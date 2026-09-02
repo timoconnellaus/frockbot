@@ -1,25 +1,17 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
+import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/kernel-contracts";
 import {
   PROBE_BROKEN_SOURCE,
   PROBE_PACKAGE_SOURCE,
+  PROBE_THROWING_HOOK_SOURCE,
+  PROBE_TIMEOUT_HOOK_SOURCE,
+  PROBE_UNDECODABLE_HOOK_SOURCE,
 } from "./bot-isolate-probe.ts";
-import { provisionBot, PROVISIONED_MODEL } from "./provision-bot.ts";
 
 function probe(name: string) {
   return env.BOT_ISOLATES.getByName(name);
 }
-
-function botState(userId: string, botId: string) {
-  return env.BOT_STATES.getByName(`${userId}:${botId}`);
-}
-
-const MODEL_CAPABILITY = {
-  packageId: "provider-ollama-cloud",
-  capabilityId: "ollama-cloud-models",
-  kind: "model" as const,
-  connectionId: "ollama-1",
-};
 
 describe("a Bot Package in a loaded Dynamic Worker", () => {
   test("an isolate tool is callable through ctx.tools", async () => {
@@ -52,6 +44,62 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(result.loaderCalls).toBe(1);
   });
 
+  test("a Bot-authored hook shapes one step and the log equals the provider request", async () => {
+    const stub = probe(`hook-request-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+
+    const result = await stub.runTurn({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      text: "abcd",
+    });
+
+    expect(result.providerRequestsJson).toBe(result.loggedRequestsJson);
+    expect(result.firstStepToolNames).toContain("hook_marker");
+    expect(result.secondStepToolNames).not.toContain("hook_marker");
+    expect(result.durableHookFailures).toEqual([]);
+  });
+
+  test.each([
+    ["throws", PROBE_THROWING_HOOK_SOURCE, /probe hook exploded/],
+    ["times out", PROBE_TIMEOUT_HOOK_SOURCE, /exceeded its deadline/],
+    [
+      "returns an undecodable value",
+      PROBE_UNDECODABLE_HOOK_SOURCE,
+      /invalid fields/,
+    ],
+  ])(
+    "a hook that %s is skipped and recorded",
+    async (_label, source, message) => {
+      const stub = probe(`hook-failure-${crypto.randomUUID()}`);
+      const artifact = await stub.seedArtifact(source);
+
+      const result = await stub.runTurn({
+        userId: "user-1",
+        botId: "bot-1",
+        artifact,
+        text: "abcd",
+        deadlineMs: 10,
+      });
+
+      expect(result.text).toBe("tool:dcba");
+      expect(result.providerRequestsJson).toBe(result.loggedRequestsJson);
+      expect(result.firstStepToolNames).not.toContain("hook_marker");
+      expect(result.durableHookFailures).toHaveLength(1);
+      expect(result.durableHookFailures[0]).toMatchObject({
+        type: "package/hook-failed",
+        packageId: "bot-authored",
+        event: "agent/tool-exposure",
+      });
+      expect(
+        result.durableHookFailures[0]?.type === "package/hook-failed"
+          ? result.durableHookFailures[0].message
+          : "",
+      ).toMatch(message);
+    },
+  );
+
   test("a Turn that uses no isolate tool makes no loader call", async () => {
     const stub = probe(`no-isolate-${crypto.randomUUID()}`);
 
@@ -64,7 +112,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(result.loaderCalls).toBe(0);
   });
 
-  test("a non-first-party Package loads with globalOutbound disabled and User-enabled bindings only", async () => {
+  test("a non-first-party Package loads with globalOutbound disabled and Bot authority bindings only", async () => {
     const stub = probe(`outbound-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
@@ -77,7 +125,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     });
 
     expect(loaded).toHaveLength(1);
-    // Network access exists only through the bindings the User enabled.
+    // Network access exists only through the per-Bot authority bindings.
     expect(loaded[0]?.globalOutbound).toBeNull();
     expect(loaded[0]?.envKeys).toEqual(["CAPABILITIES", "IDENTITY"]);
     expect(loaded[0]?.identityKeys).toEqual([
@@ -118,6 +166,22 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(JSON.parse(result.content)).toEqual(["CAPABILITIES", "IDENTITY"]);
   });
 
+  test("the runtime context keys equal the generated self-inspection catalog", async () => {
+    const stub = probe(`context-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+
+    const result = await stub.callTool({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      tool: "context_keys",
+    });
+
+    expect(JSON.parse(result.content)).toEqual(
+      [...BOT_ISOLATE_CONTEXT_KEYS_V1].sort(),
+    );
+  });
+
   test("the isolate reaches no storage, no secret, and no other Bot's Durable Object", async () => {
     const stub = probe(`isolation-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
@@ -144,7 +208,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(await stub.readStorage()).toBe("host-only");
   });
 
-  test("two Bots of one User with the same artifact and grant get different loader ids", async () => {
+  test("two Bots with the same artifact get different loader ids", async () => {
     const stub = probe(`loader-ids-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
@@ -161,30 +225,11 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
 
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
-    expect(first[0]).toMatch(/^bot-package:user-1:[0-9a-f]{64}$/);
-    expect(second[0]).toMatch(/^bot-package:user-1:[0-9a-f]{64}$/);
-    expect(second[0]).not.toBe(first[0]);
-  });
-
-  test("changing the User-enabled set changes the loader id", async () => {
-    const stub = probe(`loader-grant-${crypto.randomUUID()}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-
-    const before = await stub.observedLoaderIds({
-      userId: "user-1",
-      botId: "bot-1",
-      artifact,
-    });
-    const after = await stub.observedLoaderIds({
-      userId: "user-1",
-      botId: "bot-1",
-      artifact,
-      capabilities: [MODEL_CAPABILITY],
-    });
-
-    expect(before).toHaveLength(1);
-    expect(after).toHaveLength(1);
-    expect(after[0]).not.toBe(before[0]);
+    expect(first[0]).toMatch(/^bot-package:user-1:bot-1:[0-9a-f]{64}$/);
+    expect(second[0]).toMatch(/^bot-package:user-1:bot-2:[0-9a-f]{64}$/);
+    expect(first[0]).not.toBe(second[0]);
+    // Same artifact, so the content-addressed component is identical.
+    expect(first[0]?.split(":").at(-1)).toBe(second[0]?.split(":").at(-1));
   });
 
   test("a broken package.js fails verification with a diagnostic, not a hang", async () => {
@@ -203,204 +248,123 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
 });
 
 describe("the isolate capability binding", () => {
-  test("list reports the User-enabled capability set", async () => {
+  test("list reports exactly the Bot's authority", async () => {
     const stub = probe(`list-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-
-    const withNone = await stub.callTool({
-      userId: "user-1",
-      botId: "bot-1",
-      artifact,
-      tool: "list_capabilities",
-    });
-    const withModel = await stub.callTool({
-      userId: "user-1",
-      botId: "bot-1",
-      artifact,
-      tool: "list_capabilities",
-      capabilities: [MODEL_CAPABILITY],
-    });
-
-    expect(JSON.parse(withNone.content)).toEqual([]);
-    expect(JSON.parse(withModel.content)).toEqual([
-      { capabilityId: "ollama-cloud-models", kind: "model" },
-    ]);
-  });
-
-  test("invokeModel with no resolved model binding is unavailable", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`model-denied-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const botId = `model-denied-bot-${suffix}`;
-
-    const result = await stub.callTool({
-      userId: "user-1",
-      botId,
-      artifact,
-      tool: "call_model",
-      toolInput: {
-        requestId: "request-1",
-        provider: PROVISIONED_MODEL.provider,
-        model: PROVISIONED_MODEL.providerModelId,
-        system: "",
-        messages: [{ role: "user", content: "hello" }],
-        tools: [],
-      },
-    });
-
-    expect(JSON.parse(result.content)).toEqual({
-      status: "unavailable",
-      reason: "the model is unavailable",
-    });
-    expect(
-      await botState("user-1", botId).isolateModelRequestRecords(),
-    ).toHaveLength(0);
-  });
-
-  test("invokeModel for a provider the Bot's binding does not name is unavailable", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`model-mismatch-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const userId = `model-mismatch-user-${suffix}`;
-    const botId = `model-mismatch-bot-${suffix}`;
-    await provisionBot({ userId, botId });
-    // Materializes the Bot's durable configuration in its own object, the way
-    // the first command addressed to a new Bot does.
-    await botState(userId, botId).readConfiguration({
-      schemaVersion: 1,
-      userId,
-      botId,
-    });
-    await botState(userId, botId).seedCompositionGeneration(
-      await stub.generationFor(artifact),
-    );
-
-    // The User enabled the Ollama Cloud model Capability. That authorizes
-    // exactly that Package's provider and exactly the model its binding names
-    // — not the first-party provider the Bot asked for here.
-    const result = await stub.callTool({
-      userId,
-      botId,
-      artifact,
-      tool: "call_model",
-      capabilities: [MODEL_CAPABILITY],
-      toolInput: {
-        requestId: "request-1",
-        provider: "foundation",
-        model: "deterministic-v1",
-        system: "",
-        messages: [{ role: "user", content: "hello" }],
-        tools: [],
-      },
-    });
-
-    expect(JSON.parse(result.content)).toEqual({
-      status: "unavailable",
-      reason: "the model is unavailable",
-    });
-    expect(
-      await botState(userId, botId).isolateModelRequestRecords(),
-    ).toHaveLength(0);
-  });
-
-  test("invokeModel for the enabled model but another Package's provider is unavailable", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`model-provider-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const userId = `model-provider-user-${suffix}`;
-    const botId = `model-provider-bot-${suffix}`;
-    await provisionBot({ userId, botId });
-    // Materializes the Bot's durable configuration in its own object, the way
-    // the first command addressed to a new Bot does.
-    await botState(userId, botId).readConfiguration({
-      schemaVersion: 1,
-      userId,
-      botId,
-    });
-    await botState(userId, botId).seedCompositionGeneration(
-      await stub.generationFor(artifact),
-    );
-
-    const result = await stub.callTool({
-      userId,
-      botId,
-      artifact,
-      tool: "call_model",
-      capabilities: [MODEL_CAPABILITY],
-      toolInput: {
-        requestId: "request-1",
-        provider: "foundation",
-        model: PROVISIONED_MODEL.providerModelId,
-        system: "",
-        messages: [{ role: "user", content: "hello" }],
-        tools: [],
-      },
-    });
-
-    expect(JSON.parse(result.content)).toEqual({
-      status: "unavailable",
-      reason: "the model is unavailable",
-    });
-  });
-
-  test("invokeModel with the authority's exact enabled provider and model streams", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`model-allowed-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const userId = `model-allowed-user-${suffix}`;
-    const botId = `model-allowed-bot-${suffix}`;
-    await provisionBot({ userId, botId });
-    // Materializes the Bot's durable configuration in its own object, the way
-    // the first command addressed to a new Bot does.
-    await botState(userId, botId).readConfiguration({
-      schemaVersion: 1,
-      userId,
-      botId,
-    });
-    await botState(userId, botId).seedCompositionGeneration(
-      await stub.generationFor(artifact),
-    );
-
-    const result = await stub.callTool({
-      userId,
-      botId,
-      artifact,
-      tool: "call_model",
-      capabilities: [MODEL_CAPABILITY],
-      toolInput: {
-        requestId: "request-1",
-        provider: PROVISIONED_MODEL.provider,
-        model: PROVISIONED_MODEL.providerModelId,
-        system: "",
-        messages: [{ role: "user", content: "hello" }],
-        tools: [],
-      },
-    });
-
-    expect(result).toMatchObject({ isError: false });
-    const streamed = JSON.parse(result.content) as {
-      status: string;
-      requestId: string;
-      text: string;
+    const connection = {
+      connectionId: "connection-1",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      displayName: "Work",
+      generation: "connection-generation-1",
+      safeMetadata: { region: "au" },
     };
-    expect(streamed.status).toBe("streaming");
-    expect(streamed.requestId).toBe("request-1");
-    expect(streamed.text).toBe("Ollama reply");
+    const model = {
+      connectionId: connection.connectionId,
+      packageId: connection.packageId,
+      provider: "ollama-cloud",
+      providerModelId: "glm-5.3-flash:cloud",
+      connectionGeneration: connection.generation,
+    };
 
-    const recorded = (await botState(
-      userId,
-      botId,
-    ).isolateModelRequestRecords()) as {
-      requestId: string;
-      packageId: string;
-      capabilityId: string;
-    }[];
-    expect(recorded).toHaveLength(1);
-    expect(recorded[0]).toMatchObject({
-      requestId: "request-1",
-      packageId: "bot-authored",
-      capabilityId: PROVISIONED_MODEL.capabilityId,
+    const result = await stub.callTool({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      tool: "list_capabilities",
+      connections: [connection],
+      model,
+      memory: true,
+      workspace: true,
+    });
+
+    expect(JSON.parse(result.content)).toEqual({
+      status: "available",
+      connections: [connection],
+      model,
+      tools: true,
+      memory: true,
+      workspace: true,
+      notify: true,
+      schedule: true,
     });
   });
 
+  test("a capability the Bot does not hold is unavailable", async () => {
+    const stub = probe(`unavailable-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+
+    const connection = await stub.callTool({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      tool: "connection_lease",
+      toolInput: { connectionId: "missing-connection" },
+    });
+    const model = await stub.callTool({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      tool: "call_model",
+      toolInput: {
+        requestId: "request-1",
+        provider: "ollama-cloud",
+        model: "glm-5.3-flash:cloud",
+        system: "",
+        messages: [{ role: "user", content: "hello" }],
+        tools: [],
+      },
+    });
+
+    expect(JSON.parse(connection.content)).toMatchObject({
+      status: "unavailable",
+    });
+    expect(JSON.parse(model.content)).toMatchObject({
+      status: "unavailable",
+    });
+  });
+
+  test("the durable schedule surface is exposed", async () => {
+    const stub = probe(`schedule-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+
+    const result = await stub.callTool({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      tool: "schedule_surface",
+    });
+
+    expect(result).toEqual({ content: "function", isError: false });
+  });
+
+  test("adding or removing a Connection yields a new isolate", async () => {
+    const stub = probe(`connection-identity-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+    const identity = {
+      userId: `user-${crypto.randomUUID()}`,
+      botId: `bot-${crypto.randomUUID()}`,
+      artifact,
+    };
+    const connection = {
+      connectionId: "connection-1",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      displayName: "Work",
+      generation: "connection-generation-1",
+      safeMetadata: {},
+    };
+
+    const without = await stub.observedLoaderIds(identity);
+    const withConnection = await stub.observedLoaderIds({
+      ...identity,
+      connections: [connection],
+    });
+    const removedAgain = await stub.observedLoaderIds(identity);
+
+    expect(without).toHaveLength(1);
+    expect(withConnection).toHaveLength(1);
+    expect(removedAgain).toEqual(without);
+    expect(withConnection[0]).not.toBe(without[0]);
+  });
 });

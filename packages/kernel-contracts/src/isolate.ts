@@ -17,8 +17,14 @@
 //     from the content address of the mounted modules and nothing else.
 //
 // Everything decoded here is untrusted: Bot-authored code produces the results
-// and the isolate produces the health report.
+// and the capability requests, and the isolate produces the health report.
 import type { TurnAdmissionV1 } from "./tool-execution.js";
+import {
+  BOT_ISOLATE_HOOK_EVENTS_V1,
+  isBotIsolateHookEventNameV1,
+  type BotIsolateHookEventNameV1,
+  type LoopEventPayloadMapV1,
+} from "./loop-events.js";
 import {
   decodeTurnTypeV1,
   type LlmStreamEvent,
@@ -28,21 +34,20 @@ import {
 
 /**
  * The wire contract version the kernel wrapper emits. Version 2 added
- * per-tool turn admission; a version 1 isolate declares no admission and its
- * tools are therefore offered on every turn type.
+ * per-tool turn admission. Version 3 added declared loop hooks and hook RPC.
  */
-export const ISOLATE_CONTRACT_VERSION = 2;
+export const ISOLATE_CONTRACT_VERSION = 3;
 
 /** Every contract version the kernel still decodes. */
-export type IsolateContractVersion = 1 | 2;
+export type IsolateContractVersion = 1 | 2 | 3;
 
-const ISOLATE_CONTRACT_VERSIONS: readonly IsolateContractVersion[] = [1, 2];
+const ISOLATE_CONTRACT_VERSIONS: readonly IsolateContractVersion[] = [1, 2, 3];
 
 /** The upper bound on a single isolate invocation, enforced on both sides. */
 export const ISOLATE_MAX_DEADLINE_MS = 60_000;
 
 const MAX_ISOLATE_TOOLS = 64;
-const MAX_ISOLATE_CAPABILITIES = 256;
+const MAX_ISOLATE_CONNECTIONS = 100;
 const MAX_ISOLATE_CONTENT = 1_000_000;
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 
@@ -73,12 +78,32 @@ export interface IsolateToolResultV1 {
   isError: boolean;
 }
 
+export interface IsolateHookInvocationV1<
+  Event extends BotIsolateHookEventNameV1 = BotIsolateHookEventNameV1,
+> {
+  schemaVersion: 1;
+  event: Event;
+  payload: LoopEventPayloadMapV1[Event];
+  botId: string;
+  sessionId: string;
+  runId: string;
+  turnId: string;
+  generationId: string;
+  deadlineMs: number;
+}
+
+export type IsolateHookResultV1 =
+  | { schemaVersion: 1; status: "unchanged" }
+  | { schemaVersion: 1; status: "replaced"; replacement: unknown };
+
 export interface IsolateHealthV1 {
   schemaVersion: 1;
   ok: boolean;
   packageId: string;
   contractVersion: IsolateContractVersion;
   tools: IsolateToolDescriptorV1[];
+  /** Contract version 3 and later. */
+  hooks?: BotIsolateHookEventNameV1[];
 }
 
 /** What `IDENTITY` carries into the isolate. Structured-clonable, never a stub. */
@@ -86,14 +111,6 @@ export interface IsolateIdentityV1 {
   botId: string;
   generationId: string;
   packageId: string;
-}
-
-export type IsolateCapabilityKindV1 =
-  "tool" | "model" | "memory" | "notification" | "computer";
-
-export interface IsolateCapabilityDescriptorV1 {
-  capabilityId: string;
-  kind: IsolateCapabilityKindV1;
 }
 
 /**
@@ -107,23 +124,134 @@ export interface IsolateCapabilityFailureV1 {
   reason: string;
 }
 
+/** One safe Connection projection. Credentials and credential references never cross. */
+export interface IsolateConnectionV1 {
+  connectionId: string;
+  packageId: string;
+  connectionTypeId: string;
+  displayName: string;
+  generation: string;
+  safeMetadata: Record<string, unknown>;
+}
+
+/** The Bot's configured model, resolved through one of its ready Connections. */
+export interface IsolateModelBindingV1 {
+  connectionId: string;
+  packageId: string;
+  provider: string;
+  providerModelId: string;
+  connectionGeneration: string;
+  catalogGeneration?: string;
+}
+
+/** The per-Bot authority every Package in one Composition sees identically. */
+export interface IsolateCapabilityListV1 {
+  status: "available";
+  connections: IsolateConnectionV1[];
+  model?: IsolateModelBindingV1;
+  tools: true;
+  memory: boolean;
+  workspace: boolean;
+  notify: true;
+  schedule: true;
+}
+
 export type IsolateCapabilityListOutcomeV1 =
-  IsolateCapabilityDescriptorV1[] | IsolateCapabilityFailureV1;
+  IsolateCapabilityListV1 | IsolateCapabilityFailureV1;
+
+/** An opaque, short-lived reference to a Connection — never its credential. */
+export interface IsolateConnectionLeaseV1 {
+  status: "available";
+  leaseId: string;
+  connectionId: string;
+  generation: string;
+  expiresAt: string;
+}
+
+export type IsolateConnectionOutcomeV1 =
+  IsolateConnectionLeaseV1 | IsolateCapabilityFailureV1;
+
+export interface IsolateToolRequestV1 {
+  callId: string;
+  name: string;
+  input: unknown;
+}
+
+export type IsolateToolOutcomeV1 =
+  | { status: "completed"; content: string; isError: boolean }
+  | IsolateCapabilityFailureV1;
+
+export type IsolateMemoryScopeV1 = "bot" | "user" | "project";
+export type IsolateMemoryTierV1 = "profile" | "log" | "note";
+export interface IsolateMemoryReadRequestV1 {
+  scope: IsolateMemoryScopeV1;
+  projectId?: string;
+}
+export interface IsolateMemoryWriteRequestV1 extends IsolateMemoryReadRequestV1 {
+  tier?: IsolateMemoryTierV1;
+  fact: string;
+}
+export type IsolateMemoryOutcomeV1 =
+  { status: "available"; value: unknown } | IsolateCapabilityFailureV1;
+
+/** A root selector without a User id; the authority supplies its own User. */
+export type IsolateWorkspaceRootV1 =
+  | { kind: "bot-instructions"; botId: string }
+  | { kind: "user-instructions" }
+  | { kind: "package-declared"; packageId: string; rootId: string };
+export interface IsolateWorkspacePathV1 {
+  root: IsolateWorkspaceRootV1;
+  path: string;
+}
+export interface IsolateWorkspaceListRequestV1 {
+  root: IsolateWorkspaceRootV1;
+  prefix?: string;
+  cursor?: string;
+  limit?: number;
+}
+export interface IsolateWorkspaceWriteRequestV1 {
+  path: IsolateWorkspacePathV1;
+  bytes: Uint8Array;
+  expectedGenerationId: string | null;
+  mediaType?: string;
+}
+export interface IsolateWorkspaceDeleteRequestV1 {
+  path: IsolateWorkspacePathV1;
+  expectedGenerationId: string;
+}
+export type IsolateWorkspaceOutcomeV1 =
+  { status: "available"; value: unknown } | IsolateCapabilityFailureV1;
+
+export interface IsolateNotificationRequestV1 {
+  notificationId: string;
+  title: string;
+  body: string;
+}
+export type IsolateNotificationOutcomeV1 =
+  { status: "recorded" } | IsolateCapabilityFailureV1;
+
+/** A durable Routine operation attributed to one Package call. */
+export interface IsolateScheduleRequestV1 {
+  callId: string;
+  input: unknown;
+}
+export type IsolateScheduleOutcomeV1 = IsolateToolOutcomeV1;
 
 /**
- * D6: model invocation as an enabled-capability binding. Events cross the RPC
+ * Model invocation through the Bot's configured model binding. Events cross the RPC
  * boundary as an NDJSON byte stream — see `decodeIsolateModelEventV1`. A
  * `ReadableStream` of JavaScript objects is not transferable over workerd RPC;
  * a byte stream is, so the kernel encodes and the isolate decodes.
  */
-export interface IsolateModelInvocationV1 {
-  status: "streaming";
-  requestId: string;
-  events: ReadableStream<Uint8Array>;
-}
+export type IsolateModelInvocationV1 =
+  | {
+      status: "streaming";
+      requestId: string;
+      events: ReadableStream<Uint8Array>;
+    }
+  | IsolateCapabilityFailureV1;
 
-export type IsolateModelOutcomeV1 =
-  IsolateModelInvocationV1 | IsolateCapabilityFailureV1;
+export type IsolateModelOutcomeV1 = IsolateModelInvocationV1;
 
 /**
  * The wrapper `WorkerEntrypoint` the kernel generates. Bot code never
@@ -132,22 +260,126 @@ export type IsolateModelOutcomeV1 =
 export interface BotIsolateEntrypoint {
   health(): Promise<IsolateHealthV1>;
   execute(invocation: IsolateToolInvocationV1): Promise<IsolateToolResultV1>;
+  hook(invocation: IsolateHookInvocationV1): Promise<IsolateHookResultV1>;
 }
 
 /**
  * The loopback service binding the Bot's Durable Object mints for one isolate.
- * Every method derives from enabled capabilities: nothing here can hand out authority the
- * Bot does not already hold.
+ * Every method is Bot-authority-derived: nothing here can hand out authority
+ * the Bot does not already hold.
  */
 export interface BotCapabilitiesStub {
   list(): Promise<IsolateCapabilityListOutcomeV1>;
-  /**
-   * D6 addendum. The kernel records the normalized request and acquires the
-   * credential lease through the existing provider path *before* forwarding.
-   * Without the resolved model binding the answer is `unavailable`; Bot code
-   * has no authority-request path.
-   */
   invokeModel(request: NormalizedModelRequest): Promise<IsolateModelOutcomeV1>;
+  invokeTool(request: IsolateToolRequestV1): Promise<IsolateToolOutcomeV1>;
+  memoryRead(
+    request: IsolateMemoryReadRequestV1,
+  ): Promise<IsolateMemoryOutcomeV1>;
+  memoryWrite(
+    request: IsolateMemoryWriteRequestV1,
+  ): Promise<IsolateMemoryOutcomeV1>;
+  memoryForget(
+    request: IsolateMemoryWriteRequestV1,
+  ): Promise<IsolateMemoryOutcomeV1>;
+  workspaceRead(
+    path: IsolateWorkspacePathV1,
+  ): Promise<IsolateWorkspaceOutcomeV1>;
+  workspaceList(
+    request: IsolateWorkspaceListRequestV1,
+  ): Promise<IsolateWorkspaceOutcomeV1>;
+  workspaceStat(
+    path: IsolateWorkspacePathV1,
+  ): Promise<IsolateWorkspaceOutcomeV1>;
+  workspaceWrite(
+    request: IsolateWorkspaceWriteRequestV1,
+  ): Promise<IsolateWorkspaceOutcomeV1>;
+  workspaceDelete(
+    request: IsolateWorkspaceDeleteRequestV1,
+  ): Promise<IsolateWorkspaceOutcomeV1>;
+  connection(connectionId: string): Promise<IsolateConnectionOutcomeV1>;
+  notify(
+    request: IsolateNotificationRequestV1,
+  ): Promise<IsolateNotificationOutcomeV1>;
+  schedule(
+    request: IsolateScheduleRequestV1,
+  ): Promise<IsolateScheduleOutcomeV1>;
+}
+
+/** The model outcome Bot-authored `package.js` receives after wrapper narrowing. */
+export type BotPackageModelOutcomeV1 =
+  | {
+      status: "streaming";
+      requestId: string;
+      events: AsyncIterable<LlmStreamEvent>;
+    }
+  | IsolateCapabilityFailureV1;
+
+/**
+ * The common exact `ctx` passed to a Bot-authored Package's tool and hook.
+ * The model-facing declarations are generated from these interfaces, and the
+ * wrapper's implementation is compile- and test-checked against the same
+ * keys.
+ */
+export interface BotPackageContextV1 {
+  readonly tool?: string;
+  readonly event?: BotIsolateHookEventNameV1;
+  readonly botId: string;
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly turnId: string;
+  readonly generationId: string;
+  readonly packageId: string;
+  readonly deadlineMs: number;
+  readonly bindings: string[];
+  readonly capabilities: {
+    list(): Promise<IsolateCapabilityListOutcomeV1>;
+  };
+  readonly model: {
+    invoke(
+      request: NormalizedModelRequest,
+    ): Promise<BotPackageModelOutcomeV1>;
+  };
+  readonly tools: {
+    /** Runs through the trusted registry's active-Composition and deny guards. */
+    invoke(request: IsolateToolRequestV1): Promise<IsolateToolOutcomeV1>;
+  };
+  readonly memory: {
+    read(request: IsolateMemoryReadRequestV1): Promise<IsolateMemoryOutcomeV1>;
+    write(
+      request: IsolateMemoryWriteRequestV1,
+    ): Promise<IsolateMemoryOutcomeV1>;
+    forget(
+      request: IsolateMemoryWriteRequestV1,
+    ): Promise<IsolateMemoryOutcomeV1>;
+  };
+  readonly workspace: {
+    read(path: IsolateWorkspacePathV1): Promise<IsolateWorkspaceOutcomeV1>;
+    list(
+      request: IsolateWorkspaceListRequestV1,
+    ): Promise<IsolateWorkspaceOutcomeV1>;
+    stat(path: IsolateWorkspacePathV1): Promise<IsolateWorkspaceOutcomeV1>;
+    write(
+      request: IsolateWorkspaceWriteRequestV1,
+    ): Promise<IsolateWorkspaceOutcomeV1>;
+    delete(
+      request: IsolateWorkspaceDeleteRequestV1,
+    ): Promise<IsolateWorkspaceOutcomeV1>;
+  };
+  connection(connectionId: string): Promise<IsolateConnectionOutcomeV1>;
+  notify(
+    request: IsolateNotificationRequestV1,
+  ): Promise<IsolateNotificationOutcomeV1>;
+  schedule(request: IsolateScheduleRequestV1): Promise<IsolateScheduleOutcomeV1>;
+}
+
+export interface BotPackageExecutionContextV1 extends BotPackageContextV1 {
+  readonly tool: string;
+  readonly event?: never;
+}
+
+export interface BotPackageHookContextV1 extends BotPackageContextV1 {
+  readonly tool?: never;
+  readonly event: BotIsolateHookEventNameV1;
 }
 
 /**
@@ -181,10 +413,8 @@ export interface IsolateHost {
  * D2. The loader identity, and nothing else — a reused id silently serves the
  * first code and `env`, so every component here is content- or owner-derived.
  * The hash covers the mounted wrapper and Package artifact plus the digest of
- * every baked-in binding: User, Bot, Composition generation, and enabled set.
- * Identical artifacts reuse an isolate only under identical authority; the
- * User prefix independently prevents cross-User reuse (AGENTS.md Package
- * composition; ADR 0019).
+ * every baked-in binding: User, Bot, Composition generation, Connections, and
+ * resolved model. The User prefix independently prevents cross-User reuse.
  */
 export function isolateLoaderIdV1(input: {
   userId: string;
@@ -438,16 +668,93 @@ export function decodeIsolateToolResultV1(
   };
 }
 
+export function decodeIsolateHookInvocationV1(
+  input: unknown,
+  label = "isolate hook invocation",
+): IsolateHookInvocationV1 {
+  const value = record(input, label);
+  exactKeys(
+    value,
+    [
+      "schemaVersion",
+      "event",
+      "payload",
+      "botId",
+      "sessionId",
+      "runId",
+      "turnId",
+      "generationId",
+      "deadlineMs",
+    ],
+    label,
+  );
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  if (!isBotIsolateHookEventNameV1(value.event)) {
+    throw new Error(`${label}.event is invalid`);
+  }
+  // The host authored the event snapshot. The event-specific replacement is
+  // decoded on the return seam; here JSON validation prevents a live object
+  // from being smuggled into Bot code by a future host caller.
+  jsonValue(value.payload, `${label}.payload`);
+  const deadlineMs = value.deadlineMs;
+  if (
+    !Number.isSafeInteger(deadlineMs) ||
+    (deadlineMs as number) <= 0 ||
+    (deadlineMs as number) > ISOLATE_MAX_DEADLINE_MS
+  ) {
+    throw new Error(`${label}.deadlineMs is out of range`);
+  }
+  return {
+    schemaVersion: 1,
+    event: value.event,
+    payload: value.payload as LoopEventPayloadMapV1[BotIsolateHookEventNameV1],
+    botId: boundedString(value.botId, `${label}.botId`, 256),
+    sessionId: boundedString(value.sessionId, `${label}.sessionId`, 257),
+    runId: boundedString(value.runId, `${label}.runId`, 128),
+    turnId: boundedString(value.turnId, `${label}.turnId`, 128),
+    generationId: boundedString(
+      value.generationId,
+      `${label}.generationId`,
+      256,
+    ),
+    deadlineMs: deadlineMs as number,
+  };
+}
+
+export function decodeIsolateHookResultV1(
+  input: unknown,
+  label = "isolate hook result",
+): IsolateHookResultV1 {
+  const value = record(input, label);
+  if (value.status === "unchanged") {
+    exactKeys(value, ["schemaVersion", "status"], label);
+    if (value.schemaVersion !== 1) {
+      throw new Error(`${label}.schemaVersion is unsupported`);
+    }
+    return { schemaVersion: 1, status: "unchanged" };
+  }
+  exactKeys(value, ["schemaVersion", "status", "replacement"], label);
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  if (value.status !== "replaced") {
+    throw new Error(`${label}.status is invalid`);
+  }
+  jsonValue(value.replacement, `${label}.replacement`);
+  return {
+    schemaVersion: 1,
+    status: "replaced",
+    replacement: value.replacement,
+  };
+}
+
 export function decodeIsolateHealthV1(
   input: unknown,
   label = "isolate health",
 ): IsolateHealthV1 {
   const value = record(input, label);
-  exactKeys(
-    value,
-    ["schemaVersion", "ok", "packageId", "contractVersion", "tools"],
-    label,
-  );
   if (value.schemaVersion !== 1) {
     throw new Error(`${label}.schemaVersion is unsupported`);
   }
@@ -457,6 +764,18 @@ export function decodeIsolateHealthV1(
   if (contractVersion === undefined) {
     throw new Error(`${label}.contractVersion is unsupported`);
   }
+  exactKeys(
+    value,
+    [
+      "schemaVersion",
+      "ok",
+      "packageId",
+      "contractVersion",
+      "tools",
+      ...(contractVersion >= 3 ? ["hooks"] : []),
+    ],
+    label,
+  );
   if (typeof value.ok !== "boolean") {
     throw new Error(`${label}.ok must be a boolean`);
   }
@@ -476,12 +795,32 @@ export function decodeIsolateHealthV1(
   if (new Set(tools.map((tool) => tool.name)).size !== tools.length) {
     throw new Error(`${label}.tools contains duplicate names`);
   }
+  if (
+    contractVersion >= 3 &&
+    (!Array.isArray(value.hooks) ||
+      value.hooks.length > BOT_ISOLATE_HOOK_EVENTS_V1.length)
+  ) {
+    throw new Error(`${label}.hooks must be a bounded array`);
+  }
+  const hooks =
+    contractVersion < 3
+      ? []
+      : (value.hooks as unknown[]).map((hook, index) => {
+          if (!isBotIsolateHookEventNameV1(hook)) {
+            throw new Error(`${label}.hooks[${index}] is invalid`);
+          }
+          return hook;
+        });
+  if (new Set(hooks).size !== hooks.length) {
+    throw new Error(`${label}.hooks contains duplicates`);
+  }
   return {
     schemaVersion: 1,
     ok: value.ok,
     packageId: boundedString(value.packageId, `${label}.packageId`, 128),
     contractVersion,
     tools,
+    hooks,
   };
 }
 
@@ -502,43 +841,345 @@ export function decodeIsolateIdentityV1(
   };
 }
 
-const CAPABILITY_KINDS: readonly IsolateCapabilityKindV1[] = [
-  "tool",
-  "model",
-  "memory",
-  "notification",
-  "computer",
-];
-
-export function decodeIsolateCapabilityDescriptorV1(
+export function decodeIsolateConnectionV1(
   input: unknown,
-  label = "isolate capability",
-): IsolateCapabilityDescriptorV1 {
+  label = "isolate Connection",
+): IsolateConnectionV1 {
   const value = record(input, label);
-  exactKeys(value, ["capabilityId", "kind"], label);
-  const kind = CAPABILITY_KINDS.find((candidate) => candidate === value.kind);
-  if (!kind) throw new Error(`${label}.kind is invalid`);
+  exactKeys(
+    value,
+    [
+      "connectionId",
+      "packageId",
+      "connectionTypeId",
+      "displayName",
+      "generation",
+      "safeMetadata",
+    ],
+    label,
+  );
+  const safeMetadata = record(value.safeMetadata, `${label}.safeMetadata`);
+  jsonValue(safeMetadata, `${label}.safeMetadata`);
   return {
-    capabilityId: boundedString(
-      value.capabilityId,
-      `${label}.capabilityId`,
+    connectionId: boundedString(
+      value.connectionId,
+      `${label}.connectionId`,
       256,
     ),
-    kind,
+    packageId: boundedString(value.packageId, `${label}.packageId`, 128),
+    connectionTypeId: boundedString(
+      value.connectionTypeId,
+      `${label}.connectionTypeId`,
+      128,
+    ),
+    displayName: boundedString(value.displayName, `${label}.displayName`, 256),
+    generation: boundedString(value.generation, `${label}.generation`, 256),
+    safeMetadata,
+  };
+}
+
+export function decodeIsolateModelBindingV1(
+  input: unknown,
+  label = "isolate model binding",
+): IsolateModelBindingV1 {
+  const value = record(input, label);
+  exactKeys(
+    value,
+    [
+      "connectionId",
+      "packageId",
+      "provider",
+      "providerModelId",
+      "connectionGeneration",
+    ],
+    label,
+    ["catalogGeneration"],
+  );
+  return {
+    connectionId: boundedString(
+      value.connectionId,
+      `${label}.connectionId`,
+      256,
+    ),
+    packageId: boundedString(value.packageId, `${label}.packageId`, 128),
+    provider: boundedString(value.provider, `${label}.provider`, 128),
+    providerModelId: boundedString(
+      value.providerModelId,
+      `${label}.providerModelId`,
+      256,
+    ),
+    connectionGeneration: boundedString(
+      value.connectionGeneration,
+      `${label}.connectionGeneration`,
+      256,
+    ),
+    ...(value.catalogGeneration === undefined
+      ? {}
+      : {
+          catalogGeneration: boundedString(
+            value.catalogGeneration,
+            `${label}.catalogGeneration`,
+            256,
+          ),
+        }),
   };
 }
 
 export function decodeIsolateCapabilityListV1(
   input: unknown,
   label = "isolate capability list",
-): IsolateCapabilityDescriptorV1[] {
-  if (!Array.isArray(input)) throw new Error(`${label} must be an array`);
-  if (input.length > MAX_ISOLATE_CAPABILITIES) {
-    throw new Error(`${label} exceeds its bound`);
-  }
-  return input.map((entry, index) =>
-    decodeIsolateCapabilityDescriptorV1(entry, `${label}[${index}]`),
+): IsolateCapabilityListV1 {
+  const value = record(input, label);
+  exactKeys(
+    value,
+    [
+      "status",
+      "connections",
+      "tools",
+      "memory",
+      "workspace",
+      "notify",
+      "schedule",
+    ],
+    label,
+    ["model"],
   );
+  if (
+    value.status !== "available" ||
+    value.tools !== true ||
+    value.notify !== true ||
+    value.schedule !== true ||
+    typeof value.memory !== "boolean" ||
+    typeof value.workspace !== "boolean" ||
+    !Array.isArray(value.connections) ||
+    value.connections.length > MAX_ISOLATE_CONNECTIONS
+  ) {
+    throw new Error(`${label} is invalid`);
+  }
+  return {
+    status: "available",
+    connections: value.connections.map((connection, index) =>
+      decodeIsolateConnectionV1(connection, `${label}.connections[${index}]`),
+    ),
+    ...(value.model === undefined
+      ? {}
+      : { model: decodeIsolateModelBindingV1(value.model, `${label}.model`) }),
+    tools: true,
+    memory: value.memory,
+    workspace: value.workspace,
+    notify: true,
+    schedule: true,
+  };
+}
+
+export function decodeIsolateToolRequestV1(
+  input: unknown,
+  label = "isolate tool request",
+): IsolateToolRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["callId", "name", "input"], label);
+  jsonValue(value.input, `${label}.input`);
+  return {
+    callId: boundedString(value.callId, `${label}.callId`, 256),
+    name: boundedString(value.name, `${label}.name`, 128),
+    input: value.input,
+  };
+}
+
+export function decodeIsolateScheduleRequestV1(
+  input: unknown,
+  label = "isolate schedule request",
+): IsolateScheduleRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["callId", "input"], label);
+  jsonValue(value.input, `${label}.input`);
+  return {
+    callId: boundedString(value.callId, `${label}.callId`, 256),
+    input: value.input,
+  };
+}
+
+const MEMORY_SCOPES = ["bot", "user", "project"] as const;
+const MEMORY_TIERS = ["profile", "log", "note"] as const;
+
+export function decodeIsolateMemoryReadRequestV1(
+  input: unknown,
+  label = "isolate Memory read request",
+): IsolateMemoryReadRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["scope"], label, ["projectId"]);
+  const scope = MEMORY_SCOPES.find((candidate) => candidate === value.scope);
+  if (!scope) throw new Error(`${label}.scope is invalid`);
+  if (scope === "project" && value.projectId === undefined) {
+    throw new Error(`${label}.projectId is required`);
+  }
+  return {
+    scope,
+    ...(value.projectId === undefined
+      ? {}
+      : {
+          projectId: boundedString(value.projectId, `${label}.projectId`, 128),
+        }),
+  };
+}
+
+export function decodeIsolateMemoryWriteRequestV1(
+  input: unknown,
+  label = "isolate Memory write request",
+): IsolateMemoryWriteRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["scope", "fact"], label, ["projectId", "tier"]);
+  const scope = MEMORY_SCOPES.find((candidate) => candidate === value.scope);
+  const tier =
+    value.tier === undefined
+      ? undefined
+      : MEMORY_TIERS.find((candidate) => candidate === value.tier);
+  if (!scope || (value.tier !== undefined && !tier)) {
+    throw new Error(`${label} is invalid`);
+  }
+  if (scope === "project" && value.projectId === undefined) {
+    throw new Error(`${label}.projectId is required`);
+  }
+  return {
+    scope,
+    ...(value.projectId === undefined
+      ? {}
+      : {
+          projectId: boundedString(value.projectId, `${label}.projectId`, 128),
+        }),
+    ...(tier ? { tier } : {}),
+    fact: boundedString(value.fact, `${label}.fact`, 2_000),
+  };
+}
+
+function decodeIsolateWorkspaceRootV1(
+  input: unknown,
+  label: string,
+): IsolateWorkspaceRootV1 {
+  const value = record(input, label);
+  if (value.kind === "user-instructions") {
+    exactKeys(value, ["kind"], label);
+    return { kind: "user-instructions" };
+  }
+  if (value.kind === "bot-instructions") {
+    exactKeys(value, ["kind", "botId"], label);
+    return {
+      kind: "bot-instructions",
+      botId: boundedString(value.botId, `${label}.botId`, 256),
+    };
+  }
+  if (value.kind === "package-declared") {
+    exactKeys(value, ["kind", "packageId", "rootId"], label);
+    return {
+      kind: "package-declared",
+      packageId: boundedString(value.packageId, `${label}.packageId`, 128),
+      rootId: boundedString(value.rootId, `${label}.rootId`, 128),
+    };
+  }
+  throw new Error(`${label}.kind is invalid`);
+}
+
+export function decodeIsolateWorkspacePathV1(
+  input: unknown,
+  label = "isolate Workspace path",
+): IsolateWorkspacePathV1 {
+  const value = record(input, label);
+  exactKeys(value, ["root", "path"], label);
+  return {
+    root: decodeIsolateWorkspaceRootV1(value.root, `${label}.root`),
+    path: boundedString(value.path, `${label}.path`, 1_024, true),
+  };
+}
+
+export function decodeIsolateWorkspaceListRequestV1(
+  input: unknown,
+  label = "isolate Workspace list request",
+): IsolateWorkspaceListRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["root"], label, ["prefix", "cursor", "limit"]);
+  const limit = value.limit;
+  if (
+    limit !== undefined &&
+    (!Number.isSafeInteger(limit) ||
+      (limit as number) <= 0 ||
+      (limit as number) > 1_000)
+  ) {
+    throw new Error(`${label}.limit is invalid`);
+  }
+  return {
+    root: decodeIsolateWorkspaceRootV1(value.root, `${label}.root`),
+    ...(value.prefix === undefined
+      ? {}
+      : {
+          prefix: boundedString(value.prefix, `${label}.prefix`, 1_024, true),
+        }),
+    ...(value.cursor === undefined
+      ? {}
+      : { cursor: boundedString(value.cursor, `${label}.cursor`, 1_024) }),
+    ...(limit === undefined ? {} : { limit: limit as number }),
+  };
+}
+
+export function decodeIsolateWorkspaceWriteRequestV1(
+  input: unknown,
+  label = "isolate Workspace write request",
+): IsolateWorkspaceWriteRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["path", "bytes", "expectedGenerationId"], label, [
+    "mediaType",
+  ]);
+  if (!(value.bytes instanceof Uint8Array)) {
+    throw new Error(`${label}.bytes must be bytes`);
+  }
+  if (
+    value.expectedGenerationId !== null &&
+    typeof value.expectedGenerationId !== "string"
+  ) {
+    throw new Error(`${label}.expectedGenerationId is invalid`);
+  }
+  return {
+    path: decodeIsolateWorkspacePathV1(value.path, `${label}.path`),
+    bytes: value.bytes,
+    expectedGenerationId: value.expectedGenerationId as string | null,
+    ...(value.mediaType === undefined
+      ? {}
+      : {
+          mediaType: boundedString(value.mediaType, `${label}.mediaType`, 256),
+        }),
+  };
+}
+
+export function decodeIsolateWorkspaceDeleteRequestV1(
+  input: unknown,
+  label = "isolate Workspace delete request",
+): IsolateWorkspaceDeleteRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["path", "expectedGenerationId"], label);
+  return {
+    path: decodeIsolateWorkspacePathV1(value.path, `${label}.path`),
+    expectedGenerationId: boundedString(
+      value.expectedGenerationId,
+      `${label}.expectedGenerationId`,
+      256,
+    ),
+  };
+}
+
+export function decodeIsolateNotificationRequestV1(
+  input: unknown,
+  label = "isolate notification request",
+): IsolateNotificationRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["notificationId", "title", "body"], label);
+  return {
+    notificationId: boundedString(
+      value.notificationId,
+      `${label}.notificationId`,
+      256,
+    ),
+    title: boundedString(value.title, `${label}.title`, 160),
+    body: boundedString(value.body, `${label}.body`, 500),
+  };
 }
 
 /** The exact decoder for the declared failure variant. */
@@ -612,6 +1253,9 @@ export function decodeIsolateModelInvocationV1(
   label = "isolate model invocation",
 ): IsolateModelInvocationV1 {
   const value = record(input, label);
+  if (value.status === "unavailable") {
+    return decodeIsolateCapabilityFailureV1(value, label);
+  }
   exactKeys(value, ["status", "requestId", "events"], label);
   if (value.status !== "streaming") {
     throw new Error(`${label}.status is invalid`);

@@ -485,7 +485,7 @@ describe("isolate capability failure v1", () => {
 });
 
 describe("isolate loader identity", () => {
-  test("is the User and the content address — nothing else", () => {
+  test("is the User and binding-addressed module set — nothing else", () => {
     expect(
       isolateLoaderIdV1({
         userId: "user-1",
@@ -494,25 +494,24 @@ describe("isolate loader identity", () => {
     ).toBe(`bot-package:user-1:${"a".repeat(64)}`);
   });
 
-  test("two Users never share an id", () => {
-    const hash = "b".repeat(64);
+  test("different binding digests produce different ids", () => {
     expect(
       isolateLoaderIdV1({
         userId: "user-1",
-        artifactSetHash: hash,
+        artifactSetHash: "b".repeat(64),
       }),
     ).not.toBe(
       isolateLoaderIdV1({
-        userId: "user-2",
-        artifactSetHash: hash,
+        userId: "user-1",
+        artifactSetHash: "c".repeat(64),
       }),
     );
   });
 
-  test("rejects a component that could forge another User's id", () => {
+  test("rejects a component that could forge another Bot's id", () => {
     expect(() =>
       isolateLoaderIdV1({
-        userId: "user-1:other",
+        userId: "user-1:bot-2",
         artifactSetHash: "c".repeat(64),
       }),
     ).toThrow(/components are invalid/);
