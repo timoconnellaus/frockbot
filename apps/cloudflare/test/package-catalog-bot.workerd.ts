@@ -12,7 +12,9 @@ import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
 const MODULE = `export const tools = [
   { name: "track_parcel", description: "Tracks a parcel", inputSchema: { type: "object" }, idempotent: true },
 ];
-export async function execute(tool, input) {
+export async function execute(tool, input, ctx) {
+  const capabilities = await ctx.listCapabilities();
+  if (capabilities.length === 0) return "unavailable";
   return "catalog parcel " + String(input?.id ?? "unknown");
 }
 `;
@@ -117,7 +119,7 @@ async function publishCatalog(generation: string) {
 }
 
 describe("a Bot installing a Package from the Catalog", () => {
-  test("installs hash-pinned code, activates it next Turn, and package_undo removes it", async () => {
+  test("installs hash-pinned code, leaves missing authority unavailable, and package_undo removes it", async () => {
     const id = suffix();
     const userId = `catalog-user-${id}`;
     const botId = `catalog-bot-${id}`;
@@ -157,7 +159,7 @@ describe("a Bot installing a Package from the Catalog", () => {
       tool: "track_parcel",
       input: { id: "AU123" },
     });
-    expect(used.text).toBe("ok:catalog parcel AU123");
+    expect(used.text).toBe("ok:unavailable");
     expect(used.loaderCalls).toBe(1);
 
     const undone = await probe.runTurn({
