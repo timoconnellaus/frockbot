@@ -38,6 +38,14 @@ export async function execute(tool, input, ctx) {
 }
 `;
 
+const SHOUTER_SOURCE = `export const tools = [
+  { name: "shout", description: "Shouts by name", inputSchema: { type: "object" }, idempotent: true },
+];
+export async function execute(tool, input, ctx) {
+  return ("hello " + String(input?.name ?? "world")).toUpperCase();
+}
+`;
+
 /** D6: a Bot-authored model adapter — a translation layer over the binding. */
 const MODEL_ADAPTER_SOURCE = `export const tools = [
   { name: "summarize", description: "Summarizes through the model binding", inputSchema: { type: "object" } },
@@ -406,7 +414,14 @@ describe("a Bot authoring a Package", () => {
       tool: "package_author",
       input: authorInput({
         packageId: "second",
-        source: SHOUTING_GREETER_SOURCE,
+        tools: [
+          {
+            name: "shout",
+            description: "Shouts by name",
+            inputSchema: { type: "object" },
+          },
+        ],
+        source: SHOUTER_SOURCE,
       }),
     });
 
