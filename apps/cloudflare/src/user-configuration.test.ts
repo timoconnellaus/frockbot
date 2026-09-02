@@ -158,20 +158,19 @@ describe("UserConfiguration Connection routing", () => {
       revision: 3,
       connections: [
         expect.objectContaining({
-          connectionId: "workers-ai-ambient",
-          providerType: "workers-ai",
+          connectionId: "flock-ai-ambient",
+          providerType: "flock-ai",
           state: "ready",
         }),
       ],
-      newBotModelTemplate: {
-        connectionId: "workers-ai-ambient",
-        providerModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+      platformModel: {
+        connectionId: "flock-ai-ambient",
+        providerModelId: "@flock/auto",
       },
-      newBotModelTemplateSource: "auto",
     });
     expect(first.packages).toContainEqual(
       expect.objectContaining({
-        packageId: "provider-workers-ai",
+        packageId: "provider-flock-ai",
         state: "installed",
       }),
     );

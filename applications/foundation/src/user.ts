@@ -55,9 +55,9 @@ import {
   type OllamaCloudUserBackendContribution,
 } from "@frockbot/plugin-provider-ollama-cloud/user";
 import {
-  createWorkersAiUserBackendPlugin,
-  type WorkersAiUserBackendContribution,
-} from "@frockbot/plugin-provider-workers-ai/user";
+  createFlockAiUserBackendPlugin,
+  type FlockAiUserBackendContribution,
+} from "@frockbot/plugin-provider-flock-ai/user";
 import {
   createUserSettingsBackendPlugin,
   type UserPackageCatalogHost,
@@ -225,7 +225,7 @@ export async function createFoundationUserBackendContributions(
   let settings: UserSettingsBackendContribution | undefined;
   let credentials: CredentialUserBackendContribution | undefined;
   let ollama: OllamaCloudUserBackendContribution | undefined;
-  let workersAi: WorkersAiUserBackendContribution | undefined;
+  let flockAi: FlockAiUserBackendContribution | undefined;
   let mcp: McpUserBackendContribution | undefined;
   let flock: FlockUserBackendContribution | undefined;
   let botTemplate: BotTemplateUserBackendContribution | undefined;
@@ -244,7 +244,7 @@ export async function createFoundationUserBackendContributions(
         | UserSettingsBackendContribution
         | CredentialUserBackendContribution
         | OllamaCloudUserBackendContribution
-        | WorkersAiUserBackendContribution
+        | FlockAiUserBackendContribution
         | McpUserBackendContribution
         | FlockUserBackendContribution
         | BotTemplateUserBackendContribution
@@ -329,17 +329,17 @@ export async function createFoundationUserBackendContributions(
       },
     ],
     [
-      "@frockbot/plugin-provider-workers-ai/user",
+      "@frockbot/plugin-provider-flock-ai/user",
       (lifecycle) => {
         if (!settings) {
-          throw new Error("Workers AI requires the Settings Contribution");
+          throw new Error("Flock AI requires the Settings Contribution");
         }
         const userSettings = settings;
-        return createWorkersAiUserBackendPlugin(
+        return createFlockAiUserBackendPlugin(
           { storage: host.storage, settings },
           {
-            mount(value: WorkersAiUserBackendContribution) {
-              workersAi = value;
+            mount(value: FlockAiUserBackendContribution) {
+              flockAi = value;
               connections.set(value.packageId, value);
               const unregister =
                 userSettings.registerConnectionCommandOwner(value);
@@ -619,7 +619,7 @@ export async function createFoundationUserBackendContributions(
     | UserSettingsBackendContribution
     | CredentialUserBackendContribution
     | OllamaCloudUserBackendContribution
-    | WorkersAiUserBackendContribution
+    | FlockAiUserBackendContribution
     | McpUserBackendContribution
     | FlockUserBackendContribution
     | BotTemplateUserBackendContribution
@@ -641,7 +641,7 @@ export async function createFoundationUserBackendContributions(
     !settings ||
     !credentials ||
     !ollama ||
-    !workersAi ||
+    !flockAi ||
     !mcp ||
     !flock ||
     !botTemplate ||
@@ -652,7 +652,7 @@ export async function createFoundationUserBackendContributions(
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Workers AI, MCP, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Flock AI, MCP, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
     );
   }
   return {

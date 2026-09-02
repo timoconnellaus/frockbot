@@ -139,6 +139,10 @@ import {
   type UserMemoryRpc,
 } from "./memory.js";
 import {
+  createFlockAiGatewayHostV1,
+  type FlockAiGatewayHostV1,
+} from "./flock-ai.js";
+import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
   rpcBotId,
@@ -148,6 +152,22 @@ import {
   rpcObject,
   rpcString,
 } from "./durable-rpc.js";
+
+function isFlockAiGatewayBindingV1(
+  value: BotStateEnv["AI"],
+): value is NonNullable<BotStateEnv["AI"]> & Pick<Ai, "gateway"> {
+  return (
+    value !== undefined && typeof Reflect.get(value, "gateway") === "function"
+  );
+}
+
+function optionalWorkerVarV1(
+  env: BotStateEnv,
+  name: string,
+): string | undefined {
+  const value = Reflect.get(env, name);
+  return typeof value === "string" && value ? value : undefined;
+}
 
 export type { BotStateEnv, OwnedBotTurnCommand };
 
@@ -181,6 +201,7 @@ export class BotState extends DurableObject<BotStateEnv> {
    * constructed here and never reaches the deployed bindings map.
    */
   protected readonly backendEnv: BotStateEnv & {
+    FLOCK_AI?: FlockAiGatewayHostV1;
     WORKSPACE_FILES?: WorkspaceFilesV1;
     PACKAGE_CATALOG_ENTRIES?: BotSkillCatalogReaderV1;
     MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
@@ -225,7 +246,17 @@ export class BotState extends DurableObject<BotStateEnv> {
     // The surfaces are built per identity in `bindSurfaces`, not here: they
     // carry the `owner` guard, and a Durable Object learns which User it
     // serves from the RPC that addresses it, never from its constructor.
-    this.backendEnv = { ...env };
+    this.backendEnv = {
+      ...env,
+      ...(isFlockAiGatewayBindingV1(env.AI)
+        ? {
+            FLOCK_AI: createFlockAiGatewayHostV1(env.AI, {
+              gatewayId: optionalWorkerVarV1(env, "FLOCK_AI_GATEWAY_ID"),
+              autoRoute: optionalWorkerVarV1(env, "FLOCK_AI_AUTO_ROUTE"),
+            }),
+          }
+        : {}),
+    };
   }
 
   private contributions(): Promise<{
