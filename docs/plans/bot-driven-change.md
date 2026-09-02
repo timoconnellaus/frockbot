@@ -2,7 +2,7 @@
 
 ## Status
 
-accepted 2026-09-02; ADR 0019 and the `AGENTS.md` amendment gate slices 1, 3, 4 (isolate half), and 5. Slice 2 is inside the current constitution and runs now.
+accepted 2026-09-02; ADR 0020 and the `AGENTS.md` amendment gate slices 1, 3, 4 (isolate half), and 5. Slice 2 is inside the current constitution and runs now.
 
 ## Intent
 
@@ -18,7 +18,7 @@ The desktop app is a shell around the hosted UI plus the "this computer" Connect
 
 Deliberately not in this plan (decided 2026-09-02, "lock down later where the log shows it is needed"): per-Package grants, envelopes, approval cards, effect classes, confirmation guards, egress rules, signed indexes, revocation lists, a loop phase taxonomy, declarative UI vocabularies, a command registry, desktop declarative blocks, per-Package spend accounting.
 
-## Slice 0 — Constitution amendment + ADR 0019
+## Slice 0 — Constitution amendment + ADR 0020
 
 Deltas to `AGENTS.md`: a Bot may install Packages; authority is per-Bot Connections made by the User out of band and never requested by the Bot; a required core set; loop policy may run in an isolate; undo is a Bot-callable revert of setup generations. Gate: human acceptance.
 

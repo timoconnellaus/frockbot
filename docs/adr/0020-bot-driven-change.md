@@ -10,6 +10,8 @@ FrockBot will make conversation with a Bot the primary — and for most Users th
 
 Authority is deliberately one-dimensional. A Bot's authority is exactly the set of Connections its User has made; a Package the Bot authors or installs holds exactly the Bot's authority, never more and never a narrower per-Package grant. Connecting is a User act performed out of band on the Connections surface; the Bot does not request, prompt for, or render a way to connect anything — it discovers a capability only after the User has connected it. A Package may make a service *connectable* (it ships the integration and a Connection Type); the User still connects it.
 
+Relationship to ADR 0019: account-wide enablement is the authority model; this ADR adds the Bot as the primary path for change on top of it.
+
 ## Considered options
 
 - **Per-Package capability grants with an approval card in the conversation:** narrows the blast radius of a bad Package or a prompt-injected Bot, but introduces a permission vocabulary a non-technical User must read and answer, and grant fatigue makes the answers meaningless. Rejected: the product's point is that nothing needs explaining.
