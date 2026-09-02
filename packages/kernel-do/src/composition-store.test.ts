@@ -232,16 +232,11 @@ describe("Bot Durable Object Composition records", () => {
         artifactSetHash: changedHash,
         parentGenerationId: parent.generationId,
         createdAt,
-        origin: {
-          kind: "bot-authored",
-          runId: "run-1",
-          sessionId: "s",
-          turnId: "t",
-        },
+        origin: { kind: "user-install", userId: "user-1" },
         members: [changedCore],
         status: "pending",
       }),
-    ).rejects.toThrow(/changes required first-party Package "shell"/);
+    ).resolves.toBeUndefined();
   });
 
   test("reverting records a new pending generation with the target's members", async () => {

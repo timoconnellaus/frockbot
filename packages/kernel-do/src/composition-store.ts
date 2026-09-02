@@ -448,8 +448,8 @@ export class DurableCompositionStore implements CompositionStore {
 
   /**
    * Every first-party bootstrap member is required core. No proposal path may
-   * remove it or replace its provenance: callers can append generations, but
-   * they cannot turn reviewed kernel-resident Packages into authored code.
+   * remove it or replace its provenance: callers can update reviewed
+   * first-party members, but cannot turn them into User- or Bot-authored code.
    */
   private assertRequiredCoreSet(
     bootstrap: CompositionGenerationV1,
@@ -469,11 +469,6 @@ export class DurableCompositionStore implements CompositionStore {
       if (candidate.provenance.kind !== "first-party") {
         throw new Error(
           `composition generation "${proposed.generationId}" replaces required first-party Package "${required.packageId}" with ${candidate.provenance.kind} provenance`,
-        );
-      }
-      if (JSON.stringify(candidate) !== JSON.stringify(required)) {
-        throw new Error(
-          `composition generation "${proposed.generationId}" changes required first-party Package "${required.packageId}"`,
         );
       }
     }
