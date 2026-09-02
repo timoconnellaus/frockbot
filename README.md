@@ -98,6 +98,16 @@ Auto-merge waits on the branch ruleset for `main`, which requires the `Validate`
 
 One pull request cannot queue itself: GitHub refuses to let `GITHUB_TOKEN` auto-merge anything that edits `.github/workflows/`, since that needs a `workflows` scope the Actions token cannot hold. A pull request that changes CI is merged by hand and the workflow logs a warning saying so.
 
+Neither leg is finished when it starts, so `scripts/ci-watch.ts` watches each to a terminal state and reduces it to an exit code — `0` landed, `1` failed, `2` still pending:
+
+```
+bun scripts/ci-watch.ts pr 128           # polls until merged, or names the red check
+bun scripts/ci-watch.ts release v0.2.0   # polls until production deployed
+bun scripts/ci-watch.ts pr 128 --once    # report now and exit, for a caller that paces itself
+```
+
+It reports the two quiet failures by name rather than waiting them out: a pull request whose checks all passed but whose merge was never queued, and a release whose packages published while `Deploy FrockBot app` failed — a GitHub release standing in front of a production that never moved.
+
 For the first publication, add a granular npm automation token with access to the `@frockbot` scope as the `NPM_TOKEN` repository secret. After each package exists on npm, configure its trusted publisher for repository `timoconnellaus/frockbot` and workflow `release.yml`; the workflow can then publish through GitHub OIDC without a long-lived token, and `NPM_TOKEN` can be deleted.
 
 ## Production deployment
