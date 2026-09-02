@@ -1477,6 +1477,76 @@ describe("active durable Turn projection", () => {
   });
 });
 
+describe("Bot selection", () => {
+  test("re-selecting the active Bot leaves the conversation alone", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: { href: "https://app.example/" },
+        history: { replaceState: () => {} },
+      },
+    });
+    let provided: Ref<FrockBotWebData> | undefined;
+    let configurationReads = 0;
+    let stops = 0;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: (query) => {
+          configurationReads += 1;
+          return Promise.resolve(
+            query.type === "bot/get"
+              ? initializeBotSettingsV1(query.botId)
+              : {
+                  schemaVersion: 1 as const,
+                  revision: 0,
+                  profile: { name: "Test User" },
+                  packages: [],
+                  connections: [],
+                },
+          );
+        },
+        listRuns: () => Promise.resolve([]),
+        listNotifications: () => Promise.resolve([]),
+        stopRun: () => {
+          stops += 1;
+          return Promise.reject(new Error("must not command a Stop"));
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+
+    await provided.value.selectBot("default");
+    provided.value.messages.push({
+      id: "run-1:assistant",
+      runId: "run-1",
+      role: "assistant",
+      text: "Still streaming",
+      status: "streaming",
+      tools: [],
+      sends: [],
+    });
+    provided.value.activeRunId = "run-1";
+    const readsBeforeReselect = configurationReads;
+
+    await provided.value.selectBot("default");
+
+    expect(configurationReads).toBe(readsBeforeReselect);
+    expect(provided.value.messages).toHaveLength(1);
+    expect(provided.value.messages[0]?.text).toBe("Still streaming");
+    expect(provided.value.activeRunId).toBe("run-1");
+    expect(stops).toBe(0);
+  });
+});
+
 describe("hosted Stop", () => {
   test("sends one durable command and projects accepted, reconciling, then cancelled", async () => {
     let provided: Ref<FrockBotWebData> | undefined;

@@ -3,6 +3,7 @@ import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { authSessionClientKey } from "@frockbot/plugin-auth/shared";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
+import { resolveUserDisplayName } from "./user-display-name.js";
 
 const providedAuth = inject(authSessionClientKey);
 const surfaces = inject(clientSurfaceRegistryKey);
@@ -12,6 +13,18 @@ if (!providedAuth || !surfaces || !web)
 const auth = providedAuth;
 const menuOpen = ref(false);
 const signOutError = ref<string>();
+const sessionUser = computed(() =>
+  auth.projection.value.status === "authenticated"
+    ? auth.projection.value.user
+    : undefined,
+);
+const displayName = computed(() =>
+  resolveUserDisplayName({
+    savedName: web.value.userSettings?.profile.name,
+    sessionName: sessionUser.value?.name,
+    sessionEmail: sessionUser.value?.email,
+  }),
+);
 const developmentIdentity = computed(
   () =>
     auth.projection.value.status === "authenticated" &&
@@ -58,11 +71,12 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenu));
       class="profile-trigger"
       type="button"
       :aria-expanded="menuOpen"
+      :title="sessionUser?.email"
       aria-haspopup="menu"
       @click="menuOpen = !menuOpen"
     >
       <span class="profile-face" aria-hidden="true" />
-      {{ web.userSettings?.profile.name ?? "FrockBot user" }}
+      {{ displayName }}
     </button>
     <div v-if="menuOpen" class="profile-menu" role="menu">
       <button v-if="isAdmin" type="button" role="menuitem" @click="openAdmin">

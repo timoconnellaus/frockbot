@@ -200,7 +200,7 @@ export async function openPlugins(page: Page): Promise<void> {
 /** Open the Models overlay and wait for its heading. */
 export async function openModels(page: Page): Promise<void> {
   await revealSidebar(page);
-  await page.getByRole("button", { name: "FrockBot user" }).click();
+  await page.locator("button.profile-trigger").click();
   await page.getByRole("menuitem", { name: "Models", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Models" })).toBeVisible();
 }
