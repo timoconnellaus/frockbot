@@ -110,6 +110,37 @@ It reports the two quiet failures by name rather than waiting them out: a pull r
 
 For the first publication, add a granular npm automation token with access to the `@frockbot` scope as the `NPM_TOKEN` repository secret. After each package exists on npm, configure its trusted publisher for repository `timoconnellaus/frockbot` and workflow `release.yml`; the workflow can then publish through GitHub OIDC without a long-lived token, and `NPM_TOKEN` can be deleted.
 
+## Staging deployment
+
+Staging follows the branch as production follows the tag. Every push to `main` that passes `validate` and the browser end-to-end job runs `ci.yml`'s `deploy-staging`, which deploys `apps/cloudflare` to `https://staging-bot.frockbot.com` through the GitHub `staging` environment. It is the same Worker code production runs, in Wrangler's `staging` environment, with none of production's data.
+
+Staging isolates everything that holds state or identity — its own D1 database `frockbot-auth-staging`, its own R2 buckets, its own Vectorize index, its own secrets, and its own Durable Object namespaces, which come free because a namespace belongs to the Worker that declares it. It shares the two stateless service Workers, `frockbot-cloudflare-bundler` and `frockbot-computer-host`: the bundler has no bindings at all and the Computer host owns only the Sprites credential, so staging exercises the same host production does instead of paying for a second container deployment. The consequence is production's ordering constraint — a change to either Worker's contract ships with a tag, so staging sees it only once that tag lands.
+
+Unlike production, the staging deploy provisions its own resources. Each step is create-if-absent, so the first deploy creates the D1 database, the three R2 buckets, and the Vectorize index, and every later deploy finds them and moves on. The D1 identifier is resolved at deploy time and written into the staging `database_id`, so no variable records it.
+
+**Staging admits exactly one identity.** Signups default to closed and nothing in the deploy opens them, so the only way in is the admin allowlist: `FROCKBOT_ADMIN_EMAILS` is a **required** staging secret, and the deploy fails without it rather than publishing a deployment nobody can sign in to. Anyone else who completes Google sign-in is refused at the gateway — the signup gate turns on whether a User has been provisioned, not on whether Better Auth has a row — so no Durable Object is ever created for them.
+
+Configure these GitHub `staging` environment values. They are the production set minus `CLOUDFLARE_D1_DATABASE_ID`, which staging resolves for itself:
+
+| Type     | Name                    | Purpose                                                                         |
+| -------- | ----------------------- | ------------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`  | Cloudflare token permitted to edit Workers, D1, R2, and Vectorize               |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account containing the staging resources                             |
+| Variable | `BETTER_AUTH_URL`       | Set to `https://staging-bot.frockbot.com`                                       |
+| Secret   | `BETTER_AUTH_SECRET`    | Better Auth secret with at least 32 random characters; distinct from production |
+| Secret   | `GOOGLE_CLIENT_ID`      | Google Web application OAuth client ID                                          |
+| Secret   | `GOOGLE_CLIENT_SECRET`  | Google Web application OAuth client secret                                      |
+| Secret   | `FROCKBOT_ADMIN_EMAILS` | **Required.** The only identities that can sign in to staging                   |
+| Secret   | `SPRITES_TOKEN`         | Fly Sprites token used only by the backend Computer provider                    |
+| Secret   | `COMPUTER_HOST_TOKEN`   | Must equal production's, because staging binds the production host              |
+| Secret   | `CREDENTIAL_KEYRING`    | Versioned AES-GCM keyring; generate a fresh one, never production's             |
+| Secret   | `ROUTINE_HOOK_SECRET`   | HMAC secret for Routine webhook keys; generate it                               |
+| Secret   | `MACHINE_TOKEN_SECRET`  | HMAC secret for machine tokens and pairing codes; generate it                   |
+
+The three generated secrets are `openssl rand -hex 32`, and `CREDENTIAL_KEYRING` is the same JSON keyring `scripts/setup-production.sh` builds. `COMPUTER_HOST_TOKEN` is the exception that must be copied from production rather than generated, because the host it authenticates against is production's.
+
+Register `https://staging-bot.frockbot.com/api/auth/callback/google` as an authorized Google redirect URI and `https://staging-bot.frockbot.com` as an authorized JavaScript origin — either on the production OAuth client or on a separate staging one. The `frockbot.com` zone must be active in the same Cloudflare account and the deploy token must cover it, since Wrangler creates the custom domain's proxied DNS record on the first deploy.
+
 ## Production deployment
 
 After a version tag's packages are published, `release.yml` deploys four Cloudflare Workers through the GitHub `production` environment. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
