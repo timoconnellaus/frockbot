@@ -1,13 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type {
-  ConnectionView,
   UserConfigurationCommandV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import {
-  createComposioUserBackendContribution,
-  deriveRevocationCompensations,
-} from "./user-configuration.js";
+import { createComposioUserBackendContribution } from "./user-configuration.js";
 import { ComposioClient } from "./composio-client.js";
 import { ComposioConnectionCoordinator } from "./connections.js";
 import { reconcileComposioProviderConnection } from "./provider-reconciliation.js";
@@ -66,7 +62,6 @@ function backendHost(
 ) {
   return {
     state: { storage } as unknown as DurableObjectState,
-    env: {} as never,
     availablePackages: [{ packageId: "composio", version: "0.0.1" }],
     reconcileProviderConnection,
     revokeConnectedAccount,
@@ -93,19 +88,6 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function connection(
-  safeMetadata: ConnectionView["safeMetadata"],
-): ConnectionView {
-  return {
-    connectionId: "connection-1",
-    packageId: "composio",
-    connectionTypeId: "gmail",
-    displayName: "Gmail",
-    state: "ready",
-    safeMetadata,
-  };
-}
-
 async function startInstalledConnection(
   contribution: ReturnType<typeof createComposioUserBackendContribution>,
   input: Parameters<
@@ -130,126 +112,7 @@ async function startInstalledConnection(
   return contribution.startConnection("user-1", input);
 }
 
-describe("Connection revocation dependencies", () => {
-  test("uses only acknowledged explicit Assignments", async () => {
-    expect(
-      await deriveRevocationCompensations(
-        connection({
-          targetBotId: "oauth-initiator",
-          dependentAssignments: [
-            { botId: "pending", generation: "gen-pending", status: "pending" },
-            {
-              botId: "acknowledged",
-              generation: "gen-acknowledged",
-              status: "acknowledged",
-            },
-          ],
-        }),
-      ),
-    ).toEqual([
-      {
-        botId: "acknowledged",
-        id: expect.stringMatching(/^revocation-[a-f0-9]{64}$/),
-        expectedGeneration: "gen-acknowledged",
-      },
-    ]);
-  });
-
-  test("keeps compensation identifiers unique and within the RPC bound", async () => {
-    const generation = "g".repeat(128);
-    const [first, second] = await deriveRevocationCompensations(
-      connection({
-        dependentAssignments: [
-          { botId: "primary", generation, status: "acknowledged" },
-          { botId: "secondary", generation, status: "acknowledged" },
-        ],
-      }),
-    );
-
-    expect(first).toMatchObject({ expectedGeneration: generation });
-    expect(second).toMatchObject({ expectedGeneration: generation });
-    expect(first?.id).not.toBe(second?.id);
-    expect(first?.id.length).toBeLessThanOrEqual(128);
-    expect(second?.id.length).toBeLessThanOrEqual(128);
-  });
-
-  test("ignores legacy Bot metadata even when it has a generation", async () => {
-    expect(
-      await deriveRevocationCompensations(
-        connection({
-          targetBotId: "legacy-bot",
-          assignmentGeneration: "gen-legacy",
-        }),
-      ),
-    ).toEqual([]);
-  });
-
-  test("retries durable Bot compensation through the versioned RPC envelope", async () => {
-    const storage = new MemoryStorage();
-    const requests: unknown[] = [];
-    await storage.put({
-      "user-id": "user-1",
-      "user-configuration": {
-        schemaVersion: 1,
-        revision: 1,
-        profile: { name: "User" },
-        packages: [],
-        connections: [
-          {
-            ...connection({
-              connectedAccountId: "account-1",
-              revocationProviderCompleted: true,
-              assignmentCompensationPending: true,
-              assignmentCompensations: [
-                {
-                  botId: "primary",
-                  id: "compensation-1",
-                  expectedGeneration: "generation-1",
-                },
-              ],
-              compensationRetryAt: 0,
-            }),
-            state: "revoking",
-          },
-        ],
-      } satisfies UserSettingsViewV1,
-    });
-    const contribution = createComposioUserBackendContribution({
-      ...backendHost(storage),
-      env: {
-        BOT_STATES: {
-          idFromName: (name: string) => name,
-          get: () => ({
-            markConnectionUnavailable: (request: unknown) => {
-              requests.push(request);
-              return Promise.resolve("applied" as const);
-            },
-          }),
-        },
-      } as never,
-    });
-
-    await contribution.alarm();
-
-    expect(requests).toEqual([
-      {
-        schemaVersion: 1,
-        userId: "user-1",
-        botId: "primary",
-        connectionId: "connection-1",
-        compensation: {
-          id: "compensation-1",
-          expectedGeneration: "generation-1",
-        },
-      },
-    ]);
-    expect(
-      await contribution.getConnection("user-1", "connection-1"),
-    ).toMatchObject({ state: "revoked" });
-  });
-});
-
-describe("Connection dependency admission", () => {
+describe("Connection admission", () => {
   test("replays a Package receipt before deployment availability changes", async () => {
     const storage = new MemoryStorage();
     const host = backendHost(storage);
@@ -437,7 +300,7 @@ describe("Connection dependency admission", () => {
     expect((await upgraded.read("user-1")).connections).toEqual([]);
   });
 
-  test("atomically enforces the Package and Connection Type requirement", async () => {
+  test("decodes the seam and admits an enabled Package's Connection", async () => {
     const storage = new MemoryStorage();
     const contribution = createComposioUserBackendContribution({
       ...backendHost(storage),
@@ -497,55 +360,52 @@ describe("Connection dependency admission", () => {
       state: "ready",
     });
 
-    const requirement = {
-      schemaVersion: 1 as const,
-      packageId: "composio",
-      packageVersion: "0.0.1",
-      capabilityId: "gmail-tools",
-      connectionTypeIds: ["gmail"],
-    };
-    expect(
-      await contribution.claimConnectionDependency(
-        "user-1",
-        "gmail-1",
-        "primary",
-        "generation-1",
-        { ...requirement, packageVersion: "9.9.9" },
-      ),
-    ).toBe(false);
-    expect(
-      await contribution.claimConnectionDependency(
-        "user-1",
-        "gmail-1",
-        "primary",
-        "generation-1",
-        { ...requirement, connectionTypeIds: ["calendar"] },
-      ),
-    ).toBe(false);
-    const beforeClaim = await read();
-    expect(beforeClaim.revision).toBe(3);
-    expect(beforeClaim.connections[0]?.safeMetadata).not.toHaveProperty(
-      "dependentAssignments",
-    );
-
-    expect(
-      await contribution.claimConnectionDependency(
-        "user-1",
-        "gmail-1",
-        "primary",
-        "generation-1",
-        requirement,
-      ),
-    ).toBe(true);
-    expect((await read()).connections[0]?.safeMetadata).toMatchObject({
-      dependentAssignments: [
-        {
-          botId: "primary",
-          generation: "generation-1",
-          status: "pending",
-        },
-      ],
+    expect(await read()).toMatchObject({
+      revision: 3,
+      connections: [{ connectionId: "gmail-1", state: "ready" }],
     });
+  });
+});
+
+describe("Connection revocation", () => {
+  test("disconnects without dependent bookkeeping and replays idempotently", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComposioUserBackendContribution(
+      backendHost(storage),
+    );
+    await startInstalledConnection(contribution, {
+      connectionId: "gmail-1",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+    });
+    await contribution.finishConnectionAuthorization("user-1", "gmail-1", {
+      state: "ready",
+      safeMetadata: { connectedAccountId: "account-1" },
+    });
+    let providerRevocations = 0;
+    const coordinator = new ComposioConnectionCoordinator({
+      client: new ComposioClient({
+        apiKey: "secret",
+        fetch: (_input, init) => {
+          expect(init?.method).toBe("POST");
+          providerRevocations += 1;
+          return Promise.resolve(Response.json({ success: true }));
+        },
+      }),
+      store: contribution,
+      callbackBaseUrl: "https://app.example.com",
+      connectionTypes: {},
+    });
+
+    const first = await coordinator.revoke("user-1", "gmail-1");
+    const replay = await coordinator.revoke("user-1", "gmail-1");
+
+    expect(first).toEqual({ schemaVersion: 1, status: "revoked" });
+    expect(replay).toEqual(first);
+    expect(providerRevocations).toBe(1);
+    const connection = await contribution.getConnection("user-1", "gmail-1");
+    expect(connection?.state).toBe("revoked");
   });
 });
 

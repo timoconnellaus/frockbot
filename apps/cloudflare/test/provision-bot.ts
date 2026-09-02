@@ -1,11 +1,11 @@
 // The production bootstrap for a Bot that can run a Turn, shared by every
 // workerd suite that needs one. It is the product's own path: the User
-// installs the provider Package, creates its Connection, chooses the model new
-// Bots start on, and only then creates the Bot.
+// enables custom models, installs the provider Package, creates its Connection,
+// chooses the account model, and only then creates the Bot.
 import { env } from "cloudflare:workers";
 import { expect } from "vitest";
 
-/** The provider, model, and Package the bootstrap binds a Bot to. */
+/** The provider, model, and Package the bootstrap enables account-wide. */
 export const PROVISIONED_MODEL = {
   packageId: "provider-ollama-cloud",
   connectionTypeId: "ollama-cloud-account",
@@ -19,9 +19,8 @@ function user(name: string) {
 }
 
 /**
- * A Bot receives model authority solely through that durable Connection and
- * the Assignment `bot/create` claims, so this is the shortest path that is
- * still the product's own.
+ * A Bot receives model authority through account-wide Package and Connection
+ * enablement, so this is the shortest path that is still the product's own.
  */
 export async function provisionBot(identity: {
   userId: string;
@@ -35,8 +34,20 @@ export async function provisionBot(identity: {
     command: {
       schemaVersion: 1,
       type: "user/install-package",
-      commandId: `install-${suffix}`,
+      commandId: `install-custom-models-${suffix}`,
       expectedRevision: 0,
+      packageId: "custom-models",
+      version: "0.0.1",
+    },
+  });
+  await configuration.executeConfiguration({
+    schemaVersion: 1,
+    userId: identity.userId,
+    command: {
+      schemaVersion: 1,
+      type: "user/install-package",
+      commandId: `install-${suffix}`,
+      expectedRevision: 1,
       packageId: "provider-ollama-cloud",
       version: "0.0.1",
     },
@@ -72,14 +83,16 @@ export async function provisionBot(identity: {
     userId: identity.userId,
     command: {
       schemaVersion: 1,
-      type: "user/set-new-bot-model",
+      type: "user/set-package-settings",
       commandId: `model-${suffix}`,
       expectedRevision: await revision(),
-      model: {
-        connectionId: connection.connectionId,
-        providerModelId: "glm-5.3-flash:cloud",
+      packageId: "custom-models",
+      values: {
+        model: {
+          connectionId: connection.connectionId,
+          providerModelId: "glm-5.3-flash:cloud",
+        },
       },
-      source: "user",
     },
   });
   await configuration.createBot({
@@ -98,7 +111,7 @@ export async function provisionBot(identity: {
 }
 
 /**
- * A second Bot for a User whose Packages, Connection and default model
+ * A second Bot for a User whose Packages, Connection and account model
  * `provisionBot` already set up. Only `bot/create` is left, and the Flock's
  * revision has moved on by one Bot.
  */

@@ -96,27 +96,9 @@ async function imageModelCalls(): Promise<Array<{ model: string }>> {
   return probe.runCalls();
 }
 
-/** Grant the Bot `web_search`: an Assignment bound to its Ollama Connection. */
+/** Enable the Ollama Package and Connection account-wide. */
 async function grantWebSearch(userId: string, botId: string): Promise<void> {
-  const { connectionId } = await provisionThroughGateway({ userId, botId });
-  const bot = (await expectOkJson(
-    await asUser(userId, `/api/bots/${botId}/settings`),
-  )) as { revision: number };
-  await expectOkJson(
-    await postAsUser(userId, `/api/bots/${botId}/settings`, {
-      schemaVersion: 1,
-      type: "bot/assign-capability",
-      commandId: `assign-web-search-${botId}`,
-      botId,
-      expectedRevision: bot.revision,
-      assignment: {
-        assignmentId: "web-search",
-        packageId: PACKAGE_ID,
-        capabilityId: "ollama-cloud-web-search",
-        connectionId,
-      },
-    }),
-  );
+  await provisionThroughGateway({ userId, botId });
 }
 
 async function searchResults(

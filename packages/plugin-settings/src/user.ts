@@ -4,15 +4,14 @@ import {
   ConfigurationDecodeError,
   decodePackageSettingsPatchV1,
   MAX_PACKAGE_SETTINGS_V1,
-  decodeConnectionDependencyRequirementV1,
   decodeOperationReceiptV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
   decodeUserSettingsViewV1,
   MAX_USER_CONNECTIONS_V1,
-  type ConnectionDependencyRequirementV1,
   type ConnectionView,
   type JsonValue,
+  type PackageSettingValueV1,
   type OperationReceiptV1,
   type PackageInstallationView,
   type UserConfigurationCommandV1,
@@ -40,16 +39,6 @@ const DEFAULT_PACKAGES_BOOTSTRAP_KEY = "user-default-packages-bootstrap:v1";
 const CATALOG_PIN_KEY = "user-catalog-pin";
 const IDENTITY_KEY = "user-id";
 const RECEIPT_PREFIX = "configuration-receipt:";
-const MAX_CONNECTION_DEPENDENCIES = 256;
-
-type ConnectionDependency = {
-  botId: string;
-  generation: string;
-  packageId: string;
-  capabilityId: string;
-  claimOrder: number;
-  status: "pending" | "acknowledged";
-};
 
 interface StoredConfigurationReceipt {
   commandFingerprint: string;
@@ -136,6 +125,10 @@ export interface AvailableUserPackage {
    * from their first configuration read.
    */
   installByDefault?: boolean;
+  /** The seeded installation state. Omission preserves the enabled default. */
+  defaultEnablement?: "enabled" | "disabled";
+  /** The Package manifest's Package-id-to-version-range dependency record. */
+  dependencies?: Readonly<Record<string, string>>;
   /**
    * `configuration.settings` from this version's manifest. Absent is the same
    * as empty and means the Package offers no User-level setting, so every
@@ -194,61 +187,6 @@ function requireMatchingConfigurationReceipt(
   return stored.receipt;
 }
 
-function connectionDependencies(
-  connection: ConnectionView,
-): ConnectionDependency[] {
-  const value = connection.safeMetadata.dependentAssignments;
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((candidate) => {
-    if (
-      !candidate ||
-      typeof candidate !== "object" ||
-      Array.isArray(candidate)
-    ) {
-      return [];
-    }
-    const dependency = candidate as Record<string, unknown>;
-    if (
-      typeof dependency.botId !== "string" ||
-      typeof dependency.generation !== "string" ||
-      typeof dependency.packageId !== "string" ||
-      typeof dependency.capabilityId !== "string" ||
-      (dependency.claimOrder !== undefined &&
-        (!Number.isSafeInteger(dependency.claimOrder) ||
-          (dependency.claimOrder as number) < 0)) ||
-      (dependency.status !== "pending" && dependency.status !== "acknowledged")
-    ) {
-      return [];
-    }
-    return [
-      {
-        botId: dependency.botId,
-        generation: dependency.generation,
-        packageId: dependency.packageId,
-        capabilityId: dependency.capabilityId,
-        claimOrder:
-          dependency.claimOrder === undefined
-            ? 0
-            : (dependency.claimOrder as number),
-        status: dependency.status,
-      } satisfies ConnectionDependency,
-    ];
-  });
-}
-
-function withConnectionDependencies(
-  connection: ConnectionView,
-  dependencies: ConnectionDependency[],
-): ConnectionView {
-  return {
-    ...connection,
-    safeMetadata: {
-      ...connection.safeMetadata,
-      dependentAssignments: dependencies,
-    },
-  };
-}
-
 /**
  * An install may only name the generation this User is pinned to. Refusing
  * anything else is what makes "Composition consumes immutable,
@@ -291,10 +229,12 @@ function withCatalogPin(
  * client already reads needs no second source.
  */
 function mergePackageSettingValues(
-  current: Record<string, JsonValue> | undefined,
-  patch: Record<string, string | number | boolean>,
-): Record<string, JsonValue> {
-  const merged: Record<string, JsonValue> = { ...(current ?? {}) };
+  current: Record<string, JsonValue | PackageSettingValueV1> | undefined,
+  patch: Record<string, PackageSettingValueV1>,
+): Record<string, JsonValue | PackageSettingValueV1> {
+  const merged: Record<string, JsonValue | PackageSettingValueV1> = {
+    ...(current ?? {}),
+  };
   for (const [settingId, value] of Object.entries(patch)) {
     merged[settingId] = value;
   }
@@ -316,12 +256,11 @@ function applyUserCommand(
   switch (command.type) {
     case "user/update-profile":
       return { ...current, revision, profile: command.profile };
-    case "user/set-new-bot-model":
+    case "user/set-platform-model":
       return {
         ...current,
         revision,
-        newBotModelTemplate: command.model,
-        newBotModelTemplateSource: command.source,
+        platformModel: command.model,
       };
     case "user/install-package": {
       const existing = current.packages.find(
@@ -345,7 +284,12 @@ function applyUserCommand(
           {
             packageId: command.packageId,
             version: command.version,
-            state: existing?.state === "failed" ? "failed" : "installed",
+            state:
+              existing?.state === "failed"
+                ? "failed"
+                : command.enabled === false
+                  ? "disabled"
+                  : "installed",
             failure: existing?.failure,
             // A Catalog install records where it came from; the compiled-in
             // path records nothing new, so an old row keeps its exact shape.
@@ -362,10 +306,8 @@ function applyUserCommand(
       };
     }
     case "user/uninstall-package": {
-      // Removing the row is the whole effect. Assignments that depend on it
-      // are not touched: `capabilityAssignmentFailureV1` resolves them as
-      // unavailable tombstones the User can repair (ADR 0003), and
-      // Connections are the User's own and outlive any Package.
+      // Removing the row is the whole effect. Connections are the User's own
+      // and outlive any Package (ADR 0019).
       if (
         !current.packages.some((pkg) => pkg.packageId === command.packageId)
       ) {
@@ -434,6 +376,12 @@ function applyUserCommand(
 export class UserSettingsBackendContribution {
   private readonly availablePackages: ReadonlySet<string>;
 
+  /** Declared Package dependencies, by Package id and version. */
+  private readonly packageDependencies: ReadonlyMap<
+    string,
+    Readonly<Record<string, string>>
+  >;
+
   /** The immutable first-party installation rows written on first read. */
   private readonly defaultPackages: readonly PackageInstallationView[];
 
@@ -456,6 +404,12 @@ export class UserSettingsBackendContribution {
         ({ packageId, version }) => `${packageId}\u0000${version}`,
       ),
     );
+    this.packageDependencies = new Map(
+      host.availablePackages.map((pkg) => [
+        `${pkg.packageId}\u0000${pkg.version}`,
+        pkg.dependencies ?? {},
+      ]),
+    );
     this.packageSettingDefinitions = new Map(
       host.availablePackages.map((pkg) => [
         `${pkg.packageId}\u0000${pkg.version}`,
@@ -468,7 +422,10 @@ export class UserSettingsBackendContribution {
             {
               packageId: pkg.packageId,
               version: pkg.version,
-              state: "installed" as const,
+              state:
+                pkg.defaultEnablement === "disabled"
+                  ? ("disabled" as const)
+                  : ("installed" as const),
               provenance: "first-party" as const,
             },
           ]
@@ -546,6 +503,26 @@ export class UserSettingsBackendContribution {
     return (
       this.packageSettingDefinitions.get(`${packageId}\u0000${version}`) ?? []
     );
+  }
+
+  private packageDependencyFailure(
+    packageId: string,
+    version: string,
+    settings: UserSettingsViewV1,
+  ): string | undefined {
+    const dependencies = this.packageDependencies.get(
+      `${packageId}\u0000${version}`,
+    );
+    if (!dependencies) return undefined;
+    for (const dependencyId of Object.keys(dependencies).sort()) {
+      const available = settings.packages.some(
+        (pkg) => pkg.packageId === dependencyId && pkg.state === "installed",
+      );
+      if (!available) {
+        return `Package "${packageId}" requires Package "${dependencyId}" to be installed and enabled; enable "${dependencyId}" first`;
+      }
+    }
+    return undefined;
   }
 
   async readConfiguration(input: unknown): Promise<UserSettingsViewV1> {
@@ -754,6 +731,36 @@ export class UserSettingsBackendContribution {
     if (command.expectedRevision !== current.revision) {
       throw new ConfigurationConflictError(current.revision);
     }
+    let dependencyFailure: string | undefined;
+    if (command.type === "user/install-package" && command.enabled !== false) {
+      dependencyFailure = this.packageDependencyFailure(
+        command.packageId,
+        command.version,
+        current,
+      );
+    } else if (command.type === "user/set-package-enabled" && command.enabled) {
+      const installed = current.packages.find(
+        (pkg) => pkg.packageId === command.packageId,
+      );
+      if (installed) {
+        dependencyFailure = this.packageDependencyFailure(
+          installed.packageId,
+          installed.version,
+          current,
+        );
+      }
+    }
+    if (dependencyFailure) {
+      const receipt: OperationReceiptV1 = {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        revision: current.revision,
+        status: "rejected",
+        failure: dependencyFailure,
+      };
+      await storage.put(receiptKey, { commandFingerprint, receipt });
+      return receipt;
+    }
     const next = applyUserCommand(current, command, (packageId, version) =>
       this.settingDefinitions(packageId, version),
     );
@@ -934,261 +941,6 @@ export class UserSettingsBackendContribution {
     return settings.packages.some(
       (pkg) => pkg.packageId === packageId && pkg.state === "installed",
     );
-  }
-
-  /**
-   * The durable state of one Bot's dependency on one Connection. `absent` is
-   * the answer for a Connection this object does not hold, so a reconciling
-   * saga can distinguish "never claimed" from "claimed and pending".
-   */
-  async readConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-  ): Promise<"absent" | "pending" | "acknowledged"> {
-    const connection = await this.getConnection(userId, connectionId);
-    if (!connection) return "absent";
-    const dependency = connectionDependencies(connection).find(
-      (candidate) =>
-        candidate.botId === botId && candidate.generation === generation,
-    );
-    return dependency?.status ?? "absent";
-  }
-
-  async claimConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-    requirement: ConnectionDependencyRequirementV1,
-    storage?: UserSettingsTransaction,
-  ): Promise<boolean> {
-    const decoded = decodeConnectionDependencyRequirementV1(requirement);
-    return this.transitionConnectionDependency(
-      userId,
-      connectionId,
-      (current, settings) => {
-        const installation = settings.packages.find(
-          (pkg) =>
-            pkg.packageId === decoded.packageId &&
-            pkg.version === decoded.packageVersion &&
-            pkg.state === "installed",
-        );
-        if (
-          !installation ||
-          current.state !== "ready" ||
-          current.packageId !== decoded.packageId ||
-          !decoded.connectionTypeIds.includes(current.connectionTypeId)
-        ) {
-          return undefined;
-        }
-        const existing = connectionDependencies(current);
-        const replay = existing.find(
-          (dependency) =>
-            dependency.botId === botId && dependency.generation === generation,
-        );
-        if (replay) {
-          return replay.packageId === decoded.packageId &&
-            replay.capabilityId === decoded.capabilityId
-            ? current
-            : undefined;
-        }
-        if (existing.length >= MAX_CONNECTION_DEPENDENCIES) return undefined;
-        return withConnectionDependencies(current, [
-          ...existing,
-          {
-            botId,
-            generation,
-            packageId: decoded.packageId,
-            capabilityId: decoded.capabilityId,
-            claimOrder: settings.revision + 1,
-            status: "pending",
-          },
-        ]);
-      },
-      storage,
-    );
-  }
-
-  async acknowledgeConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-  ): Promise<boolean> {
-    return this.host.storage.transaction(async (storage) => {
-      await this.assertIdentity(userId, storage);
-      const current = await this.readSnapshot(storage);
-      const target = current.connections.find(
-        (connection) => connection.connectionId === connectionId,
-      );
-      if (
-        !target ||
-        target.state === "revoking" ||
-        target.state === "revoked"
-      ) {
-        return false;
-      }
-      const matched = connectionDependencies(target).find(
-        (dependency) =>
-          dependency.botId === botId && dependency.generation === generation,
-      );
-      if (!matched) return false;
-      const latestClaimOrder = Math.max(
-        ...current.connections.flatMap((connection) =>
-          connectionDependencies(connection).flatMap((dependency) =>
-            dependency.botId === botId &&
-            dependency.packageId === matched.packageId &&
-            dependency.capabilityId === matched.capabilityId
-              ? [dependency.claimOrder]
-              : [],
-          ),
-        ),
-      );
-      if (matched.claimOrder < latestClaimOrder) return false;
-      if (
-        matched.status === "acknowledged" &&
-        !current.connections.some((connection) =>
-          connectionDependencies(connection).some(
-            (dependency) =>
-              dependency.botId === botId &&
-              dependency.packageId === matched.packageId &&
-              dependency.capabilityId === matched.capabilityId &&
-              (connection.connectionId !== connectionId ||
-                dependency.generation !== generation),
-          ),
-        )
-      ) {
-        return true;
-      }
-      const connections = current.connections.map((connection) => {
-        const dependencies = connectionDependencies(connection);
-        const nextDependencies = dependencies.flatMap((dependency) => {
-          const sameAuthority =
-            dependency.botId === botId &&
-            dependency.packageId === matched.packageId &&
-            dependency.capabilityId === matched.capabilityId;
-          if (!sameAuthority) return [dependency];
-          if (
-            connection.connectionId === connectionId &&
-            dependency.generation === generation
-          ) {
-            return [{ ...dependency, status: "acknowledged" as const }];
-          }
-          return [];
-        });
-        return nextDependencies.length === dependencies.length &&
-          nextDependencies.every(
-            (dependency, index) => dependency === dependencies[index],
-          )
-          ? connection
-          : withConnectionDependencies(connection, nextDependencies);
-      });
-      await storage.put(STATE_KEY, {
-        ...current,
-        revision: current.revision + 1,
-        connections,
-      } satisfies UserSettingsViewV1);
-      return true;
-    });
-  }
-
-  async releaseConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-  ): Promise<boolean> {
-    return this.host.storage.transaction(async (storage) => {
-      await this.assertIdentity(userId, storage);
-      const current = await this.readSnapshot(storage);
-      const target = current.connections.find(
-        (connection) => connection.connectionId === connectionId,
-      );
-      if (!target) return true;
-      const existing = connectionDependencies(target);
-      const matching = existing.filter(
-        (dependency) =>
-          dependency.botId === botId && dependency.generation === generation,
-      );
-      if (matching.length === 0) return true;
-      if (matching.some((dependency) => dependency.status !== "acknowledged")) {
-        return false;
-      }
-      const remaining = existing.filter(
-        (dependency) =>
-          dependency.botId !== botId || dependency.generation !== generation,
-      );
-      const connections = current.connections.map((connection) =>
-        connection.connectionId === connectionId
-          ? withConnectionDependencies(connection, remaining)
-          : connection,
-      );
-      await storage.put(STATE_KEY, {
-        ...current,
-        revision: current.revision + 1,
-        connections,
-      } satisfies UserSettingsViewV1);
-      return true;
-    });
-  }
-
-  async compensateConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-  ): Promise<boolean> {
-    return this.transitionConnectionDependency(
-      userId,
-      connectionId,
-      (current) => {
-        const existing = connectionDependencies(current);
-        const remaining = existing.filter(
-          (dependency) =>
-            dependency.botId !== botId ||
-            dependency.generation !== generation ||
-            dependency.status !== "pending",
-        );
-        return remaining.length === existing.length
-          ? undefined
-          : withConnectionDependencies(current, remaining);
-      },
-    );
-  }
-
-  private async transitionConnectionDependency(
-    userId: string,
-    connectionId: string,
-    transition: (
-      connection: ConnectionView,
-      settings: UserSettingsViewV1,
-    ) => ConnectionView | undefined,
-    transaction?: UserSettingsTransaction,
-  ): Promise<boolean> {
-    const apply = async (storage: UserSettingsTransaction) => {
-      await this.assertIdentity(userId, storage);
-      const current = await this.readSnapshot(storage);
-      const connection = current.connections.find(
-        (candidate) => candidate.connectionId === connectionId,
-      );
-      if (!connection) return false;
-      const nextConnection = transition(connection, current);
-      if (!nextConnection) return false;
-      if (nextConnection === connection) return true;
-      await storage.put(STATE_KEY, {
-        ...current,
-        revision: current.revision + 1,
-        connections: current.connections.map((candidate) =>
-          candidate.connectionId === connectionId ? nextConnection : candidate,
-        ),
-      } satisfies UserSettingsViewV1);
-      return true;
-    };
-    return transaction
-      ? apply(transaction)
-      : this.host.storage.transaction(apply);
   }
 
   private async assertIdentity(

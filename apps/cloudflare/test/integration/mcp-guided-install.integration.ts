@@ -1,10 +1,10 @@
 // GrokBot's `add-connector`, end to end: a Catalog entry with setup fields and
-// an OAuth server, installed with the values a User typed, connected, assigned,
+// an OAuth server, installed with the values a User typed, connected, enabled,
 // used — and then broken by the server and repaired by the User.
 //
 // The seam this exercises that no other test does is the *sequence*: catalog
 // entry detail → `setupFields` → `user/install-package{values}` → the Package's
-// own authorization route → the public callback → `bot/assign-capability` →
+// own authorization route → the public callback → account enablement →
 // a Turn. Everything crosses the gateway, and the connector is impersonated at
 // the outbound seam, so nothing is injected past a Package boundary.
 import {
@@ -260,25 +260,7 @@ describe("installing a connector from the Catalog and connecting it", () => {
     expect(connection.state).toBe("ready");
     expect(connection.pendingAuthorization).toBeUndefined();
 
-    // 4. Assign it, and its tools reach the model.
-    const botSettings = (await expectOkJson(
-      await asUser(userId, `/api/bots/${botId}/settings`),
-    )) as { revision: number };
-    await expectOkJson(
-      await postAsUser(userId, `/api/bots/${botId}/settings`, {
-        schemaVersion: 1,
-        type: "bot/assign-capability",
-        commandId: "guided-assign-1",
-        botId,
-        expectedRevision: botSettings.revision,
-        assignment: {
-          assignmentId: "guided-mcp-1",
-          packageId: "mcp",
-          capabilityId: "mcp-tools",
-          connectionId,
-        },
-      }),
-    );
+    // 4. The enabled Connection's tools reach every Bot.
     expect(
       (await runTurn(userId, botId, "hello", "guided-turn-1")).status,
     ).toBe(200);

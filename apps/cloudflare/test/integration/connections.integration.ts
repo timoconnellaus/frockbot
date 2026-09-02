@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import {
   asUser,
+  CUSTOM_MODELS_PACKAGE_ID,
   expectOkJson,
   freshUserId,
   OLLAMA_BAD_API_KEY,
@@ -31,8 +32,18 @@ async function installProvider(userId: string): Promise<void> {
     await postAsUser(userId, "/api/settings", {
       schemaVersion: 1,
       type: "user/install-package",
-      commandId: "install-provider",
+      commandId: "install-custom-models",
       expectedRevision: 0,
+      packageId: CUSTOM_MODELS_PACKAGE_ID,
+      version: "0.0.1",
+    }),
+  );
+  await expectOkJson(
+    await postAsUser(userId, "/api/settings", {
+      schemaVersion: 1,
+      type: "user/install-package",
+      commandId: "install-provider",
+      expectedRevision: 1,
       packageId: PROVISIONED_MODEL.packageId,
       version: "0.0.1",
     }),
