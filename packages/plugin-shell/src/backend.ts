@@ -5,7 +5,7 @@ import {
   type SessionEvent,
   validateToolOccurrenceJournal,
   type BotCapabilitiesStub,
-  type IsolateModelInvocationV1,
+  type IsolateModelOutcomeV1,
   type IsolatePendingDecisionV1,
   type NormalizedModelRequest,
   type PackageBundlerBinding,
@@ -42,45 +42,40 @@ import {
 } from "@frockbot/application-foundation/runtime";
 import {
   applyBotProfilePatchV1,
-  capabilityAssignmentFailureV1,
   configurationCommandFingerprintV1,
   ConfigurationConflictError,
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
   decodeCompositionCommandReceiptV1,
+  decodeInstalledPackageSettingIdsV1,
+  decodeInstalledPackageSettingsPatchV1,
   MAX_COMPOSITION_GENERATION_PAGE_V1,
   type CompositionCommandReceiptV1,
   type CompositionGenerationListViewV1,
   type CompositionGenerationViewV1,
   type RevertCompositionCommandV1,
-  type ConnectionDependencyRequirementV1,
   type BotExecutionPlanV1,
   type BotSelfWriterV1,
   type BotSettingsViewV1,
-  type CapabilityAssignmentView,
-  type ModelAssignment,
+  type EnabledCapabilityV1,
   type ConnectionView,
   type ConfigurationCommandV1,
   type OperationReceiptV1,
+  type PackageSettingValueV1,
   type ResolvedModelBindingV1,
   initializeBotSettingsV1,
   resolvePackageSettingValuesV1,
   resolveBotExecutionPlanV1,
-  resolveBotModelBindingV1,
   resolveEffectiveBotModelV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import {
-  createFoundationAssignedRuntimePackages,
+  createFoundationEnabledRuntimePackages,
   mergeFoundationRuntimePackages,
   createFoundationHostedRuntimePackages,
   mergeFoundationRuntimePackagesV1,
   type PackagePublisherAgentHost,
 } from "@frockbot/application-foundation/runtime";
-import {
-  requireStoredAssignmentSaga,
-  type StoredAssignmentSaga,
-} from "./backend-assignment.js";
 import {
   cancelStoredRun,
   completeStoredRun,
@@ -125,10 +120,7 @@ import {
   type TemplateShareReceiptV1,
 } from "@frockbot/plugin-bot-template/shared";
 import { createBotMemoryHost } from "./backend-memory.js";
-import {
-  createBotImageHost,
-  type WorkersAiBindingV1,
-} from "./backend-image.js";
+import { createBotImageHost, type NativeAiBindingV1 } from "./backend-image.js";
 import {
   createBotPluginSkillsSource,
   createBotSkillCatalogReader,
@@ -298,12 +290,13 @@ import {
   createR2PackageArtifactStore,
   isolateBindingDigestV1,
   type BotCapabilitiesPropsV1,
-  type IsolateAssignmentV1,
+  type IsolateCapabilityV1,
   type IsolateCapabilityHost,
   type IsolateModelBindingV1,
   type IsolateModelPath,
   type IsolateModelRequestRecordV1,
   type IsolatePendingAuthorityDecisionV1,
+  type IsolateUnavailableModelBindingV1,
 } from "./backend-isolate.js";
 import type { BotIsolateLoader } from "@frockbot/kernel-composition/isolate";
 import type {
@@ -379,10 +372,6 @@ import {
 
 export const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
-const ASSIGNMENT_GENERATION_PREFIX = "assignment-generation:";
-const ASSIGNMENT_COMPENSATION_PREFIX = "assignment-compensation:";
-const ASSIGNMENT_TOMBSTONE_PREFIX = "assignment-tombstone:";
-const ASSIGNMENT_SAGA_PREFIX = "assignment-saga:";
 const STOP_RECEIPT_PREFIX = "stop-receipt:";
 /**
  * The Bot's durable announcement log: Session events that happen outside any
@@ -396,17 +385,8 @@ export const BOT_ANNOUNCEMENT_RETENTION = 32;
 function botAnnouncementKey(seq: number): string {
   return `${BOT_ANNOUNCEMENT_PREFIX}${String(seq).padStart(12, "0")}`;
 }
-const ASSIGNMENT_SAGA_DEADLINE_MS = 60_000;
 /** Idempotency records for Composition commands this Package admits. */
 const COMPOSITION_COMMAND_PREFIX = "composition-command:";
-
-function assignmentGenerationKey(assignmentId: string): string {
-  return `${ASSIGNMENT_GENERATION_PREFIX}${assignmentId}`;
-}
-
-function capabilityKey(packageId: string, capabilityId: string): string {
-  return `${packageId}:${capabilityId}`;
-}
 
 interface StoredConfigurationReceipt {
   commandFingerprint: string;
@@ -428,7 +408,7 @@ function isTerminalStoredRunStatus(status: StoredRunStatus): boolean {
   );
 }
 
-interface AssignmentActivity {
+interface ConfigurationActivity {
   commandFingerprint: string;
   promise: Promise<OperationReceiptV1>;
 }
@@ -471,8 +451,16 @@ export interface BotStateEnv {
    */
   PACKAGE_BUNDLER?: PackageBundlerBinding;
   MEMORY_INDEX: VectorizeIndex;
-  /** The native Workers AI binding consumed through narrow Package adapters. */
-  AI?: WorkersAiBindingV1;
+  /** The native AI binding consumed through the image Package adapter. */
+  AI?: NativeAiBindingV1;
+  /** The Flock AI Gateway adapter constructed by the Cloudflare host. */
+  FLOCK_AI?: {
+    autoRoute: string;
+    runChatCompletion(
+      gatewayModel: string,
+      body: Record<string, unknown>,
+    ): Promise<ReadableStream<Uint8Array>>;
+  };
   USER_CONFIGURATIONS: DurableObjectNamespace;
   /**
    * The Bot Durable Object namespace, as the Subagent Durable Object namespace
@@ -545,7 +533,10 @@ export class ShellBotBackendContribution {
     Promise<ClientTurnV1>
   >();
   private readonly outboundFetch?: typeof fetch;
-  private readonly assignmentActivities = new Map<string, AssignmentActivity>();
+  private readonly configurationActivities = new Map<
+    string,
+    ConfigurationActivity
+  >();
   /** The Turn currently executing on this object, for durable Stop. */
   private activeTurn:
     { runId: string; sessionId: string; cancel(): void } | undefined;
@@ -620,7 +611,7 @@ export class ShellBotBackendContribution {
         terminalRecords: (input) => this.terminalPackageRecords(input),
         scheduledDeadlines: (transaction) =>
           this.scheduledDeadlines(transaction),
-        scheduledWorkInFlight: () => this.assignmentActivities.size > 0,
+        scheduledWorkInFlight: () => false,
         deferScheduledWork: (transaction) =>
           this.deferScheduledWork(transaction),
         settleScheduledWork: () => this.settleScheduledWork(),
@@ -634,12 +625,6 @@ export class ShellBotBackendContribution {
       name: string;
       /** The persona the Bot's profile is seeded with, when its creator gave one. */
       description?: string;
-      model?: BotSettingsViewV1["model"];
-      modelBinding?: {
-        assignment: BotSettingsViewV1["assignments"][number];
-        generation: string;
-      };
-      assignments?: BotSettingsViewV1["assignments"];
     },
   ): Promise<BotSettingsViewV1> {
     return this.ctx.storage.transaction(async (transaction) => {
@@ -656,58 +641,24 @@ export class ShellBotBackendContribution {
       );
       if (existing) return existing;
       const settings = {
-        ...this.initialBotSettings(identity.botId, initial.model),
+        ...this.initialBotSettings(identity.botId),
         profile: {
           name: initial.name,
           ...(initial.description === undefined
             ? {}
             : { description: initial.description }),
         },
-        assignments: [
-          ...(initial.assignments ?? []).map((assignment) =>
-            structuredClone(assignment),
-          ),
-          ...(initial.modelBinding
-            ? [structuredClone(initial.modelBinding.assignment)]
-            : []),
-        ],
       } satisfies BotSettingsViewV1;
       await transaction.put({
         [IDENTITY_KEY]: durableIdentity ?? identity,
         [BOT_CONFIGURATION_KEY]: settings,
-        ...(initial.modelBinding
-          ? {
-              [assignmentGenerationKey(
-                initial.modelBinding.assignment.assignmentId,
-              )]: initial.modelBinding.generation,
-            }
-          : {}),
       });
       return settings;
     });
   }
 
   async getSettings(identity: BotIdentity): Promise<BotSettingsViewV1> {
-    const settings = await this.ensureBotSettings(identity);
-    if (settings.assignments.length === 0) return settings;
-    const [user, application] = await Promise.all([
-      this.userConfiguration(identity).readConfiguration({
-        schemaVersion: 1,
-        userId: identity.userId,
-      }),
-      this.compileApplication(),
-    ]);
-    const plan = resolveBotExecutionPlanV1({
-      bot: settings,
-      user,
-      packages: application.packages.map((pkg) => ({
-        packageId: pkg.id,
-        version: pkg.version,
-        capabilities: pkg.manifest.configuration?.capabilities ?? [],
-        connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-      })),
-    });
-    return { ...settings, assignments: plan.assignments };
+    return this.ensureBotSettings(identity);
   }
 
   async readConfiguration(input: unknown): Promise<BotSettingsViewV1> {
@@ -729,7 +680,7 @@ export class ShellBotBackendContribution {
     command: Extract<ConfigurationCommandV1, { botId: string }>,
   ): Promise<OperationReceiptV1> {
     const commandFingerprint = configurationCommandFingerprintV1(command);
-    const active = this.assignmentActivities.get(command.commandId);
+    const active = this.configurationActivities.get(command.commandId);
     if (active) {
       if (active.commandFingerprint !== commandFingerprint) {
         throw new Error(
@@ -745,12 +696,13 @@ export class ShellBotBackendContribution {
         commandFingerprint,
       ).finally(() => {
         if (
-          this.assignmentActivities.get(command.commandId)?.promise === activity
+          this.configurationActivities.get(command.commandId)?.promise ===
+          activity
         ) {
-          this.assignmentActivities.delete(command.commandId);
+          this.configurationActivities.delete(command.commandId);
         }
       });
-    this.assignmentActivities.set(command.commandId, {
+    this.configurationActivities.set(command.commandId, {
       commandFingerprint,
       promise: activity,
     });
@@ -767,46 +719,18 @@ export class ShellBotBackendContribution {
     const existing =
       await this.ctx.storage.get<StoredConfigurationReceipt>(receiptKey);
     if (existing) {
-      const receipt = requireMatchingConfigurationReceipt(
+      return requireMatchingConfigurationReceipt(
         existing,
         commandFingerprint,
         command.commandId,
       );
-      if (
-        command.type === "bot/assign-capability" ||
-        command.type === "bot/replace-capability" ||
-        command.type === "bot/unassign-capability"
-      ) {
-        try {
-          await this.reconcileStoredAssignmentSaga(
-            identity,
-            command.commandId,
-            commandFingerprint,
-          );
-        } catch {
-          // The durable accepted receipt remains replayable while recovery is
-          // retrying; alarm reconciliation owns eventual settlement.
-        }
-        const pending = await this.ctx.storage.get<unknown>(
-          `${ASSIGNMENT_SAGA_PREFIX}${command.commandId}`,
-        );
-        if (pending !== undefined) {
-          const saga = requireStoredAssignmentSaga(pending);
-          if (saga.commandFingerprint !== commandFingerprint) {
-            throw new Error(
-              `Configuration command idempotency key "${command.commandId}" was reused for a different command`,
-            );
-          }
-          return saga.acceptedReceipt;
-        }
-      }
-      return receipt;
     }
     if (command.expectedRevision !== settings.revision) {
       throw new ConfigurationConflictError(settings.revision);
     }
-    let modelCapabilities = new Set<string>();
-    if (command.type === "bot/select-model") {
+    let packageValues: Record<string, unknown> | undefined;
+    let packageUnset: string[] | undefined;
+    if (command.type === "bot/set-package-settings") {
       const [user, application] = await Promise.all([
         this.userConfiguration(identity).readConfiguration({
           schemaVersion: 1,
@@ -814,241 +738,37 @@ export class ShellBotBackendContribution {
         }),
         this.compileApplication(),
       ]);
-      modelCapabilities = new Set(
-        application.packages.flatMap((pkg) =>
-          (pkg.manifest.configuration?.capabilities ?? []).flatMap(
-            (capability) =>
-              capability.kind === "model"
-                ? [capabilityKey(pkg.id, capability.id)]
-                : [],
-          ),
-        ),
-      );
-      const binding = resolveBotModelBindingV1({
-        model: command.model,
-        assignments: settings.assignments,
-        user,
-        packages: application.packages.map((pkg) => ({
-          packageId: pkg.id,
-          version: pkg.version,
-          capabilities: pkg.manifest.configuration?.capabilities ?? [],
-          connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-        })),
-      });
-      if (binding.state === "unavailable") {
-        return this.rejectConfigurationCommand(
-          identity,
-          command,
-          commandFingerprint,
-          binding.failure ?? "Bot model binding is unavailable",
-        );
-      }
-    }
-    if (
-      command.type === "bot/assign-capability" ||
-      command.type === "bot/replace-capability"
-    ) {
-      const existingAssignment = settings.assignments.find(
-        (assignment) =>
-          assignment.assignmentId === command.assignment.assignmentId,
-      );
-      if (
-        existingAssignment &&
-        (existingAssignment.packageId !== command.assignment.packageId ||
-          existingAssignment.capabilityId !== command.assignment.capabilityId)
-      ) {
-        return this.rejectConfigurationCommand(
-          identity,
-          command,
-          commandFingerprint,
-          "Assignment ID cannot change Package Capability authority",
-        );
-      }
-      const [user, application] = await Promise.all([
-        this.userConfiguration(identity).readConfiguration({
-          schemaVersion: 1,
-          userId: identity.userId,
-        }),
-        this.compileApplication(),
-      ]);
-      modelCapabilities = new Set(
-        application.packages.flatMap((pkg) =>
-          (pkg.manifest.configuration?.capabilities ?? []).flatMap(
-            (capability) =>
-              capability.kind === "model"
-                ? [capabilityKey(pkg.id, capability.id)]
-                : [],
-          ),
-        ),
-      );
-      const failure = capabilityAssignmentFailureV1({
-        assignment: command.assignment,
-        user,
-        packages: application.packages.map((pkg) => ({
-          packageId: pkg.id,
-          version: pkg.version,
-          capabilities: pkg.manifest.configuration?.capabilities ?? [],
-          connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-        })),
-      });
-      if (failure) {
-        return this.rejectConfigurationCommand(
-          identity,
-          command,
-          commandFingerprint,
-          failure,
-        );
-      }
-      if (command.model) {
-        if (command.model.connectionId !== command.assignment.connectionId) {
-          return this.rejectConfigurationCommand(
-            identity,
-            command,
-            commandFingerprint,
-            "Model binding must use the assigned Connection",
-          );
-        }
-        const binding = resolveBotModelBindingV1({
-          model: command.model,
-          assignments: [
-            ...settings.assignments,
-            { ...command.assignment, state: "enabled" },
-          ],
-          user,
-          packages: application.packages.map((pkg) => ({
-            packageId: pkg.id,
-            version: pkg.version,
-            capabilities: pkg.manifest.configuration?.capabilities ?? [],
-            connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-          })),
+      const packages = application.packages.map((pkg) => ({
+        packageId: pkg.id,
+        version: pkg.version,
+        settings: pkg.manifest.configuration?.settings ?? [],
+      }));
+      if (command.values) {
+        packageValues = decodeInstalledPackageSettingsPatchV1({
+          packageId: command.packageId,
+          values: command.values,
+          scope: "bot",
+          installations: user.packages,
+          packages,
         });
-        if (binding.state === "unavailable") {
-          return this.rejectConfigurationCommand(
-            identity,
-            command,
-            commandFingerprint,
-            binding.failure ?? "Bot model binding is unavailable",
-          );
-        }
+      }
+      if (command.unset) {
+        packageUnset = decodeInstalledPackageSettingIdsV1({
+          packageId: command.packageId,
+          unset: command.unset,
+          scope: "bot",
+          installations: user.packages,
+          packages,
+        });
       }
     }
-    if (
-      command.type === "bot/select-model" &&
-      settings.model?.connectionId &&
-      settings.model.connectionId !== command.model.connectionId
-    ) {
-      // Moving the model to another Connection changes Assignment authority,
-      // so it is a Replace, not a select. One durable shape, one saga.
-      return this.rejectConfigurationCommand(
-        identity,
-        command,
-        commandFingerprint,
-        "Selecting a model on another Connection requires Replace",
-      );
-    }
-    if (command.type === "bot/unbind-model") {
-      const assignment = settings.assignments.find(
-        (candidate) =>
-          candidate.assignmentId === command.assignmentId &&
-          (candidate.state === "enabled" ||
-            candidate.state === "unavailable") &&
-          candidate.connectionId === settings.model?.connectionId,
-      );
-      const application = await this.compileApplication();
-      const capability = application.packages
-        .find((pkg) => pkg.id === assignment?.packageId)
-        ?.manifest.configuration?.capabilities.find(
-          (candidate) => candidate.id === assignment?.capabilityId,
-        );
-      if (!assignment?.connectionId || capability?.kind !== "model") {
-        return this.rejectConfigurationCommand(
-          identity,
-          command,
-          commandFingerprint,
-          "Bot model assignment is unavailable",
-        );
-      }
-      const generation = await this.ctx.storage.get<string>(
-        assignmentGenerationKey(assignment.assignmentId),
-      );
-      if (!generation) {
-        return this.rejectConfigurationCommand(
-          identity,
-          command,
-          commandFingerprint,
-          "Bot model assignment generation is unavailable",
-        );
-      }
-      // Unbinding the model is the Assignment's Unassign: one saga releases
-      // the Connection dependency and clears the Bot's model together.
-      return this.executeAssignmentCommand(
-        identity,
-        {
-          ...command,
-          type: "bot/unassign-capability",
-          assignmentId: assignment.assignmentId,
-        },
-        commandFingerprint,
-        { clearModel: true },
-      );
-    }
-
-    if (
-      command.type !== "bot/assign-capability" &&
-      command.type !== "bot/replace-capability" &&
-      command.type !== "bot/unassign-capability"
-    ) {
-      return this.applySimpleConfigurationCommand(
-        identity,
-        command,
-        commandFingerprint,
-      );
-    }
-    return this.executeAssignmentCommand(
+    return this.applySimpleConfigurationCommand(
       identity,
       command,
       commandFingerprint,
-      {
-        ...(command.type === "bot/unassign-capability"
-          ? {}
-          : { model: command.model }),
-      },
+      packageValues,
+      packageUnset,
     );
-  }
-
-  private async rejectConfigurationCommand(
-    identity: BotIdentity,
-    command: Extract<ConfigurationCommandV1, { botId: string }>,
-    commandFingerprint: string,
-    failure: string,
-  ): Promise<OperationReceiptV1> {
-    return this.ctx.storage.transaction(async (transaction) => {
-      const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
-      const existing =
-        await transaction.get<StoredConfigurationReceipt>(receiptKey);
-      if (existing) {
-        return requireMatchingConfigurationReceipt(
-          existing,
-          commandFingerprint,
-          command.commandId,
-        );
-      }
-      const current =
-        (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
-        this.initialBotSettings(identity.botId);
-      if (command.expectedRevision !== current.revision) {
-        throw new ConfigurationConflictError(current.revision);
-      }
-      const receipt: OperationReceiptV1 = {
-        schemaVersion: 1,
-        commandId: command.commandId,
-        revision: current.revision,
-        status: "rejected",
-        failure,
-      };
-      await transaction.put(receiptKey, { commandFingerprint, receipt });
-      return receipt;
-    });
   }
 
   private async applySimpleConfigurationCommand(
@@ -1060,10 +780,12 @@ export class ShellBotBackendContribution {
           | "bot/update-profile"
           | "bot/set-profile"
           | "bot/update-notifications"
-          | "bot/select-model";
+          | "bot/set-package-settings";
       }
     >,
     commandFingerprint: string,
+    packageValues?: Record<string, unknown>,
+    packageUnset: readonly string[] = [],
   ): Promise<OperationReceiptV1> {
     return this.ctx.storage.transaction(async (transaction) => {
       await this.lifecycleAdmission?.(transaction, identity.botId);
@@ -1083,9 +805,6 @@ export class ShellBotBackendContribution {
       if (command.expectedRevision !== current.revision) {
         throw new ConfigurationConflictError(current.revision);
       }
-      if (current.assignmentOperations.length > 0) {
-        throw new Error("An Assignment operation is still retrying");
-      }
       const revision = current.revision + 1;
       const next: BotSettingsViewV1 =
         command.type === "bot/update-profile"
@@ -1102,7 +821,25 @@ export class ShellBotBackendContribution {
               }
             : command.type === "bot/update-notifications"
               ? { ...current, revision, notifications: command.notifications }
-              : { ...current, revision, model: command.model };
+              : (() => {
+                  const values = {
+                    ...(current.packageValues[command.packageId] ?? {}),
+                    ...structuredClone(packageValues ?? {}),
+                  };
+                  for (const settingId of packageUnset)
+                    delete values[settingId];
+                  const nextPackageValues = { ...current.packageValues };
+                  if (Object.keys(values).length > 0) {
+                    nextPackageValues[command.packageId] = values;
+                  } else {
+                    delete nextPackageValues[command.packageId];
+                  }
+                  return {
+                    ...current,
+                    revision,
+                    packageValues: nextPackageValues,
+                  };
+                })();
       const receipt: OperationReceiptV1 = {
         schemaVersion: 1,
         commandId: command.commandId,
@@ -1200,739 +937,10 @@ export class ShellBotBackendContribution {
       .map(([, value]) => decodeSessionEvent(value));
   }
 
-  private async assignmentRequirement(
-    identity: BotIdentity,
-    assignment: Omit<BotSettingsViewV1["assignments"][number], "state">,
-  ): Promise<
-    | {
-        user: UserSettingsViewV1;
-        requirement?: ConnectionDependencyRequirementV1;
-      }
-    | { failure: string }
-  > {
-    const [user, application] = await Promise.all([
-      this.userConfiguration(identity).readConfiguration({
-        schemaVersion: 1,
-        userId: identity.userId,
-      }),
-      this.compileApplication(),
-    ]);
-    const packages = application.packages.map((pkg) => ({
-      packageId: pkg.id,
-      version: pkg.version,
-      capabilities: pkg.manifest.configuration?.capabilities ?? [],
-      connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-    }));
-    const failure = capabilityAssignmentFailureV1({
-      assignment,
-      user,
-      packages,
-    });
-    if (failure) return { failure };
-    if (!assignment.connectionId) return { user };
-    const installation = user.packages.find(
-      (pkg) =>
-        pkg.packageId === assignment.packageId && pkg.state === "installed",
-    );
-    const pkg = application.packages.find(
-      (candidate) =>
-        candidate.id === assignment.packageId &&
-        candidate.version === installation?.version,
-    );
-    const capability = pkg?.manifest.configuration?.capabilities.find(
-      (candidate) => candidate.id === assignment.capabilityId,
-    );
-    if (!installation || !pkg || !capability) {
-      return {
-        failure: "Capability assignment policy changed during validation",
-      };
-    }
-    return {
-      user,
-      requirement: {
-        schemaVersion: 1,
-        packageId: pkg.id,
-        packageVersion: pkg.version,
-        capabilityId: capability.id,
-        connectionTypeIds: [...capability.connectionTypes],
-      },
-    };
-  }
-
-  private async executeAssignmentCommand(
-    identity: BotIdentity,
-    command: Extract<
-      ConfigurationCommandV1,
-      {
-        type:
-          | "bot/assign-capability"
-          | "bot/replace-capability"
-          | "bot/unassign-capability";
-      }
-    >,
-    commandFingerprint: string,
-    binding: { model?: ModelAssignment; clearModel?: boolean } = {},
-  ): Promise<OperationReceiptV1> {
-    try {
-      await this.reconcileStoredAssignmentSaga(
-        identity,
-        command.commandId,
-        commandFingerprint,
-      );
-    } catch (error) {
-      const pending = await this.ctx.storage.get<unknown>(
-        `${ASSIGNMENT_SAGA_PREFIX}${command.commandId}`,
-      );
-      if (pending === undefined) throw error;
-      const saga = requireStoredAssignmentSaga(pending);
-      if (saga.commandFingerprint !== commandFingerprint) throw error;
-      return saga.acceptedReceipt;
-    }
-    const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
-    const receipt =
-      await this.ctx.storage.get<StoredConfigurationReceipt>(receiptKey);
-    if (receipt) {
-      return requireMatchingConfigurationReceipt(
-        receipt,
-        commandFingerprint,
-        command.commandId,
-      );
-    }
-    const pending = await this.ctx.storage.get<unknown>(
-      `${ASSIGNMENT_SAGA_PREFIX}${command.commandId}`,
-    );
-    if (pending !== undefined) {
-      const saga = requireStoredAssignmentSaga(pending);
-      if (saga.commandFingerprint !== commandFingerprint) {
-        throw new Error(
-          `Configuration command idempotency key "${command.commandId}" was reused for a different command`,
-        );
-      }
-      return saga.acceptedReceipt;
-    }
-    const current = await this.ensureBotSettings(identity);
-    const assignmentId =
-      command.type === "bot/unassign-capability"
-        ? command.assignmentId
-        : command.assignment.assignmentId;
-    const previous = current.assignments.find(
-      (assignment) => assignment.assignmentId === assignmentId,
-    );
-    if (command.type === "bot/assign-capability" && previous) {
-      return this.rejectAssignmentCommand(
-        identity,
-        command.commandId,
-        commandFingerprint,
-        `Assignment "${assignmentId}" already exists; use Replace`,
-      );
-    }
-    if (command.type !== "bot/assign-capability" && !previous) {
-      return this.rejectAssignmentCommand(
-        identity,
-        command.commandId,
-        commandFingerprint,
-        `Assignment "${assignmentId}" does not exist`,
-      );
-    }
-    let targetRequirement: ConnectionDependencyRequirementV1 | undefined;
-    if (command.type !== "bot/unassign-capability") {
-      const validation = await this.assignmentRequirement(
-        identity,
-        command.assignment,
-      );
-      if ("failure" in validation) {
-        return this.rejectAssignmentCommand(
-          identity,
-          command.commandId,
-          commandFingerprint,
-          validation.failure,
-        );
-      }
-      targetRequirement = validation.requirement;
-    }
-    const previousGeneration = previous?.connectionId
-      ? await this.ctx.storage.get<string>(
-          `${ASSIGNMENT_GENERATION_PREFIX}${previous.assignmentId}`,
-        )
-      : undefined;
-    const operation =
-      command.type === "bot/assign-capability"
-        ? "assigning"
-        : command.type === "bot/replace-capability"
-          ? "replacing"
-          : "unassigning";
-    await this.ctx.storage.transaction(async (transaction) => {
-      await this.lifecycleAdmission?.(transaction, identity.botId);
-      const existing = await transaction.get<StoredAssignmentSaga>(
-        `${ASSIGNMENT_SAGA_PREFIX}${command.commandId}`,
-      );
-      if (existing) return;
-      const durable =
-        (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
-        this.initialBotSettings(identity.botId);
-      if (durable.revision !== command.expectedRevision) {
-        throw new ConfigurationConflictError(durable.revision);
-      }
-      if (durable.assignmentOperations.length > 0) {
-        throw new Error("Another Assignment operation is already pending");
-      }
-      const target =
-        command.type === "bot/unassign-capability"
-          ? undefined
-          : structuredClone(command.assignment);
-      const phase =
-        operation === "unassigning"
-          ? "releasing"
-          : target?.connectionId
-            ? "claiming"
-            : "committing";
-      const acceptedReceipt: OperationReceiptV1 = {
-        schemaVersion: 1,
-        commandId: command.commandId,
-        revision: durable.revision,
-        status: "pending",
-      };
-      const saga: StoredAssignmentSaga = {
-        schemaVersion: 1,
-        commandId: command.commandId,
-        commandFingerprint,
-        userId: identity.userId,
-        botId: identity.botId,
-        operation,
-        assignmentId,
-        generation: command.commandId,
-        phase,
-        target,
-        targetRequirement,
-        previous: previous ? structuredClone(previous) : undefined,
-        previousGeneration,
-        // The Bot's model commits with the Assignment, in the saga's commit
-        // phase, so the dependency claim and the binding are one durable unit.
-        model: binding.model ? structuredClone(binding.model) : undefined,
-        clearModel: binding.clearModel,
-        deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
-        acceptedReceipt,
-      };
-      await transaction.put({
-        [`${ASSIGNMENT_SAGA_PREFIX}${command.commandId}`]: saga,
-        [BOT_CONFIGURATION_KEY]: {
-          ...durable,
-          assignmentOperations: [
-            {
-              commandId: command.commandId,
-              kind: operation,
-              assignmentId,
-              state: "pending",
-              target,
-            },
-          ],
-        } satisfies BotSettingsViewV1,
-      });
-      await this.refreshRecoveryAlarm(transaction);
-    });
-    try {
-      await this.reconcileStoredAssignmentSaga(
-        identity,
-        command.commandId,
-        commandFingerprint,
-      );
-    } catch {
-      const pending = requireStoredAssignmentSaga(
-        await this.ctx.storage.get<unknown>(
-          `${ASSIGNMENT_SAGA_PREFIX}${command.commandId}`,
-        ),
-      );
-      return pending.acceptedReceipt;
-    }
-    const completed =
-      await this.ctx.storage.get<StoredConfigurationReceipt>(receiptKey);
-    if (!completed) {
-      const pending = requireStoredAssignmentSaga(
-        await this.ctx.storage.get<unknown>(
-          `${ASSIGNMENT_SAGA_PREFIX}${command.commandId}`,
-        ),
-      );
-      return pending.acceptedReceipt;
-    }
-    return requireMatchingConfigurationReceipt(
-      completed,
-      commandFingerprint,
-      command.commandId,
-    );
-  }
-
-  private async rejectAssignmentCommand(
-    identity: BotIdentity,
-    commandId: string,
-    commandFingerprint: string,
-    failure: string,
-  ): Promise<OperationReceiptV1> {
-    return this.ctx.storage.transaction(async (transaction) => {
-      await this.lifecycleAdmission?.(transaction, identity.botId);
-      const current =
-        (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
-        this.initialBotSettings(identity.botId);
-      const receipt: OperationReceiptV1 = {
-        schemaVersion: 1,
-        commandId,
-        revision: current.revision,
-        status: "rejected",
-        failure,
-      };
-      await transaction.put(`${CONFIGURATION_RECEIPT_PREFIX}${commandId}`, {
-        commandFingerprint,
-        receipt,
-      } satisfies StoredConfigurationReceipt);
-      return receipt;
-    });
-  }
-
-  private async dependencyResult(
-    identity: BotIdentity,
-    saga: StoredAssignmentSaga,
-    action: "claim" | "read" | "acknowledge" | "release" | "reconcile",
-    target: "new" | "old",
-  ): Promise<import("@frockbot/connection-core").ConnectionDependencyResultV1> {
-    const connectionId =
-      target === "new"
-        ? saga.target?.connectionId
-        : saga.previous?.connectionId;
-    const generation =
-      target === "new" ? saga.generation : saga.previousGeneration;
-    if (!connectionId) {
-      return { schemaVersion: 1, status: "released" };
-    }
-    if (!generation) {
-      return {
-        schemaVersion: 1,
-        status: "unavailable",
-        failure: `Assignment "${saga.assignmentId}" dependency generation is unavailable`,
-      };
-    }
-    const packageId =
-      target === "new" ? saga.target?.packageId : saga.previous?.packageId;
-    if (!packageId) {
-      return {
-        schemaVersion: 1,
-        status: "unavailable",
-        failure: `Assignment "${saga.assignmentId}" Package identity is unavailable`,
-      };
-    }
-    const base = {
-      schemaVersion: 1 as const,
-      operationId: `${saga.commandId}:${target}`,
-      userId: identity.userId,
-      packageId,
-      connectionId,
-      botId: identity.botId,
-      generation,
-    };
-    return this.userConfiguration(identity).executeConnectionDependency(
-      action === "claim"
-        ? { ...base, action, requirement: saga.targetRequirement! }
-        : { ...base, action },
-    );
-  }
-
-  private async rejectPendingAssignmentSaga(
-    saga: StoredAssignmentSaga,
-    failure: string,
-  ): Promise<void> {
-    await this.ctx.storage.transaction(async (transaction) => {
-      const settings = await transaction.get<BotSettingsViewV1>(
-        BOT_CONFIGURATION_KEY,
-      );
-      if (!settings) throw new Error("Bot settings are unavailable");
-      const receipt: OperationReceiptV1 = {
-        schemaVersion: 1,
-        commandId: saga.commandId,
-        revision: settings.revision,
-        status: "rejected",
-        failure,
-      };
-      await transaction.put({
-        [BOT_CONFIGURATION_KEY]: {
-          ...settings,
-          assignmentOperations: settings.assignmentOperations.filter(
-            (operation) => operation.commandId !== saga.commandId,
-          ),
-        } satisfies BotSettingsViewV1,
-        [`${CONFIGURATION_RECEIPT_PREFIX}${saga.commandId}`]: {
-          commandFingerprint: saga.commandFingerprint,
-          receipt,
-        } satisfies StoredConfigurationReceipt,
-      });
-      await transaction.delete(`${ASSIGNMENT_SAGA_PREFIX}${saga.commandId}`);
-      await this.refreshRecoveryAlarm(transaction);
-    });
-  }
-
-  private async persistSaga(
-    saga: StoredAssignmentSaga,
-    patch: Partial<StoredAssignmentSaga>,
-    retrying = false,
-  ): Promise<void> {
-    await this.ctx.storage.transaction(async (transaction) => {
-      const key = `${ASSIGNMENT_SAGA_PREFIX}${saga.commandId}`;
-      const current = await transaction.get<StoredAssignmentSaga>(key);
-      if (!current || current.generation !== saga.generation) return;
-      await transaction.put(key, {
-        ...current,
-        ...patch,
-        deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
-      } satisfies StoredAssignmentSaga);
-      if (retrying) {
-        const settings = await transaction.get<BotSettingsViewV1>(
-          BOT_CONFIGURATION_KEY,
-        );
-        if (settings) {
-          await transaction.put(BOT_CONFIGURATION_KEY, {
-            ...settings,
-            assignmentOperations: settings.assignmentOperations.map(
-              (operation) =>
-                operation.commandId === saga.commandId
-                  ? { ...operation, state: "retrying" as const }
-                  : operation,
-            ),
-          } satisfies BotSettingsViewV1);
-        }
-      }
-      await this.refreshRecoveryAlarm(transaction);
-    });
-  }
-
-  private async commitAssignmentSaga(
-    saga: StoredAssignmentSaga,
-  ): Promise<OperationReceiptV1> {
-    return this.ctx.storage.transaction(async (transaction) => {
-      const current = (await transaction.get<BotSettingsViewV1>(
-        BOT_CONFIGURATION_KEY,
-      ))!;
-      const existing = await transaction.get<StoredConfigurationReceipt>(
-        `${CONFIGURATION_RECEIPT_PREFIX}${saga.commandId}`,
-      );
-      if (existing) return existing.receipt;
-      const revision = current.revision + 1;
-      const assignments =
-        saga.operation === "unassigning"
-          ? current.assignments.filter(
-              (assignment) => assignment.assignmentId !== saga.assignmentId,
-            )
-          : [
-              ...current.assignments.filter(
-                (assignment) => assignment.assignmentId !== saga.assignmentId,
-              ),
-              { ...saga.target!, state: "enabled" as const },
-            ];
-      const receipt: OperationReceiptV1 = {
-        schemaVersion: 1,
-        commandId: saga.commandId,
-        revision,
-        status: "applied",
-      };
-      await transaction.put({
-        [BOT_CONFIGURATION_KEY]: {
-          ...current,
-          revision,
-          assignments,
-          ...(saga.clearModel
-            ? { model: undefined }
-            : saga.model
-              ? { model: structuredClone(saga.model) }
-              : {}),
-        } satisfies BotSettingsViewV1,
-        [`${CONFIGURATION_RECEIPT_PREFIX}${saga.commandId}`]: {
-          commandFingerprint: saga.commandFingerprint,
-          receipt,
-        } satisfies StoredConfigurationReceipt,
-      });
-      if (saga.target?.connectionId) {
-        await transaction.put(
-          `${ASSIGNMENT_GENERATION_PREFIX}${saga.assignmentId}`,
-          saga.generation,
-        );
-      } else if (saga.operation === "unassigning") {
-        await transaction.delete(
-          `${ASSIGNMENT_GENERATION_PREFIX}${saga.assignmentId}`,
-        );
-      }
-      return receipt;
-    });
-  }
-
-  private async markSagaAssignmentUnavailable(
-    saga: StoredAssignmentSaga,
-  ): Promise<void> {
-    await this.ctx.storage.transaction(async (transaction) => {
-      const settings = await transaction.get<BotSettingsViewV1>(
-        BOT_CONFIGURATION_KEY,
-      );
-      if (!settings) return;
-      await transaction.put(BOT_CONFIGURATION_KEY, {
-        ...settings,
-        assignments: settings.assignments.map((assignment) =>
-          assignment.assignmentId === saga.assignmentId
-            ? { ...assignment, state: "unavailable" as const }
-            : assignment,
-        ),
-      } satisfies BotSettingsViewV1);
-    });
-  }
-
-  private async finishAssignmentSaga(
-    saga: StoredAssignmentSaga,
-  ): Promise<void> {
-    await this.ctx.storage.transaction(async (transaction) => {
-      const key = `${ASSIGNMENT_SAGA_PREFIX}${saga.commandId}`;
-      const current = await transaction.get<StoredAssignmentSaga>(key);
-      if (current?.generation !== saga.generation) return;
-      const settings = await transaction.get<BotSettingsViewV1>(
-        BOT_CONFIGURATION_KEY,
-      );
-      if (settings) {
-        await transaction.put(BOT_CONFIGURATION_KEY, {
-          ...settings,
-          assignmentOperations: settings.assignmentOperations.filter(
-            (operation) => operation.commandId !== saga.commandId,
-          ),
-        } satisfies BotSettingsViewV1);
-      }
-      await transaction.delete(key);
-      await this.refreshRecoveryAlarm(transaction);
-    });
-  }
-
-  private async reconcileStoredAssignmentSaga(
-    identity: BotIdentity,
-    commandId: string,
-    commandFingerprint?: string,
-  ): Promise<void> {
-    const key = `${ASSIGNMENT_SAGA_PREFIX}${commandId}`;
-    const storedSaga = await this.ctx.storage.get<unknown>(key);
-    let saga =
-      storedSaga === undefined
-        ? undefined
-        : requireStoredAssignmentSaga(storedSaga);
-    if (!saga) return;
-    if (saga.userId !== identity.userId || saga.botId !== identity.botId) {
-      throw new Error("Assignment saga does not match its durable identity");
-    }
-    if (
-      commandFingerprint !== undefined &&
-      saga.commandFingerprint !== commandFingerprint
-    ) {
-      throw new Error(
-        `Configuration command idempotency key "${commandId}" was reused for a different command`,
-      );
-    }
-    try {
-      for (let step = 0; step < 8 && saga; step += 1) {
-        if (saga.phase === "claiming") {
-          if (!saga.claimDispatched) {
-            await this.persistSaga(saga, { claimDispatched: true });
-            saga = { ...saga, claimDispatched: true };
-          }
-          let result = await this.dependencyResult(
-            identity,
-            saga,
-            saga.claimDispatched ? "read" : "claim",
-            "new",
-          );
-          if (result.status === "absent") {
-            result = await this.dependencyResult(
-              identity,
-              saga,
-              "claim",
-              "new",
-            );
-          }
-          if (result.status === "pending" || result.status === "unavailable") {
-            if (result.status === "pending") {
-              await this.dependencyResult(identity, saga, "reconcile", "new");
-            }
-            await this.persistSaga(saga, {}, true);
-            return;
-          }
-          if (result.status !== "claimed" && result.status !== "acknowledged") {
-            await this.rejectPendingAssignmentSaga(
-              saga,
-              ("failure" in result ? result.failure : undefined) ??
-                "Connection dependency claim rejected",
-            );
-            return;
-          }
-          await this.persistSaga(saga, { phase: "committing" });
-          saga = { ...saga, phase: "committing" };
-          continue;
-        }
-        if (saga.phase === "committing") {
-          const receipt = await this.commitAssignmentSaga(saga);
-          const phase: StoredAssignmentSaga["phase"] | undefined = saga.target
-            ?.connectionId
-            ? "acknowledging"
-            : saga.previous?.connectionId
-              ? "releasing"
-              : undefined;
-          if (!phase) {
-            await this.finishAssignmentSaga({ ...saga, receipt });
-            return;
-          }
-          await this.persistSaga(saga, { phase, receipt });
-          saga = { ...saga, phase, receipt };
-          continue;
-        }
-        if (saga.phase === "acknowledging") {
-          if (!saga.acknowledgeDispatched) {
-            await this.persistSaga(saga, { acknowledgeDispatched: true });
-            saga = { ...saga, acknowledgeDispatched: true };
-          }
-          let result = await this.dependencyResult(
-            identity,
-            saga,
-            "read",
-            "new",
-          );
-          if (result.status === "claimed") {
-            result = await this.dependencyResult(
-              identity,
-              saga,
-              "acknowledge",
-              "new",
-            );
-          }
-          if (result.status === "pending" || result.status === "unavailable") {
-            if (result.status === "pending") {
-              await this.dependencyResult(identity, saga, "reconcile", "new");
-            }
-            await this.persistSaga(saga, {}, true);
-            return;
-          }
-          if (result.status !== "acknowledged") {
-            if (result.status === "rejected" || result.status === "absent") {
-              await this.markSagaAssignmentUnavailable(saga);
-              if (!saga.previous?.connectionId) {
-                await this.finishAssignmentSaga(saga);
-                return;
-              }
-              await this.persistSaga(saga, { phase: "releasing" });
-              saga = { ...saga, phase: "releasing" };
-              continue;
-            }
-            throw new Error(
-              ("failure" in result ? result.failure : undefined) ??
-                "Connection dependency acknowledgement rejected",
-            );
-          }
-          if (!saga.previous?.connectionId) {
-            await this.finishAssignmentSaga(saga);
-            return;
-          }
-          await this.persistSaga(saga, { phase: "releasing" });
-          saga = { ...saga, phase: "releasing" };
-          continue;
-        }
-        if (!saga.previous?.connectionId) {
-          if (saga.operation === "unassigning")
-            await this.commitAssignmentSaga(saga);
-          await this.finishAssignmentSaga(saga);
-          return;
-        }
-        if (!saga.releaseDispatched) {
-          await this.persistSaga(saga, { releaseDispatched: true });
-          saga = { ...saga, releaseDispatched: true };
-        }
-        let result = await this.dependencyResult(identity, saga, "read", "old");
-        if (result.status === "claimed" || result.status === "acknowledged") {
-          result = await this.dependencyResult(
-            identity,
-            saga,
-            "release",
-            "old",
-          );
-        }
-        if (result.status === "pending" || result.status === "unavailable") {
-          if (result.status === "pending") {
-            await this.dependencyResult(identity, saga, "reconcile", "old");
-          }
-          await this.persistSaga(saga, {}, true);
-          return;
-        }
-        if (result.status !== "released" && result.status !== "absent") {
-          throw new Error(
-            ("failure" in result ? result.failure : undefined) ??
-              "Connection dependency release rejected",
-          );
-        }
-        if (saga.operation === "unassigning")
-          await this.commitAssignmentSaga(saga);
-        await this.finishAssignmentSaga(saga);
-        return;
-      }
-    } catch (error) {
-      await this.persistSaga(saga, {}, true);
-      throw error;
-    }
-  }
-
   private async refreshRecoveryAlarm(
     transaction: DurableObjectTransaction,
   ): Promise<void> {
     await this.authority.refreshRecoveryAlarm(transaction);
-  }
-  async markConnectionUnavailable(
-    identity: BotIdentity,
-    connectionId: string,
-    compensation: { id: string; expectedGeneration: string },
-  ): Promise<"applied" | "stale"> {
-    await this.ensureBotSettings(identity);
-    return this.ctx.storage.transaction(async (transaction) => {
-      const receiptKey = `${ASSIGNMENT_COMPENSATION_PREFIX}${compensation.id}`;
-      const existing = await transaction.get<"applied" | "stale">(receiptKey);
-      if (existing) return existing;
-      const current =
-        (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
-        this.initialBotSettings(identity.botId);
-      // Every enabled Assignment on this Connection whose durable generation
-      // is the compensated one becomes unavailable. A compensation that names
-      // a generation no live Assignment holds is stale, not a silent no-op.
-      const matching: string[] = [];
-      for (const assignment of current.assignments) {
-        if (
-          assignment.connectionId !== connectionId ||
-          assignment.state !== "enabled"
-        ) {
-          continue;
-        }
-        if (
-          (await transaction.get<string>(
-            assignmentGenerationKey(assignment.assignmentId),
-          )) === compensation.expectedGeneration
-        ) {
-          matching.push(assignment.assignmentId);
-        }
-      }
-      await transaction.put(
-        `${ASSIGNMENT_TOMBSTONE_PREFIX}${connectionId}:${compensation.expectedGeneration}`,
-        compensation.id,
-      );
-      if (matching.length === 0) {
-        await transaction.put(receiptKey, "stale");
-        return "stale";
-      }
-      const unavailable = new Set(matching);
-      await transaction.put(BOT_CONFIGURATION_KEY, {
-        ...current,
-        revision: current.revision + 1,
-        assignments: current.assignments.map((assignment) =>
-          unavailable.has(assignment.assignmentId)
-            ? { ...assignment, state: "unavailable" as const }
-            : assignment,
-        ),
-      } satisfies BotSettingsViewV1);
-      await this.refreshRecoveryAlarm(transaction);
-      await transaction.put(receiptKey, "applied");
-      return "applied";
-    });
   }
 
   async resolveConfiguration(
@@ -2225,7 +1233,7 @@ export class ShellBotBackendContribution {
           runId: input.command.runId,
           sessionId: input.command.sessionId,
           generationId: mounting.generationId,
-          assignments: settings.assignments,
+          capabilities: runtime.capabilities,
         });
         return createShellCompositionHost({
           botId: input.identity.botId,
@@ -2386,7 +1394,7 @@ export class ShellBotBackendContribution {
       runId: string;
       sessionId: string;
       generationId: string;
-      assignments: readonly CapabilityAssignmentView[];
+      capabilities: readonly EnabledCapabilityV1[];
     },
   ): Promise<ShellIsolateMountOptions | undefined> {
     const loader = this.env.BOT_PACKAGES;
@@ -2402,7 +1410,9 @@ export class ShellBotBackendContribution {
     ).exports;
     if (!loader || !artifacts || !exports?.BotCapabilities) return undefined;
     const mintCapabilities = exports.BotCapabilities;
-    const assignments = await this.isolateAssignments(turn.assignments);
+    const capabilities = turn.capabilities.map((capability) =>
+      structuredClone(capability),
+    );
     return {
       userId: identity.userId,
       runId: turn.runId,
@@ -2417,13 +1427,15 @@ export class ShellBotBackendContribution {
             botId: identity.botId,
             generationId: turn.generationId,
             packageId: member.packageId,
-            assignments: structuredClone(assignments),
+            capabilities: structuredClone(capabilities),
           },
         }),
-      bindingDigest: await isolateBindingDigestV1(
-        assignments,
-        turn.generationId,
-      ),
+      bindingDigest: await isolateBindingDigestV1({
+        userId: identity.userId,
+        botId: identity.botId,
+        generationId: turn.generationId,
+        capabilities,
+      }),
       compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
     };
   }
@@ -2438,14 +1450,14 @@ export class ShellBotBackendContribution {
     generationId: string;
     request: unknown;
   }): Promise<IsolatePendingDecisionV1> {
-    return await this.isolateCapabilities(input, []).requestAuthority(
+    return await this.isolateCapabilityHost(input, []).requestAuthority(
       input.request,
     );
   }
 
   /**
    * The Bot Durable Object side of `CAPABILITIES.invokeModel`. Refuses with a
-   * pending decision unless an enabled model Assignment matches; otherwise
+   * pending decision unless an enabled model Capability matches; otherwise
    * records the normalized request and streams through the provider path,
    * which takes the credential lease on the way.
    */
@@ -2456,48 +1468,38 @@ export class ShellBotBackendContribution {
       generationId: string;
       request: NormalizedModelRequest;
     },
-  ): Promise<IsolateModelInvocationV1> {
-    // The Bot Durable Object's own durable configuration is what decides
-    // whether the Assignment exists at all, and its durable model binding is
-    // what the Assignment authorizes. Nothing the Bot supplied is read.
-    const stored = await this.ctx.storage.get<BotSettingsViewV1>(
+  ): Promise<IsolateModelOutcomeV1> {
+    // The effective binding and enabled set both come from authority-owned
+    // User and Bot state. Nothing the Bot supplied is read.
+    const durableSettings = await this.ctx.storage.get<BotSettingsViewV1>(
       BOT_CONFIGURATION_KEY,
     );
-    // An isolate model request is authorized exactly as an admitted Turn is,
-    // so it resolves the same execution context: a Bot that follows the
-    // User's default model claims its own durable Assignment here rather than
-    // failing closed on an authority it is entitled to hold.
-    let settings = stored;
-    if (stored) {
-      try {
-        settings = (await this.resolveExecutionContext(identity)).settings;
-      } catch {
-        settings = stored;
-      }
+    if (!durableSettings) {
+      return await this.isolateCapabilityHost(
+        {
+          botId: identity.botId,
+          packageId: input.packageId,
+          generationId: input.generationId,
+        },
+        [],
+      ).invokeModel(input.request);
     }
-    const projected = await this.isolateAssignments(
-      settings?.assignments ?? [],
+    const context = await this.resolveExecutionContext(identity);
+    const capabilities = structuredClone(context.plan.capabilities);
+    const bound = await this.isolateModelBinding(
+      identity,
+      context.settings,
+      context.user,
+      capabilities,
     );
-    const bound = await this.isolateModelBinding(identity, settings, projected);
-    const assignments = bound
-      ? projected.map((assignment) =>
-          assignment.assignmentId === bound.binding.assignmentId
-            ? {
-                ...assignment,
-                connectionId: bound.binding.connectionId,
-                providerModelId: bound.binding.providerModelId,
-              }
-            : assignment,
-        )
-      : projected;
-    const host = this.isolateCapabilities(
+    const host = this.isolateCapabilityHost(
       {
         botId: identity.botId,
         packageId: input.packageId,
         generationId: input.generationId,
       },
-      assignments,
-      bound
+      capabilities,
+      bound?.state === "ready"
         ? {
             binding: bound.binding,
             path: this.isolateModelPath(
@@ -2507,33 +1509,85 @@ export class ShellBotBackendContribution {
             ),
           }
         : undefined,
+      bound?.state === "unavailable" ? bound.binding : undefined,
     );
     return await host.invokeModel(input.request);
   }
 
   /**
-   * The Bot's one durable model binding, projected onto the isolate view. It
-   * resolves the Bot's durable `model` through the User's Connection exactly
-   * as an admitted Turn does, so an isolate model request is authorized
-   * against the same Package, Connection, and provider model a Turn would use.
-   * An unresolvable binding is no binding: the request becomes a pending
-   * decision rather than an error thrown into Bot code.
+   * The effective model binding, projected onto the isolate view. It resolves
+   * generic Package settings and the platform fallback through the User's
+   * Connection exactly as an admitted Turn does. No configured binding means
+   * an authority-widening request and a pending decision; a configured binding
+   * whose Connection cannot be resolved stays distinct as unavailable.
    */
   private async isolateModelBinding(
     identity: BotIdentity,
     settings: BotSettingsViewV1 | undefined,
-    assignments: readonly IsolateAssignmentV1[],
+    user: UserSettingsViewV1,
+    capabilities: readonly IsolateCapabilityV1[],
   ): Promise<
     | {
+        state: "ready";
         binding: IsolateModelBindingV1;
         runtime: {
           agentPackages: FoundationAgentPackage[];
           modelSelection: RuntimeModelSelection;
         };
       }
+    | {
+        state: "unavailable";
+        binding: IsolateUnavailableModelBindingV1;
+      }
     | undefined
   > {
     if (!settings) return undefined;
+    const application = await this.compileApplication();
+    const packageDefinitions = application.packages.map((pkg) => ({
+      packageId: pkg.id,
+      version: pkg.version,
+      settings: pkg.manifest.configuration?.settings ?? [],
+      capabilities: pkg.manifest.configuration?.capabilities ?? [],
+      connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
+    }));
+    const effective = resolveEffectiveBotModelV1({
+      bot: settings,
+      user,
+      packages: packageDefinitions,
+    });
+    const effectiveModel = effective.model;
+    if (!effectiveModel) return undefined;
+    const configuredConnection = user.connections.find(
+      (connection) => connection.connectionId === effectiveModel.connectionId,
+    );
+    const unavailable = (): {
+      state: "unavailable";
+      binding: IsolateUnavailableModelBindingV1;
+    } => ({
+      state: "unavailable",
+      binding: {
+        ...(effective.binding?.providerType
+          ? { provider: effective.binding.providerType }
+          : configuredConnection?.providerType
+            ? { provider: configuredConnection.providerType }
+            : {}),
+        providerModelId: effectiveModel.providerModelId,
+      },
+    });
+    if (!effective.binding || effective.binding.state === "unavailable") {
+      return unavailable();
+    }
+    const connection = effective.binding.connection;
+    const provider = effective.binding.providerType;
+    const packageId = effective.binding.packageId;
+    if (!connection || !provider || !packageId) return unavailable();
+    const capability = capabilities.find(
+      (candidate) =>
+        candidate.kind === "model" &&
+        candidate.packageId === packageId &&
+        candidate.connectionId === connection.connectionId,
+    );
+    if (!capability) return undefined;
     let runtime: {
       agentPackages: FoundationAgentPackage[];
       modelSelection: RuntimeModelSelection;
@@ -2541,22 +1595,17 @@ export class ShellBotBackendContribution {
     try {
       runtime = await this.agentRuntime(identity, settings);
     } catch {
-      return undefined;
+      return unavailable();
     }
     const selection = runtime.modelSelection;
     const connectionId = selection.connectionId;
-    if (!connectionId) return undefined;
-    const assignment = assignments.find(
-      (candidate) =>
-        candidate.kind === "model" && candidate.connectionId === connectionId,
-    );
-    if (!assignment) return undefined;
+    if (!connectionId) return unavailable();
     return {
+      state: "ready",
       runtime,
       binding: {
-        assignmentId: assignment.assignmentId,
-        packageId: assignment.packageId,
-        capabilityId: assignment.capabilityId,
+        packageId: capability.packageId,
+        capabilityId: capability.capabilityId,
         connectionId,
         provider: selection.provider,
         providerModelId: selection.model,
@@ -2570,15 +1619,16 @@ export class ShellBotBackendContribution {
     };
   }
 
-  private isolateCapabilities(
+  private isolateCapabilityHost(
     scope: {
       botId: string;
       packageId: string;
       generationId: string;
       request?: unknown;
     },
-    assignments: readonly IsolateAssignmentV1[],
+    capabilities: readonly IsolateCapabilityV1[],
     model?: { binding: IsolateModelBindingV1; path: IsolateModelPath },
+    unavailableModelBinding?: IsolateUnavailableModelBindingV1,
   ): IsolateCapabilityHost {
     return createIsolateCapabilityHost({
       storage: {
@@ -2589,44 +1639,18 @@ export class ShellBotBackendContribution {
       botId: scope.botId,
       packageId: scope.packageId,
       generationId: scope.generationId,
-      assignments,
+      capabilities,
       ...(model ? { modelBinding: model.binding, modelPath: model.path } : {}),
+      ...(unavailableModelBinding ? { unavailableModelBinding } : {}),
     });
-  }
-
-  /** The Bot's enabled Assignments, projected onto the isolate capability DTO. */
-  private async isolateAssignments(
-    assignments: readonly CapabilityAssignmentView[],
-  ): Promise<IsolateAssignmentV1[]> {
-    const application = await this.compileApplication();
-    const projected: IsolateAssignmentV1[] = [];
-    for (const assignment of assignments) {
-      if (assignment.state !== "enabled") continue;
-      const capability = application.packages
-        .find((candidate) => candidate.id === assignment.packageId)
-        ?.manifest.configuration?.capabilities.find(
-          (candidate) => candidate.id === assignment.capabilityId,
-        );
-      if (!capability) continue;
-      projected.push({
-        assignmentId: assignment.assignmentId,
-        packageId: assignment.packageId,
-        capabilityId: assignment.capabilityId,
-        kind: capability.kind,
-        ...(assignment.connectionId
-          ? { connectionId: assignment.connectionId }
-          : {}),
-      });
-    }
-    return projected;
   }
 
   /**
    * Streams through the pinned Composition's mounted `ctx.llm` — the same
    * provider path a Turn uses, so whichever provider Plugin serves the request
    * is the one that takes the credential lease. The runtime is the one the
-   * durable model binding resolved to, so the Package that streams is the
-   * Package the Assignment names.
+   * effective model binding resolved to, so the Package that streams is the
+   * Package the enabled Capability names.
    */
   private isolateModelPath(
     identity: BotIdentity,
@@ -2653,7 +1677,7 @@ export class ShellBotBackendContribution {
           agentPackages: runtime.agentPackages,
           modelSelection: runtime.modelSelection,
           // An isolate model invocation is not an admitted Turn, so there is
-          // no run to fence it against; it is admitted by its Assignment.
+          // no run to fence it against; User enablement admitted it.
           admitEffect: () => Promise.resolve(true),
         }).mount(generation, signal);
         try {
@@ -2676,11 +1700,7 @@ export class ShellBotBackendContribution {
   private async resolveAdmissionSnapshot(
     command: OwnedBotTurnCommand,
   ): Promise<BotSettingsViewV1> {
-    const context = await this.resolveExecutionContext(command);
-    return {
-      ...context.settings,
-      assignments: context.plan.assignments,
-    } satisfies BotSettingsViewV1;
+    return (await this.resolveExecutionContext(command)).settings;
   }
 
   private async admittedSnapshot(
@@ -2696,9 +1716,6 @@ export class ShellBotBackendContribution {
   private async scheduledDeadlines(
     transaction: DurableObjectTransaction,
   ): Promise<number[]> {
-    const sagas = await transaction.list<unknown>({
-      prefix: ASSIGNMENT_SAGA_PREFIX,
-    });
     // A pending approval is a deadline like any other: the object already owns
     // one alarm, and expiry rides it rather than inventing a second clock.
     const approvals = await transaction.list<unknown>({
@@ -2711,9 +1728,6 @@ export class ShellBotBackendContribution {
       expiries.push(Date.parse(approval.expiresAt));
     }
     return [
-      ...[...sagas.values()].map(
-        (stored) => requireStoredAssignmentSaga(stored).deadlineAt,
-      ),
       ...(await this.routineScheduler.deadlines(transaction)),
       ...expiries.filter((at) => Number.isFinite(at)),
       // A dispatched task's 30-minute lifetime, and a child's own owed Turn,
@@ -2761,38 +1775,12 @@ export class ShellBotBackendContribution {
   private async deferScheduledWork(
     transaction: DurableObjectTransaction,
   ): Promise<void> {
-    const sagas = await transaction.list<StoredAssignmentSaga>({
-      prefix: ASSIGNMENT_SAGA_PREFIX,
-    });
-    for (const [key, saga] of sagas) {
-      await transaction.put(key, {
-        ...saga,
-        deadlineAt: Date.now() + ASSIGNMENT_SAGA_DEADLINE_MS,
-      } satisfies StoredAssignmentSaga);
-    }
-    // A saga's deadline is a retry, so pushing it forward loses nothing. A
-    // Routine's is a debt, so the scheduler holds it instead of moving it.
+    // A Routine's deadline is a debt, so the scheduler holds it rather than
+    // moving it while other durable work remains in flight.
     await this.routineScheduler.defer(transaction);
   }
 
   private async settleScheduledWork(): Promise<void> {
-    const stored = await this.ctx.storage.list<unknown>({
-      prefix: ASSIGNMENT_SAGA_PREFIX,
-    });
-    for (const value of stored.values()) {
-      const saga = requireStoredAssignmentSaga(value);
-      try {
-        await this.reconcileStoredAssignmentSaga(
-          { userId: saga.userId, botId: saga.botId },
-          saga.commandId,
-        );
-      } catch (error) {
-        console.error(
-          "Assignment saga remains durably scheduled after reconciliation failure",
-          error instanceof Error ? error.message : "unknown failure",
-        );
-      }
-    }
     await this.settleRoutineFirings();
     await this.runOwedSubagentTurns();
     await this.reconcileOverdueTasks();
@@ -2867,7 +1855,7 @@ export class ShellBotBackendContribution {
    *
    * The Bot Durable Object cannot serialize across a User's Bots — they are
    * separate objects — and the User Durable Object owns the Computer
-   * assignment but not the desktop. The host's `control` op is already the
+   * allocation but not the desktop. The host's `control` op is already the
    * single writer that serializes human takeover, so it is where a second
    * opinion cannot exist (plan decision 3): the Bot records the intent, the
    * host grants or refuses, and the refusal names the holder.
@@ -3885,6 +2873,7 @@ export class ShellBotBackendContribution {
     },
   ): Promise<{
     agentPackages: FoundationAgentPackage[];
+    capabilities: EnabledCapabilityV1[];
     modelSelection: RuntimeModelSelection;
   }> {
     const userConfiguration = this.userConfiguration(identity);
@@ -3896,32 +2885,42 @@ export class ShellBotBackendContribution {
     const packageDefinitions = application.packages.map((pkg) => ({
       packageId: pkg.id,
       version: pkg.version,
+      settings: pkg.manifest.configuration?.settings ?? [],
       capabilities: pkg.manifest.configuration?.capabilities ?? [],
       connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
     }));
-    const plan = admittedRequest
-      ? {
-          schemaVersion: 1 as const,
-          botId: settings.botId,
-          revision: settings.revision,
-          model: settings.model ? structuredClone(settings.model) : undefined,
-          assignments: structuredClone(settings.assignments),
-        }
-      : resolveBotExecutionPlanV1({
-          bot: settings,
-          user,
-          packages: packageDefinitions,
-        });
+    const plan = resolveBotExecutionPlanV1({
+      bot: settings,
+      user,
+      packages: packageDefinitions,
+    });
     const readSecret = (name: string) => {
       // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
       const value = (this.env as unknown as Record<string, unknown>)[name];
       return typeof value === "string" ? value : undefined;
     };
-    const authorizeAssignedConnection = admittedRequest
-      ? (assignment: BotSettingsViewV1["assignments"][number]) =>
-          this.authorizeAdmittedAssignedEffect(identity, assignment)
-      : (assignment: BotSettingsViewV1["assignments"][number]) =>
-          this.authorizeAssignedEffect(identity, assignment);
+    const authorizeEnabledConnection = (
+      capability: EnabledCapabilityV1,
+    ): Promise<ConnectionView> => {
+      const enabled = plan.capabilities.some(
+        (candidate) =>
+          candidate.packageId === capability.packageId &&
+          candidate.capabilityId === capability.capabilityId &&
+          candidate.connectionId === capability.connectionId,
+      );
+      const connection = user.connections.find(
+        (candidate) =>
+          candidate.connectionId === capability.connectionId &&
+          candidate.packageId === capability.packageId &&
+          candidate.state === "ready",
+      );
+      if (!enabled || !connection) {
+        return Promise.reject(
+          new Error("Enabled effect is no longer authorized"),
+        );
+      }
+      return Promise.resolve(structuredClone(connection));
+    };
     // The Package-level settings this User holds, resolved against the manifest
     // of the Composition this Turn is pinned to. They come from the same `user`
     // read the rest of this Composition uses, so a value the User changed is
@@ -3929,7 +2928,7 @@ export class ShellBotBackendContribution {
     // one already running.
     const packageSettings = (
       packageId: string,
-    ): Record<string, string | number | boolean> => {
+    ): Record<string, PackageSettingValueV1> => {
       const installation = user.packages.find(
         (candidate) => candidate.packageId === packageId,
       );
@@ -3943,6 +2942,15 @@ export class ShellBotBackendContribution {
         installation?.values,
       );
     };
+    const primitivePackageSettings = (
+      packageId: string,
+    ): Record<string, string | number | boolean> =>
+      Object.fromEntries(
+        Object.entries(packageSettings(packageId)).filter(
+          (entry): entry is [string, string | number | boolean] =>
+            typeof entry[1] !== "object",
+        ),
+      );
     // The `image.model` Package setting, already checked against the enum the
     // Image Package's manifest declares.
     const configuredImageModel = packageSettings("image").model;
@@ -3953,7 +2961,7 @@ export class ShellBotBackendContribution {
     const machineSeam = turn ? this.machineSeam(identity) : undefined;
     const messagesGate = machineSeam
       ? await resolveBotMachineMessagesGateV1(
-          packageSettings("machine-messages"),
+          primitivePackageSettings("machine-messages"),
           () => machineSeam.list(),
         )
       : ({ status: "off" } as const);
@@ -4168,55 +3176,53 @@ export class ShellBotBackendContribution {
             ),
         },
       }),
-      ...(await createFoundationAssignedRuntimePackages(
-        application,
-        settings,
-        plan,
-        {
-          userId: identity.userId,
-          readSecret,
-          authorizeConnection: authorizeAssignedConnection,
-          packageSettings,
-          // Assigned Contributions reach the network through the same
-          // outbound seam the model provider uses, so a deployment that stubs
-          // it stubs every one of them.
-          ...(this.outboundFetch ? { fetch: this.outboundFetch } : {}),
-          leaseCredential: async (
-            assignment,
+      ...(await createFoundationEnabledRuntimePackages(application, plan, {
+        userId: identity.userId,
+        readSecret,
+        authorizeConnection: authorizeEnabledConnection,
+        packageSettings,
+        // Enabled Contributions reach the network through the same
+        // outbound seam the model provider uses, so a deployment that stubs
+        // it stubs every one of them.
+        ...(this.outboundFetch ? { fetch: this.outboundFetch } : {}),
+        leaseCredential: async (
+          capability: EnabledCapabilityV1,
+          effectId: string,
+          expectedGeneration?: string,
+        ): Promise<CredentialLeaseV1> => {
+          if (!capability.connectionId || !expectedGeneration) {
+            throw new Error("Enabled Connection generation is unavailable");
+          }
+          return userConfiguration.leaseToolCredential(
+            identity.userId,
+            capability.connectionId,
             effectId,
             expectedGeneration,
-          ): Promise<CredentialLeaseV1> => {
-            if (!assignment.connectionId || !expectedGeneration) {
-              throw new Error("Assigned Connection generation is unavailable");
-            }
-            return userConfiguration.leaseToolCredential(
-              identity.userId,
-              assignment.connectionId,
-              effectId,
-              expectedGeneration,
-            );
-          },
-          settleCredential: async (assignment, effectId): Promise<void> => {
-            if (!assignment.connectionId) return;
-            await userConfiguration.settleToolCredential(
-              identity.userId,
-              assignment.connectionId,
-              effectId,
-            );
-          },
-          // A mount that could not reach its server writes that down where
-          // the User can read it. The Bot holds no MCP record; the User
-          // Durable Object that owns the Connection does.
-          recordOutcome: (outcome) =>
-            userConfiguration.recordMcpMountOutcome(identity.userId, outcome),
+          );
         },
-      )),
+        settleCredential: async (
+          capability: EnabledCapabilityV1,
+          effectId: string,
+        ): Promise<void> => {
+          if (!capability.connectionId) return;
+          await userConfiguration.settleToolCredential(
+            identity.userId,
+            capability.connectionId,
+            effectId,
+          );
+        },
+        // A mount that could not reach its server writes that down where
+        // the User can read it. The Bot holds no MCP record; the User
+        // Durable Object that owns the Connection does.
+        recordOutcome: (outcome: McpMountOutcomeReportV1) =>
+          userConfiguration.recordMcpMountOutcome(identity.userId, outcome),
+      })),
     ];
     const agentPackages: FoundationAgentPackage[] =
       mergeFoundationRuntimePackages(resolvedAgentPackages);
-    // A Bot without its own `model` follows the User's default model. The
-    // Bot's own Assignment still carries the authority (ADR 0003); the default
-    // only names which model that Assignment's Connection should run.
+    // One generic resolver owns precedence: enabled Bot-scoped Package value,
+    // enabled User-scoped Package value, then the platform model. The kernel
+    // names no Package (AGENTS.md Configuration shape; ADR 0019).
     const effective = resolveEffectiveBotModelV1({
       bot: settings,
       user,
@@ -4224,64 +3230,37 @@ export class ShellBotBackendContribution {
     });
     const effectiveModel = effective.model;
     if (!effectiveModel) {
-      throw new Error("Bot model Connection is not configured");
+      throw new Error(
+        effective.binding?.failure ??
+          "No model is configured; enable a model Package or restore the platform model",
+      );
     }
-
-    let binding: ResolvedModelBindingV1;
-    if (admittedRequest) {
-      const admittedBinding = admittedRequest.modelBinding;
-      const assignment = settings.assignments.find(
-        (candidate) =>
-          candidate.connectionId === admittedBinding?.connectionId &&
-          candidate.state === "enabled",
-      );
-      const pkg = application.packages.find(
-        (candidate) => candidate.id === assignment?.packageId,
-      );
-      const capability = pkg?.manifest.configuration?.capabilities.find(
-        (candidate) => candidate.id === assignment?.capabilityId,
-      );
-      const connectionTypeId = capability?.connectionTypes[0];
-      if (
-        !admittedBinding?.connectionGeneration ||
-        !assignment?.connectionId ||
-        !pkg ||
-        !connectionTypeId ||
-        effectiveModel.connectionId !== admittedBinding.connectionId ||
-        effectiveModel.providerModelId !== admittedRequest.model
-      ) {
-        throw new Error("Admitted model binding is unavailable");
-      }
-      binding = {
-        state: "ready",
-        assignment: structuredClone(effectiveModel),
-        packageId: pkg.id,
-        providerType: admittedRequest.provider,
-        connection: {
-          connectionId: admittedBinding.connectionId,
-          packageId: pkg.id,
-          connectionTypeId,
-          displayName: "Admitted model Connection",
-          state: "ready",
-          providerType: admittedRequest.provider,
-          generation: admittedBinding.connectionGeneration,
-          safeMetadata: {},
-        },
-      };
-    } else {
-      binding = effective.binding ?? {
-        assignment: structuredClone(effectiveModel),
-        state: "unavailable",
-        failure: "Bot model Connection is unavailable",
-      };
-    }
+    const binding: ResolvedModelBindingV1 = effective.binding ?? {
+      model: structuredClone(effectiveModel),
+      state: "unavailable",
+      failure: "The resolved model Connection is unavailable",
+    };
     if (
       binding.state === "unavailable" ||
       !binding.connection ||
       !binding.providerType ||
       !binding.packageId
     ) {
-      throw new Error(binding.failure ?? "Bot model Connection is unavailable");
+      throw new Error(
+        binding.failure ?? "The resolved model Connection is unavailable",
+      );
+    }
+    if (
+      admittedRequest &&
+      (admittedRequest.provider !== binding.providerType ||
+        admittedRequest.model !== effectiveModel.providerModelId ||
+        admittedRequest.modelBinding?.connectionId !==
+          binding.connection.connectionId ||
+        !admittedRequest.modelBinding.connectionGeneration ||
+        admittedRequest.modelBinding.connectionGeneration !==
+          binding.connection.generation)
+    ) {
+      throw new Error("Admitted model binding is unavailable");
     }
     const bindingPackageId = binding.packageId;
     agentPackages.push(
@@ -4312,27 +3291,28 @@ export class ShellBotBackendContribution {
             bindingPackageId,
             effectId,
           ),
-        ...(this.env.AI
+        ...(this.env.FLOCK_AI
           ? {
-              runWorkersAi: (model, input) => this.env.AI!.run(model, input),
+              flockAiAutoRoute: this.env.FLOCK_AI.autoRoute,
+              runFlockAiChatCompletion: (gatewayModel, body) =>
+                this.env.FLOCK_AI!.runChatCompletion(gatewayModel, body),
             }
           : {}),
         fetch: this.outboundFetch,
       }),
     );
     // The slugs `<available_subagent_models>` renders, and the only ones a
-    // `Task` call may name. They are the Bot's own enabled model Assignment as
-    // resolved for this Turn — never anything the Bot claimed about a model.
-    const modelAssignment = settings.assignments.find(
+    // `Task` call may name. They come from User enablement as resolved for this
+    // Turn — never anything the Bot claimed about a model.
+    const modelCapability = plan.capabilities.find(
       (candidate) =>
-        candidate.state === "enabled" &&
+        candidate.kind === "model" &&
         candidate.connectionId === binding.connection!.connectionId,
     );
-    if (modelAssignment) {
+    if (modelCapability) {
       const subagentBinding = {
-        assignmentId: modelAssignment.assignmentId,
-        packageId: modelAssignment.packageId,
-        capabilityId: modelAssignment.capabilityId,
+        packageId: modelCapability.packageId,
+        capabilityId: modelCapability.capabilityId,
         connectionId: binding.connection.connectionId,
         provider: binding.providerType,
         providerModelId: effectiveModel.providerModelId,
@@ -4342,7 +3322,7 @@ export class ShellBotBackendContribution {
       };
       subagentModels.push(
         ...subagentModelCatalogV1({
-          assignments: [subagentBinding],
+          bindings: [subagentBinding],
           defaultBinding: subagentBinding,
           turnType: turn?.turnType ?? "chat",
         }),
@@ -4353,6 +3333,7 @@ export class ShellBotBackendContribution {
       // Cloud is both the model provider and the `web_search` Capability — and
       // the runtime resolves one Plugin per Contribution specifier.
       agentPackages: mergeFoundationRuntimePackagesV1(agentPackages),
+      capabilities: structuredClone(plan.capabilities),
       modelSelection: {
         provider: binding.providerType,
         model: effectiveModel.providerModelId,
@@ -4370,77 +3351,6 @@ export class ShellBotBackendContribution {
           : {}),
       },
     };
-  }
-
-  private async authorizeAdmittedAssignedEffect(
-    identity: BotIdentity,
-    assignment: BotSettingsViewV1["assignments"][number],
-  ): Promise<ConnectionView> {
-    const user = await this.userConfiguration(identity).readConfiguration({
-      schemaVersion: 1,
-      userId: identity.userId,
-    });
-    const application = await this.compileApplication();
-    const connection = user.connections.find(
-      (candidate) =>
-        candidate.connectionId === assignment.connectionId &&
-        candidate.packageId === assignment.packageId &&
-        candidate.state === "ready",
-    );
-    const pkg = application.packages.find(
-      (candidate) => candidate.id === assignment.packageId,
-    );
-    const capability = pkg?.manifest.configuration?.capabilities.find(
-      (candidate) =>
-        candidate.id === assignment.capabilityId &&
-        connection !== undefined &&
-        candidate.connectionTypes.includes(connection.connectionTypeId),
-    );
-    if (assignment.state !== "enabled" || !connection || !capability) {
-      throw new Error("Admitted assigned effect is unavailable");
-    }
-    return structuredClone(connection);
-  }
-
-  private async authorizeAssignedEffect(
-    identity: BotIdentity,
-    admittedAssignment: BotSettingsViewV1["assignments"][number],
-  ): Promise<ConnectionView> {
-    const user = await this.userConfiguration(identity).readConfiguration({
-      schemaVersion: 1,
-      userId: identity.userId,
-    });
-    const application = await this.compileApplication();
-    const admittedBot = {
-      ...this.initialBotSettings(identity.botId),
-      assignments: [admittedAssignment],
-    } satisfies BotSettingsViewV1;
-    const plan = resolveBotExecutionPlanV1({
-      bot: admittedBot,
-      user,
-      packages: application.packages.map((pkg) => ({
-        packageId: pkg.id,
-        version: pkg.version,
-        capabilities: pkg.manifest.configuration?.capabilities ?? [],
-        connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-      })),
-    });
-    const assignment = plan.assignments.find(
-      (candidate) =>
-        candidate.assignmentId === admittedAssignment.assignmentId &&
-        candidate.packageId === admittedAssignment.packageId &&
-        candidate.capabilityId === admittedAssignment.capabilityId &&
-        candidate.connectionId === admittedAssignment.connectionId &&
-        candidate.state === "enabled",
-    );
-    const connection = user.connections.find(
-      (candidate) =>
-        candidate.connectionId === assignment?.connectionId &&
-        candidate.packageId === admittedAssignment.packageId &&
-        candidate.state === "ready",
-    );
-    if (!connection) throw new Error("Assigned effect is no longer authorized");
-    return connection;
   }
 
   async readDurableIdentity(): Promise<BotIdentity | undefined> {
@@ -5127,8 +4037,8 @@ export class ShellBotBackendContribution {
   }
 
   async alarm(): Promise<void> {
-    // One alarm: the kernel defers while work is in flight, settles the
-    // Package's Assignment sagas, and recovers the active run. A run left
+    // One alarm: the kernel defers while work is in flight, settles Package
+    // scheduled work, and recovers the active run. A run left
     // durably `reconciliation-required` stays scheduled and visible; only an
     // explicit resume retrieves the original effect, so the alarm never
     // terminalizes an uncertain outcome on its own.
@@ -5426,11 +4336,8 @@ export class ShellBotBackendContribution {
       await this.authority.fenceRunAdmission(identity, query.runId),
     );
   }
-  private initialBotSettings(
-    botId: string,
-    model?: BotSettingsViewV1["model"],
-  ): BotSettingsViewV1 {
-    return initializeBotSettingsV1(botId, model);
+  private initialBotSettings(botId: string): BotSettingsViewV1 {
+    return initializeBotSettingsV1(botId);
   }
 
   private userConfiguration(identity: BotIdentity): {
@@ -5449,40 +4356,6 @@ export class ShellBotBackendContribution {
       userId: string,
       command: Parameters<PackagePublisherAgentHost["rollback"]>[0],
     ): ReturnType<PackagePublisherAgentHost["rollback"]>;
-    getConnection(
-      userId: string,
-      connectionId: string,
-    ): Promise<ConnectionView | undefined>;
-    executeConnectionDependency(
-      input: import("@frockbot/connection-core").ConnectionDependencyCommandV1,
-    ): Promise<
-      import("@frockbot/connection-core").ConnectionDependencyResultV1
-    >;
-    claimConnectionDependency(
-      userId: string,
-      connectionId: string,
-      botId: string,
-      generation: string,
-      requirement: ConnectionDependencyRequirementV1,
-    ): Promise<boolean>;
-    acknowledgeConnectionDependency(
-      userId: string,
-      connectionId: string,
-      botId: string,
-      generation: string,
-    ): Promise<boolean>;
-    releaseConnectionDependency(
-      userId: string,
-      connectionId: string,
-      botId: string,
-      generation: string,
-    ): Promise<boolean>;
-    compensateConnectionDependency(
-      userId: string,
-      connectionId: string,
-      botId: string,
-      generation: string,
-    ): Promise<boolean>;
     leaseModelCredential(
       userId: string,
       connectionId: string,
@@ -5552,16 +4425,6 @@ export class ShellBotBackendContribution {
       rollbackPackage(
         input: unknown,
       ): ReturnType<PackagePublisherAgentHost["rollback"]>;
-      getConnection(input: unknown): Promise<ConnectionView | undefined>;
-      executeConnectionDependency(
-        input: unknown,
-      ): Promise<
-        import("@frockbot/connection-core").ConnectionDependencyResultV1
-      >;
-      claimConnectionDependency(input: unknown): Promise<boolean>;
-      acknowledgeConnectionDependency(input: unknown): Promise<boolean>;
-      releaseConnectionDependency(input: unknown): Promise<boolean>;
-      compensateConnectionDependency(input: unknown): Promise<boolean>;
       leaseModelCredential(input: unknown): Promise<unknown>;
       settleModelCredential(input: unknown): Promise<void>;
       leaseToolCredential(input: unknown): Promise<unknown>;
@@ -5617,8 +4480,6 @@ export class ShellBotBackendContribution {
         rpc.publishPackage({ schemaVersion: 1, userId, command }),
       rollbackPackage: (userId, command) =>
         rpc.rollbackPackage({ schemaVersion: 1, userId, command }),
-      getConnection: (userId, connectionId) =>
-        rpc.getConnection({ schemaVersion: 1, userId, connectionId }),
       // Flock state crosses a Durable Object seam, so it decodes on arrival
       // rather than being trusted in the shape RPC happened to return.
       listBots: async (userId) =>
@@ -5635,57 +4496,6 @@ export class ShellBotBackendContribution {
             command,
           }),
         ),
-      executeConnectionDependency: (input) =>
-        rpc.executeConnectionDependency(input),
-      claimConnectionDependency: (
-        userId,
-        connectionId,
-        botId,
-        generation,
-        requirement,
-      ) =>
-        rpc.claimConnectionDependency({
-          schemaVersion: 1,
-          userId,
-          connectionId,
-          botId,
-          generation,
-          requirement,
-        }),
-      acknowledgeConnectionDependency: (
-        userId,
-        connectionId,
-        botId,
-        generation,
-      ) =>
-        rpc.acknowledgeConnectionDependency({
-          schemaVersion: 1,
-          userId,
-          connectionId,
-          botId,
-          generation,
-        }),
-      releaseConnectionDependency: (userId, connectionId, botId, generation) =>
-        rpc.releaseConnectionDependency({
-          schemaVersion: 1,
-          userId,
-          connectionId,
-          botId,
-          generation,
-        }),
-      compensateConnectionDependency: (
-        userId,
-        connectionId,
-        botId,
-        generation,
-      ) =>
-        rpc.compensateConnectionDependency({
-          schemaVersion: 1,
-          userId,
-          connectionId,
-          botId,
-          generation,
-        }),
       leaseModelCredential: async (
         userId,
         connectionId,
@@ -5760,169 +4570,35 @@ export class ShellBotBackendContribution {
     return existing;
   }
 
-  /**
-   * A Bot that follows the User's default model still needs its own durable
-   * Assignment: authority reaches a Bot only through an explicit Assignment
-   * and, when required, a Connection (ADR 0003). The Assignment is claimed
-   * lazily the first time the Bot resolves its execution context under a
-   * default it has not yet claimed, exactly as Flock claims one when a Bot is
-   * created, so the User Connection's dependency ledger stays accurate and
-   * revocation still fails closed.
-   */
-  private async claimDefaultModelAssignment(
-    identity: BotIdentity,
-    settings: BotSettingsViewV1,
-    user: UserSettingsViewV1,
-    application: Awaited<ReturnType<typeof compileFoundationApplication>>,
-  ): Promise<BotSettingsViewV1> {
-    const model = user.newBotModelTemplate;
-    if (settings.model || !model) return settings;
-    // One Assignment operation at a time: a claim still reconciling owns the
-    // Bot's Assignment authority until it settles.
-    if (settings.assignmentOperations.length > 0) return settings;
-    const connection = user.connections.find(
-      (candidate) => candidate.connectionId === model.connectionId,
-    );
-    const installation = user.packages.find(
-      (candidate) =>
-        candidate.packageId === connection?.packageId &&
-        candidate.state === "installed",
-    );
-    const pkg = application.packages.find(
-      (candidate) =>
-        candidate.id === connection?.packageId &&
-        candidate.version === installation?.version,
-    );
-    const connectionType = pkg?.manifest.configuration?.connectionTypes.find(
-      (candidate) => candidate.id === connection?.connectionTypeId,
-    );
-    const capability = pkg?.manifest.configuration?.capabilities.find(
-      (candidate) =>
-        candidate.kind === "model" &&
-        connectionType?.capabilities.includes(candidate.id) &&
-        candidate.connectionTypes.includes(connectionType.id),
-    );
-    if (connection?.state !== "ready" || !pkg || !capability) return settings;
-    if (
-      settings.assignments.some(
-        (assignment) =>
-          assignment.packageId === pkg.id &&
-          assignment.capabilityId === capability.id &&
-          assignment.connectionId === connection.connectionId,
-      )
-    ) {
-      return settings;
-    }
-    const commandId = crypto.randomUUID();
-    try {
-      const receipt = await this.executeConfigurationCommand(identity, {
-        schemaVersion: 1,
-        type: "bot/assign-capability",
-        commandId,
-        expectedRevision: settings.revision,
-        botId: identity.botId,
-        assignment: {
-          assignmentId: commandId,
-          packageId: pkg.id,
-          capabilityId: capability.id,
-          connectionId: connection.connectionId,
-        },
-      });
-      if (receipt.status !== "applied") return settings;
-    } catch (error) {
-      // The default model is not the Bot's own binding: a claim that cannot be
-      // made leaves the Bot without a model, visibly, rather than failing the
-      // caller that only wanted to read the plan.
-      console.error(
-        "Default model Assignment claim failed",
-        error instanceof Error ? error.message : "unknown failure",
-      );
-      return settings;
-    }
-    return this.ensureBotSettings(identity);
-  }
-
   private async resolveExecutionContext(identity: BotIdentity): Promise<{
     settings: BotSettingsViewV1;
     user: UserSettingsViewV1;
     plan: BotExecutionPlanV1;
   }> {
-    let settings = await this.ensureBotSettings(identity);
+    const settings = await this.ensureBotSettings(identity);
     const user = await this.userConfiguration(identity).readConfiguration({
       schemaVersion: 1,
       userId: identity.userId,
     });
     const application = await this.compileApplication();
-    let plan = resolveBotExecutionPlanV1({
+    const plan = resolveBotExecutionPlanV1({
       bot: settings,
       user,
       packages: application.packages.map((pkg) => ({
         packageId: pkg.id,
         version: pkg.version,
+        settings: pkg.manifest.configuration?.settings ?? [],
         capabilities: pkg.manifest.configuration?.capabilities ?? [],
         connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
       })),
     });
-    settings = await this.claimDefaultModelAssignment(
-      identity,
-      settings,
-      user,
-      application,
-    );
-    if (settings.revision !== plan.revision) {
-      plan = resolveBotExecutionPlanV1({
-        bot: settings,
-        user,
-        packages: application.packages.map((pkg) => ({
-          packageId: pkg.id,
-          version: pkg.version,
-          capabilities: pkg.manifest.configuration?.capabilities ?? [],
-          connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-        })),
-      });
-    }
-    const changed = settings.assignments.some(
-      (assignment, index) =>
-        assignment.state !== plan.assignments[index]?.state,
-    );
-    if (changed) {
-      settings = await this.ctx.storage.transaction(async (transaction) => {
-        const current =
-          (await transaction.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
-          settings;
-        if (current.revision !== settings.revision) return current;
-        const next = {
-          ...current,
-          revision: current.revision + 1,
-          assignments: plan.assignments,
-        } satisfies BotSettingsViewV1;
-        await transaction.put(BOT_CONFIGURATION_KEY, next);
-        await this.refreshRecoveryAlarm(transaction);
-        return next;
-      });
-      plan = {
-        ...plan,
-        revision: settings.revision,
-        assignments: settings.assignments,
-      };
-    }
     return { settings, user, plan };
   }
 
   async archiveEligible(storage: {
     get<T>(key: string): Promise<T | undefined>;
-    list<T>(options: { prefix: string }): Promise<Map<string, T>>;
   }): Promise<boolean> {
-    const [activeRunId, settings, sagas] = await Promise.all([
-      storage.get<string>(ACTIVE_RUN_KEY),
-      storage.get<BotSettingsViewV1>(BOT_CONFIGURATION_KEY),
-      storage.list<unknown>({ prefix: ASSIGNMENT_SAGA_PREFIX }),
-    ]);
-    return (
-      activeRunId === undefined &&
-      (settings?.assignmentOperations.length ?? 0) === 0 &&
-      sagas.size === 0
-    );
+    return (await storage.get<string>(ACTIVE_RUN_KEY)) === undefined;
   }
 
   async assertLifecycleActive(botId: string): Promise<void> {

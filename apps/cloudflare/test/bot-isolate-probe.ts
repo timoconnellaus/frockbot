@@ -29,7 +29,7 @@ import {
   BOT_ISOLATE_COMPATIBILITY_DATE,
   isolateBindingDigestV1,
   type BotCapabilitiesPropsV1,
-  type IsolateAssignmentV1,
+  type IsolateCapabilityV1,
 } from "@frockbot/plugin-shell/backend-isolate";
 import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import type { Plugin } from "cordis";
@@ -67,7 +67,7 @@ export const tools = [
   { name: "ask_authority", description: "Asks for authority it does not hold", inputSchema: {}, idempotent: false },
   { name: "ask_bad_authority", description: "Sends a request the contract refuses", inputSchema: {}, idempotent: false },
   { name: "call_model", description: "Calls the model binding", inputSchema: {}, idempotent: false },
-  { name: "list_capabilities", description: "Lists Assignment-derived capabilities", inputSchema: {}, idempotent: true },
+  { name: "list_capabilities", description: "Lists User-enabled capabilities", inputSchema: {}, idempotent: true },
 ];
 
 export async function execute(tool, input, ctx) {
@@ -285,7 +285,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     userId: string;
     botId: string;
     artifact?: ArtifactRefV1;
-    assignments?: IsolateAssignmentV1[];
+    capabilities?: IsolateCapabilityV1[];
     /** Varies the generation without varying the artifact. */
     generationCreatedAt?: string;
   }): Promise<{
@@ -335,13 +335,15 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
               botId: input.botId,
               generationId: generation.generationId,
               packageId: member.packageId,
-              assignments: input.assignments ?? [],
+              capabilities: input.capabilities ?? [],
             },
           }),
-        bindingDigest: await isolateBindingDigestV1(
-          input.assignments ?? [],
-          generation.generationId,
-        ),
+        bindingDigest: await isolateBindingDigestV1({
+          userId: input.userId,
+          botId: input.botId,
+          generationId: generation.generationId,
+          capabilities: input.capabilities ?? [],
+        }),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
       },
     }).mount(generation, new AbortController().signal);
@@ -363,7 +365,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     artifact: ArtifactRefV1;
     tool: string;
     toolInput?: unknown;
-    assignments?: IsolateAssignmentV1[];
+    capabilities?: IsolateCapabilityV1[];
     generationCreatedAt?: string;
   }): Promise<{ content: string; isError: boolean }> {
     const { composition, generation } = await this.mount(input);
@@ -443,6 +445,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     userId: string;
     botId: string;
     artifact: ArtifactRefV1;
+    capabilities?: IsolateCapabilityV1[];
   }): Promise<string[]> {
     this.loaderIds = [];
     const { composition } = await this.mount(input);

@@ -20,7 +20,7 @@ export interface AuthorPackageInputV1 {
    * D6 addendum. The authored Package declares a model Contribution: an
    * adapter that forwards to `CAPABILITIES.invokeModel`. It is a translation
    * layer over a kernel-declared binding, never a network client, and it is
-   * callable only where an enabled model Assignment matches.
+   * callable only where an enabled model capability matches.
    */
   model?: { providerId: string; modelId: string };
 }

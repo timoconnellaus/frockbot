@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
-  "id": "provider-workers-ai",
-  "displayName": "Cloudflare Workers AI",
+  "id": "provider-flock-ai",
+  "displayName": "Flock AI",
   "version": "0.0.1",
   "compatibility": { "frockbot": ">=0.0.1" },
   "dependencies": { "settings": ">=0.0.1" },
@@ -13,18 +13,18 @@
   "configuration": {
     "connectionTypes": [
       {
-        "id": "workers-ai-account",
-        "displayName": "Cloudflare Workers AI",
+        "id": "flock-ai-account",
+        "displayName": "Flock AI",
         "allowMultiple": false,
         "authorization": { "kind": "ambient-native" },
-        "capabilities": ["workers-ai-models"]
+        "capabilities": ["flock-ai-models"]
       }
     ],
     "capabilities": [
       {
-        "id": "workers-ai-models",
+        "id": "flock-ai-models",
         "kind": "model",
-        "connectionTypes": ["workers-ai-account"],
+        "connectionTypes": ["flock-ai-account"],
         "admission": {
           "turnTypes": ["chat", "automation", "subagent"]
         }

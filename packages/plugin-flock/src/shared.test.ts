@@ -69,10 +69,9 @@ describe("Flock v1 contracts", () => {
     ).toThrow("unknown or missing field");
   });
 
-  test("round-trips configuration-valid provider model text", () => {
+  test("rejects retired model seed fields", () => {
     const sheep = randomSheepRecipeV1(() => 0);
-    const providerModelId = "m".repeat(256);
-    expect(
+    expect(() =>
       decodeDirectoryViewV1({
         schemaVersion: 1,
         revision: 1,
@@ -84,23 +83,13 @@ describe("Flock v1 contracts", () => {
             initialName: "Alpha",
             initialModel: {
               connectionId: "connection-1",
-              providerModelId,
-            },
-            initialModelBinding: {
-              assignment: {
-                assignmentId: "create-alpha",
-                packageId: "provider-ollama-cloud",
-                capabilityId: "ollama-cloud-models",
-                connectionId: "connection-1",
-                state: "enabled",
-              },
-              generation: "create-alpha",
+              providerModelId: "model-1",
             },
             sheep,
           },
         ],
-      }).bots[0]?.initialModel?.providerModelId,
-    ).toBe(providerModelId);
+      }),
+    ).toThrow("unknown or missing field");
     expect(() =>
       decodeCreateBotCommandV1({
         schemaVersion: 1,

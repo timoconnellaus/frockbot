@@ -1,33 +1,81 @@
-import type { ConnectionView } from "@frockbot/configuration-core";
+import type {
+  ConnectionView,
+  UserConfigurationCommandV1,
+  UserSettingsViewV1,
+} from "@frockbot/configuration-core";
 import {
   decodeConnectionCommandReceiptV1,
   decodeConnectionCommandV1,
   type ConnectionCommandReceiptV1,
   type ConnectionCommandV1,
 } from "@frockbot/connection-core";
-import type {
-  UserConfigurationReadBootstrap,
-  UserSettingsBackendContribution,
-  UserSettingsStorage,
-} from "@frockbot/plugin-settings/user";
 import type { Plugin } from "cordis";
 import {
-  WORKERS_AI_CONNECTION_GENERATION,
-  WORKERS_AI_CONNECTION_ID,
-  WORKERS_AI_CONNECTION_TYPE_ID,
-  WORKERS_AI_DEFAULT_MODEL,
-  WORKERS_AI_PACKAGE_ID,
-  WORKERS_AI_PROVIDER_TYPE,
-  workersAiStaticCatalogV1,
+  FLOCK_AI_CONNECTION_GENERATION,
+  FLOCK_AI_CONNECTION_ID,
+  FLOCK_AI_CONNECTION_TYPE_ID,
+  FLOCK_AI_DEFAULT_MODEL,
+  FLOCK_AI_PACKAGE_ID,
+  FLOCK_AI_PROVIDER_TYPE,
+  flockAiStaticCatalogV1,
 } from "./catalog.js";
 
-const BOOTSTRAP_KEY = "provider-workers-ai:bootstrap-v1";
-const COMMAND_PREFIX = "provider-workers-ai:command:";
+const BOOTSTRAP_KEY = "provider-flock-ai:bootstrap-v1";
+const COMMAND_PREFIX = "provider-flock-ai:command:";
 const PACKAGE_VERSION = "0.0.1";
 
-interface WorkersAiUserBackendHost {
-  storage: UserSettingsStorage;
-  settings: UserSettingsBackendContribution;
+interface FlockAiUserSettingsTransaction {
+  get<T>(key: string): Promise<T | undefined>;
+  put<T>(key: string, value: T): Promise<void>;
+  put(entries: Record<string, unknown>): Promise<void>;
+}
+
+interface FlockAiUserSettingsStorage extends FlockAiUserSettingsTransaction {
+  transaction<T>(
+    callback: (storage: FlockAiUserSettingsTransaction) => Promise<T>,
+  ): Promise<T>;
+}
+
+interface UserConfigurationReadBootstrap {
+  readonly packageId: string;
+  bootstrap(userId: string): Promise<void>;
+}
+
+interface FlockAiUserSettingsHost {
+  read(
+    userId: string,
+    storage: FlockAiUserSettingsTransaction,
+  ): Promise<UserSettingsViewV1>;
+  executeConfigurationCommand(
+    userId: string,
+    command: UserConfigurationCommandV1,
+    storage: FlockAiUserSettingsTransaction,
+  ): Promise<unknown>;
+  createConnection(
+    userId: string,
+    connection: ConnectionView,
+    storage: FlockAiUserSettingsTransaction,
+  ): Promise<ConnectionView>;
+  replaceConnection(
+    userId: string,
+    connectionId: string,
+    expectedGeneration: string | undefined,
+    connection: ConnectionView,
+    storage: FlockAiUserSettingsTransaction,
+  ): Promise<ConnectionView>;
+  getConnection(
+    userId: string,
+    connectionId: string,
+    storage: FlockAiUserSettingsTransaction,
+  ): Promise<ConnectionView | undefined>;
+  registerConfigurationReadBootstrap(
+    bootstrap: UserConfigurationReadBootstrap,
+  ): () => void;
+}
+
+interface FlockAiUserBackendHost {
+  storage: FlockAiUserSettingsStorage;
+  settings: FlockAiUserSettingsHost;
 }
 
 interface StoredBootstrapV1 {
@@ -43,7 +91,7 @@ interface StoredCommandV1 {
 
 function decodeBootstrap(input: unknown): StoredBootstrapV1 {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new Error("Stored Workers AI bootstrap marker is invalid");
+    throw new Error("Stored Flock AI bootstrap marker is invalid");
   }
   const value = input as Record<string, unknown>;
   if (
@@ -52,14 +100,14 @@ function decodeBootstrap(input: unknown): StoredBootstrapV1 {
     typeof value.userId !== "string" ||
     !value.userId
   ) {
-    throw new Error("Stored Workers AI bootstrap marker is invalid");
+    throw new Error("Stored Flock AI bootstrap marker is invalid");
   }
   return { schemaVersion: 1, userId: value.userId };
 }
 
 function decodeStoredCommand(input: unknown): StoredCommandV1 {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new Error("Stored Workers AI command is invalid");
+    throw new Error("Stored Flock AI command is invalid");
   }
   const value = input as Record<string, unknown>;
   if (
@@ -67,7 +115,7 @@ function decodeStoredCommand(input: unknown): StoredCommandV1 {
     typeof value.accountId !== "string" ||
     !value.accountId
   ) {
-    throw new Error("Stored Workers AI command is invalid");
+    throw new Error("Stored Flock AI command is invalid");
   }
   return {
     accountId: value.accountId,
@@ -78,13 +126,13 @@ function decodeStoredCommand(input: unknown): StoredCommandV1 {
 
 function ambientConnection(): ConnectionView {
   return {
-    connectionId: WORKERS_AI_CONNECTION_ID,
-    packageId: WORKERS_AI_PACKAGE_ID,
-    connectionTypeId: WORKERS_AI_CONNECTION_TYPE_ID,
-    displayName: "Cloudflare Workers AI",
+    connectionId: FLOCK_AI_CONNECTION_ID,
+    packageId: FLOCK_AI_PACKAGE_ID,
+    connectionTypeId: FLOCK_AI_CONNECTION_TYPE_ID,
+    displayName: "Flock AI",
     state: "ready",
-    generation: WORKERS_AI_CONNECTION_GENERATION,
-    providerType: WORKERS_AI_PROVIDER_TYPE,
+    generation: FLOCK_AI_CONNECTION_GENERATION,
+    providerType: FLOCK_AI_PROVIDER_TYPE,
     authorization: {
       schemaVersion: 1,
       kind: "ambient-native",
@@ -93,18 +141,18 @@ function ambientConnection(): ConnectionView {
         configured: true,
         source: "ambient-native",
         writable: false,
-        generation: WORKERS_AI_CONNECTION_GENERATION,
+        generation: FLOCK_AI_CONNECTION_GENERATION,
       },
     },
-    modelCatalog: workersAiStaticCatalogV1(),
+    modelCatalog: flockAiStaticCatalogV1(),
     safeMetadata: { catalog: "static" },
   };
 }
 
-export class WorkersAiUserBackendContribution implements UserConfigurationReadBootstrap {
-  readonly packageId = WORKERS_AI_PACKAGE_ID;
+export class FlockAiUserBackendContribution implements UserConfigurationReadBootstrap {
+  readonly packageId = FLOCK_AI_PACKAGE_ID;
 
-  constructor(private readonly host: WorkersAiUserBackendHost) {}
+  constructor(private readonly host: FlockAiUserBackendHost) {}
 
   async bootstrap(userId: string): Promise<void> {
     await this.host.storage.transaction(async (storage) => {
@@ -112,7 +160,7 @@ export class WorkersAiUserBackendContribution implements UserConfigurationReadBo
       if (marker !== undefined) {
         const decoded = decodeBootstrap(marker);
         if (decoded.userId !== userId) {
-          throw new Error("Workers AI bootstrap belongs to another User");
+          throw new Error("Flock AI bootstrap belongs to another User");
         }
         return;
       }
@@ -120,7 +168,7 @@ export class WorkersAiUserBackendContribution implements UserConfigurationReadBo
       let settings = await this.host.settings.read(userId, storage);
       if (
         !settings.packages.some(
-          (installation) => installation.packageId === WORKERS_AI_PACKAGE_ID,
+          (installation) => installation.packageId === FLOCK_AI_PACKAGE_ID,
         )
       ) {
         await this.host.settings.executeConfigurationCommand(
@@ -128,9 +176,9 @@ export class WorkersAiUserBackendContribution implements UserConfigurationReadBo
           {
             schemaVersion: 1,
             type: "user/install-package",
-            commandId: "workers-ai-bootstrap-install",
+            commandId: "flock-ai-bootstrap-install",
             expectedRevision: settings.revision,
-            packageId: WORKERS_AI_PACKAGE_ID,
+            packageId: FLOCK_AI_PACKAGE_ID,
             version: PACKAGE_VERSION,
           },
           storage,
@@ -143,29 +191,25 @@ export class WorkersAiUserBackendContribution implements UserConfigurationReadBo
         storage,
       );
       if (
-        connection.packageId !== WORKERS_AI_PACKAGE_ID ||
-        connection.connectionTypeId !== WORKERS_AI_CONNECTION_TYPE_ID
+        connection.packageId !== FLOCK_AI_PACKAGE_ID ||
+        connection.connectionTypeId !== FLOCK_AI_CONNECTION_TYPE_ID
       ) {
-        throw new Error("Workers AI Connection identity is invalid");
+        throw new Error("Flock AI Connection identity is invalid");
       }
 
       settings = await this.host.settings.read(userId, storage);
-      if (
-        settings.newBotModelTemplate === undefined &&
-        settings.newBotModelTemplateSource !== "user"
-      ) {
+      if (settings.platformModel === undefined) {
         await this.host.settings.executeConfigurationCommand(
           userId,
           {
             schemaVersion: 1,
-            type: "user/set-new-bot-model",
-            commandId: "workers-ai-bootstrap-default",
+            type: "user/set-platform-model",
+            commandId: "flock-ai-bootstrap-platform-model",
             expectedRevision: settings.revision,
             model: {
-              connectionId: WORKERS_AI_CONNECTION_ID,
-              providerModelId: WORKERS_AI_DEFAULT_MODEL,
+              connectionId: FLOCK_AI_CONNECTION_ID,
+              providerModelId: FLOCK_AI_DEFAULT_MODEL,
             },
-            source: "auto",
           },
           storage,
         );
@@ -188,27 +232,27 @@ export class WorkersAiUserBackendContribution implements UserConfigurationReadBo
           decoded.accountId !== accountId ||
           JSON.stringify(decoded.command) !== JSON.stringify(command)
         ) {
-          throw new Error("Workers AI command id collision");
+          throw new Error("Flock AI command id collision");
         }
         return decoded.receipt;
       }
       const connectionId =
         "connectionId" in command
           ? command.connectionId
-          : WORKERS_AI_CONNECTION_ID;
+          : FLOCK_AI_CONNECTION_ID;
       let status: ConnectionCommandReceiptV1["status"] = "failed";
       const current = await this.host.settings.getConnection(
         accountId,
         connectionId,
         storage,
       );
-      if (current?.packageId === WORKERS_AI_PACKAGE_ID) {
+      if (current?.packageId === FLOCK_AI_PACKAGE_ID) {
         if (command.type === "connection/refresh-models") {
           await this.host.settings.replaceConnection(
             accountId,
             connectionId,
             current.generation,
-            { ...current, modelCatalog: workersAiStaticCatalogV1() },
+            { ...current, modelCatalog: flockAiStaticCatalogV1() },
             storage,
           );
           status = "applied";
@@ -247,7 +291,7 @@ export class WorkersAiUserBackendContribution implements UserConfigurationReadBo
   }
 
   async leaseModelCredential(): Promise<never> {
-    throw new Error("Workers AI uses its deployment binding, not a credential");
+    throw new Error("Flock AI uses its deployment binding, not a credential");
   }
 
   settleModelCredential(): Promise<void> {
@@ -255,18 +299,18 @@ export class WorkersAiUserBackendContribution implements UserConfigurationReadBo
   }
 }
 
-export function createWorkersAiUserBackendContribution(
-  host: WorkersAiUserBackendHost,
-): WorkersAiUserBackendContribution {
-  return new WorkersAiUserBackendContribution(host);
+export function createFlockAiUserBackendContribution(
+  host: FlockAiUserBackendHost,
+): FlockAiUserBackendContribution {
+  return new FlockAiUserBackendContribution(host);
 }
 
-export function createWorkersAiUserBackendPlugin(
-  host: WorkersAiUserBackendHost,
-  lifecycle: { mount(value: WorkersAiUserBackendContribution): () => void },
+export function createFlockAiUserBackendPlugin(
+  host: FlockAiUserBackendHost,
+  lifecycle: { mount(value: FlockAiUserBackendContribution): () => void },
 ): Plugin {
   return () => {
-    const contribution = createWorkersAiUserBackendContribution(host);
+    const contribution = createFlockAiUserBackendContribution(host);
     const unregister =
       host.settings.registerConfigurationReadBootstrap(contribution);
     const dispose = lifecycle.mount(contribution);

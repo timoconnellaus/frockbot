@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { CatalogEntryV1, CatalogIndexV1 } from "@frockbot/catalog-core";
 import {
-  capabilityAssignmentFailureV1,
-  initializeBotSettingsV1,
-  resolveBotExecutionPlanV1,
   USER_PROFILE_PLACEHOLDER_NAME_V1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
@@ -150,6 +147,229 @@ describe("User settings backend Contribution", () => {
     ]);
   });
 
+  test("bootstraps a declared default-disabled Package without re-enabling it", async () => {
+    const settings = createUserSettingsBackendContribution({
+      storage: new MemoryStorage(),
+      availablePackages: [
+        {
+          packageId: "custom-models",
+          version: "0.0.1",
+          installByDefault: true,
+          defaultEnablement: "disabled",
+        },
+      ],
+    });
+
+    const first = await settings.readConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+    });
+    expect(first.packages).toEqual([
+      {
+        packageId: "custom-models",
+        version: "0.0.1",
+        state: "disabled",
+        provenance: "first-party",
+      },
+    ]);
+    expect(
+      await settings.readConfiguration({ schemaVersion: 1, userId: "user-1" }),
+    ).toEqual(first);
+  });
+
+  test("installs a Package disabled when explicitly requested", async () => {
+    const settings = contribution();
+    const receipt = await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-disabled",
+        expectedRevision: 0,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+        enabled: false,
+      },
+    });
+
+    expect(receipt).toMatchObject({ status: "applied", revision: 1 });
+    expect((await settings.read("user-1")).packages).toMatchObject([
+      { packageId: "provider-ollama-cloud", state: "disabled" },
+    ]);
+  });
+
+  test("does not clear an existing failed installation", async () => {
+    const storage = new MemoryStorage();
+    const settings = contribution(storage);
+    await storage.put("user-id", "user-1");
+    await storage.put("user-configuration", {
+      schemaVersion: 1,
+      revision: 0,
+      profile: { name: "User" },
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "failed",
+          failure: "activation failed",
+        },
+      ],
+      connections: [],
+    } satisfies UserSettingsViewV1);
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "retry-failed-disabled",
+        expectedRevision: 0,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+        enabled: false,
+      },
+    });
+
+    expect((await settings.read("user-1")).packages).toMatchObject([
+      {
+        packageId: "provider-ollama-cloud",
+        state: "failed",
+        failure: "activation failed",
+      },
+    ]);
+  });
+
+  test("refuses enabling until every declared dependency is enabled", async () => {
+    const settings = createUserSettingsBackendContribution({
+      storage: new MemoryStorage(),
+      availablePackages: [
+        { packageId: "custom-models", version: "0.0.1" },
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          dependencies: { "custom-models": ">=0.0.1" },
+        },
+      ],
+    });
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-custom-models-disabled",
+        expectedRevision: 0,
+        packageId: "custom-models",
+        version: "0.0.1",
+        enabled: false,
+      },
+    });
+    const refusedInstall = await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-ollama-enabled-too-soon",
+        expectedRevision: 1,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+      },
+    });
+    expect(refusedInstall).toMatchObject({
+      status: "rejected",
+      revision: 1,
+      failure: expect.stringContaining("custom-models"),
+    });
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-ollama-disabled",
+        expectedRevision: 1,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+        enabled: false,
+      },
+    });
+
+    const refused = await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "enable-ollama-too-soon",
+        expectedRevision: 2,
+        packageId: "provider-ollama-cloud",
+        enabled: true,
+      },
+    });
+    expect(refused).toMatchObject({
+      status: "rejected",
+      revision: 2,
+      failure: expect.stringContaining("custom-models"),
+    });
+    expect((await settings.read("user-1")).packages[1]?.state).toBe("disabled");
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "enable-custom-models",
+        expectedRevision: 2,
+        packageId: "custom-models",
+        enabled: true,
+      },
+    });
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-enabled",
+          commandId: "enable-ollama",
+          expectedRevision: 3,
+          packageId: "provider-ollama-cloud",
+          enabled: true,
+        },
+      }),
+    ).resolves.toMatchObject({ status: "applied", revision: 4 });
+  });
+
+  test("applies the platform model through the backend Contribution", async () => {
+    const storage = new MemoryStorage();
+    const settings = contribution(storage);
+
+    await expect(
+      settings.executeConfigurationCommand(
+        "user-1",
+        {
+          schemaVersion: 1,
+          type: "user/set-platform-model",
+          commandId: "bootstrap-platform-model",
+          expectedRevision: 0,
+          model: {
+            connectionId: "flock-default",
+            providerModelId: "@flock/auto",
+          },
+        },
+        storage,
+      ),
+    ).resolves.toMatchObject({ status: "applied", revision: 1 });
+    expect((await settings.read("user-1")).platformModel).toEqual({
+      connectionId: "flock-default",
+      providerModelId: "@flock/auto",
+    });
+  });
+
   test("owns durable User configuration independently of providers", async () => {
     const storage = new MemoryStorage();
     const settings = contribution(storage);
@@ -221,233 +441,6 @@ describe("User settings backend Contribution", () => {
         },
       }),
     ).rejects.toThrow("Package is not available in this application");
-  });
-
-  test("coordinates Connection dependencies in provider-neutral User state", async () => {
-    const settings = contribution();
-    await settings.executeConfiguration({
-      schemaVersion: 1,
-      userId: "user-1",
-      command: {
-        schemaVersion: 1,
-        type: "user/install-package",
-        commandId: "install-ollama",
-        expectedRevision: 0,
-        packageId: "provider-ollama-cloud",
-        version: "0.0.1",
-      },
-    });
-    await settings.createConnection("user-1", {
-      connectionId: "ollama-1",
-      packageId: "provider-ollama-cloud",
-      connectionTypeId: "ollama-cloud-account",
-      displayName: "Work",
-      state: "ready",
-      providerType: "ollama-cloud",
-      generation: "connection-generation",
-      safeMetadata: {},
-    });
-    const requirement = {
-      schemaVersion: 1 as const,
-      packageId: "provider-ollama-cloud",
-      packageVersion: "0.0.1",
-      capabilityId: "ollama-cloud-models",
-      connectionTypeIds: ["ollama-cloud-account"],
-    };
-
-    await expect(
-      settings.claimConnectionDependency(
-        "user-1",
-        "ollama-1",
-        "bot-1",
-        "assignment-1",
-        requirement,
-      ),
-    ).resolves.toBe(true);
-    await expect(
-      settings.acknowledgeConnectionDependency(
-        "user-1",
-        "ollama-1",
-        "bot-1",
-        "assignment-1",
-      ),
-    ).resolves.toBe(true);
-    expect(
-      (await settings.getConnection("user-1", "ollama-1"))?.safeMetadata,
-    ).toMatchObject({
-      dependentAssignments: [
-        {
-          botId: "bot-1",
-          generation: "assignment-1",
-          packageId: "provider-ollama-cloud",
-          capabilityId: "ollama-cloud-models",
-          status: "acknowledged",
-        },
-      ],
-    });
-    await expect(
-      settings.compensateConnectionDependency(
-        "user-1",
-        "ollama-1",
-        "bot-1",
-        "assignment-1",
-      ),
-    ).resolves.toBe(false);
-
-    await settings.createConnection("user-1", {
-      connectionId: "ollama-2",
-      packageId: "provider-ollama-cloud",
-      connectionTypeId: "ollama-cloud-account",
-      displayName: "Personal",
-      state: "ready",
-      providerType: "ollama-cloud",
-      generation: "connection-generation-2",
-      safeMetadata: {},
-    });
-    await settings.claimConnectionDependency(
-      "user-1",
-      "ollama-2",
-      "bot-1",
-      "assignment-2",
-      requirement,
-    );
-    await settings.acknowledgeConnectionDependency(
-      "user-1",
-      "ollama-2",
-      "bot-1",
-      "assignment-2",
-    );
-
-    expect(
-      (await settings.getConnection("user-1", "ollama-1"))?.safeMetadata,
-    ).toMatchObject({ dependentAssignments: [] });
-    expect(
-      (await settings.getConnection("user-1", "ollama-2"))?.safeMetadata,
-    ).toMatchObject({
-      dependentAssignments: [
-        {
-          botId: "bot-1",
-          generation: "assignment-2",
-          packageId: "provider-ollama-cloud",
-          capabilityId: "ollama-cloud-models",
-          status: "acknowledged",
-        },
-      ],
-    });
-    await expect(
-      settings.releaseConnectionDependency(
-        "user-1",
-        "ollama-2",
-        "bot-1",
-        "assignment-2",
-      ),
-    ).resolves.toBe(true);
-    await expect(
-      settings.releaseConnectionDependency(
-        "user-1",
-        "ollama-2",
-        "bot-1",
-        "assignment-2",
-      ),
-    ).resolves.toBe(true);
-    expect(
-      (await settings.getConnection("user-1", "ollama-2"))?.safeMetadata,
-    ).toMatchObject({ dependentAssignments: [] });
-  });
-
-  test("rejects acknowledgement from a superseded dependency claim", async () => {
-    const settings = contribution();
-    await settings.executeConfiguration({
-      schemaVersion: 1,
-      userId: "user-1",
-      command: {
-        schemaVersion: 1,
-        type: "user/install-package",
-        commandId: "install-fenced-package",
-        expectedRevision: 0,
-        packageId: "provider-ollama-cloud",
-        version: "0.0.1",
-      },
-    });
-    for (const connectionId of ["ollama-old", "ollama-new"]) {
-      await settings.createConnection("user-1", {
-        connectionId,
-        packageId: "provider-ollama-cloud",
-        connectionTypeId: "ollama-cloud-account",
-        displayName: connectionId,
-        state: "ready",
-        providerType: "ollama-cloud",
-        generation: `${connectionId}-generation`,
-        safeMetadata: {},
-      });
-    }
-    const requirement = {
-      schemaVersion: 1 as const,
-      packageId: "provider-ollama-cloud",
-      packageVersion: "0.0.1",
-      capabilityId: "ollama-cloud-models",
-      connectionTypeIds: ["ollama-cloud-account"],
-    };
-    await settings.claimConnectionDependency(
-      "user-1",
-      "ollama-old",
-      "bot-1",
-      "assignment-old",
-      requirement,
-    );
-    await settings.claimConnectionDependency(
-      "user-1",
-      "ollama-new",
-      "bot-1",
-      "assignment-new",
-      requirement,
-    );
-    await settings.claimConnectionDependency(
-      "user-1",
-      "ollama-old",
-      "bot-1",
-      "assignment-old",
-      requirement,
-    );
-
-    await expect(
-      settings.acknowledgeConnectionDependency(
-        "user-1",
-        "ollama-old",
-        "bot-1",
-        "assignment-old",
-      ),
-    ).resolves.toBe(false);
-    expect(
-      (await settings.getConnection("user-1", "ollama-new"))?.safeMetadata,
-    ).toMatchObject({
-      dependentAssignments: [
-        { generation: "assignment-new", status: "pending" },
-      ],
-    });
-    await expect(
-      settings.compensateConnectionDependency(
-        "user-1",
-        "ollama-old",
-        "bot-1",
-        "assignment-old",
-      ),
-    ).resolves.toBe(true);
-    expect(
-      (await settings.getConnection("user-1", "ollama-old"))?.safeMetadata,
-    ).toMatchObject({ dependentAssignments: [] });
-
-    await expect(
-      settings.acknowledgeConnectionDependency(
-        "user-1",
-        "ollama-new",
-        "bot-1",
-        "assignment-new",
-      ),
-    ).resolves.toBe(true);
-    expect(
-      (await settings.getConnection("user-1", "ollama-old"))?.safeMetadata,
-    ).toMatchObject({ dependentAssignments: [] });
   });
 
   test("compacts revoked Connections and bounds active Connections", async () => {
@@ -935,92 +928,6 @@ describe("uninstall", () => {
     ]);
   });
 
-  test("dependent Assignments become unavailable tombstones, not deletions", async () => {
-    const storage = new MemoryStorage();
-    const settings = contribution(storage);
-    await settings.executeConfiguration({
-      schemaVersion: 1,
-      userId: "user-1",
-      command: {
-        schemaVersion: 1,
-        type: "user/install-package",
-        commandId: "install-provider",
-        expectedRevision: 0,
-        packageId: "provider-ollama-cloud",
-        version: "0.0.1",
-      },
-    });
-    await settings.createConnection("user-1", {
-      connectionId: "connection-1",
-      packageId: "provider-ollama-cloud",
-      connectionTypeId: "ollama-cloud-account",
-      displayName: "Work",
-      state: "ready",
-      safeMetadata: {},
-    });
-    const assignment = {
-      assignmentId: "assignment-1",
-      packageId: "provider-ollama-cloud",
-      capabilityId: "ollama-cloud-models",
-      connectionId: "connection-1",
-    };
-    const packages = [
-      {
-        packageId: "provider-ollama-cloud",
-        version: "0.0.1",
-        capabilities: [
-          {
-            id: "ollama-cloud-models",
-            kind: "model" as const,
-            connectionTypes: ["ollama-cloud-account"],
-          },
-        ],
-        connectionTypes: [
-          {
-            id: "ollama-cloud-account",
-            capabilities: ["ollama-cloud-models"],
-          },
-        ],
-      },
-    ];
-
-    const installed = await settings.readSnapshot();
-    expect(
-      capabilityAssignmentFailureV1({ assignment, user: installed, packages }),
-    ).toBeUndefined();
-
-    await settings.executeConfiguration({
-      schemaVersion: 1,
-      userId: "user-1",
-      command: {
-        schemaVersion: 1,
-        type: "user/uninstall-package",
-        commandId: "uninstall-provider",
-        expectedRevision: installed.revision,
-        packageId: "provider-ollama-cloud",
-      },
-    });
-
-    const uninstalled = await settings.readSnapshot();
-    expect(
-      capabilityAssignmentFailureV1({
-        assignment,
-        user: uninstalled,
-        packages,
-      }),
-    ).toContain("is not installed and enabled");
-    expect(
-      resolveBotExecutionPlanV1({
-        bot: {
-          ...initializeBotSettingsV1("bot-1"),
-          assignments: [{ ...assignment, state: "enabled" }],
-        },
-        user: uninstalled,
-        packages,
-      }).assignments,
-    ).toEqual([{ ...assignment, state: "unavailable" }]);
-  });
-
   test("refuses to uninstall a Package that is not installed", async () => {
     const settings = contribution();
 
@@ -1077,6 +984,53 @@ describe("Package-level setting values", () => {
       packageId: "provider-ollama-cloud",
       values: { "web-search-max-results": 5, label: "work" },
     });
+  });
+
+  test("removes only declared setting ids and drops an emptied value bag", async () => {
+    const settings = contribution();
+    await installOllama(settings, "user-1");
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: "set-before-unset",
+        expectedRevision: 1,
+        packageId: "provider-ollama-cloud",
+        values: { "web-search-max-results": 4 },
+      },
+    });
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: "unset-value",
+        expectedRevision: 2,
+        packageId: "provider-ollama-cloud",
+        unset: ["web-search-max-results"],
+      },
+    });
+    expect((await settings.read("user-1")).packages[0]?.values).toBeUndefined();
+
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-settings",
+          commandId: "unset-unknown",
+          expectedRevision: 3,
+          packageId: "provider-ollama-cloud",
+          unset: ["unknown-setting"],
+        },
+      }),
+    ).rejects.toThrow(/not declared by this Package/);
+    expect((await settings.read("user-1")).revision).toBe(3);
   });
 
   test("a replayed command id returns its receipt without applying twice", async () => {

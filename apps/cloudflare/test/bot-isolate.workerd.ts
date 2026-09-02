@@ -14,23 +14,12 @@ function botState(userId: string, botId: string) {
   return env.BOT_STATES.getByName(`${userId}:${botId}`);
 }
 
-const MODEL_ASSIGNMENT = {
-  assignmentId: "model-assignment",
+const MODEL_CAPABILITY = {
   packageId: "provider-ollama-cloud",
   capabilityId: "ollama-cloud-models",
   kind: "model" as const,
+  connectionId: "ollama-1",
 };
-
-function botSettings(botId: string, assignments: unknown[]) {
-  return {
-    schemaVersion: 1 as const,
-    botId,
-    revision: 1,
-    profile: { name: "Isolate probe" },
-    notifications: { enabled: false },
-    assignments,
-  };
-}
 
 describe("a Bot Package in a loaded Dynamic Worker", () => {
   test("an isolate tool is callable through ctx.tools", async () => {
@@ -75,7 +64,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(result.loaderCalls).toBe(0);
   });
 
-  test("a non-first-party Package loads with globalOutbound disabled and Assignment-derived bindings only", async () => {
+  test("a non-first-party Package loads with globalOutbound disabled and User-enabled bindings only", async () => {
     const stub = probe(`outbound-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
@@ -88,7 +77,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     });
 
     expect(loaded).toHaveLength(1);
-    // Network access exists only through the bindings the Assignments grant.
+    // Network access exists only through the bindings the User enabled.
     expect(loaded[0]?.globalOutbound).toBeNull();
     expect(loaded[0]?.envKeys).toEqual(["CAPABILITIES", "IDENTITY"]);
     expect(loaded[0]?.identityKeys).toEqual([
@@ -155,7 +144,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(await stub.readStorage()).toBe("host-only");
   });
 
-  test("two Bots with the same artifact get different loader ids", async () => {
+  test("two Bots of one User with the same artifact and grant get different loader ids", async () => {
     const stub = probe(`loader-ids-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
@@ -172,11 +161,30 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
 
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
-    expect(first[0]).toMatch(/^bot-package:user-1:bot-1:[0-9a-f]{64}$/);
-    expect(second[0]).toMatch(/^bot-package:user-1:bot-2:[0-9a-f]{64}$/);
-    expect(first[0]).not.toBe(second[0]);
-    // Same artifact, so the content-addressed component is identical.
-    expect(first[0]?.split(":").at(-1)).toBe(second[0]?.split(":").at(-1));
+    expect(first[0]).toMatch(/^bot-package:user-1:[0-9a-f]{64}$/);
+    expect(second[0]).toMatch(/^bot-package:user-1:[0-9a-f]{64}$/);
+    expect(second[0]).not.toBe(first[0]);
+  });
+
+  test("changing the User-enabled set changes the loader id", async () => {
+    const stub = probe(`loader-grant-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+
+    const before = await stub.observedLoaderIds({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+    });
+    const after = await stub.observedLoaderIds({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      capabilities: [MODEL_CAPABILITY],
+    });
+
+    expect(before).toHaveLength(1);
+    expect(after).toHaveLength(1);
+    expect(after[0]).not.toBe(before[0]);
   });
 
   test("a broken package.js fails verification with a diagnostic, not a hang", async () => {
@@ -254,7 +262,7 @@ describe("the isolate capability binding", () => {
     expect(await botState("user-1", botId).isolateDecisions()).toHaveLength(0);
   });
 
-  test("list reports only the Assignment-derived capabilities", async () => {
+  test("list reports the User-enabled capability set", async () => {
     const stub = probe(`list-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
@@ -269,7 +277,7 @@ describe("the isolate capability binding", () => {
       botId: "bot-1",
       artifact,
       tool: "list_capabilities",
-      assignments: [MODEL_ASSIGNMENT],
+      capabilities: [MODEL_CAPABILITY],
     });
 
     expect(JSON.parse(withNone.content)).toEqual([]);
@@ -325,7 +333,7 @@ describe("the isolate capability binding", () => {
       await stub.generationFor(artifact),
     );
 
-    // The Bot holds an enabled Ollama Cloud model Assignment. That authorizes
+    // The User enabled the Ollama Cloud model Capability. That authorizes
     // exactly that Package's provider and exactly the model its binding names
     // — not the first-party provider the Bot asked for here.
     const result = await stub.callTool({
@@ -333,7 +341,7 @@ describe("the isolate capability binding", () => {
       botId,
       artifact,
       tool: "call_model",
-      assignments: [MODEL_ASSIGNMENT],
+      capabilities: [MODEL_CAPABILITY],
       toolInput: {
         requestId: "request-1",
         provider: "foundation",
@@ -352,7 +360,7 @@ describe("the isolate capability binding", () => {
     ).toHaveLength(0);
   });
 
-  test("invokeModel for the assigned model but another Package's provider is a pending decision", async () => {
+  test("invokeModel for the enabled model but another Package's provider is a pending decision", async () => {
     const suffix = crypto.randomUUID();
     const stub = probe(`model-provider-${suffix}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
@@ -375,7 +383,7 @@ describe("the isolate capability binding", () => {
       botId,
       artifact,
       tool: "call_model",
-      assignments: [MODEL_ASSIGNMENT],
+      capabilities: [MODEL_CAPABILITY],
       toolInput: {
         requestId: "request-1",
         provider: "foundation",
@@ -391,7 +399,7 @@ describe("the isolate capability binding", () => {
     });
   });
 
-  test("invokeModel with the Bot's exact assigned provider and model streams", async () => {
+  test("invokeModel with the authority's exact enabled provider and model streams", async () => {
     const suffix = crypto.randomUUID();
     const stub = probe(`model-allowed-${suffix}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
@@ -414,7 +422,7 @@ describe("the isolate capability binding", () => {
       botId,
       artifact,
       tool: "call_model",
-      assignments: [MODEL_ASSIGNMENT],
+      capabilities: [MODEL_CAPABILITY],
       toolInput: {
         requestId: "request-1",
         provider: PROVISIONED_MODEL.provider,

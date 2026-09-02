@@ -69,20 +69,11 @@ function toolOutcome(turn: ClientTurn, name: string): ToolOutcome {
   return result!;
 }
 
-async function botRevision(userId: string, botId: string): Promise<number> {
-  const settings = (await expectOkJson(
-    await asUser(userId, `/api/bots/${botId}/settings`),
-  )) as { revision: number };
-  return settings.revision;
-}
-
 /**
- * Provision the two Capabilities this slice needs through the product's own
- * surfaces: install the Web Package, then grant the Bot `web-fetch` (no
- * Connection) and `ollama-cloud-web-search` (bound to the Ollama Connection).
+ * Enable the two Packages this slice needs through the product's own surfaces.
  */
 async function grantWebTools(userId: string, botId: string): Promise<void> {
-  const { connectionId } = await provisionThroughGateway({ userId, botId });
+  await provisionThroughGateway({ userId, botId });
 
   const settings = (await expectOkJson(
     await asUser(userId, "/api/settings"),
@@ -97,68 +88,26 @@ async function grantWebTools(userId: string, botId: string): Promise<void> {
       version: "0.0.1",
     }),
   );
-
-  await expectOkJson(
-    await postAsUser(userId, `/api/bots/${botId}/settings`, {
-      schemaVersion: 1,
-      type: "bot/assign-capability",
-      commandId: `assign-web-fetch-${botId}`,
-      botId,
-      expectedRevision: await botRevision(userId, botId),
-      assignment: {
-        assignmentId: "web-fetch",
-        packageId: "web",
-        capabilityId: "web-fetch",
-      },
-    }),
-  );
-
-  await expectOkJson(
-    await postAsUser(userId, `/api/bots/${botId}/settings`, {
-      schemaVersion: 1,
-      type: "bot/assign-capability",
-      commandId: `assign-web-search-${botId}`,
-      botId,
-      expectedRevision: await botRevision(userId, botId),
-      assignment: {
-        assignmentId: "web-search",
-        packageId: "provider-ollama-cloud",
-        capabilityId: "ollama-cloud-web-search",
-        connectionId,
-      },
-    }),
-  );
 }
 
-/**
- * Take back every Assignment the Bot holds for a Package. A new Bot snapshots
- * an enabled Assignment for each installed, connection-less, non-model
- * Capability, so "no Assignment for this Package" is now something a test has
- * to ask for through the product's own surface rather than something a fresh
- * Bot happens to be.
- */
-async function unassignPackage(
+/** Disable one Package account-wide through its single enablement surface. */
+async function disablePackage(
   userId: string,
-  botId: string,
   packageId: string,
 ): Promise<void> {
   const settings = (await expectOkJson(
-    await asUser(userId, `/api/bots/${botId}/settings`),
-  )) as { assignments: { assignmentId: string; packageId: string }[] };
-  for (const assignment of settings.assignments.filter(
-    (candidate) => candidate.packageId === packageId,
-  )) {
-    await expectOkJson(
-      await postAsUser(userId, `/api/bots/${botId}/settings`, {
-        schemaVersion: 1,
-        type: "bot/unassign-capability",
-        commandId: `unassign-${assignment.assignmentId}`,
-        botId,
-        expectedRevision: await botRevision(userId, botId),
-        assignmentId: assignment.assignmentId,
-      }),
-    );
-  }
+    await asUser(userId, "/api/settings"),
+  )) as { revision: number };
+  await expectOkJson(
+    await postAsUser(userId, "/api/settings", {
+      schemaVersion: 1,
+      type: "user/set-package-enabled",
+      commandId: `disable-${packageId}`,
+      expectedRevision: settings.revision,
+      packageId,
+      enabled: false,
+    }),
+  );
 }
 
 describe("web_search through the gateway, the artifact and the Bot", () => {
@@ -302,15 +251,13 @@ describe("web_fetch through the gateway, the artifact and the Bot", () => {
   });
 });
 
-describe("a Bot with no web Assignment", () => {
-  it("is never offered the tools, so the call is refused as unknown", async () => {
+describe("a disabled Web Package", () => {
+  it("removes web_fetch while leaving another enabled Package's tools", async () => {
     const userId = freshUserId("web-unassigned");
     const botId = "bare-bot";
-    // Provisioned for chat, and nothing else. The Web Package is installed
-    // for every User, so the Bot starts with the default `web-fetch`
-    // Assignment; taking it back is what makes this Bot the unassigned one.
+    // Package enablement is account-wide and changes the next admitted Turn.
     await provisionThroughGateway({ userId, botId });
-    await unassignPackage(userId, botId, "web");
+    await disablePackage(userId, "web");
 
     const turn = await turnCalling(
       userId,
@@ -331,7 +278,6 @@ describe("a Bot with no web Assignment", () => {
       { query: "anything" },
     );
     const searchOutcome = toolOutcome(searched, "web_search");
-    expect(searchOutcome.isError).toBe(true);
-    expect(searchOutcome.content).toContain("Unknown tool");
+    expect(searchOutcome.isError, searchOutcome.content).toBe(false);
   });
 });

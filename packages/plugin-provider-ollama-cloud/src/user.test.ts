@@ -12,7 +12,6 @@ import {
 import { OllamaCloudClient, type OllamaFetch } from "./client.js";
 import {
   createOllamaCloudUserBackendContribution,
-  selectAutomaticOllamaModelV1,
   type OllamaUserBackendHost,
 } from "./user.js";
 
@@ -254,82 +253,12 @@ describe("Ollama Cloud User Contribution", () => {
         models: [{ providerModelId: "glm-5.3-flash:cloud" }],
       },
     });
-    expect(await settings.read("account-1")).toMatchObject({
-      newBotModelTemplate: {
-        connectionId: result.connectionId,
-        providerModelId: "glm-5.3-flash:cloud",
-      },
-      newBotModelTemplateSource: "auto",
-    });
+    expect(
+      Object.hasOwn(await settings.read("account-1"), "platformModel"),
+    ).toBe(false);
     expect(JSON.stringify([...storage.values.values()])).not.toContain(
       "ollama-secret",
     );
-  });
-
-  test("never replaces a User-chosen default when a Connection succeeds", async () => {
-    const { settings, ollama } = await fixture();
-    const before = await settings.read("account-1");
-    await settings.executeConfiguration({
-      schemaVersion: 1,
-      userId: "account-1",
-      command: {
-        schemaVersion: 1,
-        type: "user/set-new-bot-model",
-        commandId: "choose-model",
-        expectedRevision: before.revision,
-        model: {
-          connectionId: "chosen-connection",
-          providerModelId: "chosen-model",
-        },
-        source: "user",
-      },
-    });
-
-    await ollama.executeConnection("account-1", {
-      schemaVersion: 1,
-      type: "connection/create-api-key",
-      commandId: "connect-after-choice",
-      packageId: "provider-ollama-cloud",
-      connectionTypeId: "ollama-cloud-account",
-      label: "Work",
-      apiKey: "ollama-secret",
-    });
-
-    expect(await settings.read("account-1")).toMatchObject({
-      newBotModelTemplate: {
-        connectionId: "chosen-connection",
-        providerModelId: "chosen-model",
-      },
-      newBotModelTemplateSource: "user",
-    });
-  });
-
-  test("prefers gpt-oss, then GLM, then the first catalog model", () => {
-    const model = (providerModelId: string) => ({
-      providerModelId,
-      displayName: providerModelId,
-      capabilities: { tools: true, vision: false, reasoning: true },
-      source: "discovered" as const,
-    });
-    const catalog = (ids: string[]) => ({
-      schemaVersion: 1 as const,
-      generation: "catalog-1",
-      state: "fresh" as const,
-      models: ids.map(model),
-    });
-    expect(
-      selectAutomaticOllamaModelV1(
-        catalog(["other", "glm-5.3-flash:cloud", "gpt-oss:20b"]),
-      )?.providerModelId,
-    ).toBe("gpt-oss:20b");
-    expect(
-      selectAutomaticOllamaModelV1(catalog(["other", "glm-5.3-flash:cloud"]))
-        ?.providerModelId,
-    ).toBe("glm-5.3-flash:cloud");
-    expect(
-      selectAutomaticOllamaModelV1(catalog(["other", "second"]))
-        ?.providerModelId,
-    ).toBe("other");
   });
 
   test("atomically admits the command, Connection, and encrypted credential", async () => {
@@ -891,7 +820,7 @@ describe("Ollama Cloud User Contribution", () => {
     );
   });
 
-  test("rejects disconnect while a Bot assignment depends on the Connection", async () => {
+  test("disconnects without a retired per-Bot dependency lock", async () => {
     const { settings, ollama } = await fixture();
     const created = await ollama.executeConnection("account-1", {
       schemaVersion: 1,
@@ -902,20 +831,6 @@ describe("Ollama Cloud User Contribution", () => {
       label: "Work",
       apiKey: "key",
     });
-    await settings.claimConnectionDependency(
-      "account-1",
-      created.connectionId,
-      "bot-1",
-      "assignment-1",
-      {
-        schemaVersion: 1,
-        packageId: "provider-ollama-cloud",
-        packageVersion: "0.0.1",
-        capabilityId: "ollama-cloud-models",
-        connectionTypeIds: ["ollama-cloud-account"],
-      },
-    );
-
     await expect(
       ollama.executeConnection("account-1", {
         schemaVersion: 1,
@@ -924,10 +839,10 @@ describe("Ollama Cloud User Contribution", () => {
         connectionId: created.connectionId,
         revokeUpstream: false,
       }),
-    ).resolves.toMatchObject({ status: "failed" });
+    ).resolves.toMatchObject({ status: "applied" });
     expect(
       await settings.getConnection("account-1", created.connectionId),
-    ).toMatchObject({ state: "ready" });
+    ).toMatchObject({ state: "revoked" });
   });
 
   test("does not downgrade concurrent upstream revocation reconciliation", async () => {

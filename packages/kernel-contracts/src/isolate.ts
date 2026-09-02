@@ -125,7 +125,7 @@ export type IsolateCapabilityListOutcomeV1 =
   IsolateCapabilityDescriptorV1[] | IsolateCapabilityFailureV1;
 
 /**
- * D6: model invocation as an Assignment-derived binding. Events cross the RPC
+ * D6: model invocation as an enabled-capability binding. Events cross the RPC
  * boundary as an NDJSON byte stream — see `decodeIsolateModelEventV1`. A
  * `ReadableStream` of JavaScript objects is not transferable over workerd RPC;
  * a byte stream is, so the kernel encodes and the isolate decodes.
@@ -152,7 +152,7 @@ export interface BotIsolateEntrypoint {
 
 /**
  * The loopback service binding the Bot's Durable Object mints for one isolate.
- * Every method is Assignment-derived: nothing here can hand out authority the
+ * Every method derives from enabled capabilities: nothing here can hand out authority the
  * Bot does not already hold.
  */
 export interface BotCapabilitiesStub {
@@ -160,7 +160,7 @@ export interface BotCapabilitiesStub {
   /**
    * D6 addendum. The kernel records the normalized request and acquires the
    * credential lease through the existing provider path *before* forwarding.
-   * Without a matching enabled model Assignment the answer is a pending
+   * Without a matching enabled model capability the answer is a pending
    * decision, never a grant.
    */
   invokeModel(request: NormalizedModelRequest): Promise<IsolateModelOutcomeV1>;
@@ -198,30 +198,27 @@ export interface IsolateHost {
 
 /**
  * D2. The loader identity, and nothing else — a reused id silently serves the
- * first code, so every component here is content- or owner-derived. The hash
- * covers the *mounted module set* (kernel wrapper text plus the Package
- * artifact), so a wrapper change is a new isolate.
+ * first code and `env`, so every component here is content- or owner-derived.
+ * The hash covers the mounted wrapper and Package artifact plus the digest of
+ * every baked-in binding: User, Bot, Composition generation, and enabled set.
+ * Identical artifacts reuse an isolate only under identical authority; the
+ * User prefix independently prevents cross-User reuse (AGENTS.md Package
+ * composition; ADR 0019).
  */
 export function isolateLoaderIdV1(input: {
   userId: string;
-  botId: string;
   artifactSetHash: string;
 }): string {
   const userId = boundedString(input.userId, "isolate loader userId", 256);
-  const botId = boundedString(input.botId, "isolate loader botId", 256);
   const hash = boundedString(
     input.artifactSetHash,
     "isolate loader artifactSetHash",
     128,
   );
-  if (
-    /[:\s]/.test(userId) ||
-    /[:\s]/.test(botId) ||
-    !/^[0-9a-f]+$/.test(hash)
-  ) {
+  if (/[:\s]/.test(userId) || !/^[0-9a-f]+$/.test(hash)) {
     throw new Error("isolate loader id components are invalid");
   }
-  return `bot-package:${userId}:${botId}:${hash}`;
+  return `bot-package:${userId}:${hash}`;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {

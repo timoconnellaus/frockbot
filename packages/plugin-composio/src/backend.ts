@@ -76,24 +76,12 @@ export interface ComposioBackendConfig {
   connectionTypes: Record<string, ComposioConnectionTypeConfig>;
   authorizationStateSecret: string;
   storeFor(userId: string): ComposioConnectionStore;
-  markBotUnavailable?: (
-    userId: string,
-    botId: string,
-    connectionId: string,
-    compensation: { id: string; expectedGeneration: string },
-  ) => Promise<"applied" | "stale">;
 }
 
 export interface ComposioBackendHost {
   callbackBaseUrl: string;
   readSecret(name: string): string | undefined;
   storeFor(userId: string): ComposioConnectionStore;
-  markConnectionUnavailable(
-    userId: string,
-    botId: string,
-    connectionId: string,
-    compensation: { id: string; expectedGeneration: string },
-  ): Promise<"applied" | "stale">;
 }
 
 export function createConfiguredComposioBackendContribution(
@@ -126,7 +114,6 @@ export function createConfiguredComposioBackendContribution(
         toolkitSlug: "gmail",
       },
     },
-    markBotUnavailable: host.markConnectionUnavailable,
   });
 }
 
@@ -161,7 +148,6 @@ function coordinator(
     store: config.storeFor(userId),
     callbackBaseUrl: config.callbackBaseUrl,
     connectionTypes: config.connectionTypes,
-    markBotUnavailable: config.markBotUnavailable,
   });
 }
 

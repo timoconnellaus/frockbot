@@ -196,7 +196,6 @@ function subagentFlag(value: unknown, label: string): boolean {
  * resolves a binding of its own.
  */
 export interface TaskModelBindingV1 {
-  assignmentId: string;
   packageId: string;
   capabilityId: string;
   connectionId: string;
@@ -214,7 +213,6 @@ export function decodeTaskModelBindingV1(
   subagentExactKeys(
     candidate,
     [
-      "assignmentId",
       "packageId",
       "capabilityId",
       "connectionId",
@@ -225,11 +223,6 @@ export function decodeTaskModelBindingV1(
     label,
   );
   return {
-    assignmentId: subagentText(
-      candidate.assignmentId,
-      128,
-      `${label}.assignmentId`,
-    ),
     packageId: subagentText(candidate.packageId, 128, `${label}.packageId`),
     capabilityId: subagentText(
       candidate.capabilityId,

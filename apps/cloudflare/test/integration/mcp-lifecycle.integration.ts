@@ -97,31 +97,6 @@ async function lifecycle(
   )) as McpReceipt;
 }
 
-async function assignMcpTools(
-  userId: string,
-  botId: string,
-  connectionId: string,
-): Promise<void> {
-  const settings = (await expectOkJson(
-    await asUser(userId, `/api/bots/${botId}/settings`),
-  )) as { revision: number };
-  await expectOkJson(
-    await postAsUser(userId, `/api/bots/${botId}/settings`, {
-      schemaVersion: 1,
-      type: "bot/assign-capability",
-      commandId: `assign-mcp-${botId}`,
-      botId,
-      expectedRevision: settings.revision,
-      assignment: {
-        assignmentId: "mcp-tools-1",
-        packageId: MCP_PACKAGE,
-        capabilityId: "mcp-tools",
-        connectionId,
-      },
-    }),
-  );
-}
-
 async function runTurn(
   userId: string,
   botId: string,
@@ -245,7 +220,6 @@ describe("the MCP server lifecycle", () => {
       "Always echo before answering.",
     );
 
-    await assignMcpTools(userId, botId, serverId);
     await runTurn(userId, botId, "mcp-lifecycle-turn");
     const tools = await offeredTools(userId, botId, "mcp-lifecycle-turn");
     const echo = tools.find((tool) => tool.name === ECHO_TOOL);

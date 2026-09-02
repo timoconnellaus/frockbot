@@ -112,7 +112,7 @@ export interface TemplateBotReaderV1 {
  * Every method is a command the importing User's own surfaces already issue —
  * `bot/create` from the sidebar, `user/install-package` from the Plugins
  * surface, a Skill write and a `routine/create` from the Bot's own settings.
- * There is deliberately nothing here for a Connection or an Assignment: an
+ * There is deliberately nothing here for a Connection or credential: an
  * import cannot create either, because this seam cannot express it.
  */
 export interface TemplateImportWriterV1 {
@@ -442,8 +442,6 @@ export class BotTemplateUserBackendContribution {
               },
             }),
       })),
-      hasModelAssignment: settings.model !== undefined,
-      assignmentCount: settings.assignments.length,
       ...(user.catalogGeneration === undefined
         ? {}
         : { sourceCatalogGeneration: user.catalogGeneration }),

@@ -143,6 +143,8 @@ export const PROVISIONED_MODEL = {
   providerModelId: "glm-5.3-flash:cloud",
 } as const;
 
+export const CUSTOM_MODELS_PACKAGE_ID = "custom-models";
+
 let seeded: Promise<void> | undefined;
 
 /**
@@ -231,10 +233,36 @@ export async function expectOkJson(response: Response): Promise<unknown> {
 
 /**
  * Provision a User and a Bot through the product's own HTTP surface: install
- * the provider Package, create the Connection, choose the model new Bots start
- * on, then create the Bot. Every step is a request the client makes, so this
+ * Custom models and the provider Package, create the Connection, choose the
+ * account model, then create the Bot. Every step is a request the client makes, so this
  * fixture proves the routes it uses as a side effect of using them.
  */
+/**
+ * Switch Custom models on for a User and return the revision that follows.
+ * The Package is seeded disabled on a User's first read, so the product path
+ * is enablement at whatever revision the seed left, never a fresh install at
+ * zero.
+ */
+export async function enableCustomModels(
+  userId: string,
+  commandId: string,
+): Promise<number> {
+  const seeded = (await expectOkJson(
+    await asUser(userId, "/api/settings"),
+  )) as { revision: number };
+  await expectOkJson(
+    await postAsUser(userId, "/api/settings", {
+      schemaVersion: 1,
+      type: "user/set-package-enabled",
+      commandId: `enable-${commandId}`,
+      expectedRevision: seeded.revision,
+      packageId: CUSTOM_MODELS_PACKAGE_ID,
+      enabled: true,
+    }),
+  );
+  return seeded.revision + 1;
+}
+
 export async function provisionThroughGateway(options: {
   userId: string;
   botId: string;
@@ -243,12 +271,13 @@ export async function provisionThroughGateway(options: {
   const { userId, botId } = options;
   const apiKey = options.apiKey ?? OLLAMA_GOOD_API_KEY;
 
+  const enabled = await enableCustomModels(userId, `custom-models-${botId}`);
   await expectOkJson(
     await postAsUser(userId, "/api/settings", {
       schemaVersion: 1,
       type: "user/install-package",
       commandId: `install-${botId}`,
-      expectedRevision: 0,
+      expectedRevision: enabled,
       packageId: PROVISIONED_MODEL.packageId,
       version: "0.0.1",
     }),
@@ -272,14 +301,16 @@ export async function provisionThroughGateway(options: {
   await expectOkJson(
     await postAsUser(userId, "/api/settings", {
       schemaVersion: 1,
-      type: "user/set-new-bot-model",
+      type: "user/set-package-settings",
       commandId: `model-${botId}`,
       expectedRevision: settings.revision,
-      model: {
-        connectionId: receipt.connectionId,
-        providerModelId: PROVISIONED_MODEL.providerModelId,
+      packageId: CUSTOM_MODELS_PACKAGE_ID,
+      values: {
+        "account-model": {
+          connectionId: receipt.connectionId,
+          providerModelId: PROVISIONED_MODEL.providerModelId,
+        },
       },
-      source: "user",
     }),
   );
 

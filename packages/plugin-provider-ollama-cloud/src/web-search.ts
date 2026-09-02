@@ -12,7 +12,7 @@
 // `@frockbot/plugin-web/contract`, and a second provider satisfies it with no
 // change here and none in the kernel.
 //
-// AUTHORITY. `web_search` needs an enabled Assignment of the
+// AUTHORITY. `web_search` needs the enabled
 // `ollama-cloud-web-search` Capability bound to a ready `ollama-cloud-account`
 // Connection. Without one this module mounts nothing and the tool is simply
 // absent from the catalog, which is what "fail visibly" means for a tool: the
@@ -249,16 +249,15 @@ export function createOllamaWebSearchRuntimePlugin(
 }
 
 /**
- * The Assignment fence (D3): `web_search` exists for a Bot only through an
- * enabled Assignment of `ollama-cloud-web-search` bound to a Connection. There
+ * The enablement fence (D3): `web_search` exists for a Bot only through an
+ * enabled `ollama-cloud-web-search` Capability bound to a Connection. There
  * is no unauthenticated fallback provider.
  */
 export function createConfiguredOllamaWebSearchRuntimeContribution(config: {
-  assignment: {
+  capability: {
     packageId: string;
     capabilityId: string;
     connectionId?: string;
-    state: string;
   };
   accountId: string;
   connectionId: string;
@@ -274,10 +273,9 @@ export function createConfiguredOllamaWebSearchRuntimeContribution(config: {
   fetch?: OllamaFetch;
 }): Plugin.Function | undefined {
   if (
-    config.assignment.packageId !== "provider-ollama-cloud" ||
-    config.assignment.capabilityId !== "ollama-cloud-web-search" ||
-    config.assignment.state !== "enabled" ||
-    config.assignment.connectionId !== config.connectionId
+    config.capability.packageId !== "provider-ollama-cloud" ||
+    config.capability.capabilityId !== "ollama-cloud-web-search" ||
+    config.capability.connectionId !== config.connectionId
   ) {
     return undefined;
   }

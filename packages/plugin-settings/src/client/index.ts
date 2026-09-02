@@ -7,11 +7,11 @@ import {
 import BotPanel from "./BotPanel.vue";
 import BotSettingsSurface from "./BotSettingsSurface.vue";
 import BotSettingsTrigger from "./BotSettingsTrigger.vue";
+import ConnectorsTrigger from "./ConnectorsTrigger.vue";
 import ConnectionsSurface from "./ConnectionsSurface.vue";
 import ModelsSurface from "./ModelsSurface.vue";
 import PluginsSurface from "./PluginsSurface.vue";
 import PackageCatalogSurface from "./PackageCatalogSurface.vue";
-import PluginsTrigger from "./PluginsTrigger.vue";
 import UserProfileTrigger from "./UserProfileTrigger.vue";
 import UserSettingsSurface from "./UserSettingsSurface.vue";
 
@@ -25,8 +25,8 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
       placement: "panel",
     }),
     // Enablement and configuration are separate surfaces: Plugins turns a
-    // Package on and off, Models configures model providers and picks the
-    // model, and Connections authorizes the accounts a Bot may be given.
+    // Package on and off, Models hosts opt-in model configuration, and
+    // Connectors authorizes Connections for every Bot the User owns.
     surfaces.register({
       id: "plugins",
       title: "Plugins",
@@ -39,7 +39,7 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
     }),
     surfaces.register({
       id: "connections",
-      title: "Connections",
+      title: "Connectors",
       component: ConnectionsSurface,
     }),
     surfaces.register({
@@ -55,7 +55,7 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
     ctx.slot({
       slot: "frockbot.sidebar-actions",
       order: 10,
-      component: PluginsTrigger,
+      component: ConnectorsTrigger,
     }),
     ctx.slot({
       slot: "frockbot.user-profile",
@@ -74,5 +74,15 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
     }),
   ];
 };
+
+export {
+  decodeModelSelection,
+  describeModelBinding,
+  eligibleModelConnections,
+  encodeModelSelection,
+  isModelConnectionEligible,
+  modelSelectOptions,
+  type ModelSelectOption,
+} from "./bot-settings.js";
 
 export default settingsClientPlugin;

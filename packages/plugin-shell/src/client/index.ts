@@ -25,12 +25,11 @@ import type {
   BotProfile,
   BotProfilePatchV1,
   BotSettingsViewV1,
-  ConfigurationCommandV1,
   JsonValue,
-  ModelAssignment,
-  OperationReceiptV1,
+  PackageSettingValueV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
+import { resolveEffectiveBotModelV1 } from "@frockbot/configuration-core";
 import {
   decodeCatalogEntryV1,
   decodeCatalogIndexV1,
@@ -57,7 +56,7 @@ import {
   decodeTaskListViewV1,
   decodeTaskViewV1,
 } from "@frockbot/plugin-subagents/shared";
-import { ref } from "vue";
+import { ref, toRaw, type Ref } from "vue";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,
@@ -172,7 +171,7 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
     return {
       runId: run.runId,
       status: run.status,
-      message: "Stop accepted; waiting for durable settlement.",
+      message: "Stop requested; finishing up.",
       canResume: false,
     };
   }
@@ -660,11 +659,21 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
         connectionTypes: capability.connectionTypes,
       }),
     );
-    // A Package with neither a Connection Type nor a Capability contributes
-    // nothing the Plugins surface can install or assign. A Capability that
-    // takes no Connection still counts: a tool Package a User installs and
-    // assigns without any credential is exactly that shape.
-    if (connectionTypes.length === 0 && decodedCapabilities.length === 0) {
+    // User- and Bot-scoped declarations are needed for generic effective
+    // model resolution. Connection-scoped settings stay with their Connection
+    // and never enter Package-level settings forms.
+    const settings = (decoded.configuration?.settings ?? []).filter((setting) =>
+      setting.scopes.some((scope) => scope === "user" || scope === "bot"),
+    );
+    // A settings-only Package still contributes enablement: disabling it is
+    // what makes its retained controls inert. A Capability that takes no
+    // Connection likewise counts because enabling its Package grants it to
+    // all of the User's Bots.
+    if (
+      connectionTypes.length === 0 &&
+      decodedCapabilities.length === 0 &&
+      settings.length === 0
+    ) {
       return [];
     }
     const decodedConnections = connectionTypes.map((connection) => {
@@ -688,12 +697,7 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
         version: candidate.version,
         capabilities: decodedCapabilities,
         connectionTypes: decodedConnections,
-        // User-scoped settings only: a `bot`-scoped one is not the Plugins
-        // surface's to edit, and a Connection-scoped one is edited with its
-        // Connection.
-        settings: (decoded.configuration?.settings ?? []).filter((setting) =>
-          setting.scopes.includes("user"),
-        ),
+        settings,
       },
     ];
   });
@@ -977,31 +981,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     }
   }
 
-  async function executeAssignmentOperation(
-    command: Extract<
-      ConfigurationCommandV1,
-      {
-        type:
-          | "bot/assign-capability"
-          | "bot/replace-capability"
-          | "bot/unassign-capability";
-      }
-    >,
-  ): Promise<void> {
-    const execute = ctx.transport.executeConfiguration;
-    if (!execute) throw new Error("Settings are unavailable");
-    const receipt = (await execute(command)) as OperationReceiptV1;
-    await web.value.loadBotSettings();
-    if (receipt.status === "rejected") {
-      const failure = receipt.failure ?? "Assignment operation was rejected";
-      web.value.settingsError = failure;
-      throw new Error(failure);
-    }
-    if (receipt.status === "pending") {
-      web.value.settingsError = "Assignment operation is retrying.";
-    }
-  }
-
   function updateSettingsLoadError(
     source: "bot" | "user" | "catalog" | "package-catalog",
     message?: string,
@@ -1011,63 +990,55 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     web.value.settingsError = [...settingsLoadErrors.values()].at(-1);
   }
 
-  /**
-   * The Bot runs on its own model when it has one and on the User's default
-   * otherwise, so readiness and the composer label follow the effective model.
-   * A Bot following the default is ready as soon as the User's Connection is:
-   * the Bot's own Assignment for that Connection is claimed durably when the
-   * Turn is admitted.
-   */
+  /** Readiness and the composer label follow the generic effective model. */
   function updateModelLabel(): void {
     const bot = web.value.botSettings;
     const user = web.value.userSettings;
-    const model = bot?.model ?? user?.newBotModelTemplate;
-    web.value.modelSource = bot?.model ? "bot" : model ? "default" : "none";
-    const connection = (user?.connections ?? []).find(
-      (candidate) => candidate.connectionId === model?.connectionId,
-    );
-    const packageInstalled = (user?.packages ?? []).some(
-      (pkg) =>
-        pkg.packageId === connection?.packageId && pkg.state === "installed",
-    );
-    const catalogPackage = web.value.pluginCatalog.find(
-      (pkg) => pkg.packageId === connection?.packageId,
-    );
-    const connectionType = catalogPackage?.connectionTypes.find(
-      (candidate) => candidate.id === connection?.connectionTypeId,
-    );
-    const modelCapabilities = new Set(
-      catalogPackage?.capabilities.flatMap((capability) =>
-        capability.kind === "model" &&
-        connectionType?.capabilities.includes(capability.id)
-          ? [capability.id]
-          : [],
-      ) ?? [],
-    );
-    const authorized =
-      web.value.modelSource === "bot"
-        ? Boolean(
-            bot?.assignments.some(
-              (assignment) =>
-                assignment.connectionId === model?.connectionId &&
-                assignment.packageId === connection?.packageId &&
-                assignment.state === "enabled" &&
-                modelCapabilities.has(assignment.capabilityId),
-            ),
-          )
-        : modelCapabilities.size > 0;
+    if (!bot || !user) {
+      web.value.modelSource = "none";
+      web.value.modelReady = false;
+      web.value.modelLabel = modelRuntimeLabel({ source: "none" });
+      return;
+    }
+    const effective = resolveEffectiveBotModelV1({
+      bot: toRaw(bot),
+      user: toRaw(user),
+      packages: toRaw(web.value.pluginCatalog).map((pkg) => ({
+        packageId: pkg.packageId,
+        version: pkg.version,
+        settings: pkg.settings ?? [],
+        capabilities: pkg.capabilities,
+        connectionTypes: pkg.connectionTypes,
+      })),
+    });
+    // `FrockBotWebData`'s source vocabulary is owned outside this lane. Until
+    // it adopts the core's four sources, both inherited choices are its
+    // existing `default` projection; the label still preserves the exact core
+    // source below.
+    web.value.modelSource =
+      effective.source === "bot"
+        ? "bot"
+        : effective.source === "none"
+          ? "none"
+          : "default";
     web.value.modelReady = Boolean(
-      model && connection?.state === "ready" && packageInstalled && authorized,
+      effective.binding && effective.binding.state !== "unavailable",
+    );
+    const connection = effective.binding?.connection;
+    const catalogPackage = web.value.pluginCatalog.find(
+      (pkg) => pkg.packageId === effective.binding?.packageId,
     );
     const catalogModel = connection?.modelCatalog?.models.find(
-      (candidate) => candidate.providerModelId === model?.providerModelId,
+      (candidate) =>
+        candidate.providerModelId === effective.model?.providerModelId,
     );
     web.value.modelLabel = modelRuntimeLabel({
+      source: effective.source,
       modelDisplayName: catalogModel?.displayName,
-      providerModelId: model?.providerModelId,
+      providerModelId: effective.model?.providerModelId,
       packageDisplayName: catalogPackage?.displayName,
       connectionDisplayName: connection?.displayName,
-      hasModel: Boolean(model),
+      failure: effective.binding?.failure,
     });
   }
 
@@ -1102,9 +1073,16 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     await web.value.loadMcpServers();
   }
 
-  const web = ref<FrockBotWebData>({
+  type ShellWebData = FrockBotWebData & {
+    saveBotPackageSettings(
+      packageId: string,
+      values: Record<string, PackageSettingValueV1>,
+    ): Promise<void>;
+  };
+
+  const web: Ref<ShellWebData> = ref({
     connection: "ready",
-    modelLabel: "No default model",
+    modelLabel: "Model unavailable",
     modelReady: false,
     modelSource: "none",
     settingsAvailable: true,
@@ -1298,8 +1276,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         )
           return;
         web.value.botSettings = settings;
-        // The effective model may be the User's default, so Bot readiness
-        // needs the User settings too. Loading them never fails this read:
+        // The effective model may come from account or platform state, so Bot
+        // readiness needs the User settings too. Loading them never fails this read:
         // `loadUserSettings` reports its own failure.
         if (!web.value.userSettings) await web.value.loadUserSettings();
         if (
@@ -1389,153 +1367,23 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       });
       await web.value.loadBotSettings();
     },
-    async assignCapability(assignment): Promise<void> {
+    async saveBotPackageSettings(
+      packageId: string,
+      values: Record<string, PackageSettingValueV1>,
+    ): Promise<void> {
       const current = web.value.botSettings;
       const botId = web.value.activeBotId;
       if (!current || !botId || !ctx.transport.executeConfiguration) {
         throw new Error("Settings are unavailable");
-      }
-      await executeAssignmentOperation({
-        schemaVersion: 1,
-        type: "bot/assign-capability",
-        commandId: crypto.randomUUID(),
-        botId,
-        expectedRevision: current.revision,
-        assignment,
-      });
-    },
-    async replaceCapability(assignment): Promise<void> {
-      const current = web.value.botSettings;
-      const botId = web.value.activeBotId;
-      if (!current || !botId || !ctx.transport.executeConfiguration) {
-        throw new Error("Settings are unavailable");
-      }
-      await executeAssignmentOperation({
-        schemaVersion: 1,
-        type: "bot/replace-capability",
-        commandId: crypto.randomUUID(),
-        botId,
-        expectedRevision: current.revision,
-        assignment,
-      });
-    },
-    async unassignCapability(assignmentId): Promise<void> {
-      const current = web.value.botSettings;
-      const botId = web.value.activeBotId;
-      if (!current || !botId || !ctx.transport.executeConfiguration) {
-        throw new Error("Settings are unavailable");
-      }
-      await executeAssignmentOperation({
-        schemaVersion: 1,
-        type: "bot/unassign-capability",
-        commandId: crypto.randomUUID(),
-        botId,
-        expectedRevision: current.revision,
-        assignmentId,
-      });
-    },
-    async saveBotModel(model: ModelAssignment): Promise<void> {
-      const current = web.value.botSettings;
-      const user = web.value.userSettings;
-      const botId = web.value.activeBotId;
-      if (!current || !user || !botId || !ctx.transport.executeConfiguration) {
-        throw new Error("Settings are unavailable");
-      }
-      const modelChanged =
-        current.model?.connectionId !== model.connectionId ||
-        current.model?.providerModelId !== model.providerModelId;
-      const connection = user.connections.find(
-        (candidate) => candidate.connectionId === model.connectionId,
-      );
-      if (!modelChanged && connection?.state !== "ready") return;
-      const pkg = web.value.pluginCatalog.find(
-        (candidate) => candidate.packageId === connection?.packageId,
-      );
-      const connectionType = pkg?.connectionTypes.find(
-        (candidate) => candidate.id === connection?.connectionTypeId,
-      );
-      const capability = pkg?.capabilities.find(
-        (candidate) =>
-          candidate.kind === "model" &&
-          connectionType?.capabilities.includes(candidate.id),
-      );
-      if (!connection || connection.state !== "ready" || !pkg || !capability) {
-        throw new Error("The selected Connection has no model capability");
-      }
-      const assigned = current.assignments.some(
-        (assignment) =>
-          assignment.state === "enabled" &&
-          assignment.packageId === pkg.packageId &&
-          assignment.capabilityId === capability.id &&
-          assignment.connectionId === connection.connectionId,
-      );
-      if (assigned && !modelChanged) return;
-      if (!assigned) {
-        // The binding commits inside the Assignment saga's commit phase, so
-        // the Connection claim and the Bot's model are one durable unit. An
-        // existing model Assignment on another Connection is replaced
-        // atomically rather than unassigned and assigned again.
-        const superseded = current.assignments.find(
-          (assignment) =>
-            assignment.packageId === pkg.packageId &&
-            assignment.capabilityId === capability.id,
-        );
-        await executeAssignmentOperation({
-          schemaVersion: 1,
-          type: superseded ? "bot/replace-capability" : "bot/assign-capability",
-          commandId: crypto.randomUUID(),
-          botId,
-          expectedRevision: current.revision,
-          assignment: {
-            assignmentId: superseded?.assignmentId ?? crypto.randomUUID(),
-            packageId: pkg.packageId,
-            capabilityId: capability.id,
-            connectionId: connection.connectionId,
-          },
-          model,
-        });
-        return;
       }
       const receipt = await ctx.transport.executeConfiguration({
         schemaVersion: 1,
-        type: "bot/select-model",
+        type: "bot/set-package-settings",
         commandId: crypto.randomUUID(),
         botId,
         expectedRevision: current.revision,
-        model,
-      });
-      await web.value.loadBotSettings();
-      if (receipt.status === "rejected") {
-        throw new Error(receipt.failure);
-      }
-    },
-    async clearBotModel(): Promise<void> {
-      const current = web.value.botSettings;
-      const botId = web.value.activeBotId;
-      if (!current?.model || !botId || !ctx.transport.executeConfiguration) {
-        throw new Error("Settings are unavailable");
-      }
-      const assignment = current.assignments.find((candidate) => {
-        const capability = web.value.pluginCatalog
-          .find((pkg) => pkg.packageId === candidate.packageId)
-          ?.capabilities.find(
-            (declared) => declared.id === candidate.capabilityId,
-          );
-        return (
-          (candidate.state === "enabled" ||
-            candidate.state === "unavailable") &&
-          candidate.connectionId === current.model?.connectionId &&
-          capability?.kind === "model"
-        );
-      });
-      if (!assignment) throw new Error("Bot model assignment is unavailable");
-      const receipt = await ctx.transport.executeConfiguration({
-        schemaVersion: 1,
-        type: "bot/unbind-model",
-        commandId: crypto.randomUUID(),
-        botId,
-        expectedRevision: current.revision,
-        assignmentId: assignment.assignmentId,
+        packageId,
+        values,
       });
       await web.value.loadBotSettings();
       if (receipt.status === "rejected") throw new Error(receipt.failure);
@@ -1584,30 +1432,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         profile,
       });
       await web.value.loadUserSettings();
-    },
-    async saveDefaultModel(model: ModelAssignment | undefined): Promise<void> {
-      const settings = web.value.userSettings;
-      if (!settings || !ctx.transport.executeConfiguration) {
-        throw new Error("Settings are unavailable");
-      }
-      const current = settings.newBotModelTemplate;
-      if (
-        current?.connectionId === model?.connectionId &&
-        current?.providerModelId === model?.providerModelId &&
-        settings.newBotModelTemplateSource === "user"
-      ) {
-        return;
-      }
-      const receipt = await ctx.transport.executeConfiguration({
-        schemaVersion: 1,
-        type: "user/set-new-bot-model",
-        commandId: crypto.randomUUID(),
-        expectedRevision: settings.revision,
-        ...(model ? { model } : {}),
-        source: "user",
-      });
-      await web.value.loadUserSettings();
-      if (receipt.status === "rejected") throw new Error(receipt.failure);
     },
     async loadPluginCatalog(): Promise<void> {
       if (
@@ -1846,7 +1670,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       // Enablement is projected onto the installation row the Plugins surface
       // renders, so the toggle reads back what the User authority recorded.
       await web.value.loadPluginCatalog();
-      if (receipt.status === "rejected") throw new Error(receipt.failure);
+      if (receipt.status === "rejected") {
+        web.value.settingsError = receipt.failure;
+        throw new Error(receipt.failure);
+      }
     },
     async savePackageSettings(
       packageId: string,
@@ -2187,7 +2014,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           runId: pendingRunId,
           role: "assistant",
           text: aborted
-            ? "Request stopped locally; admission may still be durable."
+            ? "Request stopped locally; checking whether it started."
             : "Confirming whether this Turn was admitted.",
           at: optimisticAt,
           status: "interrupted",
@@ -2246,7 +2073,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       web.value.activeRun = {
         runId,
         status: "running",
-        message: "Reconciliation requested; waiting for durable progress.",
+        message: "Reconciliation requested; checking progress.",
         canResume: false,
       };
       const botId = web.value.activeBotId;
@@ -2314,11 +2141,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     async abort() {
       activeRequest?.abort();
     },
-  });
+  } satisfies Partial<ShellWebData>) as unknown as Ref<ShellWebData>;
 
   return [
     ctx.provide(clientSurfaceRegistryKey, surfaces),
-    ctx.provide(frockBotWebDataKey, web),
+    // The shared client projection is updated by the contracts lane. This cast
+    // is the seam between its retired methods and this lane's replacement.
+    ctx.provide(frockBotWebDataKey, web as unknown as Ref<FrockBotWebData>),
     ctx.slot({
       slot: "authenticated-root",
       order: 10_000,

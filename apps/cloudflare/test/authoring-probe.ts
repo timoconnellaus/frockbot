@@ -35,7 +35,7 @@ import {
   createR2PackageArtifactStore,
   isolateBindingDigestV1,
   type BotCapabilitiesPropsV1,
-  type IsolateAssignmentV1,
+  type IsolateCapabilityV1,
 } from "@frockbot/plugin-shell/backend-isolate";
 import {
   authorshipFailureKey,
@@ -73,7 +73,7 @@ export interface AuthoringProbeTurn {
   botId: string;
   tool: string;
   input: unknown;
-  assignments?: IsolateAssignmentV1[];
+  capabilities?: IsolateCapabilityV1[];
 }
 
 const PROBE_BOOTSTRAP_AT = "2026-08-31T00:00:00.000Z";
@@ -225,7 +225,7 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
     // workers-types cannot infer the generated local RPC stubs.
     const exports = this.ctx.exports as unknown as ProbeExports;
-    const assignments = turn.assignments ?? [];
+    const capabilities = turn.capabilities ?? [];
     const host = createShellCompositionHost({
       admitEffect: () => Promise.resolve(true),
       botId: turn.botId,
@@ -250,13 +250,15 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
               botId: turn.botId,
               generationId: generation.generationId,
               packageId: member.packageId,
-              assignments: structuredClone(assignments),
+              capabilities: structuredClone(capabilities),
             },
           }),
-        bindingDigest: await isolateBindingDigestV1(
-          assignments,
-          generation.generationId,
-        ),
+        bindingDigest: await isolateBindingDigestV1({
+          userId: turn.userId,
+          botId: turn.botId,
+          generationId: generation.generationId,
+          capabilities,
+        }),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
       },
     });

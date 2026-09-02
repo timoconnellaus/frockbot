@@ -178,7 +178,7 @@ describe("Bot isolate contribution host", () => {
   test("a caller that omits the binding digest does not compile", () => {
     // @ts-expect-error the binding digest is required: an isolate loaded with
     // no digest of its granted bindings would share a loader id across
-    // Assignments and generations.
+    // enabled bindings and generations.
     void botIsolateModuleSetHashV1(CONTENT_HASH);
     expect(true).toBe(true);
   });
@@ -191,20 +191,60 @@ describe("Bot isolate contribution host", () => {
     expect(loads[0]!.loaderId).not.toBe(other.loads[0]!.loaderId);
   });
 
-  test("keys the loader id on the User, the Bot and the module set", async () => {
+  test("reuses the loader id only for the same Bot, generation, and enabled set", async () => {
     const { host: subject, loads } = host();
     await subject.prepare(descriptor());
-    const other = host({ botId: "bot-2" });
-    await other.host.prepare(descriptor());
+    const same = host();
+    await same.host.prepare(descriptor());
     const expected = await botIsolateModuleSetHashV1(
       CONTENT_HASH,
       BINDING_DIGEST,
     );
-    expect(loads[0]!.loaderId).toBe(`bot-package:user-1:bot-1:${expected}`);
-    expect(other.loads[0]!.loaderId).toBe(
-      `bot-package:user-1:bot-2:${expected}`,
+    expect(loads[0]!.loaderId).toBe(`bot-package:user-1:${expected}`);
+    expect(same.loads[0]!.loaderId).toBe(loads[0]!.loaderId);
+  });
+
+  test("changes the loader id with the Bot, generation, or enabled set", async () => {
+    const first = host();
+    const otherBot = host({ botId: "bot-2", bindingDigest: "d".repeat(64) });
+    const otherGeneration = host({
+      generationId: "gen-2",
+      bindingDigest: "e".repeat(64),
+    });
+    const otherEnabledSet = host({ bindingDigest: "f".repeat(64) });
+
+    await Promise.all([
+      first.host.prepare(descriptor()),
+      otherBot.host.prepare(descriptor()),
+      otherGeneration.host.prepare(descriptor()),
+      otherEnabledSet.host.prepare(descriptor()),
+    ]);
+
+    const loaderIds = [
+      first.loads[0]!.loaderId,
+      otherBot.loads[0]!.loaderId,
+      otherGeneration.loads[0]!.loaderId,
+      otherEnabledSet.loads[0]!.loaderId,
+    ];
+    expect(new Set(loaderIds).size).toBe(loaderIds.length);
+  });
+
+  test("never shares a loader id across Users", async () => {
+    const first = host();
+    const otherUser = host({ userId: "user-2" });
+
+    await Promise.all([
+      first.host.prepare(descriptor()),
+      otherUser.host.prepare(descriptor()),
+    ]);
+
+    expect(first.loads[0]!.loaderId).toMatch(
+      /^bot-package:user-1:[0-9a-f]{64}$/,
     );
-    expect(loads[0]!.loaderId).not.toBe(other.loads[0]!.loaderId);
+    expect(otherUser.loads[0]!.loaderId).toMatch(
+      /^bot-package:user-2:[0-9a-f]{64}$/,
+    );
+    expect(otherUser.loads[0]!.loaderId).not.toBe(first.loads[0]!.loaderId);
   });
 
   test("health failure is a prepare failure with a diagnostic", async () => {

@@ -10,7 +10,6 @@ import { TASK_DESKTOP_LEASE_KEY } from "./storage-keys.js";
 
 const MODEL = {
   binding: {
-    assignmentId: "asg-1",
     packageId: "provider-ollama-cloud",
     capabilityId: "ollama-cloud-models",
     connectionId: "conn-1",

@@ -4,8 +4,7 @@
 // it back through the gateway route a browser uses, installs an entry from the
 // pinned generation, and then uninstalls it — checking on the way that an
 // install off the pinned generation is refused with a visible failure and that
-// uninstalling leaves a dependent Assignment as an unavailable tombstone rather
-// than deleting it (ADR 0003).
+// uninstalling leaves the User's Connection untouched (ADR 0019).
 //
 // Nothing here reaches R2 on the product's behalf except the seed: every read
 // crosses the gateway, exactly as the browser and the Bot Durable Object do.
@@ -19,14 +18,12 @@ import {
   type CatalogEntryV1,
   type CatalogIndexV1,
 } from "@frockbot/catalog-core";
-import type {
-  BotSettingsViewV1,
-  UserSettingsViewV1,
-} from "@frockbot/configuration-core";
+import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   asUser,
+  CUSTOM_MODELS_PACKAGE_ID,
   expectOkJson,
   freshUserId,
   OLLAMA_GOOD_API_KEY,
@@ -165,17 +162,26 @@ describe("the remote Package Catalog", () => {
     );
   });
 
-  it("installs from the pinned generation and uninstalls to a tombstone", async () => {
+  it("installs from the pinned generation and uninstalls only the row", async () => {
     const userId = freshUserId("catalog-install");
-    const botId = "catalog-bot";
     const pinned = await readUserSettings(userId);
 
     await expectOkJson(
       await postAsUser(userId, "/api/settings", {
         schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "enable-custom-models-for-catalog",
+        expectedRevision: pinned.revision,
+        packageId: CUSTOM_MODELS_PACKAGE_ID,
+        enabled: true,
+      }),
+    );
+    await expectOkJson(
+      await postAsUser(userId, "/api/settings", {
+        schemaVersion: 1,
         type: "user/install-package",
         commandId: "install-from-catalog",
-        expectedRevision: pinned.revision,
+        expectedRevision: pinned.revision + 1,
         packageId: PROVISIONED_MODEL.packageId,
         version: "0.0.1",
         catalogId: PROVISIONED_MODEL.packageId,
@@ -211,7 +217,7 @@ describe("the remote Package Catalog", () => {
       PROVISIONED_MODEL.packageId,
     );
 
-    // A Connection and a Bot, so there is a real Assignment to tombstone.
+    // The User's Connection is independent durable state.
     const connection = (await expectOkJson(
       await postAsUser(userId, "/api/connections", {
         schemaVersion: 1,
@@ -223,48 +229,6 @@ describe("the remote Package Catalog", () => {
         apiKey: OLLAMA_GOOD_API_KEY,
       }),
     )) as { connectionId: string };
-
-    const created = await postAsUser(userId, "/api/bots", {
-      schemaVersion: 1,
-      type: "bot/create",
-      commandId: "create-catalog-bot",
-      expectedRevision: 0,
-      botId,
-      name: "Catalog Bot",
-    });
-    expect(created.status).toBe(201);
-
-    const botSettings = (await expectOkJson(
-      await asUser(userId, `/api/bots/${botId}/settings`),
-    )) as BotSettingsViewV1;
-    await expectOkJson(
-      await postAsUser(userId, `/api/bots/${botId}/settings`, {
-        schemaVersion: 1,
-        type: "bot/assign-capability",
-        commandId: "assign-catalog-model",
-        botId,
-        expectedRevision: botSettings.revision,
-        assignment: {
-          assignmentId: "catalog-model",
-          packageId: PROVISIONED_MODEL.packageId,
-          capabilityId: "ollama-cloud-models",
-          connectionId: connection.connectionId,
-        },
-        model: {
-          connectionId: connection.connectionId,
-          providerModelId: PROVISIONED_MODEL.providerModelId,
-        },
-      }),
-    );
-
-    const assigned = (await expectOkJson(
-      await asUser(userId, `/api/bots/${botId}/settings`),
-    )) as BotSettingsViewV1;
-    expect(
-      assigned.assignments.find(
-        (assignment) => assignment.assignmentId === "catalog-model",
-      ),
-    ).toMatchObject({ state: "enabled" });
 
     const beforeUninstall = await readUserSettings(userId);
     await expectOkJson(
@@ -285,14 +249,5 @@ describe("the remote Package Catalog", () => {
     expect(uninstalled.connections.map((item) => item.connectionId)).toContain(
       connection.connectionId,
     );
-
-    const tombstoned = (await expectOkJson(
-      await asUser(userId, `/api/bots/${botId}/settings`),
-    )) as BotSettingsViewV1;
-    expect(
-      tombstoned.assignments.find(
-        (assignment) => assignment.assignmentId === "catalog-model",
-      ),
-    ).toMatchObject({ state: "unavailable" });
   });
 });

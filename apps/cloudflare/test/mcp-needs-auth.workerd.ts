@@ -180,17 +180,16 @@ async function fixture() {
     return view!;
   };
 
-  /** One mount of the Assignment, as an admitted Turn resolves it. */
+  /** One mount of the capability, as an admitted Turn resolves it. */
   const mount = async (connectionId: string) => {
     const outcomes: McpMountOutcomeV1[] = [];
     const failures: string[] = [];
     const view = await connection(connectionId);
     const plugin = await createConfiguredMcpRuntimeContribution({
-      assignment: {
+      capability: {
         packageId: "mcp",
         capabilityId: "mcp-tools",
         connectionId,
-        state: "enabled",
       },
       userId: ACCOUNT,
       readSecret: (name) =>
@@ -238,7 +237,7 @@ describe("a server that stops accepting its token", () => {
     const world = await fixture();
     const connectionId = await world.authorize("needs-auth-1", SETTINGS);
 
-    // Working: the Assignment mounts and the server's tool is offered.
+    // Working: the enabled capability mounts and offers the server's tool.
     const before = await world.mount(connectionId);
     expect(before.mounted).toBe(true);
     expect(before.tools).toContain("mcp__oauth_example__echo");

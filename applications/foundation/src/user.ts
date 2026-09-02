@@ -55,9 +55,9 @@ import {
   type OllamaCloudUserBackendContribution,
 } from "@frockbot/plugin-provider-ollama-cloud/user";
 import {
-  createWorkersAiUserBackendPlugin,
-  type WorkersAiUserBackendContribution,
-} from "@frockbot/plugin-provider-workers-ai/user";
+  createFlockAiUserBackendPlugin,
+  type FlockAiUserBackendContribution,
+} from "@frockbot/plugin-provider-flock-ai/user";
 import {
   createUserSettingsBackendPlugin,
   type UserPackageCatalogHost,
@@ -143,6 +143,36 @@ export interface MountedFoundationUserBackend {
   dispose(): Promise<void>;
 }
 
+/**
+ * Packages seeded into a new User include every dependency of an explicitly
+ * seeded Package. This lets a default-disabled Package be switched on without
+ * first repairing invisible dependency rows.
+ */
+export function foundationDefaultPackageIds(
+  plan: Pick<ApplicationPlan, "packages">,
+): ReadonlySet<string> {
+  const packages = new Map(plan.packages.map((pkg) => [pkg.id, pkg]));
+  const packageIds = new Set(
+    plan.packages
+      .filter(
+        (pkg) =>
+          pkg.manifest.defaultEnablement !== undefined ||
+          (pkg.manifest.configuration?.connectionTypes.length ?? 0) > 0 ||
+          (pkg.manifest.configuration?.capabilities.length ?? 0) > 0,
+      )
+      .map((pkg) => pkg.id),
+  );
+
+  for (const packageId of packageIds) {
+    const pkg = packages.get(packageId);
+    for (const dependencyId of Object.keys(pkg?.manifest.dependencies ?? {})) {
+      if (packages.has(dependencyId)) packageIds.add(dependencyId);
+    }
+  }
+
+  return packageIds;
+}
+
 export async function createFoundationUserBackendContributions(
   plan: ApplicationPlan,
   host: {
@@ -187,8 +217,8 @@ export async function createFoundationUserBackendContributions(
       ): Promise<string | undefined>;
       /**
        * The import half. The writer carries the importing User's own commands
-       * and nothing wider — there is no method on it for a Connection or an
-       * Assignment, so an import cannot create either. `readPublishedShare`
+       * and nothing wider — there is no method on it for a Connection or
+       * model binding, so an import cannot create either. `readPublishedShare`
        * routes by the share id's owner half, which is the only way this
        * application ever reaches another User's Durable Object.
        */
@@ -222,10 +252,11 @@ export async function createFoundationUserBackendContributions(
     };
   },
 ): Promise<MountedFoundationUserBackend> {
+  const defaultPackageIds = foundationDefaultPackageIds(plan);
   let settings: UserSettingsBackendContribution | undefined;
   let credentials: CredentialUserBackendContribution | undefined;
   let ollama: OllamaCloudUserBackendContribution | undefined;
-  let workersAi: WorkersAiUserBackendContribution | undefined;
+  let flockAi: FlockAiUserBackendContribution | undefined;
   let mcp: McpUserBackendContribution | undefined;
   let flock: FlockUserBackendContribution | undefined;
   let botTemplate: BotTemplateUserBackendContribution | undefined;
@@ -244,7 +275,7 @@ export async function createFoundationUserBackendContributions(
         | UserSettingsBackendContribution
         | CredentialUserBackendContribution
         | OllamaCloudUserBackendContribution
-        | WorkersAiUserBackendContribution
+        | FlockAiUserBackendContribution
         | McpUserBackendContribution
         | FlockUserBackendContribution
         | BotTemplateUserBackendContribution
@@ -267,10 +298,10 @@ export async function createFoundationUserBackendContributions(
             availablePackages: plan.packages.map((pkg) => ({
               packageId: pkg.id,
               version: pkg.version,
+              dependencies: pkg.manifest.dependencies,
+              defaultEnablement: pkg.manifest.defaultEnablement,
               settings: pkg.manifest.configuration?.settings ?? [],
-              installByDefault:
-                (pkg.manifest.configuration?.connectionTypes.length ?? 0) > 0 ||
-                (pkg.manifest.configuration?.capabilities.length ?? 0) > 0,
+              installByDefault: defaultPackageIds.has(pkg.id),
             })),
             ...(host.catalog ? { catalog: host.catalog } : {}),
           },
@@ -329,17 +360,17 @@ export async function createFoundationUserBackendContributions(
       },
     ],
     [
-      "@frockbot/plugin-provider-workers-ai/user",
+      "@frockbot/plugin-provider-flock-ai/user",
       (lifecycle) => {
         if (!settings) {
-          throw new Error("Workers AI requires the Settings Contribution");
+          throw new Error("Flock AI requires the Settings Contribution");
         }
         const userSettings = settings;
-        return createWorkersAiUserBackendPlugin(
+        return createFlockAiUserBackendPlugin(
           { storage: host.storage, settings },
           {
-            mount(value: WorkersAiUserBackendContribution) {
-              workersAi = value;
+            mount(value: FlockAiUserBackendContribution) {
+              flockAi = value;
               connections.set(value.packageId, value);
               const unregister =
                 userSettings.registerConnectionCommandOwner(value);
@@ -530,81 +561,6 @@ export async function createFoundationUserBackendContributions(
             storage: host.storage,
             commandBotLifecycle: host.commandBotLifecycle,
             readBotLifecycle: host.readBotLifecycle,
-            readUserSettings: (storage, userId) => {
-              if (!settings) {
-                throw new Error("User settings Contribution is unavailable");
-              }
-              return settings.read(userId, storage);
-            },
-            availablePackages: plan.packages.map((pkg) => ({
-              packageId: pkg.id,
-              version: pkg.version,
-              capabilities: pkg.manifest.configuration?.capabilities ?? [],
-              connectionTypes:
-                pkg.manifest.configuration?.connectionTypes ?? [],
-            })),
-            claimInitialModelBinding: async (storage, input) => {
-              if (!settings) {
-                throw new Error("User settings Contribution is unavailable");
-              }
-              const user = await settings.readSnapshot(storage);
-              const connection = user.connections.find(
-                (candidate) =>
-                  candidate.connectionId === input.model.connectionId,
-              );
-              const installation = user.packages.find(
-                (candidate) =>
-                  candidate.packageId === connection?.packageId &&
-                  candidate.state === "installed",
-              );
-              const pkg = plan.packages.find(
-                (candidate) =>
-                  candidate.id === connection?.packageId &&
-                  candidate.version === installation?.version,
-              );
-              const connectionType =
-                pkg?.manifest.configuration?.connectionTypes.find(
-                  (candidate) => candidate.id === connection?.connectionTypeId,
-                );
-              const capability = pkg?.manifest.configuration?.capabilities.find(
-                (candidate) =>
-                  candidate.kind === "model" &&
-                  connectionType?.capabilities.includes(candidate.id) &&
-                  candidate.connectionTypes.includes(connectionType.id),
-              );
-              if (
-                connection?.state !== "ready" ||
-                !installation ||
-                !pkg ||
-                !connectionType ||
-                !capability
-              ) {
-                return undefined;
-              }
-              const claimed = await settings.claimConnectionDependency(
-                input.userId,
-                connection.connectionId,
-                input.botId,
-                input.generation,
-                {
-                  schemaVersion: 1,
-                  packageId: pkg.id,
-                  packageVersion: pkg.version,
-                  capabilityId: capability.id,
-                  connectionTypeIds: [...capability.connectionTypes],
-                },
-                storage,
-              );
-              return claimed
-                ? {
-                    assignmentId: input.generation,
-                    packageId: pkg.id,
-                    capabilityId: capability.id,
-                    connectionId: connection.connectionId,
-                    state: "enabled" as const,
-                  }
-                : undefined;
-            },
           },
           {
             mount(value: FlockUserBackendContribution) {
@@ -619,7 +575,7 @@ export async function createFoundationUserBackendContributions(
     | UserSettingsBackendContribution
     | CredentialUserBackendContribution
     | OllamaCloudUserBackendContribution
-    | WorkersAiUserBackendContribution
+    | FlockAiUserBackendContribution
     | McpUserBackendContribution
     | FlockUserBackendContribution
     | BotTemplateUserBackendContribution
@@ -641,7 +597,7 @@ export async function createFoundationUserBackendContributions(
     !settings ||
     !credentials ||
     !ollama ||
-    !workersAi ||
+    !flockAi ||
     !mcp ||
     !flock ||
     !botTemplate ||
@@ -652,7 +608,7 @@ export async function createFoundationUserBackendContributions(
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Workers AI, MCP, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Flock AI, MCP, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
     );
   }
   return {

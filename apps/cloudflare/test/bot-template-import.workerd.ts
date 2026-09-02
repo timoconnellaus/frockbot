@@ -206,7 +206,7 @@ describe("importing a Bot template in workerd", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  test("creates no Connection and no Assignment for the imported Bot", async () => {
+  test("keeps the imported Bot on account-shaped configuration", async () => {
     await seedCatalog();
     const ownerId = `tpl-owner-${crypto.randomUUID()}`;
     const importerId = `tpl-importer-${crypto.randomUUID()}`;
@@ -220,26 +220,18 @@ describe("importing a Bot template in workerd", () => {
     // represented by workers-types.
     const settingsOf = async (
       botId: string,
-    ): Promise<{ assignments: { connectionId?: string }[]; model?: unknown }> =>
+    ): Promise<{ packageValues: Record<string, Record<string, unknown>> }> =>
       (
         env.BOT_STATES.getByName(`${importerId}:${botId}`) as unknown as {
           readConfiguration(input: unknown): Promise<{
-            assignments: { connectionId?: string }[];
-            model?: unknown;
+            packageValues: Record<string, Record<string, unknown>>;
           }>;
         }
       ).readConfiguration({ schemaVersion: 1, userId: importerId, botId });
     const botSettings = await settingsOf(planned.botId);
-    // The Bot follows its User's default model like any newly created Bot, and
-    // holds no Assignment the template put there: it carries exactly what the
-    // importer's own Bot carries, and none of it names a Connection, because
-    // an import never brings a Connection across.
+    // The imported Bot follows the User's model and starts with the same
+    // Package-scoped Bot settings as a Bot created directly by that User.
     const ownBot = await settingsOf("importer-home");
-    expect(botSettings.assignments).toEqual(ownBot.assignments);
-    expect(
-      botSettings.assignments.every(
-        (assignment) => assignment.connectionId === undefined,
-      ),
-    ).toBe(true);
+    expect(botSettings.packageValues).toEqual(ownBot.packageValues);
   });
 });

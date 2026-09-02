@@ -153,7 +153,7 @@ function isPackageInstalled(packageId: string): boolean {
   <div class="package-catalog-surface">
     <p class="catalog-intro">
       Browse published Packages. Installing one makes it available to every Bot
-      you own; each Bot still needs an explicit Assignment to use it.
+      you own when the Package is enabled.
     </p>
     <label class="catalog-search">
       <UiIcon name="search" />
@@ -239,8 +239,8 @@ function isPackageInstalled(packageId: string): boolean {
               >
                 <p>
                   Uninstalling {{ entry.displayName }} removes it from every
-                  Bot. Its Assignments stay visible as unavailable so you can
-                  repair or remove them. Connections and credentials are kept.
+                  Bot. Connections and credentials are kept, and become usable
+                  again if you reinstall and enable the Package.
                 </p>
                 <div class="catalog-actions">
                   <UiButton @click="uninstallingPackageId = undefined">

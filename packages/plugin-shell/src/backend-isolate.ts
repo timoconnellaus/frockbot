@@ -8,9 +8,10 @@
 // acquires its credential lease through the existing provider path before a
 // single byte leaves the account.
 import type {
+  IsolateCapabilityFailureV1,
   IsolateAuthorityRequestV1,
   IsolateCapabilityDescriptorV1,
-  IsolateModelInvocationV1,
+  IsolateModelOutcomeV1,
   IsolatePendingDecisionV1,
   LlmStreamEvent,
   NormalizedModelRequest,
@@ -20,6 +21,7 @@ import {
   encodeIsolateModelEventLineV1,
 } from "@frockbot/kernel-contracts";
 import type { BotIsolateArtifactStore } from "@frockbot/kernel-composition/isolate";
+import type { EnabledCapabilityV1 } from "@frockbot/configuration-core";
 
 /**
  * The compatibility date every Bot isolate is loaded with. Pinned beside the
@@ -36,8 +38,8 @@ export interface BotCapabilitiesPropsV1 {
   botId: string;
   generationId: string;
   packageId: string;
-  /** Already resolved and filtered to enabled Assignments by the authority. */
-  assignments: IsolateAssignmentV1[];
+  /** The User's enabled set, already resolved by the authority. */
+  capabilities: IsolateCapabilityV1[];
 }
 
 export const ISOLATE_DECISION_PREFIX = "isolate:decision:";
@@ -78,25 +80,17 @@ export interface IsolateCapabilityStore {
   list<T>(options: { prefix: string }): Promise<Map<string, T>>;
 }
 
-/** One enabled Assignment, already resolved the way `plugin-shell` resolves them. */
-export interface IsolateAssignmentV1 {
-  assignmentId: string;
-  packageId: string;
-  capabilityId: string;
-  kind: IsolateCapabilityDescriptorV1["kind"];
-  connectionId?: string;
-  providerModelId?: string;
-}
+/** One account-wide Capability, already resolved from User enablement. */
+export type IsolateCapabilityV1 = EnabledCapabilityV1;
 
 /**
- * The Bot's durable model binding, resolved by the authority from the Bot's
- * own configuration and the User's Connection — never from anything the Bot
+ * The Bot's effective model binding, resolved by the authority from generic
+ * Package settings and the User's Connection — never from anything the Bot
  * supplied. An `invokeModel` request is authorized only when it names exactly
  * this provider and this model, and it is forwarded carrying exactly this
  * binding.
  */
 export interface IsolateModelBindingV1 {
-  assignmentId: string;
   packageId: string;
   capabilityId: string;
   connectionId: string;
@@ -105,6 +99,15 @@ export interface IsolateModelBindingV1 {
   connectionGeneration?: string;
   catalogGeneration?: string;
 }
+
+/** A configured model binding whose Connection cannot currently be used. */
+export interface IsolateUnavailableModelBindingV1 {
+  provider?: string;
+  providerModelId: string;
+}
+
+export const ISOLATE_MODEL_UNAVAILABLE_MESSAGE =
+  "the enabled model binding is unavailable";
 
 /** The bound Bot-supplied correlation id: a field, never a key, and never unbounded. */
 export const MAX_ISOLATE_REQUEST_ID = 256;
@@ -122,14 +125,17 @@ export interface IsolateCapabilityHostOptions {
   botId: string;
   packageId: string;
   generationId: string;
-  /** Assignment-derived and nothing else. */
-  assignments: readonly IsolateAssignmentV1[];
+  /** User-enabled and nothing else. */
+  capabilities: readonly IsolateCapabilityV1[];
   /**
-   * The one model binding this Bot durably holds, or absent when it holds
-   * none. Absent means every model request is a pending decision.
+   * The one ready model binding resolved for this Bot. Absent without an
+   * unavailable binding means every model request is an authority-widening
+   * pending decision.
    */
   modelBinding?: IsolateModelBindingV1;
-  /** Absent when the Bot has no enabled model Assignment at all. */
+  /** Present when the configured binding is held but its Connection is unavailable. */
+  unavailableModelBinding?: IsolateUnavailableModelBindingV1;
+  /** Present only while the ready binding can reach its provider path. */
   modelPath?: IsolateModelPath;
   now?(): Date;
   newId?(): string;
@@ -138,26 +144,24 @@ export interface IsolateCapabilityHostOptions {
 export interface IsolateCapabilityHost {
   list(): Promise<IsolateCapabilityDescriptorV1[]>;
   requestAuthority(request: unknown): Promise<IsolatePendingDecisionV1>;
-  invokeModel(
-    request: NormalizedModelRequest,
-  ): Promise<IsolateModelInvocationV1>;
+  invokeModel(request: NormalizedModelRequest): Promise<IsolateModelOutcomeV1>;
   pendingDecisions(): Promise<IsolatePendingAuthorityDecisionV1[]>;
   recordedModelRequests(): Promise<IsolateModelRequestRecordV1[]>;
 }
 
 /**
- * The enabled model Assignment that can serve this request, if any.
+ * The enabled model Capability that can serve this request, if any.
  *
- * An Assignment authorizes exactly one Package, one Connection, and one
- * provider model: the Bot's durable binding. A request naming any other
- * provider or model resolves to nothing, whatever the Bot claims about it —
- * the Bot-supplied `modelBinding` is never read here or anywhere downstream.
+ * The authority resolves the effective model against one User-enabled
+ * Package, Connection, and Capability. A request naming any other provider or
+ * model resolves to nothing, whatever the Bot claims about it — the
+ * Bot-supplied `modelBinding` is never read here or anywhere downstream.
  */
-export function matchingModelAssignmentV1(
-  assignments: readonly IsolateAssignmentV1[],
+export function matchingModelCapabilityV1(
+  capabilities: readonly IsolateCapabilityV1[],
   binding: IsolateModelBindingV1 | undefined,
   request: NormalizedModelRequest,
-): IsolateAssignmentV1 | undefined {
+): IsolateCapabilityV1 | undefined {
   if (!binding) return undefined;
   if (
     request.provider !== binding.provider ||
@@ -165,14 +169,12 @@ export function matchingModelAssignmentV1(
   ) {
     return undefined;
   }
-  return assignments.find(
-    (assignment) =>
-      assignment.kind === "model" &&
-      assignment.assignmentId === binding.assignmentId &&
-      assignment.packageId === binding.packageId &&
-      assignment.capabilityId === binding.capabilityId &&
-      assignment.connectionId === binding.connectionId &&
-      assignment.providerModelId === binding.providerModelId,
+  return capabilities.find(
+    (capability) =>
+      capability.kind === "model" &&
+      capability.packageId === binding.packageId &&
+      capability.capabilityId === binding.capabilityId &&
+      capability.connectionId === binding.connectionId,
   );
 }
 
@@ -208,9 +210,9 @@ export function createIsolateCapabilityHost(
   return {
     list(): Promise<IsolateCapabilityDescriptorV1[]> {
       return Promise.resolve(
-        options.assignments.map((assignment) => ({
-          capabilityId: assignment.capabilityId,
-          kind: assignment.kind,
+        options.capabilities.map((capability) => ({
+          capabilityId: capability.capabilityId,
+          kind: capability.kind,
         })),
       );
     },
@@ -221,26 +223,44 @@ export function createIsolateCapabilityHost(
       const decoded: IsolateAuthorityRequestV1 =
         decodeIsolateAuthorityRequestV1(request);
       // Self-modification never widens authority, even when the capability is
-      // already assigned: the answer is a decision the User makes.
+      // already enabled: the answer is a decision the User makes.
       return await recordDecision(decoded.capabilityId, decoded.reason);
     },
 
     async invokeModel(
       request: NormalizedModelRequest,
-    ): Promise<IsolateModelInvocationV1> {
+    ): Promise<IsolateModelOutcomeV1> {
       if (request.requestId.length > MAX_ISOLATE_REQUEST_ID) {
         throw new Error("isolate model request requestId is not bounded");
       }
       const binding = options.modelBinding;
-      const assignment = matchingModelAssignmentV1(
-        options.assignments,
+      const capability = matchingModelCapabilityV1(
+        options.capabilities,
         binding,
         request,
       );
-      if (!assignment || !binding || !options.modelPath) {
+      const unavailableBinding = options.unavailableModelBinding;
+      if (
+        unavailableBinding &&
+        request.model === unavailableBinding.providerModelId &&
+        (unavailableBinding.provider === undefined ||
+          request.provider === unavailableBinding.provider)
+      ) {
+        return {
+          status: "unavailable",
+          reason: ISOLATE_MODEL_UNAVAILABLE_MESSAGE,
+        } satisfies IsolateCapabilityFailureV1;
+      }
+      if (capability && binding && !options.modelPath) {
+        return {
+          status: "unavailable",
+          reason: ISOLATE_MODEL_UNAVAILABLE_MESSAGE,
+        } satisfies IsolateCapabilityFailureV1;
+      }
+      if (!capability || !binding || !options.modelPath) {
         return await recordDecision(
           `models:${request.provider}:${request.model}`,
-          `Bot Package "${options.packageId}" asked to invoke a model with no matching enabled Assignment`,
+          `Bot Package "${options.packageId}" asked to invoke a model with no matching enabled Capability`,
         );
       }
       // The binding the provider path receives is the authority's, never the
@@ -269,7 +289,7 @@ export function createIsolateCapabilityHost(
         botId: options.botId,
         packageId: options.packageId,
         generationId: options.generationId,
-        capabilityId: assignment.capabilityId,
+        capabilityId: capability.capabilityId,
         request: forwarded,
         recordedAt: now().toISOString(),
       };
@@ -346,31 +366,49 @@ export function isolateModelEventStreamV1(
 }
 
 /**
- * The content address of the bindings an isolate is loaded with: its
- * Assignments and the Composition generation whose `CAPABILITIES` stub is
- * baked into its `env`. A loader id is served from cache, so a Bot whose
- * Assignments change must get a different isolate rather than one that keeps a
- * revoked binding — and a new generation must get a different isolate rather
- * than one whose `env` still names the generation it was first loaded under.
- * Both are bindings the isolate was granted, so both belong in this digest and
- * the loader id stays derived from the artifact set and the binding digest
- * alone.
+ * The content address of every binding baked into an isolate's `env`: User,
+ * Bot, and Composition generation from `IDENTITY` and the `CAPABILITIES` props,
+ * plus the User-enabled capability set. A loader id is served from cache, so
+ * any change must produce a different digest or a stale isolate will answer
+ * under the wrong identity or authority. Identical artifacts share an isolate
+ * only when all of these binding inputs are identical (AGENTS.md Package
+ * composition; ADR 0019).
  */
-export async function isolateBindingDigestV1(
-  assignments: readonly IsolateAssignmentV1[],
-  generationId: string,
-): Promise<string> {
-  const ordered = [...assignments]
-    .map((assignment) => ({
-      assignmentId: assignment.assignmentId,
-      packageId: assignment.packageId,
-      capabilityId: assignment.capabilityId,
-      kind: assignment.kind,
-      connectionId: assignment.connectionId ?? null,
-      providerModelId: assignment.providerModelId ?? null,
+export async function isolateBindingDigestV1(input: {
+  userId: string;
+  botId: string;
+  generationId: string;
+  capabilities: readonly IsolateCapabilityV1[];
+}): Promise<string> {
+  const ordered = [...input.capabilities]
+    .map((capability) => ({
+      packageId: capability.packageId,
+      capabilityId: capability.capabilityId,
+      kind: capability.kind,
+      connectionId: capability.connectionId ?? null,
     }))
-    .sort((left, right) => left.assignmentId.localeCompare(right.assignmentId));
-  return await sha256Hex(JSON.stringify({ generationId, ordered }));
+    .sort(
+      (left, right) =>
+        compareIsolateIdentifierV1(left.packageId, right.packageId) ||
+        compareIsolateIdentifierV1(left.capabilityId, right.capabilityId) ||
+        compareIsolateIdentifierV1(left.kind, right.kind) ||
+        compareIsolateIdentifierV1(
+          left.connectionId ?? "",
+          right.connectionId ?? "",
+        ),
+    );
+  return await sha256Hex(
+    JSON.stringify({
+      userId: input.userId,
+      botId: input.botId,
+      generationId: input.generationId,
+      ordered,
+    }),
+  );
+}
+
+function compareIsolateIdentifierV1(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 async function sha256Hex(value: string): Promise<string> {

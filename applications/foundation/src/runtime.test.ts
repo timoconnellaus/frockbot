@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   compileFoundationApplication,
   compileFoundationApplicationDeclarations,
-  createFoundationAssignedRuntimePackages,
+  createFoundationEnabledRuntimePackages,
   mergeFoundationRuntimePackages,
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
@@ -12,6 +12,7 @@ import {
 } from "./runtime.js";
 import { Context, type Plugin } from "cordis";
 import { resolveFoundationTrustedDesktopContribution } from "./desktop.js";
+import { foundationDefaultPackageIds } from "./user.js";
 
 describe("foundation application", () => {
   test("resolves trusted desktop declarations without asynchronous startup work", () => {
@@ -42,6 +43,7 @@ describe("foundation application", () => {
       "clock",
       "computer",
       "credentials",
+      "custom-models",
       "desktop-clipboard",
       "desktop-directory-picker",
       "desktop-notifications",
@@ -56,10 +58,10 @@ describe("foundation application", () => {
       "mobile-clipboard",
       "mobile-notifications",
       "package-publisher",
+      "provider-flock-ai",
       "provider-foundation",
       "web",
       "provider-ollama-cloud",
-      "provider-workers-ai",
       "routines",
       "search",
       "skills",
@@ -78,8 +80,8 @@ describe("foundation application", () => {
         "user-machine",
         "mcp",
         "package-publisher",
+        "provider-flock-ai",
         "provider-ollama-cloud",
-        "provider-workers-ai",
         "routines",
         "search",
         "subagents",
@@ -101,10 +103,10 @@ describe("foundation application", () => {
         "mcp",
         "memory",
         "package-publisher",
+        "provider-flock-ai",
         "provider-foundation",
         "web",
         "provider-ollama-cloud",
-        "provider-workers-ai",
         "routines",
         "skills",
         "subagents",
@@ -119,6 +121,7 @@ describe("foundation application", () => {
         "settings",
         "bot-template",
         "computer",
+        "custom-models",
         "user-machine",
         "package-publisher",
         "routines",
@@ -148,12 +151,26 @@ describe("foundation application", () => {
     expect(first.packages.some((pkg) => pkg.id === "composio")).toBe(false);
   });
 
-  test("mounts an assigned Ollama model through its Package runtime Contribution", async () => {
+  test("seeds a default-disabled Package and its dependencies", async () => {
+    const plan = await compileFoundationApplication();
+    const packageIds = foundationDefaultPackageIds(plan);
+
+    expect(packageIds.has("custom-models")).toBe(true);
+    expect(packageIds.has("settings")).toBe(true);
+    expect(packageIds.has("shell")).toBe(true);
+    expect(packageIds.has("ui-theme")).toBe(true);
+    expect(
+      plan.packages.find((pkg) => pkg.id === "custom-models")?.manifest
+        .defaultEnablement,
+    ).toBe("disabled");
+  });
+
+  test("mounts an enabled Ollama model through its Package runtime Contribution", async () => {
     const plan = await compileFoundationApplication();
     const runtimePackage = createFoundationModelRuntimePackage(
       plan,
       {
-        assignment: {
+        model: {
           connectionId: "ollama-work",
           providerModelId: "glm-5.3-flash:cloud",
         },
@@ -186,7 +203,7 @@ describe("foundation application", () => {
       createFoundationModelRuntimePackage(
         plan,
         {
-          assignment: {
+          model: {
             connectionId: "ollama-work",
             providerModelId: "glm-5.3-flash:cloud",
           },
@@ -213,39 +230,41 @@ describe("foundation application", () => {
     ).toThrow('Bot model provider "foundation" is unavailable');
   });
 
-  test("mounts an assigned Workers AI model through the native host seam", async () => {
+  test("mounts an enabled Flock AI model through the gateway host seam", async () => {
     const plan = await compileFoundationApplication();
     const runtimePackage = createFoundationModelRuntimePackage(
       plan,
       {
-        assignment: {
-          connectionId: "workers-ai-ambient",
-          providerModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+        model: {
+          connectionId: "flock-ai-ambient",
+          providerModelId: "@flock/auto",
         },
         state: "ready",
-        packageId: "provider-workers-ai",
-        providerType: "workers-ai",
+        packageId: "provider-flock-ai",
+        providerType: "flock-ai",
         connection: {
-          connectionId: "workers-ai-ambient",
-          packageId: "provider-workers-ai",
-          connectionTypeId: "workers-ai-account",
-          displayName: "Cloudflare Workers AI",
+          connectionId: "flock-ai-ambient",
+          packageId: "provider-flock-ai",
+          connectionTypeId: "flock-ai-account",
+          displayName: "Flock AI",
           state: "ready",
-          generation: "workers-ai-ambient-v1",
-          providerType: "workers-ai",
+          generation: "flock-ai-ambient-v1",
+          providerType: "flock-ai",
           safeMetadata: {},
         },
       },
       {
         accountId: "account-1",
-        connectionId: "workers-ai-ambient",
-        runWorkersAi: () => Promise.reject(new Error("not executed")),
+        connectionId: "flock-ai-ambient",
+        flockAiAutoRoute: "flock-auto",
+        runFlockAiChatCompletion: () =>
+          Promise.reject(new Error("not executed")),
       },
     );
 
     expect(runtimePackage).toMatchObject({
-      specifier: "@frockbot/plugin-provider-workers-ai",
-      contributionSpecifier: "@frockbot/plugin-provider-workers-ai/runtime",
+      specifier: "@frockbot/plugin-provider-flock-ai",
+      contributionSpecifier: "@frockbot/plugin-provider-flock-ai/runtime",
     });
   });
 
@@ -338,7 +357,7 @@ describe("foundation application", () => {
     ).toThrow('foundation desktop package "auth" is not declared');
   });
 
-  test("resolves declared backend and assigned runtime Contributions through host seams", async () => {
+  test("resolves declared backend and enabled runtime Contributions through host seams", async () => {
     const plan = await compileFoundationApplication();
     const backend = await createFoundationBackendContributions(plan, {
       backendHost: "gateway",
@@ -511,7 +530,7 @@ describe("foundation application", () => {
     expect(
       userSpecifiers.indexOf("@frockbot/plugin-settings/user"),
     ).toBeLessThan(
-      userSpecifiers.indexOf("@frockbot/plugin-provider-workers-ai/user"),
+      userSpecifiers.indexOf("@frockbot/plugin-provider-flock-ai/user"),
     );
     expect(
       userSpecifiers.indexOf("@frockbot/plugin-credentials/user"),
@@ -587,29 +606,19 @@ describe("foundation application", () => {
       "@frockbot/plugin-computer",
     ]);
 
-    const assignment = {
-      assignmentId: "unavailable-assignment",
+    const capability = {
       packageId: "composio",
       capabilityId: "gmail-tools",
+      kind: "tool" as const,
       connectionId: "connection-1",
-      state: "enabled" as const,
     };
-    const runtime = await createFoundationAssignedRuntimePackages(
+    const runtime = await createFoundationEnabledRuntimePackages(
       plan,
       {
         schemaVersion: 1,
         botId: "primary",
         revision: 1,
-        profile: { name: "Primary" },
-        notifications: { enabled: false },
-        assignments: [assignment],
-        assignmentOperations: [],
-      },
-      {
-        schemaVersion: 1,
-        botId: "primary",
-        revision: 1,
-        assignments: [assignment],
+        capabilities: [capability],
       },
       {
         userId: "user-1",
@@ -620,35 +629,25 @@ describe("foundation application", () => {
     );
     expect(runtime).toEqual([]);
 
-    const webAssignment = {
-      assignmentId: "default-0-0",
+    const webCapability = {
       packageId: "web",
       capabilityId: "web-fetch",
-      state: "enabled" as const,
+      kind: "tool" as const,
     };
-    const freshBotRuntime = await createFoundationAssignedRuntimePackages(
+    const freshBotRuntime = await createFoundationEnabledRuntimePackages(
       plan,
       {
         schemaVersion: 1,
         botId: "fresh",
         revision: 0,
-        profile: { name: "Fresh" },
-        notifications: { enabled: true },
-        assignments: [webAssignment],
-        assignmentOperations: [],
-      },
-      {
-        schemaVersion: 1,
-        botId: "fresh",
-        revision: 0,
-        assignments: [webAssignment],
+        capabilities: [webCapability],
       },
       {
         userId: "user-1",
         readSecret: () => undefined,
         authorizeConnection: () =>
           Promise.reject(
-            new Error("connection-less Web Assignment must not authorize"),
+            new Error("connection-less Web Capability must not authorize"),
           ),
       },
     );

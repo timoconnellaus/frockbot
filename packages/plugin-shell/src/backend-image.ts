@@ -1,15 +1,15 @@
 // The Bot Durable Object's half of the image-generation seam.
 //
 // The Image Package consumes a narrow `ImageModelV1` — one method, answering
-// raw image bytes — and knows nothing about Workers AI. This module is the
+// raw image bytes — and knows nothing about Cloudflare's native AI binding. This module is the
 // adapter: it takes the `AI` binding off the Durable Object's environment,
-// normalizes the three shapes a Workers AI text-to-image model answers in, and
+// normalizes the three shapes a native text-to-image model answers in, and
 // hands the Package a seam with no platform vocabulary in it. "Electron,
 // Cloudflare, provider SDK, and Computer implementation types remain inside
 // their adapters."
 //
 // The binding is optional, exactly as `PACKAGE_BUNDLER` is. A deployment with
-// no Workers AI binding still mounts the Package, and `generate_image` then
+// no native AI binding still mounts the Package, and `generate_image` then
 // refuses visibly on the Turn that calls it — which is a better answer than a
 // tool that silently vanishes from the catalog, and a far better one than a
 // `TypeError` inside the Agent loop.
@@ -38,11 +38,11 @@ export interface BotImageTurn {
 }
 
 /**
- * The Workers AI binding, declared structurally so this module names no
+ * The native AI binding, declared structurally so this module names no
  * Cloudflare type it does not have to. `run` is the whole of what an image
  * model needs from it.
  */
-export interface WorkersAiBindingV1 {
+export interface NativeAiBindingV1 {
   run(model: string, input: Record<string, unknown>): Promise<unknown>;
 }
 
@@ -51,7 +51,7 @@ export interface WorkersAiBindingV1 {
  * as its own type so the binding's absence is a typed state, not a cast.
  */
 export interface BotImageEnv {
-  AI?: WorkersAiBindingV1;
+  AI?: NativeAiBindingV1;
   WORKSPACE_FILES?: WorkspaceFilesV1;
 }
 
@@ -88,7 +88,7 @@ async function readStream(
 }
 
 /**
- * The bytes inside whatever a Workers AI text-to-image model answered.
+ * The bytes inside whatever a native text-to-image model answered.
  *
  * The catalog does not agree with itself: `flux-1-schnell` and the FLUX.2
  * models answer `{ image: "<base64>" }`, the Stable Diffusion models answer a
@@ -96,7 +96,7 @@ async function readStream(
  * directly. Every one of those is an image; none of them is the Package's
  * problem.
  */
-export async function decodeWorkersAiImageV1(
+export async function decodeNativeAiImageV1(
   answer: unknown,
 ): Promise<ArrayBuffer> {
   if (answer instanceof ArrayBuffer) return answer;
@@ -123,15 +123,15 @@ export async function decodeWorkersAiImageV1(
 }
 
 /**
- * The Workers AI binding as an {@link ImageModelV1}.
+ * The native AI binding as an {@link ImageModelV1}.
  *
  * `width` and `height` are passed through: the Stable Diffusion models accept
  * them, and the FLUX models ignore unknown fields rather than refusing. The
  * Package never trusts them to have been honoured — it reads the dimensions
  * back out of the bytes.
  */
-export function createWorkersAiImageModelV1(
-  binding: WorkersAiBindingV1,
+export function createNativeAiImageModelV1(
+  binding: NativeAiBindingV1,
 ): ImageModelV1 {
   return {
     async run(model: string, input: ImageModelInputV1): Promise<ArrayBuffer> {
@@ -140,7 +140,7 @@ export function createWorkersAiImageModelV1(
         width: input.width,
         height: input.height,
       });
-      return await decodeWorkersAiImageV1(answer);
+      return await decodeNativeAiImageV1(answer);
     },
   };
 }
@@ -174,7 +174,7 @@ export function createBotImageHost(
       runId: turn.runId,
     },
     files,
-    ...(bindings.AI ? { model: createWorkersAiImageModelV1(bindings.AI) } : {}),
+    ...(bindings.AI ? { model: createNativeAiImageModelV1(bindings.AI) } : {}),
     ...(modelId ? { modelId } : {}),
   };
 }

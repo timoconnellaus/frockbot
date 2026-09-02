@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   asUser,
+  CUSTOM_MODELS_PACKAGE_ID,
   expectOkJson,
   freshUserId,
   postAsUser,
@@ -14,22 +15,30 @@ import {
 useApplicationArtifact();
 
 describe("settings round-trip through the gateway", () => {
-  it("carries the default-model choice from the command to the User view", async () => {
+  it("carries the account-model choice from the Package setting to the User view", async () => {
     const userId = freshUserId("settings-model");
     const botId = "settings-bot";
-    // `provisionThroughGateway` is itself the command half: it posts
-    // `user/set-new-bot-model` to `/api/settings`.
+    // `provisionThroughGateway` is itself the command half: it writes the
+    // Custom models Package's account-scoped `model` setting.
     const { connectionId } = await provisionThroughGateway({ userId, botId });
 
     const view = (await expectOkJson(
       await asUser(userId, "/api/settings"),
     )) as {
-      newBotModelTemplate?: { connectionId: string; providerModelId: string };
-      packages: Array<{ packageId: string; state: string }>;
+      packages: Array<{
+        packageId: string;
+        state: string;
+        values?: Record<string, unknown>;
+      }>;
     };
-    expect(view.newBotModelTemplate).toEqual({
-      connectionId,
-      providerModelId: PROVISIONED_MODEL.providerModelId,
+    expect(
+      view.packages.find((pkg) => pkg.packageId === CUSTOM_MODELS_PACKAGE_ID)
+        ?.values,
+    ).toMatchObject({
+      "account-model": {
+        connectionId,
+        providerModelId: PROVISIONED_MODEL.providerModelId,
+      },
     });
     expect(view.packages).toContainEqual(
       expect.objectContaining({

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import {
+  decodeInstalledPackageSettingsPatchV1,
+  decodeModelBindingV1,
   decodePackageSettingsPatchV1,
   decodePackageSettingValuesV1,
   emptyPackageSettingValuesV1,
@@ -128,6 +130,104 @@ describe("the Package setting values codec", () => {
     expect(() =>
       decodePackageSettingsPatchV1(botScoped, { tone: "terse" }),
     ).toThrow(/not a User-level setting/);
+    expect(
+      decodePackageSettingsPatchV1(botScoped, { tone: "terse" }, "bot"),
+    ).toEqual({ tone: "terse" });
+  });
+
+  test("validates the model role's exact structured value at either scope", () => {
+    const modelRole = [
+      definition({
+        id: "model",
+        role: "model",
+        scopes: ["user", "bot"],
+        schema: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string" },
+            providerModelId: { type: "string" },
+          },
+          required: ["connectionId", "providerModelId"],
+          additionalProperties: false,
+        },
+      }),
+    ];
+    const model = {
+      connectionId: "ollama-work",
+      providerModelId: "glm-5.3-flash:cloud",
+    };
+    expect(decodePackageSettingsPatchV1(modelRole, { model })).toEqual({
+      model,
+    });
+    expect(decodePackageSettingsPatchV1(modelRole, { model }, "bot")).toEqual({
+      model,
+    });
+    expect(() =>
+      decodePackageSettingsPatchV1(modelRole, {
+        model: { ...model, extra: true },
+      }),
+    ).toThrow(/invalid fields/);
+  });
+
+  test("rejects hidden, symbol, inherited, and prototype-shaped fields", () => {
+    const hidden = { verbose: true };
+    Object.defineProperty(hidden, "secret", { value: "hidden" });
+    expect(() => decodePackageSettingsPatchV1(declared, hidden)).toThrow(
+      /invalid fields/,
+    );
+
+    const symbol = { verbose: true, [Symbol("extra")]: true };
+    expect(() => decodePackageSettingsPatchV1(declared, symbol)).toThrow(
+      /invalid fields/,
+    );
+
+    const inherited = Object.create({ verbose: true });
+    expect(() => decodePackageSettingsPatchV1(declared, inherited)).toThrow(
+      /plain object|inherited fields/,
+    );
+
+    expect(() =>
+      decodeModelBindingV1({
+        connectionId: "constructor",
+        providerModelId: "model-1",
+      }),
+    ).toThrow(/connectionId is invalid/);
+  });
+
+  test("validates a Bot command against the installed manifest version", () => {
+    const installations = [{ packageId: "preferences", version: "1.0.0" }];
+    const packages = [
+      { packageId: "preferences", version: "1.0.0", settings: declared },
+    ];
+    const validate = (packageId: string, values: unknown) =>
+      decodeInstalledPackageSettingsPatchV1({
+        packageId,
+        values,
+        scope: "bot",
+        installations,
+        packages,
+      });
+    const botSetting = [
+      definition({ id: "tone", scopes: ["bot"], schema: { type: "string" } }),
+    ];
+    packages[0] = {
+      packageId: "preferences",
+      version: "1.0.0",
+      settings: botSetting,
+    };
+
+    expect(validate("preferences", { tone: "terse" })).toEqual({
+      tone: "terse",
+    });
+    expect(() => validate("missing", { tone: "terse" })).toThrow(
+      'Package "missing" is not installed',
+    );
+    expect(() => validate("preferences", { unknown: "value" })).toThrow(
+      /not declared/,
+    );
+    expect(() => validate("preferences", { tone: 42 })).toThrow(
+      /must be a string/,
+    );
   });
 
   test("refuses a secret, whatever its schema says", () => {

@@ -5,6 +5,7 @@ import type {
   BotSettingsViewV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
+import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import { createShellBotBackendContribution } from "./backend.js";
 
 class MemoryStorage {
@@ -51,72 +52,62 @@ class MemoryStorage {
   }
 }
 
-function installedUser(): UserSettingsViewV1 {
-  return {
-    schemaVersion: 1,
-    revision: 1,
-    profile: { name: "User" },
-    packages: [{ packageId: "composio", version: "0.0.1", state: "installed" }],
-    connections: [
-      {
-        connectionId: "gmail-1",
-        packageId: "composio",
-        connectionTypeId: "gmail",
-        displayName: "Gmail",
-        state: "ready",
-        providerType: "fixture-models",
-        safeMetadata: {},
-      },
-    ],
-  };
-}
+const MODEL_SETTING = {
+  id: "model",
+  schemaVersion: 1,
+  scopes: ["user", "bot"],
+  role: "model",
+  schema: {
+    type: "object",
+    properties: {
+      connectionId: { type: "string" },
+      providerModelId: { type: "string" },
+    },
+    required: ["connectionId", "providerModelId"],
+    additionalProperties: false,
+  },
+} as const satisfies PackageSettingDefinition;
 
-async function compileAssignmentTestApplication(): ReturnType<
+const TONE_SETTING = {
+  id: "tone",
+  schemaVersion: 1,
+  scopes: ["bot"],
+  schema: { type: "string", maxLength: 40 },
+} as const satisfies PackageSettingDefinition;
+
+async function compileModelTestApplication(): ReturnType<
   typeof compileFoundationApplication
 > {
   const application = await compileFoundationApplication();
+  const provider = application.packages.find(
+    (pkg) => pkg.id === "provider-flock-ai",
+  );
   const template = application.packages.find((pkg) => pkg.id === "settings");
-  if (!template) throw new Error("Settings fixture Package is unavailable");
+  if (!provider || !template) throw new Error("Fixture Packages unavailable");
   return {
     ...application,
     packages: [
-      ...application.packages,
+      ...application.packages.filter(
+        (pkg) => pkg.id !== provider.id && pkg.id !== "custom-models",
+      ),
+      provider,
       {
         ...template,
-        id: "composio",
-        specifier: "@test/composio",
+        id: "custom-models",
+        specifier: "@test/custom-models",
         version: "0.0.1",
         manifest: {
           ...template.manifest,
-          id: "composio",
-          displayName: "Connection fixture",
+          id: "custom-models",
+          displayName: "Custom models",
           version: "0.0.1",
           dependencies: {},
           contributions: {},
           permissions: [],
           configuration: {
-            settings: [],
-            connectionTypes: [
-              {
-                id: "gmail",
-                displayName: "Gmail",
-                allowMultiple: true,
-                authorization: { kind: "grant", driverId: "fixture" },
-                capabilities: ["gmail-tools", "gmail-send"],
-              },
-            ],
-            capabilities: [
-              {
-                id: "gmail-tools",
-                kind: "model",
-                connectionTypes: ["gmail"],
-              },
-              {
-                id: "gmail-send",
-                kind: "tool",
-                connectionTypes: ["gmail"],
-              },
-            ],
+            settings: [MODEL_SETTING, TONE_SETTING],
+            connectionTypes: [],
+            capabilities: [],
           },
         },
       },
@@ -124,34 +115,113 @@ async function compileAssignmentTestApplication(): ReturnType<
   };
 }
 
-function assignmentCommand(
-  commandId: string,
-  assignment: {
-    packageId: string;
-    capabilityId: string;
-    connectionId?: string;
-  },
-): BotConfigurationCommandV1 {
+function model(connectionId: string, providerModelId: string) {
+  return { connectionId, providerModelId };
+}
+
+function configuredUser(): UserSettingsViewV1 {
   return {
     schemaVersion: 1,
-    type: "bot/assign-capability",
-    commandId,
-    botId: "primary",
-    expectedRevision: 0,
-    assignment: {
-      assignmentId: commandId,
-      ...assignment,
-    },
+    revision: 1,
+    profile: { name: "User" },
+    packages: [
+      {
+        packageId: "provider-flock-ai",
+        version: "0.0.1",
+        state: "installed",
+      },
+      {
+        packageId: "custom-models",
+        version: "0.0.1",
+        state: "disabled",
+      },
+    ],
+    connections: [
+      {
+        connectionId: "flock-ai-ambient",
+        packageId: "provider-flock-ai",
+        connectionTypeId: "flock-ai-account",
+        displayName: "Flock AI",
+        state: "ready",
+        providerType: "flock-ai",
+        generation: "foundation-generation-1",
+        modelCatalog: {
+          schemaVersion: 1,
+          generation: "catalog-1",
+          state: "fresh",
+          models: [
+            {
+              providerModelId: "@flock/auto",
+              displayName: "Platform",
+              capabilities: {
+                tools: true,
+                vision: false,
+                reasoning: false,
+              },
+              source: "discovered",
+            },
+          ],
+        },
+        safeMetadata: {},
+      },
+    ],
+    platformModel: model("flock-ai-ambient", "@flock/auto"),
   };
 }
 
-describe("Bot capability assignment admission", () => {
+function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
+  return createShellBotBackendContribution({
+    state: { storage } as unknown as DurableObjectState,
+    env: {
+      CREDENTIAL_KEYRING:
+        '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}',
+      USER_CONFIGURATIONS: {
+        idFromName: () => "user-1",
+        get: () => ({
+          readConfiguration: () => Promise.resolve(structuredClone(readUser())),
+          listBots: () =>
+            Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
+        }),
+      },
+      MEMORY_FILES: {},
+      MEMORY_INDEX: {},
+      FLOCK_AI: {
+        autoRoute: "flock-auto",
+        runChatCompletion: () =>
+          Promise.resolve(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  new TextEncoder().encode(
+                    'data: {"choices":[{"delta":{"content":"Cordis runtime: hello"}}]}\n\n' +
+                      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
+                      "data: [DONE]\n\n",
+                  ),
+                );
+                controller.close();
+              },
+            }),
+          ),
+      },
+    } as never,
+    compileApplication: compileModelTestApplication,
+  });
+}
+
+function request(command: BotConfigurationCommandV1) {
+  return {
+    schemaVersion: 1 as const,
+    userId: "user-1",
+    botId: command.botId,
+    command,
+  };
+}
+
+describe("Bot configuration admission", () => {
   test("rejects an unmaterialized Bot without writing durable state", async () => {
     const storage = new MemoryStorage();
-    const contribution = createShellBotBackendContribution({
-      state: { storage } as unknown as DurableObjectState,
-      env: {} as never,
-    });
+    const contribution = host(storage, configuredUser);
+
     await expect(
       contribution.readConfiguration({
         schemaVersion: 1,
@@ -177,20 +247,18 @@ describe("Bot capability assignment admission", () => {
     const identity = { userId: "user-1", botId: "primary" };
     await contribution.materializeSettings(identity, { name: "Primary" });
     archived = true;
+
     await expect(
-      contribution.executeConfiguration({
-        schemaVersion: 1,
-        userId: identity.userId,
-        botId: identity.botId,
-        command: {
+      contribution.executeConfiguration(
+        request({
           schemaVersion: 1,
           type: "bot/update-profile",
           commandId: "archived-profile",
           botId: identity.botId,
           expectedRevision: 0,
           profile: { name: "Changed" },
-        },
-      }),
+        }),
+      ),
     ).rejects.toThrow("archived");
     expect(await contribution.getSettings(identity)).toMatchObject({
       revision: 0,
@@ -198,7 +266,7 @@ describe("Bot capability assignment admission", () => {
     });
   });
 
-  test("rechecks lifecycle admission in the configuration mutation transaction", async () => {
+  test("rechecks lifecycle admission in the mutation transaction", async () => {
     const storage = new MemoryStorage();
     let admissions = 0;
     const contribution = createShellBotBackendContribution({
@@ -211,24 +279,26 @@ describe("Bot capability assignment admission", () => {
           : Promise.reject(new Error(`Bot "${botId}" is archived`));
       },
     });
-    const identity = { userId: "user-1", botId: "primary" };
-    await contribution.materializeSettings(identity, { name: "Primary" });
+    await contribution.materializeSettings(
+      { userId: "user-1", botId: "primary" },
+      { name: "Primary" },
+    );
+
     await expect(
-      contribution.executeConfiguration({
-        schemaVersion: 1,
-        userId: identity.userId,
-        botId: identity.botId,
-        command: {
+      contribution.executeConfiguration(
+        request({
           schemaVersion: 1,
           type: "bot/update-profile",
           commandId: "racing-profile",
-          botId: identity.botId,
+          botId: "primary",
           expectedRevision: 0,
           profile: { name: "Changed" },
-        },
-      }),
+        }),
+      ),
     ).rejects.toThrow("archived");
-    expect(await contribution.getSettings(identity)).toMatchObject({
+    expect(
+      await contribution.getSettings({ userId: "user-1", botId: "primary" }),
+    ).toMatchObject({
       revision: 0,
       profile: { name: "Primary" },
     });
@@ -242,8 +312,7 @@ describe("Bot capability assignment admission", () => {
       revision: 7,
       profile: { name: "Primary" },
       notifications: { enabled: true },
-      assignments: [],
-      assignmentOperations: [],
+      packageValues: {},
     } satisfies BotSettingsViewV1;
     await storage.put({
       identity: { userId: "user-1", botId: "primary" },
@@ -278,58 +347,23 @@ describe("Bot capability assignment admission", () => {
     });
     const contribution = createShellBotBackendContribution({
       state: { storage } as unknown as DurableObjectState,
-      env: {
-        USER_CONFIGURATIONS: {
-          idFromName: () => "user-1",
-          get: () => ({
-            readConfiguration: () =>
-              Promise.resolve({
-                ...installedUser(),
-                newBotModelTemplate: {
-                  connectionId: "provider-1",
-                  providerModelId: "model-1",
-                },
-                newBotModelTemplateSource: "auto",
-              }),
-          }),
-        },
-      } as never,
+      env: {} as never,
     });
+    const identity = { userId: "user-1", botId: "primary" };
 
-    await contribution.materializeSettings(
-      { userId: "user-1", botId: "primary" },
-      {
-        name: "Primary",
-        model: { connectionId: "provider-1", providerModelId: "model-1" },
-      },
-    );
-    await expect(
-      contribution.readConfiguration({
-        schemaVersion: 1,
-        userId: "user-1",
-        botId: "primary",
-      }),
-    ).resolves.toMatchObject({
-      model: {
-        connectionId: "provider-1",
-        providerModelId: "model-1",
-      },
+    await contribution.materializeSettings(identity, { name: "Primary" });
+    await expect(contribution.getSettings(identity)).resolves.toMatchObject({
+      revision: 0,
+      profile: { name: "Primary" },
+      packageValues: {},
     });
   });
 
   test("binds in-flight and durable receipts to the complete Bot command", async () => {
     const storage = new MemoryStorage();
-    const userConfiguration = {
-      readConfiguration: () => Promise.resolve(installedUser()),
-    };
-    const host = {
+    const backendHost = {
       state: { storage } as unknown as DurableObjectState,
-      env: {
-        USER_CONFIGURATIONS: {
-          idFromName: () => "user-1",
-          get: () => userConfiguration,
-        },
-      } as never,
+      env: {} as never,
     };
     const original: BotConfigurationCommandV1 = {
       schemaVersion: 1,
@@ -343,13 +377,7 @@ describe("Bot capability assignment admission", () => {
       ...original,
       profile: { name: "Collision" },
     };
-    const request = (command: BotConfigurationCommandV1) => ({
-      schemaVersion: 1 as const,
-      userId: "user-1",
-      botId: "primary",
-      command,
-    });
-    const contribution = createShellBotBackendContribution(host);
+    const contribution = createShellBotBackendContribution(backendHost);
     await contribution.materializeSettings(
       { userId: "user-1", botId: "primary" },
       { name: "Primary" },
@@ -363,7 +391,7 @@ describe("Bot capability assignment admission", () => {
     );
     const receipt = await first;
 
-    const redeployed = createShellBotBackendContribution(host);
+    const redeployed = createShellBotBackendContribution(backendHost);
     await expect(
       redeployed.executeConfiguration(request(original)),
     ).resolves.toEqual(receipt);
@@ -383,1375 +411,262 @@ describe("Bot capability assignment admission", () => {
       profile: { name: "Original" },
     });
   });
+});
 
-  test("durably rejects invalid assignments before dependency claims", async () => {
+describe("generic per-Turn model resolution", () => {
+  test("runs on the platform model without creating a per-Bot model record", async () => {
     const storage = new MemoryStorage();
-    let user = installedUser();
-    let dependencyClaims = 0;
-    let dependencyAcknowledgements = 0;
-    let reads = 0;
-    let claimAuthorized = true;
-    const dependencyStates = new Map<string, "claimed" | "acknowledged">();
-    const userConfiguration = {
-      readConfiguration: () => {
-        reads += 1;
-        return Promise.resolve(structuredClone(user));
-      },
-      executeConnectionDependency: (request: {
-        action: "claim" | "read" | "acknowledge" | "release" | "reconcile";
-        operationId: string;
-        requirement?: unknown;
-      }) => {
-        if (request.action === "read") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status:
-              dependencyStates.get(request.operationId) ?? ("absent" as const),
-          });
-        }
-        if (request.action === "claim") {
-          expect(request.requirement).toEqual({
-            schemaVersion: 1,
-            packageId: "composio",
-            packageVersion: "0.0.1",
-            capabilityId: "gmail-tools",
-            connectionTypeIds: ["gmail"],
-          });
-          dependencyClaims += 1;
-          if (claimAuthorized) {
-            dependencyStates.set(request.operationId, "claimed");
-          }
-          return Promise.resolve(
-            claimAuthorized
-              ? { schemaVersion: 1 as const, status: "claimed" as const }
-              : {
-                  schemaVersion: 1 as const,
-                  status: "rejected" as const,
-                  failure: "claim rejected",
-                },
-          );
-        }
-        if (request.action === "acknowledge") {
-          dependencyAcknowledgements += 1;
-          dependencyStates.set(request.operationId, "acknowledged");
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "acknowledged" as const,
-          });
-        }
-        return Promise.resolve({
-          schemaVersion: 1 as const,
-          status: "released" as const,
-        });
-      },
-    };
-    const contribution = createShellBotBackendContribution({
-      state: { storage } as unknown as DurableObjectState,
-      env: {
-        USER_CONFIGURATIONS: {
-          idFromName: () => "user-1",
-          get: () => userConfiguration,
-        },
-      } as never,
-      compileApplication: compileAssignmentTestApplication,
-    });
+    const contribution = host(storage, configuredUser);
     const identity = { userId: "user-1", botId: "primary" };
     await contribution.materializeSettings(identity, { name: "Primary" });
-    const execute = (command: BotConfigurationCommandV1) =>
-      contribution.executeConfiguration({
-        schemaVersion: 1,
-        ...identity,
-        command,
-      });
-    const read = () =>
-      contribution.readConfiguration({ schemaVersion: 1, ...identity });
 
-    await expect(
-      contribution.readConfiguration({
-        schemaVersion: 1,
-        userId: "user-1",
-        botId: "../primary",
-      }),
-    ).rejects.toThrow("botId is invalid");
-    await expect(
-      contribution.executeConfiguration({
-        schemaVersion: 1,
-        ...identity,
-        command: {
-          schemaVersion: 1,
-          type: "bot/update-profile",
-          commandId: "malformed-profile",
-          botId: "primary",
-          expectedRevision: 0,
-          profile: { name: 42 },
-        },
-      }),
-    ).rejects.toThrow("profile.name must be a string");
-    expect(await read()).toMatchObject({ revision: 0, assignments: [] });
-
-    const missingConnection = assignmentCommand("missing-connection", {
-      packageId: "composio",
-      capabilityId: "gmail-tools",
-    });
-    const first = await execute(missingConnection);
-    expect(first).toMatchObject({
-      status: "rejected",
-      revision: 0,
-      failure: expect.stringContaining("requires a Connection"),
-    });
-    const readsAfterFirst = reads;
-    expect(await execute(missingConnection)).toEqual(first);
-    expect(reads).toBe(readsAfterFirst);
-
-    expect(
-      await execute(
-        assignmentCommand("unknown-capability", {
-          packageId: "composio",
-          capabilityId: "unknown",
-          connectionId: "gmail-1",
-        }),
-      ),
-    ).toMatchObject({ status: "rejected", revision: 0 });
-
-    user = {
-      ...installedUser(),
-      connections: [
-        { ...installedUser().connections[0]!, connectionTypeId: "calendar" },
-      ],
-    };
-    expect(
-      await execute(
-        assignmentCommand("wrong-connection-type", {
-          packageId: "composio",
-          capabilityId: "gmail-tools",
-          connectionId: "gmail-1",
-        }),
-      ),
-    ).toMatchObject({ status: "rejected", revision: 0 });
-
-    user = {
-      ...installedUser(),
-      packages: [{ ...installedUser().packages[0]!, state: "disabled" }],
-    };
-    expect(
-      await execute(
-        assignmentCommand("disabled-package", {
-          packageId: "composio",
-          capabilityId: "gmail-tools",
-          connectionId: "gmail-1",
-        }),
-      ),
-    ).toMatchObject({ status: "rejected", revision: 0 });
-
-    expect(dependencyClaims).toBe(0);
-    expect(await read()).toMatchObject({
-      revision: 0,
-      assignments: [],
-    } satisfies Partial<BotSettingsViewV1>);
-
-    user = installedUser();
-    claimAuthorized = false;
-    const changedDuringClaim = assignmentCommand("changed-during-claim", {
-      packageId: "composio",
-      capabilityId: "gmail-tools",
-      connectionId: "gmail-1",
-    });
-    const changedReceipt = await execute(changedDuringClaim);
-    expect(changedReceipt).toMatchObject({ status: "rejected", revision: 0 });
-    expect(await execute(changedDuringClaim)).toEqual(changedReceipt);
-    expect(dependencyClaims).toBe(1);
-    expect(dependencyAcknowledgements).toBe(0);
-    expect(await read()).toMatchObject({
-      revision: 0,
-      assignments: [],
+    const result = await contribution.run({
+      ...identity,
+      runId: "platform-model-run",
+      sessionId: "user-1:primary",
+      acceptedAt: "2026-09-02T00:00:00.000Z",
+      text: "hello",
     });
 
-    claimAuthorized = true;
-    expect(
-      await execute(
-        assignmentCommand("valid-assignment", {
-          packageId: "composio",
-          capabilityId: "gmail-tools",
-          connectionId: "gmail-1",
-        }),
-      ),
-    ).toMatchObject({ status: "applied", revision: 1 });
-    expect(dependencyClaims).toBe(2);
-    expect(dependencyAcknowledgements).toBe(1);
-    expect(await read()).toMatchObject({
-      revision: 1,
-      assignments: [
-        {
-          assignmentId: "valid-assignment",
-          state: "enabled",
-          connectionId: "gmail-1",
-        },
-      ],
-    });
-
-    await expect(
-      execute({
-        schemaVersion: 1,
-        type: "bot/assign-capability",
-        commandId: "reuse-assignment-authority",
-        botId: "primary",
-        expectedRevision: 1,
-        assignment: {
-          assignmentId: "valid-assignment",
-          packageId: "composio",
-          capabilityId: "gmail-send",
-          connectionId: "gmail-1",
-        },
-      }),
-    ).resolves.toMatchObject({
-      status: "rejected",
-      revision: 1,
-      failure: "Assignment ID cannot change Package Capability authority",
-    });
-    expect(dependencyClaims).toBe(2);
+    expect(result.text).toBe("Cordis runtime: hello");
+    const settings = await contribution.getSettings(identity);
+    expect(settings).toMatchObject({ revision: 0, packageValues: {} });
+    expect(Object.hasOwn(settings, "model")).toBe(false);
   });
 
-  test("atomically binds and durably unbinds a Connection model", async () => {
+  test("uses an enabled Bot-scoped model value and preserves it while disabled", async () => {
     const storage = new MemoryStorage();
-    let dependencyGeneration: string | undefined;
-    let releaseAttempts = 0;
-    const userConfiguration = {
-      readConfiguration: () => Promise.resolve(installedUser()),
-      executeConnectionDependency: (request: {
-        action: "claim" | "read" | "acknowledge" | "release" | "reconcile";
-        generation: string;
-      }) => {
-        if (request.action === "claim") {
-          dependencyGeneration = request.generation;
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "claimed" as const,
-          });
-        }
-        if (request.action === "acknowledge") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "acknowledged" as const,
-          });
-        }
-        if (request.action === "read") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status:
-              request.generation === dependencyGeneration
-                ? ("acknowledged" as const)
-                : ("absent" as const),
-          });
-        }
-        if (request.action === "release") {
-          releaseAttempts += 1;
-          if (releaseAttempts === 1) {
-            return Promise.resolve({
-              schemaVersion: 1 as const,
-              status: "pending" as const,
-            });
-          }
-          if (request.generation === dependencyGeneration) {
-            dependencyGeneration = undefined;
-          }
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "released" as const,
-          });
-        }
-        return Promise.resolve({
-          schemaVersion: 1 as const,
-          status: "released" as const,
-        });
-      },
+    let user = configuredUser();
+    user.packages[1] = {
+      ...user.packages[1]!,
+      state: "installed",
+      values: { model: model("flock-ai-ambient", "account-model") },
     };
-    const contribution = createShellBotBackendContribution({
-      state: { storage } as unknown as DurableObjectState,
-      env: {
-        USER_CONFIGURATIONS: {
-          idFromName: () => "user-1",
-          get: () => userConfiguration,
-        },
-      } as never,
-      compileApplication: compileAssignmentTestApplication,
-    });
+    const contribution = host(storage, () => user);
     const identity = { userId: "user-1", botId: "primary" };
     await contribution.materializeSettings(identity, { name: "Primary" });
-    const execute = (command: BotConfigurationCommandV1) =>
-      contribution.executeConfiguration({
+    await contribution.executeConfiguration(
+      request({
         schemaVersion: 1,
-        ...identity,
-        command,
-      });
-
-    const bound = await execute({
-      schemaVersion: 1,
-      type: "bot/assign-capability",
-      commandId: "bind-model",
-      botId: "primary",
-      expectedRevision: 0,
-      assignment: {
-        assignmentId: "fixture-model",
-        packageId: "composio",
-        capabilityId: "gmail-tools",
-        connectionId: "gmail-1",
-      },
-      model: {
-        connectionId: "gmail-1",
-        providerModelId: "fixture-model:latest",
-      },
-    });
-
-    expect(bound).toMatchObject({ status: "applied", revision: 1 });
-    expect(dependencyGeneration).toBe("bind-model");
-    expect(await contribution.getSettings(identity)).toMatchObject({
-      revision: 1,
-      model: {
-        connectionId: "gmail-1",
-        providerModelId: "fixture-model:latest",
-      },
-      assignments: [{ assignmentId: "fixture-model", state: "enabled" }],
-    });
-
-    const unavailable = await contribution.getSettings(identity);
-    await storage.put("bot-configuration", {
-      ...unavailable,
-      assignments: unavailable.assignments.map((assignment) => ({
-        ...assignment,
-        state: "unavailable" as const,
-      })),
-    });
-
-    const unbind: BotConfigurationCommandV1 = {
-      schemaVersion: 1,
-      type: "bot/unbind-model",
-      commandId: "unbind-model",
-      botId: "primary",
-      expectedRevision: 1,
-      assignmentId: "fixture-model",
-    };
-    // The release is delayed once: the Unassign stays visibly retrying and its
-    // durable receipt replays until the dependency is actually released.
-    await expect(execute(unbind)).resolves.toMatchObject({
-      status: "pending",
-    });
-    expect(dependencyGeneration).toBe("bind-model");
-    await contribution.alarm();
-
-    const unbound = await execute(unbind);
-
-    expect(unbound).toMatchObject({ status: "applied", revision: 2 });
-    expect(releaseAttempts).toBe(2);
-    expect(dependencyGeneration).toBeUndefined();
-    expect(await contribution.getSettings(identity)).toMatchObject({
-      revision: 2,
-      model: undefined,
-      assignments: [],
-    });
-  });
-
-  test("releases the superseded model dependency after switching Connections", async () => {
-    const storage = new MemoryStorage();
-    const user = installedUser();
-    user.connections.push({
-      ...user.connections[0]!,
-      connectionId: "gmail-2",
-      displayName: "Gmail 2",
-    });
-    const generations = new Set<string>();
-    const released: Array<{ connectionId: string; generation: string }> = [];
-    let releaseAttempts = 0;
-    const userConfiguration = {
-      readConfiguration: () => Promise.resolve(user),
-      executeConnectionDependency: (request: {
-        action: "claim" | "read" | "acknowledge" | "release" | "reconcile";
-        connectionId: string;
-        generation: string;
-      }) => {
-        if (request.action === "claim") {
-          generations.add(request.generation);
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "claimed" as const,
-          });
-        }
-        if (request.action === "acknowledge") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "acknowledged" as const,
-          });
-        }
-        if (request.action === "read") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: generations.has(request.generation)
-              ? ("acknowledged" as const)
-              : ("absent" as const),
-          });
-        }
-        if (request.action === "release") {
-          releaseAttempts += 1;
-          if (releaseAttempts === 1) {
-            return Promise.resolve({
-              schemaVersion: 1 as const,
-              status: "pending" as const,
-            });
-          }
-          released.push({
-            connectionId: request.connectionId,
-            generation: request.generation,
-          });
-          generations.delete(request.generation);
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "released" as const,
-          });
-        }
-        return Promise.resolve({
-          schemaVersion: 1 as const,
-          status: "released" as const,
-        });
-      },
-    };
-    const contribution = createShellBotBackendContribution({
-      state: { storage } as unknown as DurableObjectState,
-      env: {
-        USER_CONFIGURATIONS: {
-          idFromName: () => "user-1",
-          get: () => userConfiguration,
-        },
-      } as never,
-      compileApplication: compileAssignmentTestApplication,
-    });
-    const identity = { userId: "user-1", botId: "primary" };
-    await contribution.materializeSettings(identity, { name: "Primary" });
-    const execute = (command: BotConfigurationCommandV1) =>
-      contribution.executeConfiguration({
-        schemaVersion: 1,
-        ...identity,
-        command,
-      });
-
-    await execute({
-      schemaVersion: 1,
-      type: "bot/assign-capability",
-      commandId: "bind-gmail-1",
-      botId: "primary",
-      expectedRevision: 0,
-      assignment: {
-        assignmentId: "gmail-model-1",
-        packageId: "composio",
-        capabilityId: "gmail-tools",
-        connectionId: "gmail-1",
-      },
-      model: {
-        connectionId: "gmail-1",
-        providerModelId: "fixture-model:latest",
-      },
-    });
-    const beforeSwitch = await contribution.getSettings(identity);
-    await storage.put({
-      "bot-configuration": {
-        ...beforeSwitch,
-        assignments: [
-          ...beforeSwitch.assignments,
-          {
-            assignmentId: "gmail-tool",
-            packageId: "composio",
-            capabilityId: "gmail-send",
-            connectionId: "gmail-1",
-            state: "enabled" as const,
-          },
-        ],
-      },
-      "assignment-generation:gmail-tool": "tool-generation",
-    });
-    generations.add("tool-generation");
-
-    // Moving the model to another Connection is an atomic Replace on the same
-    // Assignment: it claims the new dependency, commits the swap, then
-    // releases the old one. A delayed release stays visibly retrying rather
-    // than failing the command.
-    const switchModel: BotConfigurationCommandV1 = {
-      schemaVersion: 1,
-      type: "bot/replace-capability",
-      commandId: "bind-gmail-2",
-      botId: "primary",
-      expectedRevision: 1,
-      assignment: {
-        assignmentId: "gmail-model-1",
-        packageId: "composio",
-        capabilityId: "gmail-tools",
-        connectionId: "gmail-2",
-      },
-      model: {
-        connectionId: "gmail-2",
-        providerModelId: "fixture-model:latest",
-      },
-    };
-    await expect(execute(switchModel)).resolves.toMatchObject({
-      status: "applied",
-      revision: 2,
-    });
-    // The commit is durable; only the old release is still retrying.
-    await contribution.alarm();
-    await expect(execute(switchModel)).resolves.toMatchObject({
-      status: "applied",
-      revision: 2,
-    });
-
-    expect(releaseAttempts).toBe(2);
-    expect(released).toEqual([
-      { connectionId: "gmail-1", generation: "bind-gmail-1" },
-    ]);
-    expect(generations.has("bind-gmail-1")).toBe(false);
-    expect(generations.has("tool-generation")).toBe(true);
-    expect(generations.has("bind-gmail-2")).toBe(true);
-    expect(await contribution.getSettings(identity)).toMatchObject({
-      revision: 2,
-      model: { connectionId: "gmail-2" },
-      assignments: [
-        { assignmentId: "gmail-tool", state: "enabled" },
-        { assignmentId: "gmail-model-1", state: "enabled" },
-      ],
-    });
-
-    // Each further move is another Replace on the same Assignment, so each
-    // one releases exactly the Connection it superseded.
-    for (const [commandId, connectionId, expectedRevision] of [
-      ["bind-gmail-1-again", "gmail-1", 2],
-      ["bind-gmail-2-again", "gmail-2", 3],
-    ] as const) {
-      await expect(
-        execute({
-          schemaVersion: 1,
-          type: "bot/replace-capability",
-          commandId,
-          botId: "primary",
-          expectedRevision,
-          assignment: {
-            assignmentId: "gmail-model-1",
-            packageId: "composio",
-            capabilityId: "gmail-tools",
-            connectionId,
-          },
-          model: {
-            connectionId,
-            providerModelId: "fixture-model:latest",
-          },
-        }),
-      ).resolves.toMatchObject({
-        status: "applied",
-        revision: expectedRevision + 1,
-      });
-    }
-
-    expect(released.slice(-2)).toEqual([
-      { connectionId: "gmail-2", generation: "bind-gmail-2" },
-      { connectionId: "gmail-1", generation: "bind-gmail-1-again" },
-    ]);
-    expect(generations.has("bind-gmail-1")).toBe(false);
-    expect(generations.has("bind-gmail-2")).toBe(false);
-    expect(generations.has("bind-gmail-1-again")).toBe(false);
-    expect(generations.has("tool-generation")).toBe(true);
-    expect(await contribution.getSettings(identity)).toMatchObject({
-      revision: 4,
-      model: { connectionId: "gmail-2" },
-      assignments: [
-        { assignmentId: "gmail-tool", state: "enabled" },
-        { assignmentId: "gmail-model-1", state: "enabled" },
-      ],
-    });
-  });
-
-  test("orders atomic Replace and keeps Unassign stable until release", async () => {
-    const storage = new MemoryStorage();
-    const user = installedUser();
-    user.connections.push({
-      ...user.connections[0]!,
-      connectionId: "gmail-2",
-      displayName: "Gmail replacement",
-    });
-    const dependencies = new Map<
-      string,
-      "claimed" | "acknowledged" | "released"
-    >();
-    const log: string[] = [];
-    let holdRelease = false;
-    const userConfiguration = {
-      readConfiguration: () => Promise.resolve(structuredClone(user)),
-      executeConnectionDependency: (request: {
-        action: "claim" | "read" | "acknowledge" | "release" | "reconcile";
-        generation: string;
-      }) => {
-        log.push(`${request.action}:${request.generation}`);
-        if (request.action === "read") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: dependencies.get(request.generation) ?? ("absent" as const),
-          });
-        }
-        if (request.action === "claim") {
-          dependencies.set(request.generation, "claimed");
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "claimed" as const,
-          });
-        }
-        if (request.action === "acknowledge") {
-          dependencies.set(request.generation, "acknowledged");
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "acknowledged" as const,
-          });
-        }
-        if (request.action === "release" && holdRelease) {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "pending" as const,
-          });
-        }
-        if (request.action === "release")
-          dependencies.set(request.generation, "released");
-        return Promise.resolve({
-          schemaVersion: 1 as const,
-          status:
-            request.action === "reconcile"
-              ? ("pending" as const)
-              : ("released" as const),
-        });
-      },
-    };
-    const contribution = createShellBotBackendContribution({
-      state: { storage } as unknown as DurableObjectState,
-      env: {
-        USER_CONFIGURATIONS: {
-          idFromName: () => "user-1",
-          get: () => userConfiguration,
-        },
-      } as never,
-      compileApplication: compileAssignmentTestApplication,
-    });
-    const identity = { userId: "user-1", botId: "primary" };
-    await contribution.materializeSettings(identity, { name: "Primary" });
-    const execute = (command: BotConfigurationCommandV1) =>
-      contribution.executeConfiguration({
-        schemaVersion: 1,
-        ...identity,
-        command,
-      });
-
-    await expect(
-      execute({
-        schemaVersion: 1,
-        type: "bot/assign-capability",
-        commandId: "assign-1",
+        type: "bot/set-package-settings",
+        commandId: "set-bot-model",
         botId: "primary",
         expectedRevision: 0,
-        assignment: {
-          assignmentId: "mail",
-          packageId: "composio",
-          capabilityId: "gmail-tools",
-          connectionId: "gmail-1",
-        },
+        packageId: "custom-models",
+        values: { model: model("flock-ai-ambient", "bot-model") },
       }),
-    ).resolves.toMatchObject({ status: "applied", revision: 1 });
-    log.length = 0;
-
-    await expect(
-      execute({
-        schemaVersion: 1,
-        type: "bot/replace-capability",
-        commandId: "replace-1",
-        botId: "primary",
-        expectedRevision: 1,
-        assignment: {
-          assignmentId: "mail",
-          packageId: "composio",
-          capabilityId: "gmail-tools",
-          connectionId: "gmail-2",
-        },
-      }),
-    ).resolves.toMatchObject({ status: "applied", revision: 2 });
-    expect(log).toEqual([
-      "read:replace-1",
-      "claim:replace-1",
-      "read:replace-1",
-      "acknowledge:replace-1",
-      "read:assign-1",
-      "release:assign-1",
-    ]);
-    expect(await contribution.getSettings(identity)).toMatchObject({
-      revision: 2,
-      assignments: [{ assignmentId: "mail", connectionId: "gmail-2" }],
-      assignmentOperations: [],
-    });
-
-    holdRelease = true;
-    const pendingUnassign = await execute({
-      schemaVersion: 1,
-      type: "bot/unassign-capability",
-      commandId: "unassign-1",
-      botId: "primary",
-      expectedRevision: 2,
-      assignmentId: "mail",
-    });
-    expect(pendingUnassign).toEqual({
-      schemaVersion: 1,
-      commandId: "unassign-1",
-      revision: 2,
-      status: "pending",
-    });
-    await expect(
-      execute({
-        schemaVersion: 1,
-        type: "bot/unassign-capability",
-        commandId: "unassign-1",
-        botId: "primary",
-        expectedRevision: 2,
-        assignmentId: "mail",
-      }),
-    ).resolves.toEqual(pendingUnassign);
-    expect(await contribution.getSettings(identity)).toMatchObject({
-      revision: 2,
-      assignments: [{ assignmentId: "mail", connectionId: "gmail-2" }],
-      assignmentOperations: [
-        { commandId: "unassign-1", kind: "unassigning", state: "retrying" },
-      ],
-    });
-
-    holdRelease = false;
-    const reconstructed = createShellBotBackendContribution({
-      state: { storage } as unknown as DurableObjectState,
-      env: {
-        USER_CONFIGURATIONS: {
-          idFromName: () => "user-1",
-          get: () => userConfiguration,
-        },
-      } as never,
-      compileApplication: compileAssignmentTestApplication,
-    });
-    await reconstructed.alarm();
-    expect(await reconstructed.getSettings(identity)).toMatchObject({
-      revision: 3,
-      assignments: [],
-      assignmentOperations: [],
-    });
-    await expect(
-      reconstructed.executeConfiguration({
-        schemaVersion: 1,
-        ...identity,
-        command: {
-          schemaVersion: 1,
-          type: "bot/unassign-capability",
-          commandId: "unassign-1",
-          botId: "primary",
-          expectedRevision: 2,
-          assignmentId: "mail",
-        },
-      }),
-    ).resolves.toMatchObject({ status: "applied", revision: 3 });
-    await expect(
-      reconstructed.executeConfiguration({
-        schemaVersion: 1,
-        ...identity,
-        command: {
-          schemaVersion: 1,
-          type: "bot/unassign-capability",
-          commandId: "unassign-1",
-          botId: "primary",
-          expectedRevision: 2,
-          assignmentId: "other",
-        },
-      }),
-    ).rejects.toThrow("reused for a different command");
-  });
-
-  test("releases the old Replace dependency when new acknowledgement is absent or rejected", async () => {
-    for (const acknowledgement of ["absent", "rejected"] as const) {
-      const storage = new MemoryStorage();
-      const user = installedUser();
-      user.connections.push({
-        ...user.connections[0]!,
-        connectionId: "gmail-2",
-        displayName: "Gmail replacement",
-      });
-      const dependencies = new Map<
-        string,
-        "claimed" | "acknowledged" | "released"
-      >();
-      const log: string[] = [];
-      let replacementReads = 0;
-      let holdOldRelease = true;
-      const userConfiguration = {
-        readConfiguration: () => Promise.resolve(structuredClone(user)),
-        executeConnectionDependency: (request: {
-          action: "claim" | "read" | "acknowledge" | "release" | "reconcile";
-          generation: string;
-        }) => {
-          log.push(`${request.action}:${request.generation}`);
-          if (request.action === "read") {
-            if (request.generation.startsWith("replace-")) {
-              replacementReads += 1;
-              if (replacementReads > 1 && acknowledgement === "absent") {
-                return Promise.resolve({
-                  schemaVersion: 1 as const,
-                  status: "absent" as const,
-                });
-              }
-            }
-            return Promise.resolve({
-              schemaVersion: 1 as const,
-              status:
-                dependencies.get(request.generation) ?? ("absent" as const),
-            });
-          }
-          if (request.action === "claim") {
-            dependencies.set(request.generation, "claimed");
-            return Promise.resolve({
-              schemaVersion: 1 as const,
-              status: "claimed" as const,
-            });
-          }
-          if (request.action === "acknowledge") {
-            if (
-              request.generation.startsWith("replace-") &&
-              acknowledgement === "rejected"
-            ) {
-              return Promise.resolve({
-                schemaVersion: 1 as const,
-                status: "rejected" as const,
-                failure: "acknowledgement rejected",
-              });
-            }
-            dependencies.set(request.generation, "acknowledged");
-            return Promise.resolve({
-              schemaVersion: 1 as const,
-              status: "acknowledged" as const,
-            });
-          }
-          if (request.action === "release") {
-            if (request.generation === "assign-old" && holdOldRelease) {
-              return Promise.resolve({
-                schemaVersion: 1 as const,
-                status: "pending" as const,
-              });
-            }
-            dependencies.set(request.generation, "released");
-            return Promise.resolve({
-              schemaVersion: 1 as const,
-              status: "released" as const,
-            });
-          }
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "pending" as const,
-          });
-        },
-      };
-      const makeContribution = () =>
-        createShellBotBackendContribution({
-          state: { storage } as unknown as DurableObjectState,
-          env: {
-            USER_CONFIGURATIONS: {
-              idFromName: () => "user-1",
-              get: () => userConfiguration,
-            },
-          } as never,
-          compileApplication: compileAssignmentTestApplication,
-        });
-      const contribution = makeContribution();
-      const identity = { userId: "user-1", botId: "primary" };
-      await contribution.materializeSettings(identity, { name: "Primary" });
-      const execute = (
-        backend: ReturnType<typeof createShellBotBackendContribution>,
-        command: BotConfigurationCommandV1,
-      ) =>
-        backend.executeConfiguration({
-          schemaVersion: 1,
-          ...identity,
-          command,
-        });
-      await execute(contribution, {
-        schemaVersion: 1,
-        type: "bot/assign-capability",
-        commandId: "assign-old",
-        botId: "primary",
-        expectedRevision: 0,
-        assignment: {
-          assignmentId: "mail",
-          packageId: "composio",
-          capabilityId: "gmail-tools",
-          connectionId: "gmail-1",
-        },
-      });
-      const replaceCommand = {
-        schemaVersion: 1 as const,
-        type: "bot/replace-capability" as const,
-        commandId: `replace-${acknowledgement}`,
-        botId: "primary",
-        expectedRevision: 1,
-        assignment: {
-          assignmentId: "mail",
-          packageId: "composio",
-          capabilityId: "gmail-tools",
-          connectionId: "gmail-2",
-        },
-      };
-
-      await expect(
-        execute(contribution, replaceCommand),
-      ).resolves.toMatchObject({ status: "applied", revision: 2 });
-      expect(dependencies.get("assign-old")).toBe("acknowledged");
-      expect(await contribution.getSettings(identity)).toMatchObject({
-        revision: 2,
-        assignments: [
-          {
-            assignmentId: "mail",
-            connectionId: "gmail-2",
-            state: "unavailable",
-          },
-        ],
-        assignmentOperations: [
-          {
-            commandId: `replace-${acknowledgement}`,
-            kind: "replacing",
-            state: "retrying",
-          },
-        ],
-      });
-      expect(log).toContain("release:assign-old");
-
-      holdOldRelease = false;
-      const reconstructed = makeContribution();
-      await reconstructed.alarm();
-      expect(dependencies.get("assign-old")).toBe("released");
-      expect(await reconstructed.getSettings(identity)).toMatchObject({
-        revision: 2,
-        assignments: [
-          {
-            assignmentId: "mail",
-            connectionId: "gmail-2",
-            state: "unavailable",
-          },
-        ],
-        assignmentOperations: [],
-      });
-      await expect(
-        execute(reconstructed, replaceCommand),
-      ).resolves.toMatchObject({ status: "applied", revision: 2 });
-    }
-  });
-
-  test("keeps provider absence retrying until the owner becomes available", async () => {
-    const storage = new MemoryStorage();
-    let available = false;
-    let dependency: "absent" | "claimed" | "acknowledged" = "absent";
-    const userConfiguration = {
-      readConfiguration: () => Promise.resolve(installedUser()),
-      executeConnectionDependency: (request: { action: string }) => {
-        if (!available) {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "unavailable" as const,
-            failure: "Connection owner is unavailable",
-          });
-        }
-        if (request.action === "read") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: dependency,
-          });
-        }
-        if (request.action === "claim") dependency = "claimed";
-        if (request.action === "acknowledge") dependency = "acknowledged";
-        return Promise.resolve({
-          schemaVersion: 1 as const,
-          status:
-            request.action === "claim"
-              ? ("claimed" as const)
-              : request.action === "acknowledge"
-                ? ("acknowledged" as const)
-                : ("pending" as const),
-        });
-      },
-    };
-    const host = {
-      state: { storage } as unknown as DurableObjectState,
-      env: {
-        USER_CONFIGURATIONS: {
-          idFromName: () => "user-1",
-          get: () => userConfiguration,
-        },
-      } as never,
-      compileApplication: compileAssignmentTestApplication,
-    };
-    const identity = { userId: "user-1", botId: "primary" };
-    const contribution = createShellBotBackendContribution(host);
-    await contribution.materializeSettings(identity, { name: "Primary" });
-    const command = assignmentCommand("owner-retry", {
-      packageId: "composio",
-      capabilityId: "gmail-tools",
-      connectionId: "gmail-1",
-    });
-    await expect(
-      contribution.executeConfiguration({
-        schemaVersion: 1,
-        ...identity,
-        command,
-      }),
-    ).resolves.toEqual({
-      schemaVersion: 1,
-      commandId: "owner-retry",
-      revision: 0,
-      status: "pending",
-    });
-    expect(await contribution.getSettings(identity)).toMatchObject({
-      revision: 0,
-      assignments: [],
-      assignmentOperations: [{ commandId: "owner-retry", state: "retrying" }],
-    });
-    available = true;
-    const reconstructed = createShellBotBackendContribution(host);
-    await reconstructed.alarm();
-    expect(await reconstructed.getSettings(identity)).toMatchObject({
-      revision: 1,
-      assignments: [{ assignmentId: "owner-retry", state: "enabled" }],
-      assignmentOperations: [],
-    });
-  });
-
-  test("scopes generations to Assignments that share one Connection", async () => {
-    const storage = new MemoryStorage();
-    const user = installedUser();
-    user.connections.push({
-      ...user.connections[0]!,
-      connectionId: "gmail-2",
-      displayName: "Gmail replacement",
-    });
-    const dependencies = new Map<
-      string,
-      "claimed" | "acknowledged" | "released"
-    >();
-    const userConfiguration = {
-      readConfiguration: () => Promise.resolve(structuredClone(user)),
-      executeConnectionDependency: (request: {
-        action: "claim" | "read" | "acknowledge" | "release" | "reconcile";
-        generation: string;
-      }) => {
-        if (request.action === "read") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: dependencies.get(request.generation) ?? ("absent" as const),
-          });
-        }
-        if (request.action === "claim") {
-          dependencies.set(request.generation, "claimed");
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "claimed" as const,
-          });
-        }
-        if (request.action === "acknowledge") {
-          dependencies.set(request.generation, "acknowledged");
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "acknowledged" as const,
-          });
-        }
-        if (request.action === "release") {
-          dependencies.set(request.generation, "released");
-        }
-        return Promise.resolve({
-          schemaVersion: 1 as const,
-          status: "released" as const,
-        });
-      },
-    };
-    const contribution = createShellBotBackendContribution({
-      state: { storage } as unknown as DurableObjectState,
-      env: {
-        USER_CONFIGURATIONS: {
-          idFromName: () => "user-1",
-          get: () => userConfiguration,
-        },
-      } as never,
-      compileApplication: compileAssignmentTestApplication,
-    });
-    const identity = { userId: "user-1", botId: "primary" };
-    await contribution.materializeSettings(identity, { name: "Primary" });
-    const execute = (command: BotConfigurationCommandV1) =>
-      contribution.executeConfiguration({
-        schemaVersion: 1,
-        ...identity,
-        command,
-      });
-    const assign = (
-      commandId: string,
-      expectedRevision: number,
-      assignmentId: string,
-      connectionId: string,
-      type:
-        | "bot/assign-capability"
-        | "bot/replace-capability" = "bot/assign-capability",
-    ) =>
-      execute({
-        schemaVersion: 1,
-        type,
-        commandId,
-        botId: "primary",
-        expectedRevision,
-        assignment: {
-          assignmentId,
-          packageId: "composio",
-          capabilityId: "gmail-tools",
-          connectionId,
-        },
-      });
-
-    await assign("assign-a", 0, "mail-a", "gmail-1");
-    await assign("assign-b", 1, "mail-b", "gmail-1");
-    await assign("replace-a", 2, "mail-a", "gmail-2", "bot/replace-capability");
-    expect(dependencies.get("assign-a")).toBe("released");
-    expect(dependencies.get("assign-b")).toBe("acknowledged");
-    await execute({
-      schemaVersion: 1,
-      type: "bot/unassign-capability",
-      commandId: "unassign-a",
-      botId: "primary",
-      expectedRevision: 3,
-      assignmentId: "mail-a",
-    });
-    expect(await contribution.getSettings(identity)).toMatchObject({
-      revision: 4,
-      assignments: [
-        {
-          assignmentId: "mail-b",
-          connectionId: "gmail-1",
-          state: "enabled",
-        },
-      ],
-    });
-    expect(dependencies.get("assign-b")).toBe("acknowledged");
-  });
-
-  test("settles a committed assignment saga before replaying its receipt", async () => {
-    const storage = new MemoryStorage();
-    let acknowledgementAttempts = 0;
-    let acknowledged = false;
-    let dependencyStatus: "absent" | "claimed" | "acknowledged" = "absent";
-    const userConfiguration = {
-      readConfiguration: () => Promise.resolve(installedUser()),
-      executeConnectionDependency: (request: { action: string }) => {
-        if (request.action === "read") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: dependencyStatus,
-          });
-        }
-        if (request.action === "claim") {
-          dependencyStatus = "claimed";
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "claimed" as const,
-          });
-        }
-        if (request.action === "acknowledge") {
-          acknowledgementAttempts += 1;
-          if (acknowledgementAttempts <= 1) {
-            return Promise.reject(new Error("acknowledgement response lost"));
-          }
-          dependencyStatus = "acknowledged";
-          acknowledged = true;
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "acknowledged" as const,
-          });
-        }
-        return Promise.resolve({
-          schemaVersion: 1 as const,
-          status: "released" as const,
-        });
-      },
-    };
-    const contribution = createShellBotBackendContribution({
-      state: { storage } as unknown as DurableObjectState,
-      env: {
-        USER_CONFIGURATIONS: {
-          idFromName: () => "user-1",
-          get: () => userConfiguration,
-        },
-      } as never,
-      compileApplication: compileAssignmentTestApplication,
-    });
-    await contribution.materializeSettings(
-      { userId: "user-1", botId: "primary" },
-      { name: "Primary" },
     );
-    const command = assignmentCommand("lost-assignment-response", {
-      packageId: "composio",
-      capabilityId: "gmail-tools",
-      connectionId: "gmail-1",
+
+    expect(await contribution.resolveConfiguration(identity)).toMatchObject({
+      model: model("flock-ai-ambient", "bot-model"),
     });
-    const execute = () =>
-      contribution.executeConfiguration({
-        schemaVersion: 1,
-        userId: "user-1",
-        botId: "primary",
-        command,
+
+    user = {
+      ...user,
+      packages: user.packages.map((pkg) =>
+        pkg.packageId === "custom-models"
+          ? { ...pkg, state: "disabled" as const }
+          : pkg,
+      ),
+    };
+    expect(await contribution.resolveConfiguration(identity)).toMatchObject({
+      model: model("flock-ai-ambient", "@flock/auto"),
+    });
+    expect(await contribution.getSettings(identity)).toMatchObject({
+      packageValues: {
+        "custom-models": {
+          model: model("flock-ai-ambient", "bot-model"),
+        },
+      },
+    });
+
+    user = {
+      ...user,
+      packages: user.packages.map((pkg) =>
+        pkg.packageId === "custom-models"
+          ? { ...pkg, state: "installed" as const }
+          : pkg,
+      ),
+    };
+    expect(await contribution.resolveConfiguration(identity)).toMatchObject({
+      model: model("flock-ai-ambient", "bot-model"),
+    });
+  });
+
+  test("Package disablement and Connection revocation fail every Bot's next Turn closed", async () => {
+    let user = configuredUser();
+    const bots = ["alpha", "beta"].map((botId) => {
+      const storage = new MemoryStorage();
+      return {
+        botId,
+        storage,
+        contribution: host(storage, () => user),
+      };
+    });
+    for (const bot of bots) {
+      await bot.contribution.materializeSettings(
+        { userId: "user-1", botId: bot.botId },
+        { name: bot.botId },
+      );
+    }
+
+    user = {
+      ...user,
+      packages: user.packages.map((pkg) =>
+        pkg.packageId === "provider-flock-ai"
+          ? { ...pkg, state: "disabled" as const }
+          : pkg,
+      ),
+    };
+    for (const bot of bots) {
+      const runId = `${bot.botId}-disabled-package`;
+      await expect(
+        bot.contribution.run({
+          userId: "user-1",
+          botId: bot.botId,
+          runId,
+          sessionId: `user-1:${bot.botId}`,
+          acceptedAt: "2026-09-02T00:01:00.000Z",
+          text: "must fail",
+        }),
+      ).rejects.toThrow("not installed and enabled");
+      expect(await bot.storage.get(`run:${runId}`)).toMatchObject({
+        status: "failed",
+        failure: expect.stringContaining("not installed and enabled"),
       });
+    }
 
-    await expect(execute()).resolves.toEqual({
-      schemaVersion: 1,
-      commandId: "lost-assignment-response",
-      status: "pending",
-      revision: 0,
-    });
-    expect(acknowledgementAttempts).toBe(1);
-    expect(acknowledged).toBe(false);
-
-    await expect(execute()).resolves.toMatchObject({
-      commandId: "lost-assignment-response",
-      status: "applied",
-      revision: 1,
-    });
-    expect(acknowledgementAttempts).toBe(2);
-    expect(acknowledged).toBe(true);
+    user = configuredUser();
+    user.connections[0] = { ...user.connections[0]!, state: "revoked" };
+    for (const bot of bots) {
+      const runId = `${bot.botId}-revoked-connection`;
+      await expect(
+        bot.contribution.run({
+          userId: "user-1",
+          botId: bot.botId,
+          runId,
+          sessionId: `user-1:${bot.botId}`,
+          acceptedAt: "2026-09-02T00:02:00.000Z",
+          text: "must fail",
+        }),
+      ).rejects.toThrow("is revoked");
+      expect(await bot.storage.get(`run:${runId}`)).toMatchObject({
+        status: "failed",
+        failure: expect.stringContaining("is revoked"),
+      });
+    }
   });
 });
 
-describe("User default model", () => {
-  test("claims one durable Assignment for a Bot that follows the default", async () => {
+describe("Bot Package setting commands", () => {
+  test("validates, revision-fences, merges, and replays durably", async () => {
     const storage = new MemoryStorage();
-    let dependencyClaims = 0;
-    let dependencyAcknowledgements = 0;
-    let dependencyStatus: "absent" | "claimed" | "acknowledged" = "absent";
-    const user: UserSettingsViewV1 = {
-      ...installedUser(),
-      newBotModelTemplate: {
-        connectionId: "gmail-1",
-        providerModelId: "fixture-model",
-      },
-      newBotModelTemplateSource: "auto",
-    };
-    const userConfiguration = {
-      readConfiguration: () => Promise.resolve(structuredClone(user)),
-      executeConnectionDependency: (request: { action: string }) => {
-        if (request.action === "read") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: dependencyStatus,
-          });
-        }
-        if (request.action === "claim") {
-          dependencyClaims += 1;
-          dependencyStatus = "claimed";
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "claimed" as const,
-          });
-        }
-        if (request.action === "acknowledge") {
-          dependencyAcknowledgements += 1;
-          dependencyStatus = "acknowledged";
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "acknowledged" as const,
-          });
-        }
-        dependencyStatus = "absent";
-        return Promise.resolve({
-          schemaVersion: 1 as const,
-          status: "released" as const,
-        });
-      },
-    };
-    const contribution = createShellBotBackendContribution({
-      state: { storage } as unknown as DurableObjectState,
-      env: {
-        USER_CONFIGURATIONS: {
-          idFromName: () => "user-1",
-          get: () => userConfiguration,
-        },
-      } as never,
-      compileApplication: compileAssignmentTestApplication,
-    });
+    const user = configuredUser();
+    const contribution = host(storage, () => user);
     const identity = { userId: "user-1", botId: "primary" };
     await contribution.materializeSettings(identity, { name: "Primary" });
 
-    const plan = await contribution.resolveConfiguration(identity);
-    expect(plan.model).toBeUndefined();
-    expect(plan.assignments).toMatchObject([
-      {
-        packageId: "composio",
-        capabilityId: "gmail-tools",
-        connectionId: "gmail-1",
-        state: "enabled",
-      },
-    ]);
-    expect(dependencyClaims).toBe(1);
-    expect(dependencyAcknowledgements).toBe(1);
-
-    // The claim is made once: a Bot that already holds the Assignment keeps it
-    // and follows the default without further durable writes.
-    const settings = await contribution.readConfiguration({
-      schemaVersion: 1,
-      ...identity,
-    });
-    await contribution.resolveConfiguration(identity);
-    expect(dependencyClaims).toBe(1);
-    expect(
-      await contribution.readConfiguration({ schemaVersion: 1, ...identity }),
-    ).toEqual(settings);
-    expect(settings.model).toBeUndefined();
-  });
-
-  test("leaves a Bot unclaimed when the default Connection is unavailable", async () => {
-    const storage = new MemoryStorage();
-    let dependencyClaims = 0;
-    const userConfiguration = {
-      readConfiguration: () =>
-        Promise.resolve({
-          ...installedUser(),
-          connections: [
-            { ...installedUser().connections[0]!, state: "revoked" as const },
-          ],
-          newBotModelTemplate: {
-            connectionId: "gmail-1",
-            providerModelId: "fixture-model",
-          },
-          newBotModelTemplateSource: "auto",
+    await expect(
+      contribution.executeConfiguration(
+        request({
+          schemaVersion: 1,
+          type: "bot/set-package-settings",
+          commandId: "invalid-model",
+          botId: "primary",
+          expectedRevision: 0,
+          packageId: "custom-models",
+          values: { model: { connectionId: "flock-ai-ambient" } as never },
         }),
-      executeConnectionDependency: (request: { action: string }) => {
-        if (request.action === "read") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "absent" as const,
-          });
-        }
-        if (request.action === "claim") dependencyClaims += 1;
-        return Promise.resolve({
-          schemaVersion: 1 as const,
-          status: "unauthorized" as const,
-        });
+      ),
+    ).rejects.toThrow("model has invalid fields");
+    expect((await contribution.getSettings(identity)).revision).toBe(0);
+
+    const first: BotConfigurationCommandV1 = {
+      schemaVersion: 1,
+      type: "bot/set-package-settings",
+      commandId: "set-package-values",
+      botId: "primary",
+      expectedRevision: 0,
+      packageId: "custom-models",
+      values: {
+        model: model("flock-ai-ambient", "bot-model"),
+        tone: "concise",
       },
     };
-    const contribution = createShellBotBackendContribution({
-      state: { storage } as unknown as DurableObjectState,
-      env: {
-        USER_CONFIGURATIONS: {
-          idFromName: () => "user-1",
-          get: () => userConfiguration,
+    const receipt = await contribution.executeConfiguration(request(first));
+    await expect(
+      contribution.executeConfiguration(request(first)),
+    ).resolves.toEqual(receipt);
+    expect(await contribution.getSettings(identity)).toMatchObject({
+      revision: 1,
+      packageValues: {
+        "custom-models": {
+          model: model("flock-ai-ambient", "bot-model"),
+          tone: "concise",
         },
-      } as never,
-      compileApplication: compileAssignmentTestApplication,
+      },
     });
-    const identity = { userId: "user-1", botId: "primary" };
-    await contribution.materializeSettings(identity, { name: "Primary" });
 
-    expect(
-      (await contribution.resolveConfiguration(identity)).assignments,
-    ).toEqual([]);
-    expect(dependencyClaims).toBe(0);
+    await contribution.executeConfiguration(
+      request({
+        ...first,
+        commandId: "update-model-only",
+        expectedRevision: 1,
+        values: { model: model("flock-ai-ambient", "new-bot-model") },
+      }),
+    );
+    expect(await contribution.getSettings(identity)).toMatchObject({
+      revision: 2,
+      packageValues: {
+        "custom-models": {
+          model: model("flock-ai-ambient", "new-bot-model"),
+          tone: "concise",
+        },
+      },
+    });
+
+    await contribution.executeConfiguration(
+      request({
+        ...first,
+        commandId: "unset-bot-model",
+        expectedRevision: 2,
+        values: undefined,
+        unset: ["model"],
+      }),
+    );
+    expect(await contribution.getSettings(identity)).toMatchObject({
+      revision: 3,
+      packageValues: { "custom-models": { tone: "concise" } },
+    });
+
+    await expect(
+      contribution.executeConfiguration(
+        request({
+          ...first,
+          commandId: "unset-unknown",
+          expectedRevision: 3,
+          values: undefined,
+          unset: ["unknown-setting"],
+        }),
+      ),
+    ).rejects.toThrow(/not declared by this Package/);
+
+    await expect(
+      contribution.executeConfiguration(
+        request({
+          ...first,
+          commandId: "stale-revision",
+          expectedRevision: 2,
+        }),
+      ),
+    ).rejects.toThrow("configuration revision is 3");
+    await expect(
+      contribution.executeConfiguration(
+        request({
+          ...first,
+          values: { tone: "different" },
+        }),
+      ),
+    ).rejects.toThrow("reused for a different command");
   });
 });

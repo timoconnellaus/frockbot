@@ -5,50 +5,10 @@ import {
   type ClientSlotRegistration,
 } from "@frockbot/client-core";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
+import manifest from "../../frockbot.json";
 import { settingsClientPlugin } from "./index.js";
-import {
-  assignmentHasPendingOperation,
-  projectAssignmentOperations,
-} from "./assignment-operations.js";
 
 describe("settings client contribution", () => {
-  it("projects every Assignment operation without catalog ownership", () => {
-    const operations = [
-      {
-        commandId: "assign-1",
-        kind: "assigning" as const,
-        assignmentId: "orphan-assign",
-        state: "retrying" as const,
-        target: {
-          assignmentId: "orphan-assign",
-          packageId: "missing-package",
-          capabilityId: "missing-capability",
-        },
-      },
-      {
-        commandId: "replace-1",
-        kind: "replacing" as const,
-        assignmentId: "orphan-replace",
-        state: "pending" as const,
-      },
-      {
-        commandId: "unassign-1",
-        kind: "unassigning" as const,
-        assignmentId: "orphan-unassign",
-        state: "retrying" as const,
-      },
-    ];
-    const projected = projectAssignmentOperations({
-      assignmentOperations: operations,
-    });
-    expect(projected).toEqual(operations);
-    expect(projected).not.toBe(operations);
-    expect(assignmentHasPendingOperation(projected, "orphan-unassign")).toBe(
-      true,
-    );
-    expect(assignmentHasPendingOperation(projected, "stable")).toBe(false);
-  });
-
   it("registers feature surfaces and shell-owned trigger seats", () => {
     const surfaces = createClientSurfaceRegistry();
     const slots: ClientSlotRegistration[] = [];
@@ -95,6 +55,12 @@ describe("settings client contribution", () => {
     ]) {
       expect(surfaces.has(id)).toBe(true);
     }
+    surfaces.open("connections");
+    expect(surfaces.active.value?.title).toBe("Connectors");
+    surfaces.close();
+    expect(manifest.contributions.client.outlets).toContain(
+      "frockbot.models-sections",
+    );
 
     for (const dispose of result.toReversed()) dispose();
     expect(slots).toEqual([]);

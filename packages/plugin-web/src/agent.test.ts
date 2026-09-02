@@ -12,10 +12,9 @@ import {
   type WebFetchResultV1,
 } from "./agent.ts";
 
-const ENABLED_ASSIGNMENT = {
+const ENABLED_CAPABILITY = {
   packageId: "web",
   capabilityId: "web-fetch",
-  state: "enabled",
 } as const;
 
 function toolContext(): ToolExecutionContext {
@@ -226,21 +225,16 @@ describe("web_fetch", () => {
   });
 });
 
-describe("the web-fetch Capability Assignment", () => {
-  test("mounts nothing without an enabled Assignment naming it", () => {
+describe("the web-fetch Capability enablement", () => {
+  test("mounts only for the enabled Capability", () => {
     expect(
       createConfiguredWebFetchRuntimeContribution({
-        assignment: { ...ENABLED_ASSIGNMENT, state: "disabled" },
+        capability: { ...ENABLED_CAPABILITY, capabilityId: "something-else" },
       }),
     ).toBeUndefined();
     expect(
       createConfiguredWebFetchRuntimeContribution({
-        assignment: { ...ENABLED_ASSIGNMENT, capabilityId: "something-else" },
-      }),
-    ).toBeUndefined();
-    expect(
-      createConfiguredWebFetchRuntimeContribution({
-        assignment: ENABLED_ASSIGNMENT,
+        capability: ENABLED_CAPABILITY,
       }),
     ).toBeDefined();
   });
@@ -249,7 +243,7 @@ describe("the web-fetch Capability Assignment", () => {
     const root = new Context();
     await root.plugin(ToolRegistry);
     const plugin = createConfiguredWebFetchRuntimeContribution({
-      assignment: ENABLED_ASSIGNMENT,
+      capability: ENABLED_CAPABILITY,
     });
     expect(plugin).toBeDefined();
     await root.plugin(plugin!);

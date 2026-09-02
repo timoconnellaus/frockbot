@@ -177,6 +177,8 @@ interface Env {
   PACKAGE_CATALOG?: R2Bucket;
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
+  FLOCK_AI_GATEWAY_ID?: string;
+  FLOCK_AI_AUTO_ROUTE?: string;
   BOT_STATES: DurableObjectNamespace<BotState>;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;

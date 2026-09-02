@@ -159,7 +159,7 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
     >
       <p class="plugin-intro">
         Turn Packages on and off for your Bots. Set one up where it belongs:
-        model providers in Models, accounts in Connections.
+        model providers in Models, accounts in Connectors.
       </p>
       <div class="plugin-catalog-link">
         <UiButton type="button" @click="openPackageCatalog">

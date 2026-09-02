@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 4,
+  "id": "custom-models",
+  "displayName": "Custom models",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {
+    "settings": ">=0.0.1",
+    "shell": ">=0.0.1",
+    "ui-theme": ">=0.0.1"
+  },
+  "defaultEnablement": "disabled",
+  "contributions": {
+    "client": {
+      "entry": "./client",
+      "mounts": [
+        { "slot": "frockbot.models-sections", "order": 0 },
+        { "slot": "frockbot.bot-settings-sections", "order": 0 }
+      ],
+      "outlets": []
+    }
+  },
+  "configuration": {
+    "settings": [
+      {
+        "id": "account-model",
+        "schemaVersion": 1,
+        "scopes": ["user"],
+        "role": "model",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "connectionId": { "type": "string" },
+            "providerModelId": { "type": "string" }
+          },
+          "required": ["connectionId", "providerModelId"],
+          "additionalProperties": false
+        }
+      },
+      {
+        "id": "model",
+        "schemaVersion": 1,
+        "scopes": ["bot"],
+        "role": "model",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "connectionId": { "type": "string" },
+            "providerModelId": { "type": "string" }
+          },
+          "required": ["connectionId", "providerModelId"],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "connectionTypes": [],
+    "capabilities": []
+  },
+  "permissions": []
+}

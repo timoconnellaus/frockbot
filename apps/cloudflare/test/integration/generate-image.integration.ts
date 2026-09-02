@@ -4,7 +4,7 @@
 // the Worker Loader and the real artifact, then the Bot Durable Object, whose
 // Agent loop runs the Turn. The stubbed model answers with a `generate_image`
 // tool call; `env.AI` is an auxiliary Worker's RPC entrypoint (see
-// `test/workers-ai-fake.ts`), so the production seam — `env.AI.run(model,
+// `test/flock-ai-fake.ts`), so the production seam — `env.AI.run(model,
 // input)` — is the one exercised.
 //
 // Three claims:
@@ -61,16 +61,15 @@ async function runEvents(
 
 /** What the fake `AI` binding has been asked to generate so far. */
 async function modelCalls(): Promise<Array<{ model: string; prompt: string }>> {
-  // SAFETY: the binding is declared as Workers AI in the production `Env`; the
-  // suite binds the same entrypoint a second time under `WORKERS_AI` so the
-  // call log is reachable without widening the production type.
+  // SAFETY: the suite binds the same RPC entrypoint a second time under
+  // `AI_PROBE` so the call log is reachable without widening production Env.
   const probe = (
     env as unknown as {
-      WORKERS_AI: {
+      AI_PROBE: {
         runCalls(): Promise<Array<{ model: string; prompt: string }>>;
       };
     }
-  ).WORKERS_AI;
+  ).AI_PROBE;
   return await probe.runCalls();
 }
 

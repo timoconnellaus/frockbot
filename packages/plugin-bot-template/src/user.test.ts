@@ -92,17 +92,7 @@ function botSettings(): BotSettingsViewV1 {
     revision: 3,
     profile: { name: "Budget", title: "Money minder" },
     notifications: { enabled: true },
-    assignments: [
-      {
-        assignmentId: "a-1",
-        packageId: "mcp",
-        capabilityId: "mcp-tools",
-        connectionId: "connection-1",
-        state: "enabled",
-      },
-    ],
-    assignmentOperations: [],
-    model: { connectionId: "connection-1", providerModelId: "glm" },
+    packageValues: {},
   };
 }
 

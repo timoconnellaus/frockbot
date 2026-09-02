@@ -127,14 +127,14 @@ export async function openApplication(
   }
   // Not the "Create Bot" button: for a User with no Bots the creation dialog
   // opens by itself, and its submit carries the same name. The sidebar's
-  // Plugins trigger renders once the shell has mounted and read the manifest.
+  // Connectors trigger renders once the shell has mounted and read the manifest.
   //
   // On a phone the sidebar is a closed drawer — inert, and so invisible to a
   // role query — and the menu button that opens it is the same signal: it too
   // renders only once the shell has mounted.
   await expect(
     page
-      .getByRole("button", { name: "Plugins", exact: true })
+      .getByRole("button", { name: "Connectors", exact: true })
       .or(page.getByRole("button", { name: "Show navigation" })),
   ).toBeVisible();
 }
@@ -165,12 +165,19 @@ export async function createBot(page: Page, name: string): Promise<void> {
   // is being typed reopens the dialog on an empty draft — the field clears,
   // the required input refuses to submit, and the dialog never closes. Retry
   // until the value survives, which is also what a person would do.
+  // The same reopen also lands between the value settling and the submit, and
+  // then the click meets an empty draft: the required input refuses, and the
+  // dialog stays open for the rest of the run. So the fill and the submit
+  // retry together. A reopened draft submits nothing, so a retry cannot leave
+  // a second Bot behind.
   const nameField = dialog.getByLabel("Bot name");
   await expect(async () => {
+    if (await dialog.isHidden()) return;
     await nameField.fill(name);
     await expect(nameField).toHaveValue(name, { timeout: 2_000 });
+    await dialog.getByRole("button", { name: "Create Bot" }).click();
+    await expect(dialog).toBeHidden({ timeout: 5_000 });
   }).toPass({ timeout: 30_000 });
-  await dialog.getByRole("button", { name: "Create Bot" }).click();
   await expect(dialog).toBeHidden();
 }
 
@@ -193,7 +200,8 @@ export async function revealSidebar(page: Page): Promise<void> {
 /** Open the Plugins overlay and wait for its heading. */
 export async function openPlugins(page: Page): Promise<void> {
   await revealSidebar(page);
-  await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await page.locator(".profile-trigger").click();
+  await page.getByRole("menuitem", { name: "Plugins", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Plugins" })).toBeVisible();
 }
 
@@ -223,30 +231,61 @@ export function ollamaPluginRow(page: Page): Locator {
   });
 }
 
+/** The Custom models enablement row in Plugins. */
+export function customModelsPluginRow(page: Page): Locator {
+  return page.locator("article.plugin-card", {
+    has: page.getByText("Custom models", { exact: true }),
+  });
+}
+
+/**
+ * Switch a Package on from its Plugins row, whichever affordance it offers,
+ * and wait until the row reports it is on. Enabling is refused while a
+ * declared dependency is off, so a caller that skips a dependency would
+ * otherwise sail past the refusal and wait out its timeout on a surface that
+ * never appears.
+ */
+async function enablePluginRow(row: Locator): Promise<void> {
+  await expect(row).toBeVisible();
+  const action = row.getByRole("button", { name: /^(Add|Enable)$/u });
+  await expect(action).toBeVisible();
+  await action.click();
+  await expect(
+    row.getByRole("button", { name: "Disable", exact: true }),
+  ).toBeVisible();
+}
+
+/**
+ * Switch Custom models on. The platform chooses the model, so choosing one at
+ * all — and every model provider besides the built-in one — is behind this one
+ * Package, which ships disabled.
+ */
+export async function enableCustomModels(page: Page): Promise<void> {
+  await openPlugins(page);
+  await enablePluginRow(customModelsPluginRow(page));
+  await closeOverlay(page);
+}
+
 /**
  * Enable the Ollama Cloud Package if it is not already, then connect an API
  * key to an endpoint on Models.
  *
- * The two steps are two surfaces on purpose: Plugins decides whether the
- * Package is on, Models sets it up. `API base URL` is the Package's own
- * Connection setting, so pointing the Connection at the harness's fake server
- * is the shipped path a User takes to reach a local Ollama — not a test-only
- * door. It leaves the form submitted; the caller decides whether it expects
+ * Three steps, three surfaces on purpose: Custom models decides whether a User
+ * chooses models at all, Plugins decides whether this provider is on, and
+ * Models sets it up. Ollama Cloud declares a dependency on Custom models, so
+ * enabling it first is the shipped path, not test scaffolding. `API base URL`
+ * is the Package's own Connection setting, so pointing the Connection at the
+ * harness's fake server is also the shipped path a User takes to reach a local
+ * Ollama. It leaves the form submitted; the caller decides whether it expects
  * success or a failure.
  */
 export async function connectOllama(
   page: Page,
   options: { apiKey: string; apiBaseUrl: string; label?: string },
 ): Promise<void> {
+  await enableCustomModels(page);
   await openPlugins(page);
-  const row = ollamaPluginRow(page);
-  for (const label of ["Add", "Enable"]) {
-    const action = row.getByRole("button", { name: label, exact: true });
-    if (await action.isVisible().catch(() => false)) {
-      await action.click();
-      break;
-    }
-  }
+  await enablePluginRow(ollamaPluginRow(page));
   await closeOverlay(page);
   await openModels(page);
   const card = ollamaCard(page);
@@ -278,12 +317,12 @@ export async function chooseDefaultModel(
   optionLabel: string,
 ): Promise<void> {
   await openModels(page);
-  const models = page.getByLabel(/^Default model/);
+  const models = page.getByLabel(/^Account model/);
   await expect(
     models.getByRole("option", { name: optionLabel }),
   ).toBeAttached();
   await models.selectOption({ label: optionLabel });
-  await page.getByRole("button", { name: "Save model" }).click();
+  await page.getByRole("button", { name: "Save account model" }).click();
   await closeOverlay(page);
   await expect(page.getByRole("heading", { name: "Models" })).toBeHidden();
 }

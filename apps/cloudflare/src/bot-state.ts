@@ -1,7 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   compileFoundationApplication,
-  createFoundationAssignedRuntimePackages,
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
   createFoundationRuntimeApplication,
@@ -147,6 +146,10 @@ import {
   type UserMemoryRpc,
 } from "./memory.js";
 import {
+  createFlockAiGatewayHostV1,
+  type FlockAiGatewayHostV1,
+} from "./flock-ai.js";
+import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
   rpcBotId,
@@ -156,6 +159,22 @@ import {
   rpcObject,
   rpcString,
 } from "./durable-rpc.js";
+
+function isFlockAiGatewayBindingV1(
+  value: BotStateEnv["AI"],
+): value is NonNullable<BotStateEnv["AI"]> & Pick<Ai, "gateway"> {
+  return (
+    value !== undefined && typeof Reflect.get(value, "gateway") === "function"
+  );
+}
+
+function optionalWorkerVarV1(
+  env: BotStateEnv,
+  name: string,
+): string | undefined {
+  const value = Reflect.get(env, name);
+  return typeof value === "string" && value ? value : undefined;
+}
 
 export type { BotStateEnv, OwnedBotTurnCommand };
 
@@ -192,6 +211,7 @@ export class BotState extends DurableObject<BotStateEnv> {
    * constructed here and never reaches the deployed bindings map.
    */
   protected readonly backendEnv: BotStateEnv & {
+    FLOCK_AI?: FlockAiGatewayHostV1;
     WORKSPACE_FILES?: WorkspaceFilesV1;
     PACKAGE_CATALOG_ENTRIES?: BotSkillCatalogReaderV1;
     MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
@@ -237,7 +257,17 @@ export class BotState extends DurableObject<BotStateEnv> {
     // The surfaces are built per identity in `bindSurfaces`, not here: they
     // carry the `owner` guard, and a Durable Object learns which User it
     // serves from the RPC that addresses it, never from its constructor.
-    this.backendEnv = { ...env };
+    this.backendEnv = {
+      ...env,
+      ...(isFlockAiGatewayBindingV1(env.AI)
+        ? {
+            FLOCK_AI: createFlockAiGatewayHostV1(env.AI, {
+              gatewayId: optionalWorkerVarV1(env, "FLOCK_AI_GATEWAY_ID"),
+              autoRoute: optionalWorkerVarV1(env, "FLOCK_AI_AUTO_ROUTE"),
+            }),
+          }
+        : {}),
+    };
   }
 
   private contributions(): Promise<{
@@ -315,43 +345,22 @@ export class BotState extends DurableObject<BotStateEnv> {
                 return createFlockBotBackendPlugin(
                   {
                     storage: this.ctx.storage,
-                    materializeSettings: (registration, userId) => {
+                    materializeSettings: async (registration, userId) => {
                       if (!shell)
                         throw new Error(
                           "Shell Bot Contribution is unavailable",
                         );
-                      return shell
-                        .materializeSettings(
-                          { userId, botId: registration.botId },
-                          {
-                            name: registration.initialName,
-                            ...(registration.initialDescription === undefined
-                              ? {}
-                              : {
-                                  description: registration.initialDescription,
-                                }),
-                            model: registration.initialModel,
-                            modelBinding: registration.initialModelBinding,
-                            assignments: registration.initialAssignments ?? [],
-                          },
-                        )
-                        .then(async (settings) => {
-                          if (
-                            registration.initialModel &&
-                            registration.initialModelBinding &&
-                            settings.assignments.some(
-                              (assignment) =>
-                                assignment.assignmentId ===
-                                registration.initialModelBinding?.assignment
-                                  .assignmentId,
-                            )
-                          ) {
-                            await this.acknowledgeInitialModelBinding(
-                              userId,
-                              registration,
-                            );
-                          }
-                        });
+                      await shell.materializeSettings(
+                        { userId, botId: registration.botId },
+                        {
+                          name: registration.initialName,
+                          ...(registration.initialDescription === undefined
+                            ? {}
+                            : {
+                                description: registration.initialDescription,
+                              }),
+                        },
+                      );
                     },
                     archiveEligible: (storage) => {
                       if (!shell)
@@ -425,31 +434,6 @@ export class BotState extends DurableObject<BotStateEnv> {
       });
     }
     return this.mounted;
-  }
-
-  private async acknowledgeInitialModelBinding(
-    userId: string,
-    registration: BotRegistrationV1,
-  ): Promise<void> {
-    const binding = registration.initialModelBinding;
-    const model = registration.initialModel;
-    if (!binding || !model) return;
-    const id = this.env.USER_CONFIGURATIONS.idFromName(userId);
-    // SAFETY: USER_CONFIGURATIONS binds UserConfiguration; workers-types cannot infer its generated dependency RPC surface.
-    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
-      acknowledgeConnectionDependency(input: unknown): Promise<boolean>;
-    };
-    if (
-      !(await rpc.acknowledgeConnectionDependency({
-        schemaVersion: 1,
-        userId,
-        connectionId: model.connectionId,
-        botId: registration.botId,
-        generation: binding.generation,
-      }))
-    ) {
-      throw new Error("Initial model dependency was not acknowledged");
-    }
   }
 
   private async registration(identity: {
@@ -699,8 +683,8 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   /**
-   * D6: model invocation as an Assignment-derived binding. Without a matching
-   * enabled model Assignment the answer is a pending decision; with one, the
+   * D6: model invocation as a User-enabled binding. Without a matching
+   * enabled model Capability the answer is a pending decision; with one, the
    * request is recorded and the credential lease taken through the existing
    * provider path before any event is streamed back.
    */
@@ -722,28 +706,6 @@ export class BotState extends DurableObject<BotStateEnv> {
       generationId: request.generationId as string,
       request: request.request as NormalizedModelRequest,
     });
-  }
-
-  async markConnectionUnavailable(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      connectionId: rpcIdentifier,
-      compensation: rpcObject({
-        id: rpcIdentifier,
-        expectedGeneration: rpcIdentifier,
-      }),
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    return shell.markConnectionUnavailable(
-      identity,
-      request.connectionId as string,
-      request.compensation as { id: string; expectedGeneration: string },
-    );
   }
 
   async resolveConfiguration(input: unknown) {

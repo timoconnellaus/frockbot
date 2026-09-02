@@ -16,7 +16,7 @@ import {
   MCP_UNREACHABLE_ENDPOINT,
 } from "./harness/miniflare.ts";
 import {
-  mcpAssignmentResolutionV1,
+  mcpCapabilityResolutionV1,
   type McpMountOutcomeV1,
 } from "@frockbot/plugin-mcp/agent";
 
@@ -45,11 +45,10 @@ async function mount(
   outcomes: McpMountOutcomeV1[] = [],
 ) {
   const plugin = await createConfiguredMcpRuntimeContribution({
-    assignment: {
+    capability: {
       packageId: "mcp",
       capabilityId: "mcp-tools",
       connectionId: view.connectionId,
-      state: "enabled",
     },
     userId: "mcp-workerd-user",
     readSecret: () => undefined,
@@ -148,13 +147,13 @@ describe("the MCP runtime Contribution in workerd", () => {
     const before = connection({ safeMetadata: { serverEpoch: 1 } });
     const after = connection({ safeMetadata: { serverEpoch: 2 } });
     expect(
-      mcpAssignmentResolutionV1({
-        assignment: { connectionId: before.connectionId },
+      mcpCapabilityResolutionV1({
+        capability: { connectionId: before.connectionId },
         connection: after,
       }),
     ).not.toBe(
-      mcpAssignmentResolutionV1({
-        assignment: { connectionId: before.connectionId },
+      mcpCapabilityResolutionV1({
+        capability: { connectionId: before.connectionId },
         connection: before,
       }),
     );

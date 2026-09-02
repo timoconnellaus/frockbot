@@ -175,27 +175,6 @@
   text-overflow: ellipsis;
 }
 
-.model-setup-link {
-  width: max-content;
-  max-width: 100%;
-  margin-top: 3px;
-  overflow: hidden;
-  border: 0;
-  padding: 0;
-  color: var(--frock-action-primary);
-  background: transparent;
-  font: inherit;
-  font-size: var(--frock-text-sm);
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.model-setup-link:hover {
-  color: var(--frock-action-primary-hover);
-}
-
 /*
  * The panel collapse control is pinned to the window's trailing edge. Feature
  * actions live in the panel's own header.
@@ -568,12 +547,6 @@
   box-shadow:
     var(--frock-shadow-composer),
     0 0 0 3px var(--frock-focus-ring);
-}
-
-.composer-model-setup {
-  min-width: 0;
-  flex: 1;
-  align-self: center;
 }
 
 .composer textarea {

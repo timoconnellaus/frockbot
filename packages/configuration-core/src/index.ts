@@ -6,10 +6,18 @@ import {
   decodeConnectionAuthorizationViewV1,
   decodeConnectionModelCatalogV1,
 } from "@frockbot/connection-core";
+import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import { ConfigurationDecodeError } from "./errors.js";
 import {
+  decodeInstalledPackageSettingsPatchV1,
+  decodeInstalledPackageSettingIdsV1,
+  decodeModelBindingV1,
   MAX_PACKAGE_SETTINGS_V1,
   MAX_PACKAGE_SETTING_TEXT_V1,
+  resolvePackageSettingValuesV1,
+  type InstalledPackageSettingsV1,
+  type ModelBindingV1,
+  type PackageSettingsDefinitionV1,
   type PackageSettingValueV1,
 } from "./package-settings.js";
 export { ConfigurationDecodeError } from "./errors.js";
@@ -21,13 +29,20 @@ import {
 } from "./identifiers.js";
 export { isBotIdV1 } from "./bot-id.js";
 export {
+  decodeInstalledPackageSettingsPatchV1,
+  decodeInstalledPackageSettingIdsV1,
+  decodeModelBindingV1,
   decodePackageSettingsPatchV1,
+  decodePackageSettingIdsV1,
   decodePackageSettingValueV1,
   decodePackageSettingValuesV1,
   emptyPackageSettingValuesV1,
   MAX_PACKAGE_SETTINGS_V1,
   MAX_PACKAGE_SETTING_TEXT_V1,
   resolvePackageSettingValuesV1,
+  type InstalledPackageSettingsV1,
+  type ModelBindingV1,
+  type PackageSettingsDefinitionV1,
   type PackageSettingValueV1,
   type PackageSettingValuesV1,
 } from "./package-settings.js";
@@ -103,14 +118,6 @@ export interface BotNotificationPolicy {
   enabled: boolean;
 }
 
-export interface ModelAssignment {
-  connectionId: string;
-  providerModelId: string;
-}
-
-/** Whether the User chose the default model or a provider selected it safely. */
-export type NewBotModelTemplateSourceV1 = "user" | "auto";
-
 /**
  * Where an installed Package came from. `first-party` is a Package compiled
  * into the running application; `catalog` is one admitted from a pinned remote
@@ -131,7 +138,7 @@ export interface PackageInstallationView {
   catalogGeneration?: string;
   provenance?: PackageProvenanceV1;
   /** The setup values the install carried, as GrokBot's `InstallPlugin{values}`. */
-  values?: Record<string, JsonValue>;
+  values?: Record<string, JsonValue | ModelBindingV1>;
 }
 
 /**
@@ -213,12 +220,11 @@ export interface UserSettingsViewV1 {
   profile: { name: string; email?: string };
   packages: PackageInstallationView[];
   connections: ConnectionView[];
-  newBotModelTemplate?: ModelAssignment;
   /**
-   * `user` is sticky, including when the User explicitly clears the default.
-   * Providers may replace only an `auto` default (or the untouched absence).
+   * The model the platform chose for this User. Only a provider bootstrap
+   * writes it; no User command may do so (AGENTS.md Configuration shape).
    */
-  newBotModelTemplateSource?: NewBotModelTemplateSourceV1;
+  platformModel?: ModelBindingV1;
   /**
    * The remote Catalog generation this User is pinned to, and the content hash
    * of that generation's index. Pinned on the first read that finds a Catalog
@@ -230,54 +236,27 @@ export interface UserSettingsViewV1 {
   catalogIndexHash?: string;
 }
 
-export interface CapabilityAssignmentView {
-  assignmentId: string;
-  packageId: string;
-  capabilityId: string;
-  connectionId?: string;
-  state: "enabled" | "disabled" | "unavailable";
-}
-
-export interface ConnectionDependencyRequirementV1 {
-  schemaVersion: 1;
-  packageId: string;
-  packageVersion: string;
-  capabilityId: string;
-  connectionTypeIds: string[];
-}
-
-export interface CapabilityAssignmentOperationViewV1 {
-  commandId: string;
-  kind: "assigning" | "replacing" | "unassigning";
-  assignmentId: string;
-  state: "pending" | "retrying";
-  target?: Omit<CapabilityAssignmentView, "state">;
-}
-
 export interface BotSettingsViewV1 {
   schemaVersion: 1;
   botId: string;
   revision: number;
   profile: BotProfile;
   notifications: BotNotificationPolicy;
-  assignments: CapabilityAssignmentView[];
-  assignmentOperations: CapabilityAssignmentOperationViewV1[];
-  model?: ModelAssignment;
+  /**
+   * Package-owned Bot overrides. Disabling a Package leaves these durable but
+   * inert so re-enabling restores them (ADR 0019).
+   */
+  packageValues: Record<string, Record<string, unknown>>;
 }
 
-export function initializeBotSettingsV1(
-  botId: string,
-  model?: ModelAssignment,
-): BotSettingsViewV1 {
+export function initializeBotSettingsV1(botId: string): BotSettingsViewV1 {
   return {
     schemaVersion: 1,
     botId,
     revision: 0,
     profile: { name: botId === "default" ? "Barebones" : botId },
     notifications: { enabled: true },
-    assignments: [],
-    assignmentOperations: [],
-    model: model ? structuredClone(model) : undefined,
+    packageValues: {},
   };
 }
 
@@ -299,14 +278,20 @@ export type ConfigurationCommandV1 =
       profile: UserSettingsViewV1["profile"];
     })
   | (CommandMetaV1 & {
-      type: "user/set-new-bot-model";
-      model?: ModelAssignment;
-      source: NewBotModelTemplateSourceV1;
+      /**
+       * Only a backend Contribution may issue this command. The User gateway
+       * enforces that authority; a User can choose a model only by enabling a
+       * Package that owns model-role settings.
+       */
+      type: "user/set-platform-model";
+      model: ModelBindingV1;
     })
   | (CommandMetaV1 & {
       type: "user/install-package";
       packageId: string;
       version: string;
+      /** Installs enabled unless the caller explicitly asks otherwise. */
+      enabled?: boolean;
       /**
        * A Catalog install names the entry and the generation it was read
        * from. The User Durable Object refuses a generation other than the one
@@ -318,11 +303,7 @@ export type ConfigurationCommandV1 =
       values?: Record<string, JsonValue>;
     })
   | (CommandMetaV1 & {
-      /**
-       * Removes the installation. Dependent Assignments are never deleted:
-       * they resolve as unavailable tombstones the User can repair (ADR 0003).
-       * Connections are untouched.
-       */
+      /** Removes the installation; Connections remain User-owned (ADR 0019). */
       type: "user/uninstall-package";
       packageId: string;
     })
@@ -342,7 +323,9 @@ export type ConfigurationCommandV1 =
        */
       type: "user/set-package-settings";
       packageId: string;
-      values: Record<string, PackageSettingValueV1>;
+      values?: Record<string, PackageSettingValueV1>;
+      /** Setting ids whose stored values are removed by this command. */
+      unset?: string[];
     })
   | (CommandMetaV1 & {
       type: "bot/update-profile";
@@ -371,31 +354,17 @@ export type ConfigurationCommandV1 =
       notifications: BotNotificationPolicy;
     })
   | (CommandMetaV1 & {
-      type: "bot/select-model";
+      /**
+       * A partial update of one installed Package's Bot-scoped setting bag.
+       * The Bot authority validates it against that installed version's
+       * manifest through the same codec as User-scoped Package settings.
+       */
+      type: "bot/set-package-settings";
       botId: string;
-      model: ModelAssignment;
-    })
-  | (CommandMetaV1 & {
-      type: "bot/assign-capability";
-      botId: string;
-      assignment: Omit<CapabilityAssignmentView, "state">;
-      model?: ModelAssignment;
-    })
-  | (CommandMetaV1 & {
-      type: "bot/replace-capability";
-      botId: string;
-      assignment: Omit<CapabilityAssignmentView, "state">;
-      model?: ModelAssignment;
-    })
-  | (CommandMetaV1 & {
-      type: "bot/unassign-capability";
-      botId: string;
-      assignmentId: string;
-    })
-  | (CommandMetaV1 & {
-      type: "bot/unbind-model";
-      botId: string;
-      assignmentId: string;
+      packageId: string;
+      values?: Record<string, PackageSettingValueV1>;
+      /** Setting ids whose stored values are removed by this command. */
+      unset?: string[];
     });
 
 export type UserConfigurationCommandV1 = Exclude<
@@ -502,16 +471,25 @@ export interface BotExecutionPlanV1 {
   schemaVersion: 1;
   botId: string;
   revision: number;
-  model?: ModelAssignment;
-  assignments: CapabilityAssignmentView[];
+  model?: ModelBindingV1;
+  capabilities: EnabledCapabilityV1[];
+}
+
+/** One Capability granted account-wide by an enabled Package (ADR 0019). */
+export interface EnabledCapabilityV1 {
+  packageId: string;
+  capabilityId: string;
+  kind: "tool" | "model" | "memory" | "notification" | "computer";
+  connectionId?: string;
 }
 
 export interface ExecutionPackageDefinition {
   packageId: string;
   version: string;
+  settings: PackageSettingDefinition[];
   capabilities: Array<{
     id: string;
-    kind?: "tool" | "model" | "memory" | "notification" | "computer";
+    kind: "tool" | "model" | "memory" | "notification" | "computer";
     connectionTypes: string[];
   }>;
   connectionTypes: Array<{
@@ -520,62 +498,55 @@ export interface ExecutionPackageDefinition {
   }>;
 }
 
-export function capabilityAssignmentFailureV1(input: {
-  assignment: Omit<CapabilityAssignmentView, "state">;
+function compareIdentifiers(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export function modelBindingFailureV1(input: {
+  model: ModelBindingV1;
   user: UserSettingsViewV1;
   packages: readonly ExecutionPackageDefinition[];
 }): string | undefined {
-  const installation = input.user.packages.find(
-    (pkg) =>
-      pkg.packageId === input.assignment.packageId && pkg.state === "installed",
+  const connection = input.user.connections.find(
+    (candidate) => candidate.connectionId === input.model.connectionId,
   );
+  if (!connection) {
+    return `Connection "${input.model.connectionId}" is unavailable; reconnect it or choose another model`;
+  }
+  if (connection.state !== "ready") {
+    return `Connection "${input.model.connectionId}" is ${connection.state}; enable or reconnect it`;
+  }
+  const installation = input.user.packages.find(
+    (candidate) => candidate.packageId === connection.packageId,
+  );
+  if (!installation || installation.state !== "installed") {
+    return `Package "${connection.packageId}" is not installed and enabled; enable it to use Connection "${connection.connectionId}"`;
+  }
   const pkg = input.packages.find(
     (candidate) =>
-      candidate.packageId === input.assignment.packageId &&
-      candidate.version === installation?.version,
+      candidate.packageId === connection.packageId &&
+      candidate.version === installation.version,
   );
-  if (!installation || !pkg) {
-    return `Package "${input.assignment.packageId}" is not installed and enabled`;
-  }
-  const capability = pkg.capabilities.find(
-    (candidate) => candidate.id === input.assignment.capabilityId,
-  );
-  if (!capability) {
-    return `Capability "${input.assignment.capabilityId}" is not declared by Package "${input.assignment.packageId}"`;
-  }
-  if (capability.connectionTypes.length === 0) {
-    return input.assignment.connectionId
-      ? `Capability "${input.assignment.capabilityId}" does not accept a Connection`
-      : undefined;
-  }
-  if (!input.assignment.connectionId) {
-    return `Capability "${input.assignment.capabilityId}" requires a Connection`;
-  }
-  const connection = input.user.connections.find(
-    (candidate) => candidate.connectionId === input.assignment.connectionId,
-  );
-  if (
-    !connection ||
-    connection.packageId !== input.assignment.packageId ||
-    connection.state !== "ready"
-  ) {
-    return `Connection "${input.assignment.connectionId}" is not a ready Connection for Package "${input.assignment.packageId}"`;
+  if (!pkg) {
+    return `Installed Package "${connection.packageId}" version "${installation.version}" is unavailable`;
   }
   const connectionType = pkg.connectionTypes.find(
     (candidate) => candidate.id === connection.connectionTypeId,
   );
-  if (
-    !connectionType ||
-    !capability.connectionTypes.includes(connectionType.id) ||
-    !connectionType.capabilities.includes(capability.id)
-  ) {
-    return `Connection "${input.assignment.connectionId}" has an incompatible Connection Type`;
+  const modelCapability = pkg.capabilities.find(
+    (candidate) =>
+      candidate.kind === "model" &&
+      candidate.connectionTypes.includes(connection.connectionTypeId) &&
+      connectionType?.capabilities.includes(candidate.id),
+  );
+  if (!connectionType || !modelCapability) {
+    return `Connection "${connection.connectionId}" does not provide a model Capability accepted by Package "${pkg.packageId}"`;
   }
   return undefined;
 }
 
 export interface ResolvedModelBindingV1 {
-  assignment: ModelAssignment;
+  model?: ModelBindingV1;
   state: "ready" | "requires-resolution" | "unavailable";
   connection?: ConnectionView;
   packageId?: string;
@@ -584,65 +555,39 @@ export interface ResolvedModelBindingV1 {
 }
 
 export function resolveBotModelBindingV1(input: {
-  model: ModelAssignment;
-  assignments: readonly CapabilityAssignmentView[];
+  model: ModelBindingV1;
   user: UserSettingsViewV1;
   packages: readonly ExecutionPackageDefinition[];
 }): ResolvedModelBindingV1 {
   const unavailable = (failure: string): ResolvedModelBindingV1 => ({
-    assignment: structuredClone(input.model),
+    model: structuredClone(input.model),
     state: "unavailable",
     failure,
   });
+  const failure = modelBindingFailureV1(input);
+  if (failure) return unavailable(failure);
   const connection = input.user.connections.find(
     (candidate) => candidate.connectionId === input.model.connectionId,
-  );
-  if (!connection) return unavailable("Connection is unavailable");
-  if (connection.state !== "ready") {
-    return unavailable(`Connection is ${connection.state}`);
-  }
+  )!;
   const installation = input.user.packages.find(
     (candidate) => candidate.packageId === connection.packageId,
-  );
-  if (!installation || installation.state !== "installed") {
-    return unavailable("Connection Package is not installed and enabled");
-  }
+  )!;
   const pkg = input.packages.find(
     (candidate) =>
       candidate.packageId === connection.packageId &&
       candidate.version === installation.version,
-  );
-  const connectionType = pkg?.connectionTypes.find(
-    (candidate) => candidate.id === connection.connectionTypeId,
-  );
-  const modelCapability = pkg?.capabilities.find(
-    (candidate) =>
-      candidate.kind === "model" &&
-      connectionType?.capabilities.includes(candidate.id) &&
-      candidate.connectionTypes.includes(connection.connectionTypeId),
-  );
-  if (!pkg || !connectionType || !modelCapability) {
-    return unavailable("Connection does not provide models");
-  }
-  const assignment = input.assignments.find(
-    (candidate) =>
-      candidate.packageId === pkg.packageId &&
-      candidate.capabilityId === modelCapability.id &&
-      candidate.connectionId === connection.connectionId &&
-      candidate.state === "enabled",
-  );
-  if (!assignment) {
-    return unavailable("Bot is not assigned the Connection model capability");
-  }
+  )!;
   if (!connection.providerType) {
-    return unavailable("Connection provider type is unavailable");
+    return unavailable(
+      `Connection "${connection.connectionId}" provider type is unavailable`,
+    );
   }
   const knownModel = connection.modelCatalog?.models.some(
     (candidate: { providerModelId: string }) =>
       candidate.providerModelId === input.model.providerModelId,
   );
   return {
-    assignment: structuredClone(input.model),
+    model: structuredClone(input.model),
     state: knownModel ? "ready" : "requires-resolution",
     connection: structuredClone(connection),
     packageId: pkg.packageId,
@@ -652,35 +597,119 @@ export function resolveBotModelBindingV1(input: {
 
 export interface EffectiveBotModelV1 {
   /**
-   * "bot" when the Bot overrides the User default, "default" when the Bot
-   * follows `UserSettingsViewV1.newBotModelTemplate`, "none" when neither is
-   * set.
+   * The Package setting scope that supplied the model, or the platform
+   * bootstrap when no enabled model-choice Package supplied one.
    */
-  source: "bot" | "default" | "none";
-  model?: ModelAssignment;
+  source: "bot" | "account" | "platform" | "none";
+  model?: ModelBindingV1;
   binding?: ResolvedModelBindingV1;
 }
 
 /**
- * The model a Bot actually runs on. A Bot without its own `model` follows the
- * User's default dynamically, so changing the default changes every Bot that
- * has not overridden it. Authority is unchanged: the returned binding is still
- * resolved against the Bot's own Assignments, so a Bot that has never claimed
- * the Connection's model Capability resolves "unavailable" until it does.
+ * The model a Bot actually runs on. The kernel knows only the manifest role:
+ * Bot value, User value, then platform bootstrap. Disabled Package values stay
+ * present but are inert, as required by AGENTS.md Configuration shape.
  */
 export function resolveEffectiveBotModelV1(input: {
-  bot: Pick<BotSettingsViewV1, "model" | "assignments">;
+  bot: Pick<BotSettingsViewV1, "packageValues">;
   user: UserSettingsViewV1;
   packages: readonly ExecutionPackageDefinition[];
 }): EffectiveBotModelV1 {
-  const model = input.bot.model ?? input.user.newBotModelTemplate;
+  const enabled = input.user.packages
+    .filter((installation) => installation.state === "installed")
+    .map((installation) => ({
+      installation,
+      pkg: input.packages.find(
+        (candidate) =>
+          candidate.packageId === installation.packageId &&
+          candidate.version === installation.version,
+      ),
+    }))
+    .filter(
+      (
+        candidate,
+      ): candidate is {
+        installation: PackageInstallationView;
+        pkg: ExecutionPackageDefinition;
+      } => candidate.pkg !== undefined,
+    );
+
+  const fromScope = (
+    scope: "user" | "bot",
+  ): { model?: ModelBindingV1; conflict?: string } | undefined => {
+    const declarations = enabled
+      .map(({ installation, pkg }) => ({
+        installation,
+        pkg,
+        definition: pkg.settings
+          .filter(
+            (definition) =>
+              definition.role === "model" && definition.scopes.includes(scope),
+          )
+          .sort((left, right) => compareIdentifiers(left.id, right.id))[0],
+      }))
+      .filter(
+        (
+          candidate,
+        ): candidate is typeof candidate & {
+          definition: PackageSettingDefinition;
+        } => candidate.definition !== undefined,
+      )
+      .sort((left, right) =>
+        compareIdentifiers(left.pkg.packageId, right.pkg.packageId),
+      );
+    if (declarations.length > 1) {
+      const names = declarations.map(({ pkg }) => `"${pkg.packageId}"`);
+      return {
+        conflict: `Enabled Packages ${names.join(" and ")} both declare the model role at ${scope === "user" ? "User" : "Bot"} scope; disable one Package`,
+      };
+    }
+    const declaration = declarations[0];
+    if (!declaration) return undefined;
+    const stored =
+      scope === "bot"
+        ? Object.hasOwn(input.bot.packageValues, declaration.pkg.packageId)
+          ? input.bot.packageValues[declaration.pkg.packageId]
+          : undefined
+        : declaration.installation.values;
+    const value = resolvePackageSettingValuesV1(
+      declaration.pkg.settings,
+      stored,
+      scope,
+    )[declaration.definition.id];
+    return {
+      ...(typeof value === "object" && value !== null ? { model: value } : {}),
+    };
+  };
+
+  for (const scope of ["bot", "user"] as const) {
+    const resolved = fromScope(scope);
+    if (resolved?.conflict) {
+      return {
+        source: scope === "bot" ? "bot" : "account",
+        binding: { state: "unavailable", failure: resolved.conflict },
+      };
+    }
+    if (resolved?.model) {
+      return {
+        source: scope === "bot" ? "bot" : "account",
+        model: structuredClone(resolved.model),
+        binding: resolveBotModelBindingV1({
+          model: resolved.model,
+          user: input.user,
+          packages: input.packages,
+        }),
+      };
+    }
+  }
+
+  const model = input.user.platformModel;
   if (!model) return { source: "none" };
   return {
-    source: input.bot.model ? "bot" : "default",
+    source: "platform",
     model: structuredClone(model),
     binding: resolveBotModelBindingV1({
       model,
-      assignments: input.bot.assignments,
       user: input.user,
       packages: input.packages,
     }),
@@ -692,25 +721,53 @@ export function resolveBotExecutionPlanV1(input: {
   user: UserSettingsViewV1;
   packages: readonly ExecutionPackageDefinition[];
 }): BotExecutionPlanV1 {
-  const assignments = input.bot.assignments.map((assignment) => {
-    if (assignment.state !== "enabled") return structuredClone(assignment);
-    if (
-      capabilityAssignmentFailureV1({
-        assignment,
-        user: input.user,
-        packages: input.packages,
-      })
-    ) {
-      return { ...assignment, state: "unavailable" as const };
-    }
-    return structuredClone(assignment);
+  const capabilities = input.user.packages.flatMap((installation) => {
+    if (installation.state !== "installed") return [];
+    const pkg = input.packages.find(
+      (candidate) =>
+        candidate.packageId === installation.packageId &&
+        candidate.version === installation.version,
+    );
+    if (!pkg) return [];
+    return pkg.capabilities.flatMap((capability): EnabledCapabilityV1[] => {
+      const base = {
+        packageId: pkg.packageId,
+        capabilityId: capability.id,
+        kind: capability.kind,
+      };
+      if (capability.connectionTypes.length === 0) return [base];
+      return input.user.connections
+        .filter((connection) => {
+          if (
+            connection.packageId !== pkg.packageId ||
+            connection.state !== "ready" ||
+            !capability.connectionTypes.includes(connection.connectionTypeId)
+          ) {
+            return false;
+          }
+          return pkg.connectionTypes
+            .find((candidate) => candidate.id === connection.connectionTypeId)
+            ?.capabilities.includes(capability.id);
+        })
+        .map((connection) => ({
+          ...base,
+          connectionId: connection.connectionId,
+        }));
+    });
   });
+  capabilities.sort(
+    (left, right) =>
+      compareIdentifiers(left.packageId, right.packageId) ||
+      compareIdentifiers(left.capabilityId, right.capabilityId) ||
+      compareIdentifiers(left.connectionId ?? "", right.connectionId ?? ""),
+  );
+  const effective = resolveEffectiveBotModelV1(input);
   return {
     schemaVersion: 1,
     botId: input.bot.botId,
     revision: input.bot.revision,
-    model: input.bot.model ? structuredClone(input.bot.model) : undefined,
-    assignments,
+    ...(effective.model ? { model: structuredClone(effective.model) } : {}),
+    capabilities,
   };
 }
 
@@ -737,7 +794,17 @@ function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new ConfigurationDecodeError(`${label} must be an object`);
   }
-  return value as Record<string, unknown>;
+  const candidate = value as Record<string, unknown>;
+  const prototype = Object.getPrototypeOf(candidate);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new ConfigurationDecodeError(`${label} must be a plain object`);
+  }
+  for (const key in candidate) {
+    if (!Object.hasOwn(candidate, key)) {
+      throw new ConfigurationDecodeError(`${label} has inherited fields`);
+    }
+  }
+  return candidate;
 }
 
 export function decodeBotIdV1(value: unknown, label = "botId"): string {
@@ -835,36 +902,6 @@ export function decodeRevokeConnectionCommandV1(
     throw new ConfigurationDecodeError("unsupported Connection revoke command");
   }
   return { schemaVersion: 1, type: "connection/revoke" };
-}
-
-export function decodeConnectionDependencyRequirementV1(
-  input: unknown,
-): ConnectionDependencyRequirementV1 {
-  const value = exactRecord(input, "Connection dependency requirement", [
-    "schemaVersion",
-    "packageId",
-    "packageVersion",
-    "capabilityId",
-    "connectionTypeIds",
-  ]);
-  schemaVersion(value);
-  if (
-    !Array.isArray(value.connectionTypeIds) ||
-    value.connectionTypeIds.length === 0
-  ) {
-    throw new ConfigurationDecodeError(
-      "Connection dependency requirement connectionTypeIds are invalid",
-    );
-  }
-  return {
-    schemaVersion: 1,
-    packageId: identifier(value.packageId, "packageId"),
-    packageVersion: text(value.packageVersion, "packageVersion", 128),
-    capabilityId: identifier(value.capabilityId, "capabilityId"),
-    connectionTypeIds: value.connectionTypeIds.map((item) =>
-      identifier(item, "connectionTypeId"),
-    ),
-  };
 }
 
 function text(value: unknown, label: string, maximum: number): string {
@@ -1093,26 +1130,6 @@ function notifications(value: unknown): BotNotificationPolicy {
   return { enabled: policy.enabled };
 }
 
-/** The exact Bot model DTO, decoded wherever it crosses a durable seam. */
-export function decodeModelAssignmentV1(value: unknown): ModelAssignment {
-  return model(value);
-}
-
-function model(value: unknown): ModelAssignment {
-  const assignment = exactRecord(value, "model", [
-    "connectionId",
-    "providerModelId",
-  ]);
-  return {
-    connectionId: identifier(assignment.connectionId, "model.connectionId"),
-    providerModelId: text(
-      assignment.providerModelId,
-      "model.providerModelId",
-      256,
-    ),
-  };
-}
-
 export function decodeConfigurationQueryV1(
   input: unknown,
 ): ConfigurationQueryV1 {
@@ -1161,30 +1178,19 @@ export function decodeConfigurationCommandV1(
         },
       };
     }
-    case "user/set-new-bot-model": {
-      const command = exactCommand(input, ["source"], ["model"]);
-      if (command.source !== "user" && command.source !== "auto") {
-        throw new ConfigurationDecodeError(
-          "new Bot model source must be user or auto",
-        );
-      }
-      if (command.source === "auto" && command.model === undefined) {
-        throw new ConfigurationDecodeError(
-          "an automatic new Bot model must name a model",
-        );
-      }
+    case "user/set-platform-model": {
+      const command = exactCommand(input, ["model"]);
       return {
         ...commandMeta(command),
         type: value.type,
-        model: command.model === undefined ? undefined : model(command.model),
-        source: command.source,
+        model: decodeModelBindingV1(command.model),
       };
     }
     case "user/install-package": {
       const command = exactCommand(
         input,
         ["packageId", "version"],
-        ["catalogId", "catalogGeneration", "values"],
+        ["catalogId", "catalogGeneration", "values", "enabled"],
       );
       // A Catalog install is all three of identity, generation and (optional)
       // values or none of them: half a Catalog install would be an install
@@ -1202,11 +1208,18 @@ export function decodeConfigurationCommandV1(
           "install values require a Catalog entry",
         );
       }
+      if (
+        command.enabled !== undefined &&
+        typeof command.enabled !== "boolean"
+      ) {
+        throw new ConfigurationDecodeError("enabled is invalid");
+      }
       return {
         ...commandMeta(command),
         type: value.type,
         packageId: identifier(command.packageId, "packageId"),
         version: text(command.version, "version", 100),
+        ...(command.enabled === undefined ? {} : { enabled: command.enabled }),
         ...(command.catalogId === undefined
           ? {}
           : {
@@ -1242,12 +1255,22 @@ export function decodeConfigurationCommandV1(
       };
     }
     case "user/set-package-settings": {
-      const command = exactCommand(input, ["packageId", "values"]);
+      const command = exactCommand(input, ["packageId"], ["values", "unset"]);
+      const values =
+        command.values === undefined
+          ? undefined
+          : packageSettingsPatch(command.values);
+      const unset =
+        command.unset === undefined
+          ? undefined
+          : packageSettingIds(command.unset);
+      requirePackageSettingsChange(values, unset);
       return {
         ...commandMeta(command),
         type: value.type,
         packageId: identifier(command.packageId, "packageId"),
-        values: packageSettingsPatch(command.values),
+        ...(values ? { values } : {}),
+        ...(unset ? { unset } : {}),
       };
     }
     case "bot/update-profile": {
@@ -1296,34 +1319,28 @@ export function decodeConfigurationCommandV1(
         notifications: notifications(command.notifications),
       };
     }
-    case "bot/select-model": {
-      const command = exactCommand(input, ["botId", "model"]);
+    case "bot/set-package-settings": {
+      const command = exactCommand(
+        input,
+        ["botId", "packageId"],
+        ["values", "unset"],
+      );
+      const values =
+        command.values === undefined
+          ? undefined
+          : packageSettingsPatch(command.values);
+      const unset =
+        command.unset === undefined
+          ? undefined
+          : packageSettingIds(command.unset);
+      requirePackageSettingsChange(values, unset);
       return {
         ...commandMeta(command),
         type: value.type,
         botId: identifier(command.botId, "botId"),
-        model: model(command.model),
-      };
-    }
-    case "bot/assign-capability":
-    case "bot/replace-capability": {
-      const command = exactCommand(input, ["botId", "assignment"], ["model"]);
-      return {
-        ...commandMeta(command),
-        type: value.type,
-        botId: identifier(command.botId, "botId"),
-        assignment: assignmentTarget(command.assignment, "assignment"),
-        model: command.model === undefined ? undefined : model(command.model),
-      };
-    }
-    case "bot/unassign-capability":
-    case "bot/unbind-model": {
-      const command = exactCommand(input, ["botId", "assignmentId"]);
-      return {
-        ...commandMeta(command),
-        type: value.type,
-        botId: identifier(command.botId, "botId"),
-        assignmentId: identifier(command.assignmentId, "assignmentId"),
+        packageId: identifier(command.packageId, "packageId"),
+        ...(values ? { values } : {}),
+        ...(unset ? { unset } : {}),
       };
     }
     default:
@@ -1423,11 +1440,41 @@ function safeJsonValue(value: unknown, label: string): JsonValue {
     return value as JsonValue;
   }
   if (Array.isArray(value)) {
+    if (
+      Object.getPrototypeOf(value) !== Array.prototype ||
+      Reflect.ownKeys(value).some(
+        (key) =>
+          typeof key !== "string" ||
+          (key !== "length" &&
+            (!/^(0|[1-9][0-9]*)$/.test(key) ||
+              Number(key) >= value.length ||
+              !Object.getOwnPropertyDescriptor(value, key)?.enumerable)),
+      ) ||
+      Array.from({ length: value.length }, (_item, index) => index).some(
+        (index) => !Object.hasOwn(value, index),
+      )
+    ) {
+      throw new ConfigurationDecodeError(`${label} is not plain JSON`);
+    }
     return value.map((item) => safeJsonValue(item, label));
   }
   if (typeof value === "object" && value !== null) {
+    const object = record(value, label);
+    if (
+      Reflect.ownKeys(object).some((key) => {
+        const descriptor = Object.getOwnPropertyDescriptor(object, key);
+        return (
+          typeof key !== "string" ||
+          !descriptor ||
+          !("value" in descriptor) ||
+          !descriptor.enumerable
+        );
+      })
+    ) {
+      throw new ConfigurationDecodeError(`${label} is not plain JSON`);
+    }
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
+      Object.entries(object).map(([key, item]) => [
         key,
         safeJsonValue(item, label),
       ]),
@@ -1471,15 +1518,29 @@ function installValues(value: unknown): Record<string, JsonValue> {
  * The shape of a `user/set-package-settings` payload, before anything knows
  * which Package it is for.
  *
- * Only the shape: ids are identifiers, values are scalars, and the bag is
- * bounded. Whether a named setting exists, and whether its value satisfies the
- * schema the Package declared, is the User Durable Object's answer — it is the
- * authority that holds the installed version.
+ * Only the shape: ids are identifiers, ordinary values are scalars, the model
+ * role may carry its exact binding object, and the bag is bounded. Whether a
+ * named setting exists, and whether its value satisfies the schema the Package
+ * declared, is the owning Durable Object's answer — it validates against the
+ * installed version through `decodeInstalledPackageSettingsPatchV1`.
  */
 function packageSettingsPatch(
   value: unknown,
 ): Record<string, PackageSettingValueV1> {
   const values = record(value, "values");
+  if (
+    Reflect.ownKeys(values).some((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(values, key);
+      return (
+        typeof key !== "string" ||
+        !descriptor ||
+        !("value" in descriptor) ||
+        !descriptor.enumerable
+      );
+    })
+  ) {
+    throw new ConfigurationDecodeError("values has invalid fields");
+  }
   const entries = Object.entries(values);
   if (entries.length === 0) {
     throw new ConfigurationDecodeError("values names no setting");
@@ -1489,6 +1550,9 @@ function packageSettingsPatch(
   }
   return Object.fromEntries(
     entries.map(([key, item]) => {
+      if (typeof item === "object" && item !== null && !Array.isArray(item)) {
+        return [identifier(key, "values key"), decodeModelBindingV1(item)];
+      }
       if (
         typeof item !== "string" &&
         typeof item !== "number" &&
@@ -1508,6 +1572,34 @@ function packageSettingsPatch(
       return [identifier(key, "values key"), item];
     }),
   );
+}
+
+function packageSettingIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ConfigurationDecodeError("unset names no setting");
+  }
+  if (value.length > MAX_PACKAGE_SETTINGS_V1) {
+    throw new ConfigurationDecodeError("unset is too large");
+  }
+  const decoded = value.map((item) => identifier(item, "unset setting id"));
+  if (new Set(decoded).size !== decoded.length) {
+    throw new ConfigurationDecodeError("unset repeats a setting");
+  }
+  return decoded;
+}
+
+function requirePackageSettingsChange(
+  values: Record<string, PackageSettingValueV1> | undefined,
+  unset: readonly string[] | undefined,
+): void {
+  if (!values && !unset) {
+    throw new ConfigurationDecodeError("Package settings command is empty");
+  }
+  if (values && unset?.some((settingId) => Object.hasOwn(values, settingId))) {
+    throw new ConfigurationDecodeError(
+      "Package settings command both sets and unsets a setting",
+    );
+  }
 }
 
 function viewRevision(value: unknown): number {
@@ -1679,101 +1771,6 @@ export function decodePendingAuthorizationV1(
   };
 }
 
-export function decodeCapabilityAssignmentV1(
-  value: unknown,
-): CapabilityAssignmentView {
-  const assignment = exactRecord(
-    value,
-    "Capability Assignment",
-    ["assignmentId", "packageId", "capabilityId", "state"],
-    ["connectionId"],
-  );
-  if (
-    assignment.state !== "enabled" &&
-    assignment.state !== "disabled" &&
-    assignment.state !== "unavailable"
-  ) {
-    throw new ConfigurationDecodeError(
-      "Capability Assignment state is invalid",
-    );
-  }
-  return {
-    assignmentId: identifier(assignment.assignmentId, "assignmentId"),
-    packageId: identifier(assignment.packageId, "assignment.packageId"),
-    capabilityId: identifier(
-      assignment.capabilityId,
-      "assignment.capabilityId",
-    ),
-    connectionId:
-      assignment.connectionId === undefined
-        ? undefined
-        : identifier(assignment.connectionId, "assignment.connectionId"),
-    state: assignment.state,
-  };
-}
-
-function assignmentTarget(
-  value: unknown,
-  label = "assignment target",
-): Omit<CapabilityAssignmentView, "state"> {
-  const assignment = exactRecord(
-    value,
-    label,
-    ["assignmentId", "packageId", "capabilityId"],
-    ["connectionId"],
-  );
-  return {
-    assignmentId: identifier(assignment.assignmentId, `${label}.assignmentId`),
-    packageId: identifier(assignment.packageId, `${label}.packageId`),
-    capabilityId: identifier(assignment.capabilityId, `${label}.capabilityId`),
-    connectionId:
-      assignment.connectionId === undefined
-        ? undefined
-        : identifier(assignment.connectionId, `${label}.connectionId`),
-  };
-}
-
-function assignmentOperation(
-  value: unknown,
-): CapabilityAssignmentOperationViewV1 {
-  const operation = exactRecord(
-    value,
-    "Assignment operation",
-    ["commandId", "kind", "assignmentId", "state"],
-    ["target"],
-  );
-  if (
-    operation.kind !== "assigning" &&
-    operation.kind !== "replacing" &&
-    operation.kind !== "unassigning"
-  ) {
-    throw new ConfigurationDecodeError("Assignment operation kind is invalid");
-  }
-  if (operation.state !== "pending" && operation.state !== "retrying") {
-    throw new ConfigurationDecodeError("Assignment operation state is invalid");
-  }
-  if (operation.kind !== "unassigning" && operation.target === undefined) {
-    throw new ConfigurationDecodeError(
-      "Assignment operation target is required",
-    );
-  }
-  if (operation.kind === "unassigning" && operation.target !== undefined) {
-    throw new ConfigurationDecodeError(
-      "Unassign operation cannot have a target",
-    );
-  }
-  return {
-    commandId: identifier(operation.commandId, "operation.commandId"),
-    kind: operation.kind,
-    assignmentId: identifier(operation.assignmentId, "operation.assignmentId"),
-    state: operation.state,
-    target:
-      operation.target === undefined
-        ? undefined
-        : assignmentTarget(operation.target),
-  };
-}
-
 function schemaVersion(value: Record<string, unknown>): void {
   if (value.schemaVersion !== 1) {
     throw new ConfigurationDecodeError("unsupported configuration schema");
@@ -1785,12 +1782,7 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
     input,
     "User settings",
     ["schemaVersion", "revision", "profile", "packages", "connections"],
-    [
-      "newBotModelTemplate",
-      "newBotModelTemplateSource",
-      "catalogGeneration",
-      "catalogIndexHash",
-    ],
+    ["platformModel", "catalogGeneration", "catalogIndexHash"],
   );
   schemaVersion(value);
   const profile = exactRecord(value.profile, "profile", ["name"], ["email"]);
@@ -1803,31 +1795,6 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
       "User settings Packages and Connections must be bounded arrays",
     );
   }
-  if (
-    value.newBotModelTemplateSource !== undefined &&
-    value.newBotModelTemplateSource !== "user" &&
-    value.newBotModelTemplateSource !== "auto"
-  ) {
-    throw new ConfigurationDecodeError(
-      "new Bot model source must be user or auto",
-    );
-  }
-  if (
-    value.newBotModelTemplate !== undefined &&
-    value.newBotModelTemplateSource === undefined
-  ) {
-    throw new ConfigurationDecodeError(
-      "a new Bot model must record its source",
-    );
-  }
-  if (
-    value.newBotModelTemplate === undefined &&
-    value.newBotModelTemplateSource === "auto"
-  ) {
-    throw new ConfigurationDecodeError(
-      "an automatic new Bot model must name a model",
-    );
-  }
   return {
     schemaVersion: 1,
     revision: viewRevision(value.revision),
@@ -1837,11 +1804,9 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
     },
     packages: value.packages.map(packageInstallation),
     connections: value.connections.map(connectionView),
-    newBotModelTemplate:
-      value.newBotModelTemplate === undefined
-        ? undefined
-        : model(value.newBotModelTemplate),
-    newBotModelTemplateSource: value.newBotModelTemplateSource,
+    ...(value.platformModel === undefined
+      ? {}
+      : { platformModel: decodeModelBindingV1(value.platformModel) }),
     // The pin is optional — a deployment with no Catalog has none — but never
     // half present: one field alone is a corrupt pin, not a pin.
     ...(value.catalogGeneration === undefined &&
@@ -1861,39 +1826,73 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
   };
 }
 
-export function decodeBotSettingsViewV1(input: unknown): BotSettingsViewV1 {
-  const value = exactRecord(
-    input,
-    "Bot settings",
-    [
-      "schemaVersion",
-      "botId",
-      "revision",
-      "profile",
-      "notifications",
-      "assignments",
-      "assignmentOperations",
-    ],
-    ["model"],
-  );
-  schemaVersion(value);
+function packageValueBags(
+  input: unknown,
+): Record<string, Record<string, unknown>> {
+  const packages = record(input, "packageValues");
   if (
-    !Array.isArray(value.assignments) ||
-    !Array.isArray(value.assignmentOperations)
+    Reflect.ownKeys(packages).some((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(packages, key);
+      return (
+        typeof key !== "string" ||
+        !descriptor ||
+        !("value" in descriptor) ||
+        !descriptor.enumerable
+      );
+    })
   ) {
-    throw new ConfigurationDecodeError(
-      "Bot settings Assignments and operations must be arrays",
-    );
+    throw new ConfigurationDecodeError("packageValues has invalid fields");
   }
+  return Object.fromEntries(
+    Object.entries(packages).map(([packageId, stored]) => {
+      identifier(packageId, "packageValues packageId");
+      const values = record(stored, `packageValues.${packageId}`);
+      if (
+        Reflect.ownKeys(values).length > MAX_PACKAGE_SETTINGS_V1 ||
+        Reflect.ownKeys(values).some((key) => {
+          const descriptor = Object.getOwnPropertyDescriptor(values, key);
+          return (
+            typeof key !== "string" ||
+            !descriptor ||
+            !("value" in descriptor) ||
+            !descriptor.enumerable
+          );
+        })
+      ) {
+        throw new ConfigurationDecodeError(
+          `packageValues.${packageId} has invalid fields`,
+        );
+      }
+      return [
+        packageId,
+        Object.fromEntries(
+          Object.entries(values).map(([settingId, value]) => [
+            identifier(settingId, "packageValues settingId"),
+            safeJsonValue(value, `packageValues.${packageId}.${settingId}`),
+          ]),
+        ),
+      ];
+    }),
+  );
+}
+
+export function decodeBotSettingsViewV1(input: unknown): BotSettingsViewV1 {
+  const value = exactRecord(input, "Bot settings", [
+    "schemaVersion",
+    "botId",
+    "revision",
+    "profile",
+    "notifications",
+    "packageValues",
+  ]);
+  schemaVersion(value);
   return {
     schemaVersion: 1,
     botId: identifier(value.botId, "botId"),
     revision: viewRevision(value.revision),
     profile: botProfile(value.profile),
     notifications: notifications(value.notifications),
-    assignments: value.assignments.map(decodeCapabilityAssignmentV1),
-    assignmentOperations: value.assignmentOperations.map(assignmentOperation),
-    model: value.model === undefined ? undefined : model(value.model),
+    packageValues: packageValueBags(value.packageValues),
   };
 }
 

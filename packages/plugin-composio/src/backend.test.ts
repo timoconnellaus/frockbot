@@ -15,7 +15,6 @@ describe("configured Composio backend", () => {
     callbackBaseUrl: "https://bot.frockbot.com",
     readSecret: (name: string) => secrets[name],
     storeFor: () => ({}) as ComposioConnectionStore,
-    markConnectionUnavailable: () => Promise.resolve("applied" as const),
   });
 
   test("requires a strong dedicated authorization-state secret without auth fallback", () => {

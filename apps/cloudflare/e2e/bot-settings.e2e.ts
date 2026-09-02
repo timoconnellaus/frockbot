@@ -3,12 +3,12 @@
 //
 // Incidents 2 and 3 were both here: the producer emitted a Package without a
 // `configuration` block, or with a `deployment.applicationHash` the decoder
-// refused, and the Bot settings panel came up with an error banner instead of
-// the Assignment catalog. Producer and consumer each had passing unit tests.
+// refused, and the Bot settings panel came up with an error banner. Producer
+// and consumer each had passing unit tests.
 //
 // The Bot settings panel has no turns list — the conversation is the window
 // beside it — so the Turn history assertion lives in `chat.e2e.ts`, and this
-// spec asserts the panel and the catalog it decodes.
+// spec asserts the stripped panel and the contributed sections it hosts.
 import { test, expect, provisionThroughUi, sendMessage } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 
@@ -57,19 +57,11 @@ test("Bot settings follows the GrokBot order and keeps extras under Advanced", a
   ).toBeVisible();
   await expect(panel.getByRole("textbox", { name: /^Title/u })).toBeHidden();
 
-  // The Assignment catalog is the client's decode of `/app-manifest`. A Package
-  // the decoder refused would leave this section empty and the banner set.
   await panel.getByText("Advanced").click();
   await expect(panel.getByRole("textbox", { name: /^Title/u })).toBeVisible();
   await expect(panel.getByText("Members", { exact: true })).toBeVisible();
   await expect(panel.getByText("Named by user")).toBeVisible();
-  await expect(panel.getByText("Capability Assignments")).toBeVisible();
-  await expect(
-    panel.getByText("Ollama Cloud · ollama-cloud-models"),
-  ).toBeVisible();
-  await expect(
-    panel.getByLabel("Connection for ollama-cloud-models"),
-  ).toBeVisible();
+  await expect(panel.locator("#bot-model")).toHaveCount(0);
   await expect(panel.getByText("Routines", { exact: true })).toBeVisible();
   await expect(panel.getByText("Audit log", { exact: true })).toBeVisible();
   await expect(panel.getByText("Import a Bot template")).toBeVisible();

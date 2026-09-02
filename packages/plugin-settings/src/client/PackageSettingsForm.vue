@@ -23,7 +23,12 @@ const providedWeb = inject(frockBotWebDataKey);
 if (!providedWeb) throw new Error("shell client data was not provided");
 const web = providedWeb;
 
-const definitions = computed(() => props.item.settings ?? []);
+const definitions = computed(() =>
+  (props.item.settings ?? []).filter(
+    (definition) =>
+      definition.role !== "model" && definition.scopes.includes("user"),
+  ),
+);
 const draft = ref<Record<string, string | number | boolean>>({});
 
 /** The stored values of this Package, as the User settings hold them. */
