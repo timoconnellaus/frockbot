@@ -217,7 +217,7 @@ describe("package authority boundaries", () => {
     expect(AUTHOR_PACKAGE_INPUT_SCHEMA_V1.additionalProperties).toBe(false);
     expect(
       Object.keys(AUTHOR_PACKAGE_INPUT_SCHEMA_V1.properties).sort(),
-    ).toEqual(["displayName", "hooks", "packageId", "source", "tools"]);
+    ).toEqual(["displayName", "hooks", "packageId", "source", "tools", "ui"]);
     const valid = {
       packageId: "bot-tool",
       displayName: "Bot Tool",

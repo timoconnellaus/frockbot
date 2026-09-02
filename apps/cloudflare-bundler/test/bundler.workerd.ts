@@ -65,6 +65,27 @@ it("reports the sha-256 of the module bytes it returns", async () => {
   expect(result.artifact.contentHash).toBe(hex);
 });
 
+it("returns raw ui.html under its own content hash", async () => {
+  const html = "<!doctype html><script>window.frockbot.resize()</script>";
+  const result = await bundle(bundleRequest({ ui: { path: "ui.html", html } }));
+  expect(result.status).toBe("bundled");
+  if (result.status !== "bundled") return;
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(html),
+  );
+  const hash = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  expect(result.uiHtml).toBe(html);
+  expect(result.uiArtifact).toEqual({
+    contentHash: hash,
+    size: new TextEncoder().encode(html).byteLength,
+    mediaType: "text/html",
+    bundlerVersion: "frockbot-inline-html@1",
+  });
+});
+
 it("fails a syntax error with a file:line:col diagnostic and no artifact", async () => {
   const result = await bundle(
     bundleRequest({
@@ -136,6 +157,17 @@ it("refuses source over the 256 KB quota", async () => {
   expect(result.status).toBe("failed");
   if (result.status !== "failed") return;
   expect(result.failure).toBe("source-too-large");
+});
+
+it("refuses ui.html over the 256 KB quota", async () => {
+  const result = await bundle(
+    bundleRequest({
+      ui: { path: "ui.html", html: "x".repeat(256 * 1024 + 1) },
+    }),
+  );
+  expect(result.status).toBe("failed");
+  if (result.status !== "failed") return;
+  expect(result.failure).toBe("ui-too-large");
 });
 
 it("rejects an unknown request field instead of throwing across the binding", async () => {

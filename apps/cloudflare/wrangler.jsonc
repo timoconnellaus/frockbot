@@ -10,6 +10,10 @@
       "pattern": "bot.frockbot.com",
       "custom_domain": true,
     },
+    {
+      "pattern": "ui.bot.frockbot.com",
+      "custom_domain": true,
+    },
   ],
   "worker_loaders": [
     {
@@ -106,6 +110,7 @@
     "DEFAULT_APPLICATION_HASH": "foundation-v1",
     // Comma-separated webview origins allowed to call /api/* cross-origin.
     "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
+    "UI_ARTIFACT_HOSTS": "ui.bot.frockbot.com",
   },
   "env": {
     "development": {
@@ -183,6 +188,7 @@
       "vars": {
         "DEFAULT_APPLICATION_HASH": "foundation-v1",
         "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
+        "UI_ARTIFACT_HOSTS": "ui.localhost",
         // Placeholder only. Production supplies this as a secret.
         "FROCKBOT_ADMIN_EMAILS": "owner@example.com",
       },
@@ -205,6 +211,10 @@
       "routes": [
         {
           "pattern": "staging-bot.frockbot.com",
+          "custom_domain": true,
+        },
+        {
+          "pattern": "ui.staging-bot.frockbot.com",
           "custom_domain": true,
         },
       ],
@@ -280,6 +290,7 @@
       "vars": {
         "DEFAULT_APPLICATION_HASH": "foundation-v1",
         "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
+        "UI_ARTIFACT_HOSTS": "ui.staging-bot.frockbot.com",
       },
     },
     // The browser end-to-end harness (`apps/cloudflare/e2e/harness.ts`) runs
@@ -374,6 +385,7 @@
       "vars": {
         "DEFAULT_APPLICATION_HASH": "foundation-v1",
         "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
+        "UI_ARTIFACT_HOSTS": "ui.localhost",
         // The canonical `development` identity is admin in this environment;
         // this placeholder also proves the configured-allowlist rule.
         "FROCKBOT_ADMIN_EMAILS": "owner@example.com",

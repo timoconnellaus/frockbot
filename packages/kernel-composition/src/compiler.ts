@@ -1,4 +1,8 @@
-import { decodeFrockBotManifest, type FrockBotManifest } from "./manifest.ts";
+import {
+  decodeFrockBotManifest,
+  isClientIframeContribution,
+  type FrockBotManifest,
+} from "./manifest.ts";
 import { satisfies, valid } from "semver";
 
 export type JsonValue =
@@ -162,7 +166,9 @@ function orderedPackages(
 function validateClientComposition(packages: readonly CompiledPackage[]): void {
   const clients = packages.flatMap((pkg) => {
     const client = pkg.manifest.contributions.client;
-    return client ? [{ id: pkg.id, client }] : [];
+    return client && !isClientIframeContribution(client)
+      ? [{ id: pkg.id, client }]
+      : [];
   });
   const roots = clients.flatMap(({ id, client }) =>
     client.mounts.filter((mount) => mount.slot === "root").map(() => id),

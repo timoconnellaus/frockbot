@@ -3,7 +3,11 @@ import {
   decodeMachineResultDeliveryV1,
   type MachineResultDeliveryV1,
 } from "@frockbot/plugin-user-machine/delivery";
-import { decodeSkillRefsV1 } from "@frockbot/kernel-contracts";
+import {
+  decodeSkillRefsV1,
+  decodePackageIframeToolCommandV1,
+  type PackageIframeCompositionV1,
+} from "@frockbot/kernel-contracts";
 import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 import {
   compileFoundationApplication,
@@ -159,6 +163,7 @@ interface Env {
   // USER_APPLICATIONS so the two never share an identity.
   BOT_PACKAGES: BotPackageLoader;
   APPLICATION_ARTIFACTS: R2Bucket;
+  UI_ARTIFACT_HOSTS?: string;
   // `apps/cloudflare-bundler`; the Bot Durable Object calls it after recording
   // its authorship intent (plan Step 3, decision D4).
   PACKAGE_BUNDLER: BundlerBinding;
@@ -245,6 +250,10 @@ interface BotStateRpc extends BotConfigurationBinding {
   lookupRun(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   fenceRunAdmission(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   listSkills(): Promise<ClientSkillCatalogV1>;
+  listPackageUi(): Promise<PackageIframeCompositionV1>;
+  runPackageUiTool(
+    command: import("@frockbot/kernel-contracts").PackageIframeToolCommandV1,
+  ): Promise<BotTurnResult>;
   readWorkspaceFileV1(path: unknown): Promise<ClientWorkspaceFileV1>;
   listNotifications(): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(notificationId: string): Promise<void>;
@@ -344,6 +353,9 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     fenceRunAdmission: (query) =>
       rpc.fenceRunAdmission({ schemaVersion: 1, userId, botId, query }),
     listSkills: () => rpc.listSkills({ schemaVersion: 1, userId, botId }),
+    listPackageUi: () => rpc.listPackageUi({ schemaVersion: 1, userId, botId }),
+    runPackageUiTool: (command) =>
+      rpc.runPackageUiTool({ schemaVersion: 1, userId, botId, command }),
     readWorkspaceFileV1: (path) =>
       rpc.readWorkspaceFileV1({ schemaVersion: 1, userId, botId, path }),
     listNotifications: () =>
@@ -650,6 +662,29 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     ).listSkills();
   }
 
+  async listPackageUi(input: unknown): Promise<PackageIframeCompositionV1> {
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId as string,
+    ).listPackageUi();
+  }
+
+  async runPackageUiTool(input: unknown): Promise<BotTurnResult> {
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      command: rpcDecoded(decodePackageIframeToolCommandV1),
+    });
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId as string,
+    ).runPackageUiTool(
+      request.command as import("@frockbot/kernel-contracts").PackageIframeToolCommandV1,
+    );
+  }
+
   async readWorkspaceFileV1(input: unknown): Promise<ClientWorkspaceFileV1> {
     const request = decodeRpcEnvelopeV1(input, {
       botId: rpcBotId,
@@ -752,6 +787,13 @@ function packageArtifactKey(contentHash: string): string {
   return `packages/${contentHash}.mjs`;
 }
 
+function packageUiArtifactKey(contentHash: string): string {
+  if (!/^[0-9a-f]{64}$/.test(contentHash)) {
+    throw new Error("package UI artifact contentHash is invalid");
+  }
+  return `packages/${contentHash}.html`;
+}
+
 async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -775,6 +817,20 @@ class R2ApplicationArtifacts
       );
     }
     return object.text();
+  }
+
+  async loadPackageUiArtifact(
+    contentHash: string,
+  ): Promise<string | undefined> {
+    const object = await this.bucket.get(packageUiArtifactKey(contentHash));
+    if (!object) return undefined;
+    const html = await object.text();
+    if ((await sha256Hex(html)) !== contentHash) {
+      throw new Error(
+        `package UI artifact "${contentHash}" failed hash verification`,
+      );
+    }
+    return html;
   }
 
   /**
@@ -1514,6 +1570,10 @@ export default {
     const gateway = createGateway({
       loader: env.USER_APPLICATIONS,
       artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
+      uiArtifactHosts: (env.UI_ARTIFACT_HOSTS ?? "")
+        .split(",")
+        .map((host) => host.trim())
+        .filter(Boolean),
       auth: gatewayAuth(env),
       userExists: (userId) =>
         userConfigurationStub(env, userId).isProvisioned({

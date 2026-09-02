@@ -155,6 +155,198 @@ export interface ExecuteBotTurnOptions {
   resume?: boolean;
 }
 
+export interface ExecuteDirectToolTurnOptions {
+  command: BotTurnCommand & {
+    directTool: NonNullable<BotTurnCommand["directTool"]>;
+  };
+  previousEvents: readonly SessionEvent[];
+  composition: ShellMountedComposition;
+  admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
+  signal: AbortSignal;
+}
+
+/**
+ * Runs a Package-page tool as one ordinary durable Turn, without a model call.
+ * The same Session journal and effect fence make retry/recovery identical to a
+ * model-selected tool occurrence.
+ */
+export async function executeDirectToolTurn(
+  options: ExecuteDirectToolTurnOptions,
+): Promise<BotTurnCompletion> {
+  const { command, composition, previousEvents, admitEffect, signal } = options;
+  const session = composition.runtime.agent.agent.session;
+  const call = {
+    id: command.runId,
+    name: command.directTool.name,
+    input: command.directTool.input,
+  };
+  try {
+    let turnStart = [...session.events].findLast(
+      (event) =>
+        event.type === "turn/start" &&
+        !session.events.some(
+          (candidate) =>
+            candidate.type === "turn/end" && candidate.turn === event.turn,
+        ),
+    );
+    if (!turnStart || turnStart.type !== "turn/start") {
+      const turn = session.nextTurn();
+      const messageId = `iframe:${command.runId}`;
+      session.appendBatch([
+        { type: "input/queued", messageId, text: command.text },
+        { type: "turn/start", turn },
+        {
+          type: "composition/pinned",
+          turn,
+          generationId: composition.generation.generationId,
+          artifactSetHash: composition.generation.artifactSetHash,
+        },
+        { type: "turn/admission", turn, turnType: "chat" },
+        { type: "input/admitted", messageId, turn },
+        { type: "step/start", turn, step: 1 },
+        { type: "user/message", turn, step: 1, messageId, text: command.text },
+        {
+          type: "assistant/message",
+          turn,
+          step: 1,
+          requestId: `iframe:${command.runId}`,
+          text: "",
+          toolCalls: [call],
+        },
+      ]);
+      await session.flush();
+      turnStart = session.events.findLast(
+        (event) => event.type === "turn/start" && event.turn === turn,
+      );
+    }
+    if (!turnStart || turnStart.type !== "turn/start") {
+      throw new Error("Package UI tool Turn has no durable start");
+    }
+    const turn = turnStart.turn;
+    const occurrenceId = `tool:${turn}:1:0`;
+    const journal = validateToolOccurrenceJournal(session.events);
+    const existing = journal.get(occurrenceId);
+    if (!existing) throw new Error("Package UI tool occurrence is unavailable");
+
+    if (!existing.result) {
+      const context = {
+        botId: composition.runtime.agent.agent.botId,
+        agentId: composition.runtime.agent.agent.id,
+        sessionId: command.sessionId,
+        compositionGenerationId: composition.generation.generationId,
+        effectId: occurrenceId,
+        toolCall: call,
+        turnType: "chat" as const,
+        signal,
+      };
+      const preparation = await composition.root.tools.prepare(call, context);
+      let result;
+      if (existing.intent) {
+        if (preparation.kind !== "ready") {
+          throw new BotTurnReconciliationRequiredError(
+            `Tool effect "${occurrenceId}" cannot be reconciled because its definition is unavailable`,
+            appendedSessionEvents(previousEvents, session.events),
+          );
+        }
+        const reconciled = await composition.root.tools.reconcilePrepared(
+          preparation,
+          context,
+        );
+        if (reconciled.status === "unavailable") {
+          throw new BotTurnReconciliationRequiredError(
+            reconciled.reason,
+            appendedSessionEvents(previousEvents, session.events),
+          );
+        }
+        result = reconciled.result;
+      } else {
+        session.append({
+          type: "tool/call",
+          turn,
+          step: 1,
+          occurrenceId,
+          name: call.name,
+          input: call.input,
+        });
+        await session.flush();
+        if (preparation.kind === "denied") {
+          result = preparation.result;
+        } else {
+          if (!(await admitEffect({ kind: "tool", effectId: occurrenceId }))) {
+            session.appendBatch([
+              {
+                type: "tool/result",
+                turn,
+                step: 1,
+                occurrenceId,
+                name: call.name,
+                content: "Cancelled before tool execution started.",
+                isError: true,
+                status: "interrupted",
+              },
+              { type: "step/end", turn, step: 1, outcome: "cancelled" },
+              { type: "turn/end", turn, outcome: "cancelled" },
+            ]);
+            await session.flush();
+            throw new Error("Package UI tool effect was fenced by Stop");
+          }
+          try {
+            result = await composition.root.tools.executePrepared(
+              preparation,
+              context,
+            );
+          } catch (error) {
+            if (signal.aborted || !preparation.idempotent) {
+              throw new BotTurnReconciliationRequiredError(
+                `Tool effect "${occurrenceId}" outcome is uncertain`,
+                appendedSessionEvents(previousEvents, session.events),
+              );
+            }
+            result = {
+              content:
+                error instanceof Error
+                  ? error.message
+                  : "Tool execution failed",
+              isError: true,
+            };
+          }
+        }
+      }
+      session.append({
+        type: "tool/result",
+        turn,
+        step: 1,
+        occurrenceId,
+        name: call.name,
+        content: result.content,
+        isError: result.isError,
+        status: "completed",
+        ...(result.attachments?.length
+          ? { attachments: result.attachments }
+          : {}),
+      });
+      await session.flush();
+    }
+    const hasTerminal = session.events.some(
+      (event) => event.type === "turn/end" && event.turn === turn,
+    );
+    if (!hasTerminal) {
+      session.appendBatch([
+        { type: "step/end", turn, step: 1, outcome: "completed" },
+        { type: "turn/end", turn, outcome: "completed" },
+      ]);
+      await session.flush();
+    }
+    return {
+      runId: command.runId,
+      text: "",
+      events: appendedSessionEvents(previousEvents, session.events),
+    };
+  } finally {
+    await composition.dispose();
+  }
+}
+
 export async function executeBotTurn(
   options: ExecuteBotTurnOptions,
 ): Promise<BotTurnCompletion> {

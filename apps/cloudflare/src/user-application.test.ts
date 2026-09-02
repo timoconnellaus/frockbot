@@ -12,6 +12,20 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     assertRegistered: () => Promise.resolve(),
     listSkills: () =>
       Promise.resolve({ schemaVersion: 1 as const, skills: [] }),
+    listPackageUi: ({ botId }) =>
+      Promise.resolve({
+        schemaVersion: 1 as const,
+        botId,
+        generationId: "generation-1",
+        contributions: [],
+      }),
+    runPackageUiTool: ({ command }) =>
+      Promise.resolve({
+        schemaVersion: 1 as const,
+        runId: command.commandId,
+        text: "",
+        events: [],
+      }),
     readWorkspaceFileV1: () =>
       Promise.resolve({
         schemaVersion: 1 as const,
@@ -93,6 +107,7 @@ describe("user application security headers", () => {
     expect(policy.get("font-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("img-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("style-src")).toEqual(["'self'"]);
+    expect(policy.get("frame-src")).toEqual(["https://ui.app.example"]);
     expect(policy.get("frame-ancestors")).toEqual(["'none'"]);
   });
 

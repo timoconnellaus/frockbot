@@ -40,10 +40,35 @@ export interface ClientMount {
   order?: number;
 }
 
-export interface ClientContribution {
+/** A reviewed first-party client module compiled into the hosted bundle. */
+export interface ClientModuleContribution {
   entry: string;
   mounts: ClientMount[];
   outlets: string[];
+}
+
+/** Immutable HTML bytes rendered only by the first-party sandbox host. */
+export interface ClientIframeArtifactV1 {
+  contentHash: string;
+  size: number;
+  mediaType: "text/html";
+  bundlerVersion: string;
+}
+
+/** A non-first-party page. It never becomes JavaScript in the app origin. */
+export interface ClientIframeContribution {
+  kind: "iframe";
+  artifact: ClientIframeArtifactV1;
+  mounts: ClientMount[];
+}
+
+export type ClientContribution =
+  ClientModuleContribution | ClientIframeContribution;
+
+export function isClientIframeContribution(
+  contribution: ClientContribution,
+): contribution is ClientIframeContribution {
+  return "kind" in contribution && contribution.kind === "iframe";
 }
 
 export interface DesktopContribution {
@@ -464,32 +489,86 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     const client = value.contributions.client;
     if (!isRecord(client))
       throw new Error("manifest client contribution must be an object");
-    exactFields(
-      client,
-      ["entry", "mounts", "outlets"],
-      "manifest client contribution",
-    );
     const mounts = client.mounts;
     if (!Array.isArray(mounts)) {
       throw new Error("manifest client mounts must be an array");
     }
-    contributions.client = {
-      entry: relativeEntry(client, "entry"),
-      mounts: mounts.map((mount) => {
-        if (!isRecord(mount))
-          throw new Error("manifest client mount must be an object");
-        exactFields(mount, ["slot", "order"], "manifest client mount");
-        const order = mount.order;
-        if (
-          order !== undefined &&
-          (typeof order !== "number" || !Number.isFinite(order))
-        ) {
-          throw new Error("manifest client mount order must be finite");
-        }
-        return { slot: requiredString(mount, "slot"), order };
-      }),
-      outlets: optionalStringArray(client, "outlets"),
-    };
+    const decodedMounts = mounts.map((mount) => {
+      if (!isRecord(mount))
+        throw new Error("manifest client mount must be an object");
+      exactFields(mount, ["slot", "order"], "manifest client mount");
+      const order = mount.order;
+      if (
+        order !== undefined &&
+        (typeof order !== "number" || !Number.isFinite(order))
+      ) {
+        throw new Error("manifest client mount order must be finite");
+      }
+      return {
+        slot: requiredString(mount, "slot"),
+        ...(order === undefined ? {} : { order }),
+      };
+    });
+    if (client.kind === "iframe") {
+      if (!isV3OrLater(value)) {
+        throw new Error("manifest iframe client requires schema version 3");
+      }
+      exactFields(
+        client,
+        ["kind", "artifact", "mounts"],
+        "manifest iframe client contribution",
+      );
+      if (!isRecord(client.artifact)) {
+        throw new Error("manifest iframe client artifact must be an object");
+      }
+      exactFields(
+        client.artifact,
+        ["contentHash", "size", "mediaType", "bundlerVersion"],
+        "manifest iframe client artifact",
+      );
+      const artifact = client.artifact;
+      if (
+        typeof artifact.contentHash !== "string" ||
+        !/^[0-9a-f]{64}$/.test(artifact.contentHash)
+      ) {
+        throw new Error(
+          "manifest iframe client artifact contentHash must be a sha-256 digest",
+        );
+      }
+      if (
+        !Number.isSafeInteger(artifact.size) ||
+        (artifact.size as number) < 0 ||
+        (artifact.size as number) > 256 * 1024
+      ) {
+        throw new Error(
+          "manifest iframe client artifact size must be within the 256 KB quota",
+        );
+      }
+      if (artifact.mediaType !== "text/html") {
+        throw new Error("manifest iframe client artifact mediaType is invalid");
+      }
+      contributions.client = {
+        kind: "iframe",
+        artifact: {
+          contentHash: artifact.contentHash,
+          size: artifact.size as number,
+          mediaType: "text/html",
+          bundlerVersion: requiredString(artifact, "bundlerVersion"),
+        },
+        mounts: decodedMounts,
+      };
+    } else {
+      exactFields(
+        client,
+        ["entry", "mounts", "outlets"],
+        "manifest client contribution",
+      );
+      contributions.client = {
+        entry: relativeEntry(client, "entry"),
+        mounts: decodedMounts,
+        outlets: optionalStringArray(client, "outlets"),
+      };
+    }
   }
   if (value.contributions.mobile !== undefined) {
     const mobile = value.contributions.mobile;
@@ -1263,6 +1342,7 @@ function decodeV3(value: Record<string, unknown>): FrockBotManifest {
   if (!botIsolate && hooks !== undefined) {
     throw new Error("manifest hooks require a bot-isolate runtime");
   }
+  validateIframeClientContribution(base.contributions.client, tools);
   return {
     ...base,
     schemaVersion: 3,
@@ -1286,6 +1366,7 @@ function decodeV4(value: Record<string, unknown>): FrockBotManifest {
   if (!botIsolate && hooks !== undefined) {
     throw new Error("manifest hooks require a bot-isolate runtime");
   }
+  validateIframeClientContribution(base.contributions.client, tools);
   return {
     ...base,
     schemaVersion: 4,
@@ -1293,6 +1374,34 @@ function decodeV4(value: Record<string, unknown>): FrockBotManifest {
     ...(tools ? { tools } : {}),
     ...(hooks ? { hooks } : {}),
   };
+}
+
+function validateIframeClientContribution(
+  client: ClientContribution | undefined,
+  tools: ManifestToolDeclaration[] | undefined,
+): void {
+  if (!client || !isClientIframeContribution(client)) return;
+  if (client.mounts.length === 0 || client.mounts.length > 64) {
+    throw new Error(
+      "manifest iframe client mounts must be a non-empty bounded array",
+    );
+  }
+  const toolNames = new Set((tools ?? []).map((tool) => tool.name));
+  for (const mount of client.mounts) {
+    if (mount.slot === "frockbot.bot-settings-sections") continue;
+    const prefix = "frockbot.tool-result:";
+    if (!mount.slot.startsWith(prefix)) {
+      throw new Error(
+        `manifest iframe client slot "${mount.slot}" is not iframe-safe`,
+      );
+    }
+    const toolName = mount.slot.slice(prefix.length);
+    if (!toolNames.has(toolName)) {
+      throw new Error(
+        `manifest iframe client tool-result slot names undeclared tool "${toolName}"`,
+      );
+    }
+  }
 }
 
 export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
