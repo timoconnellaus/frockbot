@@ -225,11 +225,9 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
 
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
-    expect(first[0]).toMatch(/^bot-package:user-1:bot-1:[0-9a-f]{64}$/);
-    expect(second[0]).toMatch(/^bot-package:user-1:bot-2:[0-9a-f]{64}$/);
+    expect(first[0]).toMatch(/^bot-package:user-1:[0-9a-f]{64}$/);
+    expect(second[0]).toMatch(/^bot-package:user-1:[0-9a-f]{64}$/);
     expect(first[0]).not.toBe(second[0]);
-    // Same artifact, so the content-addressed component is identical.
-    expect(first[0]?.split(":").at(-1)).toBe(second[0]?.split(":").at(-1));
   });
 
   test("a broken package.js fails verification with a diagnostic, not a hang", async () => {
