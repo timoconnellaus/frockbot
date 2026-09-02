@@ -7,11 +7,11 @@ implemented; see docs/architecture-checks.md
 ## Resolved decisions
 
 - **D1** spike `@cloudflare/worker-bundler` in Step 3; fall back to single-file transpile-only.
-- **D2** loader identity is per-(Bot, artifactSet); cost bounded by the per-User generation-rate quota.
+- **D2** loader identity is per-(Bot, artifact set, binding digest); the digest is identity-bound and cost is bounded by the per-User generation-rate quota.
 - **D3** DO authority moves out of `plugin-shell` into `packages/kernel-do` as Step 1.5, after the pure Step 1 move.
 - **D4** the Bot DO calls the bundler through a service binding, intent recorded first.
 - **D5** one artifact per Package; the generation is the set.
-- **D6** the slice ships **tool and model binding**: the isolate's `CAPABILITIES` stub exposes model invocation as an Assignment-derived binding, so a Bot-authored adapter is a translation layer over that binding. Steps 4 and 5 grow accordingly (see the "D6 addendum" notes in those steps).
+- **D6** the slice ships **tool and model binding**: the isolate's `CAPABILITIES` stub exposes model invocation through ADR 0019's effective Package-setting model resolver, so a Bot-authored adapter is a translation layer over the admitted Bot binding. Steps 4 and 5 grow accordingly (see the "D6 addendum" notes in those steps).
 - **D7** quotas: 50 retained generations per Bot, 100 authored generations per User per day, 256 KB source per Package; durable per-User config with these defaults; nightly GC of unreferenced artifacts.
 - **D8** `AgentRegistry` stays in the kernel.
 - **D9** keep the `@frockbot/agent-core` barrel through Step 5; delete in Step 6.
@@ -301,25 +301,16 @@ export interface BotIsolateEntrypoint {
 /** Everything Bot code can see. Nothing else is in scope: globalOutbound is null. */
 export interface BotIsolateEnv {
   IDENTITY: { botId: string; generationId: string; packageId: string };
-  CAPABILITIES: BotCapabilitiesStub; // loopback service binding via ctx.exports, Assignment-derived only
+  CAPABILITIES: BotCapabilitiesStub; // loopback service binding via ctx.exports, Bot-authority-derived only
 }
 export interface BotCapabilitiesStub {
-  list(): Promise<
-    {
-      capabilityId: string;
-      kind: "tool" | "model" | "memory" | "notification";
-    }[]
-  >;
-  /** D6 addendum: model invocation as a binding. Streams over RPC; the kernel records
-   *  the normalized request and lease in the Bot DO before forwarding. Only capabilities
-   *  an enabled model Assignment grants are callable. */
-  invokeModel(
-    request: NormalizedModelRequest,
-  ): Promise<ReadableStream<LlmStreamEvent>>;
-  requestAuthority(request: {
-    capabilityId: string;
-    reason: string;
-  }): Promise<{ status: "pending-user-decision"; decisionId: string }>; // never a grant
+  list(): Promise<IsolateCapabilityListOutcomeV1>;
+  invokeModel(request: NormalizedModelRequest): Promise<IsolateModelOutcomeV1>;
+  invokeTool(request: IsolateToolRequestV1): Promise<IsolateToolOutcomeV1>;
+  connection(connectionId: string): Promise<IsolateConnectionOutcomeV1>;
+  // The complete Memory, Workspace, notification, and schedule methods live
+  // in packages/kernel-contracts/src/isolate.ts. Every unavailable capability
+  // is a declared outcome; there is no method that can request more authority.
 }
 export interface IsolateHost {
   load(input: {
@@ -334,15 +325,15 @@ export interface IsolateHost {
 
 **Module map — exactly two entries**, following `docs/research/zerobsai-memory-sandbox.md` §12: `index.js` (kernel-generated wrapper `WorkerEntrypoint` that decodes `IsolateToolInvocationV1`, hands user code a narrow `ctx` via `RpcTarget`, and enforces the deadline) and `package.js` (the bundled Bot module). The wrapper text is content-addressed together with the package, so a wrapper change is a new artifact.
 
-**Loader identity.** `bot-package:${userId}:${botId}:${artifactSetHash}`. Bot-scoped because bindings are Assignment-derived and Assignments are Bot-scoped, and `LOADER.get` requires the callback to return identical `WorkerCode` for an id (research constraint 2). This costs one unique Dynamic Worker per (Bot, artifact set) per day — see Open decision D2.
+**Loader identity.** `bot-package:${userId}:${moduleSetHash}`. `moduleSetHash` includes the artifact and the identity-bound binding digest, so it is Bot-scoped even though the Bot id is not a plaintext loader-id segment. `LOADER.get` requires the callback to return identical `WorkerCode` for an id (research constraint 2). This costs one unique Dynamic Worker per (Bot, artifact set, binding snapshot) per day — see decision D2.
 
 **Reusable from the existing slice:** `WorkerCode`/`LoadedWorker`/`WorkerLoader` shapes and `globalOutbound: null` + `limits` (`apps/cloudflare/src/contracts.ts:179-201`); the immutable-callback call pattern (`apps/cloudflare/src/gateway.ts:299-311`); id validation (`gateway.ts:22-31` `applicationDeploymentId`); `createImmutablePlanRequestFactory` (`apps/cloudflare/src/immutable-application.ts`) for caching the mounted Composition per DO instance; `PackageCatalog`'s prepare/commit/rollback (`packages/plugin-catalog/src/index.ts:118-180`), which is already the two-phase mount the constitution asks for; `evictDurableObject` harness (`apps/cloudflare/vitest.config.ts`).
 
 **Must be replaced:** `WorkerCode.env` is typed `UserApplicationEnv` (`contracts.ts:174-185`) — generalize to `BotIsolateEnv`. The loader is bound only into the gateway (`apps/cloudflare/src/index.ts:371`) — add a second `worker_loaders` binding `BOT_PACKAGES` to `wrangler.jsonc:14-18` and read it from the DO env. `artifacts.load(applicationHash)` keys on the deploy-time constant `DEFAULT_APPLICATION_HASH` (`wrangler.jsonc:68`) — Bot artifacts are content-addressed at runtime. `LocalCordisContributionHost` (`plugin-catalog/src/index.ts:253-312`) resolves by module import — a new `BotIsolateContributionHost implements ContributionHost` sits beside it and returns a `PreparedContribution` whose `commit()` registers one `ToolDefinition` per `health().tools` entry that RPCs into the isolate. `createFoundationRuntime` (`apps/agent-runtime/src/runtime.ts:80-190`) hard-codes the registries and `sessionId "barebones"` — becomes the kernel composition bootstrap driven by a `CompositionGenerationV1`.
 
-**Tests (Miniflare/workerd, mandatory).** Isolate tool callable end-to-end through `ctx.tools`; `fetch()` inside Bot code rejects; the isolate cannot reach `ctx.storage`, secrets, or another Bot's DO; `requestAuthority` returns a pending decision, never a grant; two Bots with the same artifact get different loader ids; a Turn that uses no isolate tool makes no loader call.
+**Tests (Miniflare/workerd, mandatory).** Isolate tool callable end-to-end through `ctx.tools`; `fetch()` inside Bot code rejects; the isolate cannot reach `ctx.storage`, secrets, or another Bot's DO; a missing or disabled Connection returns `unavailable` and records a visible failure without any authority-request path; two Bots with the same artifact get different loader ids; a Turn that uses no isolate tool makes no loader call.
 
-**Decision (loader identity and the generation, 2026-08-31).** `env` is baked into a cached isolate — both `IDENTITY` and the `CAPABILITIES` loopback stub, whose `props` carry the Composition `generationId`. So a new generation with an identical artifact set and identical Assignments would have reused an isolate whose stub still recorded decisions and resolved model requests under the _previous_ generation. Dropping `generationId` from `IDENTITY` does not fix that: the stale generation lives in the stub's props, and the alternative — having the isolate pass its generation per invocation — would make a Bot-supplied value the authority for which generation its capability calls are recorded under, which it must never be. The generation therefore goes into the **binding digest** (`isolateBindingDigestV1(assignments, generationId)`), not into the loader id directly: the generation is part of the authority the isolate was granted, so the constitutional formula holds unchanged — loader identity is the artifact set plus the digest of the bindings it was granted. The cost is that isolates are no longer shared across generations; D5's sharing was for identical _artifacts_ under identical authority, and a new generation is new authority.
+**Decision (loader identity and the generation, updated 2026-09-02).** `env` is baked into a cached isolate — both `IDENTITY` and the `CAPABILITIES` loopback stub, whose `props` carry the Composition `generationId`. A new generation with an identical artifact set and bindings would otherwise reuse an isolate whose stub still attributed capability calls to the previous generation. The generation therefore goes into `isolateBindingDigestV1` beside User identity, Bot identity, sorted Connection ids and generations, and the effective model binding. The module-set hash folds that digest together with the wrapper and Package artifact. The cost is that isolates are not shared across Bots or generations; a changed Connection generation or model also produces a new identity.
 
 **Spike result (2026-08-31, `docs/research/spike-worker-loader-from-do.md`).** Resolved: a DO can call `env.BOT_PACKAGES.get()` under the pinned Miniflare/workerd with no upgrade. Three contract changes follow: (1) `CAPABILITIES` cannot be an `RpcTarget` placed in `env` (`DataCloneError`); it is a loopback service binding created with `this.ctx.exports.BotCapabilities({ props })`, and per-invocation narrowed objects are `RpcTarget`s _returned_ from its methods; (2) `.get()` never throws — a broken `package.js` fails on the first RPC, so mount and `health()` are one guarded phase; (3) a reused loader id with different code silently serves the first code, so the id must be the content-addressed `artifactSetHash` and nothing else. RPC across the isolate boundary is structured-clone/RpcTarget only, so `ToolDefinition.execute`'s `AbortSignal` cannot cross — use `deadlineMs` plus DO-side `Promise.race`.
 
@@ -352,7 +343,7 @@ export interface IsolateHost {
 
 **Goal.** DoD item 2 and the activation half of 3.
 
-**D6 addendum.** The authored Package may also declare a `model` Contribution: a Bot-authored adapter that implements the `ModelInvocation` interface _inside the isolate_ by calling `CAPABILITIES.invokeModel`. The kernel treats it as any other model Package member; it can never reach the network. Tests: a Bot-authored adapter that forwards to the binding streams a completion; one that calls `fetch` fails; an adapter without a matching model Assignment gets `pending-user-decision` from `requestAuthority`.
+**D6 addendum.** Authored code may implement a model translation inside the isolate by calling `ctx.model.invoke`, which forwards only through ADR 0019's effective admitted model binding and can never reach the network. Tests: a Bot-authored adapter that forwards to the configured binding streams a completion; one that calls `fetch` fails; an adapter without a matching admitted binding gets `unavailable`.
 
 **New first-party Package `packages/plugin-authoring`** (runtime Contribution), exposing one tool, modelled on DeepSeek Harness's `cordis_define`/`cordis_run` split (`docs/research/deepseek-harness-extension.md` §2 — define mints identity and records source, run activates; the model never overwrites a version, it appends a corrected one):
 
@@ -419,7 +410,7 @@ export interface CompositionFailureLog {
 ## Open decisions for Tim
 
 - **D1. Does `@cloudflare/worker-bundler` run inside a Worker isolate, or do we need a Container?** _Recommend:_ spike it in Step 3; if it fails, ship the zerobsai shape — accept only a single TypeScript file with no imports, transpile-only (strip types), no npm resolution. That covers "one tool, TypeScript source" and defers dependency resolution.
-- **D2. Loader identity: per-(User, artifactSet) or per-(Bot, artifactSet)?** _Recommend:_ per-Bot. Bindings are Assignment-derived and Assignments are Bot-scoped, so per-User would require identical bindings across a User's Bots. Accept the billing cost (research constraint 4: 1,000 unique Dynamic Workers/month included, then $0.002/worker/day) and bound it with the per-User generation-rate quota.
+- **D2. Loader identity: per-(User, artifactSet) or per-(Bot, artifactSet)?** _Resolved:_ identity-bound per Bot. ADR 0019 makes authority account-wide, but attribution, the Composition generation, and the capability stub remain Bot-specific; the binding digest therefore includes User and Bot identity. Accept the billing cost (research constraint 4: 1,000 unique Dynamic Workers/month included, then $0.002/worker/day) and bound it with the per-User generation-rate quota.
 - **D3. Does DO authority stay in `@frockbot/plugin-shell` (2571 lines) or move to `packages/kernel-do`?** _Recommend:_ move admission / event log / cursor / idempotency / cancellation / scheduling to `packages/kernel-do` in a Step 1.5, leaving `plugin-shell` with run projection and the hosted client. Otherwise the "kernel imports no Package" check is satisfied on a technicality while a Package holds the DO authority. This is the one place the plan currently under-delivers against the constitution; it is deliberately deferred so Step 1 stays a pure move.
 - **D4. Does the Bot DO call the bundler, or does the gateway?** _Recommend:_ the DO calls it via service binding, with intent recorded first. The DO is the authority for the effect; the gateway is explicitly non-authoritative.
 - **D5. One artifact per Package, or one per Composition generation?** _Recommend:_ per Package. The generation is the _set_; `artifactSetHash` is derived. This lets identical Packages share isolates across generations.

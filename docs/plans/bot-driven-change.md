@@ -2,7 +2,7 @@
 
 ## Status
 
-accepted 2026-09-02; ADR 0020 and the `AGENTS.md` amendment gate slices 1, 3, 4 (isolate half), and 5. Slice 2 is inside the current constitution and runs now.
+Implemented and integrated 2026-09-02. ADR 0019 supplies account-wide enablement and model resolution; ADR 0020 and the accepted `AGENTS.md` amendment add the Bot-driven authoring, Catalog, hook, undo, inspection, and iframe layers on that authority model.
 
 ## Intent
 
@@ -11,7 +11,7 @@ A non-technical User connects accounts, chats, and says "undo". The Bot does eve
 - **Backend contribution**: code in the Bot's isolate with the Bot's bindings; registers tools and hooks loop events.
 - **UI contribution**: an HTML page mounted in a named slot as a cookieless-origin sandboxed iframe with a small bridge.
 - **Trust**: first-party runs in-process; everything else runs in an isolate or an iframe.
-- **Authority**: the Bot's Connections, made by the User out of band; a Package has exactly the Bot's authority.
+- **Authority**: account-wide enabled Packages and the User's Connections, changed by the User out of band; every Package in one Bot Composition receives the same Bot authority projection.
 - **Verbs**: `search`, `inspect`, `install`, `author`, `undo`.
 
 The desktop app is a shell around the hosted UI plus the "this computer" Connection; native abilities are tools on that Connection. No separate desktop contribution host.
@@ -20,13 +20,13 @@ Deliberately not in this plan (decided 2026-09-02, "lock down later where the lo
 
 ## Slice 0 — Constitution amendment + ADR 0020
 
-Deltas to `AGENTS.md`: a Bot may install Packages; authority is per-Bot Connections made by the User out of band and never requested by the Bot; a required core set; loop policy may run in an isolate; undo is a Bot-callable revert of setup generations. Gate: human acceptance.
+Deltas to `AGENTS.md`: a Bot may install Packages; account-wide Package enablement and Connections are User acts and are never requested by the Bot; a required core set; loop policy may run in an isolate; undo is a Bot-callable revert of setup generations. Gate: human acceptance. Accepted 2026-09-02.
 
-## Slice 1 — Authority = the Bot's Connections
+## Slice 1 — Account-wide enablement projected as Bot authority
 
-Collapse Assignments to (Bot, Connection). The isolate's `CAPABILITIES` becomes "what the Bot has": `model`, `tools.invoke`, `memory`, `workspace`, `connection(id)` leases, `notify`, `schedule`. Remove `requestAuthority` and pending decisions from the Bot-facing surface; a missing Connection is `unavailable`. The loader binding digest keys on the Bot's Connection set. Gate (workerd): a Package uses a connected service with no grant step; an unconnected one gets `unavailable`; a Connection change yields a new isolate.
+ADR 0019 removes per-Bot Assignments: Package installation and enablement are User-level, the Bot holds every Connection its User made, and model resolution follows the enabled `role: "model"` Package setting at Bot scope, then User scope, then the platform model. The isolate's `CAPABILITIES` is "what the Bot has": `model`, `tools.invoke`, `memory`, `workspace`, `connection(id)` leases, `notify`, and `schedule`. There is no authority-request or pending-authority-decision surface; a missing, disabled, or revoked Connection is `unavailable` and records a visible, repairable failure. Gate: an unconfigured Bot and its isolate use the platform model; a Package uses a connected service with no grant step; an unconnected one gets `unavailable`; identity or binding changes yield a new isolate.
 
-As built, one mount snapshots every ready User Connection without credentials, the resolved Bot model binding, the active tool registry, Memory and Workspace availability, notifications, and durable scheduling; every Package receives that same projection. `isolateBindingDigestV1` hashes the mounted Composition generation, sorted `(connectionId, generation)` pairs, and model binding into the loader identity, while the loopback stub pins returned leases to those admitted generations. The Assignment store and controls, authority-request and pending-decision DTOs, and MCP Bot-requested authorization command are gone; every missing seam returns `{ status: "unavailable", reason }`.
+As built, one mount snapshots every ready User Connection without credentials, the resolver's effective model binding, the active tool registry, Memory and Workspace availability, notifications, and durable scheduling; every Package receives that same projection. `isolateBindingDigestV1` hashes User identity, Bot identity, the mounted Composition generation, sorted `(connectionId, generation)` pairs, and the effective model binding into the loader identity, while the loopback stub pins returned leases to those admitted generations. The Assignment store and controls, authority-request and pending-decision DTOs, and MCP Bot-requested authorization command are gone; every missing seam returns `{ status: "unavailable", reason }`.
 
 ## Slice 2 — Authoring made solid, undo, binding catalog
 
@@ -44,6 +44,6 @@ Expose the events the loop already emits (`turn/start`, `model/request`, `tool/c
 
 One host, one bridge (`callTool`, `subscribe`, theme tokens). First slots: the tool-result renderer and the settings panel. `package_author` accepts a UI page; it goes through the same bundler and is content-addressed. Core chrome is never Package-owned; Package surfaces are attributed. Gate: a Bot-authored Package renders its tool's output as a table and adds a settings form with no Package JavaScript in the page.
 
-## Lanes
+## Integration outcome
 
-Slice 2 runs now. Slices 1 and 3 start on acceptance of Slice 0, in parallel. Slices 4 and 5 follow, in parallel, with an integration lane at the end. Each lane is a Codex worktree with strict file ownership and a report listing changes it needs in files it does not own.
+All five slices are integrated on ADR 0019's account-wide base. Main's Package-setting model resolver and Custom models Package replace Slice 1's provisional model assignment DTO. Slices 2–5 retain their first-party runtime hosts, immutable records and artifacts, generated isolate context, declared waterfall hooks, Package Catalog tools, and cookieless iframe path. The production Bot authority contains no per-Package grant, authority request, or pending authority decision.
