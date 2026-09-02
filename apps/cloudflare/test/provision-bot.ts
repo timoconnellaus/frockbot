@@ -28,16 +28,31 @@ export async function provisionBot(identity: {
 }): Promise<void> {
   const configuration = user(identity.userId);
   const suffix = identity.botId;
+  // SAFETY: the generated stub type for `readConfiguration` is too deep for the
+  // compiler to instantiate here; this names the one field the bootstrap reads.
+  const settingsRpc = configuration as unknown as {
+    readConfiguration(input: unknown): Promise<{ revision: number }>;
+  };
+  const revision = async (): Promise<number> =>
+    (
+      await settingsRpc.readConfiguration({
+        schemaVersion: 1,
+        userId: identity.userId,
+      })
+    ).revision;
+  // Custom models is seeded disabled for every User on first read; the product
+  // path is to switch it on, not to install it, and the seed owns the revision.
+  const seeded = await revision();
   await configuration.executeConfiguration({
     schemaVersion: 1,
     userId: identity.userId,
     command: {
       schemaVersion: 1,
-      type: "user/install-package",
-      commandId: `install-custom-models-${suffix}`,
-      expectedRevision: 0,
+      type: "user/set-package-enabled",
+      commandId: `enable-custom-models-${suffix}`,
+      expectedRevision: seeded,
       packageId: "custom-models",
-      version: "0.0.1",
+      enabled: true,
     },
   });
   await configuration.executeConfiguration({
@@ -47,7 +62,7 @@ export async function provisionBot(identity: {
       schemaVersion: 1,
       type: "user/install-package",
       commandId: `install-${suffix}`,
-      expectedRevision: 1,
+      expectedRevision: seeded + 1,
       packageId: "provider-ollama-cloud",
       version: "0.0.1",
     },
@@ -66,18 +81,6 @@ export async function provisionBot(identity: {
     },
   })) as unknown as { status: string; connectionId: string };
   expect(connection).toMatchObject({ status: "applied" });
-  // SAFETY: the generated stub type for `readConfiguration` is too deep for the
-  // compiler to instantiate here; this names the one field the bootstrap reads.
-  const settingsRpc = configuration as unknown as {
-    readConfiguration(input: unknown): Promise<{ revision: number }>;
-  };
-  const revision = async (): Promise<number> =>
-    (
-      await settingsRpc.readConfiguration({
-        schemaVersion: 1,
-        userId: identity.userId,
-      })
-    ).revision;
   await configuration.executeConfiguration({
     schemaVersion: 1,
     userId: identity.userId,
@@ -88,7 +91,7 @@ export async function provisionBot(identity: {
       expectedRevision: await revision(),
       packageId: "custom-models",
       values: {
-        model: {
+        "account-model": {
           connectionId: connection.connectionId,
           providerModelId: "glm-5.3-flash:cloud",
         },

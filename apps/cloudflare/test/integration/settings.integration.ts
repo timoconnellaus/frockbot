@@ -35,7 +35,7 @@ describe("settings round-trip through the gateway", () => {
       view.packages.find((pkg) => pkg.packageId === CUSTOM_MODELS_PACKAGE_ID)
         ?.values,
     ).toMatchObject({
-      model: {
+      "account-model": {
         connectionId,
         providerModelId: PROVISIONED_MODEL.providerModelId,
       },

@@ -237,6 +237,32 @@ export async function expectOkJson(response: Response): Promise<unknown> {
  * account model, then create the Bot. Every step is a request the client makes, so this
  * fixture proves the routes it uses as a side effect of using them.
  */
+/**
+ * Switch Custom models on for a User and return the revision that follows.
+ * The Package is seeded disabled on a User's first read, so the product path
+ * is enablement at whatever revision the seed left, never a fresh install at
+ * zero.
+ */
+export async function enableCustomModels(
+  userId: string,
+  commandId: string,
+): Promise<number> {
+  const seeded = (await expectOkJson(
+    await asUser(userId, "/api/settings"),
+  )) as { revision: number };
+  await expectOkJson(
+    await postAsUser(userId, "/api/settings", {
+      schemaVersion: 1,
+      type: "user/set-package-enabled",
+      commandId: `enable-${commandId}`,
+      expectedRevision: seeded.revision,
+      packageId: CUSTOM_MODELS_PACKAGE_ID,
+      enabled: true,
+    }),
+  );
+  return seeded.revision + 1;
+}
+
 export async function provisionThroughGateway(options: {
   userId: string;
   botId: string;
@@ -245,22 +271,13 @@ export async function provisionThroughGateway(options: {
   const { userId, botId } = options;
   const apiKey = options.apiKey ?? OLLAMA_GOOD_API_KEY;
 
-  await expectOkJson(
-    await postAsUser(userId, "/api/settings", {
-      schemaVersion: 1,
-      type: "user/install-package",
-      commandId: `install-custom-models-${botId}`,
-      expectedRevision: 0,
-      packageId: CUSTOM_MODELS_PACKAGE_ID,
-      version: "0.0.1",
-    }),
-  );
+  const enabled = await enableCustomModels(userId, `custom-models-${botId}`);
   await expectOkJson(
     await postAsUser(userId, "/api/settings", {
       schemaVersion: 1,
       type: "user/install-package",
       commandId: `install-${botId}`,
-      expectedRevision: 1,
+      expectedRevision: enabled,
       packageId: PROVISIONED_MODEL.packageId,
       version: "0.0.1",
     }),
@@ -289,7 +306,7 @@ export async function provisionThroughGateway(options: {
       expectedRevision: settings.revision,
       packageId: CUSTOM_MODELS_PACKAGE_ID,
       values: {
-        model: {
+        "account-model": {
           connectionId: receipt.connectionId,
           providerModelId: PROVISIONED_MODEL.providerModelId,
         },
