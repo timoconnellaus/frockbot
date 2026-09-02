@@ -553,6 +553,7 @@ export function createPackageAuthoringHost(
         displayName: request.input.displayName,
         version,
         tools: request.input.tools,
+        hooks: request.input.hooks,
       });
       // The generated document crosses the same strict seam as every other
       // manifest before it becomes durable or participates in a generation.

@@ -323,6 +323,30 @@ describe("a Bot authoring a Package", () => {
     });
   });
 
+  test("stores declared loop hooks in the authored manifest", async () => {
+    const bundler = countingBundler((effectId) => bundledResult(effectId));
+    const outcome = await host({ bundler }).author(
+      requestFor({
+        input: {
+          ...requestFor().input,
+          hooks: ["agent/tool-exposure", "tools/post-execute"],
+        },
+      }),
+    );
+    if (outcome.status !== "authored") throw new Error(outcome.reason);
+
+    const artifact = storage.values.get(
+      artifactKey(outcome.contentHash),
+    ) as AuthoredArtifactRecordV1;
+    const manifestRecord = storage.values.get(
+      authorshipManifestKey(artifact.manifestHash),
+    ) as AuthoredManifestRecordV1;
+
+    expect(manifestRecord.manifest).toMatchObject({
+      hooks: ["agent/tool-exposure", "tools/post-execute"],
+    });
+  });
+
   test("proposes a pending generation pinned for the next Turn", async () => {
     const bundler = countingBundler((effectId) => bundledResult(effectId));
     const outcome = await host({ bundler }).author(requestFor());
