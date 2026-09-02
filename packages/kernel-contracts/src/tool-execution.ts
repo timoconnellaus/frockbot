@@ -187,11 +187,27 @@ export interface ToolRegistrationOptions {
 
 /** Contributing Packages register tool definitions through this surface. */
 export interface ToolRegistration {
+  /** Every registered name, before turn/role admission trims the catalog. */
+  registeredNames?(): string[];
   register(
     definition: ToolDefinition,
     options?: ToolRegistrationOptions,
   ): () => void;
+  /**
+   * First-party, deny-only policy evaluated after `tools/pre-execute` and
+   * before `tools/execute`. The isolate contract never exposes this method.
+   */
+  guard(guard: ToolGuard): () => void;
 }
+
+export interface ToolGuardDenial {
+  reason: string;
+}
+
+export type ToolGuard = (
+  call: ToolCall,
+  context: ToolExecutionContext,
+) => ToolGuardDenial | undefined | Promise<ToolGuardDenial | undefined>;
 
 declare module "cordis" {
   interface Context {

@@ -726,6 +726,9 @@ class FakeCatalog implements UserPackageCatalogHost {
           version: entry.version,
           manifestHash: entry.manifestHash,
           kind: entry.kind,
+          ...(entry.bundle === undefined
+            ? {}
+            : { contentHash: entry.bundle.contentHash }),
         })),
       },
     });
@@ -819,6 +822,89 @@ describe("remote Package Catalog", () => {
         },
       ],
     });
+  });
+
+  test("admits only the exact hash of a code-carrying Catalog entry", async () => {
+    const contentHash = "b".repeat(64);
+    const catalog = new FakeCatalog();
+    catalog.entries = [
+      catalogEntry({
+        packageId: "parcel-tracking",
+        catalogId: "parcel-tracking",
+        displayName: "Parcel tracking",
+        manifestHash: "e".repeat(64),
+        bundle: {
+          contentHash,
+          size: 512,
+          mediaType: "application/javascript",
+          bundlerVersion: "catalog-test@1",
+          manifest: {
+            schemaVersion: 3,
+            id: "parcel-tracking",
+            displayName: "Parcel tracking",
+            version: "0.0.1",
+            compatibility: { frockbot: "*" },
+            dependencies: {},
+            contributions: {
+              runtime: { entry: "./package.js", host: "bot-isolate" },
+            },
+            tools: [],
+            permissions: [],
+          },
+        },
+      }),
+    ];
+    const { settings, storage } = catalogContribution(
+      new MemoryStorage(),
+      catalog,
+    );
+    await settings.readConfiguration({ schemaVersion: 1, userId: "user-1" });
+
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/install-package",
+          commandId: "install-parcel",
+          expectedRevision: 0,
+          packageId: "parcel-tracking",
+          version: "0.0.1",
+          catalogId: "parcel-tracking",
+          catalogGeneration: "gen-one",
+          contentHash,
+        },
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    expect(
+      (await storage.get<UserSettingsViewV1>("user-configuration"))?.packages,
+    ).toEqual([
+      expect.objectContaining({ packageId: "parcel-tracking", contentHash }),
+    ]);
+
+    const mismatch = catalogContribution(new MemoryStorage(), catalog);
+    await mismatch.settings.readConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+    });
+    await expect(
+      mismatch.settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/install-package",
+          commandId: "install-wrong-hash",
+          expectedRevision: 0,
+          packageId: "parcel-tracking",
+          version: "0.0.1",
+          catalogId: "parcel-tracking",
+          catalogGeneration: "gen-one",
+          contentHash: "c".repeat(64),
+        },
+      }),
+    ).rejects.toThrow('requires bundle hash "bbbb');
   });
 
   test("refuses an install off the pinned generation", async () => {

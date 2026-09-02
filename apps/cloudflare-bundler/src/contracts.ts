@@ -10,11 +10,20 @@
 export const BUNDLER_ENTRY = "package.ts";
 /** D7: 256 KB of source per Package. */
 export const BUNDLER_MAX_SOURCE_BYTES = 256 * 1024;
+/** Must match the kernel contract: raw HTML is never transformed. */
+export const BUNDLER_UI_ARTIFACT_VERSION = "frockbot-inline-html@1";
 
 export interface ArtifactRefV1 {
   contentHash: string; // sha-256 hex of the bundled module bytes
   size: number;
   mediaType: "application/javascript";
+  bundlerVersion: string;
+}
+
+export interface UiArtifactRefV1 {
+  contentHash: string;
+  size: number;
+  mediaType: "text/html";
   bundlerVersion: string;
 }
 
@@ -30,6 +39,7 @@ export interface BundleRequestV1 {
   compatibilityDate: string;
   entry: "package.ts";
   sources: BundleSourceV1[]; // exactly 1 file in this slice
+  ui?: { path: "ui.html"; html: string };
 }
 
 export type BundleResultV1 =
@@ -38,6 +48,8 @@ export type BundleResultV1 =
       effectId: string;
       status: "bundled";
       artifact: ArtifactRefV1;
+      uiArtifact?: UiArtifactRefV1;
+      uiHtml?: string;
       /** The module bytes as text. D4: the DO owns the R2 write, not the bundler. */
       module: string;
       diagnostics: string[];
@@ -58,6 +70,7 @@ export interface BundlerBinding {
 export type BundleFailureV1 =
   | "invalid-request"
   | "source-too-large"
+  | "ui-too-large"
   | "single-file-only"
   | "bundle-failed"
   | "unresolved-import"
@@ -118,14 +131,18 @@ function decodeBundleSourceV1(input: unknown): BundleSourceV1 {
 
 export function decodeBundleRequestV1(input: unknown): BundleRequestV1 {
   const value = record(input, "bundle request");
-  exact(value, [
-    "schemaVersion",
-    "effectId",
-    "target",
-    "compatibilityDate",
-    "entry",
-    "sources",
-  ]);
+  exact(
+    value,
+    [
+      "schemaVersion",
+      "effectId",
+      "target",
+      "compatibilityDate",
+      "entry",
+      "sources",
+    ],
+    ["ui"],
+  );
   if (value.schemaVersion !== 1)
     throw new BundleDecodeError("unsupported bundle request");
   if (value.target !== "bot-isolate")
@@ -134,6 +151,19 @@ export function decodeBundleRequestV1(input: unknown): BundleRequestV1 {
     throw new BundleDecodeError("entry is invalid");
   if (!Array.isArray(value.sources) || value.sources.length !== 1)
     throw new BundleDecodeError("exactly one source file is required");
+  let ui: BundleRequestV1["ui"];
+  if (value.ui !== undefined) {
+    const rawUi = record(value.ui, "bundle request ui");
+    exact(rawUi, ["path", "html"]);
+    if (
+      rawUi.path !== "ui.html" ||
+      typeof rawUi.html !== "string" ||
+      rawUi.html.length === 0
+    ) {
+      throw new BundleDecodeError("ui must contain one non-empty ui.html");
+    }
+    ui = { path: "ui.html", html: rawUi.html };
+  }
   return {
     schemaVersion: 1,
     effectId: boundedText(value.effectId, "effectId", 200),
@@ -141,6 +171,7 @@ export function decodeBundleRequestV1(input: unknown): BundleRequestV1 {
     compatibilityDate: compatibilityDate(value.compatibilityDate),
     entry: BUNDLER_ENTRY,
     sources: value.sources.map(decodeBundleSourceV1),
+    ...(ui ? { ui } : {}),
   };
 }
 

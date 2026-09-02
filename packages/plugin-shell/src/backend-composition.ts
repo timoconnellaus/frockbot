@@ -65,6 +65,8 @@ export interface ShellIsolateMountOptions {
   turnId: string;
   loader: BotIsolateLoader;
   artifacts: BotIsolateArtifactStore;
+  /** Reads the exact manifest whose hash the member records. */
+  manifestFor(member: CompositionMemberV1): Promise<unknown>;
   /**
    * Mints the loopback `CAPABILITIES` service binding for one Package —
    * `ctx.exports.BotCapabilities({ props })` in the Durable Object.
@@ -177,12 +179,27 @@ export function createShellCompositionHost(
             loader: isolate.loader,
             artifacts: isolate.artifacts,
             tools: runtime.root.tools,
+            loop: runtime.root,
             userId: isolate.userId,
             botId: options.botId,
             sessionId: options.sessionId,
             runId: isolate.runId,
             turnId: isolate.turnId,
             generationId: generation.generationId,
+            turnType: options.turnType ?? "chat",
+            ...(options.subagentRole === undefined
+              ? {}
+              : { subagentRole: options.subagentRole }),
+            recordHookFailure: async (failure) => {
+              const session = runtime.root.sessions.get(options.sessionId);
+              if (!session) {
+                throw new Error(
+                  `session "${options.sessionId}" is unavailable for hook failure recording`,
+                );
+              }
+              session.append({ type: "package/hook-failed", ...failure });
+              await session.flush();
+            },
             capabilities: isolate.capabilitiesFor(member),
             compatibilityDate: isolate.compatibilityDate,
             bindingDigest: isolate.bindingDigest,
@@ -192,8 +209,9 @@ export function createShellCompositionHost(
               : { deadlineMs: isolate.deadlineMs }),
           });
           // Mount and health-check are one guarded phase (Worker Loader spike).
+          const storedManifest = await isolate.manifestFor(member);
           const prepared = await host.prepare(
-            botIsolatePackageDescriptorV1(member),
+            await botIsolatePackageDescriptorV1(member, storedManifest),
           );
           if (!prepared) {
             failures.push({

@@ -9,7 +9,7 @@
 //     `widget` payload ends the Turn; row 53's `approval` payload is the only
 //     other one that does, and for the same reason — the Bot has nothing left
 //     to do until a person answers.
-//  3. One `agent/request` handler, which is where the transcript seam is: a
+//  3. One `agent/message-window` handler, which is where the transcript seam is: a
 //     chat Turn's request carries only chat Turns, and an automation Turn's
 //     carries its own Turn and a pointer to the parent it may not read. See
 //     `history.ts`.
@@ -120,8 +120,6 @@ function sendAcknowledgement(payload: SendToUserPayloadV1): string {
       return "Secret request sent to the user.";
     case "agent-card":
       return "Agent card sent to the user.";
-    case "connect-card":
-      return "Connect card sent to the user. Only they can complete the authorization; you have recorded the request, not granted it.";
     case "approval":
       // Deliberately not "requested permission": nothing has been granted, and
       // the Turn is over whatever the answer turns out to be.
@@ -137,7 +135,6 @@ const SEND_TO_USER_DESCRIPTION = [
   '{"type":"widget","widget":{"prompt":"…","helpText":"…","options":["…"],"allowCustom":false,"dismissOnMoveOn":false}}',
   '{"type":"secret-request","prompt":"…","secretName":"…"}',
   '{"type":"agent-card","agentId":"…","title":"…","body":"…"}',
-  '{"type":"connect-card","connectionId":"…","title":"…","body":"…"}',
   '{"type":"approval","approvalId":"…","action":"…","rationale":"…","risk":"low|medium|high","expiresInSeconds":86400}',
   "A widget asks the user a question with 1 to 6 options and ends your Turn;",
   "their answer arrives as a new Turn. An approval asks the user to allow one",
@@ -313,18 +310,18 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
     // Applied after the rest of the chain, so this Package has the last word on
     // what history a request carries — the one rule the visible transcript
     // rests on.
-    ctx.on("agent/request", async (agent, _request, _signal, next) => {
-      const proposed = await next();
-      return {
-        ...proposed,
-        messages: turnScopedMessagesV1({
+    ctx.on(
+      "agent/message-window",
+      async (agent, _messages, _turn, _step, _signal, next) => {
+        const proposed = await next();
+        return turnScopedMessagesV1({
           events: agent.session.events,
-          messages: proposed.messages,
+          messages: proposed,
           pointer: automationParentPointerV1,
           sessionId: agent.session.id,
-        }),
-      };
-    }),
+        });
+      },
+    ),
   ];
   return () => {
     for (const dispose of disposers.toReversed()) dispose();

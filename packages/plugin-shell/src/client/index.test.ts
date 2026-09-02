@@ -395,6 +395,125 @@ describe("Bot selection", () => {
     expect(provided.value.activeBotId).toBe("new");
     expect(provided.value.botSettings?.botId).toBe("new");
   });
+
+  test("loads sandboxed Package UI and transports only declared iframe tools", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: { href: "https://app.example/" },
+        history: { replaceState: () => undefined },
+      },
+    });
+    const contribution = {
+      packageId: "weather-page",
+      displayName: "Sydney Weather",
+      provenance: "Bot-authored" as const,
+      artifact: {
+        contentHash: "a".repeat(64),
+        size: 1,
+        mediaType: "text/html" as const,
+        bundlerVersion: "frockbot-inline-html@1",
+      },
+      mounts: [{ slot: "frockbot.bot-settings-sections", order: 20 }],
+      declaredTools: ["weather_lookup"],
+    };
+    const requests: Array<{
+      path: string;
+      method?: string;
+      body?: string;
+    }> = [];
+    const slots: string[] = [];
+    let provided: Ref<FrockBotWebData> | undefined;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: (query) => {
+          if (query.type !== "bot/get")
+            throw new Error("unexpected User query");
+          return Promise.resolve(initializeBotSettingsV1(query.botId));
+        },
+        hostedRequest: (path, method, body) => {
+          requests.push({ path, method, body });
+          if (path.endsWith("/package-ui")) {
+            return Promise.resolve({
+              schemaVersion: 1,
+              botId: "primary",
+              generationId: "generation-ui",
+              artifactOrigin: "https://ui.app.example",
+              contributions: [contribution],
+            });
+          }
+          if (path.endsWith("/package-ui/tools")) {
+            return Promise.resolve({
+              schemaVersion: 1,
+              runId: "run-iframe-tool",
+              text: "Sydney Weather",
+              events: [],
+            });
+          }
+          return Promise.resolve({});
+        },
+      },
+      slot: (registration) => {
+        slots.push(registration.slot);
+        return () => {};
+      },
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.userSettings = {
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [],
+      connections: [],
+    };
+
+    await provided.value.selectBot("primary");
+
+    expect(slots).toContain("frockbot.bot-settings-sections");
+    expect(requests.filter(({ path }) => path.endsWith("/package-ui"))).toEqual(
+      [
+        {
+          path: "/api/bots/primary/package-ui",
+          method: undefined,
+          body: undefined,
+        },
+      ],
+    );
+    expect(provided.value.packageUi?.contributions).toEqual([contribution]);
+
+    expect(
+      await provided.value.callPackageUiTool(contribution, "weather_lookup", {
+        city: "Sydney",
+      }),
+    ).toEqual({ content: "Sydney Weather", isError: false });
+    const toolRequest = requests.find(({ path }) =>
+      path.endsWith("/package-ui/tools"),
+    );
+    expect(toolRequest?.method).toBe("POST");
+    expect(JSON.parse(toolRequest?.body ?? "null")).toEqual({
+      schemaVersion: 1,
+      commandId: expect.any(String),
+      generationId: "generation-ui",
+      packageId: "weather-page",
+      name: "weather_lookup",
+      input: { city: "Sydney" },
+    });
+
+    const requestCount = requests.length;
+    await expect(
+      provided.value.callPackageUiTool(contribution, "package_author", {}),
+    ).rejects.toThrow("did not declare");
+    expect(requests).toHaveLength(requestCount);
+  });
+
   test("preserves load failures and ignores stale User settings", async () => {
     let provided: Ref<FrockBotWebData> | undefined;
     const older = Promise.withResolvers<UserSettingsViewV1>();

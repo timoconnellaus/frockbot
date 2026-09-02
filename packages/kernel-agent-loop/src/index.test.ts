@@ -4,6 +4,7 @@ import {
   LlmEffectNotStartedError,
   type LlmReconciliationOutcome,
   type LlmProvider,
+  type NormalizedModelRequest,
   type LlmStreamEvent,
   type PersistSessionEvents,
   type SessionEvent,
@@ -150,6 +151,79 @@ afterEach(async () => {
 });
 
 describe("AgentLoop", () => {
+  test("records exactly the hook-shaped request received by the provider", async () => {
+    let received: NormalizedModelRequest | undefined;
+    const provider: LlmProvider = {
+      id: "hook-shaped-request",
+      async *stream(request) {
+        received = structuredClone(request);
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const root = await mountRuntime(provider, {
+      name: "original_tool",
+      description: "The initially exposed tool.",
+      inputSchema: { type: "object" },
+      execute: () => Promise.resolve({ content: "ok", isError: false }),
+    });
+    root.on("system-prompt/assemble", async (_context, next) => {
+      const assembly = await next();
+      return {
+        text: `${assembly.text}\nHook-shaped system context.`,
+        sections: [
+          ...assembly.sections,
+          { id: "hook", text: "Hook-shaped system context." },
+        ],
+      };
+    });
+    root.on(
+      "agent/message-window",
+      async (_agent, messages, _turn, _step, _signal, next) => [
+        ...(await next()),
+        { role: "user" as const, content: `window:${messages.length}` },
+      ],
+    );
+    root.on(
+      "agent/tool-exposure",
+      async (_agent, _tools, _turn, _step, _signal, next) => {
+        await next();
+        return [
+          {
+            name: "hook_visible",
+            description: "Visible only in this shaped request.",
+            inputSchema: { type: "object" },
+          },
+        ];
+      },
+    );
+    const handle = await root.agents.create({
+      ...allowEffectOptions,
+      botId: "bot-hook-request",
+      sessionId: "hook-shaped-request",
+      provider: provider.id,
+      model: "model-1",
+    });
+
+    handle.agent.send("shape the request");
+    await handle.agent.whenIdle();
+
+    const recorded = handle.agent.session.events.find(
+      (event) => event.type === "model/request",
+    );
+    if (recorded?.type !== "model/request" || !received) {
+      throw new Error("model request was not recorded and received");
+    }
+    expect(recorded.request).toEqual(received);
+    expect(recorded.request.system).toContain("Hook-shaped system context.");
+    expect(recorded.request.messages.at(-1)).toEqual({
+      role: "user",
+      content: "window:1",
+    });
+    expect(recorded.request.tools.map((tool) => tool.name)).toEqual([
+      "hook_visible",
+    ]);
+  });
+
   test("fences a model after durable intent without invoking its provider", async () => {
     let streams = 0;
     const provider: LlmProvider = {

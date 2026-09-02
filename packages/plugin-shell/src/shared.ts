@@ -14,6 +14,8 @@ import type {
   CatalogIndexEntryV1,
 } from "@frockbot/catalog-core";
 import type {
+  PackageIframeCatalogV1,
+  PackageIframeContributionViewV1,
   SendToUserPayloadV1,
   SkillRefV1,
 } from "@frockbot/kernel-contracts";
@@ -187,6 +189,8 @@ export interface FrockBotWebData {
    * without the run's own events being rewritten.
    */
   tasks: TaskViewV1[];
+  /** Sandboxed pages in the selected Bot's active fail-closed Composition. */
+  packageUi?: PackageIframeCatalogV1;
   /**
    * The User's MCP servers: state, tool count, last handshake, instructions,
    * failure, and the durable refusal ledger. Absent until it is loaded, and
@@ -240,6 +244,12 @@ export interface FrockBotWebData {
   loadApprovals(): Promise<void>;
   /** Refreshes {@link FrockBotWebData.tasks} for the active Bot. */
   loadTasks(): Promise<void>;
+  loadPackageUi(): Promise<void>;
+  callPackageUiTool(
+    contribution: PackageIframeContributionViewV1,
+    name: string,
+    input: unknown,
+  ): Promise<unknown>;
   /**
    * Cancels one subagent, explicitly and with the User's authentication. The
    * backend is the authority: the task this replaces in the list is the record

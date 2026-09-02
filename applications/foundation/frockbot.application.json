@@ -32,6 +32,11 @@
       "grants": ["packages:author"]
     },
     {
+      "specifier": "@frockbot/plugin-package-catalog",
+      "version": "0.0.1",
+      "grants": ["packages:install"]
+    },
+    {
       "specifier": "@frockbot/plugin-skills",
       "version": "0.0.1",
       "grants": ["skills:author"]

@@ -7,6 +7,7 @@ import type {
 } from "@frockbot/configuration-core";
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import { createShellBotBackendContribution } from "./backend.js";
+import { createIsolateCapabilityHost } from "./backend-isolate.js";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();
@@ -466,6 +467,65 @@ describe("Bot configuration admission", () => {
 });
 
 describe("generic per-Turn model resolution", () => {
+  test("projects the platform model into an otherwise unconfigured Bot's isolate list", async () => {
+    const storage = new MemoryStorage();
+    const contribution = host(storage, configuredUser);
+    const identity = { userId: "user-1", botId: "primary" };
+    const settings = await contribution.materializeSettings(identity, {
+      name: "Primary",
+    });
+    const snapshot = await (
+      contribution as unknown as {
+        isolateAuthoritySnapshot(
+          identity: { userId: string; botId: string },
+          settings: BotSettingsViewV1,
+        ): Promise<{
+          connections: Array<{
+            connectionId: string;
+            packageId: string;
+            connectionTypeId: string;
+            displayName: string;
+            generation: string;
+            safeMetadata: Record<string, unknown>;
+          }>;
+          model?: {
+            connectionId: string;
+            packageId: string;
+            provider: string;
+            providerModelId: string;
+            connectionGeneration: string;
+            catalogGeneration?: string;
+          };
+          memory: boolean;
+          workspace: boolean;
+        }>;
+      }
+    ).isolateAuthoritySnapshot(identity, settings);
+    const listed = await createIsolateCapabilityHost({
+      storage: {
+        put: () => Promise.resolve(),
+        list: () => Promise.resolve(new Map()),
+      },
+      botId: identity.botId,
+      packageId: "bot-authored",
+      generationId: "composition-1",
+      connections: snapshot.connections,
+      ...(snapshot.model ? { modelBinding: snapshot.model } : {}),
+      memory: snapshot.memory,
+      workspace: snapshot.workspace,
+    }).list();
+
+    expect(listed.model).toEqual({
+      connectionId: "flock-ai-ambient",
+      packageId: "provider-flock-ai",
+      provider: "flock-ai",
+      providerModelId: "@flock/auto",
+      connectionGeneration: "foundation-generation-1",
+      catalogGeneration: "catalog-1",
+    });
+    expect(Object.hasOwn(settings, "model")).toBe(false);
+  });
+
   test("runs on the platform model without creating a per-Bot model record", async () => {
     const storage = new MemoryStorage();
     const contribution = host(storage, configuredUser);
@@ -481,9 +541,63 @@ describe("generic per-Turn model resolution", () => {
     });
 
     expect(result.text).toBe("Cordis runtime: hello");
+    const durableEvents = storage.values.get("latest-events") as
+      Array<{ seq: number }> | undefined;
+    expect(durableEvents?.length).toBeGreaterThan(0);
+    expect(durableEvents?.map((event) => event.seq)).toEqual(
+      durableEvents?.map((_, index) => index),
+    );
     const settings = await contribution.getSettings(identity);
     expect(settings).toMatchObject({ revision: 0, packageValues: {} });
     expect(Object.hasOwn(settings, "model")).toBe(false);
+  });
+
+  test("a Connection disabled after admission is unavailable and records a visible failure", async () => {
+    const storage = new MemoryStorage();
+    const user = configuredUser();
+    const contribution = host(storage, () => user);
+    const identity = { userId: "user-1", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Primary" });
+    (
+      contribution as unknown as {
+        activeTurn: unknown;
+      }
+    ).activeTurn = {
+      runId: "run-1",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      generationId: "composition-1",
+      mounted: {
+        generation: {
+          members: [
+            { packageId: "bot-authored", artifact: { contentHash: "hash" } },
+          ],
+        },
+      },
+    };
+    user.connections[0] = { ...user.connections[0]!, state: "disabled" };
+
+    await expect(
+      contribution.isolateConnection({
+        ...identity,
+        runId: "run-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        packageId: "bot-authored",
+        generationId: "composition-1",
+        request: "flock-ai-ambient",
+      }),
+    ).resolves.toEqual({
+      status: "unavailable",
+      reason: "the Connection is unavailable",
+    });
+    await expect(contribution.listNotifications()).resolves.toEqual([
+      expect.objectContaining({
+        notificationId:
+          "package-connection-unavailable:run-1:bot-authored:flock-ai-ambient",
+        title: "Connection unavailable",
+      }),
+    ]);
   });
 
   test("uses an enabled Bot-scoped model value and preserves it while disabled", async () => {

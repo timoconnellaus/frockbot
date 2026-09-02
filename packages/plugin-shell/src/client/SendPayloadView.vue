@@ -19,7 +19,6 @@
  */
 import { UiButton, UiMarkdown } from "@frockbot/client-ui";
 import { computed, inject, ref } from "vue";
-import { settingsLinkV1 } from "../settings-links.js";
 import { frockBotWebDataKey, type WebSendPayload } from "../shared.js";
 
 const props = defineProps<{ send: WebSendPayload }>();
@@ -39,17 +38,6 @@ const widget = computed(() =>
 const attachment = computed(() =>
   payload.value?.type === "attachment" ? payload.value : undefined,
 );
-/**
- * The connect card. It carries no URL and never will: the Bot recorded a
- * pending decision, and only the User — in Settings, where the host authors
- * the link at the moment they press it — can complete one. So this draws the
- * request and points at the place the decision is made, and is deliberately
- * not a button that authorizes anything.
- */
-const connectCard = computed(() =>
-  payload.value?.type === "connect-card" ? payload.value : undefined,
-);
-const connectionsLink = settingsLinkV1({ anchor: "user-packages" });
 const approval = computed(() =>
   payload.value?.type === "approval" ? payload.value : undefined,
 );
@@ -112,21 +100,6 @@ const unsupported = computed(
     </ul>
     <p v-if="widget.allowCustom" class="send-widget-help">
       Any other answer is accepted too.
-    </p>
-  </section>
-
-  <section
-    v-else-if="connectCard"
-    class="send-connect-card"
-    aria-label="Connection request"
-  >
-    <p class="send-connect-title">{{ connectCard.title }}</p>
-    <p v-if="connectCard.body" class="send-connect-body">
-      {{ connectCard.body }}
-    </p>
-    <p class="send-connect-help">
-      Open Settings → Plugins to authorize it. Only you can complete this.
-      <a :href="connectionsLink">{{ connectionsLink }}</a>
     </p>
   </section>
 
@@ -219,39 +192,6 @@ const unsupported = computed(
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.send-connect-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  border: 1px solid var(--frock-border);
-  border-radius: var(--frock-radius-card);
-  background: var(--frock-surface-raised);
-  padding: 0.75rem 1rem;
-}
-
-.send-connect-title {
-  margin: 0;
-  color: var(--frock-text);
-  font-weight: 600;
-  font-size: var(--frock-text-base);
-  line-height: var(--frock-leading-snug);
-}
-
-.send-connect-body {
-  margin: 0;
-  color: var(--frock-text);
-  font-size: var(--frock-text-sm);
-  line-height: var(--frock-leading-normal);
-}
-
-.send-connect-help {
-  margin: 0;
-  color: var(--frock-text-muted);
-  font-size: var(--frock-text-sm);
-  line-height: var(--frock-leading-normal);
-  overflow-wrap: anywhere;
 }
 
 .send-widget-options li {

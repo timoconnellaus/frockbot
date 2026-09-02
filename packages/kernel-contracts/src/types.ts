@@ -328,6 +328,27 @@ export interface SessionEventMap {
     /** Durable references to binaries the tool produced. Never their bytes. */
     attachments?: ToolAttachmentV1[];
   };
+  /** A tool one loaded Package invoked through the Bot's shared registry. */
+  "package/tool-call": {
+    turn: number;
+    step: number;
+    effectId: string;
+    packageId: string;
+    callId: string;
+    name: string;
+    input: unknown;
+  };
+  /** The exact result returned to that Package. */
+  "package/tool-result": {
+    turn: number;
+    step: number;
+    effectId: string;
+    packageId: string;
+    callId: string;
+    name: string;
+    content: string;
+    isError: boolean;
+  };
   /**
    * The Bot recorded the intent to author a Package, before the bundler ran.
    * Constitution, Durable effects: intent is recorded before the effect.
@@ -348,6 +369,48 @@ export interface SessionEventMap {
     version: string;
     contentHash: string;
     generationId: string;
+  };
+  /** A Bot-isolate loop hook failed open for one invocation. */
+  "package/hook-failed": {
+    packageId: string;
+    event: string;
+    generationId: string;
+    message: string;
+  };
+  /** Durable session intent before a Catalog installation effect. */
+  "package/catalog-change-intent": {
+    turn: number;
+    step: number;
+    effectId: string;
+    action: "install" | "update" | "remove";
+    catalogId?: string;
+    packageId?: string;
+    contentHash?: string;
+  };
+  /** The pending Composition generation produced by that Catalog change. */
+  "package/catalog-changed": {
+    turn: number;
+    step: number;
+    effectId: string;
+    action: "install" | "update" | "remove";
+    packageId: string;
+    contentHash?: string;
+    generationId: string;
+  };
+  /** Durable intent before a Bot-origin Composition revert is proposed. */
+  "package/undo-intent": {
+    turn: number;
+    step: number;
+    effectId: string;
+    requestedGenerationId?: string;
+  };
+  /** The new pending generation recorded by a Bot-origin revert. */
+  "package/undo-recorded": {
+    turn: number;
+    step: number;
+    effectId: string;
+    generationId: string;
+    targetGenerationId: string;
   };
   /**
    * The Skills this Turn loaded as instructions, and the candidates it
@@ -1179,6 +1242,54 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         );
       }
       break;
+    case "package/tool-call":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          "packageId",
+          "callId",
+          "name",
+          "input",
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.packageId, "session event.packageId");
+      eventString(event.callId, "session event.callId");
+      eventString(event.name, "session event.name");
+      requireJsonValue(event.input, "session event.input");
+      break;
+    case "package/tool-result":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          "packageId",
+          "callId",
+          "name",
+          "content",
+          "isError",
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.packageId, "session event.packageId");
+      eventString(event.callId, "session event.callId");
+      eventString(event.name, "session event.name");
+      eventString(event.content, "session event.content", true);
+      if (typeof event.isError !== "boolean") {
+        throw new Error("session event.isError must be a boolean");
+      }
+      break;
     case "package/author-intent":
       requireEventKeys(
         event,
@@ -1212,6 +1323,124 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       eventString(event.version, "session event.version");
       eventString(event.contentHash, "session event.contentHash");
       eventString(event.generationId, "session event.generationId");
+      break;
+    case "package/hook-failed":
+      requireEventKeys(
+        event,
+        keys("packageId", "event", "generationId", "message"),
+        "session event",
+      );
+      eventString(event.packageId, "session event.packageId");
+      eventString(event.event, "session event.event");
+      eventString(event.generationId, "session event.generationId");
+      eventString(event.message, "session event.message");
+      break;
+    case "package/catalog-change-intent":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          "action",
+          ...(Object.hasOwn(event, "catalogId") ? ["catalogId"] : []),
+          ...(Object.hasOwn(event, "packageId") ? ["packageId"] : []),
+          ...(Object.hasOwn(event, "contentHash") ? ["contentHash"] : []),
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      if (
+        event.action !== "install" &&
+        event.action !== "update" &&
+        event.action !== "remove"
+      ) {
+        throw new Error("session event.action is invalid");
+      }
+      if (event.catalogId !== undefined)
+        eventString(event.catalogId, "session event.catalogId");
+      if (event.packageId !== undefined)
+        eventString(event.packageId, "session event.packageId");
+      if (event.contentHash !== undefined)
+        eventString(event.contentHash, "session event.contentHash");
+      if (
+        (event.action === "remove" &&
+          (event.packageId === undefined ||
+            event.catalogId !== undefined ||
+            event.contentHash !== undefined)) ||
+        (event.action !== "remove" &&
+          (event.catalogId === undefined ||
+            event.contentHash === undefined ||
+            event.packageId !== undefined))
+      ) {
+        throw new Error("session Catalog change intent identity is invalid");
+      }
+      break;
+    case "package/catalog-changed":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          "action",
+          "packageId",
+          "generationId",
+          ...(Object.hasOwn(event, "contentHash") ? ["contentHash"] : []),
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.packageId, "session event.packageId");
+      eventString(event.generationId, "session event.generationId");
+      if (event.contentHash !== undefined)
+        eventString(event.contentHash, "session event.contentHash");
+      if (
+        event.action !== "install" &&
+        event.action !== "update" &&
+        event.action !== "remove"
+      ) {
+        throw new Error("session event.action is invalid");
+      }
+      break;
+    case "package/undo-intent":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          ...(Object.hasOwn(event, "requestedGenerationId")
+            ? ["requestedGenerationId"]
+            : []),
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      if (event.requestedGenerationId !== undefined) {
+        eventString(
+          event.requestedGenerationId,
+          "session event.requestedGenerationId",
+        );
+      }
+      break;
+    case "package/undo-recorded":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "effectId", "generationId", "targetGenerationId"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.generationId, "session event.generationId");
+      eventString(event.targetGenerationId, "session event.targetGenerationId");
       break;
     case "skill/injected": {
       requireEventKeys(

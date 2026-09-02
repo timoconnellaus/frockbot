@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type {
+  IsolateConnectionV1,
   LlmStreamEvent,
   NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
@@ -9,27 +10,32 @@ import {
   isolateModelEventStreamV1,
   ISOLATE_MODEL_FAILURE_MESSAGE,
   ISOLATE_MODEL_REQUEST_PREFIX,
-  matchingModelCapabilityV1,
-  type IsolateCapabilityV1,
+  matchesAdmittedConnectionV1,
+  matchingModelBindingV1,
   type IsolateModelBindingV1,
   type IsolateModelRequestRecordV1,
 } from "./backend-isolate.ts";
 
-const CAPABILITY: IsolateCapabilityV1 = {
-  packageId: "provider-ollama-cloud",
-  capabilityId: "ollama-cloud-models",
-  kind: "model",
-  connectionId: "connection-1",
-};
+const CONNECTIONS: IsolateConnectionV1[] = [
+  {
+    connectionId: "connection-1",
+    packageId: "provider-ollama-cloud",
+    connectionTypeId: "ollama-cloud-account",
+    displayName: "Work",
+    generation: "generation-1",
+    safeMetadata: { region: "au" },
+  },
+];
 
 const BINDING: IsolateModelBindingV1 = {
-  packageId: "provider-ollama-cloud",
-  capabilityId: "ollama-cloud-models",
   connectionId: "connection-1",
+  packageId: "provider-ollama-cloud",
   provider: "ollama-cloud",
   providerModelId: "glm-5.3-flash:cloud",
   connectionGeneration: "generation-1",
 };
+
+const IDENTITY = { userId: "user-1", botId: "bot-1" } as const;
 
 function request(
   overrides: Partial<NormalizedModelRequest> = {},
@@ -41,6 +47,10 @@ function request(
     system: "",
     messages: [{ role: "user", content: "hello" }],
     tools: [],
+    modelBinding: {
+      connectionId: BINDING.connectionId,
+      connectionGeneration: BINDING.connectionGeneration,
+    },
     ...overrides,
   };
 }
@@ -53,7 +63,6 @@ function memoryStorage() {
       values.set(key, structuredClone(value));
       return Promise.resolve();
     },
-    get: <T>(key: string) => Promise.resolve(values.get(key) as T | undefined),
     list: <T>(options: { prefix: string }) =>
       Promise.resolve(
         new Map(
@@ -67,271 +76,259 @@ function memoryStorage() {
 
 function host(
   options: {
-    binding?: IsolateModelBindingV1 | null;
-    capabilities?: IsolateCapabilityV1[];
-    unavailableModelBinding?: {
-      provider?: string;
-      providerModelId: string;
-    };
+    packageId?: string;
+    binding?: IsolateModelBindingV1;
+    withoutModel?: boolean;
     stream?: (request: NormalizedModelRequest) => AsyncIterable<LlmStreamEvent>;
   } = {},
 ) {
   const storage = memoryStorage();
   const forwarded: NormalizedModelRequest[] = [];
   let minted = 0;
-  const binding = options.binding === undefined ? BINDING : options.binding;
   return {
     storage,
     forwarded,
     host: createIsolateCapabilityHost({
       storage,
       botId: "bot-1",
-      packageId: "bot-authored",
-      generationId: "generation-1",
-      capabilities: options.capabilities ?? [CAPABILITY],
-      ...(binding
+      packageId: options.packageId ?? "bot-authored",
+      generationId: "composition-1",
+      connections: CONNECTIONS,
+      ...(!options.withoutModel
+        ? { modelBinding: options.binding ?? BINDING }
+        : {}),
+      ...(!options.withoutModel
         ? {
-            modelBinding: binding,
             modelPath: {
               stream: (value: NormalizedModelRequest) => {
                 forwarded.push(structuredClone(value));
                 return (
                   options.stream?.(value) ??
                   (async function* () {
-                    yield {
-                      type: "text-delta",
-                      text: "hi",
-                    } as LlmStreamEvent;
+                    yield { type: "text-delta", text: "hi" } as LlmStreamEvent;
                   })()
                 );
               },
             },
           }
         : {}),
-      ...(options.unavailableModelBinding
-        ? { unavailableModelBinding: options.unavailableModelBinding }
-        : {}),
+      memory: true,
+      workspace: true,
       newId: () => `minted-${(minted += 1)}`,
       now: () => new Date("2026-08-31T00:00:00.000Z"),
     }),
   };
 }
 
-describe("an isolate model request is bound to its enabled Capability", () => {
-  test("matches only the exact authoritative provider and model", () => {
-    expect(matchingModelCapabilityV1([CAPABILITY], BINDING, request())).toEqual(
-      CAPABILITY,
-    );
-    expect(
-      matchingModelCapabilityV1(
-        [CAPABILITY],
-        BINDING,
-        request({ provider: "foundation" }),
-      ),
-    ).toBeUndefined();
-    expect(
-      matchingModelCapabilityV1(
-        [CAPABILITY],
-        BINDING,
-        request({ model: "some-other-model" }),
-      ),
-    ).toBeUndefined();
-    // No authoritative binding at all: an enabled Capability on its own authorizes
-    // nothing.
-    expect(
-      matchingModelCapabilityV1([CAPABILITY], undefined, request()),
-    ).toBeUndefined();
+describe("per-Bot isolate authority", () => {
+  test("two Packages of one Bot see the same Connections and capabilities", async () => {
+    const left = await host({ packageId: "package-left" }).host.list();
+    const right = await host({ packageId: "package-right" }).host.list();
+    expect(left).toEqual(right);
+    expect(left).toMatchObject({
+      status: "available",
+      connections: [
+        { connectionId: "connection-1", generation: "generation-1" },
+      ],
+      tools: true,
+      memory: true,
+      workspace: true,
+      notify: true,
+      schedule: true,
+    });
   });
 
-  test("ignores a Bot-supplied model binding", () => {
+  test("matches only the Bot's configured provider and model", () => {
+    expect(matchingModelBindingV1(BINDING, request())).toEqual(BINDING);
     expect(
-      matchingModelCapabilityV1(
-        [CAPABILITY],
+      matchingModelBindingV1(BINDING, request({ provider: "foundation" })),
+    ).toBeUndefined();
+    expect(
+      matchingModelBindingV1(BINDING, request({ model: "other" })),
+    ).toBeUndefined();
+    expect(
+      matchingModelBindingV1(
         BINDING,
         request({
-          provider: "foundation",
-          model: "deterministic-v1",
-          modelBinding: { connectionId: "connection-1" },
+          modelBinding: {
+            connectionId: BINDING.connectionId,
+            connectionGeneration: "generation-2",
+          },
         }),
       ),
     ).toBeUndefined();
+    expect(matchingModelBindingV1(undefined, request())).toBeUndefined();
   });
 
-  test("a request outside the effective binding is a pending decision", async () => {
-    const subject = host();
-    const outcome = await subject.host.invokeModel(
-      request({ provider: "foundation", model: "deterministic-v1" }),
-    );
-
-    expect(outcome).toMatchObject({ status: "pending-user-decision" });
-    expect(await subject.host.recordedModelRequests()).toHaveLength(0);
-    expect(subject.forwarded).toHaveLength(0);
-  });
-
-  test("a request with no durable model binding is a pending decision", async () => {
-    const subject = host({ binding: null, capabilities: [] });
-
-    const outcome = await subject.host.invokeModel(request());
-
-    expect(outcome).toMatchObject({ status: "pending-user-decision" });
-    expect(await subject.host.pendingDecisions()).toHaveLength(1);
-    expect(await subject.host.recordedModelRequests()).toHaveLength(0);
-    expect(subject.forwarded).toHaveLength(0);
-  });
-
-  test("a held model binding with an unavailable Connection is unavailable", async () => {
-    const subject = host({
-      binding: null,
-      capabilities: [],
-      unavailableModelBinding: {
-        provider: BINDING.provider,
-        providerModelId: BINDING.providerModelId,
-      },
+  test("a Bot with no configured model gets unavailable, never a pending decision", async () => {
+    const subject = host({ withoutModel: true });
+    await expect(subject.host.invokeModel(request())).resolves.toEqual({
+      status: "unavailable",
+      reason: "this Bot has no configured model",
     });
-
-    const outcome = await subject.host.invokeModel(request());
-
-    expect(outcome).toMatchObject({ status: "unavailable" });
-    expect(await subject.host.pendingDecisions()).toHaveLength(0);
     expect(await subject.host.recordedModelRequests()).toHaveLength(0);
     expect(subject.forwarded).toHaveLength(0);
   });
 
-  test("an unavailable binding does not cover another provider", async () => {
-    const subject = host({
-      binding: null,
-      capabilities: [],
-      unavailableModelBinding: {
-        provider: BINDING.provider,
-        providerModelId: BINDING.providerModelId,
-      },
+  test("a request that does not match the configured model is unavailable", async () => {
+    const subject = host();
+    await expect(
+      subject.host.invokeModel(
+        request({ provider: "foundation", model: "deterministic-v1" }),
+      ),
+    ).resolves.toEqual({
+      status: "unavailable",
+      reason: "the request does not match this Bot's configured model",
     });
-
-    const outcome = await subject.host.invokeModel(
-      request({ provider: "foundation" }),
-    );
-
-    expect(outcome).toMatchObject({ status: "pending-user-decision" });
-    expect(await subject.host.pendingDecisions()).toHaveLength(1);
+    expect(await subject.host.recordedModelRequests()).toHaveLength(0);
   });
 
-  test("forwards the authority's binding, never the Bot's", async () => {
+  test("refuses a model binding outside the admitted snapshot", async () => {
     const subject = host();
-    await subject.host.invokeModel(
-      request({
-        modelBinding: {
-          connectionId: "another-users-connection",
-          connectionGeneration: "forged",
-        },
-      }),
-    );
+    await expect(
+      subject.host.invokeModel(
+        request({
+          modelBinding: {
+            connectionId: "forged-connection",
+            connectionGeneration: "forged-generation",
+          },
+        }),
+      ),
+    ).resolves.toEqual({
+      status: "unavailable",
+      reason: "the request does not match this Bot's configured model",
+    });
+    expect(subject.forwarded).toHaveLength(0);
+  });
 
-    expect(subject.forwarded[0]?.modelBinding).toEqual({
+  test("an old isolate cannot receive a newly added or regenerated Connection", () => {
+    const lease = {
+      status: "available" as const,
+      leaseId: "lease-1",
       connectionId: "connection-1",
-      connectionGeneration: "generation-1",
-    });
+      generation: "generation-1",
+      expiresAt: "2026-08-31T00:05:00.000Z",
+    };
+    expect(matchesAdmittedConnectionV1(CONNECTIONS[0], lease)).toBe(true);
+    expect(matchesAdmittedConnectionV1(undefined, lease)).toBe(false);
+    expect(
+      matchesAdmittedConnectionV1(CONNECTIONS[0], {
+        ...lease,
+        generation: "generation-2",
+      }),
+    ).toBe(false);
   });
 });
 
-describe("User-enabled isolate bindings", () => {
-  test("list projects the complete enabled set", async () => {
-    const subject = host();
-
-    await expect(subject.host.list()).resolves.toEqual([
-      { capabilityId: "ollama-cloud-models", kind: "model" },
-    ]);
-  });
-
-  test("identity, generation, and the enabled set are binding digest inputs", async () => {
-    const first = await isolateBindingDigestV1({
-      userId: "user-1",
-      botId: "bot-1",
-      generationId: "generation-1",
-      capabilities: [CAPABILITY],
-    });
-    const same = await isolateBindingDigestV1({
-      userId: "user-1",
-      botId: "bot-1",
-      generationId: "generation-1",
-      capabilities: [structuredClone(CAPABILITY)],
-    });
-    const otherUser = await isolateBindingDigestV1({
-      userId: "user-2",
-      botId: "bot-1",
-      generationId: "generation-1",
-      capabilities: [CAPABILITY],
-    });
-    const otherBot = await isolateBindingDigestV1({
-      userId: "user-1",
-      botId: "bot-2",
-      generationId: "generation-1",
-      capabilities: [CAPABILITY],
-    });
-    const otherGeneration = await isolateBindingDigestV1({
-      userId: "user-1",
-      botId: "bot-1",
-      generationId: "generation-2",
-      capabilities: [CAPABILITY],
-    });
-    const widened = await isolateBindingDigestV1({
-      userId: "user-1",
-      botId: "bot-1",
-      generationId: "generation-1",
-      capabilities: [
-        CAPABILITY,
-        {
-          packageId: "clock",
-          capabilityId: "clock",
-          kind: "tool",
-        },
-      ],
-    });
-
-    expect(same).toBe(first);
-    expect(otherUser).not.toBe(first);
-    expect(otherBot).not.toBe(first);
-    expect(otherGeneration).not.toBe(first);
-    expect(widened).not.toBe(first);
-  });
-
-  test("ordering does not change the digest", async () => {
-    const clock: IsolateCapabilityV1 = {
-      packageId: "clock",
-      capabilityId: "clock",
-      kind: "tool",
+describe("isolate binding digest", () => {
+  test("is order-independent for the same Bot authority", async () => {
+    const another = {
+      ...CONNECTIONS[0]!,
+      connectionId: "connection-2",
+      generation: "generation-2",
     };
-
+    const input = {
+      model: BINDING,
+      compositionGenerationId: "composition-1",
+    };
     await expect(
       isolateBindingDigestV1({
-        userId: "user-1",
-        botId: "bot-1",
-        generationId: "generation-1",
-        capabilities: [CAPABILITY, clock],
+        ...IDENTITY,
+        ...input,
+        connections: [CONNECTIONS[0]!, another],
       }),
     ).resolves.toBe(
       await isolateBindingDigestV1({
-        userId: "user-1",
-        botId: "bot-1",
-        generationId: "generation-1",
-        capabilities: [clock, CAPABILITY],
+        ...IDENTITY,
+        ...input,
+        connections: [another, CONNECTIONS[0]!],
       }),
     );
+  });
+
+  test("changes with User and Bot identity", async () => {
+    const input = {
+      connections: CONNECTIONS,
+      model: BINDING,
+      compositionGenerationId: "composition-1",
+    };
+    const base = await isolateBindingDigestV1({ ...IDENTITY, ...input });
+    const otherUser = await isolateBindingDigestV1({
+      userId: "user-2",
+      botId: IDENTITY.botId,
+      ...input,
+    });
+    const otherBot = await isolateBindingDigestV1({
+      userId: IDENTITY.userId,
+      botId: "bot-2",
+      ...input,
+    });
+
+    expect(otherUser).not.toBe(base);
+    expect(otherBot).not.toBe(base);
+  });
+
+  test("changes when a Connection is added, removed, or regenerated", async () => {
+    const base = await isolateBindingDigestV1({
+      ...IDENTITY,
+      connections: CONNECTIONS,
+      model: BINDING,
+      compositionGenerationId: "composition-1",
+    });
+    const added = await isolateBindingDigestV1({
+      ...IDENTITY,
+      connections: [
+        ...CONNECTIONS,
+        { ...CONNECTIONS[0]!, connectionId: "connection-2" },
+      ],
+      model: BINDING,
+      compositionGenerationId: "composition-1",
+    });
+    const removed = await isolateBindingDigestV1({
+      ...IDENTITY,
+      connections: [],
+      model: BINDING,
+      compositionGenerationId: "composition-1",
+    });
+    const regenerated = await isolateBindingDigestV1({
+      ...IDENTITY,
+      connections: [{ ...CONNECTIONS[0]!, generation: "generation-2" }],
+      model: BINDING,
+      compositionGenerationId: "composition-1",
+    });
+    expect(new Set([base, added, removed, regenerated]).size).toBe(4);
+  });
+
+  test("changes with the model binding and Composition generation", async () => {
+    const base = await isolateBindingDigestV1({
+      ...IDENTITY,
+      connections: CONNECTIONS,
+      model: BINDING,
+      compositionGenerationId: "composition-1",
+    });
+    const model = await isolateBindingDigestV1({
+      ...IDENTITY,
+      connections: CONNECTIONS,
+      model: { ...BINDING, providerModelId: "other" },
+      compositionGenerationId: "composition-1",
+    });
+    const composition = await isolateBindingDigestV1({
+      ...IDENTITY,
+      connections: CONNECTIONS,
+      model: BINDING,
+      compositionGenerationId: "composition-2",
+    });
+    expect(new Set([base, model, composition]).size).toBe(3);
   });
 });
 
 describe("the isolate model request record", () => {
-  test("two invocations reusing one Bot request id produce two records", async () => {
+  test("two invocations reusing one request id produce two records", async () => {
     const subject = host();
-
     await subject.host.invokeModel(request());
     await subject.host.invokeModel(request());
-
     const recorded = await subject.host.recordedModelRequests();
     expect(recorded).toHaveLength(2);
-    expect(recorded.map((entry) => entry.requestId)).toEqual([
-      "request-1",
-      "request-1",
-    ]);
     expect(new Set(recorded.map((entry) => entry.recordId)).size).toBe(2);
     expect(
       [...subject.storage.values.keys()].filter((key) =>
@@ -340,23 +337,22 @@ describe("the isolate model request record", () => {
     ).toHaveLength(2);
   });
 
-  test("refuses an unbounded Bot request id", async () => {
-    const subject = host();
+  test("refuses an unbounded request id", async () => {
     await expect(
-      subject.host.invokeModel(request({ requestId: "r".repeat(257) })),
+      host().host.invokeModel(request({ requestId: "r".repeat(257) })),
     ).rejects.toThrow("requestId is not bounded");
   });
 
-  test("records the request that was forwarded", async () => {
-    const subject = host();
+  test("records the request that was forwarded and attributes the Package", async () => {
+    const subject = host({ packageId: "bot-authored" });
     await subject.host.invokeModel(request());
     const recorded = (await subject.host.recordedModelRequests())[0] as
       IsolateModelRequestRecordV1 | undefined;
+    expect(recorded?.packageId).toBe("bot-authored");
     expect(recorded?.request.modelBinding).toEqual({
       connectionId: "connection-1",
       connectionGeneration: "generation-1",
     });
-    expect(recorded?.capabilityId).toBe("ollama-cloud-models");
   });
 });
 
@@ -372,7 +368,6 @@ describe("provider errors crossing into Bot code", () => {
     );
     const reader = stream.getReader();
     await reader.read();
-
     const failure = await reader.read().then(
       () => undefined,
       (error: unknown) => (error instanceof Error ? error.message : ""),

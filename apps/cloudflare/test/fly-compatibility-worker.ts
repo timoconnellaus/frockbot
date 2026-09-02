@@ -64,10 +64,7 @@ import {
 } from "@frockbot/kernel-composition/activation";
 import { BotState } from "../src/bot-state.ts";
 import { BOT_CONFIGURATION_KEY } from "@frockbot/plugin-shell/backend";
-import {
-  ISOLATE_DECISION_PREFIX,
-  ISOLATE_MODEL_REQUEST_PREFIX,
-} from "@frockbot/plugin-shell/backend-isolate";
+import { ISOLATE_MODEL_REQUEST_PREFIX } from "@frockbot/plugin-shell/backend-isolate";
 import type { BotSettingsViewV1 } from "@frockbot/configuration-core";
 import { UserConfiguration } from "../src/user-configuration.ts";
 export { DeploymentPolicy } from "../src/deployment-policy.ts";
@@ -389,13 +386,6 @@ export class WorkerdBotState extends BotState {
       bootstrap: () => Promise.resolve(generation),
     });
     await store.materialize();
-  }
-
-  async isolateDecisions(): Promise<unknown[]> {
-    const stored = await this.ctx.storage.list<unknown>({
-      prefix: ISOLATE_DECISION_PREFIX,
-    });
-    return [...stored.values()];
   }
 
   async isolateModelRequestRecords(): Promise<unknown[]> {

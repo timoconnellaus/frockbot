@@ -9,6 +9,7 @@ import {
   type ToolExecution,
   type ToolExecutionContext,
   type ToolExecutionResult,
+  type ToolGuard,
   type ToolPreparation,
   type ToolRegistrationOptions,
   type ToolSchema,
@@ -42,6 +43,7 @@ interface RegisteredTool {
 
 export class ToolRegistry extends Service implements ToolExecution {
   private definitions = new Map<string, RegisteredTool>();
+  private guards: ToolGuard[] = [];
 
   constructor(ctx: Context) {
     super(ctx, "tools");
@@ -73,6 +75,18 @@ export class ToolRegistry extends Service implements ToolExecution {
     };
   }
 
+  registeredNames(): string[] {
+    return [...this.definitions.keys()].toSorted();
+  }
+
+  guard(guard: ToolGuard): () => void {
+    this.guards.push(guard);
+    return () => {
+      const index = this.guards.indexOf(guard);
+      if (index >= 0) this.guards.splice(index, 1);
+    };
+  }
+
   schemas(admission: {
     turnType: TurnTypeV1;
     subagentRole?: string;
@@ -93,66 +107,86 @@ export class ToolRegistry extends Service implements ToolExecution {
       }));
   }
 
-  prepare(
+  async prepare(
     call: ToolCall,
     context: ToolExecutionContext,
   ): Promise<ToolPreparation> {
-    return this.ctx.waterfall("tools/pre-execute", call, context, async () => {
-      const registered = this.definitions.get(call.name);
-      if (!registered) {
+    const prepared = await this.ctx.waterfall(
+      "tools/pre-execute",
+      call,
+      context,
+      async () => {
+        const registered = this.definitions.get(call.name);
+        if (!registered) {
+          return {
+            kind: "denied",
+            call,
+            result: { content: `Unknown tool: ${call.name}`, isError: true },
+          };
+        }
+        // Defence in depth: the catalog was already trimmed, so a call that
+        // arrives here names a tool the model was never offered.
+        if (!registered.admitted.includes(context.turnType)) {
+          return {
+            kind: "denied",
+            call,
+            result: {
+              content: `Tool is not available on a ${context.turnType} turn: ${call.name}`,
+              isError: true,
+            },
+          };
+        }
+        // The same defence on the second dimension. A `browserUse` subagent that
+        // names `computer_exec` was never offered it, and the ceiling says so
+        // here as well as in the catalog.
+        if (
+          !isSubagentRoleAdmittedV1(
+            registered.admittedRoles,
+            context.subagentRole,
+          )
+        ) {
+          return {
+            kind: "denied",
+            call,
+            result: {
+              content: `Tool is not available to a ${context.subagentRole} subagent: ${call.name}`,
+              isError: true,
+            },
+          };
+        }
+        const definition = registered.definition;
+        if (definition.validate && !definition.validate(call.input)) {
+          return {
+            kind: "denied",
+            call,
+            result: {
+              content: `Invalid input for tool: ${call.name}`,
+              isError: true,
+            },
+          };
+        }
         return {
-          kind: "denied",
+          kind: "ready",
           call,
-          result: { content: `Unknown tool: ${call.name}`, isError: true },
+          idempotent: definition.idempotent ?? false,
         };
-      }
-      // Defence in depth: the catalog was already trimmed, so a call that
-      // arrives here names a tool the model was never offered.
-      if (!registered.admitted.includes(context.turnType)) {
-        return {
-          kind: "denied",
-          call,
-          result: {
-            content: `Tool is not available on a ${context.turnType} turn: ${call.name}`,
-            isError: true,
-          },
-        };
-      }
-      // The same defence on the second dimension. A `browserUse` subagent that
-      // names `computer_exec` was never offered it, and the ceiling says so
-      // here as well as in the catalog.
-      if (
-        !isSubagentRoleAdmittedV1(
-          registered.admittedRoles,
-          context.subagentRole,
-        )
-      ) {
-        return {
-          kind: "denied",
-          call,
-          result: {
-            content: `Tool is not available to a ${context.subagentRole} subagent: ${call.name}`,
-            isError: true,
-          },
-        };
-      }
-      const definition = registered.definition;
-      if (definition.validate && !definition.validate(call.input)) {
-        return {
-          kind: "denied",
-          call,
-          result: {
-            content: `Invalid input for tool: ${call.name}`,
-            isError: true,
-          },
-        };
-      }
+      },
+    );
+    // A pre-execute listener can add a denial. Once denied, neither a guard
+    // nor anything registered later can turn the call back into executable
+    // work. Guards themselves return only a reason, so they have no vocabulary
+    // with which to lift another guard's denial.
+    if (prepared.kind === "denied") return prepared;
+    for (const guard of this.guards) {
+      const denial = await guard(prepared.call, context);
+      if (!denial) continue;
       return {
-        kind: "ready",
-        call,
-        idempotent: definition.idempotent ?? false,
+        kind: "denied",
+        call: prepared.call,
+        result: { content: denial.reason, isError: true },
       };
-    });
+    }
+    return prepared;
   }
 
   async executePrepared(

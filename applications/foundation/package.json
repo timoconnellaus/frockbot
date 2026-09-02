@@ -46,6 +46,7 @@
     "@frockbot/plugin-mobile-clipboard": "workspace:*",
     "@frockbot/plugin-mobile-notifications": "workspace:*",
     "@frockbot/plugin-package-publisher": "workspace:*",
+    "@frockbot/plugin-package-catalog": "workspace:*",
     "@frockbot/plugin-provider-foundation": "workspace:*",
     "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
     "@frockbot/plugin-provider-flock-ai": "workspace:*",

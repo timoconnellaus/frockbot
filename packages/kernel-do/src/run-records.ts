@@ -112,6 +112,15 @@ export interface StoredRunV1<Snapshot = unknown> {
   previousEventCount: number;
   /** Absent ⇒ the run was admitted as a `chat` Turn. */
   admission?: StoredRunAdmissionV1;
+  /** An ordinary admitted Turn whose only action is one caller-selected tool. */
+  directTool?: DirectToolCommandV1;
+}
+
+export interface DirectToolCommandV1 {
+  generationId: string;
+  packageId: string;
+  name: string;
+  input: unknown;
 }
 
 /** The subagent role a stored run re-mounts under, if any. */
@@ -185,6 +194,7 @@ const STORED_RUN_OPTIONAL_KEYS = [
   "failure",
   "stopRequestedAt",
   "admission",
+  "directTool",
 ] as const;
 const UTF8_ENCODER = new TextEncoder();
 
@@ -198,6 +208,44 @@ function boundedString(
     (allowEmpty || value.length > 0) &&
     UTF8_ENCODER.encode(value).byteLength <= maximum
   );
+}
+
+function decodeDirectToolCommandV1(value: unknown): DirectToolCommandV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("stored run has invalid direct tool command");
+  }
+  const candidate = value as Record<PropertyKey, unknown>;
+  const fields = ["generationId", "packageId", "name", "input"];
+  if (
+    Reflect.ownKeys(candidate).length !== fields.length ||
+    Object.keys(candidate).length !== fields.length ||
+    !fields.every((field) => Object.hasOwn(candidate, field)) ||
+    !boundedString(candidate.generationId, 256) ||
+    !boundedString(candidate.packageId, 64) ||
+    !boundedString(candidate.name, 64) ||
+    !/^[a-z][a-z0-9_]{0,63}$/.test(candidate.name)
+  ) {
+    throw new Error("stored run has invalid direct tool command fields");
+  }
+  let input: unknown;
+  try {
+    const encoded = JSON.stringify(candidate.input);
+    if (
+      encoded === undefined ||
+      UTF8_ENCODER.encode(encoded).byteLength > 64_000
+    ) {
+      throw new Error("invalid input");
+    }
+    input = JSON.parse(encoded) as unknown;
+  } catch {
+    throw new Error("stored run has invalid direct tool input");
+  }
+  return {
+    generationId: candidate.generationId,
+    packageId: candidate.packageId,
+    name: candidate.name,
+    input,
+  };
 }
 
 /**
@@ -521,6 +569,9 @@ function requireStoredRunRecordV1<Snapshot>(
     ...(candidate.admission === undefined
       ? {}
       : { admission: decodeStoredRunAdmission(candidate.admission, runId) }),
+    ...(candidate.directTool === undefined
+      ? {}
+      : { directTool: decodeDirectToolCommandV1(candidate.directTool) }),
   };
 }
 
@@ -550,6 +601,7 @@ export interface BotTurnCommand {
    * command, so it must not collide on an idempotency record.
    */
   skills?: SkillRefV1[];
+  directTool?: DirectToolCommandV1;
 }
 
 /**
@@ -568,7 +620,8 @@ export function botTurnCommandFingerprintV1(
     turnType !== "chat" ||
     command.origin !== undefined ||
     command.subagentRole !== undefined ||
-    skills.length > 0
+    skills.length > 0 ||
+    command.directTool !== undefined
   ) {
     return `bot-turn-command-v2:${JSON.stringify({
       userId: command.userId,
@@ -579,6 +632,7 @@ export function botTurnCommandFingerprintV1(
       ...(command.subagentRole ? { subagentRole: command.subagentRole } : {}),
       ...(command.origin ? { origin: command.origin } : {}),
       ...(skills.length > 0 ? { skills: skills.map(formatSkillRefV1) } : {}),
+      ...(command.directTool ? { directTool: command.directTool } : {}),
     })}`;
   }
   return `bot-turn-command-v1:${JSON.stringify({

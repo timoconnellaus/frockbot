@@ -187,15 +187,9 @@ describe("package authority boundaries", () => {
       packageId: "bot-tool",
       displayName: "Bot Tool",
       version: "0.0.1",
-      tool: { name: "do_it", description: "does it", inputSchema: {} },
+      tools: [{ name: "do_it", description: "does it", inputSchema: {} }],
     };
-    for (const manifest of [
-      authoredManifestV1(base),
-      authoredManifestV1({
-        ...base,
-        model: { providerId: "foundation", modelId: "small" },
-      }),
-    ]) {
+    for (const manifest of [authoredManifestV1(base)]) {
       const contributions = manifest.contributions as Record<string, unknown>;
       expect(Object.keys(contributions).sort()).toEqual(
         expect.arrayContaining(["runtime"]),
@@ -208,11 +202,7 @@ describe("package authority boundaries", () => {
           },
         );
       }
-      expect(
-        Object.keys(contributions).every((kind) =>
-          ["runtime", "model"].includes(kind),
-        ),
-      ).toBe(true);
+      expect(Object.keys(contributions)).toEqual(["runtime"]);
       const serialized = JSON.stringify(manifest);
       expect(serialized).not.toContain("trusted-main");
       expect(serialized).not.toContain("desktop");
@@ -227,11 +217,11 @@ describe("package authority boundaries", () => {
     expect(AUTHOR_PACKAGE_INPUT_SCHEMA_V1.additionalProperties).toBe(false);
     expect(
       Object.keys(AUTHOR_PACKAGE_INPUT_SCHEMA_V1.properties).sort(),
-    ).toEqual(["displayName", "model", "packageId", "source", "tool"]);
+    ).toEqual(["displayName", "hooks", "packageId", "source", "tools", "ui"]);
     const valid = {
       packageId: "bot-tool",
       displayName: "Bot Tool",
-      tool: { name: "do_it", description: "does it", inputSchema: {} },
+      tools: [{ name: "do_it", description: "does it", inputSchema: {} }],
       source: "export const tools = [];\n",
     };
     for (const smuggled of [

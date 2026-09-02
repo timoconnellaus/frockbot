@@ -1,14 +1,19 @@
-import { decodeTurnTypeV1, type TurnTypeV1 } from "@frockbot/kernel-contracts";
+import {
+  isBotIsolateHookEventNameV1,
+  decodeTurnTypeV1,
+  type BotIsolateHookEventNameV1,
+  type TurnTypeV1,
+} from "@frockbot/kernel-contracts";
 
 /** The Contribution kinds a Package manifest can declare. */
 export type ManifestContributionKind =
   "backend" | "runtime" | "client" | "desktop" | "mobile";
 
 /**
- * Every execution host a Contribution can be mounted in. `bot-isolate` is not
- * manifest-declared: it is derived from a Composition member carrying an
- * immutable artifact, so a Package's provenance — not its manifest — decides
- * whether it runs in the kernel isolate or a loaded Dynamic Worker.
+ * Every execution host a Contribution can be mounted in. A Bot-authored
+ * manifest declares `bot-isolate`, but provenance and an immutable artifact
+ * still decide whether the host accepts it; a manifest never grants itself
+ * that execution authority.
  */
 export type ContributionKind = ManifestContributionKind | "bot-isolate";
 
@@ -19,6 +24,15 @@ export interface BackendContribution {
 
 export interface RuntimeContribution {
   entry: string;
+  /** Present only on a Bot-authored manifest; provenance still decides host authority. */
+  host?: "bot-isolate";
+}
+
+/** A Bot-authored manifest's durable declaration; isolate health supplies details at mount. */
+export interface ManifestToolDeclaration {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
 }
 
 export interface ClientMount {
@@ -26,10 +40,35 @@ export interface ClientMount {
   order?: number;
 }
 
-export interface ClientContribution {
+/** A reviewed first-party client module compiled into the hosted bundle. */
+export interface ClientModuleContribution {
   entry: string;
   mounts: ClientMount[];
   outlets: string[];
+}
+
+/** Immutable HTML bytes rendered only by the first-party sandbox host. */
+export interface ClientIframeArtifactV1 {
+  contentHash: string;
+  size: number;
+  mediaType: "text/html";
+  bundlerVersion: string;
+}
+
+/** A non-first-party page. It never becomes JavaScript in the app origin. */
+export interface ClientIframeContribution {
+  kind: "iframe";
+  artifact: ClientIframeArtifactV1;
+  mounts: ClientMount[];
+}
+
+export type ClientContribution =
+  ClientModuleContribution | ClientIframeContribution;
+
+export function isClientIframeContribution(
+  contribution: ClientContribution,
+): contribution is ClientIframeContribution {
+  return "kind" in contribution && contribution.kind === "iframe";
 }
 
 export interface DesktopContribution {
@@ -146,6 +185,10 @@ export interface FrockBotManifest {
   };
   permissions: string[];
   configuration?: PackageConfiguration;
+  /** Present exactly when `contributions.runtime.host` is `bot-isolate`. */
+  tools?: ManifestToolDeclaration[];
+  /** Bot-isolate waterfalls the immutable artifact declares it exports. */
+  hooks?: BotIsolateHookEventNameV1[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -164,6 +207,88 @@ function exactFields(
   if (unknown !== undefined) {
     throw new Error(`${boundary} has unknown field "${String(unknown)}"`);
   }
+}
+
+function validateManifestJson(value: unknown, label: string, depth = 0): void {
+  if (depth > 16) throw new Error(`${label} is too deeply nested`);
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) validateManifestJson(entry, label, depth + 1);
+    return;
+  }
+  if (!isRecord(value)) throw new Error(`${label} must contain only JSON`);
+  for (const entry of Object.values(value)) {
+    validateManifestJson(entry, label, depth + 1);
+  }
+}
+
+function decodeManifestTools(
+  value: unknown,
+): ManifestToolDeclaration[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 64) {
+    throw new Error("manifest tools must be a non-empty bounded array");
+  }
+  const tools = value.map((candidate, index) => {
+    if (!isRecord(candidate)) {
+      throw new Error(`manifest tools[${index}] must be an object`);
+    }
+    exactFields(
+      candidate,
+      ["name", "description", "inputSchema"],
+      `manifest tools[${index}]`,
+    );
+    const name = requiredString(candidate, "name");
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(name)) {
+      throw new Error(`manifest tools[${index}] name is invalid`);
+    }
+    const description = requiredString(candidate, "description");
+    if (description.length > 1_024) {
+      throw new Error(`manifest tools[${index}] description is too long`);
+    }
+    if (!isRecord(candidate.inputSchema)) {
+      throw new Error(`manifest tools[${index}] inputSchema must be an object`);
+    }
+    validateManifestJson(
+      candidate.inputSchema,
+      `manifest tools[${index}] inputSchema`,
+    );
+    return {
+      name,
+      description,
+      inputSchema: structuredClone(candidate.inputSchema),
+    };
+  });
+  if (new Set(tools.map((tool) => tool.name)).size !== tools.length) {
+    throw new Error("manifest tools contains duplicate names");
+  }
+  return tools;
+}
+
+function decodeManifestHooks(
+  value: unknown,
+): BotIsolateHookEventNameV1[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 16) {
+    throw new Error("manifest hooks must be a non-empty bounded array");
+  }
+  const hooks = value.map((hook, index) => {
+    if (!isBotIsolateHookEventNameV1(hook)) {
+      throw new Error(`manifest hooks[${index}] is invalid`);
+    }
+    return hook;
+  });
+  if (new Set(hooks).size !== hooks.length) {
+    throw new Error("manifest hooks contains duplicates");
+  }
+  return hooks;
 }
 
 function requiredString(record: Record<string, unknown>, key: string): string {
@@ -368,43 +493,102 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     }
     exactFields(
       value.contributions.runtime,
-      ["entry"],
+      ["entry", ...(isV3OrLater(value) ? ["host"] : [])],
       "manifest runtime contribution",
     );
+    const host = value.contributions.runtime.host;
+    if (host !== undefined && host !== "bot-isolate") {
+      throw new Error("manifest runtime host is invalid");
+    }
     contributions.runtime = {
       entry: relativeEntry(value.contributions.runtime, "entry"),
+      ...(host === "bot-isolate" ? { host } : {}),
     };
   }
   if (value.contributions.client !== undefined) {
     const client = value.contributions.client;
     if (!isRecord(client))
       throw new Error("manifest client contribution must be an object");
-    exactFields(
-      client,
-      ["entry", "mounts", "outlets"],
-      "manifest client contribution",
-    );
     const mounts = client.mounts;
     if (!Array.isArray(mounts)) {
       throw new Error("manifest client mounts must be an array");
     }
-    contributions.client = {
-      entry: relativeEntry(client, "entry"),
-      mounts: mounts.map((mount) => {
-        if (!isRecord(mount))
-          throw new Error("manifest client mount must be an object");
-        exactFields(mount, ["slot", "order"], "manifest client mount");
-        const order = mount.order;
-        if (
-          order !== undefined &&
-          (typeof order !== "number" || !Number.isFinite(order))
-        ) {
-          throw new Error("manifest client mount order must be finite");
-        }
-        return { slot: requiredString(mount, "slot"), order };
-      }),
-      outlets: optionalStringArray(client, "outlets"),
-    };
+    const decodedMounts = mounts.map((mount) => {
+      if (!isRecord(mount))
+        throw new Error("manifest client mount must be an object");
+      exactFields(mount, ["slot", "order"], "manifest client mount");
+      const order = mount.order;
+      if (
+        order !== undefined &&
+        (typeof order !== "number" || !Number.isFinite(order))
+      ) {
+        throw new Error("manifest client mount order must be finite");
+      }
+      return {
+        slot: requiredString(mount, "slot"),
+        ...(order === undefined ? {} : { order }),
+      };
+    });
+    if (client.kind === "iframe") {
+      if (!isV3OrLater(value)) {
+        throw new Error("manifest iframe client requires schema version 3");
+      }
+      exactFields(
+        client,
+        ["kind", "artifact", "mounts"],
+        "manifest iframe client contribution",
+      );
+      if (!isRecord(client.artifact)) {
+        throw new Error("manifest iframe client artifact must be an object");
+      }
+      exactFields(
+        client.artifact,
+        ["contentHash", "size", "mediaType", "bundlerVersion"],
+        "manifest iframe client artifact",
+      );
+      const artifact = client.artifact;
+      if (
+        typeof artifact.contentHash !== "string" ||
+        !/^[0-9a-f]{64}$/.test(artifact.contentHash)
+      ) {
+        throw new Error(
+          "manifest iframe client artifact contentHash must be a sha-256 digest",
+        );
+      }
+      if (
+        !Number.isSafeInteger(artifact.size) ||
+        (artifact.size as number) < 0 ||
+        (artifact.size as number) > 256 * 1024
+      ) {
+        throw new Error(
+          "manifest iframe client artifact size must be within the 256 KB quota",
+        );
+      }
+      if (artifact.mediaType !== "text/html") {
+        throw new Error("manifest iframe client artifact mediaType is invalid");
+      }
+      contributions.client = {
+        kind: "iframe",
+        artifact: {
+          contentHash: artifact.contentHash,
+          size: artifact.size as number,
+          mediaType: "text/html",
+          bundlerVersion: requiredString(artifact, "bundlerVersion"),
+        },
+        mounts: decodedMounts,
+      };
+    } else {
+      exactFields(
+        client,
+        ["entry", "mounts", "outlets"],
+        "manifest client contribution",
+      );
+      contributions.client = {
+        entry: relativeEntry(client, "entry"),
+        mounts: decodedMounts,
+        outlets: optionalStringArray(client, "outlets"),
+      };
+    }
   }
   if (value.contributions.mobile !== undefined) {
     const mobile = value.contributions.mobile;
@@ -1218,21 +1402,77 @@ function decodeConfiguration(
 
 function decodeV3(value: Record<string, unknown>): FrockBotManifest {
   const base = decodeV2(value);
+  const tools = decodeManifestTools(value.tools);
+  const hooks = decodeManifestHooks(value.hooks);
+  const botIsolate = base.contributions.runtime?.host === "bot-isolate";
+  if (botIsolate !== (tools !== undefined)) {
+    throw new Error(
+      "manifest bot-isolate runtime and tools declaration must appear together",
+    );
+  }
+  if (!botIsolate && hooks !== undefined) {
+    throw new Error("manifest hooks require a bot-isolate runtime");
+  }
+  validateIframeClientContribution(base.contributions.client, tools);
   return {
     ...base,
     schemaVersion: 3,
     configuration: decodeConfiguration(value.configuration, false),
+    ...(tools ? { tools } : {}),
+    ...(hooks ? { hooks } : {}),
   };
 }
 
 /** v4 is v3 plus the Capability admission ceiling, and nothing else. */
 function decodeV4(value: Record<string, unknown>): FrockBotManifest {
   const base = decodeV2(value);
+  const tools = decodeManifestTools(value.tools);
+  const hooks = decodeManifestHooks(value.hooks);
+  const botIsolate = base.contributions.runtime?.host === "bot-isolate";
+  if (botIsolate !== (tools !== undefined)) {
+    throw new Error(
+      "manifest bot-isolate runtime and tools declaration must appear together",
+    );
+  }
+  if (!botIsolate && hooks !== undefined) {
+    throw new Error("manifest hooks require a bot-isolate runtime");
+  }
+  validateIframeClientContribution(base.contributions.client, tools);
   return {
     ...base,
     schemaVersion: 4,
     configuration: decodeConfiguration(value.configuration, true),
+    ...(tools ? { tools } : {}),
+    ...(hooks ? { hooks } : {}),
   };
+}
+
+function validateIframeClientContribution(
+  client: ClientContribution | undefined,
+  tools: ManifestToolDeclaration[] | undefined,
+): void {
+  if (!client || !isClientIframeContribution(client)) return;
+  if (client.mounts.length === 0 || client.mounts.length > 64) {
+    throw new Error(
+      "manifest iframe client mounts must be a non-empty bounded array",
+    );
+  }
+  const toolNames = new Set((tools ?? []).map((tool) => tool.name));
+  for (const mount of client.mounts) {
+    if (mount.slot === "frockbot.bot-settings-sections") continue;
+    const prefix = "frockbot.tool-result:";
+    if (!mount.slot.startsWith(prefix)) {
+      throw new Error(
+        `manifest iframe client slot "${mount.slot}" is not iframe-safe`,
+      );
+    }
+    const toolName = mount.slot.slice(prefix.length);
+    if (!toolNames.has(toolName)) {
+      throw new Error(
+        `manifest iframe client tool-result slot names undeclared tool "${toolName}"`,
+      );
+    }
+  }
 }
 
 export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
@@ -1270,6 +1510,8 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
         "defaultEnablement",
         "contributions",
         ...(isV3OrLater(value) ? ["configuration"] : []),
+        ...(isV3OrLater(value) ? ["tools"] : []),
+        ...(isV3OrLater(value) ? ["hooks"] : []),
       ],
       "manifest",
     );

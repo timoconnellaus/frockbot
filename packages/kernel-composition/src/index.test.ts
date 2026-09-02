@@ -295,6 +295,84 @@ describe("PackageCatalog", () => {
 });
 
 describe("decodeFrockBotManifest", () => {
+  test("accepts iframe UI only in settings or its own declared tool-result slots", () => {
+    const manifest = {
+      schemaVersion: 3,
+      id: "weather-page",
+      displayName: "Weather page",
+      version: "0.0.1",
+      compatibility: { frockbot: ">=0.0.1" },
+      dependencies: {},
+      contributions: {
+        runtime: { entry: "./package.js", host: "bot-isolate" },
+        client: {
+          kind: "iframe",
+          artifact: {
+            contentHash: "a".repeat(64),
+            size: 123,
+            mediaType: "text/html",
+            bundlerVersion: "frockbot-inline-html@1",
+          },
+          mounts: [
+            { slot: "frockbot.tool-result:weather_lookup" },
+            { slot: "frockbot.bot-settings-sections", order: 10 },
+          ],
+        },
+      },
+      tools: [
+        { name: "weather_lookup", description: "Weather", inputSchema: {} },
+      ],
+      hooks: ["agent/tool-exposure"],
+      permissions: [],
+    };
+    const decoded = decodeFrockBotManifest(manifest);
+    const client = decoded.contributions.client;
+    expect(client && "kind" in client ? client.kind : undefined).toBe("iframe");
+    expect(client?.mounts[0]).toEqual({
+      slot: "frockbot.tool-result:weather_lookup",
+    });
+    expect(decoded.hooks).toEqual(["agent/tool-exposure"]);
+    expect(() =>
+      decodeFrockBotManifest({
+        ...manifest,
+        contributions: {
+          ...manifest.contributions,
+          client: {
+            ...manifest.contributions.client,
+            mounts: [{ slot: "root" }],
+          },
+        },
+      }),
+    ).toThrow("not iframe-safe");
+    expect(() =>
+      decodeFrockBotManifest({
+        ...manifest,
+        contributions: {
+          ...manifest.contributions,
+          client: {
+            ...manifest.contributions.client,
+            mounts: [{ slot: "frockbot.tool-result:package_author" }],
+          },
+        },
+      }),
+    ).toThrow("undeclared tool");
+    expect(() =>
+      decodeFrockBotManifest({
+        ...manifest,
+        contributions: {
+          ...manifest.contributions,
+          client: {
+            ...manifest.contributions.client,
+            artifact: {
+              ...manifest.contributions.client.artifact,
+              size: 256 * 1024 + 1,
+            },
+          },
+        },
+      }),
+    ).toThrow("256 KB quota");
+  });
+
   test("keeps trusted Electron main execution exclusive to manifest v3", () => {
     const contribution = {
       desktop: {
@@ -1125,6 +1203,70 @@ describe("decodeFrockBotManifest", () => {
         }),
       ),
     ).toThrow("manifest setting schema is too large");
+  });
+
+  test("decodes the exact Bot isolate runtime and tool declaration", () => {
+    const decoded = decodeFrockBotManifest({
+      schemaVersion: 3,
+      id: "authored",
+      displayName: "Authored",
+      version: "0.0.1",
+      compatibility: { frockbot: ">=0.0.1" },
+      dependencies: {},
+      contributions: {
+        runtime: { entry: "./package.js", host: "bot-isolate" },
+      },
+      tools: [
+        {
+          name: "look_up",
+          description: "Looks up a value",
+          inputSchema: { type: "object" },
+        },
+      ],
+      hooks: ["agent/tool-exposure", "tools/post-execute"],
+      permissions: [],
+    });
+
+    expect(decoded.contributions.runtime?.host).toBe("bot-isolate");
+    expect(decoded.tools?.map((tool) => tool.name)).toEqual(["look_up"]);
+    expect(decoded.hooks).toEqual([
+      "agent/tool-exposure",
+      "tools/post-execute",
+    ]);
+  });
+
+  test("requires Bot isolate runtime and tools declarations together", () => {
+    const base = {
+      schemaVersion: 3,
+      id: "authored",
+      displayName: "Authored",
+      version: "0.0.1",
+      compatibility: { frockbot: ">=0.0.1" },
+      dependencies: {},
+      permissions: [],
+    };
+    expect(() =>
+      decodeFrockBotManifest({
+        ...base,
+        contributions: {
+          runtime: { entry: "./package.js", host: "bot-isolate" },
+        },
+      }),
+    ).toThrow(/must appear together/);
+    expect(() =>
+      decodeFrockBotManifest({
+        ...base,
+        contributions: { runtime: { entry: "./package.js" } },
+        hooks: ["agent/tool-exposure"],
+      }),
+    ).toThrow(/hooks require a bot-isolate/);
+    expect(() =>
+      decodeFrockBotManifest({
+        ...base,
+        contributions: { runtime: { entry: "./package.js" } },
+        tools: [{ name: "look_up", description: "Looks", inputSchema: {} }],
+      }),
+    ).toThrow(/must appear together/);
   });
 
   test("orders normalized contribution kinds", () => {

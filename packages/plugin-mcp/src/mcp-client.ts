@@ -115,10 +115,11 @@ export class McpProtocolError extends Error {
  * The server said "authorize first".
  *
  * A 401 carrying `WWW-Authenticate: Bearer …` is the one MCP failure that is
- * not a broken server: it is a durable pending decision for the User. It is a
- * subclass rather than a sibling so every existing `McpProtocolError` handler
- * keeps working, and typed rather than a status check so the runtime seam and
- * the durable record agree on what it means without re-deriving it from prose.
+ * not a broken server: it puts the existing User Connection into a durable
+ * repair state. It is a subclass rather than a sibling so every existing
+ * `McpProtocolError` handler keeps working, and typed rather than a status
+ * check so the runtime seam and the durable record agree on what it means
+ * without re-deriving it from prose.
  */
 export class McpAuthorizationRequiredError extends McpProtocolError {
   /** RFC 9728 §5.1's `resource_metadata`, when the server named one. */

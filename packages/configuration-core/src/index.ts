@@ -136,6 +136,8 @@ export interface PackageInstallationView {
   catalogId?: string;
   /** The immutable Catalog generation `catalogId` was read from. */
   catalogGeneration?: string;
+  /** Exact non-first-party bundle admitted from the Catalog, when it carries code. */
+  contentHash?: string;
   provenance?: PackageProvenanceV1;
   /** The setup values the install carried, as GrokBot's `InstallPlugin{values}`. */
   values?: Record<string, JsonValue | ModelBindingV1>;
@@ -145,9 +147,9 @@ export interface PackageInstallationView {
  * A durable pending decision for the User: this Connection needs authorizing
  * before it will do anything again.
  *
- * It carries **no URL**, and that is the whole design. A Bot may write one —
- * `mcp_authenticate_server` does, and so does a mount that met a 401 — but a
- * redirect is minted only by an authenticated User action. A single-use
+ * It carries **no URL**, and that is the whole design. A mount that meets a
+ * 401 may write one, but a Bot has no command that requests authorization and
+ * a redirect is minted only by an authenticated User action. A single-use
  * ten-minute link stored in a projection every client reads, and replayed into
  * every transcript, would outlive the decision it belonged to and would let a
  * Bot hand its User a link it authored. The card is drawn from this record and
@@ -300,6 +302,7 @@ export type ConfigurationCommandV1 =
        */
       catalogId?: string;
       catalogGeneration?: string;
+      contentHash?: string;
       values?: Record<string, JsonValue>;
     })
   | (CommandMetaV1 & {
@@ -1190,7 +1193,7 @@ export function decodeConfigurationCommandV1(
       const command = exactCommand(
         input,
         ["packageId", "version"],
-        ["catalogId", "catalogGeneration", "values", "enabled"],
+        ["catalogId", "catalogGeneration", "contentHash", "values", "enabled"],
       );
       // A Catalog install is all three of identity, generation and (optional)
       // values or none of them: half a Catalog install would be an install
@@ -1206,6 +1209,14 @@ export function decodeConfigurationCommandV1(
       if (command.catalogId === undefined && command.values !== undefined) {
         throw new ConfigurationDecodeError(
           "install values require a Catalog entry",
+        );
+      }
+      if (
+        command.catalogId === undefined &&
+        command.contentHash !== undefined
+      ) {
+        throw new ConfigurationDecodeError(
+          "install contentHash requires a Catalog entry",
         );
       }
       if (
@@ -1228,6 +1239,14 @@ export function decodeConfigurationCommandV1(
                 command.catalogGeneration,
                 "catalogGeneration",
               ),
+              ...(command.contentHash === undefined
+                ? {}
+                : {
+                    contentHash: compositionHash(
+                      command.contentHash,
+                      "contentHash",
+                    ),
+                  }),
             }),
         ...(command.values === undefined
           ? {}
@@ -1614,7 +1633,14 @@ function packageInstallation(value: unknown): PackageInstallationView {
     value,
     "Package installation",
     ["packageId", "version", "state"],
-    ["failure", "catalogId", "catalogGeneration", "provenance", "values"],
+    [
+      "failure",
+      "catalogId",
+      "catalogGeneration",
+      "contentHash",
+      "provenance",
+      "values",
+    ],
   );
   if (
     installation.state !== "installed" &&
@@ -1647,6 +1673,11 @@ function packageInstallation(value: unknown): PackageInstallationView {
             installation.catalogGeneration,
             "catalogGeneration",
           ),
+        }),
+    ...(installation.contentHash === undefined
+      ? {}
+      : {
+          contentHash: compositionHash(installation.contentHash, "contentHash"),
         }),
     ...(installation.provenance === undefined
       ? {}
@@ -2095,6 +2126,11 @@ const COMPOSITION_GENERATION_STATUSES_V1: readonly CompositionGenerationStatusVi
 
 export type CompositionProvenanceViewV1 =
   | { kind: "first-party" }
+  | {
+      kind: "catalog";
+      catalogId: string;
+      catalogGeneration: string;
+    }
   | { kind: "user"; userId: string; authoredAt: string }
   | {
       kind: "bot";
@@ -2109,7 +2145,14 @@ export type CompositionOriginViewV1 =
   | { kind: "bootstrap" }
   | { kind: "bot-authored"; runId: string; sessionId: string; turnId: string }
   | { kind: "user-install"; userId: string }
-  | { kind: "revert"; revertsTo: string; userId: string };
+  | { kind: "revert"; revertsTo: string; userId: string }
+  | {
+      kind: "revert";
+      revertsTo: string;
+      botId: string;
+      runId: string;
+      turnId: string;
+    };
 
 export interface CompositionMemberViewV1 {
   packageId: string;
@@ -2247,6 +2290,25 @@ function compositionProvenanceView(
     exactRecord(input, "Composition provenance", ["kind"]);
     return { kind: "first-party" };
   }
+  if (kind === "catalog") {
+    const value = exactRecord(input, "Composition provenance", [
+      "kind",
+      "catalogId",
+      "catalogGeneration",
+    ]);
+    return {
+      kind: "catalog",
+      catalogId: identifier(
+        value.catalogId,
+        "Composition provenance catalogId",
+      ),
+      catalogGeneration: text(
+        value.catalogGeneration,
+        "Composition provenance catalogGeneration",
+        256,
+      ),
+    };
+  }
   if (kind === "user") {
     const value = exactRecord(input, "Composition provenance", [
       "kind",
@@ -2314,18 +2376,32 @@ function compositionOriginView(input: unknown): CompositionOriginViewV1 {
     };
   }
   if (kind === "revert") {
-    const value = exactRecord(input, "Composition origin", [
+    const value = record(input, "Composition origin");
+    const revertsTo = decodeCompositionGenerationIdV1(
+      value.revertsTo,
+      "Composition origin revertsTo",
+    );
+    if (Object.hasOwn(value, "userId")) {
+      exactRecord(input, "Composition origin", ["kind", "revertsTo", "userId"]);
+      return {
+        kind: "revert",
+        revertsTo,
+        userId: text(value.userId, "Composition origin userId", 256),
+      };
+    }
+    const bot = exactRecord(input, "Composition origin", [
       "kind",
       "revertsTo",
-      "userId",
+      "botId",
+      "runId",
+      "turnId",
     ]);
     return {
       kind: "revert",
-      revertsTo: decodeCompositionGenerationIdV1(
-        value.revertsTo,
-        "Composition origin revertsTo",
-      ),
-      userId: text(value.userId, "Composition origin userId", 256),
+      revertsTo,
+      botId: decodeBotIdV1(bot.botId),
+      runId: text(bot.runId, "Composition origin runId", 128),
+      turnId: text(bot.turnId, "Composition origin turnId", 128),
     };
   }
   throw new ConfigurationDecodeError("Composition origin kind is invalid");

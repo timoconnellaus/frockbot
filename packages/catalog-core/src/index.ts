@@ -23,9 +23,12 @@
  * manifest could not declare.
  */
 import {
+  decodeFrockBotManifest,
   decodePackageSettingSchemaV1,
+  type FrockBotManifest,
   type PackageSettingSchema,
 } from "@frockbot/kernel-composition";
+import { canonicalJson } from "@frockbot/kernel-composition/compiler";
 
 export class CatalogDecodeError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -41,6 +44,7 @@ export const MAX_CATALOG_ENTRIES_V1 = 512;
 export const MAX_CATALOG_SERVERS_V1 = 16;
 export const MAX_CATALOG_SETUP_FIELDS_V1 = 32;
 export const MAX_CATALOG_SKILLS_V1 = 64;
+export const MAX_CATALOG_TAGS_V1 = 32;
 /**
  * Longest Skill body one Catalog entry may carry.
  *
@@ -65,6 +69,9 @@ export interface CatalogIndexEntryV1 {
   version: string;
   manifestHash: string;
   kind: CatalogEntryKindV1;
+  /** Present when this row names code loaded in a Bot isolate. */
+  contentHash?: string;
+  tags?: string[];
   logo?: string;
   homepage?: string;
 }
@@ -93,6 +100,25 @@ export interface CatalogSkillV1 {
   body?: string;
 }
 
+/**
+ * One immutable non-first-party bundle named by a Package Catalog entry.
+ *
+ * The manifest is decoded with the same kernel decoder used for a stored
+ * Bot-authored manifest. `sourceHash` is optional because source publication
+ * is optional; when present it addresses the retained `.ts` object in the
+ * shared Package artifact store. A sandboxed page needs no duplicate bundle
+ * field: its canonical artifact descriptor is the decoded manifest's iframe
+ * client Contribution.
+ */
+export interface CatalogPackageBundleV1 {
+  contentHash: string;
+  size: number;
+  mediaType: "application/javascript";
+  bundlerVersion: string;
+  manifest: FrockBotManifest;
+  sourceHash?: string;
+}
+
 export interface CatalogEntryV1 {
   schemaVersion: 1;
   catalogId: string;
@@ -102,11 +128,14 @@ export interface CatalogEntryV1 {
   version: string;
   kind: CatalogEntryKindV1;
   manifestHash: string;
+  tags?: string[];
   logo?: string;
   homepage?: string;
   servers: CatalogServerV1[];
   setupFields: PackageSettingSchema[];
   skills: CatalogSkillV1[];
+  /** Absent means the existing reviewed, compiled-in first-party form. */
+  bundle?: CatalogPackageBundleV1;
 }
 
 /**
@@ -232,6 +261,20 @@ function entryKind(value: unknown, label: string): CatalogEntryKindV1 {
   return value;
 }
 
+function tags(value: unknown, label: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  const decoded = boundedArray(value, label, MAX_CATALOG_TAGS_V1).map(
+    (tag, index) => text(tag, `${label}[${index}]`, 64),
+  );
+  if (
+    new Set(decoded.map((tag) => tag.toLocaleLowerCase())).size !==
+    decoded.length
+  ) {
+    throw new CatalogDecodeError(`${label} repeats a tag`);
+  }
+  return decoded;
+}
+
 /**
  * A Catalog logo and homepage are rendered by the browser, so only an absolute
  * `https:` URL is admitted: a `javascript:` or `data:` value in a document the
@@ -295,9 +338,9 @@ export function decodeCatalogIndexEntryV1(value: unknown): CatalogIndexEntryV1 {
       "manifestHash",
       "kind",
     ],
-    ["logo", "homepage"],
+    ["contentHash", "tags", "logo", "homepage"],
   );
-  return withOptional(
+  const decoded = withOptional(
     {
       catalogId: decodeCatalogIdV1(entry.catalogId),
       packageId: pattern(entry.packageId, "packageId", PACKAGE_ID_PATTERN, 64),
@@ -313,10 +356,18 @@ export function decodeCatalogIndexEntryV1(value: unknown): CatalogIndexEntryV1 {
       kind: entryKind(entry.kind, "kind"),
     },
     {
+      contentHash:
+        entry.contentHash === undefined
+          ? undefined
+          : decodeCatalogContentHashV1(entry.contentHash, "contentHash"),
       logo: optionalHttpsUrl(entry.logo, "logo"),
       homepage: optionalHttpsUrl(entry.homepage, "homepage"),
     },
   );
+  const decodedTags = tags(entry.tags, "catalog tags");
+  return decodedTags === undefined
+    ? decoded
+    : { ...decoded, tags: decodedTags };
 }
 
 export function decodeCatalogIndexV1(input: unknown): CatalogIndexV1 {
@@ -391,6 +442,49 @@ function decodeCatalogSkillV1(value: unknown): CatalogSkillV1 {
   );
 }
 
+function decodeCatalogPackageBundleV1(input: unknown): CatalogPackageBundleV1 {
+  const bundle = exactRecord(
+    input,
+    "catalog package bundle",
+    ["contentHash", "size", "mediaType", "bundlerVersion", "manifest"],
+    ["sourceHash"],
+  );
+  if (!Number.isSafeInteger(bundle.size) || (bundle.size as number) < 0) {
+    throw new CatalogDecodeError("catalog package bundle size is invalid");
+  }
+  if (bundle.mediaType !== "application/javascript") {
+    throw new CatalogDecodeError("catalog package bundle mediaType is invalid");
+  }
+  const manifest = decodeFrockBotManifest(bundle.manifest);
+  if (manifest.contributions.runtime?.host !== "bot-isolate") {
+    throw new CatalogDecodeError(
+      "catalog package bundle manifest must declare a Bot isolate runtime",
+    );
+  }
+  return {
+    contentHash: decodeCatalogContentHashV1(
+      bundle.contentHash,
+      "catalog package bundle contentHash",
+    ),
+    size: bundle.size as number,
+    mediaType: "application/javascript",
+    bundlerVersion: text(
+      bundle.bundlerVersion,
+      "catalog package bundle bundlerVersion",
+      128,
+    ),
+    manifest,
+    ...(bundle.sourceHash === undefined
+      ? {}
+      : {
+          sourceHash: decodeCatalogContentHashV1(
+            bundle.sourceHash,
+            "catalog package bundle sourceHash",
+          ),
+        }),
+  };
+}
+
 export function decodeCatalogEntryV1(input: unknown): CatalogEntryV1 {
   const value = exactRecord(
     input,
@@ -408,10 +502,10 @@ export function decodeCatalogEntryV1(input: unknown): CatalogEntryV1 {
       "setupFields",
       "skills",
     ],
-    ["logo", "homepage"],
+    ["tags", "logo", "homepage", "bundle"],
   );
   schemaVersion(value, "catalog entry detail");
-  return withOptional(
+  const decoded = withOptional(
     {
       schemaVersion: 1 as const,
       catalogId: decodeCatalogIdV1(value.catalogId),
@@ -447,6 +541,45 @@ export function decodeCatalogEntryV1(input: unknown): CatalogEntryV1 {
       homepage: optionalHttpsUrl(value.homepage, "homepage"),
     },
   );
+  const decodedTags = tags(value.tags, "catalog tags");
+  const bundle =
+    value.bundle === undefined
+      ? undefined
+      : decodeCatalogPackageBundleV1(value.bundle);
+  if (bundle && decoded.kind !== "package") {
+    throw new CatalogDecodeError(
+      "only a package Catalog entry may carry a bundle",
+    );
+  }
+  if (
+    bundle &&
+    (bundle.manifest.id !== decoded.packageId ||
+      bundle.manifest.version !== decoded.version)
+  ) {
+    throw new CatalogDecodeError(
+      "catalog package bundle manifest does not match its entry",
+    );
+  }
+  return {
+    ...decoded,
+    ...(decodedTags === undefined ? {} : { tags: decodedTags }),
+    ...(bundle === undefined ? {} : { bundle }),
+  };
+}
+
+/** Verify the nested manifest against the entry's immutable manifest hash. */
+export async function assertCatalogPackageBundleV1(
+  entry: CatalogEntryV1,
+): Promise<void> {
+  if (!entry.bundle) return;
+  const actual = await catalogContentHashV1(
+    canonicalJson(entry.bundle.manifest),
+  );
+  if (actual !== entry.manifestHash) {
+    throw new CatalogDecodeError(
+      `catalog entry "${entry.catalogId}" bundle manifest failed content hash verification`,
+    );
+  }
 }
 
 export function decodeCatalogPointerV1(input: unknown): CatalogPointerV1 {
@@ -472,6 +605,20 @@ export function catalogEntryKeyV1(
   catalogId: string,
 ): string {
   return `catalog/${decodeCatalogGenerationIdV1(generation)}/entry/${decodeCatalogIdV1(catalogId)}.json`;
+}
+
+/** Package artifacts share the same immutable store and layout as authored code. */
+export function catalogPackageArtifactKeyV1(contentHash: string): string {
+  return `packages/${decodeCatalogContentHashV1(contentHash)}.mjs`;
+}
+
+export function catalogPackageSourceKeyV1(sourceHash: string): string {
+  return `packages/${decodeCatalogContentHashV1(sourceHash)}.ts`;
+}
+
+/** Sandboxed UI artifacts share the authored Package artifact layout too. */
+export function catalogPackageUiArtifactKeyV1(contentHash: string): string {
+  return `packages/${decodeCatalogContentHashV1(contentHash)}.html`;
 }
 
 /**
@@ -535,7 +682,9 @@ export async function decodeCatalogEntryDocumentV1(
   expectedHash: string,
 ): Promise<CatalogEntryV1> {
   await assertContentHash(document, expectedHash, "catalog entry");
-  return decodeCatalogEntryV1(parseDocument(document, "catalog entry"));
+  const entry = decodeCatalogEntryV1(parseDocument(document, "catalog entry"));
+  await assertCatalogPackageBundleV1(entry);
+  return entry;
 }
 
 /** Parse an index document whose hash the caller has not pinned yet. */
@@ -561,7 +710,8 @@ export function assertCatalogEntryMatchesIndexV1(
     entry.packageId !== indexEntry.packageId ||
     entry.version !== indexEntry.version ||
     entry.kind !== indexEntry.kind ||
-    entry.manifestHash !== indexEntry.manifestHash
+    entry.manifestHash !== indexEntry.manifestHash ||
+    entry.bundle?.contentHash !== indexEntry.contentHash
   ) {
     throw new CatalogDecodeError(
       `catalog entry "${indexEntry.catalogId}" does not match its index row`,

@@ -39,6 +39,43 @@ afterEach(async () => {
 });
 
 describe("ToolRegistry effect reconciliation", () => {
+  test("deny-only guards run after pre-execute and cannot be lifted", async () => {
+    const order: string[] = [];
+    const fixture = await registryFixture({
+      name: "guarded_order",
+      description: "Guard ordering fixture.",
+      inputSchema: { type: "object" },
+      execute: () => {
+        order.push("execute");
+        return Promise.resolve({ content: "ran", isError: false });
+      },
+    });
+    fixture.root.on("tools/pre-execute", async (_call, _context, next) => {
+      order.push("pre-execute");
+      return next();
+    });
+    fixture.root.tools.guard(() => {
+      order.push("deny");
+      return { reason: "first guard denied the call" };
+    });
+    fixture.root.tools.guard(() => {
+      order.push("later-guard");
+      return undefined;
+    });
+
+    const preparation = await fixture.root.tools.prepare(
+      fixture.call,
+      fixture.context,
+    );
+    expect(preparation).toEqual({
+      kind: "denied",
+      call: fixture.call,
+      result: { content: "first guard denied the call", isError: true },
+    });
+    expect(order).toEqual(["pre-execute", "deny"]);
+    expect(order).not.toContain("execute");
+  });
+
   test("retries an idempotent definition with the same durable effect id", async () => {
     const effects: string[] = [];
     const fixture = await registryFixture({

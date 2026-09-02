@@ -19,3 +19,14 @@ set), `UiIconButton` (icon centred by grid, mandatory label), and `UiSkeleton`;
 plugins render icons through these rather than text glyphs. The shell pins Bot
 actions and the panel toggle to the window's trailing edge so they do not move
 when the right panel opens, matching the desktop chat apps FrockBot sits beside.
+
+## Sandboxed non-first-party pages (2026-09-02)
+
+The direct Vue Contribution path remains first-party-only. A Bot-authored or
+Catalog Package contributes at most one content-addressed HTML page, rendered
+by `plugin-shell` from the dedicated anonymous UI hostname in an
+`allow-scripts` sandbox without `allow-same-origin`. The Shell owns the frame,
+attribution, slot placement, sizing bounds, and the exact versioned bridge;
+the page receives semantic theme tokens through `init` and never imports the
+Cordis-free `client-ui` module. This preserves the design-system boundary while
+keeping all non-first-party JavaScript out of the application origin.

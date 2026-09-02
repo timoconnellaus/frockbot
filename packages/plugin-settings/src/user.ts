@@ -303,6 +303,9 @@ function applyUserCommand(
               : {
                   catalogId: command.catalogId,
                   catalogGeneration: command.catalogGeneration,
+                  ...(command.contentHash === undefined
+                    ? {}
+                    : { contentHash: command.contentHash }),
                   provenance: "catalog" as const,
                 }),
             ...(Object.keys(values).length === 0 ? {} : { values }),
@@ -616,6 +619,7 @@ export class UserSettingsBackendContribution {
     version: string;
     catalogId: string;
     catalogGeneration: string;
+    contentHash?: string;
   }): Promise<CatalogEntryV1> {
     const catalog = this.host.catalog;
     if (!catalog) {
@@ -640,6 +644,17 @@ export class UserSettingsBackendContribution {
         `Catalog entry "${command.catalogId}" does not offer Package "${command.packageId}" at version "${command.version}"`,
       );
     }
+    if (entry.bundle) {
+      if (command.contentHash !== entry.bundle.contentHash) {
+        throw new Error(
+          `Catalog entry "${command.catalogId}" requires bundle hash "${entry.bundle.contentHash}"`,
+        );
+      }
+    } else if (command.contentHash !== undefined) {
+      throw new Error(
+        `Catalog entry "${command.catalogId}" does not carry a Package bundle`,
+      );
+    }
     return entry;
   }
 
@@ -657,6 +672,9 @@ export class UserSettingsBackendContribution {
             version: command.version,
             catalogId: command.catalogId,
             catalogGeneration: command.catalogGeneration,
+            ...(command.contentHash === undefined
+              ? {}
+              : { contentHash: command.contentHash }),
           })
         : undefined;
     return this.host.storage.transaction((storage) =>

@@ -17,7 +17,12 @@ import type {
   ConnectionCommandV1,
 } from "@frockbot/connection-core";
 import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
-import { decodeSendToUserPayloadV1 } from "@frockbot/kernel-contracts";
+import {
+  decodePackageIframeCatalogV1,
+  packageIframeToolAllowedV1,
+  decodeSendToUserPayloadV1,
+  type PackageIframeContributionViewV1,
+} from "@frockbot/kernel-contracts";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
 import type {
   BotNameProvenanceV1,
@@ -48,6 +53,7 @@ import {
 import { MCP_OAUTH_CONNECTION_TYPE_ID } from "@frockbot/plugin-mcp/agent";
 import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
+import { decodeClientTurnV1 } from "../run-protocol.js";
 import {
   decodeApprovalDecisionReceiptV1,
   decodeApprovalListViewV1,
@@ -69,6 +75,7 @@ import {
   type WebToolActivity,
 } from "../shared.js";
 import FrockBotApp from "./FrockBotApp.vue";
+import PackageIframeSettings from "./PackageIframeSettings.vue";
 import { modelRuntimeLabel } from "./model-presentation.js";
 import { showClientNotificationV1 } from "./notify.js";
 import "@frockbot/client-core/fonts.css";
@@ -1095,6 +1102,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     skillCatalog: [],
     approvals: [],
     tasks: [],
+    packageUi: undefined,
     async selectBot(botId: string): Promise<void> {
       // Re-selecting the open Bot is not a switch: aborting the live Turn and
       // clearing the transcript would discard state the User is watching.
@@ -1113,6 +1121,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       web.value.skillCatalog = [];
       web.value.approvals = [];
       web.value.tasks = [];
+      web.value.packageUi = undefined;
       const url = URL.parse(window.location.href);
       if (url) {
         url.searchParams.set("bot", botId);
@@ -1195,6 +1204,68 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         )
           web.value.tasks = [];
       }
+    },
+    async loadPackageUi(): Promise<void> {
+      const read = ctx.transport.hostedRequest;
+      const botId = web.value.activeBotId;
+      if (!read || !botId) return;
+      const generation = selectionGeneration;
+      try {
+        const catalog = decodePackageIframeCatalogV1(
+          await read(`/api/bots/${encodeURIComponent(botId)}/package-ui`),
+        );
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        web.value.packageUi = catalog;
+      } catch {
+        if (
+          generation === selectionGeneration &&
+          web.value.activeBotId === botId
+        ) {
+          web.value.packageUi = undefined;
+        }
+      }
+    },
+    async callPackageUiTool(
+      contribution: PackageIframeContributionViewV1,
+      name: string,
+      input: unknown,
+    ): Promise<unknown> {
+      const post = ctx.transport.hostedRequest;
+      const botId = web.value.activeBotId;
+      const catalog = web.value.packageUi;
+      if (!post || !botId || !catalog || catalog.botId !== botId) {
+        throw new Error("Package UI is unavailable");
+      }
+      if (!packageIframeToolAllowedV1(contribution, name)) {
+        throw new Error(
+          `Package "${contribution.packageId}" did not declare tool "${name}"`,
+        );
+      }
+      const turn = decodeClientTurnV1(
+        await post(
+          `/api/bots/${encodeURIComponent(botId)}/package-ui/tools`,
+          "POST",
+          JSON.stringify({
+            schemaVersion: 1,
+            commandId: crypto.randomUUID(),
+            generationId: catalog.generationId,
+            packageId: contribution.packageId,
+            name,
+            input,
+          }),
+        ),
+      );
+      await deliverNotifications(botId);
+      const result = turn.events.findLast(
+        (event) => event.type === "tool/result",
+      );
+      return result?.type === "tool/result"
+        ? { content: result.content, isError: result.isError === true }
+        : { content: turn.text, isError: false };
     },
     /**
      * Explicit, authenticated cancellation of one subagent from the client.
@@ -1288,6 +1359,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         updateModelLabel();
         updateSettingsLoadError("bot");
         await deliverNotifications(botId, generation);
+        await web.value.loadPackageUi();
       } catch (error) {
         if (
           generation !== selectionGeneration ||
@@ -2152,6 +2224,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       slot: "authenticated-root",
       order: 10_000,
       component: FrockBotApp,
+    }),
+    ctx.slot({
+      slot: "frockbot.bot-settings-sections",
+      order: 10_000,
+      component: PackageIframeSettings,
     }),
     () => {
       activeRequest?.abort();

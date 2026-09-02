@@ -13,6 +13,7 @@ import {
   decodeSkillRefsV1,
   LlmEffectNotStartedError,
   type LlmStreamEvent,
+  type LoopStepContinuationV1,
   type NormalizedModelRequest,
   type Session,
   type SessionEvent,
@@ -409,6 +410,12 @@ class LoopAgent implements Agent {
         signal.throwIfAborted();
         await this.#notifyModelOutcome(response.request.requestId, "completed");
         if (response.toolCalls.length === 0) {
+          const shouldStop = await this.#stepShouldStop(
+            openTurn,
+            latestStep,
+            { kind: "stop" },
+            signal,
+          );
           this.session.append({
             type: "step/end",
             turn: openTurn,
@@ -416,29 +423,44 @@ class LoopAgent implements Agent {
             outcome: "completed",
           });
           openStep = undefined;
-          turnOutcome = "completed";
-          return;
-        }
-        const endsTurn = await this.#executeTools(
-          toolCallOccurrences(openTurn, latestStep, response.toolCalls),
-          signal,
-        );
-        signal.throwIfAborted();
-        this.session.append({
-          type: "step/end",
-          turn: openTurn,
-          step: latestStep,
-          outcome: "completed",
-        });
-        openStep = undefined;
-        if (endsTurn) {
-          turnOutcome = "completed";
-          return;
+          if (shouldStop) {
+            turnOutcome = "completed";
+            return;
+          }
+        } else {
+          const endsTurn = await this.#executeTools(
+            toolCallOccurrences(openTurn, latestStep, response.toolCalls),
+            signal,
+          );
+          signal.throwIfAborted();
+          const shouldStop = await this.#stepShouldStop(
+            openTurn,
+            latestStep,
+            { kind: endsTurn ? "stop" : "continue" },
+            signal,
+          );
+          this.session.append({
+            type: "step/end",
+            turn: openTurn,
+            step: latestStep,
+            outcome: "completed",
+          });
+          openStep = undefined;
+          if (shouldStop) {
+            turnOutcome = "completed";
+            return;
+          }
         }
         nextStep = latestStep + 1;
       } else if (latestStepStatus === "open" && latestAssistant) {
         openStep = latestStep;
         if (latestAssistant.toolCalls.length === 0) {
+          const shouldStop = await this.#stepShouldStop(
+            openTurn,
+            latestStep,
+            { kind: "stop" },
+            signal,
+          );
           this.session.append({
             type: "step/end",
             turn: openTurn,
@@ -446,26 +468,35 @@ class LoopAgent implements Agent {
             outcome: "completed",
           });
           openStep = undefined;
-          turnOutcome = "completed";
-          return;
-        }
-        const occurrences = toolCallOccurrences(
-          openTurn,
-          latestStep,
-          latestAssistant.toolCalls,
-        );
-        const endsTurn = await this.#executeTools(occurrences, signal);
-        signal.throwIfAborted();
-        this.session.append({
-          type: "step/end",
-          turn: openTurn,
-          step: latestStep,
-          outcome: "completed",
-        });
-        openStep = undefined;
-        if (endsTurn) {
-          turnOutcome = "completed";
-          return;
+          if (shouldStop) {
+            turnOutcome = "completed";
+            return;
+          }
+        } else {
+          const occurrences = toolCallOccurrences(
+            openTurn,
+            latestStep,
+            latestAssistant.toolCalls,
+          );
+          const endsTurn = await this.#executeTools(occurrences, signal);
+          signal.throwIfAborted();
+          const shouldStop = await this.#stepShouldStop(
+            openTurn,
+            latestStep,
+            { kind: endsTurn ? "stop" : "continue" },
+            signal,
+          );
+          this.session.append({
+            type: "step/end",
+            turn: openTurn,
+            step: latestStep,
+            outcome: "completed",
+          });
+          openStep = undefined;
+          if (shouldStop) {
+            turnOutcome = "completed";
+            return;
+          }
         }
         nextStep = latestStep + 1;
       } else if (latestStepStatus === "ended") {
@@ -499,6 +530,12 @@ class LoopAgent implements Agent {
         signal.throwIfAborted();
         await this.#notifyModelOutcome(response.request.requestId, "completed");
         if (response.toolCalls.length === 0) {
+          const shouldStop = await this.#stepShouldStop(
+            openTurn,
+            step,
+            { kind: "stop" },
+            signal,
+          );
           this.session.append({
             type: "step/end",
             turn: openTurn,
@@ -506,24 +543,33 @@ class LoopAgent implements Agent {
             outcome: "completed",
           });
           openStep = undefined;
-          turnOutcome = "completed";
-          return;
-        }
-        const endsTurn = await this.#executeTools(
-          toolCallOccurrences(openTurn, step, response.toolCalls),
-          signal,
-        );
-        signal.throwIfAborted();
-        this.session.append({
-          type: "step/end",
-          turn: openTurn,
-          step,
-          outcome: "completed",
-        });
-        openStep = undefined;
-        if (endsTurn) {
-          turnOutcome = "completed";
-          return;
+          if (shouldStop) {
+            turnOutcome = "completed";
+            return;
+          }
+        } else {
+          const endsTurn = await this.#executeTools(
+            toolCallOccurrences(openTurn, step, response.toolCalls),
+            signal,
+          );
+          signal.throwIfAborted();
+          const shouldStop = await this.#stepShouldStop(
+            openTurn,
+            step,
+            { kind: endsTurn ? "stop" : "continue" },
+            signal,
+          );
+          this.session.append({
+            type: "step/end",
+            turn: openTurn,
+            step,
+            outcome: "completed",
+          });
+          openStep = undefined;
+          if (shouldStop) {
+            turnOutcome = "completed";
+            return;
+          }
         }
       }
       throw new Error(`agent exceeded ${this.#maxSteps} steps`);
@@ -640,6 +686,12 @@ class LoopAgent implements Agent {
         await this.#notifyModelOutcome(response.request.requestId, "completed");
 
         if (response.toolCalls.length === 0) {
+          const shouldStop = await this.#stepShouldStop(
+            turn,
+            step,
+            { kind: "stop" },
+            signal,
+          );
           this.session.append({
             type: "step/end",
             turn,
@@ -647,27 +699,35 @@ class LoopAgent implements Agent {
             outcome: "completed",
           });
           openStep = undefined;
-          turnOutcome = "completed";
-          return;
-        }
-
-        const endsTurn = await this.#executeTools(
-          toolCallOccurrences(turn, step, response.toolCalls),
-          signal,
-        );
-        signal.throwIfAborted();
-        this.session.append({
-          type: "step/end",
-          turn,
-          step,
-          outcome: "completed",
-        });
-        openStep = undefined;
-        // A tool result that ends the Turn closes it here: no further model
-        // request, and the log replays as a completed Turn with none.
-        if (endsTurn) {
-          turnOutcome = "completed";
-          return;
+          if (shouldStop) {
+            turnOutcome = "completed";
+            return;
+          }
+        } else {
+          const endsTurn = await this.#executeTools(
+            toolCallOccurrences(turn, step, response.toolCalls),
+            signal,
+          );
+          signal.throwIfAborted();
+          const shouldStop = await this.#stepShouldStop(
+            turn,
+            step,
+            { kind: endsTurn ? "stop" : "continue" },
+            signal,
+          );
+          this.session.append({
+            type: "step/end",
+            turn,
+            step,
+            outcome: "completed",
+          });
+          openStep = undefined;
+          // A tool result that ends the Turn closes it here unless declared
+          // termination policy replaces that default for this step.
+          if (shouldStop) {
+            turnOutcome = "completed";
+            return;
+          }
         }
         inputs = [];
       }
@@ -750,18 +810,38 @@ class LoopAgent implements Agent {
     });
 
     while (true) {
+      const proposedMessages = this.session.deriveMessages();
+      const messages = await this.#ctx.waterfall(
+        "agent/message-window",
+        this,
+        proposedMessages,
+        turn,
+        step,
+        signal,
+        () => Promise.resolve(proposedMessages),
+      );
+      const proposedTools = this.#ctx.tools.schemas({
+        turnType: this.#turnType,
+        ...(this.#subagentRole === undefined
+          ? {}
+          : { subagentRole: this.#subagentRole }),
+      });
+      const tools = await this.#ctx.waterfall(
+        "agent/tool-exposure",
+        this,
+        proposedTools,
+        turn,
+        step,
+        signal,
+        () => Promise.resolve(proposedTools),
+      );
       const proposed: NormalizedModelRequest = {
         requestId: crypto.randomUUID(),
         provider: this.#options.provider,
         model: this.#options.model,
         system: assembly.text,
-        messages: this.session.deriveMessages(),
-        tools: this.#ctx.tools.schemas({
-          turnType: this.#turnType,
-          ...(this.#subagentRole === undefined
-            ? {}
-            : { subagentRole: this.#subagentRole }),
-        }),
+        messages,
+        tools,
         ...(this.#options.modelBinding
           ? { modelBinding: structuredClone(this.#options.modelBinding) }
           : {}),
@@ -1113,6 +1193,24 @@ class LoopAgent implements Agent {
       await this.session.flush();
     }
     return endsTurn;
+  }
+
+  async #stepShouldStop(
+    turn: number,
+    step: number,
+    proposed: LoopStepContinuationV1,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const decision = await this.#ctx.waterfall(
+      "agent/step-continuation",
+      this,
+      proposed,
+      turn,
+      step,
+      signal,
+      () => Promise.resolve(proposed),
+    );
+    return decision.kind === "stop";
   }
 
   async #settleCancelledStep(turn: number, step: number): Promise<void> {

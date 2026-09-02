@@ -9,6 +9,10 @@
 //
 // The wrapper is emitted as plain JavaScript because it is a module in the
 // loaded Worker's module map, not a source file this repository compiles.
+import {
+  BOT_ISOLATE_HOOK_EVENTS_V1,
+  type BotPackageContextV1,
+} from "@frockbot/kernel-contracts";
 
 /**
  * The deadline guard, shared verbatim between the generated wrapper and the
@@ -35,6 +39,7 @@ export const BOT_ISOLATE_DEADLINE_SOURCE = `function withIsolateDeadline(work, d
  * the boundary is crossed in both directions and both sides decode.
  */
 export const BOT_ISOLATE_INVOCATION_SOURCE = `var TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+var HOOK_EVENTS = ${JSON.stringify(BOT_ISOLATE_HOOK_EVENTS_V1)};
 var INVOCATION_KEYS = [
   "schemaVersion",
   "tool",
@@ -72,6 +77,42 @@ function decodeInvocation(value) {
     }
   }
   return value;
+}
+var HOOK_INVOCATION_KEYS = [
+  "schemaVersion",
+  "event",
+  "payload",
+  "botId",
+  "sessionId",
+  "runId",
+  "turnId",
+  "generationId",
+  "deadlineMs",
+];
+function decodeHookInvocation(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("isolate hook invocation must be an object");
+  }
+  if (
+    Object.keys(value).length !== HOOK_INVOCATION_KEYS.length ||
+    !HOOK_INVOCATION_KEYS.every(function (key) {
+      return Object.hasOwn(value, key);
+    })
+  ) {
+    throw new Error("isolate hook invocation has invalid fields");
+  }
+  if (value.schemaVersion !== 1 || !HOOK_EVENTS.includes(value.event)) {
+    throw new Error("isolate hook invocation is unsupported");
+  }
+  if (!value.payload || typeof value.payload !== "object" || Array.isArray(value.payload)) {
+    throw new Error("isolate hook invocation payload is invalid");
+  }
+  for (const key of ["botId", "sessionId", "runId", "turnId", "generationId"]) {
+    if (typeof value[key] !== "string" || value[key].length === 0) {
+      throw new Error("isolate hook invocation " + key + " is invalid");
+    }
+  }
+  return value;
 }`;
 
 /** Decodes one NDJSON line of the `invokeModel` byte stream inside the isolate. */
@@ -99,6 +140,86 @@ export const BOT_ISOLATE_MODEL_SOURCE = `async function* modelEvents(stream) {
   }
 }`;
 
+const BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1 = {
+  tool: "invocation.tool",
+  event: "invocation.event",
+  botId: "invocation.botId",
+  sessionId: "invocation.sessionId",
+  runId: "invocation.runId",
+  turnId: "invocation.turnId",
+  generationId: "invocation.generationId",
+  packageId: "env.IDENTITY.packageId",
+  deadlineMs: "invocation.deadlineMs",
+  bindings: "Object.keys(env).sort()",
+  capabilities: `{
+      list: function () {
+        return capabilities.list();
+      },
+    }`,
+  model: `{
+      invoke: async function (request) {
+        const outcome = await capabilities.invokeModel(request);
+        if (!outcome || outcome.status !== "streaming") return outcome;
+        return {
+          status: "streaming",
+          requestId: outcome.requestId,
+          events: modelEvents(outcome.events),
+        };
+      },
+    }`,
+  tools: `{
+      invoke: function (request) {
+        return capabilities.invokeTool(request);
+      },
+    }`,
+  memory: `{
+      read: function (request) {
+        return capabilities.memoryRead(request);
+      },
+      write: function (request) {
+        return capabilities.memoryWrite(request);
+      },
+      forget: function (request) {
+        return capabilities.memoryForget(request);
+      },
+    }`,
+  workspace: `{
+      read: function (path) {
+        return capabilities.workspaceRead(path);
+      },
+      list: function (request) {
+        return capabilities.workspaceList(request);
+      },
+      stat: function (path) {
+        return capabilities.workspaceStat(path);
+      },
+      write: function (request) {
+        return capabilities.workspaceWrite(request);
+      },
+      delete: function (request) {
+        return capabilities.workspaceDelete(request);
+      },
+    }`,
+  connection:
+    "function (connectionId) { return capabilities.connection(connectionId); }",
+  notify: "function (request) { return capabilities.notify(request); }",
+  schedule: "function (request) { return capabilities.schedule(request); }",
+} satisfies Record<keyof BotPackageContextV1, string>;
+
+/** The keys the generated wrapper actually places on `ctx`. */
+export const BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1 = Object.keys(
+  BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1,
+) as Array<keyof BotPackageContextV1>;
+
+export const BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1 = `function narrowContext(env, invocation) {
+  const capabilities = env.CAPABILITIES;
+  return {
+${Object.entries(BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1)
+  .map(([key, source]) => `    ${JSON.stringify(key)}: ${source},`)
+  .join("\n")}
+  };
+}`;
+
 /**
  * The wrapper module text. Content-addressed with `package.js`; bump
  * `BOT_ISOLATE_WRAPPER_VERSION` whenever this string changes so the mounted
@@ -108,7 +229,7 @@ export const BOT_ISOLATE_WRAPPER_SOURCE = `// Generated by @frockbot/kernel-comp
 import { WorkerEntrypoint } from "cloudflare:workers";
 import * as botPackage from "./package.js";
 
-const CONTRACT_VERSION = 2;
+const CONTRACT_VERSION = 3;
 
 ${BOT_ISOLATE_DEADLINE_SOURCE}
 
@@ -155,37 +276,23 @@ function declaredTools() {
   });
 }
 
-function narrowContext(env, invocation) {
-  const capabilities = env.CAPABILITIES;
-  return {
-    tool: invocation.tool,
-    botId: invocation.botId,
-    sessionId: invocation.sessionId,
-    runId: invocation.runId,
-    turnId: invocation.turnId,
-    generationId: invocation.generationId,
-    packageId: env.IDENTITY.packageId,
-    deadlineMs: invocation.deadlineMs,
-    // What this isolate holds, by name. Everything else is out of scope:
-    // globalOutbound is null and no host binding is in env.
-    bindings: Object.keys(env).sort(),
-    listCapabilities: function () {
-      return capabilities.list();
-    },
-    requestAuthority: function (request) {
-      return capabilities.requestAuthority(request);
-    },
-    invokeModel: async function (request) {
-      const outcome = await capabilities.invokeModel(request);
-      if (!outcome || outcome.status !== "streaming") return outcome;
-      return {
-        status: "streaming",
-        requestId: outcome.requestId,
-        events: modelEvents(outcome.events),
-      };
-    },
-  };
+function declaredHooks() {
+  if (botPackage.hooks === undefined) return [];
+  if (!botPackage.hooks || typeof botPackage.hooks !== "object" || Array.isArray(botPackage.hooks)) {
+    throw new Error('package.js "hooks" must be an object');
+  }
+  return Object.keys(botPackage.hooks).map(function (event) {
+    if (!HOOK_EVENTS.includes(event)) {
+      throw new Error('package.js declared an unsupported hook "' + event + '"');
+    }
+    if (typeof botPackage.hooks[event] !== "function") {
+      throw new Error('package.js hook "' + event + '" must be a function');
+    }
+    return event;
+  });
 }
+
+${BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1}
 
 export default class extends WorkerEntrypoint {
   async health() {
@@ -195,6 +302,7 @@ export default class extends WorkerEntrypoint {
       packageId: this.env.IDENTITY.packageId,
       contractVersion: CONTRACT_VERSION,
       tools: declaredTools(),
+      hooks: declaredHooks(),
     };
   }
 
@@ -227,11 +335,26 @@ export default class extends WorkerEntrypoint {
       };
     }
   }
+
+  async hook(rawInvocation) {
+    const invocation = decodeHookInvocation(rawInvocation);
+    const hooks = declaredHooks();
+    if (!hooks.includes(invocation.event)) {
+      throw new Error('package.js did not declare hook "' + invocation.event + '"');
+    }
+    const context = narrowContext(this.env, invocation);
+    const replacement = await withIsolateDeadline(function () {
+      return botPackage.hooks[invocation.event](invocation.payload, context);
+    }, invocation.deadlineMs);
+    return replacement === undefined
+      ? { schemaVersion: 1, status: "unchanged" }
+      : { schemaVersion: 1, status: "replaced", replacement: replacement };
+  }
 }
 `;
 
 /** Bumped with any change to the wrapper text; folded into the loader id. */
-export const BOT_ISOLATE_WRAPPER_VERSION = "wrapper-v2";
+export const BOT_ISOLATE_WRAPPER_VERSION = "wrapper-v4";
 
 export const BOT_ISOLATE_MAIN_MODULE = "index.js";
 export const BOT_ISOLATE_PACKAGE_MODULE = "package.js";

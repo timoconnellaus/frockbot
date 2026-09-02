@@ -13,7 +13,14 @@
  * L2 adds `plugin-mcp` and the connector entries that need it; this seed
  * generation deliberately contains zero MCP connectors.
  *
- *   bun scripts/publish-catalog.ts [--out <dir>]
+ * A User-selected Bot-authored Package may be supplied with
+ * `--published <json>`; its immutable artifact already lives in the shared
+ * Package artifact store, so publication adds only the Catalog entry that
+ * names its exact hash. Delisting omits an entry from a later generation and
+ * moves `catalog/current`; it never deletes an artifact or revokes an
+ * installation that already recorded the old generation.
+ *
+ *   bun scripts/publish-catalog.ts [--out <dir>] [--published <json>]
  */
 import {
   catalogContentHashV1,
@@ -25,6 +32,7 @@ import {
   type CatalogEntryV1,
   type CatalogIndexEntryV1,
   type CatalogIndexV1,
+  type CatalogPackageBundleV1,
   type CatalogPointerV1,
 } from "../packages/catalog-core/src/index.ts";
 import { canonicalJson } from "../packages/kernel-composition/src/compiler.ts";
@@ -34,6 +42,12 @@ export interface CatalogSourcePackage {
   id: string;
   version: string;
   manifest: FrockBotManifest;
+  /** Catalog copy supplied by the User publication action. */
+  catalog?: {
+    description: string;
+    tags?: string[];
+    bundle: Omit<CatalogPackageBundleV1, "manifest">;
+  };
 }
 
 export interface CatalogGenerationFile {
@@ -80,14 +94,21 @@ export async function buildCatalogGeneration(
   const rows: CatalogIndexEntryV1[] = [];
   for (const pkg of [...packages].sort((a, b) => a.id.localeCompare(b.id))) {
     const manifestHash = await contentHash(pkg.manifest);
+    const description = pkg.catalog?.description ?? describe(pkg.manifest);
     const row: CatalogIndexEntryV1 = {
       catalogId: pkg.id,
       packageId: pkg.id,
       displayName: pkg.manifest.displayName,
-      description: describe(pkg.manifest),
+      description,
       version: pkg.version,
       manifestHash,
       kind: "package",
+      ...(pkg.catalog
+        ? {
+            contentHash: pkg.catalog.bundle.contentHash,
+            ...(pkg.catalog.tags ? { tags: pkg.catalog.tags } : {}),
+          }
+        : {}),
     };
     rows.push(row);
     entries.push(
@@ -100,18 +121,27 @@ export async function buildCatalogGeneration(
         version: row.version,
         kind: row.kind,
         manifestHash,
+        ...(pkg.catalog?.tags ? { tags: pkg.catalog.tags } : {}),
         // A first-party Package is not an MCP connector: it declares no
         // server, needs no setup value, and carries no bundled Skill.
         servers: [],
         setupFields: [],
         skills: [],
+        ...(pkg.catalog
+          ? {
+              bundle: {
+                ...pkg.catalog.bundle,
+                manifest: pkg.manifest,
+              },
+            }
+          : {}),
       }),
     );
   }
 
-  // The generation *is* the content hash of what it contains, so an identical
-  // application always republishes to the same immutable key.
-  const generation = `g${(await contentHash(rows)).slice(0, 32)}`;
+  // The generation hashes entry details, not only index rows: an optional
+  // retained source hash and every manifest field are part of what it names.
+  const generation = `g${(await contentHash(entries)).slice(0, 32)}`;
   const index = decodeCatalogIndexV1({
     schemaVersion: 1,
     generation,
@@ -146,10 +176,29 @@ async function main(): Promise<void> {
   const outDirectory =
     outFlag >= 0 ? argv[outFlag + 1] : "apps/cloudflare/dist/catalog";
   if (!outDirectory) throw new Error("--out requires a directory");
+  const publishedFlag = argv.indexOf("--published");
+  const publishedPath =
+    publishedFlag >= 0 ? argv[publishedFlag + 1] : undefined;
+  if (publishedFlag >= 0 && !publishedPath) {
+    throw new Error("--published requires a JSON file");
+  }
   const { compileFoundationApplication } =
     await import("../applications/foundation/src/runtime.ts");
   const plan = await compileFoundationApplication();
-  const built = await buildCatalogGeneration(plan.packages);
+  const published = publishedPath
+    ? (JSON.parse(await Bun.file(publishedPath).text()) as unknown)
+    : [];
+  if (!Array.isArray(published)) {
+    throw new Error("--published must contain a JSON array");
+  }
+  // `buildCatalogGeneration` decodes every emitted entry through catalog-core,
+  // including the real manifest and artifact descriptor. The assertion here
+  // only narrows the script input after JSON parsing; no unvalidated value is
+  // published.
+  const built = await buildCatalogGeneration([
+    ...plan.packages,
+    ...(published as CatalogSourcePackage[]),
+  ]);
   for (const file of built.files) {
     await Bun.write(`${outDirectory}/${file.key}`, file.document);
   }

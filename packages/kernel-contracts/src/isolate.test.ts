@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
-  decodeIsolateAuthorityRequestV1,
   decodeIsolateCapabilityFailureV1,
   decodeIsolateCapabilityListV1,
   decodeIsolateHealthV1,
+  decodeIsolateHookInvocationV1,
+  decodeIsolateHookResultV1,
   decodeIsolateIdentityV1,
   decodeIsolateModelEventV1,
   decodeIsolateModelInvocationV1,
-  decodeIsolatePendingDecisionV1,
+  decodeIsolateScheduleRequestV1,
   decodeIsolateToolDescriptorV1,
   decodeIsolateToolInvocationV1,
   decodeIsolateToolResultV1,
@@ -15,6 +16,7 @@ import {
   isolateLoaderIdV1,
   isolateToolSchemaV1,
   ISOLATE_MAX_DEADLINE_MS,
+  type IsolateHookInvocationV1,
 } from "./isolate.js";
 
 function descriptor(overrides: Record<string, unknown> = {}) {
@@ -161,7 +163,7 @@ describe("isolate health v1", () => {
 
   test("rejects an unsupported contract version", () => {
     expect(() =>
-      decodeIsolateHealthV1({ ...health, contractVersion: 3 }),
+      decodeIsolateHealthV1({ ...health, contractVersion: 4 }),
     ).toThrow(/contractVersion is unsupported/);
     expect(() =>
       decodeIsolateHealthV1({ ...health, contractVersion: 0 }),
@@ -196,6 +198,26 @@ describe("isolate health v1", () => {
     ).toThrow(/invalid fields/);
   });
 
+  test("requires and decodes declared hooks on contract v3", () => {
+    expect(
+      decodeIsolateHealthV1({
+        ...health,
+        contractVersion: 3,
+        hooks: ["agent/tool-exposure", "tools/post-execute"],
+      }).hooks,
+    ).toEqual(["agent/tool-exposure", "tools/post-execute"]);
+    expect(() =>
+      decodeIsolateHealthV1({ ...health, contractVersion: 3 }),
+    ).toThrow(/invalid fields/);
+    expect(() =>
+      decodeIsolateHealthV1({
+        ...health,
+        contractVersion: 3,
+        hooks: ["agent/request"],
+      }),
+    ).toThrow(/hooks\[0\] is invalid/);
+  });
+
   test("rejects an unknown turn type in a v2 descriptor", () => {
     expect(() =>
       decodeIsolateHealthV1({
@@ -220,6 +242,61 @@ describe("isolate health v1", () => {
   });
 });
 
+describe("isolate hook v1", () => {
+  const hookInvocation: IsolateHookInvocationV1<"agent/tool-exposure"> = {
+    schemaVersion: 1,
+    event: "agent/tool-exposure",
+    payload: {
+      step: {
+        botId: "bot-1",
+        agentId: "bot-1",
+        sessionId: "session-1",
+        status: "running",
+        compositionGenerationId: "gen-1",
+        turn: 1,
+        step: 1,
+        turnType: "chat",
+      },
+      tools: [],
+    },
+    botId: "bot-1",
+    sessionId: "session-1",
+    runId: "run-1",
+    turnId: "turn-1",
+    generationId: "gen-1",
+    deadlineMs: 1_000,
+  };
+
+  test("decodes an exact hook invocation and result envelope", () => {
+    expect(decodeIsolateHookInvocationV1(hookInvocation)).toEqual(
+      hookInvocation,
+    );
+    expect(
+      decodeIsolateHookResultV1({
+        schemaVersion: 1,
+        status: "replaced",
+        replacement: [],
+      }),
+    ).toEqual({ schemaVersion: 1, status: "replaced", replacement: [] });
+  });
+
+  test("refuses undeclared events and inexact result envelopes", () => {
+    expect(() =>
+      decodeIsolateHookInvocationV1({
+        ...hookInvocation,
+        event: "agent/request",
+      }),
+    ).toThrow(/event is invalid/);
+    expect(() =>
+      decodeIsolateHookResultV1({
+        schemaVersion: 1,
+        status: "unchanged",
+        replacement: [],
+      }),
+    ).toThrow(/invalid fields/);
+  });
+});
+
 describe("isolate identity and capabilities", () => {
   test("decodes the identity binding", () => {
     expect(
@@ -233,42 +310,79 @@ describe("isolate identity and capabilities", () => {
 
   test("decodes a capability list", () => {
     expect(
-      decodeIsolateCapabilityListV1([
-        { capabilityId: "models:chat", kind: "model" },
-      ]),
-    ).toHaveLength(1);
-  });
-
-  test("rejects an unknown capability kind", () => {
-    expect(() =>
-      decodeIsolateCapabilityListV1([
-        { capabilityId: "models:chat", kind: "network" },
-      ]),
-    ).toThrow(/kind is invalid/);
-  });
-
-  test("decodes an authority request and its pending answer", () => {
-    expect(
-      decodeIsolateAuthorityRequestV1({
-        capabilityId: "models:chat",
-        reason: "translate",
+      decodeIsolateCapabilityListV1({
+        status: "available",
+        connections: [
+          {
+            connectionId: "connection-1",
+            packageId: "provider",
+            connectionTypeId: "account",
+            displayName: "Account",
+            generation: "generation-1",
+            safeMetadata: { region: "au" },
+          },
+        ],
+        model: {
+          connectionId: "connection-1",
+          packageId: "provider",
+          provider: "provider",
+          providerModelId: "model-1",
+          connectionGeneration: "generation-1",
+        },
+        tools: true,
+        memory: true,
+        workspace: false,
+        notify: true,
+        schedule: true,
       }),
-    ).toEqual({ capabilityId: "models:chat", reason: "translate" });
-    expect(
-      decodeIsolatePendingDecisionV1({
-        status: "pending-user-decision",
-        decisionId: "decision-1",
-      }).decisionId,
-    ).toBe("decision-1");
+    ).toMatchObject({
+      status: "available",
+      connections: [{ connectionId: "connection-1" }],
+      tools: true,
+      memory: true,
+      workspace: false,
+      notify: true,
+      schedule: true,
+    });
   });
 
-  test("refuses to decode a grant as a decision", () => {
+  test("rejects authority fields outside the Bot authority contract", () => {
     expect(() =>
-      decodeIsolatePendingDecisionV1({
-        status: "granted",
-        decisionId: "decision-1",
+      decodeIsolateCapabilityListV1({
+        status: "available",
+        connections: [],
+        tools: true,
+        memory: true,
+        workspace: true,
+        notify: true,
+        schedule: true,
+        packageId: "package-local-authority",
       }),
-    ).toThrow(/pending-user-decision/);
+    ).toThrow(/invalid fields/);
+  });
+});
+
+describe("isolate schedule request v1", () => {
+  test("decodes the durable Routine input and call id", () => {
+    expect(
+      decodeIsolateScheduleRequestV1({
+        callId: "schedule-1",
+        input: { action: "create", schedule: "@daily" },
+      }),
+    ).toEqual({
+      callId: "schedule-1",
+      input: { action: "create", schedule: "@daily" },
+    });
+  });
+
+  test("rejects an undeclared field", () => {
+    expect(() =>
+      decodeIsolateScheduleRequestV1({
+        callId: "schedule-1",
+        input: {},
+        packageId: "package-local-authority",
+      }),
+    ).toThrow(/invalid fields/);
   });
 });
 
@@ -314,13 +428,16 @@ describe("isolate model invocation v1", () => {
     if (outcome.status === "streaming") expect(outcome.events).toBe(events);
   });
 
-  test("decodes a pending decision outcome", () => {
+  test("decodes an unavailable outcome when no model is configured", () => {
     expect(
       decodeIsolateModelInvocationV1({
-        status: "pending-user-decision",
-        decisionId: "decision-9",
+        status: "unavailable",
+        reason: "this Bot has no configured model",
       }),
-    ).toEqual({ status: "pending-user-decision", decisionId: "decision-9" });
+    ).toEqual({
+      status: "unavailable",
+      reason: "this Bot has no configured model",
+    });
   });
 
   test("rejects a streaming outcome without a stream", () => {
@@ -368,7 +485,7 @@ describe("isolate capability failure v1", () => {
 });
 
 describe("isolate loader identity", () => {
-  test("is the User and the content address — nothing else", () => {
+  test("is the User and binding-addressed module set — nothing else", () => {
     expect(
       isolateLoaderIdV1({
         userId: "user-1",
@@ -377,25 +494,24 @@ describe("isolate loader identity", () => {
     ).toBe(`bot-package:user-1:${"a".repeat(64)}`);
   });
 
-  test("two Users never share an id", () => {
-    const hash = "b".repeat(64);
+  test("different binding digests produce different ids", () => {
     expect(
       isolateLoaderIdV1({
         userId: "user-1",
-        artifactSetHash: hash,
+        artifactSetHash: "b".repeat(64),
       }),
     ).not.toBe(
       isolateLoaderIdV1({
-        userId: "user-2",
-        artifactSetHash: hash,
+        userId: "user-1",
+        artifactSetHash: "c".repeat(64),
       }),
     );
   });
 
-  test("rejects a component that could forge another User's id", () => {
+  test("rejects a component that could forge another Bot's id", () => {
     expect(() =>
       isolateLoaderIdV1({
-        userId: "user-1:other",
+        userId: "user-1:bot-2",
         artifactSetHash: "c".repeat(64),
       }),
     ).toThrow(/components are invalid/);

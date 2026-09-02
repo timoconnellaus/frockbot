@@ -23,9 +23,11 @@ import {
   type WebChatMessage,
   type WebTaskChip,
   type WebToolAttachment,
+  type WebToolActivity,
 } from "../shared.js";
 import { ComposerDraftStore } from "./composer-draft.js";
 import SendPayloadView from "./SendPayloadView.vue";
+import PackageIframeHost from "./PackageIframeHost.vue";
 import type { ClientSkillCatalogEntryV1 } from "../skill-protocol.js";
 import {
   nextSkillHighlightV1,
@@ -189,6 +191,30 @@ function attachmentsOf(message: WebChatMessage): WebToolAttachment[] {
   return message.tools.flatMap((tool) => tool.attachments ?? []);
 }
 
+function iframeEntriesFor(tool: WebToolActivity) {
+  const slot = `frockbot.tool-result:${tool.name}`;
+  return (state.value.packageUi?.contributions ?? [])
+    .flatMap((contribution) =>
+      contribution.mounts
+        .filter((mount) => mount.slot === slot)
+        .map((mount) => ({ contribution, slot, order: mount.order ?? 0 })),
+    )
+    .sort(
+      (left, right) =>
+        left.order - right.order ||
+        left.contribution.packageId.localeCompare(right.contribution.packageId),
+    );
+}
+
+function toolResultState(tool: WebToolActivity): unknown {
+  if (tool.text === undefined) return { status: tool.status };
+  try {
+    return JSON.parse(tool.text) as unknown;
+  } catch {
+    return { content: tool.text, isError: tool.status === "failed" };
+  }
+}
+
 /** The Workspace read route for one encoded `WorkspacePathV1`. */
 function workspaceFileUrl(path: string): string {
   const botId = state.value.activeBotId ?? "";
@@ -251,6 +277,7 @@ function isVisible(message: WebChatMessage): boolean {
   // visible act was dispatching a subagent.
   return (
     message.text.length > 0 ||
+    message.tools.some((tool) => iframeEntriesFor(tool).length > 0) ||
     message.sends.length > 0 ||
     (message.tasks?.length ?? 0) > 0 ||
     message.status === "streaming"
@@ -687,6 +714,17 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               <div v-if="message.text" class="message-bubble">
                 <UiMarkdown :text="message.text" />
               </div>
+              <template v-for="tool in message.tools" :key="tool.id">
+                <PackageIframeHost
+                  v-for="entry in iframeEntriesFor(tool)"
+                  :key="`${tool.id}:${entry.contribution.packageId}`"
+                  class="message-package-iframe"
+                  :contribution="entry.contribution"
+                  :slot="entry.slot"
+                  :state-name="`tool:${tool.name}`"
+                  :state-value="toolResultState(tool)"
+                />
+              </template>
               <!--
                 A binary a tool filed in the Workspace, drawn from the
                 Workspace read route. The thread carries the path, never the

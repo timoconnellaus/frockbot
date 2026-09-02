@@ -28,6 +28,9 @@ const PUBLIC_ASSET_PATHS = new Set([
   "/app.css",
   "/favicon.ico",
 ]);
+const PACKAGE_UI_PATH = /^\/packages\/([0-9a-f]{64})\.html$/;
+export const PACKAGE_UI_CSP =
+  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'";
 export const SIGNUPS_CLOSED_MESSAGE =
   "FrockBot isn't taking new signups right now.";
 
@@ -45,6 +48,44 @@ export function applicationDeploymentId(
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
+}
+
+/** Anonymous immutable artifact route. A configured UI host serves nothing else. */
+export async function servePackageUiArtifact(
+  request: Request,
+  url: URL,
+  artifacts: GatewayDependencies["artifacts"],
+): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return jsonError(405, "method not allowed");
+  }
+  const match = url.pathname.match(PACKAGE_UI_PATH);
+  if (!match) return jsonError(404, "UI artifact was not found");
+  if (!artifacts.loadPackageUiArtifact) {
+    return jsonError(503, "Package UI artifacts are not configured");
+  }
+  const contentHash = match[1]!;
+  let html: string | undefined;
+  try {
+    html = await artifacts.loadPackageUiArtifact(contentHash);
+  } catch {
+    return jsonError(502, "UI artifact failed verification");
+  }
+  if (html === undefined) return jsonError(404, "UI artifact was not found");
+  const etag = `"${contentHash}"`;
+  const headers = {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "public, max-age=31536000, immutable",
+    "content-security-policy": PACKAGE_UI_CSP,
+    "cross-origin-resource-policy": "cross-origin",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    etag,
+  };
+  if (request.headers.get("if-none-match") === etag) {
+    return new Response(null, { status: 304, headers });
+  }
+  return new Response(request.method === "HEAD" ? null : html, { headers });
 }
 
 function signupClosedResponse(request: Request, url: URL): Response {
@@ -576,6 +617,10 @@ export function createGateway(dependencies: GatewayDependencies) {
       url = new URL(request.url);
     } catch {
       return jsonError(400, "invalid request URL");
+    }
+
+    if (dependencies.uiArtifactHosts?.includes(url.hostname)) {
+      return servePackageUiArtifact(request, url, dependencies.artifacts);
     }
 
     const origin = allowedClientOrigin(
