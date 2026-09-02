@@ -39,6 +39,22 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => root.fiber.dispose()));
 });
 
+test("a Bot-isolate hook failure is an exact durable session event", () => {
+  const event = {
+    type: "package/hook-failed",
+    packageId: "bot-authored",
+    event: "agent/tool-exposure",
+    generationId: "gen-1",
+    message: "hook exploded",
+    seq: 0,
+    timestamp,
+  } as const;
+  expect(decodeSessionEvent(event)).toEqual(event);
+  expect(() => decodeSessionEvent({ ...event, retry: true })).toThrow(
+    /invalid fields/,
+  );
+});
+
 describe("SessionStore", () => {
   test("accepts resumable tool crash states only while their step is open", () => {
     const assistant = [

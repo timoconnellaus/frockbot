@@ -4,6 +4,8 @@ import {
   decodeIsolateCapabilityFailureV1,
   decodeIsolateCapabilityListV1,
   decodeIsolateHealthV1,
+  decodeIsolateHookInvocationV1,
+  decodeIsolateHookResultV1,
   decodeIsolateIdentityV1,
   decodeIsolateModelEventV1,
   decodeIsolateModelInvocationV1,
@@ -15,6 +17,7 @@ import {
   isolateLoaderIdV1,
   isolateToolSchemaV1,
   ISOLATE_MAX_DEADLINE_MS,
+  type IsolateHookInvocationV1,
 } from "./isolate.js";
 
 function descriptor(overrides: Record<string, unknown> = {}) {
@@ -161,7 +164,7 @@ describe("isolate health v1", () => {
 
   test("rejects an unsupported contract version", () => {
     expect(() =>
-      decodeIsolateHealthV1({ ...health, contractVersion: 3 }),
+      decodeIsolateHealthV1({ ...health, contractVersion: 4 }),
     ).toThrow(/contractVersion is unsupported/);
     expect(() =>
       decodeIsolateHealthV1({ ...health, contractVersion: 0 }),
@@ -196,6 +199,26 @@ describe("isolate health v1", () => {
     ).toThrow(/invalid fields/);
   });
 
+  test("requires and decodes declared hooks on contract v3", () => {
+    expect(
+      decodeIsolateHealthV1({
+        ...health,
+        contractVersion: 3,
+        hooks: ["agent/tool-exposure", "tools/post-execute"],
+      }).hooks,
+    ).toEqual(["agent/tool-exposure", "tools/post-execute"]);
+    expect(() =>
+      decodeIsolateHealthV1({ ...health, contractVersion: 3 }),
+    ).toThrow(/invalid fields/);
+    expect(() =>
+      decodeIsolateHealthV1({
+        ...health,
+        contractVersion: 3,
+        hooks: ["agent/request"],
+      }),
+    ).toThrow(/hooks\[0\] is invalid/);
+  });
+
   test("rejects an unknown turn type in a v2 descriptor", () => {
     expect(() =>
       decodeIsolateHealthV1({
@@ -217,6 +240,61 @@ describe("isolate health v1", () => {
     expect(() =>
       decodeIsolateHealthV1({ ...health, tools: [descriptor(), descriptor()] }),
     ).toThrow(/duplicate names/);
+  });
+});
+
+describe("isolate hook v1", () => {
+  const hookInvocation: IsolateHookInvocationV1<"agent/tool-exposure"> = {
+    schemaVersion: 1,
+    event: "agent/tool-exposure",
+    payload: {
+      step: {
+        botId: "bot-1",
+        agentId: "bot-1",
+        sessionId: "session-1",
+        status: "running",
+        compositionGenerationId: "gen-1",
+        turn: 1,
+        step: 1,
+        turnType: "chat",
+      },
+      tools: [],
+    },
+    botId: "bot-1",
+    sessionId: "session-1",
+    runId: "run-1",
+    turnId: "turn-1",
+    generationId: "gen-1",
+    deadlineMs: 1_000,
+  };
+
+  test("decodes an exact hook invocation and result envelope", () => {
+    expect(decodeIsolateHookInvocationV1(hookInvocation)).toEqual(
+      hookInvocation,
+    );
+    expect(
+      decodeIsolateHookResultV1({
+        schemaVersion: 1,
+        status: "replaced",
+        replacement: [],
+      }),
+    ).toEqual({ schemaVersion: 1, status: "replaced", replacement: [] });
+  });
+
+  test("refuses undeclared events and inexact result envelopes", () => {
+    expect(() =>
+      decodeIsolateHookInvocationV1({
+        ...hookInvocation,
+        event: "agent/request",
+      }),
+    ).toThrow(/event is invalid/);
+    expect(() =>
+      decodeIsolateHookResultV1({
+        schemaVersion: 1,
+        status: "unchanged",
+        replacement: [],
+      }),
+    ).toThrow(/invalid fields/);
   });
 });
 

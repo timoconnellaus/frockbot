@@ -137,6 +137,18 @@ drives (`WORKSPACE_SYNC_SERVICE` in `packages/plugin-fly-sprite/src/computer.ts`
 | — recovery reads that outcome instead of repeating the effect                                                             | `apps/cloudflare/test/computer-sync.workerd.ts` | `an interrupted push is adopted after eviction, never written twice`                      | workerd |
 | — the deployed push mirrors a shell-written file unattributed, inside an admitted Turn                                    | `apps/cloudflare/test/computer-sync.workerd.ts` | `a Turn's push writes the Bot's own instruction root, unattributed`                       | workerd |
 
+## Bot-authored loop hooks
+
+Rows for `docs/plans/bot-driven-change.md` Slice 4. The workerd checks cross
+the real Worker Loader boundary; the Bun guard check fixes the in-process
+ordering independently.
+
+| Constitutional check                                                                       | File                                          | Test name                                                                                     | Runner  |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------- | --------------------------------------------------------------------------------------------- | ------- |
+| a Bot-authored hook alters one step's tool list and the log reconstructs the exact request | `apps/cloudflare/test/bot-isolate.workerd.ts` | `a Bot-authored hook shapes one step and the log equals the provider request`                 | workerd |
+| a hook that throws or times out is skipped and recorded                                    | `apps/cloudflare/test/bot-isolate.workerd.ts` | `a hook that throws is skipped and recorded`, `a hook that times out is skipped and recorded` | workerd |
+| a deny-only guard cannot be lifted by a later listener                                     | `packages/plugin-tools/src/tools.test.ts`     | `deny-only guards run after pre-execute and cannot be lifted`                                 | Bun     |
+
 ## Memory
 
 Rows for `docs/plans/slice-2.md` Step 3 — the Memory Package

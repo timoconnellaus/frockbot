@@ -1,4 +1,9 @@
-import { decodeTurnTypeV1, type TurnTypeV1 } from "@frockbot/kernel-contracts";
+import {
+  isBotIsolateHookEventNameV1,
+  decodeTurnTypeV1,
+  type BotIsolateHookEventNameV1,
+  type TurnTypeV1,
+} from "@frockbot/kernel-contracts";
 
 /** The Contribution kinds a Package manifest can declare. */
 export type ManifestContributionKind =
@@ -150,6 +155,8 @@ export interface FrockBotManifest {
   configuration?: PackageConfiguration;
   /** Present exactly when `contributions.runtime.host` is `bot-isolate`. */
   tools?: ManifestToolDeclaration[];
+  /** Bot-isolate waterfalls the immutable artifact declares it exports. */
+  hooks?: BotIsolateHookEventNameV1[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -231,6 +238,25 @@ function decodeManifestTools(
     throw new Error("manifest tools contains duplicate names");
   }
   return tools;
+}
+
+function decodeManifestHooks(
+  value: unknown,
+): BotIsolateHookEventNameV1[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 16) {
+    throw new Error("manifest hooks must be a non-empty bounded array");
+  }
+  const hooks = value.map((hook, index) => {
+    if (!isBotIsolateHookEventNameV1(hook)) {
+      throw new Error(`manifest hooks[${index}] is invalid`);
+    }
+    return hook;
+  });
+  if (new Set(hooks).size !== hooks.length) {
+    throw new Error("manifest hooks contains duplicates");
+  }
+  return hooks;
 }
 
 function requiredString(record: Record<string, unknown>, key: string): string {
@@ -1227,17 +1253,22 @@ function decodeConfiguration(
 function decodeV3(value: Record<string, unknown>): FrockBotManifest {
   const base = decodeV2(value);
   const tools = decodeManifestTools(value.tools);
+  const hooks = decodeManifestHooks(value.hooks);
   const botIsolate = base.contributions.runtime?.host === "bot-isolate";
   if (botIsolate !== (tools !== undefined)) {
     throw new Error(
       "manifest bot-isolate runtime and tools declaration must appear together",
     );
   }
+  if (!botIsolate && hooks !== undefined) {
+    throw new Error("manifest hooks require a bot-isolate runtime");
+  }
   return {
     ...base,
     schemaVersion: 3,
     configuration: decodeConfiguration(value.configuration, false),
     ...(tools ? { tools } : {}),
+    ...(hooks ? { hooks } : {}),
   };
 }
 
@@ -1245,17 +1276,22 @@ function decodeV3(value: Record<string, unknown>): FrockBotManifest {
 function decodeV4(value: Record<string, unknown>): FrockBotManifest {
   const base = decodeV2(value);
   const tools = decodeManifestTools(value.tools);
+  const hooks = decodeManifestHooks(value.hooks);
   const botIsolate = base.contributions.runtime?.host === "bot-isolate";
   if (botIsolate !== (tools !== undefined)) {
     throw new Error(
       "manifest bot-isolate runtime and tools declaration must appear together",
     );
   }
+  if (!botIsolate && hooks !== undefined) {
+    throw new Error("manifest hooks require a bot-isolate runtime");
+  }
   return {
     ...base,
     schemaVersion: 4,
     configuration: decodeConfiguration(value.configuration, true),
     ...(tools ? { tools } : {}),
+    ...(hooks ? { hooks } : {}),
   };
 }
 
@@ -1294,6 +1330,7 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
         "contributions",
         ...(isV3OrLater(value) ? ["configuration"] : []),
         ...(isV3OrLater(value) ? ["tools"] : []),
+        ...(isV3OrLater(value) ? ["hooks"] : []),
       ],
       "manifest",
     );

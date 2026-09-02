@@ -12,14 +12,23 @@
 // and a reused loader id silently serves the first code, so the id is nothing
 // but the content address of the module set actually mounted.
 import {
+  decodeBotIsolateHookReplacementV1,
   decodeIsolateHealthV1,
+  decodeIsolateHookResultV1,
   decodeIsolateToolResultV1,
   isolateToolSchemaV1,
   ISOLATE_MAX_DEADLINE_MS,
   isolateLoaderIdV1,
   type BotCapabilitiesStub,
   type BotIsolateEntrypoint,
+  type BotIsolateHookEventNameV1,
   type IsolateHealthV1,
+  type IsolateHookInvocationV1,
+  type LoopAgentRuntimeV1,
+  type LoopEventPayloadMapV1,
+  type LoopEventReturnMapV1,
+  type LoopStepSnapshotV1,
+  loopToolExecutionContextSnapshotV1,
   type IsolateToolDescriptorV1,
   type IsolateToolInvocationV1,
   type ToolDefinition,
@@ -28,6 +37,7 @@ import {
   type ToolRegistration,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
+import type { Context } from "cordis";
 import { CompositionMountFailureError } from "./activation.ts";
 import { canonicalJson, sha256 } from "./compiler.ts";
 import type { CompositionMemberV1 } from "./generation.ts";
@@ -82,12 +92,18 @@ export interface BotIsolateHostOptions {
   artifacts: BotIsolateArtifactStore;
   /** Where the isolate's tools are registered — the kernel's tool surface. */
   tools: Pick<ToolRegistration, "register">;
+  /** The mounted Bot/generation root. Isolate hook listeners live only here. */
+  loop: Context;
   userId: string;
   botId: string;
   sessionId: string;
   runId: string;
   turnId: string;
   generationId: string;
+  turnType: TurnTypeV1;
+  subagentRole?: string;
+  /** Persists a visible failure without letting a broken hook wedge the loop. */
+  recordHookFailure(failure: IsolateHookFailureV1): Promise<void>;
   /**
    * The loopback service binding minted with
    * `ctx.exports.BotCapabilities({ props })`. Opaque to the kernel: it only
@@ -108,6 +124,13 @@ export interface BotIsolateHostOptions {
   deadlineMs?: number;
   /** Verification deadline: an isolate that never answers `health()` fails closed. */
   healthDeadlineMs?: number;
+}
+
+export interface IsolateHookFailureV1 {
+  packageId: string;
+  event: BotIsolateHookEventNameV1;
+  generationId: string;
+  message: string;
 }
 
 export const BOT_ISOLATE_DEFAULT_LIMITS: BotIsolateLimits = {
@@ -314,6 +337,21 @@ export class BotIsolateContributionHost implements ContributionHost {
         ],
       );
     }
+    const declaredHooks = (pkg.manifest.hooks ?? []).toSorted();
+    const reportedHooks = (health.hooks ?? []).toSorted();
+    if (
+      declaredHooks.length !== reportedHooks.length ||
+      declaredHooks.some((name, index) => name !== reportedHooks[index])
+    ) {
+      throw new CompositionMountFailureError(
+        "health",
+        `package "${packageId}" isolate hooks do not match its stored manifest`,
+        [
+          `declared:${declaredHooks.join(",")}`,
+          `reported:${reportedHooks.join(",")}`,
+        ],
+      );
+    }
 
     let disposed = false;
     const registered: (() => void)[] = [];
@@ -340,6 +378,9 @@ export class BotIsolateContributionHost implements ContributionHost {
               options,
             ),
           );
+        }
+        for (const event of health.hooks ?? []) {
+          registered.push(this.registerHook(packageId, entrypoint, event));
         }
         return Promise.resolve({
           dispose: () => {
@@ -393,6 +434,222 @@ export class BotIsolateContributionHost implements ContributionHost {
         limits,
       }),
     );
+  }
+
+  private agentSnapshot(agent: LoopAgentRuntimeV1) {
+    return {
+      botId: agent.botId,
+      agentId: agent.id,
+      sessionId: agent.session.id,
+      status: agent.status,
+    } as const;
+  }
+
+  private stepSnapshot(
+    agent: LoopAgentRuntimeV1,
+    turn: number,
+    step: number,
+  ): LoopStepSnapshotV1 {
+    return {
+      ...this.agentSnapshot(agent),
+      compositionGenerationId: this.options.generationId,
+      turn,
+      step,
+      turnType: this.options.turnType,
+      ...(this.options.subagentRole === undefined
+        ? {}
+        : { subagentRole: this.options.subagentRole }),
+    };
+  }
+
+  private registerHook(
+    packageId: string,
+    entrypoint: BotIsolateEntrypoint,
+    event: BotIsolateHookEventNameV1,
+  ): () => void {
+    const root = this.options.loop;
+    switch (event) {
+      case "agent/pre-step":
+        return root.on(event, async (agent, _inputs, turn, step, next) => {
+          const current = await next();
+          if (agent.botId !== this.options.botId) return current;
+          return this.invokeHook(
+            packageId,
+            entrypoint,
+            event,
+            {
+              step: this.stepSnapshot(agent, turn, step),
+              inputs: current.kind === "enter" ? current.inputs : _inputs,
+              decision: current,
+            },
+            current,
+          );
+        });
+      case "system-prompt/assemble":
+        return root.on(event, async (context, next) => {
+          const current = await next();
+          return this.invokeHook(
+            packageId,
+            entrypoint,
+            event,
+            { context: structuredClone(context), assembly: current },
+            current,
+          );
+        });
+      case "agent/message-window":
+        return root.on(
+          event,
+          async (agent, _messages, turn, step, signal, next) => {
+            const current = await next();
+            if (agent.botId !== this.options.botId) return current;
+            return this.invokeHook(
+              packageId,
+              entrypoint,
+              event,
+              {
+                step: this.stepSnapshot(agent, turn, step),
+                messages: current,
+              },
+              current,
+              signal,
+            );
+          },
+        );
+      case "agent/tool-exposure":
+        return root.on(
+          event,
+          async (agent, _tools, turn, step, signal, next) => {
+            const current = await next();
+            if (agent.botId !== this.options.botId) return current;
+            return this.invokeHook(
+              packageId,
+              entrypoint,
+              event,
+              { step: this.stepSnapshot(agent, turn, step), tools: current },
+              current,
+              signal,
+            );
+          },
+        );
+      case "tools/pre-execute":
+        return root.on(event, async (call, context, next) => {
+          const current = await next();
+          if (
+            context.botId !== this.options.botId ||
+            context.compositionGenerationId !== this.options.generationId
+          ) {
+            return current;
+          }
+          return this.invokeHook(
+            packageId,
+            entrypoint,
+            event,
+            {
+              call,
+              context: loopToolExecutionContextSnapshotV1(context),
+              preparation: current,
+            },
+            current,
+            context.signal,
+          );
+        });
+      case "tools/post-execute":
+        return root.on(event, async (call, _result, context, next) => {
+          const current = await next();
+          if (
+            context.botId !== this.options.botId ||
+            context.compositionGenerationId !== this.options.generationId
+          ) {
+            return current;
+          }
+          return this.invokeHook(
+            packageId,
+            entrypoint,
+            event,
+            {
+              call,
+              context: loopToolExecutionContextSnapshotV1(context),
+              result: current,
+            },
+            current,
+            context.signal,
+          );
+        });
+      case "agent/step-continuation":
+        return root.on(
+          event,
+          async (agent, _decision, turn, step, signal, next) => {
+            const current = await next();
+            if (agent.botId !== this.options.botId) return current;
+            return this.invokeHook(
+              packageId,
+              entrypoint,
+              event,
+              {
+                step: this.stepSnapshot(agent, turn, step),
+                decision: current,
+              },
+              current,
+              signal,
+            );
+          },
+        );
+    }
+  }
+
+  private async invokeHook<Event extends BotIsolateHookEventNameV1>(
+    packageId: string,
+    entrypoint: BotIsolateEntrypoint,
+    event: Event,
+    payload: LoopEventPayloadMapV1[Event],
+    original: LoopEventReturnMapV1[Event],
+    signal?: AbortSignal,
+  ): Promise<LoopEventReturnMapV1[Event]> {
+    const deadlineMs = Math.min(
+      this.options.deadlineMs ?? BOT_ISOLATE_DEFAULT_DEADLINE_MS,
+      ISOLATE_MAX_DEADLINE_MS,
+    );
+    try {
+      const invocation: IsolateHookInvocationV1<Event> = {
+        schemaVersion: 1,
+        event,
+        payload: structuredClone(payload),
+        botId: this.options.botId,
+        sessionId: this.options.sessionId,
+        runId: this.options.runId,
+        turnId: this.options.turnId,
+        generationId: this.options.generationId,
+        deadlineMs,
+      };
+      const result = decodeIsolateHookResultV1(
+        await raceDeadline(
+          () => entrypoint.hook(invocation),
+          deadlineMs,
+          signal,
+        ),
+        `package "${packageId}" isolate hook result`,
+      );
+      if (result.status === "unchanged") return original;
+      return decodeBotIsolateHookReplacementV1(
+        event,
+        result.replacement,
+        original,
+      );
+    } catch (error) {
+      const message = errorMessage(error).slice(0, 2_048);
+      try {
+        await this.options.recordHookFailure({
+          packageId,
+          event,
+          generationId: this.options.generationId,
+          message,
+        });
+      } catch {
+        // Failure recording is itself an external durability boundary. A
+        // broken hook still cannot wedge the loop if that boundary is down.
+      }
+      return original;
+    }
   }
 
   private definition(

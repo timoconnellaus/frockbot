@@ -32,6 +32,9 @@ import type {
   ToolSchema,
   TurnTypeV1,
 } from "./types.js";
+import { decodeNormalizedModelRequestV1 } from "./types.js";
+import type { Session } from "./session.js";
+import { decodeSkillRefsV1, type SkillRefV1 } from "./skills.js";
 
 export type LoopEventDispatchModeV1 = "waterfall" | "serial" | "emit";
 
@@ -42,6 +45,14 @@ export interface LoopAgentSnapshotV1 {
   agentId: string;
   sessionId: string;
   status: LoopAgentStatusV1;
+}
+
+/** The live in-process projection used only by first-party Cordis listeners. */
+export interface LoopAgentRuntimeV1 {
+  readonly id: string;
+  readonly botId: string;
+  readonly session: Session;
+  readonly status: LoopAgentStatusV1;
 }
 
 export interface LoopStepSnapshotV1 extends LoopAgentSnapshotV1 {
@@ -55,7 +66,7 @@ export interface LoopStepSnapshotV1 extends LoopAgentSnapshotV1 {
 export interface LoopAgentInputV1 {
   messageId: string;
   text: string;
-  skills?: Array<{ owner: "bot" | "user"; name: string }>;
+  skills?: SkillRefV1[];
 }
 
 export type LoopPreStepDecisionV1 =
@@ -226,6 +237,277 @@ export function isBotIsolateHookEventNameV1(
   return BOT_ISOLATE_HOOK_EVENTS_V1.some((event) => event === value);
 }
 
+function hookRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function hookExactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+  label: string,
+): void {
+  const allowed = new Set([...required, ...optional]);
+  if (
+    !required.every((key) => Object.hasOwn(value, key)) ||
+    !Object.keys(value).every((key) => allowed.has(key))
+  ) {
+    throw new Error(`${label} has invalid fields`);
+  }
+}
+
+function hookString(
+  value: unknown,
+  label: string,
+  maximum = 1_000_000,
+  allowEmpty = false,
+): string {
+  if (
+    typeof value !== "string" ||
+    (!allowEmpty && value.length === 0) ||
+    value.length > maximum
+  ) {
+    throw new Error(`${label} must be a bounded string`);
+  }
+  return value;
+}
+
+function decodeHookCall(value: unknown, label: string): ToolCall {
+  const call = hookRecord(value, label);
+  hookExactKeys(call, ["id", "name", "input"], [], label);
+  // Reuse the normalized request decoder's exact ToolCall and JSON checks.
+  const decoded = decodeNormalizedModelRequestV1(
+    {
+      requestId: "hook-decode",
+      provider: "hook-decode",
+      model: "hook-decode",
+      system: "",
+      messages: [{ role: "assistant", content: "", toolCalls: [call] }],
+      tools: [],
+    },
+    label,
+  );
+  return (decoded.messages[0] as { toolCalls: ToolCall[] }).toolCalls[0]!;
+}
+
+function decodeHookResult(value: unknown, label: string): ToolExecutionResult {
+  const result = hookRecord(value, label);
+  hookExactKeys(
+    result,
+    ["content", "isError"],
+    ["endsTurn", "attachments"],
+    label,
+  );
+  if (typeof result.isError !== "boolean") {
+    throw new Error(`${label}.isError must be a boolean`);
+  }
+  if (result.endsTurn !== undefined && typeof result.endsTurn !== "boolean") {
+    throw new Error(`${label}.endsTurn must be a boolean`);
+  }
+  const decoded = decodeNormalizedModelRequestV1(
+    {
+      requestId: "hook-decode",
+      provider: "hook-decode",
+      model: "hook-decode",
+      system: "",
+      messages: [
+        {
+          role: "tool",
+          callId: "hook-decode",
+          name: "hook_decode",
+          content: result.content,
+          isError: result.isError,
+          ...(result.attachments === undefined
+            ? {}
+            : { attachments: result.attachments }),
+        },
+      ],
+      tools: [],
+    },
+    label,
+  );
+  const message = decoded.messages[0] as Extract<LlmMessage, { role: "tool" }>;
+  return {
+    content: hookString(message.content, `${label}.content`, 1_000_000, true),
+    isError: message.isError,
+    ...(result.endsTurn === undefined
+      ? {}
+      : { endsTurn: result.endsTurn as boolean }),
+    ...(message.attachments === undefined
+      ? {}
+      : { attachments: message.attachments }),
+  };
+}
+
+function decodeHookInputs(value: unknown, label: string): LoopAgentInputV1[] {
+  if (!Array.isArray(value) || value.length > 256) {
+    throw new Error(`${label} must be a bounded array`);
+  }
+  return value.map((input, index) => {
+    const itemLabel = `${label}[${index}]`;
+    const item = hookRecord(input, itemLabel);
+    hookExactKeys(item, ["messageId", "text"], ["skills"], itemLabel);
+    const skills = item.skills;
+    if (skills !== undefined && !Array.isArray(skills)) {
+      throw new Error(`${itemLabel}.skills must be an array`);
+    }
+    const decodedSkills =
+      skills === undefined
+        ? undefined
+        : decodeSkillRefsV1(skills, `${itemLabel}.skills`);
+    return {
+      messageId: hookString(item.messageId, `${itemLabel}.messageId`, 256),
+      text: hookString(item.text, `${itemLabel}.text`, 1_000_000, true),
+      ...(decodedSkills === undefined ? {} : { skills: decodedSkills }),
+    };
+  });
+}
+
+function sameHookCall(left: ToolCall, right: ToolCall): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** Exact, event-specific decoding for an untrusted isolate replacement. */
+export function decodeBotIsolateHookReplacementV1<
+  Event extends BotIsolateHookEventNameV1,
+>(
+  event: Event,
+  input: unknown,
+  original: LoopEventReturnMapV1[Event],
+): LoopEventReturnMapV1[Event] {
+  const label = `isolate hook ${event} replacement`;
+  let decoded: LoopEventReturnMapV1[BotIsolateHookEventNameV1];
+  switch (event) {
+    case "agent/pre-step": {
+      const decision = hookRecord(input, label);
+      if (decision.kind === "enter") {
+        hookExactKeys(decision, ["kind", "inputs"], [], label);
+        decoded = {
+          kind: "enter",
+          inputs: decodeHookInputs(decision.inputs, `${label}.inputs`),
+        };
+        break;
+      }
+      hookExactKeys(decision, ["kind", "reason"], [], label);
+      if (decision.kind !== "reject") {
+        throw new Error(`${label}.kind is invalid`);
+      }
+      decoded = {
+        kind: "reject",
+        reason: hookString(decision.reason, `${label}.reason`, 2_048),
+      };
+      break;
+    }
+    case "system-prompt/assemble": {
+      const assembly = hookRecord(input, label);
+      hookExactKeys(assembly, ["text", "sections"], [], label);
+      if (!Array.isArray(assembly.sections) || assembly.sections.length > 256) {
+        throw new Error(`${label}.sections must be a bounded array`);
+      }
+      decoded = {
+        text: hookString(assembly.text, `${label}.text`, 1_000_000, true),
+        sections: assembly.sections.map((section, index) => {
+          const sectionLabel = `${label}.sections[${index}]`;
+          const item = hookRecord(section, sectionLabel);
+          hookExactKeys(item, ["id", "text"], [], sectionLabel);
+          return {
+            id: hookString(item.id, `${sectionLabel}.id`, 256),
+            text: hookString(
+              item.text,
+              `${sectionLabel}.text`,
+              1_000_000,
+              true,
+            ),
+          };
+        }),
+      };
+      break;
+    }
+    case "agent/message-window": {
+      decoded = decodeNormalizedModelRequestV1(
+        {
+          requestId: "hook-decode",
+          provider: "hook-decode",
+          model: "hook-decode",
+          system: "",
+          messages: input,
+          tools: [],
+        },
+        label,
+      ).messages;
+      break;
+    }
+    case "agent/tool-exposure": {
+      decoded = decodeNormalizedModelRequestV1(
+        {
+          requestId: "hook-decode",
+          provider: "hook-decode",
+          model: "hook-decode",
+          system: "",
+          messages: [],
+          tools: input,
+        },
+        label,
+      ).tools;
+      break;
+    }
+    case "tools/pre-execute": {
+      const prior = original as ToolPreparation;
+      const preparation = hookRecord(input, label);
+      if (preparation.kind === "ready") {
+        hookExactKeys(preparation, ["kind", "call", "idempotent"], [], label);
+        if (typeof preparation.idempotent !== "boolean") {
+          throw new Error(`${label}.idempotent must be a boolean`);
+        }
+        const ready = {
+          kind: "ready" as const,
+          call: decodeHookCall(preparation.call, `${label}.call`),
+          idempotent: preparation.idempotent,
+        };
+        if (
+          prior.kind === "denied" ||
+          !sameHookCall(ready.call, prior.call) ||
+          ready.idempotent !== prior.idempotent
+        ) {
+          throw new Error(`${label} cannot lift or alter prior preparation`);
+        }
+        decoded = ready;
+        break;
+      }
+      hookExactKeys(preparation, ["kind", "call", "result"], [], label);
+      if (preparation.kind !== "denied") {
+        throw new Error(`${label}.kind is invalid`);
+      }
+      const denied = {
+        kind: "denied" as const,
+        call: decodeHookCall(preparation.call, `${label}.call`),
+        result: decodeHookResult(preparation.result, `${label}.result`),
+      };
+      if (!sameHookCall(denied.call, prior.call)) {
+        throw new Error(`${label} cannot alter the tool call`);
+      }
+      decoded = denied;
+      break;
+    }
+    case "tools/post-execute":
+      decoded = decodeHookResult(input, label);
+      break;
+    case "agent/step-continuation": {
+      const decision = hookRecord(input, label);
+      hookExactKeys(decision, ["kind"], [], label);
+      if (decision.kind !== "continue" && decision.kind !== "stop") {
+        throw new Error(`${label}.kind is invalid`);
+      }
+      decoded = { kind: decision.kind };
+      break;
+    }
+  }
+  return decoded as LoopEventReturnMapV1[Event];
+}
+
 export interface LoopEventDefinitionV1 {
   mode: LoopEventDispatchModeV1;
   payload: string;
@@ -371,3 +653,59 @@ export const LOOP_EVENTS_V1 = {
     isolateHook: false,
   },
 } as const satisfies Record<LoopEventNameV1, LoopEventDefinitionV1>;
+
+declare module "cordis" {
+  interface Events {
+    "agent/created": (agent: LoopAgentRuntimeV1) => void;
+    "agent/disposed": (agent: LoopAgentRuntimeV1) => void;
+    "agent/status": (
+      agent: LoopAgentRuntimeV1,
+      status: LoopAgentStatusV1,
+    ) => void;
+    "agent/inbox/inserted": (
+      agent: LoopAgentRuntimeV1,
+      input: LoopAgentInputV1,
+    ) => void;
+    "agent/inbox/claimed": (
+      agent: LoopAgentRuntimeV1,
+      inputs: LoopAgentInputV1[],
+      turn: number,
+    ) => void;
+    "agent/pre-step": (
+      agent: LoopAgentRuntimeV1,
+      inputs: LoopAgentInputV1[],
+      turn: number,
+      step: number,
+      next: () => Promise<LoopPreStepDecisionV1>,
+    ) => Promise<LoopPreStepDecisionV1>;
+    "agent/message-window": (
+      agent: LoopAgentRuntimeV1,
+      messages: LlmMessage[],
+      turn: number,
+      step: number,
+      signal: AbortSignal,
+      next: () => Promise<LlmMessage[]>,
+    ) => Promise<LlmMessage[]>;
+    "agent/tool-exposure": (
+      agent: LoopAgentRuntimeV1,
+      tools: ToolSchema[],
+      turn: number,
+      step: number,
+      signal: AbortSignal,
+      next: () => Promise<ToolSchema[]>,
+    ) => Promise<ToolSchema[]>;
+    "agent/step-continuation": (
+      agent: LoopAgentRuntimeV1,
+      decision: LoopStepContinuationV1,
+      turn: number,
+      step: number,
+      signal: AbortSignal,
+      next: () => Promise<LoopStepContinuationV1>,
+    ) => Promise<LoopStepContinuationV1>;
+    "agent/cancel-requested": (
+      agent: LoopAgentRuntimeV1,
+      reason: "user" | "shutdown",
+    ) => void;
+    "agent/error": (agent: LoopAgentRuntimeV1, error: unknown) => void;
+  }
+}

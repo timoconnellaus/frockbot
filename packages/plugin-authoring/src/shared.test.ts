@@ -32,6 +32,24 @@ describe("decodeAuthorPackageInputV1", () => {
     ).toEqual(VALID);
   });
 
+  test("accepts only declared public waterfall hooks", () => {
+    expect(
+      decodeAuthorPackageInputV1({
+        ...VALID,
+        hooks: ["agent/tool-exposure", "tools/post-execute"],
+      }).hooks,
+    ).toEqual(["agent/tool-exposure", "tools/post-execute"]);
+    expect(() =>
+      decodeAuthorPackageInputV1({ ...VALID, hooks: ["agent/request"] }),
+    ).toThrow(/hooks\[0\] is invalid/);
+    expect(() =>
+      decodeAuthorPackageInputV1({
+        ...VALID,
+        hooks: ["agent/tool-exposure", "agent/tool-exposure"],
+      }),
+    ).toThrow(/duplicate events/);
+  });
+
   test.each([
     ["a non-object", 7],
     ["an unknown field", { ...VALID, activate: true }],
@@ -102,12 +120,13 @@ describe("authoring identity", () => {
     expect(() => authoredVersionV1(0)).toThrow();
   });
 
-  test("the synthesized manifest declares only the isolate host and its tools", () => {
+  test("the synthesized manifest declares only the isolate host, tools and hooks", () => {
     const manifest = authoredManifestV1({
       packageId: VALID.packageId,
       displayName: VALID.displayName,
       version: "0.0.1",
       tools: VALID.tools,
+      hooks: ["agent/tool-exposure"],
     });
     const contributions = manifest.contributions as Record<
       string,
@@ -116,6 +135,7 @@ describe("authoring identity", () => {
     expect(Object.keys(contributions)).toEqual(["runtime"]);
     expect(contributions.runtime?.host).toBe("bot-isolate");
     expect(manifest.tools).toEqual(VALID.tools);
+    expect(manifest.hooks).toEqual(["agent/tool-exposure"]);
     expect(manifest.permissions).toEqual([]);
   });
 

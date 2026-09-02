@@ -179,12 +179,27 @@ export function createShellCompositionHost(
             loader: isolate.loader,
             artifacts: isolate.artifacts,
             tools: runtime.root.tools,
+            loop: runtime.root,
             userId: isolate.userId,
             botId: options.botId,
             sessionId: options.sessionId,
             runId: isolate.runId,
             turnId: isolate.turnId,
             generationId: generation.generationId,
+            turnType: options.turnType ?? "chat",
+            ...(options.subagentRole === undefined
+              ? {}
+              : { subagentRole: options.subagentRole }),
+            recordHookFailure: async (failure) => {
+              const session = runtime.root.sessions.get(options.sessionId);
+              if (!session) {
+                throw new Error(
+                  `session "${options.sessionId}" is unavailable for hook failure recording`,
+                );
+              }
+              session.append({ type: "package/hook-failed", ...failure });
+              await session.flush();
+            },
             capabilities: isolate.capabilitiesFor(member),
             compatibilityDate: isolate.compatibilityDate,
             bindingDigest: isolate.bindingDigest,

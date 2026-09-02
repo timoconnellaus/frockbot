@@ -349,6 +349,13 @@ export interface SessionEventMap {
     contentHash: string;
     generationId: string;
   };
+  /** A Bot-isolate loop hook failed open for one invocation. */
+  "package/hook-failed": {
+    packageId: string;
+    event: string;
+    generationId: string;
+    message: string;
+  };
   /** Durable intent before a Bot-origin Composition revert is proposed. */
   "package/undo-intent": {
     turn: number;
@@ -1215,6 +1222,17 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       eventString(event.version, "session event.version");
       eventString(event.contentHash, "session event.contentHash");
       eventString(event.generationId, "session event.generationId");
+      break;
+    case "package/hook-failed":
+      requireEventKeys(
+        event,
+        keys("packageId", "event", "generationId", "message"),
+        "session event",
+      );
+      eventString(event.packageId, "session event.packageId");
+      eventString(event.event, "session event.event");
+      eventString(event.generationId, "session event.generationId");
+      eventString(event.message, "session event.message");
       break;
     case "package/undo-intent":
       requireEventKeys(

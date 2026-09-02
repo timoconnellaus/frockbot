@@ -23,6 +23,9 @@ type DecodeInvocation = (value: unknown) => unknown;
 const decodeInvocation = new Function(
   `${BOT_ISOLATE_INVOCATION_SOURCE}\nreturn decodeInvocation;`,
 )() as DecodeInvocation;
+const decodeHookInvocation = new Function(
+  `${BOT_ISOLATE_INVOCATION_SOURCE}\nreturn decodeHookInvocation;`,
+)() as DecodeInvocation;
 
 function invocation(overrides: Record<string, unknown> = {}) {
   return {
@@ -86,6 +89,25 @@ describe("the generated wrapper's invocation decoder", () => {
     });
   });
 
+  test("accepts only a public waterfall hook invocation", () => {
+    const hook = {
+      ...invocation(),
+      event: "agent/tool-exposure",
+      payload: { tools: [] },
+    } as Record<string, unknown>;
+    delete hook.tool;
+    delete hook.input;
+    expect(decodeHookInvocation(hook)).toMatchObject({
+      event: "agent/tool-exposure",
+    });
+    expect(() =>
+      decodeHookInvocation({ ...hook, event: "agent/request" }),
+    ).toThrow(/unsupported/);
+    expect(() =>
+      decodeHookInvocation({ ...hook, signal: "live AbortSignal" }),
+    ).toThrow(/invalid fields/);
+  });
+
   test("refuses an invocation carrying an undeclared field", () => {
     expect(() =>
       decodeInvocation(invocation({ capabilities: ["models:invoke"] })),
@@ -129,5 +151,7 @@ describe("the generated wrapper module map", () => {
     expect(BOT_ISOLATE_WRAPPER_SOURCE).toContain(
       "async execute(rawInvocation)",
     );
+    expect(BOT_ISOLATE_WRAPPER_SOURCE).toContain("async hook(rawInvocation)");
+    expect(BOT_ISOLATE_WRAPPER_SOURCE).toContain("hooks: declaredHooks()");
   });
 });
