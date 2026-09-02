@@ -4,8 +4,7 @@
 // it back through the gateway route a browser uses, installs an entry from the
 // pinned generation, and then uninstalls it — checking on the way that an
 // install off the pinned generation is refused with a visible failure and that
-// uninstalling leaves a dependent Assignment as an unavailable tombstone rather
-// than deleting it (ADR 0003).
+// uninstalling leaves Connections and a Bot's model setting untouched.
 //
 // Nothing here reaches R2 on the product's behalf except the seed: every read
 // crosses the gateway, exactly as the browser and the Bot Durable Object do.
@@ -165,7 +164,7 @@ describe("the remote Package Catalog", () => {
     );
   });
 
-  it("installs from the pinned generation and uninstalls to a tombstone", async () => {
+  it("installs from the pinned generation and preserves User-owned state on uninstall", async () => {
     const userId = freshUserId("catalog-install");
     const botId = "catalog-bot";
     const pinned = await readUserSettings(userId);
@@ -211,7 +210,7 @@ describe("the remote Package Catalog", () => {
       PROVISIONED_MODEL.packageId,
     );
 
-    // A Connection and a Bot, so there is a real Assignment to tombstone.
+    // A Connection and a Bot with an explicit model setting.
     const connection = (await expectOkJson(
       await postAsUser(userId, "/api/connections", {
         schemaVersion: 1,
@@ -240,16 +239,10 @@ describe("the remote Package Catalog", () => {
     await expectOkJson(
       await postAsUser(userId, `/api/bots/${botId}/settings`, {
         schemaVersion: 1,
-        type: "bot/assign-capability",
-        commandId: "assign-catalog-model",
+        type: "bot/select-model",
+        commandId: "select-catalog-model",
         botId,
         expectedRevision: botSettings.revision,
-        assignment: {
-          assignmentId: "catalog-model",
-          packageId: PROVISIONED_MODEL.packageId,
-          capabilityId: "ollama-cloud-models",
-          connectionId: connection.connectionId,
-        },
         model: {
           connectionId: connection.connectionId,
           providerModelId: PROVISIONED_MODEL.providerModelId,
@@ -257,14 +250,13 @@ describe("the remote Package Catalog", () => {
       }),
     );
 
-    const assigned = (await expectOkJson(
+    const selected = (await expectOkJson(
       await asUser(userId, `/api/bots/${botId}/settings`),
     )) as BotSettingsViewV1;
-    expect(
-      assigned.assignments.find(
-        (assignment) => assignment.assignmentId === "catalog-model",
-      ),
-    ).toMatchObject({ state: "enabled" });
+    expect(selected.model).toEqual({
+      connectionId: connection.connectionId,
+      providerModelId: PROVISIONED_MODEL.providerModelId,
+    });
 
     const beforeUninstall = await readUserSettings(userId);
     await expectOkJson(
@@ -289,10 +281,6 @@ describe("the remote Package Catalog", () => {
     const tombstoned = (await expectOkJson(
       await asUser(userId, `/api/bots/${botId}/settings`),
     )) as BotSettingsViewV1;
-    expect(
-      tombstoned.assignments.find(
-        (assignment) => assignment.assignmentId === "catalog-model",
-      ),
-    ).toMatchObject({ state: "unavailable" });
+    expect(tombstoned.model).toEqual(selected.model);
   });
 });

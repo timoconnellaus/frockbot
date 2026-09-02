@@ -428,20 +428,17 @@ describe("MCP servers and Connections", () => {
     expect(omitted(summary, "private-network-server")).toBe(1);
   });
 
-  it("never carries a connectionId, safeMetadata or an Assignment", () => {
+  it("never carries a connectionId, safeMetadata, or model selection", () => {
     const { template, summary } = buildBotTemplateV1(
       source({
         connections: [publicServer, keyedServer],
-        assignmentCount: 3,
-        hasModelAssignment: true,
+        hasModelSelection: true,
       }),
     );
     const document = JSON.stringify(template);
     expect(document).not.toContain("connectionId");
     expect(document).not.toContain("safeMetadata");
-    expect(document).not.toContain("assignment");
     expect(omitted(summary, "connection")).toBe(2);
-    expect(omitted(summary, "assignment")).toBe(3);
     expect(omitted(summary, "model")).toBe(1);
   });
 

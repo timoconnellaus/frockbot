@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  decodeIsolateAuthorityRequestV1,
   decodeIsolateCapabilityFailureV1,
   decodeIsolateCapabilityListV1,
   decodeIsolateHealthV1,
@@ -9,7 +8,7 @@ import {
   decodeIsolateIdentityV1,
   decodeIsolateModelEventV1,
   decodeIsolateModelInvocationV1,
-  decodeIsolatePendingDecisionV1,
+  decodeIsolateScheduleRequestV1,
   decodeIsolateToolDescriptorV1,
   decodeIsolateToolInvocationV1,
   decodeIsolateToolResultV1,
@@ -311,42 +310,79 @@ describe("isolate identity and capabilities", () => {
 
   test("decodes a capability list", () => {
     expect(
-      decodeIsolateCapabilityListV1([
-        { capabilityId: "models:chat", kind: "model" },
-      ]),
-    ).toHaveLength(1);
-  });
-
-  test("rejects an unknown capability kind", () => {
-    expect(() =>
-      decodeIsolateCapabilityListV1([
-        { capabilityId: "models:chat", kind: "network" },
-      ]),
-    ).toThrow(/kind is invalid/);
-  });
-
-  test("decodes an authority request and its pending answer", () => {
-    expect(
-      decodeIsolateAuthorityRequestV1({
-        capabilityId: "models:chat",
-        reason: "translate",
+      decodeIsolateCapabilityListV1({
+        status: "available",
+        connections: [
+          {
+            connectionId: "connection-1",
+            packageId: "provider",
+            connectionTypeId: "account",
+            displayName: "Account",
+            generation: "generation-1",
+            safeMetadata: { region: "au" },
+          },
+        ],
+        model: {
+          connectionId: "connection-1",
+          packageId: "provider",
+          provider: "provider",
+          providerModelId: "model-1",
+          connectionGeneration: "generation-1",
+        },
+        tools: true,
+        memory: true,
+        workspace: false,
+        notify: true,
+        schedule: true,
       }),
-    ).toEqual({ capabilityId: "models:chat", reason: "translate" });
-    expect(
-      decodeIsolatePendingDecisionV1({
-        status: "pending-user-decision",
-        decisionId: "decision-1",
-      }).decisionId,
-    ).toBe("decision-1");
+    ).toMatchObject({
+      status: "available",
+      connections: [{ connectionId: "connection-1" }],
+      tools: true,
+      memory: true,
+      workspace: false,
+      notify: true,
+      schedule: true,
+    });
   });
 
-  test("refuses to decode a grant as a decision", () => {
+  test("rejects authority fields outside the Bot authority contract", () => {
     expect(() =>
-      decodeIsolatePendingDecisionV1({
-        status: "granted",
-        decisionId: "decision-1",
+      decodeIsolateCapabilityListV1({
+        status: "available",
+        connections: [],
+        tools: true,
+        memory: true,
+        workspace: true,
+        notify: true,
+        schedule: true,
+        packageId: "package-local-authority",
       }),
-    ).toThrow(/pending-user-decision/);
+    ).toThrow(/invalid fields/);
+  });
+});
+
+describe("isolate schedule request v1", () => {
+  test("decodes the durable Routine input and call id", () => {
+    expect(
+      decodeIsolateScheduleRequestV1({
+        callId: "schedule-1",
+        input: { action: "create", schedule: "@daily" },
+      }),
+    ).toEqual({
+      callId: "schedule-1",
+      input: { action: "create", schedule: "@daily" },
+    });
+  });
+
+  test("rejects an undeclared field", () => {
+    expect(() =>
+      decodeIsolateScheduleRequestV1({
+        callId: "schedule-1",
+        input: {},
+        packageId: "package-local-authority",
+      }),
+    ).toThrow(/invalid fields/);
   });
 });
 
@@ -392,13 +428,16 @@ describe("isolate model invocation v1", () => {
     if (outcome.status === "streaming") expect(outcome.events).toBe(events);
   });
 
-  test("decodes a pending decision outcome", () => {
+  test("decodes an unavailable outcome when no model is configured", () => {
     expect(
       decodeIsolateModelInvocationV1({
-        status: "pending-user-decision",
-        decisionId: "decision-9",
+        status: "unavailable",
+        reason: "this Bot has no configured model",
       }),
-    ).toEqual({ status: "pending-user-decision", decisionId: "decision-9" });
+    ).toEqual({
+      status: "unavailable",
+      reason: "this Bot has no configured model",
+    });
   });
 
   test("rejects a streaming outcome without a stream", () => {

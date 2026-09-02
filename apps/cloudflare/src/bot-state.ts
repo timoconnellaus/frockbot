@@ -1,7 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   compileFoundationApplication,
-  createFoundationAssignedRuntimePackages,
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
   createFoundationRuntimeApplication,
@@ -64,8 +63,16 @@ import {
   type ApprovalDecisionCommandV1,
 } from "@frockbot/plugin-shell/approvals";
 import {
-  decodeIsolateAuthorityRequestV1,
   decodePackageIframeToolCommandV1,
+  decodeIsolateMemoryReadRequestV1,
+  decodeIsolateMemoryWriteRequestV1,
+  decodeIsolateNotificationRequestV1,
+  decodeIsolateScheduleRequestV1,
+  decodeIsolateToolRequestV1,
+  decodeIsolateWorkspaceDeleteRequestV1,
+  decodeIsolateWorkspaceListRequestV1,
+  decodeIsolateWorkspacePathV1,
+  decodeIsolateWorkspaceWriteRequestV1,
   decodeNormalizedModelRequestV1,
 } from "@frockbot/kernel-contracts";
 import type {
@@ -169,6 +176,22 @@ function decodeBotIdentityRpcV1(input: unknown): {
     userId: request.userId as string,
     botId: request.botId as string,
   };
+}
+
+function decodeIsolateCallRpcV1(
+  input: unknown,
+  decodeRequest: (value: unknown) => unknown,
+) {
+  return decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    botId: rpcBotId,
+    runId: rpcIdentifier,
+    sessionId: rpcString(257),
+    turnId: rpcIdentifier,
+    packageId: rpcIdentifier,
+    generationId: rpcIdentifier,
+    request: rpcDecoded(decodeRequest),
+  });
 }
 
 export class BotState extends DurableObject<BotStateEnv> {
@@ -289,27 +312,9 @@ export class BotState extends DurableObject<BotStateEnv> {
                                 description: registration.initialDescription,
                               }),
                           model: registration.initialModel,
-                          modelBinding: registration.initialModelBinding,
-                          assignments: registration.initialAssignments ?? [],
                         },
                       )
-                      .then(async (settings) => {
-                        if (
-                          registration.initialModel &&
-                          registration.initialModelBinding &&
-                          settings.assignments.some(
-                            (assignment) =>
-                              assignment.assignmentId ===
-                              registration.initialModelBinding?.assignment
-                                .assignmentId,
-                          )
-                        ) {
-                          await this.acknowledgeInitialModelBinding(
-                            userId,
-                            registration,
-                          );
-                        }
-                      });
+                      .then(() => undefined);
                   },
                   archiveEligible: (storage) => {
                     if (!shell)
@@ -338,31 +343,6 @@ export class BotState extends DurableObject<BotStateEnv> {
       });
     }
     return this.mounted;
-  }
-
-  private async acknowledgeInitialModelBinding(
-    userId: string,
-    registration: BotRegistrationV1,
-  ): Promise<void> {
-    const binding = registration.initialModelBinding;
-    const model = registration.initialModel;
-    if (!binding || !model) return;
-    const id = this.env.USER_CONFIGURATIONS.idFromName(userId);
-    // SAFETY: USER_CONFIGURATIONS binds UserConfiguration; workers-types cannot infer its generated dependency RPC surface.
-    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
-      acknowledgeConnectionDependency(input: unknown): Promise<boolean>;
-    };
-    if (
-      !(await rpc.acknowledgeConnectionDependency({
-        schemaVersion: 1,
-        userId,
-        connectionId: model.connectionId,
-        botId: registration.botId,
-        generation: binding.generation,
-      }))
-    ) {
-      throw new Error("Initial model dependency was not acknowledged");
-    }
   }
 
   private async registration(identity: {
@@ -556,75 +536,116 @@ export class BotState extends DurableObject<BotStateEnv> {
     return flock.executeLifecycle(registration, identity.userId, command);
   }
 
-  /**
-   * The Bot isolate asked for authority it does not hold. The answer is never
-   * a grant: the Bot Durable Object records a durable pending decision and
-   * returns its id (plan Step 4, "Self-modification never widens authority").
-   */
-  async isolateRequestAuthority(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      packageId: rpcIdentifier,
-      generationId: rpcIdentifier,
-      request: rpcDecoded(decodeIsolateAuthorityRequestV1),
-    });
-    // The isolate capability path needs the Bot's own authority, not its Flock
-    // projection, so it does not materialize the Sheep record.
-    const shell = await this.contribution();
-    return shell.isolateRequestAuthority({
-      botId: request.botId as string,
-      packageId: request.packageId as string,
-      generationId: request.generationId as string,
-      request: request.request,
-    });
-  }
-
-  /**
-   * D6: model invocation as an Assignment-derived binding. Without a matching
-   * enabled model Assignment the answer is a pending decision; with one, the
-   * request is recorded and the credential lease taken through the existing
-   * provider path before any event is streamed back.
-   */
   async isolateInvokeModel(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      packageId: rpcIdentifier,
-      generationId: rpcIdentifier,
-      request: rpcDecoded(decodeNormalizedModelRequestV1),
-    });
+    const request = decodeIsolateCallRpcV1(
+      input,
+      decodeNormalizedModelRequestV1,
+    );
     const identity = {
       userId: request.userId as string,
       botId: request.botId as string,
     };
     const shell = await this.contribution();
     return shell.isolateInvokeModel(identity, {
+      runId: request.runId as string,
+      sessionId: request.sessionId as string,
+      turnId: request.turnId as string,
       packageId: request.packageId as string,
       generationId: request.generationId as string,
       request: request.request as NormalizedModelRequest,
     });
   }
 
-  async markConnectionUnavailable(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      connectionId: rpcIdentifier,
-      compensation: rpcObject({
-        id: rpcIdentifier,
-        expectedGeneration: rpcIdentifier,
-      }),
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    return shell.markConnectionUnavailable(
-      identity,
-      request.connectionId as string,
-      request.compensation as { id: string; expectedGeneration: string },
+  async isolateInvokeTool(input: unknown) {
+    return (await this.contribution()).isolateInvokeTool(
+      decodeIsolateCallRpcV1(input, decodeIsolateToolRequestV1) as never,
+    );
+  }
+
+  async isolateMemoryRead(input: unknown) {
+    return (await this.contribution()).isolateMemoryRead(
+      decodeIsolateCallRpcV1(input, decodeIsolateMemoryReadRequestV1) as never,
+    );
+  }
+
+  async isolateMemoryWrite(input: unknown) {
+    return (await this.contribution()).isolateMemoryWrite(
+      decodeIsolateCallRpcV1(input, decodeIsolateMemoryWriteRequestV1) as never,
+    );
+  }
+
+  async isolateMemoryForget(input: unknown) {
+    return (await this.contribution()).isolateMemoryForget(
+      decodeIsolateCallRpcV1(input, decodeIsolateMemoryWriteRequestV1) as never,
+    );
+  }
+
+  async isolateWorkspaceRead(input: unknown) {
+    return (await this.contribution()).isolateWorkspaceRead(
+      decodeIsolateCallRpcV1(input, decodeIsolateWorkspacePathV1) as never,
+    );
+  }
+
+  async isolateWorkspaceList(input: unknown) {
+    return (await this.contribution()).isolateWorkspaceList(
+      decodeIsolateCallRpcV1(
+        input,
+        decodeIsolateWorkspaceListRequestV1,
+      ) as never,
+    );
+  }
+
+  async isolateWorkspaceStat(input: unknown) {
+    return (await this.contribution()).isolateWorkspaceStat(
+      decodeIsolateCallRpcV1(input, decodeIsolateWorkspacePathV1) as never,
+    );
+  }
+
+  async isolateWorkspaceWrite(input: unknown) {
+    return (await this.contribution()).isolateWorkspaceWrite(
+      decodeIsolateCallRpcV1(
+        input,
+        decodeIsolateWorkspaceWriteRequestV1,
+      ) as never,
+    );
+  }
+
+  async isolateWorkspaceDelete(input: unknown) {
+    return (await this.contribution()).isolateWorkspaceDelete(
+      decodeIsolateCallRpcV1(
+        input,
+        decodeIsolateWorkspaceDeleteRequestV1,
+      ) as never,
+    );
+  }
+
+  async isolateConnection(input: unknown) {
+    return (await this.contribution()).isolateConnection(
+      decodeIsolateCallRpcV1(input, (value) => {
+        if (
+          typeof value !== "string" ||
+          value.length === 0 ||
+          value.length > 256
+        ) {
+          throw new Error("Connection id is invalid");
+        }
+        return value;
+      }) as never,
+    );
+  }
+
+  async isolateNotify(input: unknown) {
+    return (await this.contribution()).isolateNotify(
+      decodeIsolateCallRpcV1(
+        input,
+        decodeIsolateNotificationRequestV1,
+      ) as never,
+    );
+  }
+
+  async isolateSchedule(input: unknown) {
+    return (await this.contribution()).isolateSchedule(
+      decodeIsolateCallRpcV1(input, decodeIsolateScheduleRequestV1) as never,
     );
   }
 

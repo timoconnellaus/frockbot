@@ -1,10 +1,8 @@
 // The Web Package's runtime Contribution: `web_fetch`.
 //
 // AUTHORITY. `web-fetch` is a Capability with no Connection: fetching a public
-// page needs no credential, so a Bot holds the tool the moment its User grants
-// an Assignment of it, and holds nothing when they have not. The Capability is
-// still the fence — {@link createConfiguredWebFetchRuntimeContribution} mounts
-// nothing without an enabled Assignment naming it.
+// page needs no credential. An installed, enabled Web Package contributes it
+// to the Bot's Composition without a second grant record.
 //
 // TRUST BOUNDARY. The Bot's Durable Object is the only thing between a model's
 // URL and the platform's network, so every hop is classified by `./ssrf.ts`
@@ -478,12 +476,11 @@ export function createWebRuntimePlugin(
 }
 
 /**
- * The Assignment fence. A Bot holds `web_fetch` only through an enabled
- * Assignment of this Package's `web-fetch` Capability; without one this
- * returns `undefined` and nothing is mounted.
+ * The manifest fence for the Connection-derived runtime binding. A
+ * Connection-less Capability mounts once when its Package is enabled.
  */
 export function createConfiguredWebFetchRuntimeContribution(config: {
-  assignment: {
+  binding: {
     packageId: string;
     capabilityId: string;
     connectionId?: string;
@@ -492,9 +489,9 @@ export function createConfiguredWebFetchRuntimeContribution(config: {
   fetch?: WebFetchFn;
 }): Plugin.Function | undefined {
   if (
-    config.assignment.packageId !== "web" ||
-    config.assignment.capabilityId !== "web-fetch" ||
-    config.assignment.state !== "enabled"
+    config.binding.packageId !== "web" ||
+    config.binding.capabilityId !== "web-fetch" ||
+    config.binding.state !== "enabled"
   ) {
     return undefined;
   }

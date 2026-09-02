@@ -122,7 +122,7 @@ const DESCRIPTION = [
   "Pack yourself into a shareable Bot template: a recipe, not a backup.",
   "It carries your name, description, your own Skills, your Routines' prompts,",
   "the Catalog Packages your User installed, and public MCP server addresses.",
-  "It never carries Memory, credentials, Connections, Assignments, your model,",
+  "It never carries Memory, credentials, Connections, your model,",
   "webhook keys, uploaded images, or anything from your Computer.",
   "The template is staged privately and shared with nobody:",
   "only your User can choose to publish it, from Bot settings.",

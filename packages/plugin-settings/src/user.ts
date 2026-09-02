@@ -4,14 +4,12 @@ import {
   ConfigurationDecodeError,
   decodePackageSettingsPatchV1,
   MAX_PACKAGE_SETTINGS_V1,
-  decodeConnectionDependencyRequirementV1,
   decodeOperationReceiptV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
   decodeUserSettingsViewV1,
   MAX_USER_CONNECTIONS_V1,
   USER_PROFILE_PLACEHOLDER_NAME_V1,
-  type ConnectionDependencyRequirementV1,
   type ConnectionView,
   type JsonValue,
   type OperationReceiptV1,
@@ -41,16 +39,6 @@ const DEFAULT_PACKAGES_BOOTSTRAP_KEY = "user-default-packages-bootstrap:v1";
 const CATALOG_PIN_KEY = "user-catalog-pin";
 const IDENTITY_KEY = "user-id";
 const RECEIPT_PREFIX = "configuration-receipt:";
-const MAX_CONNECTION_DEPENDENCIES = 256;
-
-type ConnectionDependency = {
-  botId: string;
-  generation: string;
-  packageId: string;
-  capabilityId: string;
-  claimOrder: number;
-  status: "pending" | "acknowledged";
-};
 
 interface StoredConfigurationReceipt {
   commandFingerprint: string;
@@ -195,61 +183,6 @@ function requireMatchingConfigurationReceipt(
   return stored.receipt;
 }
 
-function connectionDependencies(
-  connection: ConnectionView,
-): ConnectionDependency[] {
-  const value = connection.safeMetadata.dependentAssignments;
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((candidate) => {
-    if (
-      !candidate ||
-      typeof candidate !== "object" ||
-      Array.isArray(candidate)
-    ) {
-      return [];
-    }
-    const dependency = candidate as Record<string, unknown>;
-    if (
-      typeof dependency.botId !== "string" ||
-      typeof dependency.generation !== "string" ||
-      typeof dependency.packageId !== "string" ||
-      typeof dependency.capabilityId !== "string" ||
-      (dependency.claimOrder !== undefined &&
-        (!Number.isSafeInteger(dependency.claimOrder) ||
-          (dependency.claimOrder as number) < 0)) ||
-      (dependency.status !== "pending" && dependency.status !== "acknowledged")
-    ) {
-      return [];
-    }
-    return [
-      {
-        botId: dependency.botId,
-        generation: dependency.generation,
-        packageId: dependency.packageId,
-        capabilityId: dependency.capabilityId,
-        claimOrder:
-          dependency.claimOrder === undefined
-            ? 0
-            : (dependency.claimOrder as number),
-        status: dependency.status,
-      } satisfies ConnectionDependency,
-    ];
-  });
-}
-
-function withConnectionDependencies(
-  connection: ConnectionView,
-  dependencies: ConnectionDependency[],
-): ConnectionView {
-  return {
-    ...connection,
-    safeMetadata: {
-      ...connection.safeMetadata,
-      dependentAssignments: dependencies,
-    },
-  };
-}
-
 /**
  * An install may only name the generation this User is pinned to. Refusing
  * anything else is what makes "Composition consumes immutable,
@@ -366,10 +299,8 @@ function applyUserCommand(
       };
     }
     case "user/uninstall-package": {
-      // Removing the row is the whole effect. Assignments that depend on it
-      // are not touched: `capabilityAssignmentFailureV1` resolves them as
-      // unavailable tombstones the User can repair (ADR 0003), and
-      // Connections are the User's own and outlive any Package.
+      // Removing the row is the whole effect. Connections are the User's own
+      // and outlive any Package; Bot authority follows their current state.
       if (
         !current.packages.some((pkg) => pkg.packageId === command.packageId)
       ) {
@@ -953,261 +884,6 @@ export class UserSettingsBackendContribution {
     return settings.packages.some(
       (pkg) => pkg.packageId === packageId && pkg.state === "installed",
     );
-  }
-
-  /**
-   * The durable state of one Bot's dependency on one Connection. `absent` is
-   * the answer for a Connection this object does not hold, so a reconciling
-   * saga can distinguish "never claimed" from "claimed and pending".
-   */
-  async readConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-  ): Promise<"absent" | "pending" | "acknowledged"> {
-    const connection = await this.getConnection(userId, connectionId);
-    if (!connection) return "absent";
-    const dependency = connectionDependencies(connection).find(
-      (candidate) =>
-        candidate.botId === botId && candidate.generation === generation,
-    );
-    return dependency?.status ?? "absent";
-  }
-
-  async claimConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-    requirement: ConnectionDependencyRequirementV1,
-    storage?: UserSettingsTransaction,
-  ): Promise<boolean> {
-    const decoded = decodeConnectionDependencyRequirementV1(requirement);
-    return this.transitionConnectionDependency(
-      userId,
-      connectionId,
-      (current, settings) => {
-        const installation = settings.packages.find(
-          (pkg) =>
-            pkg.packageId === decoded.packageId &&
-            pkg.version === decoded.packageVersion &&
-            pkg.state === "installed",
-        );
-        if (
-          !installation ||
-          current.state !== "ready" ||
-          current.packageId !== decoded.packageId ||
-          !decoded.connectionTypeIds.includes(current.connectionTypeId)
-        ) {
-          return undefined;
-        }
-        const existing = connectionDependencies(current);
-        const replay = existing.find(
-          (dependency) =>
-            dependency.botId === botId && dependency.generation === generation,
-        );
-        if (replay) {
-          return replay.packageId === decoded.packageId &&
-            replay.capabilityId === decoded.capabilityId
-            ? current
-            : undefined;
-        }
-        if (existing.length >= MAX_CONNECTION_DEPENDENCIES) return undefined;
-        return withConnectionDependencies(current, [
-          ...existing,
-          {
-            botId,
-            generation,
-            packageId: decoded.packageId,
-            capabilityId: decoded.capabilityId,
-            claimOrder: settings.revision + 1,
-            status: "pending",
-          },
-        ]);
-      },
-      storage,
-    );
-  }
-
-  async acknowledgeConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-  ): Promise<boolean> {
-    return this.host.storage.transaction(async (storage) => {
-      await this.assertIdentity(userId, storage);
-      const current = await this.readSnapshot(storage);
-      const target = current.connections.find(
-        (connection) => connection.connectionId === connectionId,
-      );
-      if (
-        !target ||
-        target.state === "revoking" ||
-        target.state === "revoked"
-      ) {
-        return false;
-      }
-      const matched = connectionDependencies(target).find(
-        (dependency) =>
-          dependency.botId === botId && dependency.generation === generation,
-      );
-      if (!matched) return false;
-      const latestClaimOrder = Math.max(
-        ...current.connections.flatMap((connection) =>
-          connectionDependencies(connection).flatMap((dependency) =>
-            dependency.botId === botId &&
-            dependency.packageId === matched.packageId &&
-            dependency.capabilityId === matched.capabilityId
-              ? [dependency.claimOrder]
-              : [],
-          ),
-        ),
-      );
-      if (matched.claimOrder < latestClaimOrder) return false;
-      if (
-        matched.status === "acknowledged" &&
-        !current.connections.some((connection) =>
-          connectionDependencies(connection).some(
-            (dependency) =>
-              dependency.botId === botId &&
-              dependency.packageId === matched.packageId &&
-              dependency.capabilityId === matched.capabilityId &&
-              (connection.connectionId !== connectionId ||
-                dependency.generation !== generation),
-          ),
-        )
-      ) {
-        return true;
-      }
-      const connections = current.connections.map((connection) => {
-        const dependencies = connectionDependencies(connection);
-        const nextDependencies = dependencies.flatMap((dependency) => {
-          const sameAuthority =
-            dependency.botId === botId &&
-            dependency.packageId === matched.packageId &&
-            dependency.capabilityId === matched.capabilityId;
-          if (!sameAuthority) return [dependency];
-          if (
-            connection.connectionId === connectionId &&
-            dependency.generation === generation
-          ) {
-            return [{ ...dependency, status: "acknowledged" as const }];
-          }
-          return [];
-        });
-        return nextDependencies.length === dependencies.length &&
-          nextDependencies.every(
-            (dependency, index) => dependency === dependencies[index],
-          )
-          ? connection
-          : withConnectionDependencies(connection, nextDependencies);
-      });
-      await storage.put(STATE_KEY, {
-        ...current,
-        revision: current.revision + 1,
-        connections,
-      } satisfies UserSettingsViewV1);
-      return true;
-    });
-  }
-
-  async releaseConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-  ): Promise<boolean> {
-    return this.host.storage.transaction(async (storage) => {
-      await this.assertIdentity(userId, storage);
-      const current = await this.readSnapshot(storage);
-      const target = current.connections.find(
-        (connection) => connection.connectionId === connectionId,
-      );
-      if (!target) return true;
-      const existing = connectionDependencies(target);
-      const matching = existing.filter(
-        (dependency) =>
-          dependency.botId === botId && dependency.generation === generation,
-      );
-      if (matching.length === 0) return true;
-      if (matching.some((dependency) => dependency.status !== "acknowledged")) {
-        return false;
-      }
-      const remaining = existing.filter(
-        (dependency) =>
-          dependency.botId !== botId || dependency.generation !== generation,
-      );
-      const connections = current.connections.map((connection) =>
-        connection.connectionId === connectionId
-          ? withConnectionDependencies(connection, remaining)
-          : connection,
-      );
-      await storage.put(STATE_KEY, {
-        ...current,
-        revision: current.revision + 1,
-        connections,
-      } satisfies UserSettingsViewV1);
-      return true;
-    });
-  }
-
-  async compensateConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-  ): Promise<boolean> {
-    return this.transitionConnectionDependency(
-      userId,
-      connectionId,
-      (current) => {
-        const existing = connectionDependencies(current);
-        const remaining = existing.filter(
-          (dependency) =>
-            dependency.botId !== botId ||
-            dependency.generation !== generation ||
-            dependency.status !== "pending",
-        );
-        return remaining.length === existing.length
-          ? undefined
-          : withConnectionDependencies(current, remaining);
-      },
-    );
-  }
-
-  private async transitionConnectionDependency(
-    userId: string,
-    connectionId: string,
-    transition: (
-      connection: ConnectionView,
-      settings: UserSettingsViewV1,
-    ) => ConnectionView | undefined,
-    transaction?: UserSettingsTransaction,
-  ): Promise<boolean> {
-    const apply = async (storage: UserSettingsTransaction) => {
-      await this.assertIdentity(userId, storage);
-      const current = await this.readSnapshot(storage);
-      const connection = current.connections.find(
-        (candidate) => candidate.connectionId === connectionId,
-      );
-      if (!connection) return false;
-      const nextConnection = transition(connection, current);
-      if (!nextConnection) return false;
-      if (nextConnection === connection) return true;
-      await storage.put(STATE_KEY, {
-        ...current,
-        revision: current.revision + 1,
-        connections: current.connections.map((candidate) =>
-          candidate.connectionId === connectionId ? nextConnection : candidate,
-        ),
-      } satisfies UserSettingsViewV1);
-      return true;
-    };
-    return transaction
-      ? apply(transaction)
-      : this.host.storage.transaction(apply);
   }
 
   private async assertIdentity(

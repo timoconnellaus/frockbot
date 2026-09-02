@@ -291,8 +291,8 @@ async function connect(
       class="settings-row"
     >
       <p class="field-hint">
-        Accounts and services you can give your Bots access to. A Bot still
-        needs an explicit Assignment before it can use one.
+        Accounts and services your Bots can use. Every Bot holds the ready
+        Connections its User has made.
       </p>
 
       <section

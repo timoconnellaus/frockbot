@@ -12,18 +12,16 @@
 // type admits, when a payload ends a Turn, or how a client draws one.
 //
 // Only the `widget` shape is host-source (§4.2 of `docs/research/
-// grokbot-computer.md`). The other four members are named in the same section
+// grokbot-computer.md`). The other members are named in the same section
 // but their field lists are not recorded, so they are declared here in the
 // narrowest shape that carries the observed meaning, and widened when a
 // primary source says more.
 //
-// `approval` has no GrokBot payload behind it at all: row 53
-// records only the harness sentence "when your own action needs approval". It
-// is declared here because the constitution's *Self-modification* rule — "a
-// request for more becomes a durable pending decision for the User, never a
-// grant" — needs one shape to carry that request, and a card the Bot sends is
-// the only path a Turn has to a person. Like `widget` it ends the Turn: the
-// Bot has nothing to do until a human answers.
+// `approval` has no GrokBot payload behind it at all: row 53 records only the
+// harness sentence "when your own action needs approval". It carries a human
+// confirmation required by a deny-only guard; it never widens Bot authority.
+// Like `widget` it ends the Turn: the Bot has nothing to do until a human
+// answers.
 
 /** The widget shape, verbatim from §4.2: `options` holds 1–6 entries. */
 export interface SendToUserWidgetV1 {
@@ -40,22 +38,6 @@ export type SendToUserPayloadV1 =
   | { type: "widget"; widget: SendToUserWidgetV1 }
   | { type: "secret-request"; prompt: string; secretName: string }
   | { type: "agent-card"; agentId: string; title: string; body?: string }
-  /**
-   * A Connection the Bot has recorded a pending authorization decision for.
-   *
-   * There is deliberately **no URL** on this payload, and there never will be.
-   * A Bot may create a durable *request* for authorization; only an
-   * authenticated User action mints a redirect, and a single-use ten-minute
-   * link sitting in a client-readable transcript would outlive the decision it
-   * belonged to. The client draws a card from the Connection's own projection
-   * and the User presses it; the host authors the link at that moment.
-   */
-  | {
-      type: "connect-card";
-      connectionId: string;
-      title: string;
-      body?: string;
-    }
   | {
       type: "approval";
       /** The Bot's own id for the decision, and the key it is recorded under. */
@@ -76,15 +58,7 @@ export const SEND_TO_USER_APPROVAL_RISKS_V1: readonly SendToUserApprovalRiskV1[]
   ["low", "medium", "high"];
 
 export const SEND_TO_USER_PAYLOAD_TYPES_V1: readonly SendToUserPayloadV1["type"][] =
-  [
-    "text",
-    "attachment",
-    "widget",
-    "secret-request",
-    "agent-card",
-    "connect-card",
-    "approval",
-  ];
+  ["text", "attachment", "widget", "secret-request", "agent-card", "approval"];
 
 /**
  * Bounds, so a payload cannot be the way a Turn writes an unbounded record
@@ -103,7 +77,6 @@ export const SEND_TO_USER_LIMITS_V1 = {
   maxOptions: 6,
   secretName: 128,
   agentId: 128,
-  connectionId: 128,
   title: 200,
   body: 8_000,
   approvalId: 128,
@@ -351,28 +324,6 @@ export function decodeSendToUserPayloadV1(
           payload.agentId,
           limits.agentId,
           `${label}.agentId`,
-        ),
-        title: boundedString(payload.title, limits.title, `${label}.title`),
-        ...(body === undefined ? {} : { body }),
-      };
-    }
-    case "connect-card": {
-      exactPayloadKeys(
-        payload,
-        ["type", "connectionId", "title", "body"],
-        label,
-      );
-      const body = optionalBoundedString(
-        payload.body,
-        limits.body,
-        `${label}.body`,
-      );
-      return {
-        type: "connect-card",
-        connectionId: boundedString(
-          payload.connectionId,
-          limits.connectionId,
-          `${label}.connectionId`,
         ),
         title: boundedString(payload.title, limits.title, `${label}.title`),
         ...(body === undefined ? {} : { body }),

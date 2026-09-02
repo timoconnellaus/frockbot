@@ -37,10 +37,8 @@ describe("settings link scheme", () => {
   });
 
   test("renders a Markdown citation a payload can carry verbatim", () => {
-    expect(
-      renderSettingsLinkV1({ anchor: "bot-capabilities", botId: "alpha" }),
-    ).toBe(
-      "[Capability Assignments](/?bot=alpha&settings=bot-settings#bot-capabilities)",
+    expect(renderSettingsLinkV1({ anchor: "bot-model", botId: "alpha" })).toBe(
+      "[Model](/?bot=alpha&settings=bot-settings#bot-model)",
     );
   });
 

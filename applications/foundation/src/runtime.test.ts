@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   compileFoundationApplication,
   compileFoundationApplicationDeclarations,
-  createFoundationAssignedRuntimePackages,
+  createFoundationConnectedRuntimePackages,
   mergeFoundationRuntimePackages,
   createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
@@ -149,12 +149,12 @@ describe("foundation application", () => {
     expect(first.packages.some((pkg) => pkg.id === "composio")).toBe(false);
   });
 
-  test("mounts an assigned Ollama model through its Package runtime Contribution", async () => {
+  test("mounts a selected Ollama model through its Package runtime Contribution", async () => {
     const plan = await compileFoundationApplication();
     const runtimePackage = createFoundationModelRuntimePackage(
       plan,
       {
-        assignment: {
+        model: {
           connectionId: "ollama-work",
           providerModelId: "glm-5.3-flash:cloud",
         },
@@ -187,7 +187,7 @@ describe("foundation application", () => {
       createFoundationModelRuntimePackage(
         plan,
         {
-          assignment: {
+          model: {
             connectionId: "ollama-work",
             providerModelId: "glm-5.3-flash:cloud",
           },
@@ -214,12 +214,12 @@ describe("foundation application", () => {
     ).toThrow('Bot model provider "foundation" is unavailable');
   });
 
-  test("mounts an assigned Workers AI model through the native host seam", async () => {
+  test("mounts a selected Workers AI model through the native host seam", async () => {
     const plan = await compileFoundationApplication();
     const runtimePackage = createFoundationModelRuntimePackage(
       plan,
       {
-        assignment: {
+        model: {
           connectionId: "workers-ai-ambient",
           providerModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
         },
@@ -576,29 +576,14 @@ describe("foundation application", () => {
       "@frockbot/plugin-computer",
     ]);
 
-    const assignment = {
-      assignmentId: "unavailable-assignment",
-      packageId: "composio",
-      capabilityId: "gmail-tools",
-      connectionId: "connection-1",
-      state: "enabled" as const,
-    };
-    const runtime = await createFoundationAssignedRuntimePackages(
+    const runtime = await createFoundationConnectedRuntimePackages(
       plan,
       {
         schemaVersion: 1,
-        botId: "primary",
         revision: 1,
-        profile: { name: "Primary" },
-        notifications: { enabled: false },
-        assignments: [assignment],
-        assignmentOperations: [],
-      },
-      {
-        schemaVersion: 1,
-        botId: "primary",
-        revision: 1,
-        assignments: [assignment],
+        profile: { name: "User" },
+        packages: [],
+        connections: [],
       },
       {
         userId: "user-1",
@@ -609,35 +594,21 @@ describe("foundation application", () => {
     );
     expect(runtime).toEqual([]);
 
-    const webAssignment = {
-      assignmentId: "default-0-0",
-      packageId: "web",
-      capabilityId: "web-fetch",
-      state: "enabled" as const,
-    };
-    const freshBotRuntime = await createFoundationAssignedRuntimePackages(
+    const freshBotRuntime = await createFoundationConnectedRuntimePackages(
       plan,
       {
         schemaVersion: 1,
-        botId: "fresh",
         revision: 0,
-        profile: { name: "Fresh" },
-        notifications: { enabled: true },
-        assignments: [webAssignment],
-        assignmentOperations: [],
-      },
-      {
-        schemaVersion: 1,
-        botId: "fresh",
-        revision: 0,
-        assignments: [webAssignment],
+        profile: { name: "User" },
+        packages: [{ packageId: "web", version: "0.0.1", state: "installed" }],
+        connections: [],
       },
       {
         userId: "user-1",
         readSecret: () => undefined,
         authorizeConnection: () =>
           Promise.reject(
-            new Error("connection-less Web Assignment must not authorize"),
+            new Error("connection-less Web capability must not authorize"),
           ),
       },
     );

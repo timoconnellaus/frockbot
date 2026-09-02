@@ -6,7 +6,7 @@ import {
   createConfiguredMcpRuntimeContribution,
   decodeMcpConnectionSettingsV1,
   MAX_MCP_SERVERS_PER_USER_V1,
-  mcpAssignmentResolutionV1,
+  mcpConnectionResolutionV1,
   mcpConnectionLifecycleV1,
   mcpServerSlugV1,
   mcpToolNameV1,
@@ -96,20 +96,20 @@ function server(options: {
 async function mount(config: {
   fetch: typeof fetch;
   connection?: ConnectionView;
-  assignmentIndex?: number;
+  bindingIndex?: number;
   failures?: string[];
   outcomes?: unknown[];
 }): Promise<{ root: Context; mounted: boolean }> {
   const plugin = await createConfiguredMcpRuntimeContribution({
-    assignment: {
+    binding: {
       packageId: "mcp",
       capabilityId: "mcp-tools",
       connectionId: "mcp-1",
       state: "enabled",
     },
-    ...(config.assignmentIndex === undefined
+    ...(config.bindingIndex === undefined
       ? {}
-      : { assignmentIndex: config.assignmentIndex }),
+      : { bindingIndex: config.bindingIndex }),
     userId: "user-1",
     readSecret: () => undefined,
     authorizeConnection: () =>
@@ -170,7 +170,7 @@ describe("Connection-scoped settings", () => {
   });
 });
 
-describe("mounting one Assignment", () => {
+describe("mounting one Connection", () => {
   test("registers every listed tool with the server's own schema", async () => {
     const { root } = await mount({ fetch: server({}) });
 
@@ -284,7 +284,7 @@ describe("mounting one Assignment", () => {
     const { mounted } = await mount({
       failures,
       fetch: server({}),
-      assignmentIndex: MAX_MCP_SERVERS_PER_USER_V1,
+      bindingIndex: MAX_MCP_SERVERS_PER_USER_V1,
     });
 
     expect(mounted).toBe(false);
@@ -385,13 +385,13 @@ describe("the durable lifecycle a mount participates in", () => {
     });
   });
 
-  test("the Assignment's resolution key moves with the server epoch", () => {
-    const before = mcpAssignmentResolutionV1({
-      assignment: { connectionId: "mcp-1" },
+  test("the Connection resolution key moves with the server epoch", () => {
+    const before = mcpConnectionResolutionV1({
+      binding: { connectionId: "mcp-1" },
       connection: connection({ safeMetadata: { serverEpoch: 1 } }),
     });
-    const restarted = mcpAssignmentResolutionV1({
-      assignment: { connectionId: "mcp-1" },
+    const restarted = mcpConnectionResolutionV1({
+      binding: { connectionId: "mcp-1" },
       connection: connection({ safeMetadata: { serverEpoch: 2 } }),
     });
     expect(restarted).not.toBe(before);

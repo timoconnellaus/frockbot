@@ -33,6 +33,7 @@ interface SettingsRpc {
   readConfiguration(input: unknown): Promise<{
     revision: number;
     packages: { packageId: string; catalogId?: string }[];
+    connections: { connectionId: string }[];
   }>;
 }
 
@@ -173,7 +174,6 @@ describe("importing a Bot template in workerd", () => {
     const importerId = `tpl-importer-${crypto.randomUUID()}`;
     const shareId = await publishedShare(ownerId, "budget");
     await provisionBot({ userId: importerId, botId: "importer-home" });
-
     const planned = await plan(importerId, shareId);
     const applied = await apply(importerId);
     expect(applied.status).toBe("applied");
@@ -206,40 +206,41 @@ describe("importing a Bot template in workerd", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  test("creates no Connection and no Assignment for the imported Bot", async () => {
+  test("creates no Connection and keeps the importer's model setting", async () => {
     await seedCatalog();
     const ownerId = `tpl-owner-${crypto.randomUUID()}`;
     const importerId = `tpl-importer-${crypto.randomUUID()}`;
     const shareId = await publishedShare(ownerId, "budget");
     await provisionBot({ userId: importerId, botId: "importer-home" });
+    const connectionsBefore = (
+      await user(importerId).readConfiguration({
+        schemaVersion: 1,
+        userId: importerId,
+      })
+    ).connections.map((connection) => connection.connectionId);
 
     const planned = await plan(importerId, shareId);
     await apply(importerId);
 
     // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not
     // represented by workers-types.
-    const settingsOf = async (
-      botId: string,
-    ): Promise<{ assignments: { connectionId?: string }[]; model?: unknown }> =>
+    const settingsOf = async (botId: string): Promise<{ model?: unknown }> =>
       (
         env.BOT_STATES.getByName(`${importerId}:${botId}`) as unknown as {
-          readConfiguration(input: unknown): Promise<{
-            assignments: { connectionId?: string }[];
-            model?: unknown;
-          }>;
+          readConfiguration(input: unknown): Promise<{ model?: unknown }>;
         }
       ).readConfiguration({ schemaVersion: 1, userId: importerId, botId });
     const botSettings = await settingsOf(planned.botId);
     // The Bot follows its User's default model like any newly created Bot, and
-    // holds no Assignment the template put there: it carries exactly what the
-    // importer's own Bot carries, and none of it names a Connection, because
-    // an import never brings a Connection across.
+    // the template neither replaces that setting nor imports a Connection.
     const ownBot = await settingsOf("importer-home");
-    expect(botSettings.assignments).toEqual(ownBot.assignments);
+    expect(botSettings.model).toEqual(ownBot.model);
+    const importer = await user(importerId).readConfiguration({
+      schemaVersion: 1,
+      userId: importerId,
+    });
     expect(
-      botSettings.assignments.every(
-        (assignment) => assignment.connectionId === undefined,
-      ),
-    ).toBe(true);
+      importer.connections.map((connection) => connection.connectionId),
+    ).toEqual(connectionsBefore);
   });
 });

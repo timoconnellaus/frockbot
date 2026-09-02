@@ -153,5 +153,8 @@ describe("the generated wrapper module map", () => {
     );
     expect(BOT_ISOLATE_WRAPPER_SOURCE).toContain("async hook(rawInvocation)");
     expect(BOT_ISOLATE_WRAPPER_SOURCE).toContain("hooks: declaredHooks()");
+    expect(BOT_ISOLATE_WRAPPER_SOURCE).toContain(
+      "return capabilities.schedule(request);",
+    );
   });
 });

@@ -73,7 +73,7 @@ onBeforeUnmount(() => restoreFocus?.focus());
         <h1 id="flock-title">Archive this Bot?</h1>
         <p>
           Archiving stops new work and hides the Bot from your active flock.
-          History, settings, and Assignments are preserved for restoration.
+          History and settings are preserved for restoration.
         </p>
         <p
           v-if="flock.error"

@@ -1,6 +1,6 @@
 /**
- * The runtime Contribution: one enabled Assignment of `mcp-tools` becomes one
- * remote MCP server's tools in the Bot's tool registry.
+ * The runtime Contribution: one ready MCP Connection becomes one remote MCP
+ * server's tools in the Bot's tool registry.
  *
  * Everything the Bot ever sees of a server passes through here, and every byte
  * of it is bounded. The server is contacted with the Package's own `fetch`, so
@@ -27,7 +27,7 @@ import {
 import { mcpAuthorizationRequiredV1 } from "./oauth.js";
 import { decodeOutboundMcpUrlV1 } from "./ssrf.js";
 import {
-  mcpAssignmentResolutionKeyV1,
+  mcpConnectionResolutionKeyV1,
   mcpFailureCodeV1,
   MAX_MCP_INSTRUCTIONS_BYTES_V1,
   type McpFailureCodeV1,
@@ -62,8 +62,7 @@ export const MCP_TOOL_SUBAGENT_ROLES: readonly string[] = ["executor"];
 
 /**
  * The durable per-User ceiling on remote MCP servers. Counted over the enabled
- * Assignments of this Package, so a Bot cannot be handed a seventeenth server
- * by adding one more Assignment.
+ * ready Connections of this Package, so a seventeenth server is refused.
  */
 export const MAX_MCP_SERVERS_PER_USER_V1 = 16;
 
@@ -200,18 +199,17 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 export interface McpRuntimeContributionConfig {
-  assignment: {
+  binding: {
     packageId: string;
     capabilityId: string;
     connectionId?: string;
     state: string;
   };
   /**
-   * This Assignment's ordinal among the enabled Assignments of this Package,
-   * which is what makes the per-User server ceiling countable from inside a
-   * per-Assignment factory.
+   * This binding's ordinal among the ready Connections of this Package,
+   * which makes the per-User server ceiling countable from inside the factory.
    */
-  assignmentIndex?: number;
+  bindingIndex?: number;
   userId: string;
   readSecret(name: string): string | undefined;
   authorizeConnection(): Promise<ConnectionView>;
@@ -240,7 +238,7 @@ export interface McpRuntimeContributionConfig {
 }
 
 /**
- * Resolve one Assignment into a mounted runtime Plugin. The handshake and
+ * Resolve one ready Connection into a mounted runtime Plugin. The handshake and
  * `tools/list` happen here, before the Plugin mounts, so a server that cannot
  * be reached contributes nothing instead of half-registering.
  */
@@ -248,23 +246,23 @@ export async function createConfiguredMcpRuntimeContribution(
   config: McpRuntimeContributionConfig,
 ): Promise<Plugin.Function | undefined> {
   if (
-    config.assignment.packageId !== MCP_PACKAGE_ID ||
-    config.assignment.capabilityId !== MCP_CAPABILITY_ID ||
-    config.assignment.state !== "enabled" ||
-    !config.assignment.connectionId
+    config.binding.packageId !== MCP_PACKAGE_ID ||
+    config.binding.capabilityId !== MCP_CAPABILITY_ID ||
+    config.binding.state !== "enabled" ||
+    !config.binding.connectionId
   ) {
     return undefined;
   }
-  if ((config.assignmentIndex ?? 0) >= MAX_MCP_SERVERS_PER_USER_V1) {
+  if ((config.bindingIndex ?? 0) >= MAX_MCP_SERVERS_PER_USER_V1) {
     config.onFailure?.(
-      `A User may assign at most ${MAX_MCP_SERVERS_PER_USER_V1} MCP servers`,
+      `A User may connect at most ${MAX_MCP_SERVERS_PER_USER_V1} MCP servers`,
     );
     return undefined;
   }
   const fetchImpl = config.fetch ?? boundFetch;
   let client: McpClient | undefined;
   let lifecycle: { serverEpoch?: number; instructions?: string } = {};
-  const connectionId = config.assignment.connectionId;
+  const connectionId = config.binding.connectionId;
   try {
     const connection = await config.authorizeConnection();
     lifecycle = mcpConnectionLifecycleV1(connection);
@@ -275,7 +273,7 @@ export async function createConfiguredMcpRuntimeContribution(
     const apiKey =
       connection.connectionTypeId === MCP_KEYED_CONNECTION_TYPE_ID ||
       connection.connectionTypeId === MCP_OAUTH_CONNECTION_TYPE_ID
-        ? await openAssignedCredential(config, connection)
+        ? await openConnectionCredential(config, connection)
         : undefined;
     client = new McpClient({
       url: settings.url,
@@ -372,18 +370,18 @@ export async function createConfiguredMcpRuntimeContribution(
 }
 
 /**
- * What one Assignment of `mcp-tools` resolves to, including the server's
+ * What one ready MCP Connection resolves to, including the server's
  * `serverEpoch`. A restart bumps the epoch, so this key changes, so the next
  * admitted Turn resolves a different mount and re-handshakes — while the
  * in-flight Turn, holding the client it already mounted, is untouched.
  */
-export function mcpAssignmentResolutionV1(config: {
-  assignment: { connectionId?: string };
+export function mcpConnectionResolutionV1(config: {
+  binding: { connectionId?: string };
   connection: { generation?: string; safeMetadata?: Record<string, unknown> };
 }): string {
   const lifecycle = mcpConnectionLifecycleV1(config.connection);
-  return mcpAssignmentResolutionKeyV1({
-    connectionId: config.assignment.connectionId ?? "",
+  return mcpConnectionResolutionKeyV1({
+    connectionId: config.binding.connectionId ?? "",
     ...(config.connection.generation === undefined
       ? {}
       : { connectionGeneration: config.connection.generation }),
@@ -393,7 +391,7 @@ export function mcpAssignmentResolutionV1(config: {
   });
 }
 
-async function openAssignedCredential(
+async function openConnectionCredential(
   config: McpRuntimeContributionConfig,
   connection: ConnectionView,
 ): Promise<string> {

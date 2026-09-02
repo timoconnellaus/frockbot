@@ -328,6 +328,27 @@ export interface SessionEventMap {
     /** Durable references to binaries the tool produced. Never their bytes. */
     attachments?: ToolAttachmentV1[];
   };
+  /** A tool one loaded Package invoked through the Bot's shared registry. */
+  "package/tool-call": {
+    turn: number;
+    step: number;
+    effectId: string;
+    packageId: string;
+    callId: string;
+    name: string;
+    input: unknown;
+  };
+  /** The exact result returned to that Package. */
+  "package/tool-result": {
+    turn: number;
+    step: number;
+    effectId: string;
+    packageId: string;
+    callId: string;
+    name: string;
+    content: string;
+    isError: boolean;
+  };
   /**
    * The Bot recorded the intent to author a Package, before the bundler ran.
    * Constitution, Durable effects: intent is recorded before the effect.
@@ -1207,6 +1228,54 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
           "session event.attachments",
           true,
         );
+      }
+      break;
+    case "package/tool-call":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          "packageId",
+          "callId",
+          "name",
+          "input",
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.packageId, "session event.packageId");
+      eventString(event.callId, "session event.callId");
+      eventString(event.name, "session event.name");
+      requireJsonValue(event.input, "session event.input");
+      break;
+    case "package/tool-result":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          "packageId",
+          "callId",
+          "name",
+          "content",
+          "isError",
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.packageId, "session event.packageId");
+      eventString(event.callId, "session event.callId");
+      eventString(event.name, "session event.name");
+      eventString(event.content, "session event.content", true);
+      if (typeof event.isError !== "boolean") {
+        throw new Error("session event.isError must be a boolean");
       }
       break;
     case "package/author-intent":

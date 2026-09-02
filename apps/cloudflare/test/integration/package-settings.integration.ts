@@ -96,27 +96,9 @@ async function imageModelCalls(): Promise<Array<{ model: string }>> {
   return probe.runCalls();
 }
 
-/** Grant the Bot `web_search`: an Assignment bound to its Ollama Connection. */
-async function grantWebSearch(userId: string, botId: string): Promise<void> {
-  const { connectionId } = await provisionThroughGateway({ userId, botId });
-  const bot = (await expectOkJson(
-    await asUser(userId, `/api/bots/${botId}/settings`),
-  )) as { revision: number };
-  await expectOkJson(
-    await postAsUser(userId, `/api/bots/${botId}/settings`, {
-      schemaVersion: 1,
-      type: "bot/assign-capability",
-      commandId: `assign-web-search-${botId}`,
-      botId,
-      expectedRevision: bot.revision,
-      assignment: {
-        assignmentId: "web-search",
-        packageId: PACKAGE_ID,
-        capabilityId: "ollama-cloud-web-search",
-        connectionId,
-      },
-    }),
-  );
+/** Connect Ollama Cloud; every Bot then holds its `web_search` capability. */
+async function prepareWebSearch(userId: string, botId: string): Promise<void> {
+  await provisionThroughGateway({ userId, botId });
 }
 
 async function searchResults(
@@ -146,7 +128,7 @@ describe("a Package-level setting value reaching a Turn", () => {
   it("caps web_search at the value the User stored on the Package", async () => {
     const userId = freshUserId("package-settings");
     const botId = "configured-bot";
-    await grantWebSearch(userId, botId);
+    await prepareWebSearch(userId, botId);
 
     // Unset, the Package is on its own default and the model's request stands.
     expect(
@@ -172,7 +154,7 @@ describe("a Package-level setting value reaching a Turn", () => {
   it("refuses a value the Package's schema does not allow, with the reason", async () => {
     const userId = freshUserId("package-settings-invalid");
     const botId = "refusing-bot";
-    await grantWebSearch(userId, botId);
+    await prepareWebSearch(userId, botId);
 
     const refused = await setPackageSettings(userId, `bad-${botId}`, {
       [SETTING_ID]: 99,

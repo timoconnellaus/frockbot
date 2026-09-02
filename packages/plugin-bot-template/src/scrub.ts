@@ -17,11 +17,10 @@
 //   Memory, transcripts, unread state, Computer files  a template is
 //     public-shareable and Memory is the User's facts under a durable root
 //     (ADR 0015 records the divergence from GrokBot's `memory:[…]`).
-//   Connections, `connectionId`, `safeMetadata`, Assignments  "A Bot receives
-//     authority solely through an explicit, durable Assignment and, when
-//     required, a Connection." An import must not inherit either.
+//   Connections, `connectionId`, `safeMetadata`  A template must not inherit a
+//     User's accounts; the importing User makes their own Connections.
 //   `PackageInstallationView.values`  setup fields may hold keys.
-//   The model assignment  it names a Connection.
+//   The model setting  it names a Connection.
 import {
   MAX_TEMPLATE_ROUTINE_PROMPT_BYTES_V1,
   MAX_TEMPLATE_SKILL_BODY_BYTES_V1,
@@ -123,10 +122,8 @@ export interface TemplateSourceV1 {
   routines: readonly TemplateRoutineCandidateV1[];
   packages: readonly TemplatePackageCandidateV1[];
   connections: readonly TemplateConnectionCandidateV1[];
-  /** True when the Bot has a model assignment; it names a Connection, so it goes. */
-  hasModelAssignment?: boolean;
-  /** How many Assignments the Bot holds; counted, never carried. */
-  assignmentCount?: number;
+  /** True when the Bot has a model selection; it names a Connection, so it goes. */
+  hasModelSelection?: boolean;
   sourceCatalogGeneration?: string;
 }
 
@@ -434,8 +431,7 @@ export function buildBotTemplateV1(
   source: TemplateSourceV1,
 ): TemplateBuildResultV1 {
   const omissions = new Omissions();
-  if (source.hasModelAssignment) omissions.add("model");
-  omissions.add("assignment", source.assignmentCount ?? 0);
+  if (source.hasModelSelection) omissions.add("model");
   // Memory is never read, so there is nothing to count; the omission is
   // recorded unconditionally because it is the one a User most needs told.
   omissions.add("memory");
@@ -495,7 +491,7 @@ export function describeTemplateSummaryV1(
     `${summary.packages} Package${summary.packages === 1 ? "" : "s"}`,
     `${summary.publicServers} public MCP server${summary.publicServers === 1 ? "" : "s"}`,
   ].join(", ");
-  const scrubbed: string[] = ["Memory", "Connections", "Assignments"];
+  const scrubbed: string[] = ["Memory", "Connections"];
   if (summary.needsConnection > 0) {
     scrubbed.push(
       `${summary.needsConnection} server${summary.needsConnection === 1 ? "" : "s"} left as a placeholder`,

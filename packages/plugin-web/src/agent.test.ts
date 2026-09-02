@@ -12,7 +12,7 @@ import {
   type WebFetchResultV1,
 } from "./agent.ts";
 
-const ENABLED_ASSIGNMENT = {
+const ENABLED_BINDING = {
   packageId: "web",
   capabilityId: "web-fetch",
   state: "enabled",
@@ -226,21 +226,21 @@ describe("web_fetch", () => {
   });
 });
 
-describe("the web-fetch Capability Assignment", () => {
-  test("mounts nothing without an enabled Assignment naming it", () => {
+describe("the web-fetch runtime binding", () => {
+  test("mounts once for the enabled Package capability", () => {
     expect(
       createConfiguredWebFetchRuntimeContribution({
-        assignment: { ...ENABLED_ASSIGNMENT, state: "disabled" },
+        binding: { ...ENABLED_BINDING, state: "disabled" },
       }),
     ).toBeUndefined();
     expect(
       createConfiguredWebFetchRuntimeContribution({
-        assignment: { ...ENABLED_ASSIGNMENT, capabilityId: "something-else" },
+        binding: { ...ENABLED_BINDING, capabilityId: "something-else" },
       }),
     ).toBeUndefined();
     expect(
       createConfiguredWebFetchRuntimeContribution({
-        assignment: ENABLED_ASSIGNMENT,
+        binding: ENABLED_BINDING,
       }),
     ).toBeDefined();
   });
@@ -249,7 +249,7 @@ describe("the web-fetch Capability Assignment", () => {
     const root = new Context();
     await root.plugin(ToolRegistry);
     const plugin = createConfiguredWebFetchRuntimeContribution({
-      assignment: ENABLED_ASSIGNMENT,
+      binding: ENABLED_BINDING,
     });
     expect(plugin).toBeDefined();
     await root.plugin(plugin!);

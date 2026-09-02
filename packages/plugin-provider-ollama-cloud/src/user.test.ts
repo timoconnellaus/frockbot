@@ -891,45 +891,6 @@ describe("Ollama Cloud User Contribution", () => {
     );
   });
 
-  test("rejects disconnect while a Bot assignment depends on the Connection", async () => {
-    const { settings, ollama } = await fixture();
-    const created = await ollama.executeConnection("account-1", {
-      schemaVersion: 1,
-      type: "connection/create-api-key",
-      commandId: "connect-dependent",
-      packageId: "provider-ollama-cloud",
-      connectionTypeId: "ollama-cloud-account",
-      label: "Work",
-      apiKey: "key",
-    });
-    await settings.claimConnectionDependency(
-      "account-1",
-      created.connectionId,
-      "bot-1",
-      "assignment-1",
-      {
-        schemaVersion: 1,
-        packageId: "provider-ollama-cloud",
-        packageVersion: "0.0.1",
-        capabilityId: "ollama-cloud-models",
-        connectionTypeIds: ["ollama-cloud-account"],
-      },
-    );
-
-    await expect(
-      ollama.executeConnection("account-1", {
-        schemaVersion: 1,
-        type: "connection/disconnect",
-        commandId: "disconnect-dependent",
-        connectionId: created.connectionId,
-        revokeUpstream: false,
-      }),
-    ).resolves.toMatchObject({ status: "failed" });
-    expect(
-      await settings.getConnection("account-1", created.connectionId),
-    ).toMatchObject({ state: "ready" });
-  });
-
   test("does not downgrade concurrent upstream revocation reconciliation", async () => {
     const { settings, credentials, ollama } = await fixture();
     const created = await ollama.executeConnection("account-1", {

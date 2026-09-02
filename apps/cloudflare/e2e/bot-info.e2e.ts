@@ -115,9 +115,9 @@ test("settings and retired info-pane deep links resolve at their new homes", asy
   await expect(description).toHaveAttribute("data-anchor-target", "true");
 
   await page.goto(
-    `/?bot=${encodeURIComponent(botId)}&settings=bot-settings#bot-capabilities`,
+    `/?bot=${encodeURIComponent(botId)}&settings=bot-settings#bot-model`,
   );
-  await expect(settings.locator("#bot-capabilities")).toBeVisible();
+  await expect(settings.locator("#bot-model")).toBeVisible();
 
   await page.goto(
     `/?bot=${encodeURIComponent(botId)}&settings=bot-settings#bot-audit`,

@@ -35,8 +35,11 @@ import {
   BOT_ISOLATE_COMPATIBILITY_DATE,
   isolateBindingDigestV1,
   type BotCapabilitiesPropsV1,
-  type IsolateAssignmentV1,
 } from "@frockbot/plugin-shell/backend-isolate";
+import type {
+  IsolateConnectionV1,
+  IsolateModelBindingV1,
+} from "@frockbot/kernel-contracts";
 import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import type { Plugin } from "cordis";
 import type { BotCapabilities } from "../src/bot-capabilities.ts";
@@ -76,10 +79,10 @@ export const tools = [
   { name: "env_keys", description: "Reports the bindings this isolate can see", inputSchema: {}, idempotent: true },
   { name: "leak_probe", description: "Reports whether host state leaked in", inputSchema: {}, idempotent: true },
   { name: "reach_network", description: "Attempts egress", inputSchema: {}, idempotent: false },
-  { name: "ask_authority", description: "Asks for authority it does not hold", inputSchema: {}, idempotent: false },
-  { name: "ask_bad_authority", description: "Sends a request the contract refuses", inputSchema: {}, idempotent: false },
   { name: "call_model", description: "Calls the model binding", inputSchema: {}, idempotent: false },
-  { name: "list_capabilities", description: "Lists Assignment-derived capabilities", inputSchema: {}, idempotent: true },
+  { name: "list_capabilities", description: "Lists the Bot's authority", inputSchema: {}, idempotent: true },
+  { name: "connection_lease", description: "Requests a lease for one Connection", inputSchema: {}, idempotent: true },
+  { name: "schedule_surface", description: "Reports whether durable scheduling is present", inputSchema: {}, idempotent: true },
 ];
 
 export const hooks = {
@@ -112,18 +115,14 @@ export async function execute(tool, input, ctx) {
     case "reach_network":
       await fetch("https://example.com");
       return "egress-allowed";
-    case "ask_authority":
-      return JSON.stringify(
-        await ctx.requestAuthority({ capabilityId: "memory:write", reason: "probe" }),
-      );
-    case "ask_bad_authority":
-      return JSON.stringify(
-        await ctx.requestAuthority({ capabilityId: 42, reason: "probe" }),
-      );
     case "list_capabilities":
-      return JSON.stringify(await ctx.listCapabilities());
+      return JSON.stringify(await ctx.capabilities.list());
+    case "connection_lease":
+      return JSON.stringify(await ctx.connection(String(input?.connectionId ?? "")));
+    case "schedule_surface":
+      return typeof ctx.schedule;
     case "call_model": {
-      const outcome = await ctx.invokeModel(input);
+      const outcome = await ctx.model.invoke(input);
       if (outcome.status !== "streaming") return JSON.stringify(outcome);
       let text = "";
       for await (const event of outcome.events) {
@@ -356,7 +355,10 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     userId: string;
     botId: string;
     artifact?: ArtifactRefV1;
-    assignments?: IsolateAssignmentV1[];
+    connections?: IsolateConnectionV1[];
+    model?: IsolateModelBindingV1;
+    memory?: boolean;
+    workspace?: boolean;
     /** Varies the generation without varying the artifact. */
     generationCreatedAt?: string;
     deadlineMs?: number;
@@ -413,15 +415,22 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
             props: {
               userId: input.userId,
               botId: input.botId,
+              runId: "run-1",
+              sessionId: `${input.userId}:${input.botId}`,
+              turnId: "turn-1",
               generationId: generation.generationId,
               packageId: member.packageId,
-              assignments: input.assignments ?? [],
+              connections: structuredClone(input.connections ?? []),
+              ...(input.model ? { model: structuredClone(input.model) } : {}),
+              memory: input.memory ?? false,
+              workspace: input.workspace ?? false,
             },
           }),
-        bindingDigest: await isolateBindingDigestV1(
-          input.assignments ?? [],
-          generation.generationId,
-        ),
+        bindingDigest: await isolateBindingDigestV1({
+          connections: input.connections ?? [],
+          ...(input.model ? { model: input.model } : {}),
+          compositionGenerationId: generation.generationId,
+        }),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
         ...(input.deadlineMs === undefined
           ? {}
@@ -446,7 +455,10 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     artifact: ArtifactRefV1;
     tool: string;
     toolInput?: unknown;
-    assignments?: IsolateAssignmentV1[];
+    connections?: IsolateConnectionV1[];
+    model?: IsolateModelBindingV1;
+    memory?: boolean;
+    workspace?: boolean;
     generationCreatedAt?: string;
   }): Promise<{ content: string; isError: boolean }> {
     const { composition, generation } = await this.mount(input);
@@ -567,6 +579,9 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     userId: string;
     botId: string;
     artifact: ArtifactRefV1;
+    connections?: IsolateConnectionV1[];
+    model?: IsolateModelBindingV1;
+    generationCreatedAt?: string;
   }): Promise<string[]> {
     this.loaderIds = [];
     const { composition } = await this.mount(input);

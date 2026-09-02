@@ -94,14 +94,6 @@ function harness(initial?: Partial<BotSettingsViewV1>): Harness {
   const storage = memoryStorage();
   const flock = createFlockUserBackendContribution({
     storage,
-    readUserSettings: () =>
-      Promise.resolve({
-        schemaVersion: 1,
-        revision: 0,
-        profile: { name: "User" },
-        packages: [],
-        connections: [],
-      }),
     now: () => new Date("2026-08-31T10:00:00.000Z"),
     random: () => 0,
     commandBotLifecycle: () => {
@@ -339,10 +331,8 @@ describe("bot_create", () => {
     expect(created.botId).toBe(
       await createdBotIdV1(OWNER, CONTEXT.effectId, "Budget"),
     );
-    // The new Bot receives no authority beyond what `bot/create` grants: no
-    // model of its own and no Assignment.
-    expect(created.initialModel).toBeUndefined();
-    expect(created.initialModelBinding).toBeUndefined();
+    // A registration contains identity and provenance, never an authority snapshot.
+    expect(created).not.toHaveProperty("initialModel");
     expect(result.content).toContain(created.botId);
   });
 

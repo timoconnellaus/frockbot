@@ -1,6 +1,6 @@
-// A first configuration read and first Bot creation must leave durable Package
-// installations and Capability Assignments behind. This browser layer proves
-// those records reach both User-facing projections without a setup detour.
+// A first configuration read and first Bot creation leave durable Package
+// installations behind. This browser layer proves those records reach the
+// User-facing projection without a setup detour or a second grant surface.
 import {
   createBot,
   expect,
@@ -50,8 +50,7 @@ test("a fresh User and Bot start with first-party capabilities", async ({
   await expect(page.getByLabel("Search the Package Catalog")).toBeVisible();
 
   // The retired Bot info pane's contents live in Bot settings now: the
-  // notifications switch on the front of it, the Assignment catalog under
-  // Advanced.
+  // notifications switch on the front of it, the model setting under Advanced.
   await page.getByRole("button", { name: "Close panel" }).click();
   // Exact: the Catalog behind this panel lists a "FrockBot Settings" Package.
   await page.getByRole("button", { name: "Bot settings", exact: true }).click();
@@ -60,10 +59,6 @@ test("a fresh User and Bot start with first-party capabilities", async ({
     pane.locator("#bot-info-notifications").getByRole("checkbox"),
   ).toBeChecked();
   await pane.getByText("Advanced").click();
-  await expect(
-    pane.getByText("Web · web-fetch", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    pane.getByText("Routines · routine-tools", { exact: true }),
-  ).toBeVisible();
+  await expect(pane.getByText("Model", { exact: true })).toBeVisible();
+  await expect(pane.getByText("Capability Assignments")).toHaveCount(0);
 });

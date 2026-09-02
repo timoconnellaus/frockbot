@@ -5,7 +5,7 @@
 // registry rows, the pairing offers, the command queue with its leases, and
 // the results. "The User's Durable Object is the authority for everything
 // User-scoped", and a machine is a User asset: a Bot reaches one only through
-// a Capability under an Assignment, and (from R3) a per-call human approval.
+// a ready Connection the Bot holds, and (from R3) a per-call human approval.
 //
 // Three seams it does not own:
 //

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   decodeModelSelection,
-  describeModelAssignment,
+  describeModelSelection,
   encodeModelSelection,
   eligibleModelConnections,
   isModelConnectionEligible,
@@ -206,13 +206,13 @@ describe("shared model option building", () => {
     expect(() => decodeModelSelection("not-json")).toThrow(
       "A Connection and model ID are required",
     );
-    expect(describeModelAssignment(model, connections)).toBe("Llama 3 — Work");
+    expect(describeModelSelection(model, connections)).toBe("Llama 3 — Work");
     expect(
-      describeModelAssignment(
+      describeModelSelection(
         { connectionId: "ollama-1", providerModelId: "custom:cloud" },
         connections,
       ),
     ).toBe("custom:cloud — Work");
-    expect(describeModelAssignment(undefined, connections)).toBeUndefined();
+    expect(describeModelSelection(undefined, connections)).toBeUndefined();
   });
 });

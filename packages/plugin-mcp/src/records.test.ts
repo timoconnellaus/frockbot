@@ -7,7 +7,7 @@ import {
   decodeMcpRefusalRecordV1,
   decodeMcpServerRecordV1,
   decodeMcpServerStatusViewV1,
-  mcpAssignmentResolutionKeyV1,
+  mcpConnectionResolutionKeyV1,
   mcpConnectionMetadataV1,
   mcpFailureCodeV1,
   type McpServerRecordV1,
@@ -263,19 +263,19 @@ describe("the mount outcome that crosses back from a Bot", () => {
   });
 });
 
-describe("the Assignment resolution key", () => {
+describe("the Connection resolution key", () => {
   test("changes when the server epoch changes, and only then", () => {
-    const before = mcpAssignmentResolutionKeyV1({
+    const before = mcpConnectionResolutionKeyV1({
       connectionId: "mcp-1",
       connectionGeneration: "gen-1",
       serverEpoch: 1,
     });
-    const restarted = mcpAssignmentResolutionKeyV1({
+    const restarted = mcpConnectionResolutionKeyV1({
       connectionId: "mcp-1",
       connectionGeneration: "gen-1",
       serverEpoch: 2,
     });
-    const again = mcpAssignmentResolutionKeyV1({
+    const again = mcpConnectionResolutionKeyV1({
       connectionId: "mcp-1",
       connectionGeneration: "gen-1",
       serverEpoch: 1,
@@ -286,13 +286,13 @@ describe("the Assignment resolution key", () => {
 
   test("changes when the Connection generation changes", () => {
     expect(
-      mcpAssignmentResolutionKeyV1({
+      mcpConnectionResolutionKeyV1({
         connectionId: "mcp-1",
         connectionGeneration: "gen-2",
         serverEpoch: 1,
       }),
     ).not.toBe(
-      mcpAssignmentResolutionKeyV1({
+      mcpConnectionResolutionKeyV1({
         connectionId: "mcp-1",
         connectionGeneration: "gen-1",
         serverEpoch: 1,

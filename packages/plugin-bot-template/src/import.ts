@@ -10,12 +10,10 @@
 // off a moved index: "Composition consumes immutable, content-addressed
 // artifacts", and an install validated against anything else is not that.
 //
-// WHAT IMPORT NEVER CREATES. No Connection and no Assignment. "Package
-// availability is User-level. A Bot receives authority solely through an
-// explicit, durable Assignment and, when required, a Connection." A template is
-// a recipe; granting authority off the back of one would be the recipe handing
-// itself permissions. Every server the template names becomes a line on the
-// card telling the User what they would have to connect themselves.
+// WHAT IMPORT NEVER CREATES. No Connection. A template is a recipe; connecting
+// an account off the back of one would be the recipe handing itself authority.
+// Every server the template names becomes a line on the card telling the User
+// what they would have to connect themselves.
 import type {
   BotTemplateV1,
   TemplateSheepRecipeV1,
@@ -274,7 +272,7 @@ export function describeImportPlanV1(plan: TemplateImportPlanV1): string {
     plan.connections.length > 0
       ? `${plan.connections.length} server(s) need your own Connection; none is created for you.`
       : "",
-    "No Connection and no Assignment is created by an import.",
+    "No Connection is created by an import.",
   ]
     .filter(Boolean)
     .join(" ");

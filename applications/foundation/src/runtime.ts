@@ -11,11 +11,10 @@ import type {
 } from "@frockbot/kernel-composition";
 import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import type {
-  BotExecutionPlanV1,
-  BotSettingsViewV1,
   ConnectionView,
   PackageSettingValueV1,
   ResolvedModelBindingV1,
+  UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import auditManifest from "@frockbot/plugin-audit/manifest";
 import adminManifest from "@frockbot/plugin-admin/manifest";
@@ -351,19 +350,25 @@ const runtimeContributions = new Map([
 ]);
 
 /**
- * What the host gives one Assignment-derived runtime Contribution. The
- * Connection-bound fields are present only when the Assignment names a
- * Connection, so a Capability with `connectionTypes: []` receives an
- * Assignment and nothing else.
+ * What the host gives one Connection-derived runtime Contribution. The
+ * binding is an ephemeral projection of an installed Package Capability and,
+ * where required, one ready User Connection. It is not durable authority.
  */
-type AssignedRuntimeContributionFactory = (config: {
-  assignment: BotExecutionPlanV1["assignments"][number];
-  /** This Assignment's ordinal among the enabled Assignments of its Package. */
-  assignmentIndex: number;
+export interface RuntimeCapabilityBindingV1 {
+  packageId: string;
+  capabilityId: string;
+  connectionId?: string;
+  state: "enabled";
+}
+
+type ConnectedRuntimeContributionFactory = (config: {
+  binding: RuntimeCapabilityBindingV1;
+  /** This binding's ordinal among the ready Connections of its Package. */
+  bindingIndex: number;
   userId: string;
   /**
    * The Package-level setting values this User holds for the Package the
-   * Assignment names, already resolved against the manifest the pinned
+   * binding names, already resolved against the manifest the pinned
    * Composition carries. Empty when the User has set none, so a Contribution
    * reads its own default exactly as before.
    *
@@ -377,13 +382,13 @@ type AssignedRuntimeContributionFactory = (config: {
   /** The Package's own outbound seam, when the host owns one. */
   fetch?: typeof fetch;
   /**
-   * The already-authorized Connection, when the Assignment binds one. A
-   * Capability with `connectionTypes: []` receives an Assignment and no
+   * The already-authorized Connection, when the binding names one. A
+   * Capability with `connectionTypes: []` receives a binding and no
    * Connection, so this is absent rather than empty.
    */
   connection?: ConnectionView;
   /**
-   * An expiring lease over the Assignment's Connection credential. Supplied
+   * An expiring lease over the binding's Connection credential. Supplied
    * only by a host that carries the User's authority; a Contribution that
    * needs no credential never calls it.
    */
@@ -401,9 +406,9 @@ type AssignedRuntimeContributionFactory = (config: {
   recordOutcome?(outcome: McpMountOutcomeV1): Promise<void>;
 }) => Plugin | undefined | Promise<Plugin | undefined>;
 
-const assignedRuntimeContributionFactories = new Map<
+const connectedRuntimeContributionFactories = new Map<
   string,
-  AssignedRuntimeContributionFactory
+  ConnectedRuntimeContributionFactory
 >([
   [
     "@frockbot/plugin-mcp/agent",
@@ -415,16 +420,16 @@ const assignedRuntimeContributionFactories = new Map<
   ],
   [
     "@frockbot/plugin-web/agent",
-    ({ assignment, fetch: outbound }) =>
+    ({ binding, fetch: outbound }) =>
       createConfiguredWebFetchRuntimeContribution({
-        assignment,
+        binding,
         ...(outbound ? { fetch: outbound } : {}),
       }),
   ],
   [
     "@frockbot/plugin-provider-ollama-cloud/runtime",
     ({
-      assignment,
+      binding,
       userId,
       connection,
       leaseCredential,
@@ -432,20 +437,20 @@ const assignedRuntimeContributionFactories = new Map<
       fetch: outbound,
       packageSettings,
     }) => {
-      // `web_search` is authorized by its own Assignment and its own
-      // Connection generation; a Bot whose model runs elsewhere still holds it.
+      // `web_search` is authorized by its User Connection generation; a Bot
+      // whose model runs elsewhere still holds it.
       if (
         !connection?.generation ||
-        !assignment.connectionId ||
+        !binding.connectionId ||
         !leaseCredential ||
         !settleCredential
       ) {
         return undefined;
       }
       return createConfiguredOllamaWebSearchRuntimeContribution({
-        assignment,
+        binding,
         accountId: userId,
-        connectionId: assignment.connectionId,
+        connectionId: binding.connectionId,
         connectionGeneration: connection.generation,
         // Every inbound value is decoded at its seam: the provider Package
         // validates the endpoint root before it composes a request URL.
@@ -761,7 +766,7 @@ export async function createFoundationBackendContributions<T>(
   };
 }
 
-export interface FoundationAssignedRuntimePackage {
+export interface FoundationRuntimePackage {
   specifier: string;
   contributionSpecifier: string;
   manifest: unknown;
@@ -772,7 +777,7 @@ function runtimePackage(
   plan: ApplicationPlan,
   packageId: string,
   plugin: Plugin,
-): FoundationAssignedRuntimePackage {
+): FoundationRuntimePackage {
   const pkg = plan.packages.find((candidate) => candidate.id === packageId);
   const runtime = pkg?.manifest.contributions.runtime;
   if (!pkg || !runtime) {
@@ -973,7 +978,7 @@ export function createFoundationHostedRuntimePackages(
     machineMessages?: MachineMessagesRuntimeHostV1;
     packagePublisher: PackagePublisherAgentHost;
   },
-): FoundationAssignedRuntimePackage[] {
+): FoundationRuntimePackage[] {
   return [
     ...(host.mcp
       ? [runtimePackage(plan, "mcp", createMcpLifecycleRuntimePlugin(host.mcp))]
@@ -1101,9 +1106,9 @@ export function createFoundationHostedRuntimePackages(
  * mount before the servers whose state they report.
  */
 export function mergeFoundationRuntimePackages(
-  packages: readonly FoundationAssignedRuntimePackage[],
-): FoundationAssignedRuntimePackage[] {
-  const merged: FoundationAssignedRuntimePackage[] = [];
+  packages: readonly FoundationRuntimePackage[],
+): FoundationRuntimePackage[] {
+  const merged: FoundationRuntimePackage[] = [];
   const byContribution = new Map<string, Plugin[]>();
   for (const pkg of packages) {
     const existing = byContribution.get(pkg.contributionSpecifier);
@@ -1124,16 +1129,13 @@ export function mergeFoundationRuntimePackages(
   });
 }
 
-export async function createFoundationAssignedRuntimePackages(
+export async function createFoundationConnectedRuntimePackages(
   plan: ApplicationPlan,
-  settings: BotSettingsViewV1,
-  execution: BotExecutionPlanV1,
+  user: UserSettingsViewV1,
   host: {
     userId: string;
     readSecret(name: string): string | undefined;
-    authorizeConnection(
-      assignment: BotSettingsViewV1["assignments"][number],
-    ): Promise<ConnectionView>;
+    authorizeConnection(connection: ConnectionView): Promise<ConnectionView>;
     /**
      * One Package's durable User-level setting values. Supplied by the host
      * that read the User's settings for this Turn; a host that supplies none
@@ -1146,76 +1148,109 @@ export async function createFoundationAssignedRuntimePackages(
     fetch?: typeof fetch;
     /** The User's credential authority, for Contributions that hold a key. */
     leaseCredential?(
-      assignment: BotSettingsViewV1["assignments"][number],
+      connection: ConnectionView,
       effectId: string,
       expectedGeneration?: string,
     ): Promise<CredentialLeaseV1>;
     settleCredential?(
-      assignment: BotSettingsViewV1["assignments"][number],
+      connection: ConnectionView,
       effectId: string,
     ): Promise<void>;
     /** The durable home of a mount outcome, when the host has one. */
     recordOutcome?(outcome: McpMountOutcomeV1): Promise<void>;
   },
-): Promise<FoundationAssignedRuntimePackage[]> {
-  const result: FoundationAssignedRuntimePackage[] = [];
-  const assignmentIndexes = new Map<string, number>();
-  for (const assignment of execution.assignments) {
-    if (assignment.state !== "enabled") continue;
+): Promise<FoundationRuntimePackage[]> {
+  const result: FoundationRuntimePackage[] = [];
+  const bindingIndexes = new Map<string, number>();
+  for (const installation of user.packages) {
+    if (installation.state !== "installed") continue;
     const pkg = plan.packages.find(
-      (candidate) => candidate.id === assignment.packageId,
+      (candidate) =>
+        candidate.id === installation.packageId &&
+        candidate.version === installation.version,
     );
     const runtime = pkg?.manifest.contributions.runtime;
     if (!pkg || !runtime) continue;
     const specifier = contributionSpecifier(pkg.specifier, runtime.entry);
-    const factory = assignedRuntimeContributionFactories.get(specifier);
+    const factory = connectedRuntimeContributionFactories.get(specifier);
     if (!factory) continue;
-    const admittedAssignment = settings.assignments.find(
-      (candidate) => candidate.assignmentId === assignment.assignmentId,
-    );
-    if (!admittedAssignment) continue;
-    // A Capability with no Connection type is authorized by its Assignment
-    // alone; asking the host to authorize a Connection the Assignment does not
-    // name would refuse a Capability the User did grant.
-    const connection = admittedAssignment.connectionId
-      ? await host.authorizeConnection(admittedAssignment)
-      : undefined;
-    const assignmentIndex = assignmentIndexes.get(pkg.id) ?? 0;
-    assignmentIndexes.set(pkg.id, assignmentIndex + 1);
-    const plugin = await factory({
-      assignment,
-      assignmentIndex,
-      userId: host.userId,
-      packageSettings: host.packageSettings?.(pkg.id) ?? {},
-      readSecret: host.readSecret,
-      authorizeConnection: () => host.authorizeConnection(admittedAssignment),
-      ...(connection ? { connection } : {}),
-      ...(host.fetch ? { fetch: host.fetch } : {}),
-      ...(host.leaseCredential
-        ? {
-            leaseCredential: (effectId, expectedGeneration) =>
-              host.leaseCredential!(
-                admittedAssignment,
-                effectId,
-                expectedGeneration,
-              ),
-          }
-        : {}),
-      ...(host.settleCredential
-        ? {
-            settleCredential: (effectId) =>
-              host.settleCredential!(admittedAssignment, effectId),
-          }
-        : {}),
-      ...(host.recordOutcome ? { recordOutcome: host.recordOutcome } : {}),
-    });
-    if (!plugin) continue;
-    result.push({
-      specifier: pkg.specifier,
-      contributionSpecifier: specifier,
-      manifest: pkg.manifest,
-      plugin,
-    });
+    for (const capability of pkg.manifest.configuration?.capabilities ?? []) {
+      const candidates: Array<ConnectionView | undefined> =
+        capability.connectionTypes.length === 0
+          ? [undefined]
+          : user.connections.filter((connection) => {
+              if (
+                connection.packageId !== pkg.id ||
+                connection.state !== "ready" ||
+                !capability.connectionTypes.includes(
+                  connection.connectionTypeId,
+                )
+              ) {
+                return false;
+              }
+              const connectionType =
+                pkg.manifest.configuration?.connectionTypes.find(
+                  (candidate) => candidate.id === connection.connectionTypeId,
+                );
+              return (
+                connectionType?.capabilities.includes(capability.id) === true
+              );
+            });
+      for (const candidate of candidates) {
+        const connection = candidate
+          ? await host.authorizeConnection(candidate)
+          : undefined;
+        const binding: RuntimeCapabilityBindingV1 = {
+          packageId: pkg.id,
+          capabilityId: capability.id,
+          ...(connection ? { connectionId: connection.connectionId } : {}),
+          state: "enabled",
+        };
+        const bindingIndex = bindingIndexes.get(pkg.id) ?? 0;
+        bindingIndexes.set(pkg.id, bindingIndex + 1);
+        const plugin = await factory({
+          binding,
+          bindingIndex,
+          userId: host.userId,
+          packageSettings: host.packageSettings?.(pkg.id) ?? {},
+          readSecret: host.readSecret,
+          authorizeConnection: () => {
+            if (!connection) {
+              return Promise.reject(
+                new Error("Connection-backed capability is unavailable"),
+              );
+            }
+            return host.authorizeConnection(connection);
+          },
+          ...(connection ? { connection } : {}),
+          ...(host.fetch ? { fetch: host.fetch } : {}),
+          ...(host.leaseCredential && connection
+            ? {
+                leaseCredential: (effectId, expectedGeneration) =>
+                  host.leaseCredential!(
+                    connection,
+                    effectId,
+                    expectedGeneration,
+                  ),
+              }
+            : {}),
+          ...(host.settleCredential && connection
+            ? {
+                settleCredential: (effectId) =>
+                  host.settleCredential!(connection, effectId),
+              }
+            : {}),
+          ...(host.recordOutcome ? { recordOutcome: host.recordOutcome } : {}),
+        });
+        if (!plugin) continue;
+        result.push({
+          specifier: pkg.specifier,
+          contributionSpecifier: specifier,
+          manifest: pkg.manifest,
+          plugin,
+        });
+      }
+    }
   }
   return result;
 }
@@ -1224,7 +1259,7 @@ export function createFoundationModelRuntimePackage(
   plan: ApplicationPlan,
   binding: ResolvedModelBindingV1,
   host: ModelRuntimeContributionConfig,
-): FoundationAssignedRuntimePackage {
+): FoundationRuntimePackage {
   if (
     binding.state === "unavailable" ||
     !binding.connection ||
@@ -1278,10 +1313,10 @@ export function createFoundationModelRuntimePackage(
  * injections, so nothing observes the difference.
  */
 export function mergeFoundationRuntimePackagesV1(
-  packages: readonly FoundationAssignedRuntimePackage[],
-): FoundationAssignedRuntimePackage[] {
-  const merged: FoundationAssignedRuntimePackage[] = [];
-  const byContribution = new Map<string, FoundationAssignedRuntimePackage[]>();
+  packages: readonly FoundationRuntimePackage[],
+): FoundationRuntimePackage[] {
+  const merged: FoundationRuntimePackage[] = [];
+  const byContribution = new Map<string, FoundationRuntimePackage[]>();
   for (const pkg of packages) {
     const existing = byContribution.get(pkg.contributionSpecifier);
     if (existing) {
@@ -1351,15 +1386,13 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   runtimeIds.delete("fly-sprite");
   // Package publication is mounted with the current User's durable host.
   runtimeIds.delete("package-publisher");
-  // Assigned provider Packages mount only after durable Connections resolve.
+  // Provider Packages mount only after durable Connections resolve.
   runtimeIds.delete("composio");
-  // Remote MCP servers mount per enabled Assignment, after the Connection and
-  // its handshake resolve.
+  // Remote MCP servers mount after the Connection and its handshake resolve.
   runtimeIds.delete("mcp");
   runtimeIds.delete("provider-ollama-cloud");
   runtimeIds.delete("provider-workers-ai");
-  // The Web Package's `web_fetch` mounts only for a Bot whose User assigned
-  // the `web-fetch` Capability to it.
+  // The Web Package's `web_fetch` mounts whenever the Package is enabled.
   runtimeIds.delete("web");
   return {
     plan,

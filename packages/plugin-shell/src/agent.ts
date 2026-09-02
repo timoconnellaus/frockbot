@@ -120,8 +120,6 @@ function sendAcknowledgement(payload: SendToUserPayloadV1): string {
       return "Secret request sent to the user.";
     case "agent-card":
       return "Agent card sent to the user.";
-    case "connect-card":
-      return "Connect card sent to the user. Only they can complete the authorization; you have recorded the request, not granted it.";
     case "approval":
       // Deliberately not "requested permission": nothing has been granted, and
       // the Turn is over whatever the answer turns out to be.
@@ -137,7 +135,6 @@ const SEND_TO_USER_DESCRIPTION = [
   '{"type":"widget","widget":{"prompt":"…","helpText":"…","options":["…"],"allowCustom":false,"dismissOnMoveOn":false}}',
   '{"type":"secret-request","prompt":"…","secretName":"…"}',
   '{"type":"agent-card","agentId":"…","title":"…","body":"…"}',
-  '{"type":"connect-card","connectionId":"…","title":"…","body":"…"}',
   '{"type":"approval","approvalId":"…","action":"…","rationale":"…","risk":"low|medium|high","expiresInSeconds":86400}',
   "A widget asks the user a question with 1 to 6 options and ends your Turn;",
   "their answer arrives as a new Turn. An approval asks the user to allow one",

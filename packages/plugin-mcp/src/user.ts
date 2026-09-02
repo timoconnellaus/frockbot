@@ -485,43 +485,6 @@ export class McpUserBackendContribution {
           serverId: command.serverId,
         };
       }
-      case "mcp/request-authorization": {
-        // A durable pending decision, never a grant. The server record is left
-        // exactly as it is — a Bot does not get to declare its User's server
-        // broken — and what changes is the Connection projection the User's
-        // own surface draws a connect card from. No URL is minted here, and
-        // none is returned: only an authenticated `connection/start` does that.
-        const server = await this.requireServer(accountId, command.serverId);
-        const connection = await this.requireConnection(
-          accountId,
-          command.serverId,
-        );
-        if (connection.connectionTypeId !== MCP_OAUTH_CONNECTION_TYPE_ID) {
-          return this.refuse(command, {
-            code: "unauthorized",
-            message:
-              "This MCP server does not use OAuth, so there is nothing for the User to authorize. A keyed server needs a new key instead.",
-          });
-        }
-        await this.host.settings.replaceConnection(
-          accountId,
-          connection.connectionId,
-          connection.generation,
-          {
-            ...connection,
-            pendingAuthorization: mcpPendingAuthorizationV1(
-              server,
-              new Date(this.now()).toISOString(),
-            ),
-          },
-        );
-        return {
-          schemaVersion: 1,
-          commandId: command.commandId,
-          status: "applied",
-          serverId: command.serverId,
-        };
-      }
       case "mcp/restart": {
         const server = await this.requireServer(accountId, command.serverId);
         const connection = await this.requireConnection(
@@ -531,7 +494,7 @@ export class McpUserBackendContribution {
         if (connection.state === "revoked" || connection.state === "revoking") {
           throw new Error("MCP Connection is revoked");
         }
-        // The epoch bump is the whole of restart: it is in the Assignment's
+        // The epoch bump is the whole of restart: it is in the Connection's
         // resolution key, so the next admitted Turn resolves a different
         // mount and re-handshakes, while the in-flight Turn keeps the client
         // it already holds. The handshake here refreshes the status the User
@@ -704,7 +667,7 @@ export class McpUserBackendContribution {
       // The Connection generation and the credential generation are the same
       // thing for a keyed server, and deliberately are not for an OAuth one: a
       // refresh rotates the sealed generation without disturbing the
-      // Assignment resolution key a Turn is pinned to.
+      // Connection resolution key a Turn is pinned to.
       expectedGeneration: await this.currentCredentialGeneration(
         input.accountId,
         connection,
@@ -805,7 +768,7 @@ export class McpUserBackendContribution {
 
   /**
    * Mint one authorization. Only an authenticated User action reaches here —
-   * a Bot may record a pending decision, never a redirect.
+   * a Bot cannot request this path or receive a redirect.
    *
    * Order matters and is the durability argument: the quota is charged, the
    * Connection exists in `authorizing`, and the pending record carrying the
@@ -1518,8 +1481,7 @@ export class McpUserBackendContribution {
           { ...connection, state, failure: undefined },
         );
         // GrokBot's `RemoveMcpAccount`: the server is gone, so its record is
-        // gone with it. The Assignments that named it become unavailable
-        // tombstones through the ordinary Connection dependency path.
+        // gone with it, and it leaves every Bot's authority projection.
         await this.removeServer(connection.connectionId);
         return this.receipt(command.commandId, connection.connectionId);
       }
@@ -1700,8 +1662,8 @@ export class McpUserBackendContribution {
           ...connection,
           state: "ready",
           failure: undefined,
-          // A handshake that succeeded is the decision being made: the card
-          // goes away in the same write that brings the tools back.
+          // A successful handshake repairs the Connection: the card goes away
+          // in the same write that brings the tools back.
           pendingAuthorization: undefined,
           safeMetadata: {
             ...mcpConnectionMetadataV1(server),

@@ -63,8 +63,8 @@ async function script(rule: FakeExecScript): Promise<void> {
   expect(response.status).toBe(200);
 }
 
-/** Install `mcp`, add the `Example` server, and assign its tools to the Bot. */
-async function connectMcpServer(userId: string, botId: string): Promise<void> {
+/** Install `mcp` and add the `Example` server Connection. */
+async function connectMcpServer(userId: string): Promise<void> {
   const settings = (await expectOkJson(
     await asUser(userId, "/api/settings"),
   )) as {
@@ -74,40 +74,22 @@ async function connectMcpServer(userId: string, botId: string): Promise<void> {
     await postAsUser(userId, "/api/settings", {
       schemaVersion: 1,
       type: "user/install-package",
-      commandId: `install-mcp-${botId}`,
+      commandId: "install-mcp-audit",
       expectedRevision: settings.revision,
       packageId: "mcp",
       version: "0.0.1",
     }),
   );
-  const receipt = (await expectOkJson(
+  await expectOkJson(
     await postAsUser(userId, "/api/connections", {
       schemaVersion: 1,
       type: "connection/create-api-key",
-      commandId: `connect-mcp-${botId}`,
+      commandId: "connect-mcp-audit",
       packageId: "mcp",
       connectionTypeId: "mcp-remote-key",
       label: "Example",
       apiKey: MCP_GOOD_API_KEY,
       settings: { url: MCP_ENDPOINT, transport: "streamable-http" },
-    }),
-  )) as { connectionId: string };
-  const bot = (await expectOkJson(
-    await asUser(userId, `/api/bots/${botId}/settings`),
-  )) as { revision: number };
-  await expectOkJson(
-    await postAsUser(userId, `/api/bots/${botId}/settings`, {
-      schemaVersion: 1,
-      type: "bot/assign-capability",
-      commandId: `assign-mcp-${botId}`,
-      botId,
-      expectedRevision: bot.revision,
-      assignment: {
-        assignmentId: "mcp-tools-1",
-        packageId: "mcp",
-        capabilityId: "mcp-tools",
-        connectionId: receipt.connectionId,
-      },
     }),
   );
 }
@@ -123,7 +105,7 @@ describe("auditing one Turn's effects", () => {
       stdout: `audited\n${EXEC_EXIT_MARKER}0\n`,
     });
     await provisionThroughGateway({ userId, botId });
-    await connectMcpServer(userId, botId);
+    await connectMcpServer(userId);
 
     const turn = (await expectOkJson(
       await postAsUser(userId, `/api/bots/${botId}/turns`, {
@@ -192,7 +174,7 @@ describe("auditing one Turn's effects", () => {
       stdout: `audited\n${EXEC_EXIT_MARKER}0\n`,
     });
     await provisionThroughGateway({ userId, botId });
-    await connectMcpServer(userId, botId);
+    await connectMcpServer(userId);
 
     await expectOkJson(
       await postAsUser(userId, `/api/bots/${botId}/turns`, {

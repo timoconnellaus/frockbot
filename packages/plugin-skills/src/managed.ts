@@ -42,32 +42,20 @@ export interface ManagedSkillDocumentV1 {
 
 const ADD_CONNECTOR = `---
 name: Add connector
-description: Use this when the User wants to connect an app, MCP server, or model provider that this Bot cannot already reach.
+description: Use this when the User asks for an app, MCP server, or model provider that this Bot cannot already reach.
 ---
 # Add a connector
 
-You cannot install a Package or create a Connection yourself: both are your
-User's acts, in their own settings. What you can do is find the right entry and
-tell them precisely what to do.
+Connections are User acts performed out of band. You cannot create or request
+one, render a connect card, provide an authorization link, or direct the User
+through a connection flow. You discover a service only after it is connected.
 
-1. Name the gap. Say which tool you looked for and did not find, so the User
-   knows what installing this changes about what you can do.
-2. Look in the Package Catalog for an entry that covers it. An entry that is
-   already installed shows in your prompt as the Package it contributes; one
-   that is not will not be there at all.
-3. Report to the User with \`send_to_user\`: the entry's display name, what it
-   would let you do, and the single sentence "Install it under Settings →
-   Plugins, then assign it to me."
-4. If the entry needs an API key or an OAuth sign-in, say so before they start,
-   and say what the key is for. Never ask the User to paste a secret into the
-   conversation: a Connection's credentials belong in the Connection, never in
-   a Turn's transcript, and never in your Memory.
-5. Stop there and wait. Do not retry the missing tool in a loop; the install
-   becomes visible to you on a later Turn, not this one.
-
-If the User asks you to do it for them, say plainly that you cannot, and why:
-installing a Package widens what you are allowed to do, and self-modification
-never widens your own authority.
+1. Name the unavailable operation and the missing capability plainly.
+2. Do not invent a substitute credential path and never ask for a secret in
+   conversation; credentials never belong in a Turn or Memory.
+3. Offer any useful alternative that uses authority you already hold.
+4. Stop. Do not retry the missing capability in a loop and do not turn the
+   refusal into a request for more authority.
 `;
 
 const EXPORT_BOT_TEMPLATE = `---
@@ -80,23 +68,22 @@ A template is a written description of a Bot's setup, not a file format and not
 a copy of anything secret.
 
 1. Gather what actually defines this Bot: its name and description, the
-   Packages its behaviour depends on, the Capability Assignments it runs under,
-   the model it is assigned, and the Skills under its own instruction root.
+   Packages its behaviour depends on, its model setting, and the Skills under
+   its own instruction root.
 2. Read each Skill you intend to include with \`skill_load\` before you describe
    it. Describing a Skill from its catalog line alone is describing a name.
-3. Write the template as Markdown, in this order: Identity, Packages,
-   Assignments, Model, Skills, Notes. Under Skills, give each Skill's slug,
+3. Write the template as Markdown, in this order: Identity, Packages, Model,
+   Skills, Notes. Under Skills, give each Skill's slug,
    name, description, and full body — that is what makes the template
    importable.
 4. Exclude every credential. Connection ids, API keys, OAuth tokens, and
-   account identifiers are the User's, not the template's. Name the *kind* of
-   Connection each Assignment needs and stop there.
+   account identifiers are the User's, not the template's.
 5. Hand the template to the User with \`send_to_user\`. If they want it kept,
    write it into your own Memory with \`memory_write\`, not into a Skill: a
    template is a record, and a Skill is a recipe.
 
-Say explicitly which parts of the setup a template cannot carry — Connections
-and any grant the User made — so nobody expects an import to reproduce them.
+Say explicitly that a template cannot carry Connections, so nobody expects an
+import to reproduce them.
 `;
 
 const IMPORT_BOT_TEMPLATE = `---
@@ -108,17 +95,17 @@ description: Use this when the User gives you a bot template and wants a Bot set
 1. Read the template through once before you change anything, and say back what
    it will produce: a Bot's name, its Skills, and what it will still be missing.
 2. Decide where it lands. If the template is for a new Bot, use \`bot_create\` to
-   add one to your User's flock; it starts with no Assignments and follows your
-   User's default model, exactly as one the User creates in the sidebar does.
+   add one to your User's flock; it follows your User's default model, exactly
+   as one the User creates in the sidebar does.
    If it is for you, use \`bot_update\` for the identity fields and continue.
 3. Recreate the Skills you can. For each Skill in the template, call
    \`skill_write\` with its name, description, body, and slug. They land under
    your own instruction root and become visible on your next Turn, not this
    one, so do not try to run one immediately after writing it.
-4. Stop at every grant. Packages, Capability Assignments, Connections, and
-   model choices are your User's to make. List each one the template needs and
-   ask for it with \`send_to_user\`; do not attempt a workaround that reaches
-   the same capability by another route.
+4. Do not create or request Connections. If the imported setup lacks authority,
+   report the affected operation as unavailable without rendering or directing
+   a connection flow. Do not attempt a workaround that reaches the same service
+   by another route.
 5. Report what was created, what was skipped, and what the User still has to
    do. A half-imported template that reads as finished is worse than one that
    names its gaps.

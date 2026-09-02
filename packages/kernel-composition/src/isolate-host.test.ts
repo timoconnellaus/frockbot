@@ -198,7 +198,7 @@ describe("Bot isolate contribution host", () => {
   test("a caller that omits the binding digest does not compile", () => {
     // @ts-expect-error the binding digest is required: an isolate loaded with
     // no digest of its granted bindings would share a loader id across
-    // Assignments and generations.
+    // Connection authority and generations.
     void botIsolateModuleSetHashV1(CONTENT_HASH);
     expect(true).toBe(true);
   });
