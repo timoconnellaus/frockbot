@@ -667,9 +667,9 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
       }),
     );
     // A Package with neither a Connection Type nor a Capability contributes
-    // nothing the Plugins surface can install or assign. A Capability that
-    // takes no Connection still counts: a tool Package a User installs and
-    // assigns without any credential is exactly that shape.
+    // nothing the Plugins surface can install or enable. A Capability that
+    // takes no Connection still counts: a credential-free tool Package a User
+    // installs is exactly that shape.
     if (connectionTypes.length === 0 && decodedCapabilities.length === 0) {
       return [];
     }

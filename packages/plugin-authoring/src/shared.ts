@@ -365,7 +365,7 @@ export const AUTHOR_PACKAGE_INPUT_SCHEMA_V1 = {
     source: {
       type: "string",
       description:
-        "TypeScript for one package.ts that exports `tools` and `execute(tool, input, ctx)`. No imports: the isolate has no network and no npm. `ctx.invokeModel(request)` is the only model path.",
+        "TypeScript for one package.ts that exports `tools` and `execute(tool, input, ctx)`. No imports: the isolate has no network and no npm. `ctx.model.invoke(request)` uses the Bot's configured model binding.",
     },
     ui: {
       type: "object",

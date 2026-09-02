@@ -3991,7 +3991,7 @@ export class ShellBotBackendContribution {
     // The slug `<available_subagent_models>` renders, and the only model a
     // `Task` call may inherit. Its stable DTO retains the historical
     // `assignmentId` field, but the value now identifies the selected model
-    // Connection rather than a Capability Assignment record.
+    // Connection directly; there is no separate model authority record.
     const modelCapability = application.packages
       .find((candidate) => candidate.id === bindingPackageId)
       ?.manifest.configuration?.capabilities.find(
