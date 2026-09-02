@@ -437,6 +437,10 @@ export function createPackageAuthoringHost(
         runId: options.runId,
         packageId: input.packageId,
         sourceHash: input.sourceHash,
+        ...(input.uiHtmlHash === undefined
+          ? {}
+          : { uiHtmlHash: input.uiHtmlHash }),
+        ...(input.hooks === undefined ? {} : { hooks: input.hooks }),
       }),
 
     undoEffectIdFor: (input) =>

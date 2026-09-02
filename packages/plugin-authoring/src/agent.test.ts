@@ -9,7 +9,10 @@ import {
   type AuthorPackageRequestV1,
   type PackageAuthoringHost,
 } from "./agent.ts";
-import type { AuthorPackageOutcomeV1 } from "./shared.ts";
+import {
+  sha256HexV1,
+  type AuthorPackageOutcomeV1,
+} from "./shared.ts";
 
 const INPUT = {
   packageId: "weather-lookup",
@@ -112,6 +115,48 @@ describe("the package_author tool", () => {
     // The intent is recorded before the host is reached at all.
     expect(seen).toHaveLength(1);
     expect(seen[0]?.position).toEqual({ turn: 4, step: 2 });
+    await dispose();
+  });
+
+  test("includes the UI HTML hash and declared hooks in the effect identity", async () => {
+    const { sessions, dispose } = await openSession();
+    const effectInputs: Parameters<
+      PackageAuthoringHost["effectIdFor"]
+    >[0][] = [];
+    const host = stubHost({
+      status: "authored",
+      packageId: "weather-lookup",
+      version: "0.0.1",
+      contentHash: "b".repeat(64),
+      generationId: "2026-08-31T01:00:00.000Z:fedcba9876543210",
+    });
+    host.effectIdFor = (input) => {
+      effectInputs.push(input);
+      return Promise.resolve("author-0123456789abcdef");
+    };
+    const tool = createPackageAuthorTool(host, sessions);
+    const html = "<!doctype html><h1>Weather</h1>";
+
+    await tool.execute(
+      {
+        ...INPUT,
+        hooks: ["agent/tool-exposure"],
+        ui: {
+          html,
+          mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+        },
+      },
+      CONTEXT,
+    );
+
+    expect(effectInputs).toEqual([
+      {
+        packageId: "weather-lookup",
+        sourceHash: await sha256HexV1(INPUT.source),
+        uiHtmlHash: await sha256HexV1(html),
+        hooks: ["agent/tool-exposure"],
+      },
+    ]);
     await dispose();
   });
 

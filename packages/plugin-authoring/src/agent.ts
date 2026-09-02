@@ -57,6 +57,8 @@ export interface PackageAuthoringHost {
   effectIdFor(input: {
     packageId: string;
     sourceHash: string;
+    uiHtmlHash?: string;
+    hooks?: AuthorPackageInputV1["hooks"];
   }): Promise<string>;
   author(request: AuthorPackageRequestV1): Promise<AuthorPackageOutcomeV1>;
   undoEffectIdFor(input: PackageUndoInputV1): Promise<string>;
@@ -152,9 +154,14 @@ export function createPackageAuthorTool(
         };
       }
       const sourceHash = await sha256HexV1(decoded.source);
+      const uiHtmlHash = decoded.ui
+        ? await sha256HexV1(decoded.ui.html)
+        : undefined;
       const effectId = await host.effectIdFor({
         packageId: decoded.packageId,
         sourceHash,
+        ...(uiHtmlHash === undefined ? {} : { uiHtmlHash }),
+        ...(decoded.hooks === undefined ? {} : { hooks: decoded.hooks }),
       });
       const position = openTurnPositionV1(session);
       // Intent before effect: the session event and the durable intent record

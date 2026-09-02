@@ -441,16 +441,25 @@ export async function sha256HexV1(value: string): Promise<string> {
 
 /**
  * The idempotency key for one authoring effect. Deterministic in the admitted
- * run and the exact source, so a resumed Turn that re-executes the same tool
- * call lands on the same effect instead of bundling a second time.
+ * run and every independently bundled or declared execution dimension, so a
+ * resumed Turn that re-executes the same tool call lands on the same effect
+ * instead of bundling a second time.
  */
 export async function authoringEffectIdV1(input: {
   runId: string;
   packageId: string;
   sourceHash: string;
+  uiHtmlHash?: string;
+  hooks?: BotIsolateHookEventNameV1[];
 }): Promise<string> {
   const digest = await sha256HexV1(
-    JSON.stringify([input.runId, input.packageId, input.sourceHash]),
+    JSON.stringify([
+      input.runId,
+      input.packageId,
+      input.sourceHash,
+      input.uiHtmlHash ?? null,
+      input.hooks ?? [],
+    ]),
   );
   return `author-${digest.slice(0, 32)}`;
 }

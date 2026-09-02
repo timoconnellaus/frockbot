@@ -114,7 +114,7 @@ describe("decodeAuthorPackageInputV1", () => {
 });
 
 describe("authoring identity", () => {
-  test("the effect id is deterministic in the run and the exact source", async () => {
+  test("the effect id is deterministic in the run, source, UI, and hooks", async () => {
     const sourceHash = await sha256HexV1(VALID.source);
     const first = await authoringEffectIdV1({
       runId: "run-1",
@@ -136,10 +136,25 @@ describe("authoring identity", () => {
       packageId: VALID.packageId,
       sourceHash: await sha256HexV1(`${VALID.source}//`),
     });
+    const otherUi = await authoringEffectIdV1({
+      runId: "run-1",
+      packageId: VALID.packageId,
+      sourceHash,
+      uiHtmlHash: await sha256HexV1("<!doctype html><h1>Weather</h1>"),
+    });
+    const otherHooks = await authoringEffectIdV1({
+      runId: "run-1",
+      packageId: VALID.packageId,
+      sourceHash,
+      hooks: ["agent/tool-exposure"],
+    });
 
     expect(first).toBe(second);
     expect(first).not.toBe(otherRun);
     expect(first).not.toBe(otherSource);
+    expect(first).not.toBe(otherUi);
+    expect(first).not.toBe(otherHooks);
+    expect(otherUi).not.toBe(otherHooks);
     expect(first.length).toBeLessThanOrEqual(200);
   });
 
