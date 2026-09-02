@@ -339,6 +339,27 @@ describe("ComputerHostClient exec", () => {
 });
 
 describe("ComputerHostClient failures", () => {
+  test("computer-updating is provider-neutral updating and retryable", async () => {
+    const { fetcher } = recorder(() =>
+      Response.json(
+        computerHostProblemV1(
+          "computer-updating",
+          "Updating the Computer runtime",
+        ),
+        { status: 409 },
+      ),
+    );
+    const error = await client(fetcher)
+      .exec({ script: "true" })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(ComputerError);
+    expect((error as ComputerError).code).toBe("updating");
+    expect((error as ComputerError).retryable).toBe(true);
+    expect((error as ComputerError).message).toBe(
+      "Updating the Computer runtime",
+    );
+  });
+
   test("429 is limit-exceeded and retryable", async () => {
     const { fetcher } = recorder(() =>
       Response.json(
@@ -546,6 +567,11 @@ describe("ComputerHostClient operations", () => {
 
     const viewer = await host.viewer("open");
     expect(viewer.session?.url).toBe("https://sprite.example/vnc.html");
+    await host.viewer("renew", { sessionId: "token-1" });
+    expect(calls.at(-1)?.body).toMatchObject({
+      action: "renew",
+      sessionId: "token-1",
+    });
   });
 
   test("a declared service reattach reports its status", async () => {

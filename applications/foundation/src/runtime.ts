@@ -89,8 +89,13 @@ export interface BackendRouteContribution {
 import computerManifest from "@frockbot/plugin-computer/manifest";
 import {
   createComputerAgentPlugin,
+  type ComputerAgentPluginConfig,
   type ComputerProcessStorageV1,
 } from "@frockbot/plugin-computer/agent";
+import {
+  createComputerBackendPlugin,
+  type ComputerGatewayHost,
+} from "@frockbot/plugin-computer/backend";
 import {
   createSharedComputerProviderPlugin,
   type SharedComputerHostClient,
@@ -621,6 +626,7 @@ export type FoundationGatewayHost = {
   backendHost: "gateway";
 } & AdminGatewayHost &
   BotTemplateGatewayHostV1 &
+  ComputerGatewayHost &
   FlockGatewayHost &
   McpGatewayHost &
   SettingsGatewayHost &
@@ -674,6 +680,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-admin/backend"
         ) {
           plugin = createAdminGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-computer/backend"
+        ) {
+          plugin = createComputerBackendPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-flock/backend"
@@ -793,6 +804,7 @@ function computerProviderPlugin(host: {
   computerSync?: ComputerSyncHostV1;
   computerHost?: SharedComputerHostClient;
   computerHostBinding?: ComputerHostBinding;
+  computerAgentControlOwnerId?: string;
 }): Plugin.Function {
   // `SPRITES_TOKEN` is no longer a credential here — the Computer host holds
   // the only copy, and this Worker could not use one if it had it. It survives
@@ -814,6 +826,9 @@ function computerProviderPlugin(host: {
         }
       : {}),
     ...(host.computerSync ? { sync: host.computerSync } : {}),
+    ...(host.computerAgentControlOwnerId
+      ? { agentControlOwnerId: host.computerAgentControlOwnerId }
+      : {}),
   });
   const shared = host.computerHost
     ? createSharedComputerProviderPlugin(host.computerHost)
@@ -926,6 +941,12 @@ export function createFoundationHostedRuntimePackages(
      * honest way to launch a process that outlives its Turn.
      */
     computerProcesses?: ComputerProcessStorageV1;
+    /** Wake-free access to the Bot DO's durable human-control record. */
+    computerControlRecords?: NonNullable<
+      ComputerAgentPluginConfig["controlRecords"]
+    >;
+    /** The `computerUse` task owner whose User-wide lease this child holds. */
+    computerAgentControlOwnerId?: string;
     /**
      * The Bot self-management seam, supplied by the Bot Durable Object for one
      * admitted Turn. Absent outside a Turn, and the Flock runtime Contribution
@@ -1065,6 +1086,9 @@ export function createFoundationHostedRuntimePackages(
         ...(host.computerWriter ? { writer: host.computerWriter } : {}),
         ...(host.computerProcesses
           ? { processes: host.computerProcesses }
+          : {}),
+        ...(host.computerControlRecords
+          ? { controlRecords: host.computerControlRecords }
           : {}),
       }),
     ),

@@ -20,8 +20,10 @@ import type {
   ComputerHostControlResultV1,
   ComputerHostFileReadResultV1,
   ComputerHostOpenResultV1,
+  ComputerHostProvisioningV1,
   ComputerHostViewerResultV1,
 } from "@frockbot/computer-host-protocol";
+import { DESKTOP_GUI_LEASE_KEY } from "@frockbot/computer-host-runtime";
 import {
   computerBotKey,
   type ComputerHostFactoryV1,
@@ -58,7 +60,7 @@ interface FakeLease {
   fresh: boolean;
 }
 
-const GUARD = /control\.sh assert-agent '([^']+)' '([^']+)'/;
+const GUARD = /control\.sh assert-agent '([^']+)' '([^']+)' '([^']+)'/;
 /** The exit code the Computer's control script uses for a refused assertion. */
 const HUMAN_CONTROL_EXIT = 73;
 const HUMAN_CONTROL_MESSAGE = "The user is controlling this agent's computer";
@@ -81,6 +83,7 @@ export class FakeComputerHost {
     "https://frockbot-test-123.sprites.app/vnc.html#autoconnect=1&password=secret-pass";
   display: string | undefined = ":100";
   generation = 1;
+  provisioning?: ComputerHostProvisioningV1;
   /** Set to refuse the next `open`, the way an exhausted slot pool does. */
   openFailure?: Error;
   /** The bytes `file/read` answers with, by absolute path on the Computer. */
@@ -119,6 +122,7 @@ export class FakeComputerHost {
           directory: `/home/box/agent-data/agents/${botKey}`,
           ...(host.display ? { display: host.display } : {}),
           generation: host.generation,
+          ...(host.provisioning ? { provisioning: host.provisioning } : {}),
         });
       },
 
@@ -176,22 +180,26 @@ export class FakeComputerHost {
         action: "acquire" | "renew" | "release",
         ownerId: string,
         maxAgeSeconds: number,
-        options?: ComputerHostCallOptions,
+        options?: ComputerHostCallOptions & {
+          scope?: "bot" | "desktop-gui";
+        },
       ): Promise<ComputerHostControlResultV1> {
         options?.signal?.throwIfAborted();
-        const lease = host.leases.get(botKey);
+        const leaseKey =
+          options?.scope === "desktop-gui" ? DESKTOP_GUI_LEASE_KEY : botKey;
+        const lease = host.leases.get(leaseKey);
         if (action === "acquire") {
           if (lease?.fresh && lease.owner !== ownerId) {
             return Promise.reject(new Error("human control is active"));
           }
-          host.leases.set(botKey, { owner: ownerId, fresh: true });
+          host.leases.set(leaseKey, { owner: ownerId, fresh: true });
         } else if (action === "renew") {
           if (lease?.owner !== ownerId) {
             return Promise.reject(new Error("lease owner changed"));
           }
           lease.fresh = true;
         } else if (lease?.owner === ownerId) {
-          host.leases.delete(botKey);
+          host.leases.delete(leaseKey);
         }
         return Promise.resolve({
           version: 1,
@@ -209,7 +217,7 @@ export class FakeComputerHost {
       },
 
       viewer(
-        action: "open" | "revoke",
+        action: "open" | "renew" | "revoke",
         options?: ComputerHostCallOptions & { sessionId?: string },
       ): Promise<ComputerHostViewerResultV1> {
         options?.signal?.throwIfAborted();
@@ -241,18 +249,20 @@ export class FakeComputerHost {
   private assert(script: string): ComputerHostExecOutcomeV1 | undefined {
     const match = GUARD.exec(script);
     if (!match) return undefined;
-    const [, key = "", owner = ""] = match;
-    const lease = this.leases.get(key);
-    if (lease?.fresh && lease.owner !== owner) {
-      return {
-        effectId: "effect-refused",
-        exitCode: HUMAN_CONTROL_EXIT,
-        stdout: encoder.encode(""),
-        stderr: encoder.encode(HUMAN_CONTROL_MESSAGE),
-        outputTruncated: false,
-      };
+    const [, botKey = "", desktopKey = "", owner = ""] = match;
+    for (const key of [botKey, desktopKey]) {
+      const lease = this.leases.get(key);
+      if (lease?.fresh && lease.owner !== owner) {
+        return {
+          effectId: "effect-refused",
+          exitCode: HUMAN_CONTROL_EXIT,
+          stdout: encoder.encode(""),
+          stderr: encoder.encode(`${HUMAN_CONTROL_MESSAGE}: ${lease.owner}`),
+          outputTruncated: false,
+        };
+      }
+      if (lease && !lease.fresh) this.leases.delete(key);
     }
-    if (lease && !lease.fresh) this.leases.delete(key);
     return undefined;
   }
 }

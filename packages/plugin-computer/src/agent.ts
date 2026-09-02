@@ -28,6 +28,7 @@
 // failure." Every run appends `computer/sync` to the session event log with
 // what it moved, and nothing on this path can fail a Turn.
 import {
+  type Session,
   type SessionStore,
   type ToolAttachmentV1,
   type ToolDefinition,
@@ -67,6 +68,22 @@ import {
   ComputerProcessStore,
   type ComputerProcessStorageV1,
 } from "./process-store.js";
+import {
+  COMPUTER_DOCTOR_ROOT_ID,
+  COMPUTER_SCREENSHOTS_ROOT_ID,
+  COMPUTER_SCREENSHOT_RETENTION,
+} from "./roots.js";
+import {
+  COMPUTER_CONTROL_RECORD_KEY,
+  decodeStoredComputerControlV1,
+  isStoredComputerControlFreshV1,
+} from "./control-record.js";
+
+export {
+  COMPUTER_DOCTOR_ROOT_ID,
+  COMPUTER_SCREENSHOTS_ROOT_ID,
+  COMPUTER_SCREENSHOT_RETENTION,
+} from "./roots.js";
 
 export type { ComputerProcessStorageV1 };
 
@@ -96,12 +113,61 @@ export interface ComputerAgentPluginConfig {
    * no honest way to launch one.
    */
   processes?: ComputerProcessStorageV1;
+  /**
+   * Read-only access to this Bot Durable Object's Computer records. The
+   * dynamic prompt reads the human lease here rather than asking the
+   * Computer, so assembling a model request cannot wake one.
+   */
+  controlRecords?: {
+    get<T>(key: string): Promise<T | undefined>;
+    now?(): Date;
+  };
 }
 
-/** The Package-declared durable root screenshots are written to. */
-export const COMPUTER_SCREENSHOTS_ROOT_ID = "screenshots";
-/** Screenshots kept per Bot. Older captures are pruned on the next capture. */
-export const COMPUTER_SCREENSHOT_RETENTION = 20;
+export const HUMAN_CONTROL_PROMPT_LINE =
+  "Your User is currently controlling the Computer; do not use it this Turn.";
+
+/** The wake-free, Turn-scoped projection shared by prompt render and its log. */
+class ComputerControlPromptProjection {
+  #line = "";
+  #loadedTurn: number | undefined;
+
+  constructor(
+    private readonly records: NonNullable<
+      ComputerAgentPluginConfig["controlRecords"]
+    >,
+  ) {}
+
+  current(): string {
+    return this.#line;
+  }
+
+  loadedTurn(): number | undefined {
+    return this.#loadedTurn;
+  }
+
+  async refresh(turn: number, session: Session): Promise<void> {
+    const value = await this.records.get<unknown>(COMPUTER_CONTROL_RECORD_KEY);
+    const record =
+      value === undefined ? undefined : decodeStoredComputerControlV1(value);
+    const active =
+      record &&
+      isStoredComputerControlFreshV1(record, this.records.now?.() ?? new Date())
+        ? record
+        : undefined;
+    this.#line = active ? HUMAN_CONTROL_PROMPT_LINE : "";
+    this.#loadedTurn = turn;
+    session.append({
+      type: "computer/injected",
+      turn,
+      text: this.#line,
+      ...(active
+        ? { ownerId: active.ownerId, expiresAt: active.expiresAt }
+        : {}),
+    });
+    await session.flush();
+  }
+}
 
 /**
  * The width and height a PNG declares in its IHDR chunk.
@@ -153,9 +219,6 @@ function decodeExec(input: unknown): ExecInput | undefined {
   }
   return { command, background: background === true };
 }
-
-/** The Package-declared durable root a self-check report is filed in. */
-export const COMPUTER_DOCTOR_ROOT_ID = "doctor";
 
 /** The durable root a finished process's log tail is mirrored into. */
 export const COMPUTER_PROCESSES_ROOT_ID = "processes";
@@ -213,6 +276,20 @@ function decodeBrowser(input: unknown): ComputerBrowserAction | undefined {
 
 function failure(error: unknown): { content: string; isError: true } {
   if (error instanceof ComputerError) {
+    if (error.code === "human-control-active") {
+      return {
+        content:
+          "The user is controlling this Computer; do not retry this Turn",
+        isError: true,
+      };
+    }
+    if (error.code === "updating") {
+      const label = error.message.trim();
+      return {
+        content: `The Computer is updating (${label}); try again shortly`,
+        isError: true,
+      };
+    }
     return { content: error.message, isError: true };
   }
   return {
@@ -402,6 +479,9 @@ export function createComputerAgentPlugin(
     // and the Bot attaches to it as a tenant.
     const identity = { userId };
     const turnSync = new ComputerTurnSync(ctx.sessions);
+    const controlPrompt = config.controlRecords
+      ? new ComputerControlPromptProjection(config.controlRecords)
+      : undefined;
     // The Turn ordinal a `computer/process` event is recorded under. The
     // Agent loop knows it; a tool context does not, so it is caught where the
     // loop already announces it.
@@ -1287,9 +1367,12 @@ export function createComputerAgentPlugin(
       ctx.tools.register(browserTool),
       // A Turn's first step is where the Turn's sync state begins; a Turn that
       // never touches the Computer never syncs and never wakes one.
-      ctx.on("agent/pre-step", (_agent, _inputs, turn, _step, next) => {
+      ctx.on("agent/pre-step", async (agent, _inputs, turn, _step, next) => {
         currentTurn = turn;
         turnSync.beginTurn(turn);
+        if (controlPrompt?.loadedTurn() !== turn) {
+          await controlPrompt?.refresh(turn, agent.session);
+        }
         return next();
       }),
       // "after a Turn that used the Computer": the Computer is already awake
@@ -1323,6 +1406,7 @@ export function createComputerAgentPlugin(
             "Use computer_screenshot to see your own desktop; each capture is filed in your durable screenshots root.",
             "For a job that outlasts this Turn, use computer_exec with background:true and check it later with computer_process_check. Do not poll it in a loop.",
             "Use computer_doctor when the Computer misbehaves; it reports disk, desktop, sync, and network in one read-only call.",
+            ...(controlPrompt?.current() ? [controlPrompt.current()] : []),
             "Never invent a directory listing.",
           ].join("\n"),
       }),

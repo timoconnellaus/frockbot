@@ -21,8 +21,6 @@ import {
   chromeLauncherScript,
   CHROMIUM_PATH,
   COMPUTER_GUI_SHELL_COMMANDS,
-  COMPUTER_REFRESH_FILES,
-  COMPUTER_REFRESH_FINGERPRINT,
   COMPUTER_RUNTIME_FILES,
   computerGuiRefusalV1,
   SHIMS_ROOT,
@@ -41,9 +39,11 @@ import {
   computerSpriteNameV1,
   CONTROL_SCRIPT,
   DATA_ROOT,
+  DESKTOP_GUI_LEASE_KEY,
   ENSURE_AGENT_SCRIPT,
   HOME_ROOT,
   PROVISION_LOCK,
+  PROVISION_DIGEST,
   PROVISION_PHASES,
   PROVISION_SCRIPT,
   PROVISION_TASK,
@@ -56,18 +56,25 @@ import {
   BOUNDED_LOG_SCRIPT,
   BOUNDED_LOG_HEAD_BYTES,
   provisionScript,
+  RUNTIME_DOCUMENT_FILES,
+  runtimeDocumentDigestV1,
   RUNTIME_ROOT,
   base64,
   installFile,
   shellQuote,
   SLOT_IDLE_SECONDS,
+  UPDATE_PHASES,
+  updateLaunchScript,
   WORKSPACES_ROOT,
 } from "./runtime.ts";
 
 function installedScript(provision: string, path: string): string {
   const line = provision
     .split("\n")
-    .find((candidate) => candidate.endsWith(`> ${path}`));
+    .find(
+      (candidate) =>
+        candidate.includes(`> ${path}`) || candidate.includes(`> ${path}.tmp`),
+    );
   const encoded = line ? /printf %s '([^']+)'/.exec(line)?.[1] : undefined;
   if (!encoded) throw new Error(`installed script not found: ${path}`);
   return Buffer.from(encoded, "base64").toString();
@@ -94,7 +101,11 @@ async function runControl(
   owner: string,
   maxAge = "90",
 ): Promise<{ exitCode: number; stderr: string }> {
-  const child = Bun.spawn([scriptPath, action, key, owner, maxAge], {
+  const args =
+    action === "assert-agent"
+      ? [scriptPath, action, key, DESKTOP_GUI_LEASE_KEY, owner, maxAge]
+      : [scriptPath, action, key, owner, maxAge];
+  const child = Bun.spawn(args, {
     env: {
       ...process.env,
       PATH: `${dirname(scriptPath)}:${process.env.PATH ?? ""}`,
@@ -132,7 +143,9 @@ describe("layout", () => {
 describe("runtime files", () => {
   test("every declared file is the one the provisioning script installs", () => {
     for (const file of COMPUTER_RUNTIME_FILES) {
-      expect(provisionScript).toContain(installFile(file.path, file.content));
+      expect(provisionScript).toContain(
+        installFile(`${file.path}.tmp`, file.content),
+      );
     }
   });
 
@@ -141,22 +154,43 @@ describe("runtime files", () => {
       .split("\n")
       .filter(
         (line) =>
-          line.startsWith("printf %s '") && line.includes("base64 -d >"),
+          line.trimStart().startsWith("printf %s '") &&
+          line.includes("base64 -d >"),
       );
-    expect(installs).toHaveLength(COMPUTER_RUNTIME_FILES.length);
+    const paths = new Set(
+      installs.map((line) =>
+        line
+          .slice(line.indexOf("base64 -d >") + "base64 -d >".length)
+          .trim()
+          .split(/[ &]/, 1)[0]!
+          .replace(/\.tmp$/, ""),
+      ),
+    );
+    expect(paths).toEqual(
+      new Set(RUNTIME_DOCUMENT_FILES.slice(1).map((file) => file.path)),
+    );
   });
 
-  test("every declared file is also made executable where it lands", () => {
+  test("every declared file receives its mode before the atomic rename", () => {
     // Found live: the shims moved to their own directory and the `chmod` that
     // follows them kept the old path, so provisioning failed at phase 3 with
     // "cannot access /home/box/bin/xdotool". An install and a mode are one
     // fact about a file, and this is what keeps them from drifting apart.
-    const modes = provisionScript
-      .split("\n")
-      .filter((line) => line.startsWith("chmod "))
-      .join(" ");
     for (const file of COMPUTER_RUNTIME_FILES) {
-      expect(modes, file.path).toContain(` ${file.path}`);
+      const installed = provisionScript.indexOf(
+        installFile(`${file.path}.tmp`, file.content),
+      );
+      const mode = provisionScript.indexOf(
+        `chmod ${file.mode.toString(8)} ${file.path}.tmp`,
+        installed,
+      );
+      const renamed = provisionScript.indexOf(
+        `mv ${file.path}.tmp ${file.path}`,
+        mode,
+      );
+      expect(installed, file.path).toBeGreaterThan(-1);
+      expect(mode, file.path).toBeGreaterThan(installed);
+      expect(renamed, file.path).toBeGreaterThan(mode);
     }
   });
 
@@ -278,6 +312,7 @@ state running`);
     // Short enough that it cannot be the thing that is quiet.
     expect(provisionPollScript.length).toBeLessThan(1_000);
     await expectValidShell(provisionLaunchScript);
+    await expectValidShell(updateLaunchScript);
     await expectValidShell(provisionPollScript);
     await expectValidShell(provisionScript);
   });
@@ -290,6 +325,58 @@ state running`);
       provisionLaunchScript.split(`flock -n ${PROVISION_LOCK}`),
     ).toHaveLength(2);
     expect(provisionLaunchScript).toContain(`flock -w 30 ${PROVISION_LOCK}`);
+  });
+
+  test("writes the runtime digest only after the complete state", () => {
+    const complete = provisionScript.indexOf("state complete");
+    const digest = provisionScript.indexOf(
+      `mv \"$DIGEST_TMP\" ${PROVISION_DIGEST}`,
+    );
+    expect(complete).toBeGreaterThan(-1);
+    expect(digest).toBeGreaterThan(complete);
+    expect(provisionScript.slice(digest).trim()).toBe(
+      `mv \"$DIGEST_TMP\" ${PROVISION_DIGEST}`,
+    );
+  });
+
+  test("the update runner contains only the runtime and reference phases", () => {
+    expect(UPDATE_PHASES.map((phase) => phase.name)).toEqual([
+      "runtime",
+      "reference",
+    ]);
+    for (const phase of UPDATE_PHASES) {
+      expect(phase.label).toStartWith("Updating ");
+    }
+    const updateDocument = UPDATE_PHASES.map((phase) => phase.body).join("\n");
+    expect(updateDocument).not.toContain("apt-get");
+    expect(updateDocument).not.toContain("playwright-core/cli.js install");
+  });
+});
+
+describe("runtime document digest", () => {
+  test("is stable across runs and is sha-256 hex", () => {
+    const digest = runtimeDocumentDigestV1();
+    const framed = RUNTIME_DOCUMENT_FILES.map(
+      (file) => `${Buffer.byteLength(file.content)}\0${file.content}`,
+    ).join("");
+    expect(digest).toBe(runtimeDocumentDigestV1());
+    expect(digest).toBe(createHash("sha256").update(framed).digest("hex"));
+    expect(digest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  test("moves on a one-byte change to every installed file", () => {
+    const stable = runtimeDocumentDigestV1();
+    for (const file of RUNTIME_DOCUMENT_FILES) {
+      const mutable = file as { content: string };
+      const original = mutable.content;
+      try {
+        mutable.content = `${original}x`;
+        expect(runtimeDocumentDigestV1(), file.path).not.toBe(stable);
+      } finally {
+        mutable.content = original;
+      }
+    }
+    expect(runtimeDocumentDigestV1()).toBe(stable);
   });
 });
 
@@ -439,6 +526,36 @@ describe("installed shell scripts", () => {
       expect(
         (await runControl(scriptPath, "release", key, winner)).exitCode,
       ).toBe(0);
+      expect(
+        (await runControl(scriptPath, "assert-agent", key, "agent-runtime"))
+          .exitCode,
+      ).toBe(0);
+
+      expect(
+        (
+          await runControl(
+            scriptPath,
+            "acquire",
+            DESKTOP_GUI_LEASE_KEY,
+            "human-session",
+          )
+        ).exitCode,
+      ).toBe(0);
+      const fenced = await runControl(
+        scriptPath,
+        "assert-agent",
+        key,
+        "agent-runtime",
+      );
+      expect(fenced.exitCode).toBe(73);
+      expect(fenced.stderr).toContain("human-session");
+      const desktopLease = join(
+        runtimeRoot,
+        "bots",
+        DESKTOP_GUI_LEASE_KEY,
+        "human-control",
+      );
+      await utimes(desktopLease, expiredAt, expiredAt);
       expect(
         (await runControl(scriptPath, "assert-agent", key, "agent-runtime"))
           .exitCode,
@@ -598,6 +715,46 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
       const ensured = await run("newcomer");
 
       expect(ensured.exitCode).toBe(75);
+      expect(existsSync(join(runtimeRoot, "bots/tenant-003/slot"))).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("a fresh User-wide desktop lease keeps every idle display", async () => {
+    const { directory, runtimeRoot, run } = await installEnsureScript();
+    try {
+      for (let slot = 0; slot < 100; slot += 1) {
+        await seedTenant(runtimeRoot, slot, SLOT_IDLE_SECONDS + 600);
+      }
+      const leaseRoot = join(runtimeRoot, "bots", DESKTOP_GUI_LEASE_KEY);
+      await mkdir(leaseRoot, { recursive: true });
+      await writeFile(join(leaseRoot, "human-control"), "human-session\n");
+
+      const ensured = await run("newcomer");
+
+      expect(ensured.exitCode).toBe(75);
+      expect(existsSync(join(runtimeRoot, "bots/tenant-003/slot"))).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("skips a tenant whose viewer just renewed last-seen", async () => {
+    const { directory, runtimeRoot, run } = await installEnsureScript();
+    try {
+      for (let slot = 0; slot < 100; slot += 1) {
+        await seedTenant(runtimeRoot, slot, SLOT_IDLE_SECONDS + 600);
+      }
+      // Viewer open/renew touches this existing registry fact. The reclaim
+      // scan needs no viewer-specific file: a watcher is simply a live tenant.
+      const watched = join(runtimeRoot, "bots/tenant-003/last-seen");
+      const renewedAt = new Date();
+      await utimes(watched, renewedAt, renewedAt);
+
+      const ensured = await run("newcomer");
+
+      expect(ensured.exitCode).toBe(0);
       expect(existsSync(join(runtimeRoot, "bots/tenant-003/slot"))).toBe(true);
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -886,45 +1043,5 @@ describe("the shipped reference set", () => {
     );
     expect(layout?.content).toContain(SCRATCH_ROOT);
     expect(layout?.content).toContain("not** a durable root");
-  });
-});
-
-describe("refreshing an adopted Computer", () => {
-  test("carries the files a running Computer can safely gain", () => {
-    const paths = COMPUTER_REFRESH_FILES.map((file) => file.path);
-    expect(paths).toContain(DOCTOR_SCRIPT);
-    expect(paths).toContain(CHROME_LAUNCHER);
-    expect(paths).toContain(`${REFERENCE_ROOT}/.version`);
-    for (const command of COMPUTER_GUI_SHELL_COMMANDS) {
-      expect(paths).toContain(`${SHIMS_ROOT}/${command}`);
-    }
-    for (const document of REFERENCE_DOCS) {
-      expect(paths).toContain(`${REFERENCE_ROOT}/${document.name}`);
-    }
-  });
-
-  test("carries no file a running process may be reading", () => {
-    // `start-desktop.sh` and `control.sh` may be open in a live process, and
-    // the filesystem API writes in place. Those change with a reprovisioning.
-    const paths = COMPUTER_REFRESH_FILES.map((file) => file.path);
-    expect(paths).not.toContain(CONTROL_SCRIPT);
-    expect(paths).not.toContain(ENSURE_AGENT_SCRIPT);
-    expect(paths).not.toContain(`${RUNTIME_ROOT}/start-desktop.sh`);
-  });
-
-  test("every refreshed file is one the provisioning script also installs", () => {
-    const provisioned = new Set(
-      COMPUTER_RUNTIME_FILES.map((file) => file.path),
-    );
-    for (const file of COMPUTER_REFRESH_FILES) {
-      if (file.path.startsWith(REFERENCE_ROOT)) continue;
-      expect(provisioned.has(file.path), file.path).toBe(true);
-      expect(provisionScript).toContain(installFile(file.path, file.content));
-    }
-  });
-
-  test("the fingerprint moves when any refreshed byte does", () => {
-    expect(COMPUTER_REFRESH_FINGERPRINT).toMatch(/^[0-9a-f]{8}$/);
-    expect(chromeLauncherScript).toContain(CHROME_LAUNCHER.split("/").at(-1)!);
   });
 });
