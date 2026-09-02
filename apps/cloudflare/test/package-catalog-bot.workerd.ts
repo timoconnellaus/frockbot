@@ -42,7 +42,7 @@ async function publishCatalog(generation: string) {
           id: "shipping-account",
           displayName: "Shipping account",
           allowMultiple: false,
-          authorization: { kind: "none" as const },
+          authorization: { kind: "none" as const, driverId: "shipping" },
           capabilities: ["track"],
         },
       ],

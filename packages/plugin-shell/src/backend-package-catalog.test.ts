@@ -37,7 +37,7 @@ const manifest = {
         id: "shipping-account",
         displayName: "Shipping account",
         allowMultiple: false,
-        authorization: { kind: "grant" as const },
+        authorization: { kind: "grant" as const, driverId: "shipping" },
         capabilities: ["track"],
       },
     ],
