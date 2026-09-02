@@ -224,6 +224,9 @@ function narrowContext(env, invocation) {
     notify: function (request) {
       return capabilities.notify(request);
     },
+    schedule: function (request) {
+      return capabilities.schedule(request);
+    },
   };
 }
 
@@ -271,7 +274,7 @@ export default class extends WorkerEntrypoint {
 `;
 
 /** Bumped with any change to the wrapper text; folded into the loader id. */
-export const BOT_ISOLATE_WRAPPER_VERSION = "wrapper-v3";
+export const BOT_ISOLATE_WRAPPER_VERSION = "wrapper-v3-authority";
 
 export const BOT_ISOLATE_MAIN_MODULE = "index.js";
 export const BOT_ISOLATE_PACKAGE_MODULE = "package.js";

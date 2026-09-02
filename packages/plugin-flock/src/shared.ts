@@ -381,7 +381,7 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
             10_000,
           ),
         }),
-    initialModel,
+    ...(initialModel === undefined ? {} : { initialModel }),
     ...(createdBy ? { createdBy } : {}),
     sheep: decodeSheepRecipeV1(bot.sheep),
   };

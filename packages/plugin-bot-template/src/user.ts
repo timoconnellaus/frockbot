@@ -112,8 +112,8 @@ export interface TemplateBotReaderV1 {
  * Every method is a command the importing User's own surfaces already issue —
  * `bot/create` from the sidebar, `user/install-package` from the Plugins
  * surface, a Skill write and a `routine/create` from the Bot's own settings.
- * There is deliberately nothing here for a Connection or an Assignment: an
- * import cannot create either, because this seam cannot express it.
+ * There is deliberately nothing here for a Connection: an import cannot
+ * create one, because this seam cannot express it.
  */
 export interface TemplateImportWriterV1 {
   listBots(): Promise<{ revision: number; bots: { botId: string }[] }>;

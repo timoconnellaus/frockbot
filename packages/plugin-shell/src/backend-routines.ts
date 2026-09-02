@@ -1,7 +1,7 @@
 // The Bot Durable Object's half of the Routines seam.
 //
 // "The Bot's Durable Object is the authority for everything Bot-scoped: …
-// durable scheduling, Routines, Assignments." The Routines Package holds the
+// durable scheduling, and Routines." The Routines Package holds the
 // records, the codecs, the command semantics and the scheduler; this module
 // supplies the two things the Package cannot own — the Durable Object's storage,
 // and the one call that admits a Turn.

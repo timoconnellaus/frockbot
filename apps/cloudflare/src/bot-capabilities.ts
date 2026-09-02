@@ -9,6 +9,7 @@ import type {
   IsolateMemoryOutcomeV1,
   IsolateModelOutcomeV1,
   IsolateNotificationOutcomeV1,
+  IsolateScheduleOutcomeV1,
   IsolateToolOutcomeV1,
   IsolateWorkspaceOutcomeV1,
 } from "@frockbot/kernel-contracts";
@@ -18,13 +19,18 @@ import {
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateModelInvocationV1,
   decodeIsolateNotificationRequestV1,
+  decodeIsolateScheduleRequestV1,
   decodeIsolateToolRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
   decodeIsolateWorkspacePathV1,
   decodeIsolateWorkspaceWriteRequestV1,
+  decodeNormalizedModelRequestV1,
 } from "@frockbot/kernel-contracts";
-import type { BotCapabilitiesPropsV1 } from "@frockbot/plugin-shell/backend-isolate";
+import {
+  matchesAdmittedConnectionV1,
+  type BotCapabilitiesPropsV1,
+} from "@frockbot/plugin-shell/backend-isolate";
 import type { BotState } from "./bot-state.js";
 
 function unavailable(reason: string): {
@@ -53,6 +59,7 @@ interface BotIsolateRpc {
   isolateWorkspaceDelete(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
   isolateConnection(input: unknown): Promise<IsolateConnectionOutcomeV1>;
   isolateNotify(input: unknown): Promise<IsolateNotificationOutcomeV1>;
+  isolateSchedule(input: unknown): Promise<IsolateScheduleOutcomeV1>;
 }
 
 export class BotCapabilities extends WorkerEntrypoint<
@@ -91,6 +98,7 @@ export class BotCapabilities extends WorkerEntrypoint<
           memory: this.ctx.props.memory,
           workspace: this.ctx.props.workspace,
           notify: true,
+          schedule: true,
         }),
       );
     } catch {
@@ -100,8 +108,28 @@ export class BotCapabilities extends WorkerEntrypoint<
 
   async invokeModel(request: unknown): Promise<IsolateModelOutcomeV1> {
     try {
+      const decoded = decodeNormalizedModelRequestV1(request);
+      const admitted = this.ctx.props.model;
+      if (
+        !admitted ||
+        decoded.provider !== admitted.provider ||
+        decoded.model !== admitted.providerModelId
+      ) {
+        return unavailable("the model is unavailable");
+      }
       return decodeIsolateModelInvocationV1(
-        await this.rpc.isolateInvokeModel(this.scope(request)),
+        await this.rpc.isolateInvokeModel(
+          this.scope({
+            ...decoded,
+            modelBinding: {
+              connectionId: admitted.connectionId,
+              connectionGeneration: admitted.connectionGeneration,
+              ...(admitted.catalogGeneration
+                ? { catalogGeneration: admitted.catalogGeneration }
+                : {}),
+            },
+          }),
+        ),
       );
     } catch {
       return unavailable("the model request could not be served");
@@ -206,8 +234,18 @@ export class BotCapabilities extends WorkerEntrypoint<
     ) {
       return unavailable("the Connection is unavailable");
     }
+    const admitted = this.ctx.props.connections.find(
+      (connection) => connection.connectionId === connectionId,
+    );
+    if (!admitted) return unavailable("the Connection is unavailable");
     try {
-      return await this.rpc.isolateConnection(this.scope(connectionId));
+      const outcome = await this.rpc.isolateConnection(
+        this.scope(connectionId),
+      );
+      if (!matchesAdmittedConnectionV1(admitted, outcome)) {
+        return unavailable("the Connection is unavailable");
+      }
+      return outcome;
     } catch {
       return unavailable("the Connection is unavailable");
     }
@@ -220,6 +258,16 @@ export class BotCapabilities extends WorkerEntrypoint<
       );
     } catch {
       return unavailable("notifications are unavailable");
+    }
+  }
+
+  async schedule(request: unknown): Promise<IsolateScheduleOutcomeV1> {
+    try {
+      return await this.rpc.isolateSchedule(
+        this.scope(decodeIsolateScheduleRequestV1(request)),
+      );
+    } catch {
+      return unavailable("durable scheduling is unavailable");
     }
   }
 }

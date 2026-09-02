@@ -66,6 +66,7 @@ import {
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateNotificationRequestV1,
+  decodeIsolateScheduleRequestV1,
   decodeIsolateToolRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
@@ -638,6 +639,12 @@ export class BotState extends DurableObject<BotStateEnv> {
         input,
         decodeIsolateNotificationRequestV1,
       ) as never,
+    );
+  }
+
+  async isolateSchedule(input: unknown) {
+    return (await this.contribution()).isolateSchedule(
+      decodeIsolateCallRpcV1(input, decodeIsolateScheduleRequestV1) as never,
     );
   }
 

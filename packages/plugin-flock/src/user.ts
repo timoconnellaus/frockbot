@@ -159,10 +159,9 @@ export class FlockUserBackendContribution {
           failure: "Bot directory limit reached",
         };
       } else {
-        // A new Bot carries no model of its own: it follows the User's
-        // default model dynamically, and claims the Connection's model
-        // Capability the first time it resolves its execution context. Only a
-        // Bot that overrides the default owns a durable `model`.
+        // A new Bot carries no model override of its own. Model selection is a
+        // Bot setting, resolved against the User's ready Connections when a
+        // Turn is admitted.
         const registration: BotRegistrationV1 = {
           schemaVersion: 1,
           botId: command.botId,
@@ -171,7 +170,6 @@ export class FlockUserBackendContribution {
           ...(command.description === undefined
             ? {}
             : { initialDescription: command.description }),
-          initialModel: undefined,
           // The creator is durable history: a Bot the Flock made on another
           // Bot's behalf says so in the registration seed itself.
           ...(command.createdBy

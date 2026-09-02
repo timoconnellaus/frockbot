@@ -128,6 +128,7 @@ export interface IsolateCapabilityListV1 {
   memory: boolean;
   workspace: boolean;
   notify: true;
+  schedule: true;
 }
 
 export type IsolateCapabilityListOutcomeV1 =
@@ -204,6 +205,13 @@ export interface IsolateNotificationRequestV1 {
 export type IsolateNotificationOutcomeV1 =
   { status: "recorded" } | IsolateCapabilityFailureV1;
 
+/** A durable Routine operation attributed to one Package call. */
+export interface IsolateScheduleRequestV1 {
+  callId: string;
+  input: unknown;
+}
+export type IsolateScheduleOutcomeV1 = IsolateToolOutcomeV1;
+
 /**
  * Model invocation through the Bot's configured model binding. Events cross the RPC
  * boundary as an NDJSON byte stream — see `decodeIsolateModelEventV1`. A
@@ -266,6 +274,9 @@ export interface BotCapabilitiesStub {
   notify(
     request: IsolateNotificationRequestV1,
   ): Promise<IsolateNotificationOutcomeV1>;
+  schedule(
+    request: IsolateScheduleRequestV1,
+  ): Promise<IsolateScheduleOutcomeV1>;
 }
 
 /**
@@ -714,7 +725,15 @@ export function decodeIsolateCapabilityListV1(
   const value = record(input, label);
   exactKeys(
     value,
-    ["status", "connections", "tools", "memory", "workspace", "notify"],
+    [
+      "status",
+      "connections",
+      "tools",
+      "memory",
+      "workspace",
+      "notify",
+      "schedule",
+    ],
     label,
     ["model"],
   );
@@ -722,6 +741,7 @@ export function decodeIsolateCapabilityListV1(
     value.status !== "available" ||
     value.tools !== true ||
     value.notify !== true ||
+    value.schedule !== true ||
     typeof value.memory !== "boolean" ||
     typeof value.workspace !== "boolean" ||
     !Array.isArray(value.connections) ||
@@ -741,6 +761,7 @@ export function decodeIsolateCapabilityListV1(
     memory: value.memory,
     workspace: value.workspace,
     notify: true,
+    schedule: true,
   };
 }
 
@@ -754,6 +775,19 @@ export function decodeIsolateToolRequestV1(
   return {
     callId: boundedString(value.callId, `${label}.callId`, 256),
     name: boundedString(value.name, `${label}.name`, 128),
+    input: value.input,
+  };
+}
+
+export function decodeIsolateScheduleRequestV1(
+  input: unknown,
+  label = "isolate schedule request",
+): IsolateScheduleRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["callId", "input"], label);
+  jsonValue(value.input, `${label}.input`);
+  return {
+    callId: boundedString(value.callId, `${label}.callId`, 256),
     input: value.input,
   };
 }

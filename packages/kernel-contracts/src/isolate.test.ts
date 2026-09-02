@@ -6,6 +6,7 @@ import {
   decodeIsolateIdentityV1,
   decodeIsolateModelEventV1,
   decodeIsolateModelInvocationV1,
+  decodeIsolateScheduleRequestV1,
   decodeIsolateToolDescriptorV1,
   decodeIsolateToolInvocationV1,
   decodeIsolateToolResultV1,
@@ -254,6 +255,7 @@ describe("isolate identity and capabilities", () => {
         memory: true,
         workspace: false,
         notify: true,
+        schedule: true,
       }),
     ).toMatchObject({
       status: "available",
@@ -262,6 +264,7 @@ describe("isolate identity and capabilities", () => {
       memory: true,
       workspace: false,
       notify: true,
+      schedule: true,
     });
   });
 
@@ -274,7 +277,32 @@ describe("isolate identity and capabilities", () => {
         memory: true,
         workspace: true,
         notify: true,
-        requestAuthority: true,
+        schedule: true,
+        packageId: "package-local-authority",
+      }),
+    ).toThrow(/invalid fields/);
+  });
+});
+
+describe("isolate schedule request v1", () => {
+  test("decodes the durable Routine input and call id", () => {
+    expect(
+      decodeIsolateScheduleRequestV1({
+        callId: "schedule-1",
+        input: { action: "create", schedule: "@daily" },
+      }),
+    ).toEqual({
+      callId: "schedule-1",
+      input: { action: "create", schedule: "@daily" },
+    });
+  });
+
+  test("rejects an undeclared field", () => {
+    expect(() =>
+      decodeIsolateScheduleRequestV1({
+        callId: "schedule-1",
+        input: {},
+        packageId: "package-local-authority",
       }),
     ).toThrow(/invalid fields/);
   });

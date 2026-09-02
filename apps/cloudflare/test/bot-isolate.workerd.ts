@@ -210,6 +210,7 @@ describe("the isolate capability binding", () => {
       memory: true,
       workspace: true,
       notify: true,
+      schedule: true,
     });
   });
 
@@ -245,6 +246,20 @@ describe("the isolate capability binding", () => {
     expect(JSON.parse(model.content)).toMatchObject({
       status: "unavailable",
     });
+  });
+
+  test("the durable schedule surface is exposed", async () => {
+    const stub = probe(`schedule-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+
+    const result = await stub.callTool({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      tool: "schedule_surface",
+    });
+
+    expect(result).toEqual({ content: "function", isError: false });
   });
 
   test("adding or removing a Connection yields a new isolate", async () => {

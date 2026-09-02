@@ -187,10 +187,10 @@ export async function createFoundationUserBackendContributions(
       ): Promise<string | undefined>;
       /**
        * The import half. The writer carries the importing User's own commands
-       * and nothing wider — there is no method on it for a Connection or an
-       * Assignment, so an import cannot create either. `readPublishedShare`
-       * routes by the share id's owner half, which is the only way this
-       * application ever reaches another User's Durable Object.
+       * and nothing wider — there is no method on it for a Connection, so an
+       * import cannot create one. `readPublishedShare` routes by the share
+       * id's owner half, which is the only way this application ever reaches
+       * another User's Durable Object.
        */
       importer?: TemplateImportWriterV1;
       readPublishedShare?(

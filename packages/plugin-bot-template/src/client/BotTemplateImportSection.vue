@@ -9,8 +9,8 @@
 // pressed.
 //
 // What the card never offers is a way to connect anything. An import creates no
-// Connection and no Assignment, so "Needs your own Connection" is a list of
-// things the User must go and do themselves, not a checkbox.
+// Connection, so "Needs your own Connection" is a list of things the User must
+// go and do themselves, not a checkbox.
 import { UiButton, UiField, UiIcon } from "@frockbot/client-ui";
 import { computed, inject, ref } from "vue";
 import { botTemplateStateKey } from "./state.js";
@@ -73,7 +73,7 @@ async function plan(): Promise<void> {
         <small>
           Paste a template link to see exactly what it would create before
           anything happens. Importing never brings across Memory, credentials,
-          Connections or Assignments.
+          Connections.
         </small>
       </span>
     </header>
@@ -167,8 +167,8 @@ async function plan(): Promise<void> {
           </li>
         </ul>
         <p class="import__note">
-          None of these is created for you. Add each one yourself, then assign
-          it to the Bot.
+          None of these is created for you. Add each one yourself on your
+          Connections surface; every Bot will hold it once it is ready.
         </p>
       </section>
 

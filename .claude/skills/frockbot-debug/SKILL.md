@@ -59,8 +59,8 @@ curl -s -H "authorization: Bearer $DEBUG_TOKEN" \
 - `composition` — `currentGenerationId`, its `status`,
   `lastKnownGoodGenerationId`, and the last few generations each with their
   recorded `failures[]` (message + diagnostics) and `quarantined` flag.
-- `configuration` — the resolved Bot settings view: profile, model binding,
-  assignments. Absent if settings would not resolve at all.
+- `configuration` — the resolved Bot settings view: profile, model setting,
+  notifications. Absent if settings would not resolve at all.
 - `notifications` — unacknowledged Bot notifications.
 
 Events are byte-bounded (~512KB per snapshot). When a run is trimmed,

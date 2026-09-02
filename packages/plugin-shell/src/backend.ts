@@ -3,6 +3,7 @@ import {
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateNotificationRequestV1,
+  decodeIsolateScheduleRequestV1,
   decodeIsolateToolRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
@@ -1982,6 +1983,20 @@ export class ShellBotBackendContribution {
       body: request.body,
     });
     return { status: "recorded" };
+  }
+
+  async isolateSchedule(
+    input: IsolateCallScopeV1,
+  ): Promise<IsolateToolOutcomeV1> {
+    const request = decodeIsolateScheduleRequestV1(input.request);
+    return this.isolateInvokeTool({
+      ...input,
+      request: {
+        callId: request.callId,
+        name: "routine_manage",
+        input: request.input,
+      },
+    });
   }
 
   private async isolateMemoryHost(
@@ -4500,7 +4515,7 @@ export class ShellBotBackendContribution {
 
   async alarm(): Promise<void> {
     // One alarm: the kernel defers while work is in flight, settles the
-    // Package's Assignment sagas, and recovers the active run. A run left
+    // Package's durable work, and recovers the active run. A run left
     // durably `reconciliation-required` stays scheduled and visible; only an
     // explicit resume retrieves the original effect, so the alarm never
     // terminalizes an uncertain outcome on its own.

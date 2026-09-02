@@ -1367,15 +1367,13 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   runtimeIds.delete("fly-sprite");
   // Package publication is mounted with the current User's durable host.
   runtimeIds.delete("package-publisher");
-  // Assigned provider Packages mount only after durable Connections resolve.
+  // Provider Packages mount only after durable Connections resolve.
   runtimeIds.delete("composio");
-  // Remote MCP servers mount per enabled Assignment, after the Connection and
-  // its handshake resolve.
+  // Remote MCP servers mount after the Connection and its handshake resolve.
   runtimeIds.delete("mcp");
   runtimeIds.delete("provider-ollama-cloud");
   runtimeIds.delete("provider-workers-ai");
-  // The Web Package's `web_fetch` mounts only for a Bot whose User assigned
-  // the `web-fetch` Capability to it.
+  // The Web Package's `web_fetch` mounts whenever the Package is enabled.
   runtimeIds.delete("web");
   return {
     plan,

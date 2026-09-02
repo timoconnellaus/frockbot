@@ -16,7 +16,7 @@ import {
 
 // The run list projects a Session, and projecting one mounts the Bot's
 // Composition — which loads the built application artifact. A new Bot now
-// carries default Assignments, so the route reaches the loader on the first
+// carries its User's ready Connections, so the route reaches the loader on the first
 // read rather than answering from an empty Session.
 useApplicationArtifact();
 

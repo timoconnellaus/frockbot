@@ -39,11 +39,6 @@ interface UserSettingsView {
   connections: ConnectionView[];
 }
 
-interface BotSettingsView {
-  revision: number;
-  assignments: { assignmentId: string; state: string }[];
-}
-
 interface StoredRun {
   runId: string;
   events: { type: string; [key: string]: unknown }[];
@@ -57,15 +52,6 @@ async function readUserSettings(userId: string): Promise<UserSettingsView> {
   return (await expectOkJson(
     await asUser(userId, "/api/settings"),
   )) as UserSettingsView;
-}
-
-async function readBotSettings(
-  userId: string,
-  botId: string,
-): Promise<BotSettingsView> {
-  return (await expectOkJson(
-    await asUser(userId, `/api/bots/${botId}/settings`),
-  )) as BotSettingsView;
 }
 
 /** Install `mcp` and add one server Connection labelled `Example`. */
@@ -101,29 +87,6 @@ async function addMcpServer(
   );
   expect(view).toBeDefined();
   return view!;
-}
-
-async function assignMcpTools(
-  userId: string,
-  botId: string,
-  connectionId: string,
-): Promise<void> {
-  const settings = await readBotSettings(userId, botId);
-  await expectOkJson(
-    await postAsUser(userId, `/api/bots/${botId}/settings`, {
-      schemaVersion: 1,
-      type: "bot/assign-capability",
-      commandId: `assign-mcp-${botId}`,
-      botId,
-      expectedRevision: settings.revision,
-      assignment: {
-        assignmentId: "mcp-tools-1",
-        packageId: MCP_PACKAGE,
-        capabilityId: "mcp-tools",
-        connectionId,
-      },
-    }),
-  );
 }
 
 async function runTurn(
@@ -172,7 +135,7 @@ async function toolResult(
     { name: string; content: string; isError: boolean } | undefined;
 }
 
-describe("a remote MCP server reaching a Bot through an Assignment", () => {
+describe("a remote MCP server reaching a Bot through its User's Connection", () => {
   it("validates the server, offers its tools, and calls one", async () => {
     const userId = freshUserId("mcp");
     const botId = "mcp-bot";
@@ -192,25 +155,11 @@ describe("a remote MCP server reaching a Bot through an Assignment", () => {
       serverName: "Example MCP",
     });
 
-    // Before the Assignment the Bot has no MCP tool at all.
-    const before = await runTurn(userId, botId, "hello", "mcp-turn-before");
-    expect(before.status).toBe(200);
-    expect(await offeredTools(userId, botId, "mcp-turn-before")).not.toContain(
-      ECHO_TOOL,
-    );
-
-    await assignMcpTools(userId, botId, connection.connectionId);
-    expect(
-      (await readBotSettings(userId, botId)).assignments.find(
-        (assignment) => assignment.assignmentId === "mcp-tools-1",
-      ),
-    ).toMatchObject({ state: "enabled" });
-
-    // The next admitted Turn carries the server's tools in the exact
+    // The next admitted Turn carries the connected server's tools in the exact
     // normalized model request the session log records.
-    const after = await runTurn(userId, botId, "hello", "mcp-turn-after");
+    const after = await runTurn(userId, botId, "hello", "mcp-turn-connected");
     expect(after.status).toBe(200);
-    expect(await offeredTools(userId, botId, "mcp-turn-after")).toContain(
+    expect(await offeredTools(userId, botId, "mcp-turn-connected")).toContain(
       ECHO_TOOL,
     );
 
@@ -231,27 +180,25 @@ describe("a remote MCP server reaching a Bot through an Assignment", () => {
       echoed: { message: "ping" },
     });
 
-    // Unassigning takes the tools away at the next admitted Turn.
-    const assigned = await readBotSettings(userId, botId);
+    // Disconnecting takes the tools away at the next admitted Turn.
     await expectOkJson(
-      await postAsUser(userId, `/api/bots/${botId}/settings`, {
+      await postAsUser(userId, "/api/connections", {
         schemaVersion: 1,
-        type: "bot/unassign-capability",
-        commandId: "unassign-mcp-1",
-        botId,
-        expectedRevision: assigned.revision,
-        assignmentId: "mcp-tools-1",
+        type: "connection/disconnect",
+        commandId: "disconnect-mcp-1",
+        connectionId: connection.connectionId,
+        revokeUpstream: false,
       }),
     );
-    const unassigned = await runTurn(
+    const disconnected = await runTurn(
       userId,
       botId,
       "hello",
-      "mcp-turn-unassigned",
+      "mcp-turn-disconnected",
     );
-    expect(unassigned.status).toBe(200);
+    expect(disconnected.status).toBe(200);
     expect(
-      await offeredTools(userId, botId, "mcp-turn-unassigned"),
+      await offeredTools(userId, botId, "mcp-turn-disconnected"),
     ).not.toContain(ECHO_TOOL);
   });
 

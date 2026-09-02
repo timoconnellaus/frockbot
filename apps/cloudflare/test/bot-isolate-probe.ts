@@ -70,6 +70,7 @@ export const tools = [
   { name: "call_model", description: "Calls the model binding", inputSchema: {}, idempotent: false },
   { name: "list_capabilities", description: "Lists the Bot's authority", inputSchema: {}, idempotent: true },
   { name: "connection_lease", description: "Requests a lease for one Connection", inputSchema: {}, idempotent: true },
+  { name: "schedule_surface", description: "Reports whether durable scheduling is present", inputSchema: {}, idempotent: true },
 ];
 
 export async function execute(tool, input, ctx) {
@@ -96,6 +97,8 @@ export async function execute(tool, input, ctx) {
       return JSON.stringify(await ctx.capabilities.list());
     case "connection_lease":
       return JSON.stringify(await ctx.connection(String(input?.connectionId ?? "")));
+    case "schedule_surface":
+      return typeof ctx.schedule;
     case "call_model": {
       const outcome = await ctx.model.invoke(input);
       if (outcome.status !== "streaming") return JSON.stringify(outcome);

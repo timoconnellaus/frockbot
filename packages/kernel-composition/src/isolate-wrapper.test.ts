@@ -121,5 +121,8 @@ describe("the generated wrapper module map", () => {
     expect(BOT_ISOLATE_WRAPPER_SOURCE).toContain(
       "async execute(rawInvocation)",
     );
+    expect(BOT_ISOLATE_WRAPPER_SOURCE).toContain(
+      "return capabilities.schedule(request);",
+    );
   });
 });

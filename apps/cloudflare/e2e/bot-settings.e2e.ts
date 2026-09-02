@@ -4,7 +4,7 @@
 // Incidents 2 and 3 were both here: the producer emitted a Package without a
 // `configuration` block, or with a `deployment.applicationHash` the decoder
 // refused, and the Bot settings panel came up with an error banner instead of
-// the Assignment catalog. Producer and consumer each had passing unit tests.
+// the removed grant catalog. Producer and consumer each had passing unit tests.
 //
 // The Bot settings panel has no turns list — the conversation is the window
 // beside it — so the Turn history assertion lives in `chat.e2e.ts`, and this

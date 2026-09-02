@@ -213,26 +213,7 @@ describe("connecting an OAuth-protected MCP server", () => {
     expect(afterConnect.pkceRejections).toBe(0);
     expect(afterConnect.tokenResource).toBe(MCP_OAUTH_ENDPOINT);
 
-    // 4. Assign it to the Bot, and its tools reach the model.
-    const botSettings = (await expectOkJson(
-      await asUser(userId, `/api/bots/${botId}/settings`),
-    )) as { revision: number };
-    await expectOkJson(
-      await postAsUser(userId, `/api/bots/${botId}/settings`, {
-        schemaVersion: 1,
-        type: "bot/assign-capability",
-        commandId: "assign-mcp-oauth",
-        botId,
-        expectedRevision: botSettings.revision,
-        assignment: {
-          assignmentId: "mcp-oauth-1",
-          packageId: MCP_PACKAGE,
-          capabilityId: "mcp-tools",
-          connectionId: started.connectionId,
-        },
-      }),
-    );
-
+    // 4. The ready Connection's tools reach every Bot on its next Turn.
     expect(
       (await runTurn(userId, botId, "hello", "mcp-oauth-turn-1")).status,
     ).toBe(200);

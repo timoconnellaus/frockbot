@@ -10,6 +10,7 @@ import {
   isolateModelEventStreamV1,
   ISOLATE_MODEL_FAILURE_MESSAGE,
   ISOLATE_MODEL_REQUEST_PREFIX,
+  matchesAdmittedConnectionV1,
   matchingModelBindingV1,
   type IsolateModelBindingV1,
   type IsolateModelRequestRecordV1,
@@ -44,6 +45,10 @@ function request(
     system: "",
     messages: [{ role: "user", content: "hello" }],
     tools: [],
+    modelBinding: {
+      connectionId: BINDING.connectionId,
+      connectionGeneration: BINDING.connectionGeneration,
+    },
     ...overrides,
   };
 }
@@ -127,6 +132,7 @@ describe("per-Bot isolate authority", () => {
       memory: true,
       workspace: true,
       notify: true,
+      schedule: true,
     });
   });
 
@@ -137,6 +143,17 @@ describe("per-Bot isolate authority", () => {
     ).toBeUndefined();
     expect(
       matchingModelBindingV1(BINDING, request({ model: "other" })),
+    ).toBeUndefined();
+    expect(
+      matchingModelBindingV1(
+        BINDING,
+        request({
+          modelBinding: {
+            connectionId: BINDING.connectionId,
+            connectionGeneration: "generation-2",
+          },
+        }),
+      ),
     ).toBeUndefined();
     expect(matchingModelBindingV1(undefined, request())).toBeUndefined();
   });
@@ -164,20 +181,40 @@ describe("per-Bot isolate authority", () => {
     expect(await subject.host.recordedModelRequests()).toHaveLength(0);
   });
 
-  test("forwards the authority's binding, never a Bot-authored request binding", async () => {
+  test("refuses a model binding outside the admitted snapshot", async () => {
     const subject = host();
-    await subject.host.invokeModel(
-      request({
-        modelBinding: {
-          connectionId: "forged-connection",
-          connectionGeneration: "forged-generation",
-        },
-      }),
-    );
-    expect(subject.forwarded[0]?.modelBinding).toEqual({
-      connectionId: "connection-1",
-      connectionGeneration: "generation-1",
+    await expect(
+      subject.host.invokeModel(
+        request({
+          modelBinding: {
+            connectionId: "forged-connection",
+            connectionGeneration: "forged-generation",
+          },
+        }),
+      ),
+    ).resolves.toEqual({
+      status: "unavailable",
+      reason: "the request does not match this Bot's configured model",
     });
+    expect(subject.forwarded).toHaveLength(0);
+  });
+
+  test("an old isolate cannot receive a newly added or regenerated Connection", () => {
+    const lease = {
+      status: "available" as const,
+      leaseId: "lease-1",
+      connectionId: "connection-1",
+      generation: "generation-1",
+      expiresAt: "2026-08-31T00:05:00.000Z",
+    };
+    expect(matchesAdmittedConnectionV1(CONNECTIONS[0], lease)).toBe(true);
+    expect(matchesAdmittedConnectionV1(undefined, lease)).toBe(false);
+    expect(
+      matchesAdmittedConnectionV1(CONNECTIONS[0], {
+        ...lease,
+        generation: "generation-2",
+      }),
+    ).toBe(false);
   });
 });
 

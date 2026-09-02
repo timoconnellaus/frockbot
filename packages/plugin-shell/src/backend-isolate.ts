@@ -6,6 +6,8 @@
 // in props only for attribution; it never narrows the authority list.
 import type {
   IsolateCapabilityListV1,
+  IsolateConnectionLeaseV1,
+  IsolateConnectionOutcomeV1,
   IsolateConnectionV1,
   IsolateModelBindingV1,
   IsolateModelInvocationV1,
@@ -86,14 +88,36 @@ export function matchingModelBindingV1(
   binding: IsolateModelBindingV1 | undefined,
   request: NormalizedModelRequest,
 ): IsolateModelBindingV1 | undefined {
+  const admitted = request.modelBinding;
   if (
     !binding ||
+    !admitted ||
     request.provider !== binding.provider ||
-    request.model !== binding.providerModelId
+    request.model !== binding.providerModelId ||
+    admitted.connectionId !== binding.connectionId ||
+    admitted.connectionGeneration !== binding.connectionGeneration ||
+    admitted.catalogGeneration !== binding.catalogGeneration
   ) {
     return undefined;
   }
   return binding;
+}
+
+/**
+ * A loaded isolate may receive only the Connection generation baked into its
+ * admitted authority snapshot. A later User Connection change gets a new
+ * binding digest and isolate identity; it must not leak through this old stub.
+ */
+export function matchesAdmittedConnectionV1(
+  admitted: IsolateConnectionV1 | undefined,
+  outcome: IsolateConnectionOutcomeV1,
+): outcome is IsolateConnectionLeaseV1 {
+  return (
+    admitted !== undefined &&
+    outcome.status === "available" &&
+    outcome.connectionId === admitted.connectionId &&
+    outcome.generation === admitted.generation
+  );
 }
 
 export function createIsolateCapabilityHost(
@@ -114,6 +138,7 @@ export function createIsolateCapabilityHost(
         memory: options.memory,
         workspace: options.workspace,
         notify: true,
+        schedule: true,
       });
     },
 

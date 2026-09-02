@@ -263,7 +263,7 @@ describe("the mount outcome that crosses back from a Bot", () => {
   });
 });
 
-describe("the Assignment resolution key", () => {
+describe("the Connection resolution key", () => {
   test("changes when the server epoch changes, and only then", () => {
     const before = mcpConnectionResolutionKeyV1({
       connectionId: "mcp-1",

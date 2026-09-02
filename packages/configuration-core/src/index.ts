@@ -292,11 +292,7 @@ export type ConfigurationCommandV1 =
       values?: Record<string, JsonValue>;
     })
   | (CommandMetaV1 & {
-      /**
-       * Removes the installation. Dependent Assignments are never deleted:
-       * they resolve as unavailable tombstones the User can repair (ADR 0003).
-       * Connections are untouched.
-       */
+      /** Removes the installation. Connections are untouched. */
       type: "user/uninstall-package";
       packageId: string;
     })
@@ -1486,9 +1482,10 @@ function connectionView(value: unknown): ConnectionView {
 }
 
 /**
- * The pending decision, decoded strictly — and refused outright if it carries
- * anything that looks like a redirect. The rule that a Bot never hands its
- * User a link it authored is worth an assertion rather than a convention.
+ * The existing Connection's repair projection, decoded strictly — and refused
+ * outright if it carries anything that looks like a redirect. The rule that a
+ * Bot never hands its User a link it authored is worth an assertion rather
+ * than a convention.
  */
 export function decodePendingAuthorizationV1(
   input: unknown,

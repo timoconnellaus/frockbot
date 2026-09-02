@@ -170,7 +170,7 @@ describe("Connection-scoped settings", () => {
   });
 });
 
-describe("mounting one Assignment", () => {
+describe("mounting one Connection", () => {
   test("registers every listed tool with the server's own schema", async () => {
     const { root } = await mount({ fetch: server({}) });
 

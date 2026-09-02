@@ -33,6 +33,7 @@ interface SettingsRpc {
   readConfiguration(input: unknown): Promise<{
     revision: number;
     packages: { packageId: string; catalogId?: string }[];
+    connections: { connectionId: string }[];
   }>;
 }
 
@@ -173,13 +174,6 @@ describe("importing a Bot template in workerd", () => {
     const importerId = `tpl-importer-${crypto.randomUUID()}`;
     const shareId = await publishedShare(ownerId, "budget");
     await provisionBot({ userId: importerId, botId: "importer-home" });
-    const connectionsBefore = (
-      await user(importerId).readConfiguration({
-        schemaVersion: 1,
-        userId: importerId,
-      })
-    ).connections.map((connection) => connection.connectionId);
-
     const planned = await plan(importerId, shareId);
     const applied = await apply(importerId);
     expect(applied.status).toBe("applied");
@@ -218,6 +212,12 @@ describe("importing a Bot template in workerd", () => {
     const importerId = `tpl-importer-${crypto.randomUUID()}`;
     const shareId = await publishedShare(ownerId, "budget");
     await provisionBot({ userId: importerId, botId: "importer-home" });
+    const connectionsBefore = (
+      await user(importerId).readConfiguration({
+        schemaVersion: 1,
+        userId: importerId,
+      })
+    ).connections.map((connection) => connection.connectionId);
 
     const planned = await plan(importerId, shareId);
     await apply(importerId);
