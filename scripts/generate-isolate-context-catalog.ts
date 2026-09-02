@@ -1,3 +1,4 @@
+// This generator uses the TypeScript 5 compiler API, so the root pins TypeScript 5.9.3 for it.
 import ts from "typescript";
 import { format } from "prettier";
 
