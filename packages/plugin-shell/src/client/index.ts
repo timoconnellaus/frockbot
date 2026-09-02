@@ -659,11 +659,21 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
         connectionTypes: capability.connectionTypes,
       }),
     );
-    // A Package with neither a Connection Type nor a Capability contributes
-    // nothing the Plugins surface can enable. A Capability that takes no
-    // Connection still counts: enabling its Package makes it available to all
-    // of the User's Bots.
-    if (connectionTypes.length === 0 && decodedCapabilities.length === 0) {
+    // User- and Bot-scoped declarations are needed for generic effective
+    // model resolution. Connection-scoped settings stay with their Connection
+    // and never enter Package-level settings forms.
+    const settings = (decoded.configuration?.settings ?? []).filter((setting) =>
+      setting.scopes.some((scope) => scope === "user" || scope === "bot"),
+    );
+    // A settings-only Package still contributes enablement: disabling it is
+    // what makes its retained controls inert. A Capability that takes no
+    // Connection likewise counts because enabling its Package grants it to
+    // all of the User's Bots.
+    if (
+      connectionTypes.length === 0 &&
+      decodedCapabilities.length === 0 &&
+      settings.length === 0
+    ) {
       return [];
     }
     const decodedConnections = connectionTypes.map((connection) => {
@@ -687,12 +697,7 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
         version: candidate.version,
         capabilities: decodedCapabilities,
         connectionTypes: decodedConnections,
-        // User- and Bot-scoped declarations are needed for generic effective
-        // model resolution. Connection-scoped settings stay with their
-        // Connection and never enter Package-level settings forms.
-        settings: (decoded.configuration?.settings ?? []).filter((setting) =>
-          setting.scopes.some((scope) => scope === "user" || scope === "bot"),
-        ),
+        settings,
       },
     ];
   });

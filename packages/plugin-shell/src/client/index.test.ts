@@ -173,7 +173,7 @@ describe("application manifest protocol", () => {
         ],
       }),
     ).toEqual([]);
-    // A tool Package a User installs and assigns with no credential at all:
+    // A tool Package a User enables with no credential at all:
     // one Capability, no Connection Type. It stays in the catalog, because
     // needing no Connection is not the same as offering nothing.
     expect(
@@ -200,6 +200,55 @@ describe("application manifest protocol", () => {
         packageId: "web",
         capabilities: [{ id: "web-fetch", kind: "tool", connectionTypes: [] }],
         connectionTypes: [],
+      }),
+    ]);
+    // A settings-only Package still has User-visible enablement: turning it on
+    // is what makes its otherwise-inert controls available.
+    expect(
+      decodePluginCatalog({
+        ...emptyManifest,
+        packages: [
+          {
+            id: "custom-models",
+            displayName: "Custom models",
+            version: "0.0.1",
+            contributions: ["client"],
+            configuration: {
+              settings: [
+                {
+                  id: "account-model",
+                  schemaVersion: 1,
+                  scopes: ["user"],
+                  role: "model",
+                  schema: {
+                    type: "object",
+                    properties: {
+                      connectionId: { type: "string" },
+                      providerModelId: { type: "string" },
+                    },
+                    required: ["connectionId", "providerModelId"],
+                    additionalProperties: false,
+                  },
+                },
+              ],
+              connectionTypes: [],
+              capabilities: [],
+            },
+          },
+        ],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        packageId: "custom-models",
+        capabilities: [],
+        connectionTypes: [],
+        settings: [
+          expect.objectContaining({
+            id: "account-model",
+            scopes: ["user"],
+            role: "model",
+          }),
+        ],
       }),
     ]);
     // The same Package with a turn-type admission ceiling: manifest v4 is what

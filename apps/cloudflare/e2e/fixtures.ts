@@ -239,13 +239,10 @@ export function customModelsPluginRow(page: Page): Locator {
  * never appears.
  */
 async function enablePluginRow(row: Locator): Promise<void> {
-  for (const label of ["Add", "Enable"]) {
-    const action = row.getByRole("button", { name: label, exact: true });
-    if (await action.isVisible().catch(() => false)) {
-      await action.click();
-      break;
-    }
-  }
+  await expect(row).toBeVisible();
+  const action = row.getByRole("button", { name: /^(Add|Enable)$/u });
+  await expect(action).toBeVisible();
+  await action.click();
   await expect(
     row.getByRole("button", { name: "Disable", exact: true }),
   ).toBeVisible();
