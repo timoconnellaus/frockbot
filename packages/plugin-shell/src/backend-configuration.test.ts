@@ -87,7 +87,9 @@ async function compileModelTestApplication(): ReturnType<
   return {
     ...application,
     packages: [
-      ...application.packages.filter((pkg) => pkg.id !== provider.id),
+      ...application.packages.filter(
+        (pkg) => pkg.id !== provider.id && pkg.id !== "custom-models",
+      ),
       provider,
       {
         ...template,

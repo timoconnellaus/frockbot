@@ -52,6 +52,11 @@
       "grants": []
     },
     {
+      "specifier": "@frockbot/plugin-custom-models",
+      "version": "0.0.1",
+      "grants": []
+    },
+    {
       "specifier": "@frockbot/plugin-routines",
       "version": "0.0.1",
       "grants": ["routines:read", "routines:write"]

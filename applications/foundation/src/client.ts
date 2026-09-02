@@ -6,6 +6,7 @@ import uiThemeClientPlugin from "@frockbot/plugin-ui-theme/client";
 import packagePublisherClientPlugin from "@frockbot/plugin-package-publisher/client";
 import routinesClientPlugin from "@frockbot/plugin-routines/client";
 import settingsClientPlugin from "@frockbot/plugin-settings/client";
+import customModelsClientPlugin from "@frockbot/plugin-custom-models/client";
 
 // The immutable application owns the concrete client contribution list.
 import computerClientPlugin from "../../../packages/plugin-computer/src/client/application.js";
@@ -25,6 +26,7 @@ export const foundationClientPlugins: readonly ClientPlugin[] = [
   // After Flock: the Search surface injects the shell registry Flock also uses.
   searchClientPlugin,
   settingsClientPlugin,
+  customModelsClientPlugin,
   routinesClientPlugin,
   botTemplateClientPlugin,
   // After Settings: the Audit log mounts into the Advanced Bot settings slot

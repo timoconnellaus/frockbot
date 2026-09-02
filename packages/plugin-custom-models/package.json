@@ -1,0 +1,44 @@
+{
+  "name": "@frockbot/plugin-custom-models",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client/index.ts",
+    "./frockbot.json": "./frockbot.json",
+    "./manifest": "./src/manifest.ts",
+    "./package.json": "./package.json"
+  },
+  "frockbot": {
+    "manifest": "./frockbot.json"
+  },
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/client-core": "workspace:*",
+    "@frockbot/client-ui": "workspace:*",
+    "@frockbot/configuration-core": "workspace:*",
+    "@frockbot/kernel-composition": "workspace:*",
+    "@frockbot/plugin-settings": "workspace:*",
+    "@frockbot/plugin-shell": "workspace:*",
+    "vue": "3.5.41"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "@vitejs/plugin-vue": "6.0.8",
+    "typescript": "5.9.3",
+    "vite": "8.2.2",
+    "vue-tsc": "3.3.10"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "packages/plugin-custom-models"
+  }
+}

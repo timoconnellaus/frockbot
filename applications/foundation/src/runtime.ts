@@ -97,6 +97,7 @@ import {
 } from "@frockbot/plugin-computer/shared-provider";
 import credentialsManifest from "@frockbot/plugin-credentials/manifest";
 import { createCredentialRuntimePlugin } from "@frockbot/plugin-credentials/user";
+import customModelsManifest from "@frockbot/plugin-custom-models/manifest";
 // Desktop and mobile Package manifests remain part of the immutable plan.
 import clipboardManifest from "@frockbot/plugin-desktop-clipboard/manifest";
 import directoryPickerManifest from "@frockbot/plugin-desktop-directory-picker/manifest";
@@ -307,6 +308,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-identity", identityManifest],
   ["@frockbot/plugin-provider-foundation", foundationProviderManifest],
   ["@frockbot/plugin-credentials", credentialsManifest],
+  ["@frockbot/plugin-custom-models", customModelsManifest],
   ["@frockbot/plugin-web", webManifest],
   ["@frockbot/plugin-provider-ollama-cloud", ollamaCloudManifest],
   ["@frockbot/plugin-provider-flock-ai", flockAiManifest],

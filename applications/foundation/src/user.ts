@@ -143,6 +143,36 @@ export interface MountedFoundationUserBackend {
   dispose(): Promise<void>;
 }
 
+/**
+ * Packages seeded into a new User include every dependency of an explicitly
+ * seeded Package. This lets a default-disabled Package be switched on without
+ * first repairing invisible dependency rows.
+ */
+export function foundationDefaultPackageIds(
+  plan: Pick<ApplicationPlan, "packages">,
+): ReadonlySet<string> {
+  const packages = new Map(plan.packages.map((pkg) => [pkg.id, pkg]));
+  const packageIds = new Set(
+    plan.packages
+      .filter(
+        (pkg) =>
+          pkg.manifest.defaultEnablement !== undefined ||
+          (pkg.manifest.configuration?.connectionTypes.length ?? 0) > 0 ||
+          (pkg.manifest.configuration?.capabilities.length ?? 0) > 0,
+      )
+      .map((pkg) => pkg.id),
+  );
+
+  for (const packageId of packageIds) {
+    const pkg = packages.get(packageId);
+    for (const dependencyId of Object.keys(pkg?.manifest.dependencies ?? {})) {
+      if (packages.has(dependencyId)) packageIds.add(dependencyId);
+    }
+  }
+
+  return packageIds;
+}
+
 export async function createFoundationUserBackendContributions(
   plan: ApplicationPlan,
   host: {
@@ -222,6 +252,7 @@ export async function createFoundationUserBackendContributions(
     };
   },
 ): Promise<MountedFoundationUserBackend> {
+  const defaultPackageIds = foundationDefaultPackageIds(plan);
   let settings: UserSettingsBackendContribution | undefined;
   let credentials: CredentialUserBackendContribution | undefined;
   let ollama: OllamaCloudUserBackendContribution | undefined;
@@ -270,9 +301,7 @@ export async function createFoundationUserBackendContributions(
               dependencies: pkg.manifest.dependencies,
               defaultEnablement: pkg.manifest.defaultEnablement,
               settings: pkg.manifest.configuration?.settings ?? [],
-              installByDefault:
-                (pkg.manifest.configuration?.connectionTypes.length ?? 0) > 0 ||
-                (pkg.manifest.configuration?.capabilities.length ?? 0) > 0,
+              installByDefault: defaultPackageIds.has(pkg.id),
             })),
             ...(host.catalog ? { catalog: host.catalog } : {}),
           },

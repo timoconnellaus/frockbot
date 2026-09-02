@@ -12,6 +12,7 @@ import {
 } from "./runtime.js";
 import { Context, type Plugin } from "cordis";
 import { resolveFoundationTrustedDesktopContribution } from "./desktop.js";
+import { foundationDefaultPackageIds } from "./user.js";
 
 describe("foundation application", () => {
   test("resolves trusted desktop declarations without asynchronous startup work", () => {
@@ -42,6 +43,7 @@ describe("foundation application", () => {
       "clock",
       "computer",
       "credentials",
+      "custom-models",
       "desktop-clipboard",
       "desktop-directory-picker",
       "desktop-notifications",
@@ -118,6 +120,7 @@ describe("foundation application", () => {
         "settings",
         "bot-template",
         "computer",
+        "custom-models",
         "user-machine",
         "package-publisher",
         "routines",
@@ -145,6 +148,20 @@ describe("foundation application", () => {
       { entry: "./user", host: "user" },
     ]);
     expect(first.packages.some((pkg) => pkg.id === "composio")).toBe(false);
+  });
+
+  test("seeds a default-disabled Package and its dependencies", async () => {
+    const plan = await compileFoundationApplication();
+    const packageIds = foundationDefaultPackageIds(plan);
+
+    expect(packageIds.has("custom-models")).toBe(true);
+    expect(packageIds.has("settings")).toBe(true);
+    expect(packageIds.has("shell")).toBe(true);
+    expect(packageIds.has("ui-theme")).toBe(true);
+    expect(
+      plan.packages.find((pkg) => pkg.id === "custom-models")?.manifest
+        .defaultEnablement,
+    ).toBe("disabled");
   });
 
   test("mounts an enabled Ollama model through its Package runtime Contribution", async () => {
