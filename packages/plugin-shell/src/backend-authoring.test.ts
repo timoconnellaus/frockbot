@@ -7,14 +7,19 @@ import {
   type CompositionGenerationV1,
   type CompositionMemberV1,
 } from "@frockbot/kernel-composition/generation";
+import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
 import type { PackageBundleResultV1 } from "@frockbot/kernel-contracts";
 import {
   artifactKey,
   authorshipArtifactKey,
   authorshipFailureKey,
   authorshipIntentKey,
+  authorshipManifestKey,
+  authorshipUndoIntentKey,
+  authorshipUndoOutcomeKey,
   AUTHORSHIP_FAILURE_PREFIX,
   type AuthoredArtifactRecordV1,
+  type AuthoredManifestRecordV1,
   type AuthoringFailureRecordV1,
   type AuthorPackageRequestV1,
   type AuthorshipIntentV1,
@@ -34,7 +39,7 @@ function requestFor(overrides: Partial<AuthorPackageRequestV1> = {}) {
     input: {
       packageId: "hello-world",
       displayName: "Hello world",
-      tool: { name: "hello", description: "Says hi", inputSchema: {} },
+      tools: [{ name: "hello", description: "Says hi", inputSchema: {} }],
       source: SOURCE,
     },
     sourceHash: "a".repeat(64),
@@ -56,6 +61,12 @@ function memoryStorage() {
       }
       return Promise.resolve();
     },
+    list: <T>({ prefix }: { prefix: string }) =>
+      Promise.resolve(
+        new Map(
+          [...values.entries()].filter(([key]) => key.startsWith(prefix)),
+        ) as Map<string, T>,
+      ),
   };
   return storage;
 }
@@ -79,13 +90,28 @@ async function memoryComposition() {
     [bootstrap.generationId, bootstrap],
   ]);
   let current = bootstrap.generationId;
+  let lastKnownGood = bootstrap.generationId;
   const store: AuthoringCompositionStore & {
     generations: Map<string, CompositionGenerationV1>;
     currentId(): string;
+    activate(generationId: string): void;
+    fail(generationId: string): void;
   } = {
     generations,
     currentId: () => current,
     current: () => Promise.resolve(generations.get(current)!),
+    lastKnownGood: () => Promise.resolve(generations.get(lastKnownGood)!),
+    activate: (generationId) => {
+      const generation = generations.get(generationId)!;
+      generations.set(generationId, { ...generation, status: "active" });
+      current = generationId;
+      lastKnownGood = generationId;
+    },
+    fail: (generationId) => {
+      const generation = generations.get(generationId)!;
+      generations.set(generationId, { ...generation, status: "failed" });
+      current = generationId;
+    },
     read: (generationId) => Promise.resolve(generations.get(generationId)),
     propose: (generation, options) => {
       if (generations.has(generation.generationId)) {
@@ -96,6 +122,33 @@ async function memoryComposition() {
       return Promise.resolve();
     },
     retainedCount: () => Promise.resolve(generations.size),
+    list: ({ limit }) =>
+      Promise.resolve({
+        generations: [...generations.values()].reverse().slice(0, limit),
+      }),
+    revert: async (toGenerationId, origin, options) => {
+      const target = generations.get(toGenerationId);
+      if (!target) throw new Error("unknown target");
+      const createdAt = options?.createdAt ?? "2026-08-31T02:00:00.000Z";
+      const generation = decodeCompositionGenerationV1({
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(
+          createdAt,
+          target.artifactSetHash,
+        ),
+        artifactSetHash: target.artifactSetHash,
+        parentGenerationId: current,
+        createdAt,
+        origin,
+        members: target.members,
+        status: "pending",
+      });
+      const existing = generations.get(generation.generationId);
+      if (existing) return existing;
+      generations.set(generation.generationId, generation);
+      current = generation.generationId;
+      return generation;
+    },
   };
   return store;
 }
@@ -160,12 +213,16 @@ describe("a Bot authoring a Package", () => {
   let storage: ReturnType<typeof memoryStorage>;
   let composition: Awaited<ReturnType<typeof memoryComposition>>;
   let written: string[];
+  let writtenSources: string[];
+  let sourceContents: Map<string, string>;
   let reservations: unknown[];
 
   beforeEach(async () => {
     storage = memoryStorage();
     composition = await memoryComposition();
     written = [];
+    writtenSources = [];
+    sourceContents = new Map();
     reservations = [];
   });
 
@@ -173,6 +230,7 @@ describe("a Bot authoring a Package", () => {
     bundler: ReturnType<typeof countingBundler>;
     quota?: (request: unknown) => unknown;
     runId?: string;
+    currentToolNames?: readonly string[];
   }) {
     let ids = 0;
     return createPackageAuthoringHost({
@@ -184,6 +242,13 @@ describe("a Bot authoring a Package", () => {
           written.push(contentHash);
           return Promise.resolve();
         },
+        putPackageSource: (sourceHash, source) => {
+          writtenSources.push(sourceHash);
+          sourceContents.set(sourceHash, source);
+          return Promise.resolve();
+        },
+        loadPackageSource: (sourceHash) =>
+          Promise.resolve(sourceContents.get(sourceHash)),
         headPackageArtifact: () => Promise.resolve(undefined),
       },
       quota: {
@@ -206,6 +271,7 @@ describe("a Bot authoring a Package", () => {
       runId: options.runId ?? "run-1",
       turnId: options.runId ?? "run-1",
       compatibilityDate: "2026-08-27",
+      currentToolNames: () => options.currentToolNames ?? [],
       now: () => new Date("2026-08-31T01:00:00.000Z"),
       newId: () => `id-${(ids += 1)}`,
     });
@@ -242,7 +308,19 @@ describe("a Bot authoring a Package", () => {
       authoredAt: "2026-08-31T01:00:00.000Z",
     });
     expect(artifact.r2Key).toBe(`packages/${"b".repeat(64)}.mjs`);
+    expect(artifact.sourceR2Key).toBe(`packages/${"a".repeat(64)}.ts`);
+    expect(artifact.sourceHash).toBe("a".repeat(64));
     expect(written).toEqual(["b".repeat(64)]);
+    expect(writtenSources).toEqual(["a".repeat(64)]);
+    const manifestRecord = storage.values.get(
+      authorshipManifestKey(artifact.manifestHash),
+    ) as AuthoredManifestRecordV1;
+    expect(decodeFrockBotManifest(manifestRecord.manifest)).toMatchObject({
+      id: "hello-world",
+      version: "0.0.1",
+      contributions: { runtime: { host: "bot-isolate" } },
+      tools: [{ name: "hello" }],
+    });
   });
 
   test("proposes a pending generation pinned for the next Turn", async () => {
@@ -287,7 +365,13 @@ describe("a Bot authoring a Package", () => {
       ),
     );
     const first = await host({ bundler }).author(requestFor());
-    const second = await host({ bundler, runId: "run-2" }).author(
+    if (first.status !== "authored") throw new Error(first.reason);
+    composition.activate(first.generationId);
+    const second = await host({
+      bundler,
+      runId: "run-2",
+      currentToolNames: ["hello"],
+    }).author(
       requestFor({ effectId: "author-second", sourceHash: "d".repeat(64) }),
     );
     if (first.status !== "authored" || second.status !== "authored") {
@@ -316,6 +400,105 @@ describe("a Bot authoring a Package", () => {
     expect(
       composition.generations.get(second.generationId)?.parentGenerationId,
     ).toBe(first.generationId);
+  });
+
+  test("a failed pending generation is never inherited by later authoring", async () => {
+    const bundler = countingBundler((effectId) =>
+      bundledResult(
+        effectId,
+        effectId === "author-first" ? "b".repeat(64) : "c".repeat(64),
+      ),
+    );
+    const first = await host({ bundler, runId: "run-1" }).author(
+      requestFor({ effectId: "author-first" }),
+    );
+    if (first.status !== "authored") throw new Error(first.reason);
+    composition.fail(first.generationId);
+
+    const second = await host({ bundler, runId: "run-2" }).author(
+      requestFor({
+        effectId: "author-second",
+        sourceHash: "d".repeat(64),
+        input: {
+          ...requestFor().input,
+          packageId: "second-package",
+          tools: [
+            { name: "second_tool", description: "Second", inputSchema: {} },
+          ],
+        },
+      }),
+    );
+    if (second.status !== "authored") throw new Error(second.reason);
+    const generation = composition.generations.get(second.generationId)!;
+    expect(generation.parentGenerationId).toBe(
+      (await composition.lastKnownGood()).generationId,
+    );
+    expect(generation.members.map((member) => member.packageId)).toEqual([
+      "second-package",
+      "shell",
+    ]);
+  });
+
+  test("re-authoring the same package repairs a failed proposal from last-known-good", async () => {
+    const bundler = countingBundler((effectId) =>
+      bundledResult(
+        effectId,
+        effectId === "author-broken" ? "b".repeat(64) : "c".repeat(64),
+      ),
+    );
+    const broken = await host({ bundler, runId: "run-broken" }).author(
+      requestFor({ effectId: "author-broken" }),
+    );
+    if (broken.status !== "authored") throw new Error(broken.reason);
+    composition.fail(broken.generationId);
+
+    const repaired = await host({ bundler, runId: "run-repair" }).author(
+      requestFor({
+        effectId: "author-repair",
+        sourceHash: "d".repeat(64),
+        input: { ...requestFor().input, source: `${SOURCE}// repaired\n` },
+      }),
+    );
+
+    if (repaired.status !== "authored") throw new Error(repaired.reason);
+    const generation = composition.generations.get(repaired.generationId)!;
+    expect(generation.parentGenerationId).toBe(
+      (await composition.lastKnownGood()).generationId,
+    );
+    expect(
+      generation.members.find((member) => member.packageId === "hello-world")
+        ?.version,
+    ).toBe("0.0.2");
+    expect(generation.members).toHaveLength(2);
+  });
+
+  test("a registered tool-name collision is refused before quota or bundling", async () => {
+    const bundler = countingBundler((effectId) => bundledResult(effectId));
+    const outcome = await host({
+      bundler,
+      currentToolNames: ["memory_write", "package_author"],
+    }).author(
+      requestFor({
+        input: {
+          ...requestFor().input,
+          tools: [
+            {
+              name: "memory_write",
+              description: "Would collide",
+              inputSchema: {},
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(outcome.status).toBe("refused");
+    if (outcome.status !== "refused") throw new Error("unreachable");
+    expect(outcome.reason).toContain(
+      'Tool "memory_write" is already registered',
+    );
+    expect(reservations).toEqual([]);
+    expect(bundler.calls).toBe(0);
   });
 
   test("shadowing a first-party Package is refused before any durable effect", async () => {
@@ -440,6 +623,7 @@ describe("a Bot authoring a Package", () => {
         packageId: "hello-world",
         version: "0.0.1",
         sourceHash: "a".repeat(64),
+        manifestHash: "f".repeat(64),
         sourceBytes: SOURCE.length,
         recordedAt: "2026-08-31T00:30:00.000Z",
         status: "recorded",
@@ -471,6 +655,7 @@ describe("a Bot authoring a Package", () => {
         packageId: "hello-world",
         version: "0.0.1",
         sourceHash: "a".repeat(64),
+        manifestHash: "f".repeat(64),
         sourceBytes: SOURCE.length,
         recordedAt: "2026-08-31T00:30:00.000Z",
         status: "recorded",
@@ -514,5 +699,91 @@ describe("a Bot authoring a Package", () => {
 
     expect(outcome.status).toBe("refused");
     expect(composition.generations.size).toBe(1);
+  });
+
+  test("package undo records intent before an idempotent Bot-origin revert without moving last-known-good", async () => {
+    const bundler = countingBundler((effectId) => bundledResult(effectId));
+    const authored = await host({ bundler }).author(requestFor());
+    if (authored.status !== "authored") throw new Error("authoring failed");
+    composition.activate(authored.generationId);
+    const goodBeforeUndo = await composition.lastKnownGood();
+    const undoHost = host({ bundler, runId: "run-undo" });
+    const effectId = await undoHost.undoEffectIdFor({});
+    const request = {
+      input: {},
+      effectId,
+      sessionId: "user-1:bot-1",
+      position: { turn: 2, step: 1 },
+    } as const;
+
+    const first = await undoHost.undo(request);
+    const replay = await undoHost.undo(request);
+
+    expect(first).toEqual(replay);
+    expect(first.status).toBe("recorded");
+    if (first.status !== "recorded") throw new Error("undo was refused");
+    const reverted = composition.generations.get(first.generationId)!;
+    expect(reverted.origin).toEqual({
+      kind: "revert",
+      revertsTo: first.targetGenerationId,
+      botId: "bot-1",
+      runId: "run-undo",
+      turnId: "run-undo",
+    });
+    expect(reverted.members.map((member) => member.packageId)).toEqual([
+      "shell",
+    ]);
+    expect((await composition.lastKnownGood()).generationId).toBe(
+      goodBeforeUndo.generationId,
+    );
+    expect(storage.values.has(authorshipUndoIntentKey(effectId))).toBe(true);
+    expect(storage.values.has(authorshipUndoOutcomeKey(effectId))).toBe(true);
+  });
+
+  test("package_inspect_self returns generated contract, declared tools, stored source, and latest failure", async () => {
+    const bundler = countingBundler((effectId) => bundledResult(effectId));
+    const authored = await host({ bundler }).author(requestFor());
+    if (authored.status !== "authored") throw new Error("authoring failed");
+    composition.activate(authored.generationId);
+    const inspecting = host({
+      bundler,
+      runId: "run-inspect",
+      currentToolNames: ["hello", "memory_write"],
+    });
+    await inspecting.author(
+      requestFor({
+        effectId: "author-collision",
+        sourceHash: "c".repeat(64),
+        input: {
+          ...requestFor().input,
+          tools: [
+            {
+              name: "memory_write",
+              description: "collides",
+              inputSchema: {},
+            },
+          ],
+        },
+      }),
+    );
+
+    const view = await inspecting.inspectSelf();
+
+    expect(view.contextContract).toContain(
+      "interface BotPackageExecutionContextV1",
+    );
+    expect(view.composition.members).toContainEqual(
+      expect.objectContaining({
+        packageId: "hello-world",
+        declaredTools: ["hello"],
+        source: SOURCE,
+      }),
+    );
+    expect(view.failures).toContainEqual(
+      expect.objectContaining({
+        packageId: "hello-world",
+        authoring: expect.objectContaining({ phase: "compose" }),
+      }),
+    );
   });
 });

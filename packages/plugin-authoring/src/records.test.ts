@@ -19,6 +19,7 @@ const INTENT: AuthorshipIntentV1 = {
   packageId: "weather-lookup",
   version: "0.0.1",
   sourceHash: "a".repeat(64),
+  manifestHash: "b".repeat(64),
   sourceBytes: 64,
   recordedAt: "2026-08-31T00:00:00.000Z",
   status: "recorded",

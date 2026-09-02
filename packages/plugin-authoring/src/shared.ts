@@ -13,16 +13,10 @@ export interface AuthorPackageInputV1 {
   /** Stable Plugin identity; re-authoring appends a version. */
   packageId: string;
   displayName: string;
-  tool: { name: string; description: string; inputSchema: unknown };
+  /** Every tool the immutable Package artifact is expected to export. */
+  tools: Array<{ name: string; description: string; inputSchema: unknown }>;
   /** TypeScript text; exactly one `package.ts`. */
   source: string;
-  /**
-   * D6 addendum. The authored Package declares a model Contribution: an
-   * adapter that forwards to `CAPABILITIES.invokeModel`. It is a translation
-   * layer over a kernel-declared binding, never a network client, and it is
-   * callable only where an enabled model Assignment matches.
-   */
-  model?: { providerId: string; modelId: string };
 }
 
 export type AuthorPackageOutcomeV1 =
@@ -42,8 +36,61 @@ export type AuthorPackageOutcomeV1 =
       failureId: string;
     };
 
+export interface PackageUndoInputV1 {
+  /** Absent means the generation before the most recent authored change. */
+  generationId?: string;
+}
+
+export type PackageUndoOutcomeV1 =
+  | {
+      status: "recorded";
+      effectId: string;
+      generationId: string;
+      targetGenerationId: string;
+    }
+  | { status: "refused"; reason: string; failureId: string };
+
+export interface PackageInspectMemberV1 {
+  packageId: string;
+  version: string;
+  provenance: Record<string, unknown>;
+  declaredTools: string[];
+  source?: string;
+}
+
+export interface PackageInspectFailureV1 {
+  packageId: string;
+  authoring?: {
+    failureId: string;
+    phase: string;
+    reason: string;
+    diagnostics: string[];
+    recordedAt: string;
+  };
+  activation?: {
+    generationId: string;
+    attempt: number;
+    phase: string;
+    message: string;
+    diagnostics: string[];
+    at: string;
+    quarantined: boolean;
+  };
+}
+
+export interface PackageInspectSelfOutcomeV1 {
+  contextContract: string;
+  composition: {
+    generationId: string;
+    status: string;
+    members: PackageInspectMemberV1[];
+  };
+  failures: PackageInspectFailureV1[];
+}
+
 export const AUTHORED_PACKAGE_ID = /^[a-z][a-z0-9-]{2,63}$/;
 export const AUTHORED_TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+export const AUTHORED_TOOLS_MAX = 64;
 /**
  * The shape of an authored id, not its authority: a Bot may not shadow a
  * first-party or User Package, and that rule is enforced against the Bot's
@@ -112,12 +159,20 @@ export function decodeAuthorPackageInputV1(
   label = "package_author input",
 ): AuthorPackageInputV1 {
   const value = record(input, label);
+  // `tool` is accepted for one compatibility release, but the decoded shape
+  // is always the plural declaration the manifest and mount path enforce.
   exactKeys(
     value,
-    ["packageId", "displayName", "tool", "source"],
-    ["model"],
+    ["packageId", "displayName", "source"],
+    ["tools", "tool"],
     label,
   );
+  if (
+    (value.tools === undefined && value.tool === undefined) ||
+    (value.tools !== undefined && value.tool !== undefined)
+  ) {
+    throw new Error(`${label} must declare exactly one of tools or tool`);
+  }
   const packageId = boundedString(
     value.packageId,
     `${label}.packageId`,
@@ -131,19 +186,34 @@ export function decodeAuthorPackageInputV1(
     `${label}.displayName`,
     128,
   );
-  const tool = record(value.tool, `${label}.tool`);
-  exactKeys(tool, ["name", "description", "inputSchema"], [], `${label}.tool`);
-  const name = boundedString(tool.name, `${label}.tool.name`, 64);
-  if (!AUTHORED_TOOL_NAME.test(name)) {
-    throw new Error(`${label}.tool.name is invalid`);
+  const declaredTools = value.tools === undefined ? [value.tool] : value.tools;
+  if (
+    !Array.isArray(declaredTools) ||
+    declaredTools.length === 0 ||
+    declaredTools.length > AUTHORED_TOOLS_MAX
+  ) {
+    throw new Error(`${label}.tools must be a non-empty bounded array`);
   }
-  const description = boundedString(
-    tool.description,
-    `${label}.tool.description`,
-    1_024,
-  );
-  const inputSchema = record(tool.inputSchema, `${label}.tool.inputSchema`);
-  requireJsonValue(inputSchema, `${label}.tool.inputSchema`);
+  const tools = declaredTools.map((candidate, index) => {
+    const toolLabel = `${label}.tools[${index}]`;
+    const tool = record(candidate, toolLabel);
+    exactKeys(tool, ["name", "description", "inputSchema"], [], toolLabel);
+    const name = boundedString(tool.name, `${toolLabel}.name`, 64);
+    if (!AUTHORED_TOOL_NAME.test(name)) {
+      throw new Error(`${toolLabel}.name is invalid`);
+    }
+    const description = boundedString(
+      tool.description,
+      `${toolLabel}.description`,
+      1_024,
+    );
+    const inputSchema = record(tool.inputSchema, `${toolLabel}.inputSchema`);
+    requireJsonValue(inputSchema, `${toolLabel}.inputSchema`);
+    return { name, description, inputSchema };
+  });
+  if (new Set(tools.map((tool) => tool.name)).size !== tools.length) {
+    throw new Error(`${label}.tools contains duplicate names`);
+  }
   const source = boundedString(
     value.source,
     `${label}.source`,
@@ -155,25 +225,11 @@ export function decodeAuthorPackageInputV1(
   ) {
     throw new Error(`${label}.source exceeds the per-Package source quota`);
   }
-  let model: AuthorPackageInputV1["model"];
-  if (value.model !== undefined) {
-    const declared = record(value.model, `${label}.model`);
-    exactKeys(declared, ["providerId", "modelId"], [], `${label}.model`);
-    model = {
-      providerId: boundedString(
-        declared.providerId,
-        `${label}.model.providerId`,
-        128,
-      ),
-      modelId: boundedString(declared.modelId, `${label}.model.modelId`, 128),
-    };
-  }
   return {
     packageId,
     displayName,
-    tool: { name, description, inputSchema },
+    tools,
     source,
-    ...(model ? { model } : {}),
   };
 }
 
@@ -181,7 +237,7 @@ export function decodeAuthorPackageInputV1(
 export const AUTHOR_PACKAGE_INPUT_SCHEMA_V1 = {
   type: "object",
   additionalProperties: false,
-  required: ["packageId", "displayName", "tool", "source"],
+  required: ["packageId", "displayName", "tools", "source"],
   properties: {
     packageId: {
       type: "string",
@@ -189,14 +245,19 @@ export const AUTHOR_PACKAGE_INPUT_SCHEMA_V1 = {
         "Stable lowercase Package identity. Re-authoring it appends a version.",
     },
     displayName: { type: "string" },
-    tool: {
-      type: "object",
-      additionalProperties: false,
-      required: ["name", "description", "inputSchema"],
-      properties: {
-        name: { type: "string" },
-        description: { type: "string" },
-        inputSchema: { type: "object" },
+    tools: {
+      type: "array",
+      minItems: 1,
+      maxItems: AUTHORED_TOOLS_MAX,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "description", "inputSchema"],
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          inputSchema: { type: "object" },
+        },
       },
     },
     source: {
@@ -204,16 +265,34 @@ export const AUTHOR_PACKAGE_INPUT_SCHEMA_V1 = {
       description:
         "TypeScript for one package.ts that exports `tools` and `execute(tool, input, ctx)`. No imports: the isolate has no network and no npm. `ctx.invokeModel(request)` is the only model path.",
     },
-    model: {
-      type: "object",
-      additionalProperties: false,
-      required: ["providerId", "modelId"],
+  },
+} as const;
+
+export function decodePackageUndoInputV1(
+  input: unknown,
+  label = "package_undo input",
+): PackageUndoInputV1 {
+  const value = record(input, label);
+  exactKeys(value, [], ["generationId"], label);
+  return value.generationId === undefined
+    ? {}
+    : {
+        generationId: boundedString(
+          value.generationId,
+          `${label}.generationId`,
+          256,
+        ),
+      };
+}
+
+export const PACKAGE_UNDO_INPUT_SCHEMA_V1 = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    generationId: {
+      type: "string",
       description:
-        "Declare a model Contribution that forwards to the kernel model binding.",
-      properties: {
-        providerId: { type: "string" },
-        modelId: { type: "string" },
-      },
+        "Optional earlier Composition generation. Omit to undo your most recent Package change.",
     },
   },
 } as const;
@@ -244,6 +323,17 @@ export async function authoringEffectIdV1(input: {
   return `author-${digest.slice(0, 32)}`;
 }
 
+/** One undo effect per admitted run and requested target (or default target). */
+export async function packageUndoEffectIdV1(input: {
+  runId: string;
+  generationId?: string;
+}): Promise<string> {
+  const digest = await sha256HexV1(
+    JSON.stringify([input.runId, input.generationId ?? "latest"]),
+  );
+  return `undo-${digest.slice(0, 32)}`;
+}
+
 /** `0.0.1`, `0.0.2`, … — a version is appended, never overwritten. */
 export function authoredVersionV1(ordinal: number): string {
   if (!Number.isSafeInteger(ordinal) || ordinal < 1) {
@@ -260,15 +350,15 @@ export function authoredSpecifierV1(packageId: string): string {
 /**
  * The manifest an authored Package is content-addressed by. It is synthesized
  * rather than authored so a Bot cannot declare a Contribution host the kernel
- * did not offer it: exactly one Bot isolate runtime Contribution, plus the
- * declared model binding when the Package asked for one.
+ * did not offer it: exactly one Bot isolate runtime Contribution and the exact
+ * tool names mount health must report. Model access is a method on the narrow
+ * Package context, not a separate manifest Contribution.
  */
 export function authoredManifestV1(input: {
   packageId: string;
   displayName: string;
   version: string;
-  tool: AuthorPackageInputV1["tool"];
-  model?: AuthorPackageInputV1["model"];
+  tools: AuthorPackageInputV1["tools"];
 }): Record<string, unknown> {
   return {
     schemaVersion: 3,
@@ -279,25 +369,8 @@ export function authoredManifestV1(input: {
     dependencies: {},
     contributions: {
       runtime: { entry: "./package.js", host: "bot-isolate" },
-      ...(input.model
-        ? {
-            model: {
-              entry: "./package.js",
-              host: "bot-isolate",
-              binding: "capabilities.invokeModel",
-              providerId: input.model.providerId,
-              modelId: input.model.modelId,
-            },
-          }
-        : {}),
     },
-    tools: [
-      {
-        name: input.tool.name,
-        description: input.tool.description,
-        inputSchema: input.tool.inputSchema,
-      },
-    ],
+    tools: input.tools.map((tool) => ({ ...tool })),
     permissions: [],
   };
 }

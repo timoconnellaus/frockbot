@@ -3,6 +3,8 @@ import { SessionStore, type Session } from "@frockbot/kernel-contracts";
 import { Context } from "cordis";
 import {
   createPackageAuthorTool,
+  createPackageInspectSelfTool,
+  createPackageUndoTool,
   openTurnPositionV1,
   type AuthorPackageRequestV1,
   type PackageAuthoringHost,
@@ -12,7 +14,7 @@ import type { AuthorPackageOutcomeV1 } from "./shared.ts";
 const INPUT = {
   packageId: "weather-lookup",
   displayName: "Weather lookup",
-  tool: { name: "weather_lookup", description: "Looks up", inputSchema: {} },
+  tools: [{ name: "weather_lookup", description: "Looks up", inputSchema: {} }],
   source: "export const tools = [];\nexport async function execute() {}\n",
 };
 
@@ -55,6 +57,24 @@ function stubHost(
       seen.push(request);
       return Promise.resolve(outcome);
     },
+    undoEffectIdFor: () => Promise.resolve("undo-0123456789abcdef"),
+    undo: () =>
+      Promise.resolve({
+        status: "recorded",
+        effectId: "undo-0123456789abcdef",
+        generationId: "revert-generation",
+        targetGenerationId: "target-generation",
+      }),
+    inspectSelf: () =>
+      Promise.resolve({
+        contextContract: "interface BotPackageExecutionContextV1 {}",
+        composition: {
+          generationId: "current-generation",
+          status: "active",
+          members: [],
+        },
+        failures: [],
+      }),
   };
 }
 
@@ -158,5 +178,43 @@ describe("the package_author tool", () => {
     ]);
     expect(() => openTurnPositionV1(session)).toThrow();
     await root.fiber.dispose();
+  });
+});
+
+describe("the Package setup companion tools", () => {
+  test("package_undo records intent before the durable revert outcome", async () => {
+    const { session, sessions, dispose } = await openSession();
+    const host = stubHost({
+      status: "refused",
+      reason: "unused",
+      failureId: "unused",
+    });
+    const tool = createPackageUndoTool(host, sessions);
+
+    const result = await tool.execute({}, CONTEXT);
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("activates on the next Turn");
+    expect(result.content).toContain("did not undo any action");
+    expect(session.events.slice(-2).map((event) => event.type)).toEqual([
+      "package/undo-intent",
+      "package/undo-recorded",
+    ]);
+    await dispose();
+  });
+
+  test("package_inspect_self returns the host's generated catalog read-only", async () => {
+    const host = stubHost({
+      status: "refused",
+      reason: "unused",
+      failureId: "unused",
+    });
+    const tool = createPackageInspectSelfTool(host);
+
+    const result = await tool.execute({}, CONTEXT);
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("BotPackageExecutionContextV1");
+    expect(tool.idempotent).toBe(true);
   });
 });

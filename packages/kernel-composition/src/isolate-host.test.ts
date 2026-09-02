@@ -29,7 +29,16 @@ function manifest() {
     version: "0.0.1",
     compatibility: { frockbot: "^0.0.1" },
     dependencies: {},
-    contributions: { runtime: { entry: "./runtime.js" } },
+    contributions: {
+      runtime: { entry: "./package.js", host: "bot-isolate" },
+    },
+    tools: [
+      {
+        name: "reverse_text",
+        description: "Reverses text",
+        inputSchema: { type: "object" },
+      },
+    ],
     permissions: [],
   });
 }
@@ -241,6 +250,27 @@ describe("Bot isolate contribution host", () => {
     await expect(subject.prepare(descriptor())).rejects.toThrow(/unhealthy/);
   });
 
+  test("rejects isolate tool names that differ from the stored manifest", async () => {
+    const { host: subject } = host({
+      entrypoint: {
+        health: () =>
+          Promise.resolve(
+            healthy([
+              {
+                name: "undeclared_tool",
+                description: "Not in the manifest",
+                inputSchema: { type: "object" },
+                idempotent: false,
+              },
+            ]),
+          ),
+      },
+    });
+    await expect(subject.prepare(descriptor())).rejects.toThrow(
+      /tools do not match its stored manifest/,
+    );
+  });
+
   test("registers one tool per health entry and executes it over RPC", async () => {
     let seen: IsolateToolInvocationV1 | undefined;
     const { host: subject, registered } = host({
@@ -348,7 +378,16 @@ describe("the manifest bounds the turn types an isolate's tools reach", () => {
       version: "0.0.1",
       compatibility: { frockbot: "^0.0.1" },
       dependencies: {},
-      contributions: { runtime: { entry: "./runtime.js" } },
+      contributions: {
+        runtime: { entry: "./package.js", host: "bot-isolate" },
+      },
+      tools: [
+        {
+          name: "reverse_text",
+          description: "Reverses text",
+          inputSchema: { type: "object" },
+        },
+      ],
       permissions: [],
       configuration: { capabilities },
     });

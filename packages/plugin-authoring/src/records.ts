@@ -11,6 +11,10 @@ export const AUTHORSHIP_INTENT_PREFIX = "authorship:intent:";
 export const AUTHORSHIP_ARTIFACT_PREFIX = "authorship:artifact:";
 export const AUTHORSHIP_FAILURE_PREFIX = "authorship:failure:";
 export const AUTHORSHIP_PACKAGE_PREFIX = "authorship:package:";
+export const AUTHORSHIP_MANIFEST_PREFIX = "authorship:manifest:";
+export const AUTHORSHIP_LATEST_FAILURE_PREFIX = "authorship:latest-failure:";
+export const AUTHORSHIP_UNDO_INTENT_PREFIX = "authorship:undo-intent:";
+export const AUTHORSHIP_UNDO_OUTCOME_PREFIX = "authorship:undo-outcome:";
 export const ARTIFACT_PREFIX = "artifact:";
 
 export function authorshipIntentKey(effectId: string): string {
@@ -30,6 +34,22 @@ export function authorshipPackageKey(packageId: string): string {
   return `${AUTHORSHIP_PACKAGE_PREFIX}${packageId}`;
 }
 
+export function authorshipManifestKey(manifestHash: string): string {
+  return `${AUTHORSHIP_MANIFEST_PREFIX}${manifestHash}`;
+}
+
+export function authorshipLatestFailureKey(packageId: string): string {
+  return `${AUTHORSHIP_LATEST_FAILURE_PREFIX}${packageId}`;
+}
+
+export function authorshipUndoIntentKey(effectId: string): string {
+  return `${AUTHORSHIP_UNDO_INTENT_PREFIX}${effectId}`;
+}
+
+export function authorshipUndoOutcomeKey(effectId: string): string {
+  return `${AUTHORSHIP_UNDO_OUTCOME_PREFIX}${effectId}`;
+}
+
 export function artifactKey(contentHash: string): string {
   return `${ARTIFACT_PREFIX}${contentHash}`;
 }
@@ -43,8 +63,10 @@ export interface AuthorshipIntentV1 {
   turnId: string;
   packageId: string;
   version: string;
-  /** sha-256 of the source text. The source itself is never durable state. */
+  /** sha-256 of the source text stored in the immutable Package content store. */
   sourceHash: string;
+  /** sha-256 of the exact manifest recorded before bundling starts. */
+  manifestHash: string;
   sourceBytes: number;
   recordedAt: string;
   status: "recorded";
@@ -59,6 +81,9 @@ export interface AuthoredArtifactRecordV1 {
   bundlerVersion: string;
   effectId: string;
   r2Key: string;
+  sourceHash: string;
+  sourceR2Key: string;
+  manifestHash: string;
   provenance: {
     kind: "bot";
     packageId: string;
@@ -69,6 +94,16 @@ export interface AuthoredArtifactRecordV1 {
     runId: string;
     authoredAt: string;
   };
+  createdAt: string;
+}
+
+/** The exact immutable manifest mounted for one Bot-authored member. */
+export interface AuthoredManifestRecordV1 {
+  schemaVersion: 1;
+  manifestHash: string;
+  packageId: string;
+  version: string;
+  manifest: unknown;
   createdAt: string;
 }
 
@@ -96,8 +131,42 @@ export interface AuthoringFailureRecordV1 {
   recordedAt: string;
 }
 
+export interface PackageUndoIntentV1 {
+  schemaVersion: 1;
+  effectId: string;
+  botId: string;
+  runId: string;
+  turnId: string;
+  requestedGenerationId?: string;
+  targetGenerationId: string;
+  recordedAt: string;
+  status: "recorded";
+}
+
+export type PackageUndoRecordV1 =
+  | {
+      schemaVersion: 1;
+      effectId: string;
+      generationId: string;
+      targetGenerationId: string;
+      recordedAt: string;
+      status: "recorded";
+    }
+  | {
+      schemaVersion: 1;
+      effectId: string;
+      failureId: string;
+      reason: string;
+      recordedAt: string;
+      status: "refused";
+    };
+
 export function artifactR2KeyV1(contentHash: string): string {
   return `packages/${contentHash}.mjs`;
+}
+
+export function sourceR2KeyV1(sourceHash: string): string {
+  return `packages/${sourceHash}.ts`;
 }
 
 /**

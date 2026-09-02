@@ -195,26 +195,34 @@ export function botIsolateSubagentRoleCeilingV1(
 }
 
 /**
- * A Composition member projected onto the descriptor a contribution host
- * consumes. The durable record keeps the member's `manifestHash`, not its
- * manifest, so the projection carries only what the isolate host reads: the
- * Package identity, its specifier, and its immutable artifact.
+ * A Composition member and its stored manifest projected onto the descriptor
+ * a contribution host consumes. Hash and identity checks happen here so no
+ * mount caller can replace the durable manifest with a synthesized one.
  */
-export function botIsolatePackageDescriptorV1(
+export async function botIsolatePackageDescriptorV1(
   member: CompositionMemberV1,
-): PackageDescriptor {
+  storedManifest: unknown,
+): Promise<PackageDescriptor> {
+  const manifestHash = await sha256(canonicalJson(storedManifest));
+  if (manifestHash !== member.manifestHash) {
+    throw new Error(
+      `package "${member.packageId}" stored manifest failed hash verification`,
+    );
+  }
+  const manifest = decodeFrockBotManifest(storedManifest);
+  if (manifest.id !== member.packageId || manifest.version !== member.version) {
+    throw new Error(
+      `package "${member.packageId}" stored manifest does not match its Composition member`,
+    );
+  }
+  if (manifest.contributions.runtime?.host !== "bot-isolate") {
+    throw new Error(
+      `package "${member.packageId}" manifest declares no Bot isolate runtime`,
+    );
+  }
   return {
     specifier: member.specifier,
-    manifest: decodeFrockBotManifest({
-      schemaVersion: 3,
-      id: member.packageId,
-      displayName: member.packageId,
-      version: member.version,
-      compatibility: { frockbot: `^${member.version}` },
-      dependencies: {},
-      contributions: { runtime: { entry: "./package.js" } },
-      permissions: [],
-    }),
+    manifest,
     ...(member.artifact ? { artifact: member.artifact } : {}),
   };
 }
@@ -287,6 +295,23 @@ export class BotIsolateContributionHost implements ContributionHost {
         "health",
         `package "${packageId}" isolate reported a different package id`,
         [`reported:${health.packageId}`],
+      );
+    }
+    const declaredTools = (pkg.manifest.tools ?? [])
+      .map((tool) => tool.name)
+      .toSorted();
+    const reportedTools = health.tools.map((tool) => tool.name).toSorted();
+    if (
+      declaredTools.length !== reportedTools.length ||
+      declaredTools.some((name, index) => name !== reportedTools[index])
+    ) {
+      throw new CompositionMountFailureError(
+        "health",
+        `package "${packageId}" isolate tools do not match its stored manifest`,
+        [
+          `declared:${declaredTools.join(",")}`,
+          `reported:${reportedTools.join(",")}`,
+        ],
       );
     }
 

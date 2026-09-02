@@ -1043,6 +1043,58 @@ describe("decodeFrockBotManifest", () => {
     ).toThrow("manifest setting schema is too large");
   });
 
+  test("decodes the exact Bot isolate runtime and tool declaration", () => {
+    const decoded = decodeFrockBotManifest({
+      schemaVersion: 3,
+      id: "authored",
+      displayName: "Authored",
+      version: "0.0.1",
+      compatibility: { frockbot: ">=0.0.1" },
+      dependencies: {},
+      contributions: {
+        runtime: { entry: "./package.js", host: "bot-isolate" },
+      },
+      tools: [
+        {
+          name: "look_up",
+          description: "Looks up a value",
+          inputSchema: { type: "object" },
+        },
+      ],
+      permissions: [],
+    });
+
+    expect(decoded.contributions.runtime?.host).toBe("bot-isolate");
+    expect(decoded.tools?.map((tool) => tool.name)).toEqual(["look_up"]);
+  });
+
+  test("requires Bot isolate runtime and tools declarations together", () => {
+    const base = {
+      schemaVersion: 3,
+      id: "authored",
+      displayName: "Authored",
+      version: "0.0.1",
+      compatibility: { frockbot: ">=0.0.1" },
+      dependencies: {},
+      permissions: [],
+    };
+    expect(() =>
+      decodeFrockBotManifest({
+        ...base,
+        contributions: {
+          runtime: { entry: "./package.js", host: "bot-isolate" },
+        },
+      }),
+    ).toThrow(/must appear together/);
+    expect(() =>
+      decodeFrockBotManifest({
+        ...base,
+        contributions: { runtime: { entry: "./package.js" } },
+        tools: [{ name: "look_up", description: "Looks", inputSchema: {} }],
+      }),
+    ).toThrow(/must appear together/);
+  });
+
   test("orders normalized contribution kinds", () => {
     const decoded = decodeFrockBotManifest({
       schemaVersion: 3,

@@ -47,7 +47,14 @@ export type CompositionOriginV1 =
   | { kind: "bootstrap" }
   | { kind: "bot-authored"; runId: string; sessionId: string; turnId: string }
   | { kind: "user-install"; userId: string }
-  | { kind: "revert"; revertsTo: string; userId: string };
+  | { kind: "revert"; revertsTo: string; userId: string }
+  | {
+      kind: "revert";
+      revertsTo: string;
+      botId: string;
+      runId: string;
+      turnId: string;
+    };
 
 export type CompositionGenerationStatusV1 =
   "pending" | "active" | "superseded" | "failed" | "quarantined";
@@ -83,6 +90,7 @@ export interface CompositionStore {
   revert(
     toGenerationId: string,
     origin: Extract<CompositionOriginV1, { kind: "revert" }>,
+    options?: { createdAt?: string },
   ): Promise<CompositionGenerationV1>;
   list(query: {
     limit: number;
@@ -280,9 +288,21 @@ function decodeCompositionOriginV1(
     exactKeys(value, ["kind", "userId"], [], label);
     boundedString(value.userId, `${label}.userId`, 256);
   } else if (kind === "revert") {
-    exactKeys(value, ["kind", "revertsTo", "userId"], [], label);
     boundedString(value.revertsTo, `${label}.revertsTo`, 256);
-    boundedString(value.userId, `${label}.userId`, 256);
+    if (Object.hasOwn(value, "userId")) {
+      exactKeys(value, ["kind", "revertsTo", "userId"], [], label);
+      boundedString(value.userId, `${label}.userId`, 256);
+    } else {
+      exactKeys(
+        value,
+        ["kind", "revertsTo", "botId", "runId", "turnId"],
+        [],
+        label,
+      );
+      boundedString(value.botId, `${label}.botId`, 256);
+      boundedString(value.runId, `${label}.runId`, 128);
+      boundedString(value.turnId, `${label}.turnId`, 128);
+    }
   } else {
     throw new Error(`${label}.kind is invalid`);
   }

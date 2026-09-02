@@ -1,4 +1,4 @@
-// The Package Authoring runtime Contribution: one tool, `package_author`.
+// The Package Authoring runtime Contribution: author, undo, and self-inspect.
 //
 // The Package holds no authority of its own. It decodes the model's input at
 // the seam, appends the two session events that make the effect visible in the
@@ -10,12 +10,18 @@ import type {
   ToolDefinition,
   ToolExecutionContext,
 } from "@frockbot/kernel-contracts";
+import { BOT_ISOLATE_CONTEXT_SUMMARY_V1 } from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 import {
   AUTHOR_PACKAGE_INPUT_SCHEMA_V1,
+  PACKAGE_UNDO_INPUT_SCHEMA_V1,
   type AuthorPackageInputV1,
   type AuthorPackageOutcomeV1,
+  type PackageInspectSelfOutcomeV1,
+  type PackageUndoInputV1,
+  type PackageUndoOutcomeV1,
   decodeAuthorPackageInputV1,
+  decodePackageUndoInputV1,
   sha256HexV1,
 } from "./shared.js";
 
@@ -28,6 +34,13 @@ export interface AuthoringTurnPositionV1 {
 export interface AuthorPackageRequestV1 {
   input: AuthorPackageInputV1;
   sourceHash: string;
+  effectId: string;
+  sessionId: string;
+  position: AuthoringTurnPositionV1;
+}
+
+export interface PackageUndoRequestV1 {
+  input: PackageUndoInputV1;
   effectId: string;
   sessionId: string;
   position: AuthoringTurnPositionV1;
@@ -46,6 +59,9 @@ export interface PackageAuthoringHost {
     sourceHash: string;
   }): Promise<string>;
   author(request: AuthorPackageRequestV1): Promise<AuthorPackageOutcomeV1>;
+  undoEffectIdFor(input: PackageUndoInputV1): Promise<string>;
+  undo(request: PackageUndoRequestV1): Promise<PackageUndoOutcomeV1>;
+  inspectSelf(): Promise<PackageInspectSelfOutcomeV1>;
 }
 
 /**
@@ -105,8 +121,7 @@ export function createPackageAuthorTool(
     // not part of the narrow reach of `browserUse`, `computerUse`, or the two
     // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
     admission: { subagentRoles: ["executor"] },
-    description:
-      "Author a Package for yourself: one tool implemented in a single TypeScript file that runs in your own isolate. The Package is recorded as a new Composition generation and activates on your next Turn.",
+    description: `Author a Package for yourself: tools implemented in one TypeScript file that runs in your own isolate. Declare every exported tool in tools; the names must match exactly. The Package is recorded as a new Composition generation and activates on your next Turn. ${BOT_ISOLATE_CONTEXT_SUMMARY_V1}`,
     inputSchema: AUTHOR_PACKAGE_INPUT_SCHEMA_V1,
     idempotent: false,
     validate: (input: unknown) => {
@@ -179,12 +194,119 @@ export function createPackageAuthorTool(
   };
 }
 
-/** The runtime Contribution. Registers `package_author` and nothing else. */
+export function createPackageUndoTool(
+  host: PackageAuthoringHost,
+  sessions: { get(sessionId: string): Session | undefined },
+): ToolDefinition {
+  return {
+    name: "package_undo",
+    admission: { subagentRoles: ["executor"] },
+    description:
+      "Undo your latest Package setup change, or restore an earlier Composition generation. This only changes Package setup; it never undoes actions taken through Connections. The resulting generation activates on the next Turn.",
+    inputSchema: PACKAGE_UNDO_INPUT_SCHEMA_V1,
+    idempotent: false,
+    validate: (input) => {
+      try {
+        decodePackageUndoInputV1(input);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    execute: async (input: unknown, context: ToolExecutionContext) => {
+      let decoded: PackageUndoInputV1;
+      try {
+        decoded = decodePackageUndoInputV1(input);
+      } catch (error) {
+        return {
+          content: `package_undo input was rejected: ${errorMessage(error)}`,
+          isError: true,
+        };
+      }
+      const session = sessions.get(context.sessionId);
+      if (!session) {
+        return {
+          content: `package_undo cannot record its intent: session "${context.sessionId}" is unavailable`,
+          isError: true,
+        };
+      }
+      const effectId = await host.undoEffectIdFor(decoded);
+      const position = openTurnPositionV1(session);
+      session.append({
+        type: "package/undo-intent",
+        ...position,
+        effectId,
+        ...(decoded.generationId
+          ? { requestedGenerationId: decoded.generationId }
+          : {}),
+      });
+      await session.flush();
+      const outcome = await host.undo({
+        input: decoded,
+        effectId,
+        sessionId: context.sessionId,
+        position,
+      });
+      if (outcome.status === "refused") {
+        return {
+          content: `Package undo was refused: ${outcome.reason} A durable failure record "${outcome.failureId}" was written. No connection action was undone.`,
+          isError: true,
+        };
+      }
+      session.append({
+        type: "package/undo-recorded",
+        ...position,
+        effectId,
+        generationId: outcome.generationId,
+        targetGenerationId: outcome.targetGenerationId,
+      });
+      await session.flush();
+      return {
+        content: `Package setup will return to Composition generation "${outcome.targetGenerationId}" through new pending generation "${outcome.generationId}". It activates on the next Turn. This changed Package setup only; it did not undo any action taken through a Connection.`,
+        isError: false,
+      };
+    },
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function createPackageInspectSelfTool(
+  host: PackageAuthoringHost,
+): ToolDefinition {
+  return {
+    name: "package_inspect_self",
+    admission: { subagentRoles: ["executor"] },
+    description:
+      "Read your exact Package execution context contract, current Composition (including your stored Package source), and latest authoring or activation failure per authored Package.",
+    inputSchema: { type: "object", additionalProperties: false },
+    idempotent: true,
+    validate: (input) =>
+      Boolean(input && typeof input === "object" && !Array.isArray(input)) &&
+      Object.keys(input as Record<string, unknown>).length === 0,
+    execute: async () => ({
+      content: JSON.stringify(await host.inspectSelf(), null, 2),
+      isError: false,
+    }),
+  };
+}
+
+/** The runtime Contribution. Registers the three chat-first setup tools. */
 export function createAuthoringRuntimePlugin(
   host: PackageAuthoringHost,
 ): Plugin.Function {
-  const plugin: Plugin.Function = (ctx) =>
-    ctx.tools.register(createPackageAuthorTool(host, ctx.sessions));
+  const plugin: Plugin.Function = (ctx) => {
+    const disposers = [
+      ctx.tools.register(createPackageAuthorTool(host, ctx.sessions)),
+      ctx.tools.register(createPackageUndoTool(host, ctx.sessions)),
+      ctx.tools.register(createPackageInspectSelfTool(host)),
+    ];
+    return () => {
+      for (const dispose of disposers.reverse()) dispose();
+    };
+  };
   plugin.inject = ["tools", "sessions"];
   return plugin;
 }

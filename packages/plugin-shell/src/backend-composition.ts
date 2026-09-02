@@ -65,6 +65,8 @@ export interface ShellIsolateMountOptions {
   turnId: string;
   loader: BotIsolateLoader;
   artifacts: BotIsolateArtifactStore;
+  /** Reads the exact manifest whose hash the member records. */
+  manifestFor(member: CompositionMemberV1): Promise<unknown>;
   /**
    * Mints the loopback `CAPABILITIES` service binding for one Package —
    * `ctx.exports.BotCapabilities({ props })` in the Durable Object.
@@ -192,8 +194,9 @@ export function createShellCompositionHost(
               : { deadlineMs: isolate.deadlineMs }),
           });
           // Mount and health-check are one guarded phase (Worker Loader spike).
+          const storedManifest = await isolate.manifestFor(member);
           const prepared = await host.prepare(
-            botIsolatePackageDescriptorV1(member),
+            await botIsolatePackageDescriptorV1(member, storedManifest),
           );
           if (!prepared) {
             failures.push({
