@@ -38,6 +38,13 @@ These rules govern production features and architecture. Treat them as invariant
 - Development and test adapters exercise the production architecture rather than introducing alternate product runtimes.
 - Platform capabilities such as notifications, clipboard access, file selection, authentication handoff, and deep links are progressive enhancements. Core workflows remain available without a native client process.
 
+## Landing work
+
+- Merging integrates and tagging ships. A change reaching `main` moves nothing in production; only a version tag deploys it.
+- Opening a pull request or pushing a tag is not the end of the work. A session that does either watches it to a terminal state with `bun scripts/ci-watch.ts`, and owns what it finds: a red check, a merge that was never queued, and a release that published without deploying are all failures to fix, not results to report.
+- `ci-watch` exits 0 when the change landed, 1 when it failed, and 2 while it is still pending, so a session, a hook, and a person read one verdict rather than three.
+- A pull request that edits `.github/workflows/` can never be queued by `GITHUB_TOKEN` and is merged by hand. Every other pull request merges itself once its checks pass.
+
 ## Minimal kernel
 
 - The kernel is the only production code that is not a Package. It has exactly three parts: Durable Object authority (admission, event log, cursor, idempotency, cancellation, scheduling, and storage), the Agent loop (claim input, call the model, run the tools, record events, repeat), and Package composition (resolve durable desired state into a pinned generation set, mount it, verify it, commit or roll back, and bootstrap and dispose the host that does so).
