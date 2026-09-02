@@ -66,6 +66,7 @@ export type ComputerHostErrorCodeV1 =
   | "conflict"
   | "limit-exceeded"
   | "human-control-active"
+  | "computer-updating"
   | "aborted"
   | "timeout"
   | "provider-unavailable"
@@ -78,6 +79,7 @@ const ERROR_CODES: readonly ComputerHostErrorCodeV1[] = [
   "conflict",
   "limit-exceeded",
   "human-control-active",
+  "computer-updating",
   "aborted",
   "timeout",
   "provider-unavailable",
@@ -249,6 +251,8 @@ export function computerHostOperationKindV1(
  * failure names the phase it failed in rather than the whole install.
  */
 export interface ComputerHostProvisioningV1 {
+  /** Whether this run creates a Computer or updates its runtime in place. */
+  kind: "provision" | "update";
   /** Machine name of the phase reached: a declared phase, or `ready`. */
   phase: string;
   /** The same phase in words, for a client to show. */
@@ -843,7 +847,9 @@ export async function decodeComputerHostHttpRequestV1(
 export function computerHostProblemV1(
   code: ComputerHostErrorCodeV1,
   message: string,
-  retryable = code === "provider-unavailable" || code === "limit-exceeded",
+  retryable = code === "provider-unavailable" ||
+    code === "limit-exceeded" ||
+    code === "computer-updating",
 ): ComputerHostProblemV1 {
   return {
     version: COMPUTER_HOST_PROTOCOL_VERSION,
@@ -858,7 +864,9 @@ export function problem(
   status: number,
   code: ComputerHostErrorCodeV1,
   message: string,
-  retryable = code === "provider-unavailable" || code === "limit-exceeded",
+  retryable = code === "provider-unavailable" ||
+    code === "limit-exceeded" ||
+    code === "computer-updating",
 ): Response {
   return Response.json(computerHostProblemV1(code, message, retryable), {
     status,
@@ -953,7 +961,7 @@ function decodeComputerHostProvisioningV1(
   const value = object(input, `${label} provisioning`);
   exactly(
     value,
-    ["phase", "label", "index", "total", "status", "resumed"],
+    ["kind", "phase", "label", "index", "total", "status", "resumed"],
     `${label} provisioning`,
   );
   if (!PROVISIONING_STATUSES.has(value.status as string)) {
@@ -962,7 +970,11 @@ function decodeComputerHostProvisioningV1(
   if (typeof value.resumed !== "boolean") {
     fail(`${label} provisioning resumed must be a boolean`);
   }
+  if (value.kind !== "provision" && value.kind !== "update") {
+    fail(`${label} provisioning kind is invalid`);
+  }
   return {
+    kind: value.kind,
     phase: identifier(value.phase, `${label} provisioning phase`),
     label: boundedString(value.label, 200, `${label} provisioning label`),
     index: boundedInteger(value.index, 0, 1_000, `${label} provisioning index`),

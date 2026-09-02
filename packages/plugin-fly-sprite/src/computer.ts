@@ -10,6 +10,7 @@ import type {
   ComputerHostControlResultV1,
   ComputerHostFileReadResultV1,
   ComputerHostOpenResultV1,
+  ComputerHostProvisioningV1,
   ComputerHostViewerResultV1,
 } from "@frockbot/computer-host-protocol";
 import {
@@ -196,6 +197,14 @@ export interface ComputerConnection {
   display: string;
   /** The tenant's durable directory, relative to the Workspace home. */
   directory: string;
+  /** The progress from the host wake that opened this connection, if any. */
+  message?: string;
+}
+
+function provisioningMessage(progress: ComputerHostProvisioningV1): string {
+  return progress.kind === "update"
+    ? `Updating the Computer: ${progress.label}`
+    : `Preparing the Computer: ${progress.label}`;
 }
 
 function configuredName(): string {
@@ -1229,6 +1238,9 @@ export class FlySpriteComputer {
         : {}),
       display: opened.display ?? "",
       directory: `agent-data/agents/${layout.key}`,
+      ...(opened.provisioning
+        ? { message: provisioningMessage(opened.provisioning) }
+        : {}),
     };
   }
 

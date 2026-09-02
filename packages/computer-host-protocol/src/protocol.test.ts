@@ -412,6 +412,28 @@ describe("results", () => {
     expect(decodeComputerHostOpenResultV1(result)).toEqual(result);
   });
 
+  test("distinguishes an in-place update from provisioning", () => {
+    const provisioning = {
+      kind: "update" as const,
+      phase: "runtime",
+      label: "Updating the Computer runtime",
+      index: 1,
+      total: 2,
+      status: "running" as const,
+      resumed: false,
+    };
+    expect(
+      decodeComputerHostOpenResultV1({
+        version: 1,
+        effectId: "effect-1",
+        spriteName: "frockbot-0123456789ab",
+        directory: "agent-data/agents/bot-1",
+        generation: 3,
+        provisioning,
+      }).provisioning,
+    ).toEqual(provisioning);
+  });
+
   test("round-trips an exec result", () => {
     const result = {
       version: 1 as const,
@@ -537,6 +559,12 @@ describe("results", () => {
 });
 
 describe("problems", () => {
+  test("computer-updating is retryable by default", () => {
+    expect(
+      computerHostProblemV1("computer-updating", "Updating runtime"),
+    ).toMatchObject({ code: "computer-updating", retryable: true });
+  });
+
   test("problem() answers the declared shape", async () => {
     const response = problem(
       503,

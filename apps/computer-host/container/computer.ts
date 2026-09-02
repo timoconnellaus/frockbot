@@ -32,20 +32,22 @@ import {
   DESKTOP_SERVICE,
   ENSURE_AGENT_SCRIPT,
   HOME_ROOT,
+  LEASE_MAX_AGE_SECONDS,
   NO_SLOTS_MARKER,
+  PROVISION_DIGEST,
   PROVISION_MARKERS,
   PROVISION_PHASES,
   PROVISION_RUNNER_PREFIX,
   PROVISION_STARTING_PHASE,
-  COMPUTER_REFRESH_DIRECTORIES,
-  COMPUTER_REFRESH_FILES,
-  COMPUTER_REFRESH_FINGERPRINT,
-  COMPUTER_REFRESH_STAMP,
   provisionLaunchScript,
   provisionLogTailScript,
   provisionPollScript,
   RUNTIME_ROOT,
+  runtimeDocumentDigestV1,
   shellQuote,
+  UPDATE_PHASES,
+  UPDATE_STARTING_PHASE,
+  updateLaunchScript,
   WORKSPACE_SYNC_SERVICE,
   WORKSPACES_ROOT,
 } from "@frockbot/computer-host-runtime";
@@ -184,6 +186,10 @@ export const COMPUTER_HOST_PHASE_TIMEOUTS = {
   drain: 1_000,
 } as const;
 
+/** A second caller waits this long for an in-place update before retrying. */
+export const COMPUTER_UPDATE_WAIT_MS =
+  COMPUTER_HOST_PHASE_TIMEOUTS.provisionStep;
+
 /**
  * Where the host records that it has provisioned a Computer.
  *
@@ -195,6 +201,31 @@ export const COMPUTER_HOST_PHASE_TIMEOUTS = {
  * provisioning run and nothing else.
  */
 export const COMPUTER_HOST_STATE_PATH = `${RUNTIME_ROOT}/host-state.json`;
+
+const ADOPTION_STATE_PREFIX = "frockbot-adoption-state:";
+const ADOPTION_DIGEST_PREFIX = "frockbot-adoption-digest:";
+const ADOPTION_HUMAN_PREFIX = "frockbot-adoption-human:";
+
+/**
+ * One adoption read: host record, installed digest, and every human lease.
+ * The lease scan uses the same mtime rule as the runtime reclaim path, so an
+ * update cannot disagree with the Computer about whether a human is present.
+ */
+const adoptionInspectionScript = `set -eu
+printf '${ADOPTION_STATE_PREFIX}'
+base64 -w0 ${COMPUTER_HOST_STATE_PATH} 2>/dev/null || true
+printf '\n${ADOPTION_DIGEST_PREFIX}'
+cat ${PROVISION_DIGEST} 2>/dev/null || true
+printf '\n${ADOPTION_HUMAN_PREFIX}'
+NOW=$(date +%s)
+FRESH=0
+for LEASE in ${BOTS_ROOT}/*/human-control; do
+  [ -f "$LEASE" ] || continue
+  LEASED=$(stat -c %Y "$LEASE")
+  if [ $((NOW - LEASED)) -le ${LEASE_MAX_AGE_SECONDS} ]; then FRESH=1; break; fi
+done
+printf '%s\n' "$FRESH"
+`;
 
 const CONTROL_LEASE_SECONDS = 90;
 
@@ -264,6 +295,52 @@ function isNotFound(error: unknown): boolean {
   );
 }
 
+function decodeComputerHostStateV1(input: unknown): ComputerHostStateV1 {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error("Computer host state is not an object");
+  }
+  const value = input as Record<string, unknown>;
+  const keys = Object.keys(value).sort().join(",");
+  if (keys !== "generation,version" && keys !== "generation,update,version") {
+    throw new Error("Computer host state has unknown fields");
+  }
+  if (value.version !== 1 || !Number.isSafeInteger(value.generation)) {
+    throw new Error("Computer host state is invalid");
+  }
+  if (value.update === undefined) {
+    return { version: 1, generation: value.generation as number };
+  }
+  if (
+    typeof value.update !== "object" ||
+    value.update === null ||
+    Array.isArray(value.update)
+  ) {
+    throw new Error("Computer host update state is invalid");
+  }
+  const update = value.update as Record<string, unknown>;
+  if (Object.keys(update).sort().join(",") !== "digest,recordedAt,status") {
+    throw new Error("Computer host update state has unknown fields");
+  }
+  if (
+    (update.status !== "pending" && update.status !== "started") ||
+    typeof update.digest !== "string" ||
+    !/^[0-9a-f]{64}$/.test(update.digest) ||
+    typeof update.recordedAt !== "string" ||
+    !Number.isFinite(Date.parse(update.recordedAt))
+  ) {
+    throw new Error("Computer host update state is invalid");
+  }
+  return {
+    version: 1,
+    generation: value.generation as number,
+    update: {
+      status: update.status,
+      digest: update.digest,
+      recordedAt: update.recordedAt,
+    },
+  };
+}
+
 /**
  * Compiles one exec request into a single bash document.
  *
@@ -295,16 +372,27 @@ export function computerHostExecScriptV1(
 export interface ProvisionObservation extends ComputerHostProvisioningV1 {
   /** Whether a provisioner still holds the run lock. */
   running: boolean;
+  /** Target digest carried only in the provisioner's internal state line. */
+  documentDigest?: string;
 }
 
 /** Decodes a provisioning report. Anything unreadable reads as "starting". */
-export function readProvisionObservation(text: string): ProvisionObservation {
+export function readProvisionObservation(
+  text: string,
+  fallbackKind: ComputerHostProvisioningV1["kind"] = "provision",
+): ProvisionObservation {
   const running = text.includes(`${PROVISION_RUNNER_PREFIX}running`);
+  const starting =
+    fallbackKind === "update"
+      ? UPDATE_STARTING_PHASE
+      : PROVISION_STARTING_PHASE;
+  const phases = fallbackKind === "update" ? UPDATE_PHASES : PROVISION_PHASES;
   const base: ProvisionObservation = {
-    phase: PROVISION_STARTING_PHASE.name,
-    label: PROVISION_STARTING_PHASE.label,
+    kind: fallbackKind,
+    phase: starting.name,
+    label: starting.label,
     index: 0,
-    total: PROVISION_PHASES.length,
+    total: phases.length,
     status: "running",
     resumed: false,
     running,
@@ -327,6 +415,10 @@ export function readProvisionObservation(text: string): ProvisionObservation {
       ? value.status
       : "running";
   return {
+    kind:
+      value.kind === "provision" || value.kind === "update"
+        ? value.kind
+        : base.kind,
     phase: typeof value.phase === "string" ? value.phase : base.phase,
     label: typeof value.label === "string" ? value.label : base.label,
     index: Number.isSafeInteger(value.index)
@@ -338,6 +430,10 @@ export function readProvisionObservation(text: string): ProvisionObservation {
     status,
     resumed: false,
     running,
+    ...(typeof value.documentDigest === "string" &&
+    /^[0-9a-f]{64}$/.test(value.documentDigest)
+      ? { documentDigest: value.documentDigest }
+      : {}),
   };
 }
 
@@ -479,6 +575,28 @@ interface ComputerRecord {
   spriteName: string;
   generation: number;
   provisioning?: ComputerHostProvisioningV1;
+  inspection?: AdoptionInspection;
+}
+
+interface ComputerHostStateV1 {
+  version: 1;
+  generation: number;
+  update?: {
+    status: "pending" | "started";
+    digest: string;
+    recordedAt: string;
+  };
+}
+
+interface AdoptionInspection {
+  state?: ComputerHostStateV1;
+  digest?: string;
+  humanControlFresh: boolean;
+}
+
+interface ActiveUpdate {
+  progress: ComputerHostProvisioningV1;
+  promise: Promise<ComputerRecord>;
 }
 
 export interface ComputerHostOptions {
@@ -491,6 +609,8 @@ export interface ComputerHostOptions {
   concurrency?: { perContainer: number; perUser: number };
   /** How often the host asks a detached provisioner how it is going. */
   provisionPollMs?: number;
+  /** Bounded wait for a caller that did not start the active update. */
+  updateWaitMs?: number;
   /**
    * Told every time a provisioning run reaches a new phase.
    *
@@ -527,6 +647,7 @@ export class ComputerHost {
   private readonly now: () => number;
   private readonly concurrency: { perContainer: number; perUser: number };
   private readonly provisionPollMs: number;
+  private readonly updateWaitMs: number;
   private readonly onProvisionProgress?: (
     spriteName: string,
     progress: ComputerHostProvisioningV1,
@@ -539,6 +660,8 @@ export class ComputerHost {
   /** Re-derivable cache of what this container has learned about a Computer. */
   private readonly computers = new Map<string, ComputerRecord>();
   private readonly openings = new Map<string, Promise<ComputerRecord>>();
+  /** One update per User; every other operation waits only its declared bound. */
+  private readonly updates = new Map<string, ActiveUpdate>();
   /**
    * The Sprite handle for a name, looked up once.
    *
@@ -563,6 +686,7 @@ export class ComputerHost {
     this.concurrency = options.concurrency ?? COMPUTER_HOST_CONCURRENCY;
     this.provisionPollMs =
       options.provisionPollMs ?? COMPUTER_HOST_PHASE_TIMEOUTS.provisionPoll;
+    this.updateWaitMs = options.updateWaitMs ?? COMPUTER_UPDATE_WAIT_MS;
     if (options.onProvisionProgress) {
       this.onProvisionProgress = options.onProvisionProgress;
     }
@@ -719,7 +843,7 @@ export class ComputerHost {
    * reconstruction, not retry — no effect is repeated.
    */
   private async open(request: ComputerHostRequestV1): Promise<Response> {
-    const record = await this.computer(request.identity.userId);
+    const record = await this.computer(request.identity.userId, true);
     const sprite = await this.spriteFor(record.spriteName);
     const botKey = computerBotKeyV1(request.tenant.botId, this.digest);
     const profile = Buffer.from(
@@ -796,9 +920,18 @@ export class ComputerHost {
   }
 
   /** The User's Computer, provisioning it exactly once per container. */
-  private computer(userId: string): Promise<ComputerRecord> {
+  private computer(
+    userId: string,
+    inspectRuntime = false,
+  ): Promise<ComputerRecord> {
+    const updating = this.updates.get(userId);
+    if (updating) return this.waitForUpdate(updating);
     const cached = this.computers.get(userId);
-    if (cached) return Promise.resolve(cached);
+    if (cached) {
+      return inspectRuntime
+        ? this.ensureRuntimeCurrent(userId, cached)
+        : Promise.resolve(cached);
+    }
     let pending = this.openings.get(userId);
     if (!pending) {
       pending = this.provision(userId)
@@ -806,7 +939,11 @@ export class ComputerHost {
           // The progress belongs to the run, not to the Computer: the call
           // that provisioned it reports the phases, and every later `open`
           // reports an adoption with nothing to say about provisioning.
-          const { provisioning: _provisioning, ...adopted } = record;
+          const {
+            provisioning: _provisioning,
+            inspection: _inspection,
+            ...adopted
+          } = record;
           this.computers.set(userId, adopted);
           return record;
         })
@@ -815,16 +952,23 @@ export class ComputerHost {
         });
       this.openings.set(userId, pending);
     }
-    return pending;
+    return inspectRuntime
+      ? pending.then((record) =>
+          this.ensureRuntimeCurrent(userId, record, record.inspection),
+        )
+      : pending;
   }
 
   private async provision(userId: string): Promise<ComputerRecord> {
     const spriteName = this.spriteNameFor(userId);
     const sprite = await this.findOrCreate(spriteName);
-    const adopted = await this.readState(sprite);
-    if (adopted) {
-      await this.refresh(sprite);
-      return { spriteName, generation: adopted.generation };
+    const inspection = await this.inspectAdoption(sprite);
+    if (inspection.state) {
+      return {
+        spriteName,
+        generation: inspection.state.generation,
+        inspection,
+      };
     }
 
     const provisioning = await this.driveProvisioning(sprite);
@@ -858,56 +1002,132 @@ export class ComputerHost {
       .filesystem("/")
       .writeFile(
         COMPUTER_HOST_STATE_PATH,
-        `${JSON.stringify({ version: 1, generation })}\n`,
+        `${JSON.stringify({ version: 1, generation } satisfies ComputerHostStateV1)}\n`,
         { mode: 0o600 },
       );
     return { spriteName, generation, provisioning };
   }
 
-  /**
-   * Gives an adopted Computer the files this build ships that it lacks.
-   *
-   * Adoption is what makes a container restart a non-event — a Sprite with a
-   * state file is adopted and never provisioned again — and it is therefore
-   * also why a Computer provisioned last week would never gain this week's
-   * self-check, browser launcher, shims, or reference documents.
-   *
-   * Through the filesystem API and never a shell: this is exactly the use
-   * `COMPUTER_RUNTIME_FILES` was declared for, it costs the Computer no
-   * process, and a host-internal exec would spend a User's own concurrency
-   * budget on work the User did not ask for. A Computer already carrying this
-   * build's fingerprint pays one file read.
-   *
-   * Best effort. A Computer that cannot be refreshed is still a Computer the
-   * caller asked to open, and the self-check reports what is missing.
-   */
-  private async refresh(sprite: SpriteHandle): Promise<void> {
-    const files = sprite.filesystem("/");
-    try {
-      const stamp = await files.readFile(COMPUTER_REFRESH_STAMP, null);
-      if (stamp.toString("utf8").trim() === COMPUTER_REFRESH_FINGERPRINT) {
-        return;
+  /** Compares the installed runtime on every open and updates it when stale. */
+  private async ensureRuntimeCurrent(
+    userId: string,
+    record: ComputerRecord,
+    inspected?: AdoptionInspection,
+  ): Promise<ComputerRecord> {
+    const active = this.updates.get(userId);
+    if (active) return this.waitForUpdate(active);
+    const sprite = await this.spriteFor(record.spriteName);
+    const inspection = inspected ?? (await this.inspectAdoption(sprite));
+    // Two opens may finish their read-only inspection together. The first
+    // continuation records and owns the update; the second joins it instead
+    // of starting another runner or waiting the full provisioning deadline.
+    const concurrent = this.updates.get(userId);
+    if (concurrent) return this.waitForUpdate(concurrent);
+    const digest = runtimeDocumentDigestV1();
+    if (inspection.digest === digest) {
+      if (inspection.state?.update) {
+        await this.writeHostState(sprite, {
+          version: 1,
+          generation: record.generation,
+        });
       }
-    } catch {
-      // No stamp means a Computer that has never been refreshed.
+      return record;
     }
-    try {
-      for (const directory of COMPUTER_REFRESH_DIRECTORIES) {
-        await files.mkdir(directory, { recursive: true });
-      }
-      for (const file of COMPUTER_REFRESH_FILES) {
-        await files.writeFile(file.path, file.content, { mode: file.mode });
-      }
-      // Written last, so an interrupted refresh is retried rather than
-      // recorded as done.
-      await files.writeFile(
-        COMPUTER_REFRESH_STAMP,
-        `${COMPUTER_REFRESH_FINGERPRINT}\n`,
-        { mode: 0o600 },
+
+    if (inspection.humanControlFresh) {
+      await this.writeHostState(sprite, {
+        version: 1,
+        generation: record.generation,
+        update: {
+          status: "pending",
+          digest,
+          recordedAt: new Date(this.now()).toISOString(),
+        },
+      });
+      return record;
+    }
+
+    const progress: ComputerHostProvisioningV1 = {
+      kind: "update",
+      phase: UPDATE_STARTING_PHASE.name,
+      label: UPDATE_STARTING_PHASE.label,
+      index: 0,
+      total: UPDATE_PHASES.length,
+      status: "running",
+      resumed: false,
+    };
+    let held!: ActiveUpdate;
+    const promise = this.applyRuntimeUpdate(sprite, record, progress).finally(
+      () => {
+        if (this.updates.get(userId) === held) this.updates.delete(userId);
+      },
+    );
+    held = { progress, promise };
+    this.updates.set(userId, held);
+    return inspection.state?.update?.status === "started"
+      ? this.waitForUpdate(held)
+      : promise;
+  }
+
+  private async applyRuntimeUpdate(
+    sprite: SpriteHandle,
+    record: ComputerRecord,
+    progress: ComputerHostProvisioningV1,
+  ): Promise<ComputerRecord> {
+    const digest = runtimeDocumentDigestV1();
+    // Durable intent precedes the launcher. Recovery sees `started`, compares
+    // the still-old digest, and rejoins the same marker/lock-driven runner.
+    await this.writeHostState(sprite, {
+      version: 1,
+      generation: record.generation,
+      update: {
+        status: "started",
+        digest,
+        recordedAt: new Date(this.now()).toISOString(),
+      },
+    });
+    const updated = await this.driveProvisioning(sprite, "update", (observed) =>
+      Object.assign(progress, observed),
+    );
+    await this.writeHostState(sprite, {
+      version: 1,
+      generation: record.generation,
+    });
+    return { ...record, provisioning: updated };
+  }
+
+  private async waitForUpdate(active: ActiveUpdate): Promise<ComputerRecord> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new ComputerHostError(
+              "computer-updating",
+              active.progress.label,
+              409,
+              true,
+            ),
+          ),
+        this.updateWaitMs,
       );
-    } catch {
-      // Reported by the self-check, not by refusing to open a Computer.
+    });
+    try {
+      return await Promise.race([active.promise, timedOut]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
+  }
+
+  private writeHostState(
+    sprite: SpriteHandle,
+    state: ComputerHostStateV1,
+  ): Promise<void> {
+    return sprite
+      .filesystem("/")
+      .writeFile(COMPUTER_HOST_STATE_PATH, `${JSON.stringify(state)}\n`, {
+        mode: 0o600,
+      });
   }
 
   /**
@@ -928,18 +1148,30 @@ export class ComputerHost {
    */
   private async driveProvisioning(
     sprite: SpriteHandle,
+    kind: ComputerHostProvisioningV1["kind"] = "provision",
+    onProgress?: (progress: ComputerHostProvisioningV1) => void,
   ): Promise<ComputerHostProvisioningV1> {
     const deadline = this.now() + COMPUTER_HOST_PHASE_TIMEOUTS.provision;
-    let progress = await this.provisionStep(sprite, provisionLaunchScript);
+    const documentDigest = runtimeDocumentDigestV1();
+    const launch =
+      kind === "update" ? updateLaunchScript : provisionLaunchScript;
+    let progress = await this.provisionStep(sprite, launch, kind);
     // A Sprite that already carries phase markers is being *completed*: the
     // provisioner skips what is done, so this run is a resume, not a repeat.
-    const resumed = await this.hasProvisionMarkers(sprite);
+    const resumed =
+      kind === "provision" && (await this.hasProvisionMarkers(sprite));
     let announced = "";
     const announce = (observed: ProvisionObservation): void => {
       if (observed.phase === announced) return;
       announced = observed.phase;
-      const { running: _running, ...reported } = observed;
-      this.onProvisionProgress?.(sprite.name, { ...reported, resumed });
+      const {
+        running: _running,
+        documentDigest: _documentDigest,
+        ...reported
+      } = observed;
+      const current = { ...reported, resumed };
+      this.onProvisionProgress?.(sprite.name, current);
+      onProgress?.(current);
     };
     announce(progress);
     // The launcher backgrounds the runner and exits, so the very first polls
@@ -951,19 +1183,28 @@ export class ComputerHost {
     let interval = this.provisionPollMs;
 
     for (;;) {
-      if (progress.status === "complete") {
+      if (
+        progress.status === "complete" &&
+        !progress.running &&
+        progress.documentDigest === documentDigest
+      ) {
         // `running` is the host's own liveness question and never travels: the
         // protocol result carries the phase and nothing about the lock.
-        const { running: _running, ...reported } = progress;
+        const {
+          running: _running,
+          documentDigest: _documentDigest,
+          ...reported
+        } = progress;
         return { ...reported, resumed };
       }
       if (progress.status === "failed") {
         throw await this.provisioningFailure(sprite, progress);
       }
       if (this.now() >= deadline) {
+        const operation = kind === "update" ? "update" : "provisioning";
         throw new ComputerHostError(
           "timeout",
-          `Computer provisioning exceeded ${COMPUTER_HOST_PHASE_TIMEOUTS.provision}ms during ${progress.label} (${progress.index}/${progress.total})`,
+          `Computer ${operation} exceeded ${COMPUTER_HOST_PHASE_TIMEOUTS.provision}ms during ${progress.label} (${progress.index}/${progress.total})`,
           504,
           true,
         );
@@ -986,7 +1227,7 @@ export class ComputerHost {
         }
         relaunches += 1;
         stopped = 0;
-        script = provisionLaunchScript;
+        script = launch;
         this.onProvisionRetry?.(
           sprite.name,
           `no provisioner is running during ${progress.label}; restarting it from its markers (${relaunches}/${PROVISION_RELAUNCHES})`,
@@ -1000,7 +1241,7 @@ export class ComputerHost {
       // need two hundred of them.
       interval = Math.min(interval * 2, this.provisionPollMs * 5);
 
-      const observed = await this.provisionStep(sprite, script).catch(
+      const observed = await this.provisionStep(sprite, script, kind).catch(
         (error: unknown) => {
           if (!(error instanceof ComputerHostError)) throw error;
           this.onProvisionRetry?.(
@@ -1034,6 +1275,7 @@ export class ComputerHost {
   private async provisionStep(
     sprite: SpriteHandle,
     script: string,
+    kind: ComputerHostProvisioningV1["kind"],
   ): Promise<ProvisionObservation> {
     const outcome = await this.run(
       sprite,
@@ -1050,7 +1292,7 @@ export class ComputerHost {
         true,
       );
     }
-    return readProvisionObservation(text);
+    return readProvisionObservation(text, kind);
   }
 
   /**
@@ -1090,35 +1332,49 @@ export class ComputerHost {
     }
     return new ComputerHostError(
       "provider-failure",
-      `Computer provisioning failed during ${progress.label} (${progress.index}/${progress.total})${tail ? `: ${tail.slice(-512)}` : ""}`,
+      `Computer ${progress.kind === "update" ? "update" : "provisioning"} failed during ${progress.label} (${progress.index}/${progress.total})${tail ? `: ${tail.slice(-512)}` : ""}`,
       502,
       true,
     );
   }
 
-  private async readState(
+  private async inspectAdoption(
     sprite: SpriteHandle,
-  ): Promise<{ generation: number } | undefined> {
-    let text: string;
-    try {
-      text = await this.readText(sprite, COMPUTER_HOST_STATE_PATH);
-    } catch {
-      return undefined;
+  ): Promise<AdoptionInspection> {
+    const outcome = await this.run(
+      sprite,
+      adoptionInspectionScript,
+      "adoption inspection",
+      COMPUTER_HOST_PHASE_TIMEOUTS.provisionStep,
+    );
+    if (outcome.exitCode !== 0) {
+      throw new ComputerHostError(
+        "provider-failure",
+        `Computer adoption could not be inspected: ${outcome.stderr.toString("utf8").slice(0, 512)}`,
+        502,
+        true,
+      );
     }
-    try {
-      const parsed: unknown = JSON.parse(text);
-      if (
-        typeof parsed === "object" &&
-        parsed !== null &&
-        (parsed as { version?: unknown }).version === 1 &&
-        Number.isSafeInteger((parsed as { generation?: unknown }).generation)
-      ) {
-        return { generation: (parsed as { generation: number }).generation };
+    const lines = outcome.stdout.toString("utf8").split("\n");
+    const field = (prefix: string): string | undefined =>
+      lines.find((line) => line.startsWith(prefix))?.slice(prefix.length);
+    const encodedState = field(ADOPTION_STATE_PREFIX);
+    let state: ComputerHostStateV1 | undefined;
+    if (encodedState) {
+      try {
+        state = decodeComputerHostStateV1(
+          JSON.parse(Buffer.from(encodedState, "base64").toString("utf8")),
+        );
+      } catch {
+        state = undefined;
       }
-    } catch {
-      return undefined;
     }
-    return undefined;
+    const digest = field(ADOPTION_DIGEST_PREFIX)?.trim();
+    return {
+      ...(state ? { state } : {}),
+      ...(digest ? { digest } : {}),
+      humanControlFresh: field(ADOPTION_HUMAN_PREFIX)?.trim() === "1",
+    };
   }
 
   /**

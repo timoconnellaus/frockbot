@@ -106,6 +106,8 @@ skips a tenant with a fresh viewer.
 
 ## Step 3 — the runtime document digest and in-place update on wake
 
+**Status:** landed.
+
 **Goal.** P5, P6.
 
 **Owns.** `packages/computer-host-runtime`: `runtimeDocumentDigestV1()` over
