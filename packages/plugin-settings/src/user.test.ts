@@ -6,6 +6,7 @@ import {
 } from "@frockbot/configuration-core";
 import {
   createUserSettingsBackendContribution,
+  type AvailableUserPackage,
   type UserPackageCatalogHost,
   type UserSettingsStorage,
 } from "./user.js";
@@ -246,6 +247,166 @@ describe("User settings backend Contribution", () => {
     ).toEqual(first);
   });
 
+  test("repairs a pre-default-enablement account before Package enablement", async () => {
+    const storage = new MemoryStorage();
+    const availablePackages: AvailableUserPackage[] = [
+      {
+        packageId: "custom-models",
+        version: "0.0.1",
+        installByDefault: true,
+        defaultEnablement: "disabled",
+        dependencies: {
+          settings: ">=0.0.1",
+          shell: ">=0.0.1",
+          "ui-theme": ">=0.0.1",
+        },
+      },
+      {
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+        installByDefault: true,
+        defaultEnablement: "disabled",
+        dependencies: {
+          "custom-models": ">=0.0.1",
+          credentials: ">=0.0.1",
+          settings: ">=0.0.1",
+          web: ">=0.0.1",
+        },
+      },
+      { packageId: "credentials", version: "0.0.1", installByDefault: true },
+      { packageId: "settings", version: "0.0.1", installByDefault: true },
+      { packageId: "shell", version: "0.0.1", installByDefault: true },
+      { packageId: "ui-theme", version: "0.0.1", installByDefault: true },
+      { packageId: "web", version: "0.0.1", installByDefault: true },
+    ];
+    await storage.put("user-id", "legacy-user");
+    await storage.put("user-default-packages-bootstrap:v1", {
+      schemaVersion: 1,
+    });
+    await storage.put("user-configuration", {
+      schemaVersion: 1,
+      revision: 12,
+      profile: { name: "Legacy User" },
+      packages: [
+        {
+          packageId: "provider-workers-ai",
+          version: "0.0.1",
+          state: "installed",
+        },
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "installed",
+        },
+      ],
+      connections: [
+        {
+          connectionId: "workers-ai-ambient",
+          packageId: "provider-workers-ai",
+          connectionTypeId: "workers-ai-account",
+          displayName: "Cloudflare Workers AI",
+          state: "ready",
+          generation: "workers-ai-ambient-v1",
+          providerType: "workers-ai",
+          safeMetadata: { catalog: "static" },
+        },
+        {
+          connectionId: "ollama-legacy",
+          packageId: "provider-ollama-cloud",
+          connectionTypeId: "ollama-cloud-account",
+          displayName: "Ollama",
+          state: "ready",
+          generation: "ollama-generation-1",
+          providerType: "ollama-cloud",
+          safeMetadata: {
+            dependentAssignments: [
+              {
+                botId: "primary",
+                generation: "assignment-1",
+                packageId: "provider-ollama-cloud",
+                capabilityId: "ollama-cloud-models",
+                claimOrder: 1,
+                status: "acknowledged",
+              },
+            ],
+          },
+        },
+      ],
+      platformModel: {
+        connectionId: "workers-ai-ambient",
+        providerModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+      },
+      newBotModelTemplate: {
+        connectionId: "ollama-legacy",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
+      newBotModelTemplateSource: "user",
+    });
+    const settings = createUserSettingsBackendContribution({
+      storage,
+      availablePackages,
+    });
+
+    const migrated = await settings.readConfiguration({
+      schemaVersion: 1,
+      userId: "legacy-user",
+    });
+    expect(migrated.packages).toEqual([
+      {
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+        state: "disabled",
+      },
+      {
+        packageId: "custom-models",
+        version: "0.0.1",
+        state: "disabled",
+        provenance: "first-party",
+      },
+      ...availablePackages.slice(2).map(({ packageId, version }) => ({
+        packageId,
+        version,
+        state: "installed" as const,
+        provenance: "first-party" as const,
+      })),
+    ]);
+    expect(migrated.connections).toEqual([
+      expect.objectContaining({
+        connectionId: "ollama-legacy",
+        safeMetadata: {},
+      }),
+    ]);
+    expect(migrated.platformModel).toBeUndefined();
+
+    const customModels = await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "legacy-user",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "enable-custom-models-after-migration",
+        expectedRevision: migrated.revision,
+        packageId: "custom-models",
+        enabled: true,
+      },
+    });
+    expect(customModels).toMatchObject({ status: "applied" });
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "legacy-user",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-enabled",
+          commandId: "enable-ollama-after-migration",
+          expectedRevision: customModels.revision,
+          packageId: "provider-ollama-cloud",
+          enabled: true,
+        },
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+  });
+
   test("installs a Package disabled when explicitly requested", async () => {
     const settings = contribution();
     const receipt = await settings.executeConfiguration({
@@ -417,6 +578,32 @@ describe("User settings backend Contribution", () => {
     const storage = new MemoryStorage();
     const settings = contribution(storage);
 
+    await settings.executeConfigurationCommand(
+      "user-1",
+      {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "bootstrap-platform-package",
+        expectedRevision: 0,
+        packageId: "flock",
+        version: "0.0.1",
+      },
+      storage,
+    );
+    await settings.createConnection(
+      "user-1",
+      {
+        connectionId: "flock-default",
+        packageId: "flock",
+        connectionTypeId: "flock-account",
+        displayName: "Flock",
+        state: "ready",
+        providerType: "flock",
+        safeMetadata: {},
+      },
+      storage,
+    );
+
     await expect(
       settings.executeConfigurationCommand(
         "user-1",
@@ -424,7 +611,7 @@ describe("User settings backend Contribution", () => {
           schemaVersion: 1,
           type: "user/set-platform-model",
           commandId: "bootstrap-platform-model",
-          expectedRevision: 0,
+          expectedRevision: 2,
           model: {
             connectionId: "flock-default",
             providerModelId: "@flock/auto",
@@ -432,7 +619,7 @@ describe("User settings backend Contribution", () => {
         },
         storage,
       ),
-    ).resolves.toMatchObject({ status: "applied", revision: 1 });
+    ).resolves.toMatchObject({ status: "applied", revision: 3 });
     expect((await settings.read("user-1")).platformModel).toEqual({
       connectionId: "flock-default",
       providerModelId: "@flock/auto",

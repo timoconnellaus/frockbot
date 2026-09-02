@@ -21,7 +21,7 @@ import {
   type CustomModelsClientState,
 } from "./index.js";
 
-function fixture(): {
+function fixture(accountModel?: ModelBindingV1): {
   slots: ClientSlotRegistration[];
   commands: ConfigurationCommandV1[];
   state: CustomModelsClientState;
@@ -40,6 +40,7 @@ function fixture(): {
         packageId: "custom-models",
         version: "0.0.1",
         state: "installed",
+        ...(accountModel ? { values: { "account-model": accountModel } } : {}),
       },
     ],
     connections: [],
@@ -157,6 +158,25 @@ describe("Custom models client Contribution", () => {
     ]);
     expect(mounted.userLoads()).toBe(2);
     expect(mounted.botLoads()).toBe(2);
+    mounted.dispose();
+  });
+
+  test("clears an account model whose Connection no longer resolves", async () => {
+    const mounted = fixture({
+      connectionId: "ollama-legacy",
+      providerModelId: "glm-5.3-flash:cloud",
+    });
+
+    await mounted.state.setAccountModel(undefined);
+
+    expect(mounted.commands).toMatchObject([
+      {
+        type: "user/set-package-settings",
+        packageId: "custom-models",
+        unset: ["account-model"],
+      },
+    ]);
+    expect(mounted.userLoads()).toBe(1);
     mounted.dispose();
   });
 });
