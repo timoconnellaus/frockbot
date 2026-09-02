@@ -110,7 +110,7 @@ export function encodeModelSelection(model?: ModelAssignment): string {
 }
 
 /** How a bound model reads in prose, e.g. "Llama 3 — Work". */
-export function describeModelAssignment(
+export function describeModelSelection(
   model: ModelAssignment | undefined,
   connections: readonly ConnectionView[],
 ): string | undefined {

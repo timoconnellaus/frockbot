@@ -13,7 +13,7 @@ const CONNECTION_ID = "connection-1";
 const GENERATION = "generation-1";
 const API_KEY = "ollama-test-key";
 
-const ASSIGNMENT = {
+const BINDING = {
   packageId: "provider-ollama-cloud",
   capabilityId: "ollama-cloud-web-search",
   connectionId: CONNECTION_ID,
@@ -86,7 +86,7 @@ async function mount(options: {
   await root.plugin(ToolRegistry);
   await root.plugin(FakeCredentialLease);
   const plugin = createConfiguredOllamaWebSearchRuntimeContribution({
-    assignment: ASSIGNMENT,
+    binding: BINDING,
     accountId: "user-1",
     connectionId: CONNECTION_ID,
     connectionGeneration: GENERATION,
@@ -336,7 +336,7 @@ describe("the Ollama Cloud web_search Capability", () => {
     await root.fiber.dispose();
   });
 
-  test("mounts nothing without an enabled Assignment bound to the Connection", () => {
+  test("mounts only for the enabled Connection binding", () => {
     const base = {
       accountId: "user-1",
       connectionId: CONNECTION_ID,
@@ -347,19 +347,19 @@ describe("the Ollama Cloud web_search Capability", () => {
     expect(
       createConfiguredOllamaWebSearchRuntimeContribution({
         ...base,
-        assignment: { ...ASSIGNMENT, state: "disabled" },
+        binding: { ...BINDING, state: "disabled" },
       }),
     ).toBeUndefined();
     expect(
       createConfiguredOllamaWebSearchRuntimeContribution({
         ...base,
-        assignment: { ...ASSIGNMENT, capabilityId: "ollama-cloud-models" },
+        binding: { ...BINDING, capabilityId: "ollama-cloud-models" },
       }),
     ).toBeUndefined();
     expect(
       createConfiguredOllamaWebSearchRuntimeContribution({
         ...base,
-        assignment: { ...ASSIGNMENT, connectionId: "other" },
+        binding: { ...BINDING, connectionId: "other" },
       }),
     ).toBeUndefined();
   });

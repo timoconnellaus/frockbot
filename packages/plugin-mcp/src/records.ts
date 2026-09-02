@@ -96,7 +96,7 @@ export interface McpServerRecordV1 {
   transport: "streamable-http" | "sse";
   instructions?: string;
   /**
-   * Bumped by `mcp/restart`. It participates in the Assignment's resolution
+   * Bumped by `mcp/restart`. It participates in the Connection's resolution
    * key, so the next admitted Turn resolves a different mount and
    * re-handshakes; the in-flight Turn keeps the client it already has.
    */
@@ -653,12 +653,12 @@ export function decodeMcpMountOutcomeV1(
 }
 
 /**
- * What one Assignment of `mcp-tools` resolves to. The `serverEpoch` is in it,
+ * What one MCP Connection resolves to. The `serverEpoch` is in it,
  * which is the whole of restart semantics: a restart changes this key, the
  * next admitted Turn resolves a different mount and re-handshakes, and the
  * in-flight Turn — already holding its client — is untouched.
  */
-export function mcpAssignmentResolutionKeyV1(input: {
+export function mcpConnectionResolutionKeyV1(input: {
   connectionId: string;
   connectionGeneration?: string;
   serverEpoch?: number;

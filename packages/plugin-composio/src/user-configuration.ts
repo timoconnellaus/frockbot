@@ -1,7 +1,5 @@
 import {
-  decodeConnectionDependencyRequirementV1,
   USER_PROFILE_PLACEHOLDER_NAME_V1,
-  type ConnectionDependencyRequirementV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import {
@@ -11,15 +9,6 @@ import {
   // pi-lens-ignore: ts:2307
 } from "@frockbot/plugin-settings/user";
 import type { Plugin } from "cordis";
-import {
-  acknowledgeDependentAssignment,
-  claimDependentAssignment,
-  compensateDependentAssignment,
-} from "./dependency-coordination.js";
-import {
-  completeAssignmentCompensation,
-  isSettledBotCompensation,
-} from "./connection-recovery.js";
 import {
   linkReconciliationDisposition,
   type ComposioProviderReconciliationRequest,
@@ -59,60 +48,6 @@ function readyAuthorizationMetadata(
       ...(typeof nativeReturnNonce === "string" ? { nativeReturnNonce } : {}),
     },
   };
-}
-
-async function revocationCompensationId(
-  botId: string,
-  generation: string,
-): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`${botId}\u0000${generation}`),
-  );
-  return `revocation-${Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("")}`;
-}
-
-export async function deriveRevocationCompensations(
-  connection: UserSettingsViewV1["connections"][number],
-): Promise<Array<{ botId: string; id: string; expectedGeneration: string }>> {
-  const dependencies = Array.isArray(
-    connection.safeMetadata.dependentAssignments,
-  )
-    ? connection.safeMetadata.dependentAssignments
-    : [];
-  const dependenciesByKey = new Map<string, string>();
-  for (const candidate of dependencies) {
-    if (
-      !candidate ||
-      typeof candidate !== "object" ||
-      Array.isArray(candidate)
-    ) {
-      continue;
-    }
-    const dependency = candidate as Record<string, unknown>;
-    if (
-      typeof dependency.botId === "string" &&
-      typeof dependency.generation === "string" &&
-      dependency.status === "acknowledged"
-    ) {
-      dependenciesByKey.set(
-        `${dependency.botId}\u0000${dependency.generation}`,
-        dependency.generation,
-      );
-    }
-  }
-  return Promise.all(
-    [...dependenciesByKey].map(async ([key, expectedGeneration]) => {
-      const botId = key.slice(0, key.indexOf("\u0000"));
-      return {
-        botId,
-        id: await revocationCompensationId(botId, expectedGeneration),
-        expectedGeneration,
-      };
-    }),
-  );
 }
 
 export interface UserConfigurationEnv {
@@ -169,12 +104,6 @@ function nextConnectionAlarm(settings: UserSettingsViewV1): number | undefined {
       typeof metadata.reconciliationRetryAt === "number"
     ) {
       values.push(metadata.reconciliationRetryAt);
-    }
-    if (
-      metadata.assignmentCompensationPending === true &&
-      typeof metadata.compensationRetryAt === "number"
-    ) {
-      values.push(metadata.compensationRetryAt);
     }
     return values;
   });
@@ -482,8 +411,6 @@ export class ComposioUserBackendContribution {
         throw new Error("Pending Link cannot enter cleanup");
       }
       const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
-      const assignmentCompensations =
-        await deriveRevocationCompensations(connection);
       const claimed = {
         ...connection,
         state: "revoking" as const,
@@ -496,11 +423,6 @@ export class ComposioUserBackendContribution {
           reconciliationOperation: "revoke",
           revocationProviderCompleted: false,
           effectDeadlineAt,
-          assignmentCompensationPending: assignmentCompensations.length > 0,
-          assignmentCompensations,
-          ...(assignmentCompensations.length > 0
-            ? { compensationRetryAt: effectDeadlineAt }
-            : {}),
         },
         failure: "Lost Connect Link cleanup requires provider reconciliation",
       };
@@ -629,92 +551,6 @@ export class ComposioUserBackendContribution {
         failure: update.failure,
       };
     });
-  }
-
-  async recordAssignmentCompensated(
-    userId: string,
-    connectionId: string,
-    compensationId: string,
-  ): Promise<boolean> {
-    return this.transitionConnection(userId, connectionId, (connection) =>
-      completeAssignmentCompensation(connection, compensationId),
-    );
-  }
-
-  async claimConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-    requirement: ConnectionDependencyRequirementV1,
-  ): Promise<boolean> {
-    const decoded = decodeConnectionDependencyRequirementV1(requirement);
-    await this.assertIdentity(userId);
-    return this.ctx.storage.transaction(async (transaction) => {
-      const current =
-        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
-        initialState();
-      const installation = current.packages.find(
-        (pkg) =>
-          pkg.packageId === decoded.packageId &&
-          pkg.version === decoded.packageVersion &&
-          pkg.state === "installed",
-      );
-      const connection = current.connections.find(
-        (item) => item.connectionId === connectionId,
-      );
-      if (
-        !installation ||
-        !connection ||
-        connection.packageId !== decoded.packageId ||
-        !decoded.connectionTypeIds.includes(connection.connectionTypeId)
-      ) {
-        return false;
-      }
-      const nextConnection = claimDependentAssignment(
-        connection,
-        botId,
-        generation,
-      );
-      if (!nextConnection) return false;
-      const next = {
-        ...current,
-        revision: current.revision + 1,
-        connections: current.connections.map((item) =>
-          item.connectionId === connectionId ? nextConnection : item,
-        ),
-      } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
-      const alarmAt = nextConnectionAlarm(next);
-      if (alarmAt === undefined) {
-        await transaction.deleteAlarm();
-      } else {
-        await transaction.setAlarm(Math.max(Date.now(), alarmAt));
-      }
-      return true;
-    });
-  }
-
-  async acknowledgeConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-  ): Promise<boolean> {
-    return this.transitionConnection(userId, connectionId, (connection) =>
-      acknowledgeDependentAssignment(connection, botId, generation),
-    );
-  }
-
-  async compensateConnectionDependency(
-    userId: string,
-    connectionId: string,
-    botId: string,
-    generation: string,
-  ): Promise<boolean> {
-    return this.transitionConnection(userId, connectionId, (connection) =>
-      compensateDependentAssignment(connection, botId, generation),
-    );
   }
 
   async requireConnectionReconciliation(
@@ -848,8 +684,6 @@ export class ComposioUserBackendContribution {
         return { phase: "pending" as const, connection: pending };
       }
       const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
-      const assignmentCompensations =
-        await deriveRevocationCompensations(connection);
       const claimed = {
         ...connection,
         state: "revoking" as const,
@@ -858,11 +692,6 @@ export class ComposioUserBackendContribution {
           reconciliationOperation: "revoke",
           revocationProviderCompleted: false,
           effectDeadlineAt,
-          assignmentCompensationPending: assignmentCompensations.length > 0,
-          assignmentCompensations,
-          ...(assignmentCompensations.length > 0
-            ? { compensationRetryAt: effectDeadlineAt }
-            : {}),
         },
         failure: undefined,
       };
@@ -915,8 +744,6 @@ export class ComposioUserBackendContribution {
     return this.transitionConnection(userId, connectionId, (connection) => {
       if (
         connection.safeMetadata.revocationProviderCompleted !== true ||
-        (Array.isArray(connection.safeMetadata.assignmentCompensations) &&
-          connection.safeMetadata.assignmentCompensations.length > 0) ||
         (connection.state !== "revoking" &&
           !(
             connection.state === "reconciliation-required" &&
@@ -938,12 +765,6 @@ export class ComposioUserBackendContribution {
         initialState();
       const now = Date.now();
       let changed = false;
-      const pending: Array<{
-        connectionId: string;
-        botId: string;
-        compensationId: string;
-        expectedGeneration: string;
-      }> = [];
       const reconciliations: Array<{
         connection: UserSettingsViewV1["connections"][number];
         operation: "link" | "revoke";
@@ -1032,49 +853,6 @@ export class ComposioUserBackendContribution {
           changed = true;
         }
 
-        if (
-          next.safeMetadata.assignmentCompensationPending === true &&
-          typeof next.safeMetadata.compensationRetryAt === "number" &&
-          next.safeMetadata.compensationRetryAt <= now
-        ) {
-          const stored = Array.isArray(
-            next.safeMetadata.assignmentCompensations,
-          )
-            ? next.safeMetadata.assignmentCompensations
-            : [];
-          for (const candidate of stored) {
-            if (
-              !candidate ||
-              typeof candidate !== "object" ||
-              Array.isArray(candidate)
-            ) {
-              continue;
-            }
-            const compensation = candidate as Record<string, unknown>;
-            if (
-              typeof compensation.botId === "string" &&
-              typeof compensation.id === "string" &&
-              typeof compensation.expectedGeneration === "string"
-            ) {
-              pending.push({
-                connectionId: next.connectionId,
-                botId: compensation.botId,
-                compensationId: compensation.id,
-                expectedGeneration: compensation.expectedGeneration,
-              });
-            }
-          }
-          if (stored.length > 0) {
-            next = {
-              ...next,
-              safeMetadata: {
-                ...next.safeMetadata,
-                compensationRetryAt: now + CONNECTION_EFFECT_ALARM_MS,
-              },
-            };
-            changed = true;
-          }
-        }
         return next;
       });
       const next = {
@@ -1089,7 +867,7 @@ export class ComposioUserBackendContribution {
       } else {
         await transaction.setAlarm(Math.max(Date.now(), alarmAt));
       }
-      return { compensations: pending, reconciliations };
+      return { reconciliations };
     });
 
     for (const reconciliation of pending.reconciliations) {
@@ -1258,49 +1036,6 @@ export class ComposioUserBackendContribution {
         }
       } catch {
         // Durable reconciliation state and its alarm deadline remain stored.
-      }
-    }
-
-    for (const compensation of pending.compensations) {
-      try {
-        const id = this.env.BOT_STATES.idFromName(
-          `${userId}:${compensation.botId}`,
-        );
-        // SAFETY: BOT_STATES binds BotState, whose public RPC method below is
-        // stable; workers-types cannot infer the generated Durable Object stub.
-        const bot = this.env.BOT_STATES.get(id) as unknown as {
-          markConnectionUnavailable(request: {
-            schemaVersion: 1;
-            userId: string;
-            botId: string;
-            connectionId: string;
-            compensation: { id: string; expectedGeneration: string };
-          }): Promise<"applied" | "stale">;
-        };
-        const result = await bot.markConnectionUnavailable({
-          schemaVersion: 1,
-          userId,
-          botId: compensation.botId,
-          connectionId: compensation.connectionId,
-          compensation: {
-            id: compensation.compensationId,
-            expectedGeneration: compensation.expectedGeneration,
-          },
-        });
-        if (!isSettledBotCompensation(result)) continue;
-        const cleared = await this.recordAssignmentCompensated(
-          userId,
-          compensation.connectionId,
-          compensation.compensationId,
-        );
-        if (cleared) {
-          await this.finishConnectionRevocation(
-            userId,
-            compensation.connectionId,
-          );
-        }
-      } catch {
-        // Durable compensation intent and its retry deadline remain stored.
       }
     }
   }

@@ -12,14 +12,9 @@
  *
  * These tools need no Connection: they read and write the User's own MCP
  * records through the host the Bot's Durable Object supplies, which is why
- * this Contribution mounts for a Turn rather than for an Assignment.
+ * this Contribution mounts for a Turn rather than for one Connection.
  */
-import type {
-  Session,
-  ToolDefinition,
-  ToolExecutionContext,
-  TurnTypeV1,
-} from "@frockbot/kernel-contracts";
+import type { ToolDefinition, TurnTypeV1 } from "@frockbot/kernel-contracts";
 import type { Context, Plugin } from "cordis";
 import type {
   McpLifecycleReceiptV1,
@@ -35,38 +30,11 @@ export const MCP_LIFECYCLE_TURN_TYPES: readonly TurnTypeV1[] = [
 ];
 
 /**
- * Adding a server, and asking the User to authorize one, are chat-only; every
- * other lifecycle verb is not. Both are User-shaped decisions, and an
- * automation or subagent Turn has no User in front of it to make one.
+ * Adding a server is chat-only; every other lifecycle verb is not. It is a
+ * User-shaped decision, and an automation or subagent Turn has no User in
+ * front of it to make one.
  */
 export const MCP_ADMISSION_TURN_TYPES: readonly TurnTypeV1[] = ["chat"];
-
-/**
- * The open step a send belongs to. The session log is the reconstruction
- * surface, so a card recorded without its turn and step would not replay in
- * place. The same rule `plugin-shell` applies to `send_to_user`, restated here
- * because this Package records its own send rather than reaching into that one.
- */
-function openStepPositionV1(
-  session: Session,
-  tool: string,
-): { turn: number; step: number } {
-  const started = session.events.findLast(
-    (event) => event.type === "step/start",
-  );
-  const ended = session.events.findLast((event) => event.type === "step/end");
-  if (started?.type !== "step/start") {
-    throw new Error(`${tool} has no open step to record against`);
-  }
-  if (
-    ended?.type === "step/end" &&
-    ended.turn === started.turn &&
-    ended.step === started.step
-  ) {
-    throw new Error(`${tool} has no open step to record against`);
-  }
-  return { turn: started.turn, step: started.step };
-}
 
 /**
  * The User authority these tools run with. The Bot never reaches the records
@@ -273,119 +241,7 @@ export function createMcpLifecycleRuntimePlugin(
       },
     },
   ];
-  definitions.push({
-    name: "mcp_authenticate_server",
-    description: [
-      "Ask the User to authorize one OAuth MCP server that is not connected.",
-      "This records a durable pending decision and shows the User a connect card.",
-      "It returns no link and no token, and it grants nothing: only the User,",
-      "pressing that card, can complete an authorization. Never write an",
-      "authorization URL yourself — you cannot have one, and one you composed",
-      "would not work. Chat turns only.",
-    ].join(" "),
-    inputSchema: {
-      type: "object",
-      properties: {
-        server_id: { type: "string" },
-        reason: { type: "string", maxLength: 2_000 },
-      },
-      required: ["server_id"],
-      additionalProperties: false,
-    },
-    admission: { turnTypes: [...MCP_ADMISSION_TURN_TYPES] },
-    validate: (input) => isObject(input),
-    execute: async (input: unknown, context: ToolExecutionContext) => {
-      try {
-        const value = isObject(input) ? input : {};
-        const serverId = text(value, "server_id");
-        const status = await host.readStatus();
-        const server = status.servers.find(
-          (candidate) => candidate.serverId === serverId,
-        );
-        if (!server) {
-          return {
-            content: `No MCP server "${serverId}" is available.`,
-            isError: true,
-          };
-        }
-        const applied = await host.execute({
-          schemaVersion: 1,
-          type: "mcp/request-authorization",
-          commandId: nextId(),
-          serverId,
-        });
-        if (applied.status !== "applied") return receipt(applied);
-        // The card is the User's, drawn by the host from the durable
-        // projection. What the Bot supplies is a reason, never a link.
-        const emitted = await emitConnectCard(context, {
-          connectionId: serverId,
-          title: `Connect ${server.label}`,
-          ...(typeof value.reason === "string" && value.reason.length > 0
-            ? { body: value.reason.slice(0, 2_000) }
-            : {}),
-        });
-        return {
-          content: JSON.stringify({
-            ...applied,
-            pendingAuthorization: true,
-            cardShown: emitted,
-          }),
-          isError: false,
-        };
-      } catch (error) {
-        return failed(error);
-      }
-    },
-  });
-
-  /**
-   * Record the connect card on the durable session log, as a `send/to-user`
-   * exactly like `send_to_user` produces — so the thread draws it, the
-   * transcript replays it, and no second delivery path exists.
-   */
-  async function emitConnectCard(
-    context: ToolExecutionContext,
-    card: { connectionId: string; title: string; body?: string },
-  ): Promise<boolean> {
-    const session = sessionStore()?.get(context.sessionId);
-    if (!session) return false;
-    let position: { turn: number; step: number };
-    try {
-      position = openStepPositionV1(session, "mcp_authenticate_server");
-    } catch {
-      return false;
-    }
-    session.append({
-      type: "send/to-user",
-      ...position,
-      occurrenceId: context.effectId,
-      payload: { type: "connect-card", ...card },
-    });
-    await session.flush();
-    return true;
-  }
-
-  let root: Context | undefined;
-
-  /**
-   * The Session store, if this root has one.
-   *
-   * Not an `inject`: these tools are the User's own MCP records and they work
-   * with no Session at all — `mcp_server_status` is answered outside a Turn in
-   * several tests and in the lifecycle surface. Only the connect card needs a
-   * Session, and without one it degrades to "the decision was recorded, no card
-   * was drawn" rather than costing the whole lifecycle its mount.
-   */
-  const sessionStore = (): Context["sessions"] | undefined => {
-    try {
-      return root?.sessions;
-    } catch {
-      return undefined;
-    }
-  };
-
   const plugin: Plugin.Function = (ctx: Context) => {
-    root = ctx;
     const disposers = definitions.map((definition) =>
       ctx.tools.register(definition, {
         admissionCeiling: MCP_LIFECYCLE_TURN_TYPES,
@@ -393,7 +249,6 @@ export function createMcpLifecycleRuntimePlugin(
     );
     return () => {
       for (const dispose of disposers.toReversed()) dispose();
-      root = undefined;
     };
   };
   plugin.inject = ["tools"];

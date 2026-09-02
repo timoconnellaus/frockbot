@@ -11,10 +11,8 @@ import {
 } from "@frockbot/connection-core";
 import {
   decodeBotSettingsViewV1,
-  decodeConnectionDependencyRequirementV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
-  type ConnectionDependencyRequirementV1,
 } from "@frockbot/configuration-core";
 import {
   MAX_TEMPLATE_BYTES_V1,
@@ -25,10 +23,6 @@ import {
   decodeRoutineCommandReceiptV1,
   decodeRoutineListViewV1,
 } from "@frockbot/plugin-routines/shared";
-import {
-  decodeConnectionDependencyCommandV1,
-  type ConnectionDependencyResultV1,
-} from "@frockbot/connection-core";
 import {
   decodeTemplateCommandV1,
   type TemplateCommandV1,
@@ -479,175 +473,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       effectId: request.effectId as string,
       connectionGeneration: request.connectionGeneration as string,
     });
-  }
-
-  /**
-   * The provider-neutral Connection dependency protocol (ADR 0003): claim,
-   * read, acknowledge, release, and reconcile against the durable dependency
-   * records the User's Settings Contribution owns. One exact command, one
-   * durable shape; the Bot's Assignment saga speaks only this.
-   */
-  async executeConnectionDependency(
-    input: unknown,
-  ): Promise<ConnectionDependencyResultV1> {
-    const command = decodeConnectionDependencyCommandV1(input);
-    await this.assertUserIdentity(command.userId);
-    const settings = await this.settingsContribution();
-    const connection = await settings.getConnection(
-      command.userId,
-      command.connectionId,
-    );
-    if (connection && connection.packageId !== command.packageId) {
-      return {
-        schemaVersion: 1,
-        status: "rejected",
-        failure: `Connection "${command.connectionId}" does not belong to Package "${command.packageId}"`,
-      };
-    }
-    const settled = () =>
-      settings.readConnectionDependency(
-        command.userId,
-        command.connectionId,
-        command.botId,
-        command.generation,
-      );
-    switch (command.action) {
-      case "claim": {
-        if (!connection || connection.state !== "ready") {
-          return {
-            schemaVersion: 1,
-            status: "unavailable",
-            failure: `Connection "${command.connectionId}" is unavailable`,
-          };
-        }
-        return (await settings.claimConnectionDependency(
-          command.userId,
-          command.connectionId,
-          command.botId,
-          command.generation,
-          command.requirement,
-        ))
-          ? { schemaVersion: 1, status: "claimed" }
-          : {
-              schemaVersion: 1,
-              status: "unavailable",
-              failure: `Connection "${command.connectionId}" cannot serve this Capability`,
-            };
-      }
-      case "acknowledge":
-        return (await settings.acknowledgeConnectionDependency(
-          command.userId,
-          command.connectionId,
-          command.botId,
-          command.generation,
-        ))
-          ? { schemaVersion: 1, status: "acknowledged" }
-          : {
-              schemaVersion: 1,
-              status: "unavailable",
-              failure: `Connection "${command.connectionId}" cannot acknowledge this dependency`,
-            };
-      case "release":
-        return (await settings.releaseConnectionDependency(
-          command.userId,
-          command.connectionId,
-          command.botId,
-          command.generation,
-        ))
-          ? { schemaVersion: 1, status: "released" }
-          : { schemaVersion: 1, status: "pending" };
-      case "reconcile": {
-        await settings.compensateConnectionDependency(
-          command.userId,
-          command.connectionId,
-          command.botId,
-          command.generation,
-        );
-        const state = await settled();
-        if (state === "acknowledged") {
-          return { schemaVersion: 1, status: "acknowledged" };
-        }
-        return state === "pending"
-          ? { schemaVersion: 1, status: "pending" }
-          : { schemaVersion: 1, status: "released" };
-      }
-      case "read": {
-        const state = await settled();
-        if (state === "acknowledged") {
-          return { schemaVersion: 1, status: "acknowledged" };
-        }
-        // A durable dependency that is recorded but not yet acknowledged is
-        // *claimed*, which is what the Bot's Assignment saga acknowledges
-        // next. Reporting it as `pending` would tell the saga the User
-        // authority cannot answer yet, and it would compensate a claim it is
-        // entitled to keep.
-        return state === "pending"
-          ? { schemaVersion: 1, status: "claimed" }
-          : { schemaVersion: 1, status: "absent" };
-      }
-    }
-  }
-
-  async claimConnectionDependency(input: unknown): Promise<boolean> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      connectionId: rpcIdentifier,
-      botId: rpcBotId,
-      generation: rpcIdentifier,
-      requirement: rpcDecoded(decodeConnectionDependencyRequirementV1),
-    });
-    return (await this.settingsContribution()).claimConnectionDependency(
-      request.userId as string,
-      request.connectionId as string,
-      request.botId as string,
-      request.generation as string,
-      request.requirement as ConnectionDependencyRequirementV1,
-    );
-  }
-
-  async acknowledgeConnectionDependency(input: unknown): Promise<boolean> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      connectionId: rpcIdentifier,
-      botId: rpcBotId,
-      generation: rpcIdentifier,
-    });
-    return (await this.settingsContribution()).acknowledgeConnectionDependency(
-      request.userId as string,
-      request.connectionId as string,
-      request.botId as string,
-      request.generation as string,
-    );
-  }
-
-  async releaseConnectionDependency(input: unknown): Promise<boolean> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      connectionId: rpcIdentifier,
-      botId: rpcBotId,
-      generation: rpcIdentifier,
-    });
-    return (await this.settingsContribution()).releaseConnectionDependency(
-      request.userId as string,
-      request.connectionId as string,
-      request.botId as string,
-      request.generation as string,
-    );
-  }
-
-  async compensateConnectionDependency(input: unknown): Promise<boolean> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      connectionId: rpcIdentifier,
-      botId: rpcBotId,
-      generation: rpcIdentifier,
-    });
-    return (await this.settingsContribution()).compensateConnectionDependency(
-      request.userId as string,
-      request.connectionId as string,
-      request.botId as string,
-      request.generation as string,
-    );
   }
 
   /**

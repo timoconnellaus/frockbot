@@ -135,16 +135,17 @@ export interface PackageInstallationView {
 }
 
 /**
- * A durable pending decision for the User: this Connection needs authorizing
- * before it will do anything again.
+ * Durable repair state for a Connection that needs the User to authorize it
+ * again before it can do anything.
  *
- * It carries **no URL**, and that is the whole design. A Bot may write one —
- * `mcp_authenticate_server` does, and so does a mount that met a 401 — but a
- * redirect is minted only by an authenticated User action. A single-use
+ * It carries **no URL**, and that is the whole design. An integration may
+ * project one after a mount or call meets a 401, but a redirect is minted only
+ * by an authenticated User action on Connections. A single-use
  * ten-minute link stored in a projection every client reads, and replayed into
  * every transcript, would outlive the decision it belonged to and would let a
- * Bot hand its User a link it authored. The card is drawn from this record and
- * the link is authored when the User presses it.
+ * Bot hand its User a link it authored. The repair card is drawn only on the
+ * User's out-of-band Connections surface, and the link is authored when the
+ * User presses it.
  */
 export interface PendingAuthorizationV1 {
   /** Why it is pending, in the Package's own vocabulary (`needs-auth`). */
@@ -230,38 +231,13 @@ export interface UserSettingsViewV1 {
   catalogIndexHash?: string;
 }
 
-export interface CapabilityAssignmentView {
-  assignmentId: string;
-  packageId: string;
-  capabilityId: string;
-  connectionId?: string;
-  state: "enabled" | "disabled" | "unavailable";
-}
-
-export interface ConnectionDependencyRequirementV1 {
-  schemaVersion: 1;
-  packageId: string;
-  packageVersion: string;
-  capabilityId: string;
-  connectionTypeIds: string[];
-}
-
-export interface CapabilityAssignmentOperationViewV1 {
-  commandId: string;
-  kind: "assigning" | "replacing" | "unassigning";
-  assignmentId: string;
-  state: "pending" | "retrying";
-  target?: Omit<CapabilityAssignmentView, "state">;
-}
-
 export interface BotSettingsViewV1 {
   schemaVersion: 1;
   botId: string;
   revision: number;
   profile: BotProfile;
   notifications: BotNotificationPolicy;
-  assignments: CapabilityAssignmentView[];
-  assignmentOperations: CapabilityAssignmentOperationViewV1[];
+  /** A model selection is configuration, not a grant of authority. */
   model?: ModelAssignment;
 }
 
@@ -275,8 +251,6 @@ export function initializeBotSettingsV1(
     revision: 0,
     profile: { name: botId === "default" ? "Barebones" : botId },
     notifications: { enabled: true },
-    assignments: [],
-    assignmentOperations: [],
     model: model ? structuredClone(model) : undefined,
   };
 }
@@ -376,26 +350,8 @@ export type ConfigurationCommandV1 =
       model: ModelAssignment;
     })
   | (CommandMetaV1 & {
-      type: "bot/assign-capability";
-      botId: string;
-      assignment: Omit<CapabilityAssignmentView, "state">;
-      model?: ModelAssignment;
-    })
-  | (CommandMetaV1 & {
-      type: "bot/replace-capability";
-      botId: string;
-      assignment: Omit<CapabilityAssignmentView, "state">;
-      model?: ModelAssignment;
-    })
-  | (CommandMetaV1 & {
-      type: "bot/unassign-capability";
-      botId: string;
-      assignmentId: string;
-    })
-  | (CommandMetaV1 & {
       type: "bot/unbind-model";
       botId: string;
-      assignmentId: string;
     });
 
 export type UserConfigurationCommandV1 = Exclude<
@@ -503,7 +459,6 @@ export interface BotExecutionPlanV1 {
   botId: string;
   revision: number;
   model?: ModelAssignment;
-  assignments: CapabilityAssignmentView[];
 }
 
 export interface ExecutionPackageDefinition {
@@ -520,62 +475,8 @@ export interface ExecutionPackageDefinition {
   }>;
 }
 
-export function capabilityAssignmentFailureV1(input: {
-  assignment: Omit<CapabilityAssignmentView, "state">;
-  user: UserSettingsViewV1;
-  packages: readonly ExecutionPackageDefinition[];
-}): string | undefined {
-  const installation = input.user.packages.find(
-    (pkg) =>
-      pkg.packageId === input.assignment.packageId && pkg.state === "installed",
-  );
-  const pkg = input.packages.find(
-    (candidate) =>
-      candidate.packageId === input.assignment.packageId &&
-      candidate.version === installation?.version,
-  );
-  if (!installation || !pkg) {
-    return `Package "${input.assignment.packageId}" is not installed and enabled`;
-  }
-  const capability = pkg.capabilities.find(
-    (candidate) => candidate.id === input.assignment.capabilityId,
-  );
-  if (!capability) {
-    return `Capability "${input.assignment.capabilityId}" is not declared by Package "${input.assignment.packageId}"`;
-  }
-  if (capability.connectionTypes.length === 0) {
-    return input.assignment.connectionId
-      ? `Capability "${input.assignment.capabilityId}" does not accept a Connection`
-      : undefined;
-  }
-  if (!input.assignment.connectionId) {
-    return `Capability "${input.assignment.capabilityId}" requires a Connection`;
-  }
-  const connection = input.user.connections.find(
-    (candidate) => candidate.connectionId === input.assignment.connectionId,
-  );
-  if (
-    !connection ||
-    connection.packageId !== input.assignment.packageId ||
-    connection.state !== "ready"
-  ) {
-    return `Connection "${input.assignment.connectionId}" is not a ready Connection for Package "${input.assignment.packageId}"`;
-  }
-  const connectionType = pkg.connectionTypes.find(
-    (candidate) => candidate.id === connection.connectionTypeId,
-  );
-  if (
-    !connectionType ||
-    !capability.connectionTypes.includes(connectionType.id) ||
-    !connectionType.capabilities.includes(capability.id)
-  ) {
-    return `Connection "${input.assignment.connectionId}" has an incompatible Connection Type`;
-  }
-  return undefined;
-}
-
 export interface ResolvedModelBindingV1 {
-  assignment: ModelAssignment;
+  model: ModelAssignment;
   state: "ready" | "requires-resolution" | "unavailable";
   connection?: ConnectionView;
   packageId?: string;
@@ -585,12 +486,11 @@ export interface ResolvedModelBindingV1 {
 
 export function resolveBotModelBindingV1(input: {
   model: ModelAssignment;
-  assignments: readonly CapabilityAssignmentView[];
   user: UserSettingsViewV1;
   packages: readonly ExecutionPackageDefinition[];
 }): ResolvedModelBindingV1 {
   const unavailable = (failure: string): ResolvedModelBindingV1 => ({
-    assignment: structuredClone(input.model),
+    model: structuredClone(input.model),
     state: "unavailable",
     failure,
   });
@@ -624,16 +524,6 @@ export function resolveBotModelBindingV1(input: {
   if (!pkg || !connectionType || !modelCapability) {
     return unavailable("Connection does not provide models");
   }
-  const assignment = input.assignments.find(
-    (candidate) =>
-      candidate.packageId === pkg.packageId &&
-      candidate.capabilityId === modelCapability.id &&
-      candidate.connectionId === connection.connectionId &&
-      candidate.state === "enabled",
-  );
-  if (!assignment) {
-    return unavailable("Bot is not assigned the Connection model capability");
-  }
   if (!connection.providerType) {
     return unavailable("Connection provider type is unavailable");
   }
@@ -642,7 +532,7 @@ export function resolveBotModelBindingV1(input: {
       candidate.providerModelId === input.model.providerModelId,
   );
   return {
-    assignment: structuredClone(input.model),
+    model: structuredClone(input.model),
     state: knownModel ? "ready" : "requires-resolution",
     connection: structuredClone(connection),
     packageId: pkg.packageId,
@@ -664,12 +554,11 @@ export interface EffectiveBotModelV1 {
 /**
  * The model a Bot actually runs on. A Bot without its own `model` follows the
  * User's default dynamically, so changing the default changes every Bot that
- * has not overridden it. Authority is unchanged: the returned binding is still
- * resolved against the Bot's own Assignments, so a Bot that has never claimed
- * the Connection's model Capability resolves "unavailable" until it does.
+ * has not overridden it. The selected model is resolved against the User's
+ * ready Connections; there is no second per-Bot grant to claim.
  */
 export function resolveEffectiveBotModelV1(input: {
-  bot: Pick<BotSettingsViewV1, "model" | "assignments">;
+  bot: Pick<BotSettingsViewV1, "model">;
   user: UserSettingsViewV1;
   packages: readonly ExecutionPackageDefinition[];
 }): EffectiveBotModelV1 {
@@ -680,7 +569,6 @@ export function resolveEffectiveBotModelV1(input: {
     model: structuredClone(model),
     binding: resolveBotModelBindingV1({
       model,
-      assignments: input.bot.assignments,
       user: input.user,
       packages: input.packages,
     }),
@@ -692,25 +580,11 @@ export function resolveBotExecutionPlanV1(input: {
   user: UserSettingsViewV1;
   packages: readonly ExecutionPackageDefinition[];
 }): BotExecutionPlanV1 {
-  const assignments = input.bot.assignments.map((assignment) => {
-    if (assignment.state !== "enabled") return structuredClone(assignment);
-    if (
-      capabilityAssignmentFailureV1({
-        assignment,
-        user: input.user,
-        packages: input.packages,
-      })
-    ) {
-      return { ...assignment, state: "unavailable" as const };
-    }
-    return structuredClone(assignment);
-  });
   return {
     schemaVersion: 1,
     botId: input.bot.botId,
     revision: input.bot.revision,
     model: input.bot.model ? structuredClone(input.bot.model) : undefined,
-    assignments,
   };
 }
 
@@ -835,36 +709,6 @@ export function decodeRevokeConnectionCommandV1(
     throw new ConfigurationDecodeError("unsupported Connection revoke command");
   }
   return { schemaVersion: 1, type: "connection/revoke" };
-}
-
-export function decodeConnectionDependencyRequirementV1(
-  input: unknown,
-): ConnectionDependencyRequirementV1 {
-  const value = exactRecord(input, "Connection dependency requirement", [
-    "schemaVersion",
-    "packageId",
-    "packageVersion",
-    "capabilityId",
-    "connectionTypeIds",
-  ]);
-  schemaVersion(value);
-  if (
-    !Array.isArray(value.connectionTypeIds) ||
-    value.connectionTypeIds.length === 0
-  ) {
-    throw new ConfigurationDecodeError(
-      "Connection dependency requirement connectionTypeIds are invalid",
-    );
-  }
-  return {
-    schemaVersion: 1,
-    packageId: identifier(value.packageId, "packageId"),
-    packageVersion: text(value.packageVersion, "packageVersion", 128),
-    capabilityId: identifier(value.capabilityId, "capabilityId"),
-    connectionTypeIds: value.connectionTypeIds.map((item) =>
-      identifier(item, "connectionTypeId"),
-    ),
-  };
 }
 
 function text(value: unknown, label: string, maximum: number): string {
@@ -1305,25 +1149,12 @@ export function decodeConfigurationCommandV1(
         model: model(command.model),
       };
     }
-    case "bot/assign-capability":
-    case "bot/replace-capability": {
-      const command = exactCommand(input, ["botId", "assignment"], ["model"]);
-      return {
-        ...commandMeta(command),
-        type: value.type,
-        botId: identifier(command.botId, "botId"),
-        assignment: assignmentTarget(command.assignment, "assignment"),
-        model: command.model === undefined ? undefined : model(command.model),
-      };
-    }
-    case "bot/unassign-capability":
     case "bot/unbind-model": {
-      const command = exactCommand(input, ["botId", "assignmentId"]);
+      const command = exactCommand(input, ["botId"]);
       return {
         ...commandMeta(command),
         type: value.type,
         botId: identifier(command.botId, "botId"),
-        assignmentId: identifier(command.assignmentId, "assignmentId"),
       };
     }
     default:
@@ -1679,101 +1510,6 @@ export function decodePendingAuthorizationV1(
   };
 }
 
-export function decodeCapabilityAssignmentV1(
-  value: unknown,
-): CapabilityAssignmentView {
-  const assignment = exactRecord(
-    value,
-    "Capability Assignment",
-    ["assignmentId", "packageId", "capabilityId", "state"],
-    ["connectionId"],
-  );
-  if (
-    assignment.state !== "enabled" &&
-    assignment.state !== "disabled" &&
-    assignment.state !== "unavailable"
-  ) {
-    throw new ConfigurationDecodeError(
-      "Capability Assignment state is invalid",
-    );
-  }
-  return {
-    assignmentId: identifier(assignment.assignmentId, "assignmentId"),
-    packageId: identifier(assignment.packageId, "assignment.packageId"),
-    capabilityId: identifier(
-      assignment.capabilityId,
-      "assignment.capabilityId",
-    ),
-    connectionId:
-      assignment.connectionId === undefined
-        ? undefined
-        : identifier(assignment.connectionId, "assignment.connectionId"),
-    state: assignment.state,
-  };
-}
-
-function assignmentTarget(
-  value: unknown,
-  label = "assignment target",
-): Omit<CapabilityAssignmentView, "state"> {
-  const assignment = exactRecord(
-    value,
-    label,
-    ["assignmentId", "packageId", "capabilityId"],
-    ["connectionId"],
-  );
-  return {
-    assignmentId: identifier(assignment.assignmentId, `${label}.assignmentId`),
-    packageId: identifier(assignment.packageId, `${label}.packageId`),
-    capabilityId: identifier(assignment.capabilityId, `${label}.capabilityId`),
-    connectionId:
-      assignment.connectionId === undefined
-        ? undefined
-        : identifier(assignment.connectionId, `${label}.connectionId`),
-  };
-}
-
-function assignmentOperation(
-  value: unknown,
-): CapabilityAssignmentOperationViewV1 {
-  const operation = exactRecord(
-    value,
-    "Assignment operation",
-    ["commandId", "kind", "assignmentId", "state"],
-    ["target"],
-  );
-  if (
-    operation.kind !== "assigning" &&
-    operation.kind !== "replacing" &&
-    operation.kind !== "unassigning"
-  ) {
-    throw new ConfigurationDecodeError("Assignment operation kind is invalid");
-  }
-  if (operation.state !== "pending" && operation.state !== "retrying") {
-    throw new ConfigurationDecodeError("Assignment operation state is invalid");
-  }
-  if (operation.kind !== "unassigning" && operation.target === undefined) {
-    throw new ConfigurationDecodeError(
-      "Assignment operation target is required",
-    );
-  }
-  if (operation.kind === "unassigning" && operation.target !== undefined) {
-    throw new ConfigurationDecodeError(
-      "Unassign operation cannot have a target",
-    );
-  }
-  return {
-    commandId: identifier(operation.commandId, "operation.commandId"),
-    kind: operation.kind,
-    assignmentId: identifier(operation.assignmentId, "operation.assignmentId"),
-    state: operation.state,
-    target:
-      operation.target === undefined
-        ? undefined
-        : assignmentTarget(operation.target),
-  };
-}
-
 function schemaVersion(value: Record<string, unknown>): void {
   if (value.schemaVersion !== 1) {
     throw new ConfigurationDecodeError("unsupported configuration schema");
@@ -1865,34 +1601,19 @@ export function decodeBotSettingsViewV1(input: unknown): BotSettingsViewV1 {
   const value = exactRecord(
     input,
     "Bot settings",
-    [
-      "schemaVersion",
-      "botId",
-      "revision",
-      "profile",
-      "notifications",
-      "assignments",
-      "assignmentOperations",
-    ],
-    ["model"],
+    ["schemaVersion", "botId", "revision", "profile", "notifications"],
+    // Accept and discard the two legacy fields while stored v1 records roll
+    // forward. They are never projected back to a client and confer no
+    // authority.
+    ["model", "assignments", "assignmentOperations"],
   );
   schemaVersion(value);
-  if (
-    !Array.isArray(value.assignments) ||
-    !Array.isArray(value.assignmentOperations)
-  ) {
-    throw new ConfigurationDecodeError(
-      "Bot settings Assignments and operations must be arrays",
-    );
-  }
   return {
     schemaVersion: 1,
     botId: identifier(value.botId, "botId"),
     revision: viewRevision(value.revision),
     profile: botProfile(value.profile),
     notifications: notifications(value.notifications),
-    assignments: value.assignments.map(decodeCapabilityAssignmentV1),
-    assignmentOperations: value.assignmentOperations.map(assignmentOperation),
     model: value.model === undefined ? undefined : model(value.model),
   };
 }

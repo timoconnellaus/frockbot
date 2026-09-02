@@ -262,11 +262,6 @@ interface BotStateRpc extends BotConfigurationBinding {
     runId: string,
   ): Promise<BotTurnResult>;
   stopRun(command: ClientRunStopCommandV1): Promise<ClientRunStopReceiptV1>;
-  markConnectionUnavailable(
-    identity: { userId: string; botId: string },
-    connectionId: string,
-    compensation: { id: string; expectedGeneration: string },
-  ): Promise<"applied" | "stale">;
 }
 
 /**
@@ -371,13 +366,6 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       rpc.reconcileRun({ schemaVersion: 1, ...identity, runId }),
     stopRun: (command) =>
       rpc.stopRun({ schemaVersion: 1, userId, botId, command }),
-    markConnectionUnavailable: (identity, connectionId, compensation) =>
-      rpc.markConnectionUnavailable({
-        schemaVersion: 1,
-        ...identity,
-        connectionId,
-        compensation,
-      }),
   };
 }
 

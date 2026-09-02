@@ -32,7 +32,7 @@ export interface ComposioRouterPluginConfig {
 }
 
 export function createConfiguredComposioRuntimeContribution(config: {
-  assignment: {
+  binding: {
     packageId: string;
     capabilityId: string;
     connectionId?: string;
@@ -43,15 +43,15 @@ export function createConfiguredComposioRuntimeContribution(config: {
   authorizeConnection(): Promise<{ safeMetadata: Record<string, unknown> }>;
 }): Plugin.Function | undefined {
   if (
-    config.assignment.packageId !== "composio" ||
-    config.assignment.capabilityId !== "gmail-tools" ||
-    config.assignment.state !== "enabled" ||
-    !config.assignment.connectionId
+    config.binding.packageId !== "composio" ||
+    config.binding.capabilityId !== "gmail-tools" ||
+    config.binding.state !== "enabled" ||
+    !config.binding.connectionId
   ) {
     return undefined;
   }
   const apiKey = config.readSecret("COMPOSIO_API_KEY");
-  if (!apiKey) throw new Error("Assigned Composio Connection is misconfigured");
+  if (!apiKey) throw new Error("Composio Connection is misconfigured");
   const authorizeEffect = async () => {
     const connection = await config.authorizeConnection();
     const connectedAccountId = connection.safeMetadata.connectedAccountId;

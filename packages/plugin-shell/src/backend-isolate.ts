@@ -1,116 +1,59 @@
 // The Bot Durable Object half of the isolate capability boundary.
 //
-// A loaded Bot Package sees exactly two bindings: `IDENTITY` (a plain object)
-// and `CAPABILITIES` (a loopback service binding). Every method behind
-// `CAPABILITIES` ends up here, in the authority that owns the Bot's durable
-// state — so an authority-widening request becomes a durable pending decision
-// rather than a grant, and a model call records its normalized request and
-// acquires its credential lease through the existing provider path before a
-// single byte leaves the account.
+// Every Package mounted for one Bot receives the same authority projection:
+// the User's ready Connections, the Bot's configured model, and the shared
+// tool, Memory, Workspace, and notification surfaces. Package identity remains
+// in props only for attribution; it never narrows the authority list.
 import type {
-  IsolateAuthorityRequestV1,
-  IsolateCapabilityDescriptorV1,
+  IsolateCapabilityListV1,
+  IsolateConnectionV1,
+  IsolateModelBindingV1,
   IsolateModelInvocationV1,
-  IsolatePendingDecisionV1,
   LlmStreamEvent,
   NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
-import {
-  decodeIsolateAuthorityRequestV1,
-  encodeIsolateModelEventLineV1,
-} from "@frockbot/kernel-contracts";
+import { encodeIsolateModelEventLineV1 } from "@frockbot/kernel-contracts";
 import type { BotIsolateArtifactStore } from "@frockbot/kernel-composition/isolate";
 
-/**
- * The compatibility date every Bot isolate is loaded with. Pinned beside the
- * gateway Worker's own so Bot-authored code cannot outrun the kernel wrapper.
- */
+export type { IsolateModelBindingV1 } from "@frockbot/kernel-contracts";
+
 export const BOT_ISOLATE_COMPATIBILITY_DATE = "2026-08-27";
 
-/**
- * What travels in `ctx.exports.BotCapabilities({ props })`. Structured-clonable
- * by necessity: props cross into a loopback service binding.
- */
 export interface BotCapabilitiesPropsV1 {
   userId: string;
   botId: string;
+  runId: string;
+  sessionId: string;
+  turnId: string;
   generationId: string;
   packageId: string;
-  /** Already resolved and filtered to enabled Assignments by the authority. */
-  assignments: IsolateAssignmentV1[];
+  connections: IsolateConnectionV1[];
+  model?: IsolateModelBindingV1;
+  memory: boolean;
+  workspace: boolean;
 }
 
-export const ISOLATE_DECISION_PREFIX = "isolate:decision:";
 export const ISOLATE_MODEL_REQUEST_PREFIX = "isolate:model-request:";
 
-/** A durable record that the Bot asked for authority it does not hold. */
-export interface IsolatePendingAuthorityDecisionV1 {
-  schemaVersion: 1;
-  decisionId: string;
-  botId: string;
-  packageId: string;
-  generationId: string;
-  capabilityId: string;
-  reason: string;
-  requestedAt: string;
-  status: "pending";
-}
-
-/** The intent recorded before a Bot-authored adapter's model call is forwarded. */
 export interface IsolateModelRequestRecordV1 {
   schemaVersion: 1;
-  /** Minted by this Durable Object; the record is keyed by it. */
   recordId: string;
-  /** The Bot's own correlation id. Bounded, and never a storage key. */
   requestId: string;
   botId: string;
   packageId: string;
   generationId: string;
-  capabilityId: string;
   request: NormalizedModelRequest;
   recordedAt: string;
 }
 
-/** The narrow storage surface this module needs from the Durable Object. */
 export interface IsolateCapabilityStore {
   put(key: string, value: unknown): Promise<void>;
-  get<T>(key: string): Promise<T | undefined>;
   list<T>(options: { prefix: string }): Promise<Map<string, T>>;
 }
 
-/** One enabled Assignment, already resolved the way `plugin-shell` resolves them. */
-export interface IsolateAssignmentV1 {
-  assignmentId: string;
-  packageId: string;
-  capabilityId: string;
-  kind: IsolateCapabilityDescriptorV1["kind"];
-  connectionId?: string;
-  providerModelId?: string;
-}
-
-/**
- * The Bot's durable model binding, resolved by the authority from the Bot's
- * own configuration and the User's Connection — never from anything the Bot
- * supplied. An `invokeModel` request is authorized only when it names exactly
- * this provider and this model, and it is forwarded carrying exactly this
- * binding.
- */
-export interface IsolateModelBindingV1 {
-  assignmentId: string;
-  packageId: string;
-  capabilityId: string;
-  connectionId: string;
-  provider: string;
-  providerModelId: string;
-  connectionGeneration?: string;
-  catalogGeneration?: string;
-}
-
-/** The bound Bot-supplied correlation id: a field, never a key, and never unbounded. */
 export const MAX_ISOLATE_REQUEST_ID = 256;
 
 export interface IsolateModelPath {
-  /** Streams through the mounted provider Plugin; the lease is taken inside it. */
   stream(
     request: NormalizedModelRequest,
     signal: AbortSignal,
@@ -122,58 +65,35 @@ export interface IsolateCapabilityHostOptions {
   botId: string;
   packageId: string;
   generationId: string;
-  /** Assignment-derived and nothing else. */
-  assignments: readonly IsolateAssignmentV1[];
-  /**
-   * The one model binding this Bot durably holds, or absent when it holds
-   * none. Absent means every model request is a pending decision.
-   */
+  connections: readonly IsolateConnectionV1[];
   modelBinding?: IsolateModelBindingV1;
-  /** Absent when the Bot has no enabled model Assignment at all. */
   modelPath?: IsolateModelPath;
+  memory: boolean;
+  workspace: boolean;
   now?(): Date;
   newId?(): string;
 }
 
 export interface IsolateCapabilityHost {
-  list(): Promise<IsolateCapabilityDescriptorV1[]>;
-  requestAuthority(request: unknown): Promise<IsolatePendingDecisionV1>;
+  list(): Promise<IsolateCapabilityListV1>;
   invokeModel(
     request: NormalizedModelRequest,
   ): Promise<IsolateModelInvocationV1>;
-  pendingDecisions(): Promise<IsolatePendingAuthorityDecisionV1[]>;
   recordedModelRequests(): Promise<IsolateModelRequestRecordV1[]>;
 }
 
-/**
- * The enabled model Assignment that can serve this request, if any.
- *
- * An Assignment authorizes exactly one Package, one Connection, and one
- * provider model: the Bot's durable binding. A request naming any other
- * provider or model resolves to nothing, whatever the Bot claims about it —
- * the Bot-supplied `modelBinding` is never read here or anywhere downstream.
- */
-export function matchingModelAssignmentV1(
-  assignments: readonly IsolateAssignmentV1[],
+export function matchingModelBindingV1(
   binding: IsolateModelBindingV1 | undefined,
   request: NormalizedModelRequest,
-): IsolateAssignmentV1 | undefined {
-  if (!binding) return undefined;
+): IsolateModelBindingV1 | undefined {
   if (
+    !binding ||
     request.provider !== binding.provider ||
     request.model !== binding.providerModelId
   ) {
     return undefined;
   }
-  return assignments.find(
-    (assignment) =>
-      assignment.kind === "model" &&
-      assignment.assignmentId === binding.assignmentId &&
-      assignment.packageId === binding.packageId &&
-      assignment.capabilityId === binding.capabilityId &&
-      assignment.connectionId === binding.connectionId &&
-      assignment.providerModelId === binding.providerModelId,
-  );
+  return binding;
 }
 
 export function createIsolateCapabilityHost(
@@ -182,47 +102,19 @@ export function createIsolateCapabilityHost(
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? (() => crypto.randomUUID());
 
-  async function recordDecision(
-    capabilityId: string,
-    reason: string,
-  ): Promise<IsolatePendingDecisionV1> {
-    const decisionId = `decision-${newId()}`;
-    const record: IsolatePendingAuthorityDecisionV1 = {
-      schemaVersion: 1,
-      decisionId,
-      botId: options.botId,
-      packageId: options.packageId,
-      generationId: options.generationId,
-      capabilityId,
-      reason,
-      requestedAt: now().toISOString(),
-      status: "pending",
-    };
-    await options.storage.put(
-      `${ISOLATE_DECISION_PREFIX}${decisionId}`,
-      record,
-    );
-    return { status: "pending-user-decision", decisionId };
-  }
-
   return {
-    list(): Promise<IsolateCapabilityDescriptorV1[]> {
-      return Promise.resolve(
-        options.assignments.map((assignment) => ({
-          capabilityId: assignment.capabilityId,
-          kind: assignment.kind,
-        })),
-      );
-    },
-
-    async requestAuthority(
-      request: unknown,
-    ): Promise<IsolatePendingDecisionV1> {
-      const decoded: IsolateAuthorityRequestV1 =
-        decodeIsolateAuthorityRequestV1(request);
-      // Self-modification never widens authority, even when the capability is
-      // already assigned: the answer is a decision the User makes.
-      return await recordDecision(decoded.capabilityId, decoded.reason);
+    list(): Promise<IsolateCapabilityListV1> {
+      return Promise.resolve({
+        status: "available",
+        connections: structuredClone([...options.connections]),
+        ...(options.modelBinding
+          ? { model: structuredClone(options.modelBinding) }
+          : {}),
+        tools: true,
+        memory: options.memory,
+        workspace: options.workspace,
+        notify: true,
+      });
     },
 
     async invokeModel(
@@ -231,36 +123,25 @@ export function createIsolateCapabilityHost(
       if (request.requestId.length > MAX_ISOLATE_REQUEST_ID) {
         throw new Error("isolate model request requestId is not bounded");
       }
-      const binding = options.modelBinding;
-      const assignment = matchingModelAssignmentV1(
-        options.assignments,
-        binding,
-        request,
-      );
-      if (!assignment || !binding || !options.modelPath) {
-        return await recordDecision(
-          `models:${request.provider}:${request.model}`,
-          `Bot Package "${options.packageId}" asked to invoke a model with no matching enabled Assignment`,
-        );
+      const binding = matchingModelBindingV1(options.modelBinding, request);
+      if (!binding || !options.modelPath) {
+        return {
+          status: "unavailable",
+          reason: options.modelBinding
+            ? "the request does not match this Bot's configured model"
+            : "this Bot has no configured model",
+        };
       }
-      // The binding the provider path receives is the authority's, never the
-      // Bot's: a Bot-composed request carries no Connection authority.
       const forwarded: NormalizedModelRequest = {
         ...structuredClone(request),
         modelBinding: {
           connectionId: binding.connectionId,
-          ...(binding.connectionGeneration
-            ? { connectionGeneration: binding.connectionGeneration }
-            : {}),
+          connectionGeneration: binding.connectionGeneration,
           ...(binding.catalogGeneration
             ? { catalogGeneration: binding.catalogGeneration }
             : {}),
         },
       };
-      // Record the exact normalized request before forwarding; the provider
-      // path takes the credential lease on the way through. The record is
-      // keyed by an id this authority mints, so a Bot cannot overwrite one of
-      // its own earlier records by reusing a `requestId`.
       const recordId = `model-request-${newId()}`;
       const record: IsolateModelRequestRecordV1 = {
         schemaVersion: 1,
@@ -269,7 +150,6 @@ export function createIsolateCapabilityHost(
         botId: options.botId,
         packageId: options.packageId,
         generationId: options.generationId,
-        capabilityId: assignment.capabilityId,
         request: forwarded,
         recordedAt: now().toISOString(),
       };
@@ -278,20 +158,14 @@ export function createIsolateCapabilityHost(
         record,
       );
       const controller = new AbortController();
-      const events = options.modelPath.stream(forwarded, controller.signal);
       return {
         status: "streaming",
         requestId: request.requestId,
-        events: isolateModelEventStreamV1(events, controller),
+        events: isolateModelEventStreamV1(
+          options.modelPath.stream(forwarded, controller.signal),
+          controller,
+        ),
       };
-    },
-
-    async pendingDecisions(): Promise<IsolatePendingAuthorityDecisionV1[]> {
-      const stored =
-        await options.storage.list<IsolatePendingAuthorityDecisionV1>({
-          prefix: ISOLATE_DECISION_PREFIX,
-        });
-      return [...stored.values()];
     },
 
     async recordedModelRequests(): Promise<IsolateModelRequestRecordV1[]> {
@@ -346,31 +220,31 @@ export function isolateModelEventStreamV1(
 }
 
 /**
- * The content address of the bindings an isolate is loaded with: its
- * Assignments and the Composition generation whose `CAPABILITIES` stub is
- * baked into its `env`. A loader id is served from cache, so a Bot whose
- * Assignments change must get a different isolate rather than one that keeps a
- * revoked binding — and a new generation must get a different isolate rather
- * than one whose `env` still names the generation it was first loaded under.
- * Both are bindings the isolate was granted, so both belong in this digest and
- * the loader id stays derived from the artifact set and the binding digest
- * alone.
+ * The content address of the bindings baked into a loaded isolate's env.
+ *
+ * Connection order is irrelevant; ids and generations are the authority
+ * identity. The Bot's resolved model binding and pinned Composition generation
+ * complete the digest. Package id is deliberately absent: two Packages of one
+ * Bot receive the same authority projection.
  */
-export async function isolateBindingDigestV1(
-  assignments: readonly IsolateAssignmentV1[],
-  generationId: string,
-): Promise<string> {
-  const ordered = [...assignments]
-    .map((assignment) => ({
-      assignmentId: assignment.assignmentId,
-      packageId: assignment.packageId,
-      capabilityId: assignment.capabilityId,
-      kind: assignment.kind,
-      connectionId: assignment.connectionId ?? null,
-      providerModelId: assignment.providerModelId ?? null,
-    }))
-    .sort((left, right) => left.assignmentId.localeCompare(right.assignmentId));
-  return await sha256Hex(JSON.stringify({ generationId, ordered }));
+export async function isolateBindingDigestV1(input: {
+  connections: readonly Pick<
+    IsolateConnectionV1,
+    "connectionId" | "generation"
+  >[];
+  model?: IsolateModelBindingV1;
+  compositionGenerationId: string;
+}): Promise<string> {
+  const connections = [...input.connections]
+    .map(({ connectionId, generation }) => ({ connectionId, generation }))
+    .sort((left, right) => left.connectionId.localeCompare(right.connectionId));
+  return await sha256Hex(
+    JSON.stringify({
+      compositionGenerationId: input.compositionGenerationId,
+      connections,
+      model: input.model ?? null,
+    }),
+  );
 }
 
 async function sha256Hex(value: string): Promise<string> {

@@ -531,7 +531,7 @@ export class McpUserBackendContribution {
         if (connection.state === "revoked" || connection.state === "revoking") {
           throw new Error("MCP Connection is revoked");
         }
-        // The epoch bump is the whole of restart: it is in the Assignment's
+        // The epoch bump is the whole of restart: it is in the Connection's
         // resolution key, so the next admitted Turn resolves a different
         // mount and re-handshakes, while the in-flight Turn keeps the client
         // it already holds. The handshake here refreshes the status the User
@@ -704,7 +704,7 @@ export class McpUserBackendContribution {
       // The Connection generation and the credential generation are the same
       // thing for a keyed server, and deliberately are not for an OAuth one: a
       // refresh rotates the sealed generation without disturbing the
-      // Assignment resolution key a Turn is pinned to.
+      // Connection resolution key a Turn is pinned to.
       expectedGeneration: await this.currentCredentialGeneration(
         input.accountId,
         connection,
@@ -1518,8 +1518,7 @@ export class McpUserBackendContribution {
           { ...connection, state, failure: undefined },
         );
         // GrokBot's `RemoveMcpAccount`: the server is gone, so its record is
-        // gone with it. The Assignments that named it become unavailable
-        // tombstones through the ordinary Connection dependency path.
+        // gone with it, and it leaves every Bot's authority projection.
         await this.removeServer(connection.connectionId);
         return this.receipt(command.commandId, connection.connectionId);
       }

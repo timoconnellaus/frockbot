@@ -169,20 +169,60 @@ function narrowContext(env, invocation) {
     // What this isolate holds, by name. Everything else is out of scope:
     // globalOutbound is null and no host binding is in env.
     bindings: Object.keys(env).sort(),
-    listCapabilities: function () {
-      return capabilities.list();
+    capabilities: {
+      list: function () {
+        return capabilities.list();
+      },
     },
-    requestAuthority: function (request) {
-      return capabilities.requestAuthority(request);
+    model: {
+      invoke: async function (request) {
+        const outcome = await capabilities.invokeModel(request);
+        if (!outcome || outcome.status !== "streaming") return outcome;
+        return {
+          status: "streaming",
+          requestId: outcome.requestId,
+          events: modelEvents(outcome.events),
+        };
+      },
     },
-    invokeModel: async function (request) {
-      const outcome = await capabilities.invokeModel(request);
-      if (!outcome || outcome.status !== "streaming") return outcome;
-      return {
-        status: "streaming",
-        requestId: outcome.requestId,
-        events: modelEvents(outcome.events),
-      };
+    tools: {
+      invoke: function (request) {
+        return capabilities.invokeTool(request);
+      },
+    },
+    memory: {
+      read: function (request) {
+        return capabilities.memoryRead(request);
+      },
+      write: function (request) {
+        return capabilities.memoryWrite(request);
+      },
+      forget: function (request) {
+        return capabilities.memoryForget(request);
+      },
+    },
+    workspace: {
+      read: function (path) {
+        return capabilities.workspaceRead(path);
+      },
+      list: function (request) {
+        return capabilities.workspaceList(request);
+      },
+      stat: function (path) {
+        return capabilities.workspaceStat(path);
+      },
+      write: function (request) {
+        return capabilities.workspaceWrite(request);
+      },
+      delete: function (request) {
+        return capabilities.workspaceDelete(request);
+      },
+    },
+    connection: function (connectionId) {
+      return capabilities.connection(connectionId);
+    },
+    notify: function (request) {
+      return capabilities.notify(request);
     },
   };
 }
@@ -231,7 +271,7 @@ export default class extends WorkerEntrypoint {
 `;
 
 /** Bumped with any change to the wrapper text; folded into the loader id. */
-export const BOT_ISOLATE_WRAPPER_VERSION = "wrapper-v2";
+export const BOT_ISOLATE_WRAPPER_VERSION = "wrapper-v3";
 
 export const BOT_ISOLATE_MAIN_MODULE = "index.js";
 export const BOT_ISOLATE_PACKAGE_MODULE = "package.js";

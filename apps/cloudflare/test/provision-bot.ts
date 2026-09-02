@@ -20,8 +20,8 @@ function user(name: string) {
 
 /**
  * A Bot receives model authority solely through that durable Connection and
- * the Assignment `bot/create` claims, so this is the shortest path that is
- * still the product's own.
+ * its model setting, so this is the shortest path that is still the product's
+ * own.
  */
 export async function provisionBot(identity: {
   userId: string;

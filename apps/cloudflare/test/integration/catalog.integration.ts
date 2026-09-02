@@ -240,16 +240,10 @@ describe("the remote Package Catalog", () => {
     await expectOkJson(
       await postAsUser(userId, `/api/bots/${botId}/settings`, {
         schemaVersion: 1,
-        type: "bot/assign-capability",
-        commandId: "assign-catalog-model",
+        type: "bot/select-model",
+        commandId: "select-catalog-model",
         botId,
         expectedRevision: botSettings.revision,
-        assignment: {
-          assignmentId: "catalog-model",
-          packageId: PROVISIONED_MODEL.packageId,
-          capabilityId: "ollama-cloud-models",
-          connectionId: connection.connectionId,
-        },
         model: {
           connectionId: connection.connectionId,
           providerModelId: PROVISIONED_MODEL.providerModelId,
@@ -257,14 +251,13 @@ describe("the remote Package Catalog", () => {
       }),
     );
 
-    const assigned = (await expectOkJson(
+    const selected = (await expectOkJson(
       await asUser(userId, `/api/bots/${botId}/settings`),
     )) as BotSettingsViewV1;
-    expect(
-      assigned.assignments.find(
-        (assignment) => assignment.assignmentId === "catalog-model",
-      ),
-    ).toMatchObject({ state: "enabled" });
+    expect(selected.model).toEqual({
+      connectionId: connection.connectionId,
+      providerModelId: PROVISIONED_MODEL.providerModelId,
+    });
 
     const beforeUninstall = await readUserSettings(userId);
     await expectOkJson(
@@ -289,10 +282,6 @@ describe("the remote Package Catalog", () => {
     const tombstoned = (await expectOkJson(
       await asUser(userId, `/api/bots/${botId}/settings`),
     )) as BotSettingsViewV1;
-    expect(
-      tombstoned.assignments.find(
-        (assignment) => assignment.assignmentId === "catalog-model",
-      ),
-    ).toMatchObject({ state: "unavailable" });
+    expect(tombstoned.model).toEqual(selected.model);
   });
 });

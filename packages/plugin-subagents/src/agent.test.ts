@@ -55,7 +55,7 @@ function tool(
     turnType,
     models: () =>
       subagentModelCatalogV1({
-        assignments: [BINDING],
+        bindings: [BINDING],
         defaultBinding: BINDING,
         turnType,
       }),
@@ -194,7 +194,7 @@ describe("the <available_subagent_models> section", () => {
     const section = createSubagentModelsPromptSectionV1({
       models: () =>
         subagentModelCatalogV1({
-          assignments: [BINDING],
+          bindings: [BINDING],
           defaultBinding: BINDING,
           turnType: "chat",
         }),
@@ -210,7 +210,7 @@ describe("the <available_subagent_models> section", () => {
     );
   });
 
-  test("renders nothing for a Bot with no enabled model Assignment", async () => {
+  test("renders nothing for a Bot with no configured model", async () => {
     const section = createSubagentModelsPromptSectionV1({ models: () => [] });
     expect(
       await section.render({

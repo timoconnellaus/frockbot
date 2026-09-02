@@ -17,9 +17,7 @@ export interface BotResidentProjection {
   settings: BotSettingsViewV1;
   executionPlan: BotExecutionPlanV1;
   systemPromptSection: string;
-  authorizeConnection(
-    assignment: BotSettingsViewV1["assignments"][number],
-  ): Promise<ConnectionView>;
+  authorizeConnection(connection: ConnectionView): Promise<ConnectionView>;
 }
 
 export interface BotResidentTurnExecution {

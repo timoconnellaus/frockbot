@@ -4,32 +4,9 @@ import {
   PROBE_BROKEN_SOURCE,
   PROBE_PACKAGE_SOURCE,
 } from "./bot-isolate-probe.ts";
-import { provisionBot, PROVISIONED_MODEL } from "./provision-bot.ts";
 
 function probe(name: string) {
   return env.BOT_ISOLATES.getByName(name);
-}
-
-function botState(userId: string, botId: string) {
-  return env.BOT_STATES.getByName(`${userId}:${botId}`);
-}
-
-const MODEL_ASSIGNMENT = {
-  assignmentId: "model-assignment",
-  packageId: "provider-ollama-cloud",
-  capabilityId: "ollama-cloud-models",
-  kind: "model" as const,
-};
-
-function botSettings(botId: string, assignments: unknown[]) {
-  return {
-    schemaVersion: 1 as const,
-    botId,
-    revision: 1,
-    profile: { name: "Isolate probe" },
-    notifications: { enabled: false },
-    assignments,
-  };
 }
 
 describe("a Bot Package in a loaded Dynamic Worker", () => {
@@ -75,7 +52,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(result.loaderCalls).toBe(0);
   });
 
-  test("a non-first-party Package loads with globalOutbound disabled and Assignment-derived bindings only", async () => {
+  test("a non-first-party Package loads with globalOutbound disabled and Bot authority bindings only", async () => {
     const stub = probe(`outbound-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
@@ -88,7 +65,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     });
 
     expect(loaded).toHaveLength(1);
-    // Network access exists only through the bindings the Assignments grant.
+    // Network access exists only through the per-Bot authority bindings.
     expect(loaded[0]?.globalOutbound).toBeNull();
     expect(loaded[0]?.envKeys).toEqual(["CAPABILITIES", "IDENTITY"]);
     expect(loaded[0]?.identityKeys).toEqual([
@@ -195,289 +172,108 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
 });
 
 describe("the isolate capability binding", () => {
-  test("requestAuthority returns a pending decision and records it durably", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`authority-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const botId = `authority-bot-${suffix}`;
-
-    const result = await stub.callTool({
-      userId: "user-1",
-      botId,
-      artifact,
-      tool: "ask_authority",
-    });
-
-    const answer = JSON.parse(result.content) as {
-      status: string;
-      decisionId: string;
-    };
-    expect(result.isError).toBe(false);
-    expect(answer.status).toBe("pending-user-decision");
-    expect(answer.decisionId).toMatch(/^decision-/);
-
-    const decisions = (await botState("user-1", botId).isolateDecisions()) as {
-      decisionId: string;
-      capabilityId: string;
-      status: string;
-      packageId: string;
-    }[];
-    expect(decisions).toHaveLength(1);
-    expect(decisions[0]).toMatchObject({
-      decisionId: answer.decisionId,
-      capabilityId: "memory:write",
-      packageId: "bot-authored",
-      status: "pending",
-    });
-  });
-
-  test("a refused capability request is a declared variant, not a throw", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`bad-authority-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const botId = `bad-authority-bot-${suffix}`;
-
-    const result = await stub.callTool({
-      userId: "user-1",
-      botId,
-      artifact,
-      tool: "ask_bad_authority",
-    });
-
-    // Bot code has a contract for this answer; it has none for a host
-    // exception, and a host exception can carry host text.
-    expect(result.isError).toBe(false);
-    expect(JSON.parse(result.content)).toEqual({
-      status: "unavailable",
-      reason: "the authority request could not be recorded",
-    });
-    expect(await botState("user-1", botId).isolateDecisions()).toHaveLength(0);
-  });
-
-  test("list reports only the Assignment-derived capabilities", async () => {
+  test("list reports exactly the Bot's authority", async () => {
     const stub = probe(`list-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-
-    const withNone = await stub.callTool({
-      userId: "user-1",
-      botId: "bot-1",
-      artifact,
-      tool: "list_capabilities",
-    });
-    const withModel = await stub.callTool({
-      userId: "user-1",
-      botId: "bot-1",
-      artifact,
-      tool: "list_capabilities",
-      assignments: [MODEL_ASSIGNMENT],
-    });
-
-    expect(JSON.parse(withNone.content)).toEqual([]);
-    expect(JSON.parse(withModel.content)).toEqual([
-      { capabilityId: "ollama-cloud-models", kind: "model" },
-    ]);
-  });
-
-  test("invokeModel with no durable model binding is a pending decision", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`model-denied-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const botId = `model-denied-bot-${suffix}`;
-
-    const result = await stub.callTool({
-      userId: "user-1",
-      botId,
-      artifact,
-      tool: "call_model",
-      toolInput: {
-        requestId: "request-1",
-        provider: PROVISIONED_MODEL.provider,
-        model: PROVISIONED_MODEL.providerModelId,
-        system: "",
-        messages: [{ role: "user", content: "hello" }],
-        tools: [],
-      },
-    });
-
-    expect(JSON.parse(result.content)).toMatchObject({
-      status: "pending-user-decision",
-    });
-    expect(
-      await botState("user-1", botId).isolateModelRequestRecords(),
-    ).toHaveLength(0);
-  });
-
-  test("invokeModel for a provider the Bot's binding does not name is a pending decision", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`model-mismatch-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const userId = `model-mismatch-user-${suffix}`;
-    const botId = `model-mismatch-bot-${suffix}`;
-    await provisionBot({ userId, botId });
-    // Materializes the Bot's durable configuration in its own object, the way
-    // the first command addressed to a new Bot does.
-    await botState(userId, botId).readConfiguration({
-      schemaVersion: 1,
-      userId,
-      botId,
-    });
-    await botState(userId, botId).seedCompositionGeneration(
-      await stub.generationFor(artifact),
-    );
-
-    // The Bot holds an enabled Ollama Cloud model Assignment. That authorizes
-    // exactly that Package's provider and exactly the model its binding names
-    // — not the first-party provider the Bot asked for here.
-    const result = await stub.callTool({
-      userId,
-      botId,
-      artifact,
-      tool: "call_model",
-      assignments: [MODEL_ASSIGNMENT],
-      toolInput: {
-        requestId: "request-1",
-        provider: "foundation",
-        model: "deterministic-v1",
-        system: "",
-        messages: [{ role: "user", content: "hello" }],
-        tools: [],
-      },
-    });
-
-    expect(JSON.parse(result.content)).toMatchObject({
-      status: "pending-user-decision",
-    });
-    expect(
-      await botState(userId, botId).isolateModelRequestRecords(),
-    ).toHaveLength(0);
-  });
-
-  test("invokeModel for the assigned model but another Package's provider is a pending decision", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`model-provider-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const userId = `model-provider-user-${suffix}`;
-    const botId = `model-provider-bot-${suffix}`;
-    await provisionBot({ userId, botId });
-    // Materializes the Bot's durable configuration in its own object, the way
-    // the first command addressed to a new Bot does.
-    await botState(userId, botId).readConfiguration({
-      schemaVersion: 1,
-      userId,
-      botId,
-    });
-    await botState(userId, botId).seedCompositionGeneration(
-      await stub.generationFor(artifact),
-    );
-
-    const result = await stub.callTool({
-      userId,
-      botId,
-      artifact,
-      tool: "call_model",
-      assignments: [MODEL_ASSIGNMENT],
-      toolInput: {
-        requestId: "request-1",
-        provider: "foundation",
-        model: PROVISIONED_MODEL.providerModelId,
-        system: "",
-        messages: [{ role: "user", content: "hello" }],
-        tools: [],
-      },
-    });
-
-    expect(JSON.parse(result.content)).toMatchObject({
-      status: "pending-user-decision",
-    });
-  });
-
-  test("invokeModel with the Bot's exact assigned provider and model streams", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`model-allowed-${suffix}`);
-    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const userId = `model-allowed-user-${suffix}`;
-    const botId = `model-allowed-bot-${suffix}`;
-    await provisionBot({ userId, botId });
-    // Materializes the Bot's durable configuration in its own object, the way
-    // the first command addressed to a new Bot does.
-    await botState(userId, botId).readConfiguration({
-      schemaVersion: 1,
-      userId,
-      botId,
-    });
-    await botState(userId, botId).seedCompositionGeneration(
-      await stub.generationFor(artifact),
-    );
-
-    const result = await stub.callTool({
-      userId,
-      botId,
-      artifact,
-      tool: "call_model",
-      assignments: [MODEL_ASSIGNMENT],
-      toolInput: {
-        requestId: "request-1",
-        provider: PROVISIONED_MODEL.provider,
-        model: PROVISIONED_MODEL.providerModelId,
-        system: "",
-        messages: [{ role: "user", content: "hello" }],
-        tools: [],
-      },
-    });
-
-    expect(result).toMatchObject({ isError: false });
-    const streamed = JSON.parse(result.content) as {
-      status: string;
-      requestId: string;
-      text: string;
+    const connection = {
+      connectionId: "connection-1",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      displayName: "Work",
+      generation: "connection-generation-1",
+      safeMetadata: { region: "au" },
     };
-    expect(streamed.status).toBe("streaming");
-    expect(streamed.requestId).toBe("request-1");
-    expect(streamed.text).toBe("Ollama reply");
+    const model = {
+      connectionId: connection.connectionId,
+      packageId: connection.packageId,
+      provider: "ollama-cloud",
+      providerModelId: "glm-5.3-flash:cloud",
+      connectionGeneration: connection.generation,
+    };
 
-    const recorded = (await botState(
-      userId,
-      botId,
-    ).isolateModelRequestRecords()) as {
-      requestId: string;
-      packageId: string;
-      capabilityId: string;
-    }[];
-    expect(recorded).toHaveLength(1);
-    expect(recorded[0]).toMatchObject({
-      requestId: "request-1",
-      packageId: "bot-authored",
-      capabilityId: PROVISIONED_MODEL.capabilityId,
+    const result = await stub.callTool({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      tool: "list_capabilities",
+      connections: [connection],
+      model,
+      memory: true,
+      workspace: true,
+    });
+
+    expect(JSON.parse(result.content)).toEqual({
+      status: "available",
+      connections: [connection],
+      model,
+      tools: true,
+      memory: true,
+      workspace: true,
+      notify: true,
     });
   });
 
-  test("a new generation with the same artifact never answers under the old one", async () => {
-    const suffix = crypto.randomUUID();
-    const stub = probe(`generation-${suffix}`);
+  test("a capability the Bot does not hold is unavailable", async () => {
+    const stub = probe(`unavailable-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
-    const botId = `generation-bot-${suffix}`;
 
-    await stub.callTool({
+    const connection = await stub.callTool({
       userId: "user-1",
-      botId,
+      botId: "bot-1",
       artifact,
-      tool: "ask_authority",
+      tool: "connection_lease",
+      toolInput: { connectionId: "missing-connection" },
     });
-    await stub.callTool({
+    const model = await stub.callTool({
       userId: "user-1",
-      botId,
+      botId: "bot-1",
       artifact,
-      tool: "ask_authority",
-      generationCreatedAt: "2026-09-01T00:00:00.000Z",
+      tool: "call_model",
+      toolInput: {
+        requestId: "request-1",
+        provider: "ollama-cloud",
+        model: "glm-5.3-flash:cloud",
+        system: "",
+        messages: [{ role: "user", content: "hello" }],
+        tools: [],
+      },
     });
 
-    // The `CAPABILITIES` stub is baked into the isolate's `env`, so a cached
-    // isolate would keep recording under the generation it was first loaded
-    // for.
-    const decisions = (await botState("user-1", botId).isolateDecisions()) as {
-      generationId: string;
-    }[];
-    expect(decisions).toHaveLength(2);
-    expect(new Set(decisions.map((entry) => entry.generationId)).size).toBe(2);
+    expect(JSON.parse(connection.content)).toMatchObject({
+      status: "unavailable",
+    });
+    expect(JSON.parse(model.content)).toMatchObject({
+      status: "unavailable",
+    });
+  });
+
+  test("adding or removing a Connection yields a new isolate", async () => {
+    const stub = probe(`connection-identity-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+    const identity = {
+      userId: `user-${crypto.randomUUID()}`,
+      botId: `bot-${crypto.randomUUID()}`,
+      artifact,
+    };
+    const connection = {
+      connectionId: "connection-1",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      displayName: "Work",
+      generation: "connection-generation-1",
+      safeMetadata: {},
+    };
+
+    const without = await stub.observedLoaderIds(identity);
+    const withConnection = await stub.observedLoaderIds({
+      ...identity,
+      connections: [connection],
+    });
+    const removedAgain = await stub.observedLoaderIds(identity);
+
+    expect(without).toHaveLength(1);
+    expect(withConnection).toHaveLength(1);
+    expect(removedAgain).toEqual(without);
+    expect(withConnection[0]).not.toBe(without[0]);
   });
 });

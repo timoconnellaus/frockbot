@@ -123,10 +123,8 @@ export interface TemplateSourceV1 {
   routines: readonly TemplateRoutineCandidateV1[];
   packages: readonly TemplatePackageCandidateV1[];
   connections: readonly TemplateConnectionCandidateV1[];
-  /** True when the Bot has a model assignment; it names a Connection, so it goes. */
-  hasModelAssignment?: boolean;
-  /** How many Assignments the Bot holds; counted, never carried. */
-  assignmentCount?: number;
+  /** True when the Bot has a model selection; it names a Connection, so it goes. */
+  hasModelSelection?: boolean;
   sourceCatalogGeneration?: string;
 }
 
@@ -434,8 +432,7 @@ export function buildBotTemplateV1(
   source: TemplateSourceV1,
 ): TemplateBuildResultV1 {
   const omissions = new Omissions();
-  if (source.hasModelAssignment) omissions.add("model");
-  omissions.add("assignment", source.assignmentCount ?? 0);
+  if (source.hasModelSelection) omissions.add("model");
   // Memory is never read, so there is nothing to count; the omission is
   // recorded unconditionally because it is the one a User most needs told.
   omissions.add("memory");

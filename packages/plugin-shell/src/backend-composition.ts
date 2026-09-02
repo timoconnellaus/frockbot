@@ -71,8 +71,8 @@ export interface ShellIsolateMountOptions {
    */
   capabilitiesFor(member: CompositionMemberV1): BotCapabilitiesStub;
   /**
-   * Content address of the Assignment-derived bindings this isolate is granted
-   * — the Assignments *and* the Composition generation whose `CAPABILITIES`
+   * Content address of the Bot authority baked into this isolate — Connection
+   * ids and generations, model binding, and the Composition generation whose `CAPABILITIES`
    * stub is baked into its `env`. Required: it is what keeps a cached isolate
    * from answering under a stale authority.
    */

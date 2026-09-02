@@ -1,38 +1,32 @@
-// The `CAPABILITIES` binding a Bot isolate sees.
+// The loopback CAPABILITIES service binding a Bot isolate sees.
 //
-// The Worker Loader spike settled the shape: an `RpcTarget` placed in a loaded
-// Worker's `env` is rejected with `DataCloneError`, so the capability surface
-// must be a loopback *service binding*, minted inside the Durable Object with
-// `ctx.exports.BotCapabilities({ props })`. Per-Bot and per-generation state
-// therefore travels in `ctx.props`, which is structured-clonable.
-//
-// `list` answers from those props alone — the Assignments the Bot's Durable
-// Object resolved — so nothing here can widen authority. `requestAuthority`
-// and `invokeModel` go back to the Bot's Durable Object, which is the only
-// authority for the Bot's durable state and the only place a credential lease
-// is taken.
+// Props carry one per-Bot authority snapshot. Package id is attribution only:
+// every Package mounted for this Bot lists the same Connections and model.
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type {
-  IsolateAuthorityOutcomeV1,
   IsolateCapabilityListOutcomeV1,
+  IsolateConnectionOutcomeV1,
+  IsolateMemoryOutcomeV1,
   IsolateModelOutcomeV1,
-  NormalizedModelRequest,
+  IsolateNotificationOutcomeV1,
+  IsolateToolOutcomeV1,
+  IsolateWorkspaceOutcomeV1,
 } from "@frockbot/kernel-contracts";
 import {
-  decodeIsolateAuthorityRequestV1,
   decodeIsolateCapabilityListV1,
+  decodeIsolateMemoryReadRequestV1,
+  decodeIsolateMemoryWriteRequestV1,
   decodeIsolateModelInvocationV1,
-  decodeIsolatePendingDecisionV1,
+  decodeIsolateNotificationRequestV1,
+  decodeIsolateToolRequestV1,
+  decodeIsolateWorkspaceDeleteRequestV1,
+  decodeIsolateWorkspaceListRequestV1,
+  decodeIsolateWorkspacePathV1,
+  decodeIsolateWorkspaceWriteRequestV1,
 } from "@frockbot/kernel-contracts";
 import type { BotCapabilitiesPropsV1 } from "@frockbot/plugin-shell/backend-isolate";
 import type { BotState } from "./bot-state.js";
 
-/**
- * A refusal Bot code has a contract for. Every failure on this binding — an
- * invalid request, an unavailable authority, an RPC that did not complete —
- * becomes this one normalized variant rather than an exception carrying host
- * text into the isolate.
- */
 function unavailable(reason: string): {
   status: "unavailable";
   reason: string;
@@ -47,8 +41,18 @@ export interface BotCapabilitiesEnv {
 }
 
 interface BotIsolateRpc {
-  isolateRequestAuthority(input: unknown): Promise<unknown>;
   isolateInvokeModel(input: unknown): Promise<unknown>;
+  isolateInvokeTool(input: unknown): Promise<IsolateToolOutcomeV1>;
+  isolateMemoryRead(input: unknown): Promise<IsolateMemoryOutcomeV1>;
+  isolateMemoryWrite(input: unknown): Promise<IsolateMemoryOutcomeV1>;
+  isolateMemoryForget(input: unknown): Promise<IsolateMemoryOutcomeV1>;
+  isolateWorkspaceRead(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
+  isolateWorkspaceList(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
+  isolateWorkspaceStat(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
+  isolateWorkspaceWrite(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
+  isolateWorkspaceDelete(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
+  isolateConnection(input: unknown): Promise<IsolateConnectionOutcomeV1>;
+  isolateNotify(input: unknown): Promise<IsolateNotificationOutcomeV1>;
 }
 
 export class BotCapabilities extends WorkerEntrypoint<
@@ -58,71 +62,164 @@ export class BotCapabilities extends WorkerEntrypoint<
   private get rpc(): BotIsolateRpc {
     const props = this.ctx.props;
     const id = this.env.BOT_STATES.idFromName(`${props.userId}:${props.botId}`);
-    // SAFETY: Wrangler binds BOT_STATES to BotState; workers-types cannot infer
-    // its generated RPC surface.
     return this.env.BOT_STATES.get(id) as unknown as BotIsolateRpc;
   }
 
-  /**
-   * Assignment-derived only: the enabled Assignments the Bot's Durable Object
-   * resolved, projected onto their manifest-declared capability kind. Nothing
-   * is read here, so nothing here can widen what the Bot holds.
-   */
+  private scope(request: unknown): Record<string, unknown> {
+    const props = this.ctx.props;
+    return {
+      schemaVersion: 1,
+      userId: props.userId,
+      botId: props.botId,
+      runId: props.runId,
+      sessionId: props.sessionId,
+      turnId: props.turnId,
+      packageId: props.packageId,
+      generationId: props.generationId,
+      request,
+    };
+  }
+
   list(): Promise<IsolateCapabilityListOutcomeV1> {
     try {
       return Promise.resolve(
-        decodeIsolateCapabilityListV1(
-          this.ctx.props.assignments.map((assignment) => ({
-            capabilityId: assignment.capabilityId,
-            kind: assignment.kind,
-          })),
-        ),
+        decodeIsolateCapabilityListV1({
+          status: "available",
+          connections: this.ctx.props.connections,
+          ...(this.ctx.props.model ? { model: this.ctx.props.model } : {}),
+          tools: true,
+          memory: this.ctx.props.memory,
+          workspace: this.ctx.props.workspace,
+          notify: true,
+        }),
       );
     } catch {
       return Promise.resolve(unavailable("capabilities are unavailable"));
     }
   }
 
-  /** Never a grant. A durable pending decision, recorded in the Bot's authority. */
-  async requestAuthority(request: unknown): Promise<IsolateAuthorityOutcomeV1> {
-    const props = this.ctx.props;
-    try {
-      return decodeIsolatePendingDecisionV1(
-        await this.rpc.isolateRequestAuthority({
-          schemaVersion: 1,
-          userId: props.userId,
-          botId: props.botId,
-          packageId: props.packageId,
-          generationId: props.generationId,
-          request: decodeIsolateAuthorityRequestV1(request),
-        }),
-      );
-    } catch {
-      return unavailable("the authority request could not be recorded");
-    }
-  }
-
-  /**
-   * D6. The Bot Durable Object checks the model Assignment, records the
-   * normalized request and takes the credential lease through the existing
-   * provider path before a byte is forwarded; the events come back as an
-   * NDJSON byte stream, the only stream shape workerd RPC will carry.
-   */
   async invokeModel(request: unknown): Promise<IsolateModelOutcomeV1> {
-    const props = this.ctx.props;
     try {
       return decodeIsolateModelInvocationV1(
-        await this.rpc.isolateInvokeModel({
-          schemaVersion: 1,
-          userId: props.userId,
-          botId: props.botId,
-          packageId: props.packageId,
-          generationId: props.generationId,
-          request: request as NormalizedModelRequest,
-        }),
+        await this.rpc.isolateInvokeModel(this.scope(request)),
       );
     } catch {
       return unavailable("the model request could not be served");
+    }
+  }
+
+  async invokeTool(request: unknown): Promise<IsolateToolOutcomeV1> {
+    try {
+      return await this.rpc.isolateInvokeTool(
+        this.scope(decodeIsolateToolRequestV1(request)),
+      );
+    } catch {
+      return unavailable("the tool request could not be served");
+    }
+  }
+
+  async memoryRead(request: unknown): Promise<IsolateMemoryOutcomeV1> {
+    try {
+      return await this.rpc.isolateMemoryRead(
+        this.scope(decodeIsolateMemoryReadRequestV1(request)),
+      );
+    } catch {
+      return unavailable("Memory is unavailable");
+    }
+  }
+
+  async memoryWrite(request: unknown): Promise<IsolateMemoryOutcomeV1> {
+    try {
+      return await this.rpc.isolateMemoryWrite(
+        this.scope(decodeIsolateMemoryWriteRequestV1(request)),
+      );
+    } catch {
+      return unavailable("Memory is unavailable");
+    }
+  }
+
+  async memoryForget(request: unknown): Promise<IsolateMemoryOutcomeV1> {
+    try {
+      return await this.rpc.isolateMemoryForget(
+        this.scope(decodeIsolateMemoryWriteRequestV1(request)),
+      );
+    } catch {
+      return unavailable("Memory is unavailable");
+    }
+  }
+
+  async workspaceRead(request: unknown): Promise<IsolateWorkspaceOutcomeV1> {
+    try {
+      return await this.rpc.isolateWorkspaceRead(
+        this.scope(decodeIsolateWorkspacePathV1(request)),
+      );
+    } catch {
+      return unavailable("Workspace is unavailable");
+    }
+  }
+
+  async workspaceList(request: unknown): Promise<IsolateWorkspaceOutcomeV1> {
+    try {
+      return await this.rpc.isolateWorkspaceList(
+        this.scope(decodeIsolateWorkspaceListRequestV1(request)),
+      );
+    } catch {
+      return unavailable("Workspace is unavailable");
+    }
+  }
+
+  async workspaceStat(request: unknown): Promise<IsolateWorkspaceOutcomeV1> {
+    try {
+      return await this.rpc.isolateWorkspaceStat(
+        this.scope(decodeIsolateWorkspacePathV1(request)),
+      );
+    } catch {
+      return unavailable("Workspace is unavailable");
+    }
+  }
+
+  async workspaceWrite(request: unknown): Promise<IsolateWorkspaceOutcomeV1> {
+    try {
+      return await this.rpc.isolateWorkspaceWrite(
+        this.scope(decodeIsolateWorkspaceWriteRequestV1(request)),
+      );
+    } catch {
+      return unavailable("Workspace is unavailable");
+    }
+  }
+
+  async workspaceDelete(request: unknown): Promise<IsolateWorkspaceOutcomeV1> {
+    try {
+      return await this.rpc.isolateWorkspaceDelete(
+        this.scope(decodeIsolateWorkspaceDeleteRequestV1(request)),
+      );
+    } catch {
+      return unavailable("Workspace is unavailable");
+    }
+  }
+
+  async connection(connectionId: unknown): Promise<IsolateConnectionOutcomeV1> {
+    if (
+      typeof connectionId !== "string" ||
+      connectionId.length === 0 ||
+      connectionId.length > 256
+    ) {
+      return unavailable("the Connection is unavailable");
+    }
+    try {
+      return await this.rpc.isolateConnection(this.scope(connectionId));
+    } catch {
+      return unavailable("the Connection is unavailable");
+    }
+  }
+
+  async notify(request: unknown): Promise<IsolateNotificationOutcomeV1> {
+    try {
+      return await this.rpc.isolateNotify(
+        this.scope(decodeIsolateNotificationRequestV1(request)),
+      );
+    } catch {
+      return unavailable("notifications are unavailable");
     }
   }
 }

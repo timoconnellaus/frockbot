@@ -289,121 +289,6 @@ describe("composer hydration context", () => {
   });
 });
 
-describe("hosted Assignment commands", () => {
-  test("uses distinct atomic Assign, Replace, and Unassign commands", async () => {
-    let provided: Ref<FrockBotWebData> | undefined;
-    const commands: unknown[] = [];
-    await shellClientPlugin({
-      transport: {
-        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
-        readConfiguration: () =>
-          Promise.resolve(initializeBotSettingsV1("primary")),
-        executeConfiguration: (command) => {
-          commands.push(command);
-          return Promise.resolve({
-            schemaVersion: 1,
-            commandId: command.commandId,
-            revision: command.expectedRevision + 1,
-            status: "applied",
-          });
-        },
-      },
-      slot: () => () => {},
-      inject: () => {
-        throw new Error("unexpected client provider injection");
-      },
-      provide: (_key, value) => {
-        provided = value as Ref<FrockBotWebData>;
-        return () => {};
-      },
-    });
-    if (!provided) throw new Error("shell data was not provided");
-    provided.value.activeBotId = "primary";
-    provided.value.botSettings = initializeBotSettingsV1("primary");
-    const assignment = {
-      assignmentId: "mail",
-      packageId: "mail",
-      capabilityId: "send",
-      connectionId: "mail-1",
-    };
-    await provided.value.assignCapability(assignment);
-    provided.value.botSettings = {
-      ...initializeBotSettingsV1("primary"),
-      revision: 1,
-    };
-    await provided.value.replaceCapability(assignment);
-    provided.value.botSettings = {
-      ...initializeBotSettingsV1("primary"),
-      revision: 2,
-    };
-    await provided.value.unassignCapability("mail");
-    expect(commands).toMatchObject([
-      { type: "bot/assign-capability", expectedRevision: 0, assignment },
-      { type: "bot/replace-capability", expectedRevision: 1, assignment },
-      {
-        type: "bot/unassign-capability",
-        expectedRevision: 2,
-        assignmentId: "mail",
-      },
-    ]);
-  });
-
-  test("surfaces rejected and retrying Assignment receipts", async () => {
-    let provided: Ref<FrockBotWebData> | undefined;
-    const receipts = [
-      {
-        schemaVersion: 1 as const,
-        commandId: "rejected",
-        revision: 0,
-        status: "rejected" as const,
-        failure: "Connection is unavailable",
-      },
-      {
-        schemaVersion: 1 as const,
-        commandId: "pending",
-        revision: 0,
-        status: "pending" as const,
-      },
-    ];
-    await shellClientPlugin({
-      transport: {
-        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
-        readConfiguration: () =>
-          Promise.resolve(initializeBotSettingsV1("primary")),
-        executeConfiguration: () => Promise.resolve(receipts.shift()!),
-      },
-      slot: () => () => {},
-      inject: () => {
-        throw new Error("unexpected client provider injection");
-      },
-      provide: (_key, value) => {
-        provided = value as Ref<FrockBotWebData>;
-        return () => {};
-      },
-    });
-    if (!provided) throw new Error("shell data was not provided");
-    provided.value.activeBotId = "primary";
-    provided.value.botSettings = initializeBotSettingsV1("primary");
-    const assignment = {
-      assignmentId: "mail",
-      packageId: "mail",
-      capabilityId: "send",
-      connectionId: "mail-1",
-    };
-
-    await expect(provided.value.assignCapability(assignment)).rejects.toThrow(
-      "Connection is unavailable",
-    );
-    expect(provided.value.settingsError).toBe("Connection is unavailable");
-    await expect(provided.value.assignCapability(assignment)).resolves.toBe(
-      undefined,
-    );
-    expect(provided.value.settingsError).toBe(
-      "Assignment operation is retrying.",
-    );
-  });
-});
-
 describe("Bot selection", () => {
   test("passes explicit Bot IDs and ignores stale hydration", async () => {
     Object.defineProperty(globalThis, "window", {
@@ -584,15 +469,6 @@ describe("Bot selection", () => {
         connectionId: "ollama-work",
         providerModelId: "glm-5.3-flash:cloud",
       },
-      assignments: [
-        {
-          assignmentId: "ollama-model",
-          packageId: "provider-ollama-cloud",
-          capabilityId: "ollama-cloud-models",
-          connectionId: "ollama-work",
-          state: "enabled" as const,
-        },
-      ],
     };
     const user: UserSettingsViewV1 = {
       schemaVersion: 1,
@@ -672,16 +548,14 @@ describe("Bot selection", () => {
     expect(provided.value.modelReady).toBe(true);
     expect(provided.value.modelSource).toBe("bot");
 
-    bot.assignments[0] = {
-      ...bot.assignments[0]!,
-      capabilityId: "ollama-cloud-tools",
-    };
-    await provided.value.loadBotSettings();
+    user.connections[0] = { ...user.connections[0]!, state: "disabled" };
+    await provided.value.loadUserSettings();
     expect(provided.value.modelReady).toBe(false);
 
     // A Bot without a model of its own follows the User's default, and the
     // label never says so: the Bot simply runs on that model.
     bot.model = undefined as unknown as typeof bot.model;
+    user.connections[0] = { ...user.connections[0]!, state: "ready" };
     user.newBotModelTemplate = {
       connectionId: "ollama-work",
       providerModelId: "llama-3:cloud",
@@ -701,7 +575,7 @@ describe("Bot selection", () => {
     expect(provided.value.modelReady).toBe(false);
   });
 
-  test("assigns a newly connected model capability before model selection", async () => {
+  test("selects and clears a model directly through Bot settings", async () => {
     let provided: Ref<FrockBotWebData> | undefined;
     let bot = initializeBotSettingsV1("ollama-bot");
     const commands: Array<{ type: string; expectedRevision: number }> = [];
@@ -739,25 +613,13 @@ describe("Bot selection", () => {
             type: command.type,
             expectedRevision: command.expectedRevision,
           });
-          if (command.type === "bot/assign-capability") {
-            bot = {
-              ...bot,
-              revision: 1,
-              model: command.model,
-              assignments: [{ ...command.assignment, state: "enabled" }],
-            };
-          } else if (command.type === "bot/select-model") {
+          if (command.type === "bot/select-model") {
             bot = { ...bot, revision: bot.revision + 1, model: command.model };
           } else if (command.type === "bot/unbind-model") {
             bot = {
               ...bot,
               revision: bot.revision + 1,
               model: undefined,
-              assignments: bot.assignments.map((assignment) =>
-                assignment.assignmentId === command.assignmentId
-                  ? { ...assignment, state: "unavailable" }
-                  : assignment,
-              ),
             };
           } else {
             throw new Error("unexpected Bot command");
@@ -813,7 +675,7 @@ describe("Bot selection", () => {
     });
 
     expect(commands).toEqual([
-      { type: "bot/assign-capability", expectedRevision: 0 },
+      { type: "bot/select-model", expectedRevision: 0 },
     ]);
     expect(bot).toMatchObject({
       revision: 1,
@@ -821,24 +683,7 @@ describe("Bot selection", () => {
         connectionId: "ollama-work",
         providerModelId: "glm-5.3-flash:cloud",
       },
-      assignments: [
-        {
-          packageId: "provider-ollama-cloud",
-          capabilityId: "ollama-cloud-models",
-          connectionId: "ollama-work",
-          state: "enabled",
-        },
-      ],
     });
-
-    bot = {
-      ...bot,
-      assignments: bot.assignments.map((assignment) => ({
-        ...assignment,
-        state: "unavailable",
-      })),
-    };
-    provided.value.botSettings = bot;
 
     await provided.value.clearBotModel();
 
@@ -849,7 +694,6 @@ describe("Bot selection", () => {
     expect(bot).toMatchObject({
       revision: 2,
       model: undefined,
-      assignments: [{ state: "unavailable" }],
     });
   });
 
@@ -861,7 +705,6 @@ describe("Bot selection", () => {
         connectionId: "revoked-connection",
         providerModelId: "glm-5.3-flash:cloud",
       },
-      assignments: [],
     };
     let executed = false;
     await shellClientPlugin({

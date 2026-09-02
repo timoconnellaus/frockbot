@@ -249,24 +249,6 @@ describe("Bot recovery", () => {
         },
       },
     );
-    await configured.executeConfiguration({
-      schemaVersion: 1,
-      userId: "user-1",
-      botId: "primary",
-      command: {
-        schemaVersion: 1,
-        type: "bot/assign-capability",
-        commandId: "assign-ollama-model",
-        botId: "primary",
-        expectedRevision: 0,
-        assignment: {
-          assignmentId: "ollama-model",
-          packageId: "provider-ollama-cloud",
-          capabilityId: "ollama-cloud-models",
-          connectionId: "ollama-1",
-        },
-      },
-    });
     const first = await host().run({
       userId: "user-1",
       botId: "primary",
@@ -1378,15 +1360,6 @@ describe("Bot recovery", () => {
         connectionId: "ollama-race",
         providerModelId: "model:cloud",
       },
-      assignments: [
-        {
-          assignmentId: "model-race",
-          packageId: "provider-ollama-cloud",
-          capabilityId: "ollama-cloud-models",
-          connectionId: "ollama-race",
-          state: "enabled" as const,
-        },
-      ],
     };
     await storage.put("bot-configuration", settings);
     const contribution = createShellBotBackendContribution({

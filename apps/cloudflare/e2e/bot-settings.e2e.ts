@@ -57,19 +57,15 @@ test("Bot settings follows the GrokBot order and keeps extras under Advanced", a
   ).toBeVisible();
   await expect(panel.getByRole("textbox", { name: /^Title/u })).toBeHidden();
 
-  // The Assignment catalog is the client's decode of `/app-manifest`. A Package
-  // the decoder refused would leave this section empty and the banner set.
+  // The model selector is the client's decode of `/app-manifest`. A Package
+  // the decoder refused would leave its choices empty and the banner set.
   await panel.getByText("Advanced").click();
   await expect(panel.getByRole("textbox", { name: /^Title/u })).toBeVisible();
   await expect(panel.getByText("Members", { exact: true })).toBeVisible();
   await expect(panel.getByText("Named by user")).toBeVisible();
-  await expect(panel.getByText("Capability Assignments")).toBeVisible();
-  await expect(
-    panel.getByText("Ollama Cloud · ollama-cloud-models"),
-  ).toBeVisible();
-  await expect(
-    panel.getByLabel("Connection for ollama-cloud-models"),
-  ).toBeVisible();
+  await expect(panel.getByText("Model", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Custom model", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Capability Assignments")).toHaveCount(0);
   await expect(panel.getByText("Routines", { exact: true })).toBeVisible();
   await expect(panel.getByText("Audit log", { exact: true })).toBeVisible();
   await expect(panel.getByText("Import a Bot template")).toBeVisible();

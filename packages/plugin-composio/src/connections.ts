@@ -11,7 +11,6 @@ import type {
   RevokeConnectionResult,
   StartConnectionResult,
 } from "./backend-contracts.js";
-import { isSettledBotCompensation } from "./connection-recovery.js";
 import {
   linkReconciliationDisposition,
   reconcileComposioProviderConnection,
@@ -61,11 +60,6 @@ export interface ComposioConnectionStore {
       authorizationStateId?: string;
     },
   ): Promise<boolean>;
-  recordAssignmentCompensated(
-    userId: string,
-    connectionId: string,
-    compensationId: string,
-  ): Promise<boolean>;
   requireConnectionReconciliation(
     userId: string,
     connectionId: string,
@@ -101,12 +95,6 @@ export interface ComposioConnectionCoordinatorConfig {
   store: ComposioConnectionStore;
   callbackBaseUrl: string;
   connectionTypes: Record<string, ComposioConnectionTypeConfig>;
-  markBotUnavailable?: (
-    userId: string,
-    botId: string,
-    connectionId: string,
-    compensation: { id: string; expectedGeneration: string },
-  ) => Promise<"applied" | "stale">;
 }
 
 export class DefinitiveConnectionOperationError extends Error {
@@ -719,46 +707,6 @@ export class ComposioConnectionCoordinator {
     );
     if (refreshed?.safeMetadata.revocationProviderCompleted !== true) {
       return { schemaVersion: 1, status: "reconciliation-required" };
-    }
-    const compensations = Array.isArray(
-      refreshed.safeMetadata.assignmentCompensations,
-    )
-      ? refreshed.safeMetadata.assignmentCompensations
-      : [];
-    if (this.config.markBotUnavailable) {
-      for (const candidate of compensations) {
-        if (
-          !candidate ||
-          typeof candidate !== "object" ||
-          Array.isArray(candidate)
-        ) {
-          return { schemaVersion: 1, status: "reconciliation-required" };
-        }
-        const compensation = candidate as Record<string, unknown>;
-        if (
-          typeof compensation.botId !== "string" ||
-          typeof compensation.id !== "string" ||
-          typeof compensation.expectedGeneration !== "string"
-        ) {
-          return { schemaVersion: 1, status: "reconciliation-required" };
-        }
-        const result = await this.config.markBotUnavailable(
-          userId,
-          compensation.botId,
-          connectionId,
-          {
-            id: compensation.id,
-            expectedGeneration: compensation.expectedGeneration,
-          },
-        );
-        if (isSettledBotCompensation(result)) {
-          await this.config.store.recordAssignmentCompensated(
-            userId,
-            connectionId,
-            compensation.id,
-          );
-        }
-      }
     }
     const finished = await this.config.store.finishConnectionRevocation(
       userId,

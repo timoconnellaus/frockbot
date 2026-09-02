@@ -1858,12 +1858,6 @@ export class OllamaCloudUserBackendContribution {
         if (current.state === "reconciliation-required") {
           return "reconciliation-required";
         }
-        if (
-          Array.isArray(current.safeMetadata.dependentAssignments) &&
-          current.safeMetadata.dependentAssignments.length > 0
-        ) {
-          return "dependent";
-        }
         await this.cancelPendingCredentialMutations(record, storage);
         if (current.state !== "revoking") {
           await this.host.settings.replaceConnection(
@@ -1877,7 +1871,7 @@ export class OllamaCloudUserBackendContribution {
         return "revoking";
       },
     );
-    if (transition === "stale" || transition === "dependent") {
+    if (transition === "stale") {
       return this.finishRecord(record, "failed");
     }
     if (transition === "revoked") return this.finishRecord(record, "applied");

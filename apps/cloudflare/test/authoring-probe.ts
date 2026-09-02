@@ -23,7 +23,12 @@ import type {
   BotIsolateLoader,
   BotIsolateWorkerCode,
 } from "@frockbot/kernel-composition/isolate";
-import type { LlmProvider, LlmStreamEvent } from "@frockbot/kernel-contracts";
+import type {
+  IsolateConnectionV1,
+  IsolateModelBindingV1,
+  LlmProvider,
+  LlmStreamEvent,
+} from "@frockbot/kernel-contracts";
 import {
   createPackageAuthoringHost,
   createR2AuthoringArtifactStore,
@@ -35,7 +40,6 @@ import {
   createR2PackageArtifactStore,
   isolateBindingDigestV1,
   type BotCapabilitiesPropsV1,
-  type IsolateAssignmentV1,
 } from "@frockbot/plugin-shell/backend-isolate";
 import {
   authorshipFailureKey,
@@ -73,7 +77,8 @@ export interface AuthoringProbeTurn {
   botId: string;
   tool: string;
   input: unknown;
-  assignments?: IsolateAssignmentV1[];
+  connections?: IsolateConnectionV1[];
+  model?: IsolateModelBindingV1;
 }
 
 const PROBE_BOOTSTRAP_AT = "2026-08-31T00:00:00.000Z";
@@ -225,7 +230,7 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
     // workers-types cannot infer the generated local RPC stubs.
     const exports = this.ctx.exports as unknown as ProbeExports;
-    const assignments = turn.assignments ?? [];
+    const connections = turn.connections ?? [];
     const host = createShellCompositionHost({
       admitEffect: () => Promise.resolve(true),
       botId: turn.botId,
@@ -248,15 +253,22 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
             props: {
               userId: turn.userId,
               botId: turn.botId,
+              runId: turn.runId,
+              sessionId: input.command.sessionId,
+              turnId: turn.runId,
               generationId: generation.generationId,
               packageId: member.packageId,
-              assignments: structuredClone(assignments),
+              connections: structuredClone(connections),
+              ...(turn.model ? { model: structuredClone(turn.model) } : {}),
+              memory: false,
+              workspace: false,
             },
           }),
-        bindingDigest: await isolateBindingDigestV1(
-          assignments,
-          generation.generationId,
-        ),
+        bindingDigest: await isolateBindingDigestV1({
+          connections,
+          ...(turn.model ? { model: turn.model } : {}),
+          compositionGenerationId: generation.generationId,
+        }),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
       },
     });

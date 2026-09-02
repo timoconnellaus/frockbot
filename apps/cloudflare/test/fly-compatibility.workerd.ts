@@ -60,9 +60,8 @@ describe("production Bot durability in Workerd", () => {
       firstEvents.map((_, index) => index),
     );
 
-    // This Bot follows the User's default model, so its first admitted Turn
-    // claimed its own model Assignment: a client renames it against the
-    // revision it reads, exactly as the hosted client does.
+    // This Bot follows the User's default model. A client renames it against
+    // the revision it reads, exactly as the hosted client does.
     // SAFETY: the generated stub type for `readConfiguration` is too deep for
     // the compiler to instantiate here; this names the one field it reads.
     const settingsRpc = stub as unknown as {

@@ -442,8 +442,7 @@ export class BotTemplateUserBackendContribution {
               },
             }),
       })),
-      hasModelAssignment: settings.model !== undefined,
-      assignmentCount: settings.assignments.length,
+      hasModelSelection: settings.model !== undefined,
       ...(user.catalogGeneration === undefined
         ? {}
         : { sourceCatalogGeneration: user.catalogGeneration }),

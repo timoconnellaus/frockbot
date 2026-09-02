@@ -1,9 +1,3 @@
-import type {
-  CapabilityAssignmentView,
-  ExecutionPackageDefinition,
-  ModelAssignment,
-  UserSettingsViewV1,
-} from "@frockbot/configuration-core";
 import type { Plugin } from "cordis";
 import {
   BotNotFoundError,
@@ -51,28 +45,6 @@ interface Storage extends FlockUserTransaction {
 }
 export interface FlockUserBackendHost {
   storage: Storage;
-  /**
-   * Retained for hosts that materialize a Bot from User state. A new Bot no
-   * longer copies the User default model, so neither seam is called here.
-   */
-  readUserSettings(
-    storage: FlockUserTransaction,
-    userId: string,
-  ): Promise<UserSettingsViewV1>;
-  /**
-   * Immutable Package definitions from the application manifest. Omitted only
-   * by narrow test adapters that intentionally expose no Package authority.
-   */
-  availablePackages?: readonly ExecutionPackageDefinition[];
-  claimInitialModelBinding?(
-    storage: FlockUserTransaction,
-    input: {
-      userId: string;
-      botId: string;
-      generation: string;
-      model: ModelAssignment;
-    },
-  ): Promise<CapabilityAssignmentView | undefined>;
   now?: () => Date;
   random?: () => number;
   commandBotLifecycle(
@@ -187,30 +159,6 @@ export class FlockUserBackendContribution {
           failure: "Bot directory limit reached",
         };
       } else {
-        const user = await this.host.readUserSettings(storage, userId);
-        const installedVersions = new Map(
-          user.packages.flatMap((pkg) =>
-            pkg.state === "installed" ? [[pkg.packageId, pkg.version]] : [],
-          ),
-        );
-        const initialAssignments = (this.host.availablePackages ?? []).flatMap(
-          (pkg, packageIndex) =>
-            installedVersions.get(pkg.packageId) === pkg.version
-              ? pkg.capabilities.flatMap((capability, capabilityIndex) =>
-                  capability.connectionTypes.length === 0 &&
-                  capability.kind !== "model"
-                    ? [
-                        {
-                          assignmentId: `default-${packageIndex}-${capabilityIndex}`,
-                          packageId: pkg.packageId,
-                          capabilityId: capability.id,
-                          state: "enabled" as const,
-                        },
-                      ]
-                    : [],
-                )
-              : [],
-        );
         // A new Bot carries no model of its own: it follows the User's
         // default model dynamically, and claims the Connection's model
         // Capability the first time it resolves its execution context. Only a
@@ -224,8 +172,6 @@ export class FlockUserBackendContribution {
             ? {}
             : { initialDescription: command.description }),
           initialModel: undefined,
-          initialModelBinding: undefined,
-          initialAssignments,
           // The creator is durable history: a Bot the Flock made on another
           // Bot's behalf says so in the registration seed itself.
           ...(command.createdBy

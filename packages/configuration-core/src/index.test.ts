@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  capabilityAssignmentFailureV1,
   ConfigurationDecodeError,
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
@@ -10,7 +9,6 @@ import {
   decodeCompositionGenerationListViewV1,
   decodeCompositionGenerationViewV1,
   decodeRevertCompositionCommandV1,
-  decodeConnectionDependencyRequirementV1,
   decodeConfigurationCommandV1,
   decodeConfigurationQueryV1,
   decodeOperationReceiptV1,
@@ -100,39 +98,30 @@ describe("configuration DTO seam", () => {
     });
   });
 
-  test("decodes exact Assign, Replace, and Unassign commands", () => {
+  test("rejects removed per-Package authority commands", () => {
     const meta = {
       schemaVersion: 1,
       commandId: "operation-1",
       expectedRevision: 2,
       botId: "primary",
     } as const;
-    const assignment = {
-      assignmentId: "mail",
-      packageId: "mail",
-      capabilityId: "send",
-      connectionId: "mail-1",
-    };
-    expect(
+    expect(() =>
       decodeConfigurationCommandV1({
         ...meta,
         type: "bot/replace-capability",
-        assignment,
+        model: {
+          assignmentId: "mail",
+          packageId: "mail",
+          capabilityId: "send",
+          connectionId: "mail-1",
+        },
       }),
-    ).toMatchObject({ type: "bot/replace-capability", assignment });
-    expect(
-      decodeConfigurationCommandV1({
-        ...meta,
-        type: "bot/unassign-capability",
-        assignmentId: "mail",
-      }),
-    ).toMatchObject({ type: "bot/unassign-capability", assignmentId: "mail" });
+    ).toThrow(ConfigurationDecodeError);
     expect(() =>
       decodeConfigurationCommandV1({
         ...meta,
         type: "bot/unassign-capability",
         assignmentId: "mail",
-        assignment,
       }),
     ).toThrow(ConfigurationDecodeError);
   });
@@ -152,28 +141,21 @@ describe("configuration DTO seam", () => {
     ).toMatchObject({ model: { providerModelId } });
   });
 
-  test("decodes atomic model binding and explicit unbinding commands", () => {
+  test("decodes model selection and explicit unbinding as settings", () => {
     expect(
       decodeConfigurationCommandV1({
         schemaVersion: 1,
-        type: "bot/assign-capability",
+        type: "bot/select-model",
         commandId: "bind-model",
         botId: "primary",
         expectedRevision: 2,
-        assignment: {
-          assignmentId: "ollama-model",
-          packageId: "provider-ollama-cloud",
-          capabilityId: "ollama-cloud-models",
-          connectionId: "ollama-work",
-        },
         model: {
           connectionId: "ollama-work",
           providerModelId: "glm-5.3-flash:cloud",
         },
       }),
     ).toMatchObject({
-      type: "bot/assign-capability",
-      assignment: { connectionId: "ollama-work" },
+      type: "bot/select-model",
       model: { providerModelId: "glm-5.3-flash:cloud" },
     });
     expect(
@@ -183,9 +165,8 @@ describe("configuration DTO seam", () => {
         commandId: "unbind-model",
         botId: "primary",
         expectedRevision: 3,
-        assignmentId: "ollama-model",
       }),
-    ).toMatchObject({ type: "bot/unbind-model", assignmentId: "ollama-model" });
+    ).toMatchObject({ type: "bot/unbind-model" });
   });
 
   test("rejects unversioned, malformed, and unknown commands", () => {
@@ -263,7 +244,7 @@ describe("configuration DTO seam", () => {
         ...meta,
         type: "bot/assign-capability",
         botId: "primary",
-        assignment: {
+        model: {
           assignmentId: "gmail",
           packageId: "composio",
           capabilityId: "gmail-tools",
@@ -298,45 +279,6 @@ describe("configuration DTO seam", () => {
       { schemaVersion: 1, type: "bot/get", botId: "primary", extra: true },
     ]) {
       expect(() => decodeConfigurationQueryV1(value)).toThrow(
-        ConfigurationDecodeError,
-      );
-    }
-  });
-
-  test("decodes versioned Connection dependency requirements", () => {
-    expect(
-      decodeConnectionDependencyRequirementV1({
-        schemaVersion: 1,
-        packageId: "composio",
-        packageVersion: "0.0.1",
-        capabilityId: "gmail-tools",
-        connectionTypeIds: ["gmail"],
-      }),
-    ).toEqual({
-      schemaVersion: 1,
-      packageId: "composio",
-      packageVersion: "0.0.1",
-      capabilityId: "gmail-tools",
-      connectionTypeIds: ["gmail"],
-    });
-    for (const value of [
-      {
-        schemaVersion: 1,
-        packageId: "composio",
-        packageVersion: "0.0.1",
-        capabilityId: "gmail-tools",
-        connectionTypeIds: [],
-      },
-      {
-        schemaVersion: 1,
-        packageId: "composio",
-        packageVersion: "0.0.1",
-        capabilityId: "gmail-tools",
-        connectionTypeIds: ["gmail"],
-        extra: true,
-      },
-    ]) {
-      expect(() => decodeConnectionDependencyRequirementV1(value)).toThrow(
         ConfigurationDecodeError,
       );
     }
@@ -388,20 +330,14 @@ describe("configuration DTO seam", () => {
     }
   });
 
-  test("rejects hidden and symbol fields across Assignment seams", () => {
-    const assignment = {
-      assignmentId: "mail",
-      packageId: "mail",
-      capabilityId: "send",
-      connectionId: "mail-1",
-    };
+  test("rejects hidden and symbol fields across Bot settings seams", () => {
     const command = {
       schemaVersion: 1,
-      type: "bot/assign-capability",
+      type: "bot/select-model",
       commandId: "command-1",
       expectedRevision: 0,
       botId: "primary",
-      assignment,
+      model: { connectionId: "model-1", providerModelId: "provider-model-1" },
     };
     const receipt = {
       schemaVersion: 1,
@@ -415,16 +351,6 @@ describe("configuration DTO seam", () => {
       revision: 0,
       profile: { name: "Primary" },
       notifications: { enabled: false },
-      assignments: [],
-      assignmentOperations: [
-        {
-          commandId: "command-1",
-          kind: "assigning",
-          assignmentId: "mail",
-          state: "retrying",
-          target: assignment,
-        },
-      ],
     };
     const rpc = {
       schemaVersion: 1,
@@ -434,7 +360,7 @@ describe("configuration DTO seam", () => {
     };
     for (const [decode, candidate] of [
       [decodeConfigurationCommandV1, command],
-      [decodeConfigurationCommandV1, { ...command, assignment }],
+      [decodeConfigurationCommandV1, command],
       [decodeOperationReceiptV1, receipt],
       [decodeBotSettingsViewV1, view],
       [decodeBotConfigurationExecuteRpcV1, rpc],
@@ -445,19 +371,10 @@ describe("configuration DTO seam", () => {
       const symbol = { ...candidate, [Symbol("extra")]: true };
       expect(() => decode(symbol)).toThrow(ConfigurationDecodeError);
     }
-    const hiddenTarget = { ...assignment };
-    Object.defineProperty(hiddenTarget, "hidden", { value: true });
+    const hiddenModel = { ...command.model };
+    Object.defineProperty(hiddenModel, "hidden", { value: true });
     expect(() =>
-      decodeConfigurationCommandV1({ ...command, assignment: hiddenTarget }),
-    ).toThrow(ConfigurationDecodeError);
-    const symbolTarget = { ...assignment, [Symbol("extra")]: true };
-    expect(() =>
-      decodeBotSettingsViewV1({
-        ...view,
-        assignmentOperations: [
-          { ...view.assignmentOperations[0], target: symbolTarget },
-        ],
-      }),
+      decodeConfigurationCommandV1({ ...command, model: hiddenModel }),
     ).toThrow(ConfigurationDecodeError);
   });
 
@@ -704,16 +621,6 @@ describe("Bot execution-plan authority", () => {
     revision: 4,
     profile: { name: "Primary" },
     notifications: { enabled: false },
-    assignments: [
-      {
-        assignmentId: "gmail-assignment",
-        packageId: "composio",
-        capabilityId: "gmail-tools",
-        connectionId: "gmail-connection",
-        state: "enabled" as const,
-      },
-    ],
-    assignmentOperations: [],
   };
   const packages = [
     {
@@ -784,23 +691,12 @@ describe("Bot execution-plan authority", () => {
         ],
       },
     ];
-    const assignments = [
-      {
-        assignmentId: "ollama-model",
-        packageId: "provider-ollama-cloud",
-        capabilityId: "ollama-cloud-models",
-        connectionId: "ollama-work",
-        state: "enabled" as const,
-      },
-    ];
-
     expect(
       resolveBotModelBindingV1({
         model: {
           connectionId: "ollama-work",
           providerModelId: "glm-5.3-flash:cloud",
         },
-        assignments,
         user,
         packages: modelPackages,
       }),
@@ -815,7 +711,6 @@ describe("Bot execution-plan authority", () => {
           connectionId: "ollama-work",
           providerModelId: "glm-5.3-flash:cloud",
         },
-        assignments,
         user,
         packages: modelPackages.map((pkg) => ({ ...pkg, version: "0.0.2" })),
       }).state,
@@ -826,7 +721,6 @@ describe("Bot execution-plan authority", () => {
           connectionId: "ollama-work",
           providerModelId: "new-model:cloud",
         },
-        assignments,
         user,
         packages: modelPackages,
       }).state,
@@ -834,20 +728,19 @@ describe("Bot execution-plan authority", () => {
     expect(
       resolveBotModelBindingV1({
         model: {
-          connectionId: "ollama-work",
+          connectionId: "missing",
           providerModelId: "glm-5.3-flash:cloud",
         },
-        assignments: [],
         user,
         packages: modelPackages,
       }),
     ).toMatchObject({
       state: "unavailable",
-      failure: "Bot is not assigned the Connection model capability",
+      failure: "Connection is unavailable",
     });
   });
 
-  test("requires an enabled installation, declared capability, and ready typed Connection", () => {
+  test("projects only the Bot model setting into its execution plan", () => {
     const user = {
       schemaVersion: 1 as const,
       revision: 2,
@@ -870,55 +763,12 @@ describe("Bot execution-plan authority", () => {
         },
       ],
     };
-    expect(
-      resolveBotExecutionPlanV1({ bot, user, packages }).assignments[0]?.state,
-    ).toBe("enabled");
-    expect(
-      resolveBotExecutionPlanV1({
-        bot: {
-          ...bot,
-          assignments: [{ ...bot.assignments[0]!, capabilityId: "anything" }],
-        },
-        user,
-        packages,
-      }).assignments[0]?.state,
-    ).toBe("unavailable");
-    expect(
-      capabilityAssignmentFailureV1({
-        assignment: { ...bot.assignments[0]!, connectionId: undefined },
-        user,
-        packages,
-      }),
-    ).toContain("requires a Connection");
-    expect(
-      capabilityAssignmentFailureV1({
-        assignment: { ...bot.assignments[0]!, capabilityId: "anything" },
-        user,
-        packages,
-      }),
-    ).toContain("is not declared");
-    expect(
-      resolveBotExecutionPlanV1({
-        bot,
-        user: {
-          ...user,
-          packages: [{ ...user.packages[0]!, state: "disabled" }],
-        },
-        packages,
-      }).assignments[0]?.state,
-    ).toBe("unavailable");
-    expect(
-      resolveBotExecutionPlanV1({
-        bot,
-        user: {
-          ...user,
-          connections: [
-            { ...user.connections[0]!, connectionTypeId: "calendar" },
-          ],
-        },
-        packages,
-      }).assignments[0]?.state,
-    ).toBe("unavailable");
+    expect(resolveBotExecutionPlanV1({ bot, user, packages })).toEqual({
+      schemaVersion: 1,
+      botId: "primary",
+      revision: 4,
+      model: undefined,
+    });
   });
 });
 
@@ -1152,19 +1002,9 @@ describe("effective Bot model resolution", () => {
         : {}),
     };
   }
-  const assignments = [
-    {
-      assignmentId: "ollama-model",
-      packageId: "provider-ollama-cloud",
-      capabilityId: "ollama-cloud-models",
-      connectionId: "ollama-work",
-      state: "enabled" as const,
-    },
-  ];
-
   test("follows the User default when the Bot has no model of its own", () => {
     const effective = resolveEffectiveBotModelV1({
-      bot: { assignments },
+      bot: {},
       user: user({
         connectionId: "ollama-work",
         providerModelId: "llama-3:cloud",
@@ -1186,7 +1026,6 @@ describe("effective Bot model resolution", () => {
           connectionId: "ollama-work",
           providerModelId: "glm-5.3-flash:cloud",
         },
-        assignments,
       },
       user: user({
         connectionId: "ollama-work",
@@ -1202,16 +1041,16 @@ describe("effective Bot model resolution", () => {
   test("reports no model when neither the Bot nor the User names one", () => {
     expect(
       resolveEffectiveBotModelV1({
-        bot: { assignments },
+        bot: {},
         user: user(),
         packages: modelPackages,
       }),
     ).toEqual({ source: "none" });
   });
 
-  test("keeps the default fail-closed until the Bot claims the Assignment", () => {
+  test("resolves the default directly through the User's ready Connection", () => {
     const effective = resolveEffectiveBotModelV1({
-      bot: { assignments: [] },
+      bot: {},
       user: user({
         connectionId: "ollama-work",
         providerModelId: "llama-3:cloud",
@@ -1219,10 +1058,7 @@ describe("effective Bot model resolution", () => {
       packages: modelPackages,
     });
     expect(effective.source).toBe("default");
-    expect(effective.binding).toMatchObject({
-      state: "unavailable",
-      failure: "Bot is not assigned the Connection model capability",
-    });
+    expect(effective.binding).toMatchObject({ state: "ready" });
   });
 });
 

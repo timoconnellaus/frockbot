@@ -166,8 +166,6 @@ describe("BotState Ollama execution", () => {
     };
     const leases: Array<Record<string, unknown>> = [];
     const settlements: Array<Record<string, unknown>> = [];
-    const dependencyEffects: string[] = [];
-    const claimedDependencies = new Set<string>();
     const rpc = {
       getBotRegistration: () =>
         Promise.resolve({
@@ -179,16 +177,6 @@ describe("BotState Ollama execution", () => {
             connectionId: "ollama-1",
             providerModelId: "glm-5.3-flash:cloud",
           },
-          initialModelBinding: {
-            assignment: {
-              assignmentId: "create-primary",
-              packageId: "provider-ollama-cloud",
-              capabilityId: "ollama-cloud-models",
-              connectionId: "ollama-1",
-              state: "enabled" as const,
-            },
-            generation: "create-primary",
-          },
           sheep: randomSheepRecipeV1(() => 0),
         }),
       readConfiguration: () => Promise.resolve(structuredClone(user)),
@@ -196,51 +184,6 @@ describe("BotState Ollama execution", () => {
         Promise.resolve({ schemaVersion: 1 as const, revision: 0, bots: [] }),
       getConnection: () =>
         Promise.resolve(structuredClone(user.connections[0])),
-      executeConnectionDependency: (request: {
-        action: string;
-        generation: string;
-      }) => {
-        if (request.action === "claim") {
-          dependencyEffects.push("claim");
-          claimedDependencies.add(request.generation);
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "claimed" as const,
-          });
-        }
-        if (request.action === "acknowledge") {
-          dependencyEffects.push("acknowledge");
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "acknowledged" as const,
-          });
-        }
-        if (request.action === "read") {
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: claimedDependencies.has(request.generation)
-              ? ("acknowledged" as const)
-              : ("absent" as const),
-          });
-        }
-        claimedDependencies.delete(request.generation);
-        return Promise.resolve({
-          schemaVersion: 1 as const,
-          status: "released" as const,
-        });
-      },
-      claimConnectionDependency: () => {
-        dependencyEffects.push("claim");
-        return Promise.resolve(true);
-      },
-      acknowledgeConnectionDependency: () => {
-        dependencyEffects.push("acknowledge");
-        return Promise.resolve(true);
-      },
-      compensateConnectionDependency: () => {
-        dependencyEffects.push("compensate");
-        return Promise.resolve(true);
-      },
       leaseModelCredential: (input: unknown) => {
         leases.push(input as Record<string, unknown>);
         const effectId = (input as { effectId: string }).effectId;
@@ -322,16 +265,10 @@ describe("BotState Ollama execution", () => {
         botId: "primary",
         command: {
           schemaVersion: 1,
-          type: "bot/assign-capability",
+          type: "bot/select-model",
           commandId: "replace-initial-model",
           botId: "primary",
           expectedRevision: 0,
-          assignment: {
-            assignmentId: "replacement-model",
-            packageId: "provider-ollama-cloud",
-            capabilityId: "ollama-cloud-models",
-            connectionId: "ollama-1",
-          },
           model: {
             connectionId: "ollama-1",
             providerModelId: "glm-5.3-flash:cloud",
@@ -353,12 +290,6 @@ describe("BotState Ollama execution", () => {
 
     expect(first.text).toBe("Ollama reply");
     expect(second.text).toBe("Ollama reply");
-    expect(dependencyEffects).toEqual([
-      "acknowledge",
-      "acknowledge",
-      "claim",
-      "acknowledge",
-    ]);
     expect(requests).toHaveLength(2);
     expect(leases).toHaveLength(2);
     expect(settlements).toHaveLength(2);
