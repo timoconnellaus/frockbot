@@ -81,7 +81,7 @@ export interface BotIsolateHostOptions {
   loader: BotIsolateLoader;
   artifacts: BotIsolateArtifactStore;
   /** Where the isolate's tools are registered — the kernel's tool surface. */
-  tools: ToolRegistration;
+  tools: Pick<ToolRegistration, "register">;
   userId: string;
   botId: string;
   sessionId: string;

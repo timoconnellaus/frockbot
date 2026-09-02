@@ -1,6 +1,8 @@
 import { type Context, Service } from "cordis";
 import type {
   ModelBindingSnapshot,
+  LoopStepContinuationV1,
+  LlmMessage,
   NormalizedModelRequest,
   Session,
   SkillRefV1,
@@ -109,6 +111,22 @@ declare module "cordis" {
       signal: AbortSignal,
       next: () => Promise<NormalizedModelRequest>,
     ) => Promise<NormalizedModelRequest>;
+    "agent/message-window": (
+      agent: Agent,
+      messages: LlmMessage[],
+      turn: number,
+      step: number,
+      signal: AbortSignal,
+      next: () => Promise<LlmMessage[]>,
+    ) => Promise<LlmMessage[]>;
+    "agent/tool-exposure": (
+      agent: Agent,
+      tools: import("@frockbot/kernel-contracts").ToolSchema[],
+      turn: number,
+      step: number,
+      signal: AbortSignal,
+      next: () => Promise<import("@frockbot/kernel-contracts").ToolSchema[]>,
+    ) => Promise<import("@frockbot/kernel-contracts").ToolSchema[]>;
     "agent/request-error": (
       agent: Agent,
       error: unknown,
@@ -121,6 +139,14 @@ declare module "cordis" {
       outcome: "completed" | "not-started",
     ) => Promise<void>;
     "agent/turn-stopping": (agent: Agent, turn: number) => Promise<void>;
+    "agent/step-continuation": (
+      agent: Agent,
+      decision: LoopStepContinuationV1,
+      turn: number,
+      step: number,
+      signal: AbortSignal,
+      next: () => Promise<LoopStepContinuationV1>,
+    ) => Promise<LoopStepContinuationV1>;
     "agent/cancel-requested": (
       agent: Agent,
       reason: "user" | "shutdown",
