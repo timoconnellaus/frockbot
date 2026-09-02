@@ -183,6 +183,35 @@ describe("stored configuration migrations", () => {
       ]),
     ).toBe(versionMismatch);
 
+    const remoteCatalogInstall = {
+      ...versionMismatch,
+      packages: [
+        {
+          packageId: "remote-provider",
+          version: "1.2.3",
+          state: "installed" as const,
+          provenance: "catalog" as const,
+          catalogId: "remote-provider",
+          catalogGeneration: "generation-1",
+        },
+      ],
+      connections: [
+        {
+          connectionId: "remote-connection",
+          packageId: "remote-provider",
+          connectionTypeId: "remote-account",
+          displayName: "Remote",
+          state: "ready" as const,
+          safeMetadata: {},
+        },
+      ],
+    };
+    expect(
+      migrateStoredUserSettingsV1(remoteCatalogInstall, [
+        { packageId: "provider", version: "0.0.2" },
+      ]),
+    ).toBe(remoteCatalogInstall);
+
     const malformedPlatform = {
       ...versionMismatch,
       platformModel: {

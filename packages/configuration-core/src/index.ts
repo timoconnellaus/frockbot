@@ -1862,13 +1862,187 @@ const PRE_ACCOUNT_WIDE_CONNECTION_METADATA_FIELDS_V1 = [
 ] as const;
 
 /**
+ * The immutable Package facts the stored User-settings migration needs. The
+ * migration deliberately knows no Package names: absence from this Catalog is
+ * what retires an installation, and these dependency edges are what identify
+ * an enablement state an older writer could not have represented safely.
+ */
+export interface StoredUserSettingsPackageV1 {
+  packageId: string;
+  version: string;
+  dependencies?: Readonly<Record<string, string>>;
+}
+
+function migrateCatalogRelativeUserSettingsV1(
+  settings: Record<string, unknown>,
+  packages: readonly StoredUserSettingsPackageV1[],
+): Record<string, unknown> {
+  const availableVersions = new Map(
+    packages.map((pkg) => [`${pkg.packageId}\u0000${pkg.version}`, pkg]),
+  );
+  const availablePackageIds = new Set(packages.map((pkg) => pkg.packageId));
+  const storedPackages = storedDataValueV1(settings, "packages");
+  const storedConnections = storedDataValueV1(settings, "connections");
+  if (!Array.isArray(storedPackages) || !Array.isArray(storedConnections)) {
+    return settings;
+  }
+
+  let changed = false;
+  const retiredFirstPartyPackageIds = new Set<string>();
+  let installations = storedPackages.filter((storedInstallation) => {
+    const installation = storedPlainRecordV1(storedInstallation);
+    if (!installation) return true;
+    const packageId = storedDataValueV1(installation, "packageId");
+    const version = storedDataValueV1(installation, "version");
+    const provenance = storedDataValueV1(installation, "provenance");
+    if (typeof packageId !== "string" || typeof version !== "string") {
+      return true;
+    }
+    // The facts supplied here are the running application's first-party
+    // Catalog. Remote Catalog installations have a separate pinned authority
+    // and must never be inferred retired from absence here.
+    if (provenance === "catalog") return true;
+    // A different immutable version remains a visible, repairable Catalog
+    // mismatch. Only an id absent from the Catalog proves that the Package was
+    // retired and that its row is now orphaned durable state.
+    const retained = availablePackageIds.has(packageId);
+    if (!retained) retiredFirstPartyPackageIds.add(packageId);
+    changed ||= !retained;
+    return retained;
+  });
+
+  // Disable inconsistent installed dependents to the least-authority state.
+  // Iterate to a fixed point so A -> B -> missing C leaves both A and B off.
+  for (;;) {
+    const enabledIds = new Set(
+      installations.flatMap((storedInstallation) => {
+        const installation = storedPlainRecordV1(storedInstallation);
+        const packageId = installation
+          ? storedDataValueV1(installation, "packageId")
+          : undefined;
+        return typeof packageId === "string" &&
+          storedDataValueV1(installation!, "state") === "installed"
+          ? [packageId]
+          : [];
+      }),
+    );
+    let disabledInPass = false;
+    installations = installations.map((storedInstallation) => {
+      const installation = storedPlainRecordV1(storedInstallation);
+      if (
+        !installation ||
+        storedDataValueV1(installation, "state") !== "installed"
+      ) {
+        return storedInstallation;
+      }
+      const packageId = storedDataValueV1(installation, "packageId");
+      const version = storedDataValueV1(installation, "version");
+      if (typeof packageId !== "string" || typeof version !== "string") {
+        return storedInstallation;
+      }
+      const pkg = availableVersions.get(`${packageId}\u0000${version}`);
+      if (
+        !pkg ||
+        Object.keys(pkg.dependencies ?? {}).every((id) => enabledIds.has(id))
+      ) {
+        return storedInstallation;
+      }
+      changed = true;
+      disabledInPass = true;
+      return cloneStoredRecordV1(installation, {
+        state: "disabled",
+        failure: undefined,
+      });
+    });
+    if (!disabledInPass) break;
+  }
+
+  const connections = storedConnections.filter((storedConnection) => {
+    const connection = storedPlainRecordV1(storedConnection);
+    if (!connection) return true;
+    const packageId = storedDataValueV1(connection, "packageId");
+    if (typeof packageId !== "string") return true;
+    // Connections ordinarily outlive uninstalls. This one is removed only
+    // because the migration retired its first-party owning installation in
+    // the same pass, which is the evidence that it is the requested orphan.
+    const retained = !retiredFirstPartyPackageIds.has(packageId);
+    changed ||= !retained;
+    return retained;
+  });
+
+  let platformModel = storedDataValueV1(settings, "platformModel");
+  if (platformModel !== undefined) {
+    let binding: ModelBindingV1 | undefined;
+    try {
+      binding = decodeModelBindingV1(platformModel);
+    } catch {
+      // This migration only repairs a valid old binding that is unavailable
+      // against the current Catalog. Malformed current data must still reach
+      // the exact decoder and fail visibly instead of being laundered away.
+    }
+    const connectionId = binding?.connectionId;
+    const connection =
+      typeof connectionId === "string"
+        ? connections.find((storedConnection) => {
+            const candidate = storedPlainRecordV1(storedConnection);
+            return (
+              candidate &&
+              storedDataValueV1(candidate, "connectionId") === connectionId
+            );
+          })
+        : undefined;
+    const connectionRecord = storedPlainRecordV1(connection);
+    const ownerId = connectionRecord
+      ? storedDataValueV1(connectionRecord, "packageId")
+      : undefined;
+    const owner =
+      typeof ownerId === "string"
+        ? installations.find((storedInstallation) => {
+            const candidate = storedPlainRecordV1(storedInstallation);
+            return (
+              candidate &&
+              storedDataValueV1(candidate, "packageId") === ownerId &&
+              storedDataValueV1(candidate, "state") === "installed"
+            );
+          })
+        : undefined;
+    const ownerRecord = storedPlainRecordV1(owner);
+    const ownerVersion = ownerRecord
+      ? storedDataValueV1(ownerRecord, "version")
+      : undefined;
+    const resolvable =
+      connectionRecord !== undefined &&
+      storedDataValueV1(connectionRecord, "state") === "ready" &&
+      typeof ownerId === "string" &&
+      typeof ownerVersion === "string" &&
+      availableVersions.has(`${ownerId}\u0000${ownerVersion}`);
+    if (binding && !resolvable) {
+      changed = true;
+      platformModel = undefined;
+    }
+  }
+
+  if (!changed) return settings;
+  return cloneStoredRecordV1(
+    settings,
+    { packages: installations, connections },
+    platformModel === undefined && Object.hasOwn(settings, "platformModel")
+      ? ["platformModel"]
+      : [],
+  );
+}
+
+/**
  * Migrates one raw User settings record across known durable shapes before the
  * current exact-field decoder sees it. Commit 1571b62 removed the model
  * template and commit d6730ad removed the Connection dependency ledger along
  * with the Assignment feature; migration drops those fields without
  * interpreting them.
  */
-export function migrateStoredUserSettingsV1(stored: unknown): unknown {
+export function migrateStoredUserSettingsV1(
+  stored: unknown,
+  packages?: readonly StoredUserSettingsPackageV1[],
+): unknown {
   const settings = storedPlainRecordV1(stored);
   if (!settings || storedDataValueV1(settings, "schemaVersion") !== 1) {
     return stored;
@@ -1909,12 +2083,16 @@ export function migrateStoredUserSettingsV1(stored: unknown): unknown {
     }
   }
 
-  if (!changed) return stored;
-  return cloneStoredRecordV1(
-    settings,
-    connections === storedConnections ? {} : { connections },
-    removedSettingsFields,
-  );
+  const migrated = changed
+    ? cloneStoredRecordV1(
+        settings,
+        connections === storedConnections ? {} : { connections },
+        removedSettingsFields,
+      )
+    : settings;
+  return packages
+    ? migrateCatalogRelativeUserSettingsV1(migrated, packages)
+    : migrated;
 }
 
 export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
