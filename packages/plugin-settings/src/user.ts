@@ -529,7 +529,16 @@ export class UserSettingsBackendContribution {
         ) {
           return this.readSnapshot(transaction);
         }
-        const current = await this.readSnapshot(transaction);
+        const stored = await transaction.get<unknown>(STATE_KEY);
+        const current =
+          stored === undefined
+            ? initialState()
+            : decodeUserSettingsViewV1(
+                migrateStoredUserSettingsV1(
+                  stored,
+                  this.storedSettingsPackages,
+                ),
+              );
         const installedPackageIds = new Set(
           current.packages.map((pkg) => pkg.packageId),
         );
@@ -818,12 +827,7 @@ export class UserSettingsBackendContribution {
     const current =
       storedSettings === undefined
         ? initialState()
-        : decodeUserSettingsViewV1(
-            migrateStoredUserSettingsV1(
-              storedSettings,
-              this.storedSettingsPackages,
-            ),
-          );
+        : decodeUserSettingsViewV1(migrateStoredUserSettingsV1(storedSettings));
     if (command.type === "user/set-package-enabled" && command.enabled) {
       const installed = current.packages.find(
         (pkg) => pkg.packageId === command.packageId,
@@ -892,9 +896,7 @@ export class UserSettingsBackendContribution {
     const stored = await storage.get<unknown>(STATE_KEY);
     return stored === undefined
       ? initialState()
-      : decodeUserSettingsViewV1(
-          migrateStoredUserSettingsV1(stored, this.storedSettingsPackages),
-        );
+      : decodeUserSettingsViewV1(migrateStoredUserSettingsV1(stored));
   }
 
   async read(
