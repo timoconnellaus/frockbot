@@ -70,6 +70,7 @@ function mountHostedProvider() {
   const calls: Array<[string, string | undefined, string | undefined]> = [];
   const runtime = new FakeRuntime();
   let phase: Phase = "idle";
+  let hostUpdating = false;
   let controlHeld = false;
   let renewFails = false;
   let state: { value: ComputerState } | undefined;
@@ -85,7 +86,9 @@ function mountHostedProvider() {
             type:
               "connect" | "takeControl" | "releaseControl" | "refreshViewer";
           };
-          if (command.type === "connect") phase = "ready";
+          if (command.type === "connect") {
+            phase = hostUpdating ? "updating" : "ready";
+          }
           if (command.type === "takeControl") {
             phase = "human-control";
             controlHeld = true;
@@ -122,7 +125,9 @@ function mountHostedProvider() {
               : phase === "updating"
                 ? "Updating the Computer runtime"
                 : "Computer ready",
-          ...(phase === "idle" || phase === "disconnected"
+          ...(phase === "idle" ||
+          phase === "disconnected" ||
+          phase === "updating"
             ? {}
             : {
                 viewerSession: {
@@ -174,6 +179,10 @@ function mountHostedProvider() {
     },
     setUpdating() {
       phase = "updating";
+      hostUpdating = true;
+    },
+    setReady() {
+      hostUpdating = false;
     },
     dispose() {
       if (Array.isArray(disposers)) {
@@ -235,7 +244,7 @@ describe("hosted Computer provider", () => {
     mounted.dispose();
   });
 
-  test("an updating strip click only expands the progress view", async () => {
+  test("an updating strip click rejoins the update and lands on ready when it finishes", async () => {
     const mounted = mountHostedProvider();
     await flush();
     mounted.setUpdating();
@@ -246,14 +255,35 @@ describe("hosted Computer provider", () => {
       message: "Updating the Computer runtime",
       expanded: false,
     });
+    // A collapsed strip never asks the host anything while it updates.
+    expect(postedTypes(mounted.calls)).toEqual([]);
 
+    // Opening rejoins: the host still reports the update, so the phase holds
+    // and the progress view is what expands.
     await mounted.state.openViewer();
-
     expect(mounted.state).toMatchObject({
       phase: "updating",
       expanded: true,
+      viewerUrl: undefined,
     });
-    expect(postedTypes(mounted.calls)).toEqual([]);
+    expect(postedTypes(mounted.calls)).toEqual(["connect"]);
+
+    // Every poll while open asks again, so the durable `updating` record is
+    // not the last word once the host has finished.
+    mounted.setReady();
+    mounted.runtime.tick(PROJECTION_POLL_INTERVAL_MS);
+    await flush();
+    expect(postedTypes(mounted.calls)).toEqual(["connect", "connect"]);
+    expect(mounted.state).toMatchObject({
+      phase: "ready",
+      expanded: true,
+      viewerUrl: "https://viewer.invalid/secret#view_only=1",
+    });
+
+    // Once ready, polls go back to reading only.
+    mounted.runtime.tick(PROJECTION_POLL_INTERVAL_MS);
+    await flush();
+    expect(postedTypes(mounted.calls)).toEqual(["connect", "connect"]);
     mounted.dispose();
   });
 

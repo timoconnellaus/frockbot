@@ -1269,7 +1269,10 @@ export class FlySpriteComputer {
         : {}),
       display: opened.display ?? "",
       directory: `agent-data/agents/${layout.key}`,
-      ...(opened.provisioning
+      // A run the host finished inside this open is history, not progress.
+      // Reporting its final "complete" label as an update would leave the Bot
+      // authority holding `updating` for a Computer that is already current.
+      ...(opened.provisioning && opened.provisioning.status === "running"
         ? { message: provisioningMessage(opened.provisioning) }
         : {}),
     };

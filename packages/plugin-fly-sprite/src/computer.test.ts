@@ -178,7 +178,7 @@ describe("Fly Sprite computer", () => {
     ]);
   });
 
-  test("describes an in-place runtime update in the provider message", async () => {
+  test("describes an in-place runtime update still running in the provider message", async () => {
     const host = fakeHost();
     host.provisioning = {
       kind: "update",
@@ -186,7 +186,7 @@ describe("Fly Sprite computer", () => {
       label: "Updating the Computer runtime",
       index: 1,
       total: 2,
-      status: "complete",
+      status: "running",
       resumed: false,
     };
 
@@ -201,6 +201,30 @@ describe("Fly Sprite computer", () => {
     expect(connected?.message).toBe(
       "Updating the Computer: Updating the Computer runtime",
     );
+  });
+
+  test("an update the host completed inside the open is ready, not updating", async () => {
+    const host = fakeHost();
+    host.provisioning = {
+      kind: "update",
+      phase: "ready",
+      label: "the Computer update is complete",
+      index: 2,
+      total: 2,
+      status: "complete",
+      resumed: false,
+    };
+
+    const provider = new FlySpriteComputerProvider(attach(host));
+    const computer = await provider.open(
+      { userId: "owner" },
+      { botId: "general" },
+      { providerId: "fly-sprite", generation: 1 },
+    );
+    const connected = await computer.presence?.connect();
+
+    expect(connected?.url).toBeTruthy();
+    expect(connected?.message).toBeUndefined();
   });
 
   test("an unconfigured Computer refuses rather than pretending", async () => {

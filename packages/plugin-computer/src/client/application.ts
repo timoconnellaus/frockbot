@@ -163,6 +163,16 @@ export function createComputerClientPlugin(
       projectionPoll = runtime.setInterval(() => {
         const selectedBotId = shell.value.activeBotId;
         if (!selectedBotId || !runtime.isVisible()) return;
+        // The `updating` record is written when the host refused a connect
+        // mid-update; it only changes when someone connects again. While the
+        // User has the Computer open, rejoin the update each poll so the
+        // viewer arrives the moment the host finishes (P4).
+        if (machine.phase === "updating" && machine.expanded) {
+          void execute("connect").catch(() => {
+            // A refusal keeps the updating phase; the next poll asks again.
+          });
+          return;
+        }
         void load(selectedBotId).catch((error) =>
           apply({ type: "failed", message: errorMessage(error) }),
         );
@@ -234,9 +244,18 @@ export function createComputerClientPlugin(
 
     async function openViewer(): Promise<void> {
       if (machine.expanded) return;
-      const wake = machine.phase === "idle";
+      // Idle wakes. Updating rejoins: the host either hands back the viewer
+      // because the update has finished, or refuses again with its phase.
+      const wake = machine.phase === "idle" || machine.phase === "updating";
       apply({ type: "viewer-expanded" });
-      if (wake) await connect("connect-requested");
+      if (!wake) return;
+      if (machine.phase === "updating") {
+        await execute("connect").catch(() => {
+          // Still updating; the projection poll keeps rejoining.
+        });
+        return;
+      }
+      await connect("connect-requested");
     }
 
     async function closeViewer(): Promise<void> {
