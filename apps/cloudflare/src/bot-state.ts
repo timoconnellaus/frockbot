@@ -347,7 +347,9 @@ export class BotState extends DurableObject<BotStateEnv> {
                     storage: this.ctx.storage,
                     materializeSettings: async (registration, userId) => {
                       if (!shell)
-                        throw new Error("Shell Bot Contribution is unavailable");
+                        throw new Error(
+                          "Shell Bot Contribution is unavailable",
+                        );
                       await shell.materializeSettings(
                         { userId, botId: registration.botId },
                         {
@@ -362,7 +364,9 @@ export class BotState extends DurableObject<BotStateEnv> {
                     },
                     archiveEligible: (storage) => {
                       if (!shell)
-                        throw new Error("Shell Bot Contribution is unavailable");
+                        throw new Error(
+                          "Shell Bot Contribution is unavailable",
+                        );
                       return shell.archiveEligible(storage);
                     },
                   },
