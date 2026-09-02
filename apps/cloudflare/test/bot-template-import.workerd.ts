@@ -33,7 +33,6 @@ interface SettingsRpc {
   readConfiguration(input: unknown): Promise<{
     revision: number;
     packages: { packageId: string; catalogId?: string }[];
-    connections: { connectionId: string }[];
   }>;
 }
 
@@ -174,6 +173,7 @@ describe("importing a Bot template in workerd", () => {
     const importerId = `tpl-importer-${crypto.randomUUID()}`;
     const shareId = await publishedShare(ownerId, "budget");
     await provisionBot({ userId: importerId, botId: "importer-home" });
+
     const planned = await plan(importerId, shareId);
     const applied = await apply(importerId);
     expect(applied.status).toBe("applied");
@@ -206,41 +206,32 @@ describe("importing a Bot template in workerd", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  test("creates no Connection and keeps the importer's model setting", async () => {
+  test("keeps the imported Bot on account-shaped configuration", async () => {
     await seedCatalog();
     const ownerId = `tpl-owner-${crypto.randomUUID()}`;
     const importerId = `tpl-importer-${crypto.randomUUID()}`;
     const shareId = await publishedShare(ownerId, "budget");
     await provisionBot({ userId: importerId, botId: "importer-home" });
-    const connectionsBefore = (
-      await user(importerId).readConfiguration({
-        schemaVersion: 1,
-        userId: importerId,
-      })
-    ).connections.map((connection) => connection.connectionId);
 
     const planned = await plan(importerId, shareId);
     await apply(importerId);
 
     // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not
     // represented by workers-types.
-    const settingsOf = async (botId: string): Promise<{ model?: unknown }> =>
+    const settingsOf = async (
+      botId: string,
+    ): Promise<{ packageValues: Record<string, Record<string, unknown>> }> =>
       (
         env.BOT_STATES.getByName(`${importerId}:${botId}`) as unknown as {
-          readConfiguration(input: unknown): Promise<{ model?: unknown }>;
+          readConfiguration(input: unknown): Promise<{
+            packageValues: Record<string, Record<string, unknown>>;
+          }>;
         }
       ).readConfiguration({ schemaVersion: 1, userId: importerId, botId });
     const botSettings = await settingsOf(planned.botId);
-    // The Bot follows its User's default model like any newly created Bot, and
-    // the template neither replaces that setting nor imports a Connection.
+    // The imported Bot follows the User's model and starts with the same
+    // Package-scoped Bot settings as a Bot created directly by that User.
     const ownBot = await settingsOf("importer-home");
-    expect(botSettings.model).toEqual(ownBot.model);
-    const importer = await user(importerId).readConfiguration({
-      schemaVersion: 1,
-      userId: importerId,
-    });
-    expect(
-      importer.connections.map((connection) => connection.connectionId),
-    ).toEqual(connectionsBefore);
+    expect(botSettings.packageValues).toEqual(ownBot.packageValues);
   });
 });

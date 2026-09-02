@@ -65,18 +65,16 @@ export interface ShellIsolateMountOptions {
   turnId: string;
   loader: BotIsolateLoader;
   artifacts: BotIsolateArtifactStore;
-  /** Reads the exact manifest whose hash the member records. */
-  manifestFor(member: CompositionMemberV1): Promise<unknown>;
   /**
    * Mints the loopback `CAPABILITIES` service binding for one Package —
    * `ctx.exports.BotCapabilities({ props })` in the Durable Object.
    */
   capabilitiesFor(member: CompositionMemberV1): BotCapabilitiesStub;
   /**
-   * Content address of the Bot authority baked into this isolate — Connection
-   * ids and generations, model binding, and the Composition generation whose `CAPABILITIES`
-   * stub is baked into its `env`. Required: it is what keeps a cached isolate
-   * from answering under a stale authority.
+   * Content address of the User-enabled bindings this isolate is granted — the
+   * enabled set *and* the Composition generation whose `CAPABILITIES` stub is
+   * baked into its `env`. Required: it is what keeps a cached isolate from
+   * answering under stale authority (ADR 0019).
    */
   bindingDigest: string;
   compatibilityDate: string;
@@ -179,27 +177,12 @@ export function createShellCompositionHost(
             loader: isolate.loader,
             artifacts: isolate.artifacts,
             tools: runtime.root.tools,
-            loop: runtime.root,
             userId: isolate.userId,
             botId: options.botId,
             sessionId: options.sessionId,
             runId: isolate.runId,
             turnId: isolate.turnId,
             generationId: generation.generationId,
-            turnType: options.turnType ?? "chat",
-            ...(options.subagentRole === undefined
-              ? {}
-              : { subagentRole: options.subagentRole }),
-            recordHookFailure: async (failure) => {
-              const session = runtime.root.sessions.get(options.sessionId);
-              if (!session) {
-                throw new Error(
-                  `session "${options.sessionId}" is unavailable for hook failure recording`,
-                );
-              }
-              session.append({ type: "package/hook-failed", ...failure });
-              await session.flush();
-            },
             capabilities: isolate.capabilitiesFor(member),
             compatibilityDate: isolate.compatibilityDate,
             bindingDigest: isolate.bindingDigest,
@@ -209,9 +192,8 @@ export function createShellCompositionHost(
               : { deadlineMs: isolate.deadlineMs }),
           });
           // Mount and health-check are one guarded phase (Worker Loader spike).
-          const storedManifest = await isolate.manifestFor(member);
           const prepared = await host.prepare(
-            await botIsolatePackageDescriptorV1(member, storedManifest),
+            botIsolatePackageDescriptorV1(member),
           );
           if (!prepared) {
             failures.push({

@@ -30,7 +30,6 @@ export const TEMPLATE_OMISSION_REASONS_V1 = [
   "first-party-package",
   "package-values",
   "connection",
-  "model",
   "memory",
   "private-network-server",
 ] as const;

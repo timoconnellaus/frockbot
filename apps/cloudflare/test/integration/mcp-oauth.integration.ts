@@ -213,7 +213,7 @@ describe("connecting an OAuth-protected MCP server", () => {
     expect(afterConnect.pkceRejections).toBe(0);
     expect(afterConnect.tokenResource).toBe(MCP_OAUTH_ENDPOINT);
 
-    // 4. The ready Connection's tools reach every Bot on its next Turn.
+    // 4. The enabled Connection's tools reach every Bot on its next Turn.
     expect(
       (await runTurn(userId, botId, "hello", "mcp-oauth-turn-1")).status,
     ).toBe(200);
@@ -287,7 +287,7 @@ describe("connecting an OAuth-protected MCP server", () => {
     expect(response.status).toBe(400);
     expect((await ledger()).codeExchanges).toBe(before.codeExchanges);
     // And nothing was created for anyone: this User holds only the ambient
-    // Workers AI Connection its first configuration read bootstraps, and no
+    // Flock AI Connection its first configuration read bootstraps, and no
     // MCP Connection at all.
     expect(
       (await readUserSettings(userId)).connections.filter(

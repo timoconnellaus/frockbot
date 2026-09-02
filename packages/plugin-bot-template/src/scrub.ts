@@ -17,10 +17,10 @@
 //   Memory, transcripts, unread state, Computer files  a template is
 //     public-shareable and Memory is the User's facts under a durable root
 //     (ADR 0015 records the divergence from GrokBot's `memory:[…]`).
-//   Connections, `connectionId`, `safeMetadata`  A template must not inherit a
-//     User's accounts; the importing User makes their own Connections.
+//   Connections, `connectionId`, `safeMetadata`  Connections belong to the
+//     importing User and cannot cross Users.
 //   `PackageInstallationView.values`  setup fields may hold keys.
-//   The model setting  it names a Connection.
+//   Bot-scoped Package values  they may name a Connection.
 import {
   MAX_TEMPLATE_ROUTINE_PROMPT_BYTES_V1,
   MAX_TEMPLATE_SKILL_BODY_BYTES_V1,
@@ -122,8 +122,6 @@ export interface TemplateSourceV1 {
   routines: readonly TemplateRoutineCandidateV1[];
   packages: readonly TemplatePackageCandidateV1[];
   connections: readonly TemplateConnectionCandidateV1[];
-  /** True when the Bot has a model selection; it names a Connection, so it goes. */
-  hasModelSelection?: boolean;
   sourceCatalogGeneration?: string;
 }
 
@@ -431,7 +429,6 @@ export function buildBotTemplateV1(
   source: TemplateSourceV1,
 ): TemplateBuildResultV1 {
   const omissions = new Omissions();
-  if (source.hasModelSelection) omissions.add("model");
   // Memory is never read, so there is nothing to count; the omission is
   // recorded unconditionally because it is the one a User most needs told.
   omissions.add("memory");

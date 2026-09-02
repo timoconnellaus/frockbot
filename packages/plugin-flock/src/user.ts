@@ -159,9 +159,9 @@ export class FlockUserBackendContribution {
           failure: "Bot directory limit reached",
         };
       } else {
-        // A new Bot carries no model override of its own. Model selection is a
-        // Bot setting, resolved against the User's ready Connections when a
-        // Turn is admitted.
+        // A new Bot carries neither a model nor a grant. Both resolve from the
+        // User's enabled Packages and Connections at its next admitted Turn
+        // (AGENTS.md Configuration shape; ADR 0019).
         const registration: BotRegistrationV1 = {
           schemaVersion: 1,
           botId: command.botId,

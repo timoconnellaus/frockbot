@@ -1,6 +1,6 @@
 import type {
   ConnectionView,
-  ModelAssignment,
+  ModelBindingV1,
   PackageInstallationView,
 } from "@frockbot/configuration-core";
 import type { PluginCatalogItem } from "@frockbot/plugin-shell/shared";
@@ -29,43 +29,6 @@ export function isModelConnectionEligible(input: {
         connectionType?.capabilities.includes(capability.id),
     ),
   );
-}
-
-export function resolveBotSettingsModel(input: {
-  current?: ModelAssignment;
-  useExactModel: boolean;
-  selectedModel: string;
-  exactConnectionId: string;
-  exactProviderModelId: string;
-}): ModelAssignment | undefined {
-  if (input.useExactModel) {
-    const selected = {
-      connectionId: input.exactConnectionId,
-      providerModelId: input.exactProviderModelId.trim(),
-    };
-    if (!selected.connectionId || !selected.providerModelId) {
-      throw new Error("A Connection and model ID are required");
-    }
-    return selected;
-  }
-  if (!input.selectedModel) return input.current;
-  let value: unknown;
-  try {
-    value = JSON.parse(input.selectedModel);
-  } catch {
-    throw new Error("A Connection and model ID are required");
-  }
-  if (
-    !Array.isArray(value) ||
-    value.length !== 2 ||
-    typeof value[0] !== "string" ||
-    value[0].length === 0 ||
-    typeof value[1] !== "string" ||
-    value[1].length === 0
-  ) {
-    throw new Error("A Connection and model ID are required");
-  }
-  return { connectionId: value[0], providerModelId: value[1] };
 }
 
 export interface ModelSelectOption {
@@ -103,15 +66,15 @@ export function modelSelectOptions(
   );
 }
 
-export function encodeModelSelection(model?: ModelAssignment): string {
+export function encodeModelSelection(model?: ModelBindingV1): string {
   return model
     ? JSON.stringify([model.connectionId, model.providerModelId])
     : "";
 }
 
 /** How a bound model reads in prose, e.g. "Llama 3 — Work". */
-export function describeModelSelection(
-  model: ModelAssignment | undefined,
+export function describeModelBinding(
+  model: ModelBindingV1 | undefined,
   connections: readonly ConnectionView[],
 ): string | undefined {
   if (!model) return undefined;
@@ -128,7 +91,7 @@ export function describeModelSelection(
 /** The inverse of {@link encodeModelSelection}; an empty value means no model. */
 export function decodeModelSelection(
   value: string,
-): ModelAssignment | undefined {
+): ModelBindingV1 | undefined {
   if (!value) return undefined;
   let parsed: unknown;
   try {

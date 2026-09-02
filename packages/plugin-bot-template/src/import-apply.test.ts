@@ -366,7 +366,7 @@ describe("applying", () => {
     expect(Object.keys(recording.installs[0]!)).not.toContain("values");
   });
 
-  it("creates no Connection", async () => {
+  it("creates no Connection or credential", async () => {
     const { contribution, recording } = await harness();
     await plan(contribution);
     const applied = await apply(contribution);

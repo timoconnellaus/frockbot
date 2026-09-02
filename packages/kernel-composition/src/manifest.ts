@@ -120,6 +120,12 @@ export interface PackageSettingDefinition {
   id: string;
   schemaVersion: number;
   scopes: SettingScope[];
+  /**
+   * A kernel-consumed semantic role. The model role is deliberately generic:
+   * ADR 0019 lets a Package opt the User into model choice without teaching
+   * the kernel that Package's identity or policy.
+   */
+  role?: "model";
   schema: PackageSettingSchema;
 }
 
@@ -169,6 +175,7 @@ export interface FrockBotManifest {
   version: string;
   compatibility: { frockbot: string };
   dependencies: Record<string, string>;
+  defaultEnablement?: "enabled" | "disabled";
   contributions: {
     backend?: BackendContribution[];
     runtime?: RuntimeContribution;
@@ -346,6 +353,18 @@ function decodeDependencies(value: unknown): Record<string, string> {
   return dependencies;
 }
 
+function decodeDefaultEnablement(
+  value: unknown,
+): FrockBotManifest["defaultEnablement"] {
+  if (value === undefined) return undefined;
+  if (value !== "enabled" && value !== "disabled") {
+    throw new Error(
+      'manifest defaultEnablement must be "enabled" or "disabled"',
+    );
+  }
+  return value;
+}
+
 function decodeIdentity(
   value: Record<string, unknown>,
 ): Pick<FrockBotManifest, "id" | "displayName" | "version" | "permissions"> {
@@ -426,6 +445,7 @@ function isV3OrLater(value: Record<string, unknown>): boolean {
 
 function decodeV2(value: Record<string, unknown>): FrockBotManifest {
   const identity = decodeIdentity(value);
+  const defaultEnablement = decodeDefaultEnablement(value.defaultEnablement);
   if (!isRecord(value.compatibility)) {
     throw new Error("manifest compatibility must be an object");
   }
@@ -621,6 +641,7 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
       frockbot: requiredString(value.compatibility, "frockbot"),
     },
     dependencies: decodeDependencies(value.dependencies),
+    ...(defaultEnablement ? { defaultEnablement } : {}),
     contributions,
   };
 }
@@ -1089,6 +1110,44 @@ function safeSchema(value: unknown): PackageSettingSchema {
   return decodeSafeSchema(value, 0);
 }
 
+/**
+ * The one object contract the kernel interprets from a setting value. Keeping
+ * this exact prevents a Package from smuggling provider policy into the model
+ * seam while still letting ordinary settings use the supported schema subset.
+ */
+function assertModelBindingSchema(schema: PackageSettingSchema): void {
+  const fields = Reflect.ownKeys(schema);
+  const properties = schema.properties;
+  const required = schema.required;
+  if (
+    fields.length !== 4 ||
+    !fields.every((field) =>
+      ["type", "properties", "required", "additionalProperties"].includes(
+        String(field),
+      ),
+    ) ||
+    schema.type !== "object" ||
+    schema.additionalProperties !== false ||
+    !properties ||
+    Reflect.ownKeys(properties).length !== 2 ||
+    !Object.hasOwn(properties, "connectionId") ||
+    !Object.hasOwn(properties, "providerModelId") ||
+    Reflect.ownKeys(properties.connectionId ?? {}).length !== 1 ||
+    properties.connectionId?.type !== "string" ||
+    Reflect.ownKeys(properties.providerModelId ?? {}).length !== 1 ||
+    properties.providerModelId?.type !== "string" ||
+    !required ||
+    required.length !== 2 ||
+    new Set(required).size !== 2 ||
+    !required.includes("connectionId") ||
+    !required.includes("providerModelId")
+  ) {
+    throw new Error(
+      'manifest model setting schema must be exactly an object with required string properties "connectionId" and "providerModelId" and no additional properties',
+    );
+  }
+}
+
 function decodeCapabilityAdmission(value: unknown): {
   turnTypes: TurnTypeV1[];
   subagentRoles?: string[];
@@ -1168,7 +1227,13 @@ function settingDefinitions(
     // that round-trips through this decoder decodes again unchanged.
     exactFields(
       setting,
-      ["id", "schemaVersion", "schema", "scopes"],
+      [
+        "id",
+        "schemaVersion",
+        "schema",
+        "scopes",
+        ...(scope === "package" ? ["role"] : []),
+      ],
       "manifest setting definition",
     );
     const schemaVersion = setting.schemaVersion;
@@ -1203,11 +1268,17 @@ function settingDefinitions(
     ) {
       throw new Error("manifest setting scopes must contain user or bot");
     }
+    if (setting.role !== undefined && setting.role !== "model") {
+      throw new Error('manifest setting role must be "model"');
+    }
+    const schema = safeSchema(setting.schema);
+    if (setting.role === "model") assertModelBindingSchema(schema);
     return {
       id: definitionId(setting),
       schemaVersion: schemaVersion as number,
       scopes: scopes as SettingScope[],
-      schema: safeSchema(setting.schema),
+      ...(setting.role === undefined ? {} : { role: setting.role }),
+      schema,
     };
   });
 }
@@ -1436,6 +1507,7 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
         "permissions",
         "compatibility",
         "dependencies",
+        "defaultEnablement",
         "contributions",
         ...(isV3OrLater(value) ? ["configuration"] : []),
         ...(isV3OrLater(value) ? ["tools"] : []),

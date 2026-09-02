@@ -92,7 +92,7 @@ function botSettings(): BotSettingsViewV1 {
     revision: 3,
     profile: { name: "Budget", title: "Money minder" },
     notifications: { enabled: true },
-    model: { connectionId: "connection-1", providerModelId: "glm" },
+    packageValues: {},
   };
 }
 

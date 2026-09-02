@@ -2,7 +2,6 @@
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import {
   announceUiAnchor,
-  UiButton,
   UiIcon,
   UiIconButton,
   UiMarkdown,
@@ -170,33 +169,6 @@ const botName = computed(
 );
 const isRunning = computed(() => Boolean(state.value.activeRunId));
 const isConnecting = computed(() => state.value.connection !== "ready");
-const needsModel = computed(() => state.value.modelSource === "none");
-const hasConnectedModelProvider = computed(() => {
-  const user = state.value.userSettings;
-  if (!user) return false;
-  return user.connections.some((connection) => {
-    if (connection.state !== "ready") return false;
-    const installed = user.packages.some(
-      (pkg) =>
-        pkg.packageId === connection.packageId && pkg.state === "installed",
-    );
-    const pkg = state.value.pluginCatalog.find(
-      (candidate) => candidate.packageId === connection.packageId,
-    );
-    const connectionType = pkg?.connectionTypes.find(
-      (candidate) => candidate.id === connection.connectionTypeId,
-    );
-    return Boolean(
-      installed &&
-      pkg?.capabilities.some(
-        (capability) =>
-          capability.kind === "model" &&
-          connectionType?.capabilities.includes(capability.id) &&
-          capability.connectionTypes.includes(connectionType.id),
-      ),
-    );
-  });
-});
 const canSend = computed(
   () =>
     state.value.connection === "ready" &&
@@ -406,17 +378,6 @@ const applySettingsDeepLink = (): void => {
   const anchor = target.anchor;
   if (anchor) void nextTick(() => announceUiAnchor(anchor));
 };
-
-function openModelSetup(): void {
-  const registry = surfaces;
-  if (!registry) return;
-  if (hasConnectedModelProvider.value && registry.has("user-settings")) {
-    registry.open("user-settings");
-    void nextTick(() => announceUiAnchor("user-default-model"));
-    return;
-  }
-  if (registry.has("plugins")) registry.open("plugins");
-}
 
 onMounted(() => {
   void web.value.loadPluginCatalog();
@@ -648,6 +609,9 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         <div class="bot-list">
           <k-slot name="frockbot.sidebar-bots" />
         </div>
+        <div class="sidebar-computer">
+          <k-slot name="frockbot.sidebar-computer" />
+        </div>
 
         <div class="sidebar-bottom">
           <k-slot name="frockbot.sidebar-actions" />
@@ -689,15 +653,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           /></span>
           <div class="workspace-title">
             <strong>{{ botName }}</strong>
-            <small v-if="!needsModel">{{ state.modelLabel }}</small>
-            <button
-              v-else
-              type="button"
-              class="model-setup-link"
-              @click="openModelSetup"
-            >
-              Choose a model
-            </button>
+            <small>{{ state.modelLabel }}</small>
           </div>
           <k-slot name="frockbot.header-actions" />
         </header>
@@ -714,27 +670,16 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               {{
                 state.modelReady
                   ? `${botName} is ready.`
-                  : needsModel
-                    ? `${botName} needs a model.`
-                    : `${botName} isn't ready.`
+                  : `${botName} isn't ready.`
               }}
             </h1>
             <p>
               {{
                 state.modelReady
                   ? "Start with a conversation. Cordis plugins can add the rest."
-                  : needsModel
-                    ? "Pick a default to start chatting."
-                    : "Check this Bot's model Connection."
+                  : "Check this Bot's model Connection."
               }}
             </p>
-            <UiButton
-              v-if="needsModel"
-              variant="primary"
-              @click="openModelSetup"
-            >
-              Choose a model
-            </UiButton>
           </div>
           <article
             v-for="message in messages"
@@ -781,7 +726,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                 />
               </template>
               <!--
-                A binary a tool filed in a durable root, drawn from the
+                A binary a tool filed in the Workspace, drawn from the
                 Workspace read route. The thread carries the path, never the
                 bytes, so a long conversation costs paths and the image is
                 fetched only when it is on screen.
@@ -929,16 +874,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               </span>
             </li>
           </ul>
-          <UiButton
-            v-if="!isRunning && !isConnecting && needsModel"
-            type="button"
-            class="composer-model-setup"
-            variant="primary"
-            @click="openModelSetup"
-          >
-            Choose a model
-          </UiButton>
-          <div v-else class="composer-body">
+          <div class="composer-body">
             <ul v-if="attachedSkills.length > 0" class="skill-chips">
               <li v-for="entry in attachedSkills" :key="entry.ref">
                 <button
@@ -985,7 +921,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             @click="web.stopRun()"
           />
           <UiIconButton
-            v-else-if="!needsModel || isConnecting"
+            v-else
             type="submit"
             icon="arrow-up"
             label="Send message"

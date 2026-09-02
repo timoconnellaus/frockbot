@@ -211,7 +211,6 @@ describe("exporting a Bot as a shareable template", () => {
     expect(document).not.toContain(connectionId);
     expect(document).not.toContain("connectionId");
     expect(document).not.toContain(MCP_ENDPOINT);
-    expect(document).not.toContain("assignments");
     expect(document).not.toContain("memory");
     expect(document).not.toContain("digest");
 

@@ -1374,9 +1374,8 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
    *
    * `bot/create` goes to this object's Flock, `user/install-package` to its
    * Settings Contribution, and the two Bot-scoped writes to the Bot Durable
-   * Object that owns them. There is no method here for a Connection — not
-   * because the import declines to call one, but because the seam cannot
-   * express it.
+   * Object that owns them. There is no method here for a Connection because
+   * the seam cannot express it.
    */
   private templateImportWriter(): TemplateImportWriterV1 {
     const botState = (userId: string, botId: string) => {

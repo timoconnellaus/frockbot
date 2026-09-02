@@ -7,10 +7,6 @@ import {
   isApplicationDeploymentHash,
   isRpcIdentifier,
 } from "@frockbot/configuration-core";
-import {
-  decodePackageIframeToolCommandV1,
-  type PackageIframeCatalogV1,
-} from "@frockbot/kernel-contracts";
 import type {
   ClientNotificationAcknowledgementV1,
   ClientNotificationListV1,
@@ -103,27 +99,23 @@ function appHtml(
 </html>`;
 }
 
-function packageUiArtifactOrigin(requestUrl: URL): string {
-  const appHost = requestUrl.hostname;
-  const host =
-    appHost === "localhost" || appHost === "127.0.0.1"
-      ? "ui.localhost"
-      : appHost.startsWith("ui.")
-        ? appHost
-        : `ui.${appHost}`;
-  return `${requestUrl.protocol}//${host}${requestUrl.port ? `:${requestUrl.port}` : ""}`;
-}
+/**
+ * Where the shell may embed a frame. The expanded Computer viewer is the
+ * Sprite's own noVNC page at `https://<sprite>-<org>.sprites.app/` (ADR 0004);
+ * without this directive `default-src 'self'` blocks the iframe and the
+ * browser shows "This content is blocked" over the desktop. The viewer's
+ * websocket is opened by that page, so it is governed by the Sprite's policy,
+ * not this one. Screenshots are same-origin workspace reads and need nothing.
+ */
+const FRAME_SOURCES = "https://*.sprites.app";
 
-function withSecurityHeaders(
-  response: Response,
-  artifactOrigin: string,
-): Response {
+function withSecurityHeaders(response: Response): Response {
   const secured = new Response(response.body, response);
   secured.headers.set("x-content-type-options", "nosniff");
   secured.headers.set("referrer-policy", "no-referrer");
   secured.headers.set(
     "content-security-policy",
-    `default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-src ${artifactOrigin}; frame-ancestors 'none'; base-uri 'none'`,
+    `default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-src ${FRAME_SOURCES}; frame-ancestors 'none'; base-uri 'none'`,
   );
   return secured;
 }
@@ -195,7 +187,6 @@ export function createUserApplication() {
             headers: { "content-type": "text/html; charset=utf-8" },
           },
         ),
-        packageUiArtifactOrigin(url),
       );
     }
     if (request.method === "GET" && url.pathname === "/app.js") {
@@ -206,7 +197,6 @@ export function createUserApplication() {
             "cache-control": "no-cache",
           },
         }),
-        packageUiArtifactOrigin(url),
       );
     }
     if (request.method === "GET" && url.pathname === "/app.css") {
@@ -217,7 +207,6 @@ export function createUserApplication() {
             "cache-control": "no-cache",
           },
         }),
-        packageUiArtifactOrigin(url),
       );
     }
     if (request.method === "GET" && url.pathname === "/favicon.ico") {
@@ -230,7 +219,6 @@ export function createUserApplication() {
             "cache-control": "no-cache",
           },
         }),
-        packageUiArtifactOrigin(url),
       );
     }
     if (request.method === "GET" && url.pathname === "/app-manifest") {
@@ -391,12 +379,6 @@ export function createUserApplication() {
     }
 
     const skillsMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/skills$/);
-    const packageUiMatch = url.pathname.match(
-      /^\/api\/bots\/([^/]+)\/package-ui$/,
-    );
-    const packageUiToolMatch = url.pathname.match(
-      /^\/api\/bots\/([^/]+)\/package-ui\/tools$/,
-    );
     const workspaceFileMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/workspace\/file$/,
     );
@@ -415,8 +397,6 @@ export function createUserApplication() {
     );
     if (
       !skillsMatch &&
-      !packageUiMatch &&
-      !packageUiToolMatch &&
       !workspaceFileMatch &&
       !turnMatch &&
       !lookupMatch &&
@@ -430,8 +410,6 @@ export function createUserApplication() {
     try {
       const matched =
         skillsMatch ??
-        packageUiMatch ??
-        packageUiToolMatch ??
         workspaceFileMatch ??
         turnMatch ??
         lookupMatch ??
@@ -462,49 +440,6 @@ export function createUserApplication() {
         return jsonError(
           500,
           error instanceof Error ? error.message : "skill catalog failed",
-        );
-      }
-    }
-
-    if (packageUiMatch) {
-      if (request.method !== "GET") return jsonError(405, "method not allowed");
-      try {
-        const composition = await env.BOT_STATE.listPackageUi({
-          schemaVersion: 1,
-          botId,
-        });
-        return Response.json({
-          ...composition,
-          artifactOrigin: packageUiArtifactOrigin(url),
-        } satisfies PackageIframeCatalogV1);
-      } catch (error) {
-        return jsonError(
-          500,
-          error instanceof Error ? error.message : "Package UI catalog failed",
-        );
-      }
-    }
-
-    if (packageUiToolMatch) {
-      if (request.method !== "POST")
-        return jsonError(405, "method not allowed");
-      try {
-        const command = decodePackageIframeToolCommandV1(await request.json());
-        return Response.json(
-          await env.BOT_STATE.runPackageUiTool({
-            schemaVersion: 1,
-            botId,
-            command,
-          }),
-        );
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Package UI tool call failed";
-        return jsonError(
-          message.includes("did not declare") ? 403 : 409,
-          message,
         );
       }
     }

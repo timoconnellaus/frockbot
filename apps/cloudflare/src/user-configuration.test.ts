@@ -158,29 +158,32 @@ describe("UserConfiguration Connection routing", () => {
       revision: 3,
       connections: [
         expect.objectContaining({
-          connectionId: "workers-ai-ambient",
-          providerType: "workers-ai",
+          connectionId: "flock-ai-ambient",
+          providerType: "flock-ai",
           state: "ready",
         }),
       ],
-      newBotModelTemplate: {
-        connectionId: "workers-ai-ambient",
-        providerModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+      platformModel: {
+        connectionId: "flock-ai-ambient",
+        providerModelId: "@flock/auto",
       },
-      newBotModelTemplateSource: "auto",
     });
     expect(first.packages).toContainEqual(
       expect.objectContaining({
-        packageId: "provider-workers-ai",
+        packageId: "provider-flock-ai",
         state: "installed",
       }),
     );
     expect(first.packages.length).toBeGreaterThan(0);
     expect(
-      first.packages.every(
-        (pkg) => pkg.state === "installed" && pkg.provenance === "first-party",
-      ),
+      first.packages.every((pkg) => pkg.provenance === "first-party"),
     ).toBe(true);
+    expect(first.packages).toContainEqual(
+      expect.objectContaining({
+        packageId: "provider-ollama-cloud",
+        state: "disabled",
+      }),
+    );
     expect(first.packages.map((pkg) => pkg.packageId)).toContain("web");
   });
   test("dispatches a Connection command to the Package the User Contribution adjudicates", async () => {

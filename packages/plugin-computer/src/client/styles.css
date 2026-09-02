@@ -2,6 +2,107 @@
   margin: 0;
 }
 
+.computer-strip {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border: 0;
+  border-radius: var(--frock-radius-control);
+  color: var(--frock-text);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--frock-motion-fast);
+}
+
+.computer-strip:hover:not(:disabled),
+.computer-strip:focus-visible {
+  background: var(--frock-fill-hover);
+  outline: none;
+}
+
+.computer-strip:disabled {
+  cursor: default;
+}
+
+.computer-strip-capture {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 16 / 10;
+  border: 1px solid var(--frock-border);
+  border-radius: 7px;
+  background: var(--frock-surface-subtle);
+  box-shadow: inset 0 0 0 1px var(--frock-computer-inset);
+}
+
+.computer-strip-capture img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.computer-strip-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--frock-computer-accent-text);
+  background:
+    linear-gradient(var(--frock-computer-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--frock-computer-grid) 1px, transparent 1px),
+    var(--frock-surface-subtle);
+  background-size: 12px 12px;
+}
+
+.computer-strip-phase {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+  text-transform: capitalize;
+}
+
+.computer-strip-phase > :last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.computer-strip-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--frock-text-disabled);
+  box-shadow: 0 0 0 2px var(--frock-computer-inset);
+}
+
+.computer-strip-dot.phase-ready {
+  background: var(--frock-success);
+}
+
+.computer-strip-dot.phase-human-control,
+.computer-strip-dot.phase-taking-control {
+  background: var(--frock-computer-accent);
+}
+
+.computer-strip-dot.phase-updating {
+  background: var(--frock-warning);
+}
+
+.computer-strip-dot.phase-error,
+.computer-strip-dot.phase-disconnected {
+  background: var(--frock-danger-strong);
+}
+
 .computer-status {
   flex: 0 0 auto;
   padding: 3px 7px;
@@ -26,7 +127,14 @@
   background: var(--frock-computer-surface);
 }
 
+.computer-status.status-updating {
+  border-color: var(--frock-warning-border);
+  color: var(--frock-warning);
+  background: var(--frock-warning-surface);
+}
+
 .computer-status.status-error,
+.computer-status.status-disconnected,
 .computer-status.status-unconfigured {
   border-color: var(--frock-computer-error-border);
   color: var(--frock-computer-error-text);
@@ -44,6 +152,21 @@
   box-shadow: inset 0 0 0 1px var(--frock-computer-inset);
 }
 
+button.computer-screen {
+  display: block;
+  padding: 0;
+  color: var(--frock-text);
+  font: inherit;
+  text-align: inherit;
+}
+
+.computer-screen > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .computer-screen-thumbnail {
   cursor: zoom-in;
   transition:
@@ -58,12 +181,20 @@
   transform: translateY(-1px);
 }
 
+.computer-screen-thumbnail:disabled {
+  cursor: wait;
+}
+
 .computer-screen iframe {
   width: 100%;
   height: 100%;
   border: 0;
   background: var(--frock-surface);
   pointer-events: none;
+}
+
+.computer-screen-expanded iframe {
+  pointer-events: auto;
 }
 
 .human-control .computer-screen {
@@ -118,12 +249,17 @@
 }
 
 .computer-placeholder p,
+.computer-placeholder-message,
 .control-shield p {
   max-width: 210px;
   margin: 5px 0 10px;
   color: var(--frock-text-muted);
   font-size: var(--frock-text-xs);
   line-height: 1.4;
+}
+
+.computer-placeholder-message {
+  display: block;
 }
 
 .computer-placeholder button,
@@ -335,6 +471,7 @@
 }
 
 .computer-overlay .computer-status.status-error,
+.computer-overlay .computer-status.status-disconnected,
 .computer-overlay .computer-status.status-unconfigured {
   border-color: var(--frock-viewer-error-border);
   color: var(--frock-viewer-error-text);
@@ -390,6 +527,45 @@
   background: var(--frock-viewer-close-surface);
 }
 
+.computer-confirm-backdrop {
+  position: fixed;
+  z-index: 1;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: var(--frock-overlay-tint);
+}
+
+.computer-confirm-dialog {
+  width: min(420px, 100%);
+  padding: 24px;
+  border: 1px solid var(--frock-viewer-panel-border);
+  border-radius: var(--frock-radius-panel);
+  color: var(--frock-viewer-content-text);
+  background: var(--frock-viewer-control-panel);
+  box-shadow: var(--frock-viewer-shadow-panel);
+}
+
+.computer-confirm-dialog h2 {
+  margin: 0;
+  color: var(--frock-viewer-text-strong);
+  font-size: var(--frock-text-lg);
+}
+
+.computer-confirm-dialog p {
+  margin: 10px 0 22px;
+  color: var(--frock-viewer-content-muted);
+  font-size: var(--frock-text-sm);
+  line-height: var(--frock-leading-normal);
+}
+
+.computer-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 @media (max-width: 700px) {
   .computer-overlay {
     grid-template-rows: 58px minmax(0, 1fr);
@@ -406,5 +582,13 @@
   .computer-overlay-identity,
   .computer-overlay-actions > .computer-status {
     display: none;
+  }
+
+  .computer-confirm-backdrop {
+    padding: 12px;
+  }
+
+  .computer-confirm-dialog {
+    padding: 20px;
   }
 }

@@ -70,11 +70,9 @@ function toolOutcome(turn: ClientTurn, name: string): ToolOutcome {
 }
 
 /**
- * Provision the two capabilities this slice needs through the product's own
- * surfaces: connect Ollama Cloud and install the Web Package. The Bot receives
- * both on its next admitted Turn without a second grant.
+ * Enable the two Packages this slice needs through the product's own surfaces.
  */
-async function prepareWebTools(userId: string, botId: string): Promise<void> {
+async function grantWebTools(userId: string, botId: string): Promise<void> {
   await provisionThroughGateway({ userId, botId });
 
   const settings = (await expectOkJson(
@@ -92,7 +90,8 @@ async function prepareWebTools(userId: string, botId: string): Promise<void> {
   );
 }
 
-async function uninstallPackage(
+/** Disable one Package account-wide through its single enablement surface. */
+async function disablePackage(
   userId: string,
   packageId: string,
 ): Promise<void> {
@@ -102,10 +101,11 @@ async function uninstallPackage(
   await expectOkJson(
     await postAsUser(userId, "/api/settings", {
       schemaVersion: 1,
-      type: "user/uninstall-package",
-      commandId: `uninstall-${packageId}`,
+      type: "user/set-package-enabled",
+      commandId: `disable-${packageId}`,
       expectedRevision: settings.revision,
       packageId,
+      enabled: false,
     }),
   );
 }
@@ -114,7 +114,7 @@ describe("web_search through the gateway, the artifact and the Bot", () => {
   it("records the provider's results as durable JSON on the Turn", async () => {
     const userId = freshUserId("web-search");
     const botId = "searching-bot";
-    await prepareWebTools(userId, botId);
+    await grantWebTools(userId, botId);
 
     const turn = await turnCalling(
       userId,
@@ -143,7 +143,7 @@ describe("web_fetch through the gateway, the artifact and the Bot", () => {
   it("reads a public page and records the durable fetch shape", async () => {
     const userId = freshUserId("web-fetch");
     const botId = "fetching-bot";
-    await prepareWebTools(userId, botId);
+    await grantWebTools(userId, botId);
 
     const turn = await turnCalling(userId, botId, "web-fetch-1", "web_fetch", {
       url: "https://example.test/page",
@@ -177,7 +177,7 @@ describe("web_fetch through the gateway, the artifact and the Bot", () => {
   it("refuses the cloud metadata address without making the request", async () => {
     const userId = freshUserId("web-fetch-ssrf");
     const botId = "guarded-bot";
-    await prepareWebTools(userId, botId);
+    await grantWebTools(userId, botId);
 
     const blocked = await turnCalling(
       userId,
@@ -232,7 +232,7 @@ describe("web_fetch through the gateway, the artifact and the Bot", () => {
   it("refuses a media type it cannot read", async () => {
     const userId = freshUserId("web-fetch-type");
     const botId = "typed-bot";
-    await prepareWebTools(userId, botId);
+    await grantWebTools(userId, botId);
 
     const turn = await turnCalling(
       userId,
@@ -251,17 +251,18 @@ describe("web_fetch through the gateway, the artifact and the Bot", () => {
   });
 });
 
-describe("Package enablement versus Connection authority", () => {
-  it("removes web_fetch on uninstall while connected web_search remains", async () => {
-    const userId = freshUserId("web-uninstalled");
+describe("a disabled Web Package", () => {
+  it("removes web_fetch while leaving another enabled Package's tools", async () => {
+    const userId = freshUserId("web-unassigned");
     const botId = "bare-bot";
-    await prepareWebTools(userId, botId);
-    await uninstallPackage(userId, "web");
+    // Package enablement is account-wide and changes the next admitted Turn.
+    await provisionThroughGateway({ userId, botId });
+    await disablePackage(userId, "web");
 
     const turn = await turnCalling(
       userId,
       botId,
-      "web-uninstalled-1",
+      "web-unassigned-1",
       "web_fetch",
       { url: "https://example.test/page" },
     );
@@ -272,7 +273,7 @@ describe("Package enablement versus Connection authority", () => {
     const searched = await turnCalling(
       userId,
       botId,
-      "web-still-connected-2",
+      "web-unassigned-2",
       "web_search",
       { query: "anything" },
     );

@@ -10,6 +10,9 @@ import {
   type FoundationResidentRuntime,
 } from "@frockbot/agent-runtime/runtime";
 import { Context } from "cordis";
+import { ComputerRegistry } from "@frockbot/computer-core";
+import { createFlySpriteProviderPlugin } from "@frockbot/plugin-fly-sprite/agent";
+import { ComputerHostClient } from "@frockbot/plugin-fly-sprite/host-client";
 import {
   computerHostEffectRequestWireV1,
   decodeComputerHostEffectResponseV1,
@@ -39,6 +42,11 @@ import {
   type FlockBotBackendContribution,
 } from "@frockbot/plugin-flock/bot";
 import {
+  createComputerBotBackendPlugin,
+  type ComputerBotBackendContribution,
+} from "@frockbot/plugin-computer/bot";
+import { decodeComputerCommandV1 } from "@frockbot/plugin-computer/protocol";
+import {
   decodeBotLifecycleCommandV1,
   decodeBotRegistrationV1,
   decodeUpdateSheepCommandV1,
@@ -63,16 +71,7 @@ import {
   type ApprovalDecisionCommandV1,
 } from "@frockbot/plugin-shell/approvals";
 import {
-  decodePackageIframeToolCommandV1,
-  decodeIsolateMemoryReadRequestV1,
-  decodeIsolateMemoryWriteRequestV1,
-  decodeIsolateNotificationRequestV1,
-  decodeIsolateScheduleRequestV1,
-  decodeIsolateToolRequestV1,
-  decodeIsolateWorkspaceDeleteRequestV1,
-  decodeIsolateWorkspaceListRequestV1,
-  decodeIsolateWorkspacePathV1,
-  decodeIsolateWorkspaceWriteRequestV1,
+  decodeIsolateAuthorityRequestV1,
   decodeNormalizedModelRequestV1,
 } from "@frockbot/kernel-contracts";
 import type {
@@ -147,6 +146,10 @@ import {
   type UserMemoryRpc,
 } from "./memory.js";
 import {
+  createFlockAiGatewayHostV1,
+  type FlockAiGatewayHostV1,
+} from "./flock-ai.js";
+import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
   rpcBotId,
@@ -156,6 +159,22 @@ import {
   rpcObject,
   rpcString,
 } from "./durable-rpc.js";
+
+function isFlockAiGatewayBindingV1(
+  value: BotStateEnv["AI"],
+): value is NonNullable<BotStateEnv["AI"]> & Pick<Ai, "gateway"> {
+  return (
+    value !== undefined && typeof Reflect.get(value, "gateway") === "function"
+  );
+}
+
+function optionalWorkerVarV1(
+  env: BotStateEnv,
+  name: string,
+): string | undefined {
+  const value = Reflect.get(env, name);
+  return typeof value === "string" && value ? value : undefined;
+}
 
 export type { BotStateEnv, OwnedBotTurnCommand };
 
@@ -172,26 +191,13 @@ function decodeBotIdentityRpcV1(input: unknown): {
     userId: rpcIdentifier,
     botId: rpcBotId,
   });
+  if (typeof request.userId !== "string" || typeof request.botId !== "string") {
+    throw new Error("Computer identity RPC was not decoded");
+  }
   return {
-    userId: request.userId as string,
-    botId: request.botId as string,
+    userId: request.userId,
+    botId: request.botId,
   };
-}
-
-function decodeIsolateCallRpcV1(
-  input: unknown,
-  decodeRequest: (value: unknown) => unknown,
-) {
-  return decodeRpcEnvelopeV1(input, {
-    userId: rpcIdentifier,
-    botId: rpcBotId,
-    runId: rpcIdentifier,
-    sessionId: rpcString(257),
-    turnId: rpcIdentifier,
-    packageId: rpcIdentifier,
-    generationId: rpcIdentifier,
-    request: rpcDecoded(decodeRequest),
-  });
 }
 
 export class BotState extends DurableObject<BotStateEnv> {
@@ -205,6 +211,7 @@ export class BotState extends DurableObject<BotStateEnv> {
    * constructed here and never reaches the deployed bindings map.
    */
   protected readonly backendEnv: BotStateEnv & {
+    FLOCK_AI?: FlockAiGatewayHostV1;
     WORKSPACE_FILES?: WorkspaceFilesV1;
     PACKAGE_CATALOG_ENTRIES?: BotSkillCatalogReaderV1;
     MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
@@ -233,6 +240,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     | Promise<{
         shell: ShellBotBackendContribution;
         flock: FlockBotBackendContribution;
+        computer: ComputerBotBackendContribution;
         dispose(): Promise<void>;
       }>
     | undefined;
@@ -249,60 +257,100 @@ export class BotState extends DurableObject<BotStateEnv> {
     // The surfaces are built per identity in `bindSurfaces`, not here: they
     // carry the `owner` guard, and a Durable Object learns which User it
     // serves from the RPC that addresses it, never from its constructor.
-    this.backendEnv = { ...env };
+    this.backendEnv = {
+      ...env,
+      ...(isFlockAiGatewayBindingV1(env.AI)
+        ? {
+            FLOCK_AI: createFlockAiGatewayHostV1(env.AI, {
+              gatewayId: optionalWorkerVarV1(env, "FLOCK_AI_GATEWAY_ID"),
+              autoRoute: optionalWorkerVarV1(env, "FLOCK_AI_AUTO_ROUTE"),
+            }),
+          }
+        : {}),
+    };
   }
 
   private contributions(): Promise<{
     shell: ShellBotBackendContribution;
     flock: FlockBotBackendContribution;
+    computer: ComputerBotBackendContribution;
     dispose(): Promise<void>;
   }> {
     if (!this.mounted) {
       this.mounted = this.compileApplication().then(async (plan) => {
         let shell: ShellBotBackendContribution | undefined;
         let flock: FlockBotBackendContribution | undefined;
+        let computer: ComputerBotBackendContribution | undefined;
+        const root = new Context();
+        await root.plugin(ComputerRegistry);
+        const computerConfigured = Boolean(
+          this.backendEnv.COMPUTER_HOST &&
+          this.backendEnv.COMPUTER_HOST_TOKEN?.trim(),
+        );
+        await root.plugin(
+          createFlySpriteProviderPlugin(undefined, {
+            ...(computerConfigured
+              ? {
+                  host: (identity, tenant) =>
+                    new ComputerHostClient({
+                      fetcher: this.backendEnv.COMPUTER_HOST!,
+                      hostToken: this.backendEnv.COMPUTER_HOST_TOKEN!,
+                      identity,
+                      tenant,
+                    }),
+                }
+              : {}),
+          }),
+        );
         const mounted = await createFoundationBackendContributions<
-          ShellBotBackendContribution | FlockBotBackendContribution
-        >(plan, {
-          backendHost: "bot",
-          resolve: (specifier, lifecycle) => {
-            if (specifier === "@frockbot/plugin-shell/backend") {
-              return createShellBotBackendPlugin(
-                {
-                  state: this.ctx,
-                  env: this.backendEnv,
-                  outboundFetch: this.outboundFetch,
-                  // The Durable Object owns the kernel authority; the Shell
-                  // Package supplies only its configuration and Composition
-                  // hooks.
-                  createAuthority: (options) =>
-                    new BotDurableAuthority(options),
-                  // An archived Bot admits no configuration command; the Flock
-                  // Contribution owns that durable lifecycle state.
-                  assertLifecycleActive: (storage, botId) => {
-                    if (!flock) {
-                      throw new Error("Flock Bot Contribution is unavailable");
-                    }
-                    return flock.assertActive(storage, botId);
+          | ShellBotBackendContribution
+          | FlockBotBackendContribution
+          | ComputerBotBackendContribution
+        >(
+          plan,
+          {
+            backendHost: "bot",
+            resolve: (specifier, lifecycle) => {
+              if (specifier === "@frockbot/plugin-shell/backend") {
+                return createShellBotBackendPlugin(
+                  {
+                    state: this.ctx,
+                    env: this.backendEnv,
+                    outboundFetch: this.outboundFetch,
+                    // The Durable Object owns the kernel authority; the Shell
+                    // Package supplies only its configuration and Composition
+                    // hooks.
+                    createAuthority: (options) =>
+                      new BotDurableAuthority(options),
+                    // An archived Bot admits no configuration command; the Flock
+                    // Contribution owns that durable lifecycle state.
+                    assertLifecycleActive: (storage, botId) => {
+                      if (!flock) {
+                        throw new Error(
+                          "Flock Bot Contribution is unavailable",
+                        );
+                      }
+                      return flock.assertActive(storage, botId);
+                    },
                   },
-                },
-                {
-                  mount(value) {
-                    shell = value;
-                    return lifecycle.mount(value);
+                  {
+                    mount(value) {
+                      shell = value;
+                      return lifecycle.mount(value);
+                    },
                   },
-                },
-              );
-            }
-            if (specifier === "@frockbot/plugin-flock/bot") {
-              return createFlockBotBackendPlugin(
-                {
-                  storage: this.ctx.storage,
-                  materializeSettings: (registration, userId) => {
-                    if (!shell)
-                      throw new Error("Shell Bot Contribution is unavailable");
-                    return shell
-                      .materializeSettings(
+                );
+              }
+              if (specifier === "@frockbot/plugin-flock/bot") {
+                return createFlockBotBackendPlugin(
+                  {
+                    storage: this.ctx.storage,
+                    materializeSettings: async (registration, userId) => {
+                      if (!shell)
+                        throw new Error(
+                          "Shell Bot Contribution is unavailable",
+                        );
+                      await shell.materializeSettings(
                         { userId, botId: registration.botId },
                         {
                           name: registration.initialName,
@@ -311,35 +359,78 @@ export class BotState extends DurableObject<BotStateEnv> {
                             : {
                                 description: registration.initialDescription,
                               }),
-                          model: registration.initialModel,
                         },
-                      )
-                      .then(() => undefined);
+                      );
+                    },
+                    archiveEligible: (storage) => {
+                      if (!shell)
+                        throw new Error(
+                          "Shell Bot Contribution is unavailable",
+                        );
+                      return shell.archiveEligible(storage);
+                    },
                   },
-                  archiveEligible: (storage) => {
-                    if (!shell)
-                      throw new Error("Shell Bot Contribution is unavailable");
-                    return shell.archiveEligible(storage);
+                  {
+                    mount(value) {
+                      flock = value;
+                      return lifecycle.mount(value);
+                    },
                   },
-                },
-                {
-                  mount(value) {
-                    flock = value;
-                    return lifecycle.mount(value);
+                );
+              }
+              if (specifier === "@frockbot/plugin-computer/bot") {
+                return createComputerBotBackendPlugin(
+                  {
+                    storage: this.ctx.storage,
+                    workspace: this.backendEnv.WORKSPACE_FILES,
+                    providerLabel: "Fly Sprites",
+                    configured: computerConfigured,
+                    openComputer: (userId, botId, effectId) => {
+                      const identity = { userId };
+                      if (!root.computers.assignment(identity)) {
+                        root.computers.assign(identity, "fly-sprite");
+                      }
+                      return root.computers.open(
+                        identity,
+                        { botId },
+                        { effectId },
+                      );
+                    },
                   },
-                },
-              );
-            }
-            throw new Error(`Unsupported Bot Contribution: ${specifier}`);
+                  {
+                    mount(value) {
+                      computer = value;
+                      return lifecycle.mount(value);
+                    },
+                  },
+                );
+              }
+              throw new Error(`Unsupported Bot Contribution: ${specifier}`);
+            },
           },
-        });
-        if (!shell || !flock || mounted.contributions.length !== 2) {
+          root,
+        );
+        if (
+          !shell ||
+          !flock ||
+          !computer ||
+          mounted.contributions.length !== 3
+        ) {
           await mounted.dispose();
+          await root.fiber.dispose();
           throw new Error(
-            "Foundation requires Shell and Flock Bot backend Contributions",
+            "Foundation requires Shell, Flock and Computer Bot backend Contributions",
           );
         }
-        return { shell, flock, dispose: mounted.dispose };
+        return {
+          shell,
+          flock,
+          computer,
+          async dispose() {
+            await mounted.dispose();
+            await root.fiber.dispose();
+          },
+        };
       });
     }
     return this.mounted;
@@ -489,6 +580,37 @@ export class BotState extends DurableObject<BotStateEnv> {
     return shell.executeConfiguration(request);
   }
 
+  /** A non-waking projection of this Bot's durable Computer presence. */
+  async readComputerPresence(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { shell, computer } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return computer.read(identity.userId, identity.botId);
+  }
+
+  /** One durably admitted User command against this Bot's Computer. */
+  async executeComputerPresenceCommand(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeComputerCommandV1),
+    });
+    if (
+      typeof request.userId !== "string" ||
+      typeof request.botId !== "string"
+    ) {
+      throw new Error("Computer command RPC identity was not decoded");
+    }
+    const command = decodeComputerCommandV1(request.command);
+    const identity = {
+      userId: request.userId,
+      botId: request.botId,
+    };
+    const { shell, computer } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return computer.execute(identity.userId, identity.botId, command);
+  }
+
   async readSheep(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { flock, registration } = await this.materialized(identity);
@@ -536,117 +658,54 @@ export class BotState extends DurableObject<BotStateEnv> {
     return flock.executeLifecycle(registration, identity.userId, command);
   }
 
+  /**
+   * The Bot isolate asked for authority it does not hold. The answer is never
+   * a grant: the Bot Durable Object records a durable pending decision and
+   * returns its id (plan Step 4, "Self-modification never widens authority").
+   */
+  async isolateRequestAuthority(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      packageId: rpcIdentifier,
+      generationId: rpcIdentifier,
+      request: rpcDecoded(decodeIsolateAuthorityRequestV1),
+    });
+    // The isolate capability path needs the Bot's own authority, not its Flock
+    // projection, so it does not materialize the Sheep record.
+    const shell = await this.contribution();
+    return shell.isolateRequestAuthority({
+      botId: request.botId as string,
+      packageId: request.packageId as string,
+      generationId: request.generationId as string,
+      request: request.request,
+    });
+  }
+
+  /**
+   * D6: model invocation as a User-enabled binding. Without a matching
+   * enabled model Capability the answer is a pending decision; with one, the
+   * request is recorded and the credential lease taken through the existing
+   * provider path before any event is streamed back.
+   */
   async isolateInvokeModel(input: unknown) {
-    const request = decodeIsolateCallRpcV1(
-      input,
-      decodeNormalizedModelRequestV1,
-    );
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      packageId: rpcIdentifier,
+      generationId: rpcIdentifier,
+      request: rpcDecoded(decodeNormalizedModelRequestV1),
+    });
     const identity = {
       userId: request.userId as string,
       botId: request.botId as string,
     };
     const shell = await this.contribution();
     return shell.isolateInvokeModel(identity, {
-      runId: request.runId as string,
-      sessionId: request.sessionId as string,
-      turnId: request.turnId as string,
       packageId: request.packageId as string,
       generationId: request.generationId as string,
       request: request.request as NormalizedModelRequest,
     });
-  }
-
-  async isolateInvokeTool(input: unknown) {
-    return (await this.contribution()).isolateInvokeTool(
-      decodeIsolateCallRpcV1(input, decodeIsolateToolRequestV1) as never,
-    );
-  }
-
-  async isolateMemoryRead(input: unknown) {
-    return (await this.contribution()).isolateMemoryRead(
-      decodeIsolateCallRpcV1(input, decodeIsolateMemoryReadRequestV1) as never,
-    );
-  }
-
-  async isolateMemoryWrite(input: unknown) {
-    return (await this.contribution()).isolateMemoryWrite(
-      decodeIsolateCallRpcV1(input, decodeIsolateMemoryWriteRequestV1) as never,
-    );
-  }
-
-  async isolateMemoryForget(input: unknown) {
-    return (await this.contribution()).isolateMemoryForget(
-      decodeIsolateCallRpcV1(input, decodeIsolateMemoryWriteRequestV1) as never,
-    );
-  }
-
-  async isolateWorkspaceRead(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceRead(
-      decodeIsolateCallRpcV1(input, decodeIsolateWorkspacePathV1) as never,
-    );
-  }
-
-  async isolateWorkspaceList(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceList(
-      decodeIsolateCallRpcV1(
-        input,
-        decodeIsolateWorkspaceListRequestV1,
-      ) as never,
-    );
-  }
-
-  async isolateWorkspaceStat(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceStat(
-      decodeIsolateCallRpcV1(input, decodeIsolateWorkspacePathV1) as never,
-    );
-  }
-
-  async isolateWorkspaceWrite(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceWrite(
-      decodeIsolateCallRpcV1(
-        input,
-        decodeIsolateWorkspaceWriteRequestV1,
-      ) as never,
-    );
-  }
-
-  async isolateWorkspaceDelete(input: unknown) {
-    return (await this.contribution()).isolateWorkspaceDelete(
-      decodeIsolateCallRpcV1(
-        input,
-        decodeIsolateWorkspaceDeleteRequestV1,
-      ) as never,
-    );
-  }
-
-  async isolateConnection(input: unknown) {
-    return (await this.contribution()).isolateConnection(
-      decodeIsolateCallRpcV1(input, (value) => {
-        if (
-          typeof value !== "string" ||
-          value.length === 0 ||
-          value.length > 256
-        ) {
-          throw new Error("Connection id is invalid");
-        }
-        return value;
-      }) as never,
-    );
-  }
-
-  async isolateNotify(input: unknown) {
-    return (await this.contribution()).isolateNotify(
-      decodeIsolateCallRpcV1(
-        input,
-        decodeIsolateNotificationRequestV1,
-      ) as never,
-    );
-  }
-
-  async isolateSchedule(input: unknown) {
-    return (await this.contribution()).isolateSchedule(
-      decodeIsolateCallRpcV1(input, decodeIsolateScheduleRequestV1) as never,
-    );
   }
 
   async resolveConfiguration(input: unknown) {
@@ -860,31 +919,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
     return shell.listSkills(identity);
-  }
-
-  async listPackageUi(input: unknown) {
-    const identity = decodeBotIdentityRpcV1(input);
-    const { shell } = await this.materialized(identity);
-    return shell.listPackageUi(identity);
-  }
-
-  async runPackageUiTool(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      command: rpcDecoded(decodePackageIframeToolCommandV1),
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    const command =
-      request.command as import("@frockbot/kernel-contracts").PackageIframeToolCommandV1;
-    const turn = await shell.runPackageUiTool(identity, command);
-    await this.projectSettledRun(shell, identity, command.commandId);
-    await this.projectSettledAudit(shell, identity, command.commandId);
-    return turn;
   }
 
   /**

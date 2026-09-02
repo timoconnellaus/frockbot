@@ -6,7 +6,6 @@ import type {
 import type {
   BotExecutionPlanV1,
   BotSettingsViewV1,
-  ConnectionView,
 } from "@frockbot/configuration-core";
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
 
@@ -17,7 +16,6 @@ export interface BotResidentProjection {
   settings: BotSettingsViewV1;
   executionPlan: BotExecutionPlanV1;
   systemPromptSection: string;
-  authorizeConnection(connection: ConnectionView): Promise<ConnectionView>;
 }
 
 export interface BotResidentTurnExecution {

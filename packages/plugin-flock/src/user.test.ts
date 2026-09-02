@@ -54,7 +54,7 @@ function command(commandId = "create-1", expectedRevision = 0) {
 }
 
 describe("Flock User contribution", () => {
-  test("atomically admits a Bot and replays duplicate delivery", async () => {
+  test("atomically admits a model-free Bot and replays duplicate delivery", async () => {
     const storage = new MemoryStorage();
     const contribution = createFlockUserBackendContribution({
       storage,
@@ -71,8 +71,8 @@ describe("Flock User contribution", () => {
       registeredAt: "2026-08-29T00:00:00.000Z",
     });
     const registration = await contribution.registration("alpha");
-    expect(registration).not.toHaveProperty("initialModel");
-    expect(registration).not.toHaveProperty("initialAssignments");
+    expect(Object.hasOwn(registration, "initialModel")).toBe(false);
+    expect(Object.hasOwn(registration, "initialCapabilities")).toBe(false);
     await expect(
       contribution.createBot("user-1", { ...command(), name: "Different" }),
     ).rejects.toThrow("command ID collision");
@@ -84,7 +84,7 @@ describe("Flock User contribution", () => {
     ).rejects.toBeInstanceOf(FlockConflictError);
   });
 
-  test("admits a Bot without copying User authority into its registration", async () => {
+  test("admits a Bot without consulting User model state", async () => {
     const storage = new MemoryStorage();
     const contribution = createFlockUserBackendContribution({
       storage,

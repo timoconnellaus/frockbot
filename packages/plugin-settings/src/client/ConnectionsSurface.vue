@@ -1,11 +1,10 @@
 <script setup lang="ts">
 /**
- * Connections: the accounts and services a User authorizes and may then give a
- * Bot access to — Composio, Gmail, a remote MCP server.
+ * Connectors: the surface for accounts and services a User authorizes for all
+ * of their Bots — Composio, Gmail, a remote MCP server.
  *
- * It holds authorization and its durable state only. Whether the Package
- * providing a connector is enabled at all is Plugins' question, and a model
- * provider's account belongs to Models even though it is a Connection too.
+ * It holds Connection authorization and state only. Whether the Package
+ * providing a connector is enabled at all is Plugins' question.
  */
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { UiAnchor, UiButton } from "@frockbot/client-ui";
@@ -50,6 +49,7 @@ const pendingAuthorizations = computed(() =>
   ),
 );
 const reconnectingConnectionId = ref<string>();
+const togglingConnectionTypeId = ref<string>();
 
 const apiKeyPackageId = ref<string>();
 const apiKeyConnectionTypeId = ref<string>();
@@ -80,7 +80,7 @@ const mcpScope = ref("");
 const mcpClientId = ref("");
 
 /**
- * The MCP lifecycle panel: the durable server records the User Durable Object
+ * The MCP lifecycle panel: the server records the User Durable Object
  * owns, which the Connection rows cannot show — a server's `needs-auth` or
  * `error` state, when it last handshook, what its instructions are, and the
  * refusals this build recorded rather than performed.
@@ -155,6 +155,43 @@ function connectionCount(packageId: string): number {
     (connection) =>
       connection.packageId === packageId && connection.state !== "revoked",
   ).length;
+}
+
+function credentiallessConnection(item: PluginCatalogItem) {
+  const connectionType = item.connectionTypes[0];
+  if (connectionType?.authorizationKind !== "none") return undefined;
+  return (web.value.userSettings?.connections ?? []).find(
+    (connection) =>
+      connection.packageId === item.packageId &&
+      connection.connectionTypeId === connectionType.id &&
+      connection.state !== "revoked",
+  );
+}
+
+async function toggleCredentialless(item: PluginCatalogItem): Promise<void> {
+  const connectionType = item.connectionTypes[0];
+  if (connectionType?.authorizationKind !== "none") return;
+  togglingConnectionTypeId.value = connectionType.id;
+  try {
+    const connection = credentiallessConnection(item);
+    if (!connection) {
+      await web.value.createConnection({
+        packageId: item.packageId,
+        connectionTypeId: connectionType.id,
+        label: item.displayName,
+      });
+    } else {
+      await web.value.setConnectionEnabled(
+        connection.connectionId,
+        connection.state !== "ready",
+      );
+    }
+  } catch (error) {
+    web.value.settingsError =
+      error instanceof Error ? error.message : "Could not update Connection";
+  } finally {
+    togglingConnectionTypeId.value = undefined;
+  }
 }
 
 function beginMcpConnection(): void {
@@ -286,13 +323,12 @@ async function connect(
   <div class="connections-surface">
     <UiAnchor
       anchor="user-connections"
-      label="Connections"
+      label="Connectors"
       :href="connectionsLink"
       class="settings-row"
     >
       <p class="field-hint">
-        Accounts and services your Bots can use. Every Bot holds the ready
-        Connections its User has made.
+        Connect an account or service once and every Bot you own can use it.
       </p>
 
       <section
@@ -348,7 +384,20 @@ async function connect(
               </small>
             </span>
             <UiButton
-              v-if="
+              v-if="item.connectionTypes[0]?.authorizationKind === 'none'"
+              :disabled="
+                togglingConnectionTypeId === item.connectionTypes[0]?.id
+              "
+              @click="toggleCredentialless(item)"
+            >
+              {{
+                credentiallessConnection(item)?.state === "ready"
+                  ? "Disable"
+                  : "Enable"
+              }}
+            </UiButton>
+            <UiButton
+              v-else-if="
                 connectionCount(item.packageId) === 0 ||
                 item.connectionTypes[0]?.allowMultiple
               "

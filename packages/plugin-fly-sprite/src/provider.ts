@@ -372,6 +372,19 @@ function handle(
       run: (options) =>
         computer.doctor(options?.signal ?? new AbortController().signal),
     },
+    presence: {
+      connect: async (options) => {
+        const connected = await computer.connect(options);
+        return {
+          id: connected.viewerSessionId,
+          url: connected.viewerUrl,
+          ...(connected.viewerExpiresAt
+            ? { expiresAt: connected.viewerExpiresAt }
+            : {}),
+          ...(connected.message ? { message: connected.message } : {}),
+        };
+      },
+    },
     processes: {
       launch: async (request, options) => {
         const launched = await computer.launchProcess(
@@ -419,7 +432,7 @@ function handle(
     // `flock`, and neither was reachable from workerd (ADR 0004).
     viewer: {
       open: async (options) => {
-        const result = await computer.viewer(options?.signal);
+        const result = await computer.viewer(options);
         if (!result.session) {
           throw new ComputerError(
             "provider-unavailable",
@@ -435,20 +448,37 @@ function handle(
             : {}),
         };
       },
+      renew: async (sessionId, options) => {
+        const result = await computer.refreshViewer(sessionId, options);
+        if (!result.session) {
+          throw new ComputerError(
+            "provider-unavailable",
+            "The Computer host did not renew the viewer session",
+            true,
+          );
+        }
+        return {
+          id: result.session.id,
+          url: result.session.url,
+          ...(result.session.expiresAt
+            ? { expiresAt: result.session.expiresAt }
+            : {}),
+        };
+      },
       revoke: async (sessionId, options) => {
-        await computer.revokeViewer(sessionId, options?.signal);
+        await computer.revokeViewer(sessionId, options);
       },
     },
     control: {
       // The scope and the owner travel with the call, so one Computer surface
-      // serves both leases: the per-tenant human takeover it always did, and
-      // the User-wide `desktop-gui` lease a `computerUse` subagent holds.
+      // serves legacy per-tenant leases and the User-wide `desktop-gui` lease
+      // on which human sessions and `computerUse` subagents contend.
       acquire: async (request, options) =>
-        lease(await computer.takeControl(options?.signal, request)),
+        lease(await computer.takeControl(options, request)),
       renew: async (_current, request, options) =>
-        lease(await computer.refreshControl(options?.signal, request)),
+        lease(await computer.refreshControl(options, request)),
       release: (_current, request, options) =>
-        computer.releaseControl(options?.signal, request),
+        computer.releaseControl(options, request),
     },
     close: () => Promise.resolve(),
   };
@@ -484,6 +514,8 @@ export class FlySpriteComputerProvider implements ComputerProvider {
      * than a sync with nowhere to record its intent.
      */
     private readonly syncHost?: ComputerSyncHostV1,
+    /** The active `computerUse` task owner, on that task's child Turn. */
+    private readonly agentControlOwnerId?: string,
   ) {}
 
   /**
@@ -500,6 +532,9 @@ export class FlySpriteComputerProvider implements ComputerProvider {
         ...(this.host ? { host: this.host } : {}),
         respectHumanControl: true,
         spriteName: flySpriteNameForComputer(identity),
+        ...(this.agentControlOwnerId
+          ? { agentControlOwnerId: this.agentControlOwnerId }
+          : {}),
       });
       this.computers.set(key, computer);
     }
@@ -533,11 +568,20 @@ export class FlySpriteComputerProvider implements ComputerProvider {
 
 export function createFlySpriteProviderPlugin(
   computer?: FlySpriteComputer,
-  options?: { host?: ComputerHostFactoryV1; sync?: ComputerSyncHostV1 },
+  options?: {
+    host?: ComputerHostFactoryV1;
+    sync?: ComputerSyncHostV1;
+    agentControlOwnerId?: string;
+  },
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx) =>
     ctx.computers.register(
-      new FlySpriteComputerProvider(computer, options?.host, options?.sync),
+      new FlySpriteComputerProvider(
+        computer,
+        options?.host,
+        options?.sync,
+        options?.agentControlOwnerId,
+      ),
     );
   plugin.inject = ["computers"];
   return plugin;

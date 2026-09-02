@@ -42,7 +42,7 @@ test("a new User creates a first Bot and finds it in the directory", async ({
     page.getByRole("heading", { name: "Shepherd is ready." }),
   ).toBeVisible();
   await expect(page.locator(".workspace-title small")).toHaveText(
-    "DeepSeek V4 Flash · Cloudflare Workers AI",
+    "Auto (recommended) · Flock AI",
   );
   await expect(composerInput(page)).toBeEnabled();
 });

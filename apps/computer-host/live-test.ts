@@ -35,18 +35,18 @@ import {
   type ComputerHostOperationV1,
 } from "@frockbot/computer-host-protocol";
 import {
-  COMPUTER_REFRESH_FINGERPRINT,
-  COMPUTER_REFRESH_STAMP,
   computerSpriteNameSourceV1,
   computerSpriteNameV1,
   DOCTOR_LOG,
   DOCTOR_MARKER,
   DOCTOR_REPORT_SCHEMA_VERSION,
   DOCTOR_SCRIPT,
+  PROVISION_DIGEST,
   PROVISION_PHASES,
   REFERENCE_DOCS_VERSION,
   REFERENCE_ROOT,
   RUNTIME_ROOT,
+  runtimeDocumentDigestV1,
   SCRATCH_ROOT,
 } from "@frockbot/computer-host-runtime";
 
@@ -732,11 +732,10 @@ try {
   // The container is restarted, so its in-memory record of this Computer is
   // gone. A fresh SpritesClient inside it must re-derive everything from the
   // Sprite: same Sprite, same generation, same file, no reprovisioning.
-  // The reference set is versioned precisely because provisioning
-  // short-circuits: a Sprite with a state file is adopted and its provisioning
-  // document never runs again. Deleting the version stamps here is what makes
-  // the next `open` an honest test of the refresh — if it did not run, the
-  // documents would still be missing after the restart below.
+  // A Sprite with a host-state file is adopted rather than cold-provisioned.
+  // Deleting both the reference version and runtime digest makes the next
+  // `open` an honest test of the in-place update: if it did not run, the
+  // reference version would still be missing after the restart below.
   await expectOk(
     await call(COMPUTER_HOST_ROUTES["file/delete"], {
       kind: "file/delete",
@@ -748,10 +747,10 @@ try {
   await expectOk(
     await call(COMPUTER_HOST_ROUTES["file/delete"], {
       kind: "file/delete",
-      path: COMPUTER_REFRESH_STAMP,
+      path: PROVISION_DIGEST,
       recursive: false,
     }),
-    "file/delete refresh stamp",
+    "file/delete runtime digest",
   );
 
   process.stdout.write("Restarting the container to prove reconstruction\n");
@@ -785,8 +784,8 @@ try {
     ),
     "the tenant is answered with its own durable directory",
   );
-  // The adopt path's refresh: an already-provisioned Computer gains this
-  // build's reference set without being reprovisioned.
+  // The adopt path's in-place update: an already-provisioned Computer gains
+  // this build's reference set without replacing its VM or disk.
   const refreshedVersion = Buffer.from(
     decodeComputerHostFileReadResultV1(
       await expectOk(
@@ -803,16 +802,16 @@ try {
     .trim();
   check(
     refreshedVersion === REFERENCE_DOCS_VERSION,
-    `an adopted Computer refreshed its reference set to ${refreshedVersion}`,
+    `an adopted Computer updated its reference set to ${refreshedVersion}`,
   );
-  const refreshedStamp = Buffer.from(
+  const refreshedDigest = Buffer.from(
     decodeComputerHostFileReadResultV1(
       await expectOk(
         await call(COMPUTER_HOST_ROUTES["file/read"], {
           kind: "file/read",
-          path: COMPUTER_REFRESH_STAMP,
+          path: PROVISION_DIGEST,
         }),
-        "file/read refresh stamp",
+        "file/read runtime digest",
       ),
     ).bytesBase64,
     "base64",
@@ -820,8 +819,8 @@ try {
     .toString()
     .trim();
   check(
-    refreshedStamp === COMPUTER_REFRESH_FINGERPRINT,
-    "and recorded this build's fingerprint, so the next open costs one read",
+    refreshedDigest === runtimeDocumentDigestV1(),
+    "and recorded this build's runtime digest",
   );
 
   const afterRestart = decodeComputerHostFileReadResultV1(

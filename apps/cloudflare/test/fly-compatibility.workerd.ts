@@ -60,8 +60,9 @@ describe("production Bot durability in Workerd", () => {
       firstEvents.map((_, index) => index),
     );
 
-    // This Bot follows the User's default model. A client renames it against
-    // the revision it reads, exactly as the hosted client does.
+    // This Bot follows the account model and carries no configuration of its
+    // own, so a fresh Bot's revision is zero. A client renames it against the
+    // revision it reads, exactly as the hosted client does.
     // SAFETY: the generated stub type for `readConfiguration` is too deep for
     // the compiler to instantiate here; this names the one field it reads.
     const settingsRpc = stub as unknown as {
@@ -69,7 +70,7 @@ describe("production Bot durability in Workerd", () => {
     };
     const renamedFrom = (await settingsRpc.readConfiguration(identity))
       .revision;
-    expect(renamedFrom).toBeGreaterThan(0);
+    expect(renamedFrom).toBe(0);
     await stub.executeConfiguration({
       ...identity,
       command: {

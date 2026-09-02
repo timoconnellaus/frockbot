@@ -7,9 +7,9 @@
 // default binding, GrokBot's `sand-automation` — and an omitted `model`
 // inherits the parent's binding rather than picking anything.
 //
-// A slug is `<packageId>/<providerModelId>`. It names a resolved model binding,
-// not a provider: a slug the Bot invents resolves to nothing and the dispatch
-// is refused.
+// A slug is `<packageId>/<providerModelId>`. It names an enabled binding, not a
+// provider: resolution runs against the User's enabled model Capabilities, so a
+// slug the Bot invents resolves to nothing and the dispatch is refused.
 
 import type { TurnTypeV1 } from "@frockbot/kernel-contracts";
 import {
@@ -22,7 +22,7 @@ import {
 /** Most slugs the prompt section will ever render. A catalog, not a directory. */
 export const SUBAGENT_MODEL_CATALOG_LIMIT_V1 = 32;
 
-/** One offerable model, projected from one resolved model binding. */
+/** One offerable model, projected from one enabled model binding. */
 export interface SubagentModelOptionV1 {
   slug: string;
   binding: TaskModelBindingV1;
@@ -41,8 +41,9 @@ export function subagentModelSlugV1(binding: {
  * The turn types that may see more than one slug.
  *
  * An `automation` or `subagent` turn renders exactly one — the Bot's default
- * binding. It is not a permission; an unattended Turn choosing a model per
- * task is a decision with nobody to answer for it.
+ * binding. It is not a permission (the enabled set is the same either way); it
+ * is that an unattended Turn choosing a model per task is a decision with
+ * nobody to answer for it.
  */
 export function subagentModelsAreNarrowedV1(turnType: TurnTypeV1): boolean {
   return turnType === "automation" || turnType === "subagent";
@@ -51,9 +52,9 @@ export function subagentModelsAreNarrowedV1(turnType: TurnTypeV1): boolean {
 /**
  * The catalog one Turn is offered.
  *
- * `bindings` are the Bot's model bindings, already resolved by the Shell;
- * `defaultBinding` is the Bot's own durable binding. A duplicate slug is kept
- * once — two bindings naming one provider model are one choice.
+ * `bindings` are the User's enabled model bindings, already resolved by
+ * the Shell; `defaultBinding` is the Bot's own durable binding. A duplicate
+ * slug is kept once — two bindings naming one provider model are one choice.
  */
 export function subagentModelCatalogV1(input: {
   bindings: readonly TaskModelBindingV1[];
@@ -73,7 +74,7 @@ export function subagentModelCatalogV1(input: {
     options.push({ slug, binding, isDefault: slug === defaultSlug });
   };
   // The default first, so the one slug a narrowed turn renders is always the
-  // Bot's own binding and never whichever alternative happens to sort first.
+  // Bot's own binding and never whichever binding happens to sort first.
   if (input.defaultBinding) consider(input.defaultBinding);
   if (!subagentModelsAreNarrowedV1(input.turnType)) {
     for (const binding of input.bindings) consider(binding);
@@ -105,7 +106,7 @@ export function resolveSubagentModelV1(
       return {
         status: "refused",
         reason:
-          "this Bot has no configured model, so a subagent has no model to run on",
+          "this Bot has no enabled model binding, so a subagent has no model to run on",
       };
     }
     return {
@@ -121,7 +122,7 @@ export function resolveSubagentModelV1(
       reason:
         offered.length > 0
           ? `model "${requested}" is not one of this Turn's subagent models (${offered})`
-          : `model "${requested}" is not available: this Bot has no configured model`,
+          : `model "${requested}" is not available: this Bot has no enabled model binding`,
     };
   }
   return {

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   USER_PROFILE_PLACEHOLDER_NAME_V1,
-  type ConnectionView,
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
@@ -64,7 +63,6 @@ function backendHost(
 ) {
   return {
     state: { storage } as unknown as DurableObjectState,
-    env: {} as never,
     availablePackages: [{ packageId: "composio", version: "0.0.1" }],
     reconcileProviderConnection,
     revokeConnectedAccount,
@@ -89,19 +87,6 @@ function deferred<T>() {
     resolve = next;
   });
   return { promise, resolve };
-}
-
-function connection(
-  safeMetadata: ConnectionView["safeMetadata"],
-): ConnectionView {
-  return {
-    connectionId: "connection-1",
-    packageId: "composio",
-    connectionTypeId: "gmail",
-    displayName: "Gmail",
-    state: "ready",
-    safeMetadata,
-  };
 }
 
 async function startInstalledConnection(
@@ -314,6 +299,114 @@ describe("Connection admission", () => {
       }),
     ).rejects.toThrow('Package "composio" is not available');
     expect((await upgraded.read("user-1")).connections).toEqual([]);
+  });
+
+  test("decodes the seam and admits an enabled Package's Connection", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComposioUserBackendContribution({
+      ...backendHost(storage),
+    });
+    const execute = (command: UserConfigurationCommandV1) =>
+      contribution.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command,
+      });
+    const read = () =>
+      contribution.readConfiguration({ schemaVersion: 1, userId: "user-1" });
+
+    await expect(
+      contribution.readConfiguration({ schemaVersion: 1, userId: 42 }),
+    ).rejects.toThrow("userId is invalid");
+    await expect(
+      contribution.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/update-profile",
+          commandId: "malformed-profile",
+          expectedRevision: 0,
+          profile: { name: 42 },
+        },
+      }),
+    ).rejects.toThrow("profile.name must be a string");
+    await expect(
+      execute({
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-unknown",
+        expectedRevision: 0,
+        packageId: "unknown",
+        version: "1.0.0",
+      }),
+    ).rejects.toThrow("Package is not available");
+    expect((await read()).revision).toBe(0);
+
+    await execute({
+      schemaVersion: 1,
+      type: "user/install-package",
+      commandId: "install-composio",
+      expectedRevision: 0,
+      packageId: "composio",
+      version: "0.0.1",
+    });
+    await startInstalledConnection(contribution, {
+      connectionId: "gmail-1",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+    });
+    await contribution.finishConnectionAuthorization("user-1", "gmail-1", {
+      state: "ready",
+    });
+
+    expect(await read()).toMatchObject({
+      revision: 3,
+      connections: [{ connectionId: "gmail-1", state: "ready" }],
+    });
+  });
+});
+
+describe("Connection revocation", () => {
+  test("disconnects without dependent bookkeeping and replays idempotently", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComposioUserBackendContribution(
+      backendHost(storage),
+    );
+    await startInstalledConnection(contribution, {
+      connectionId: "gmail-1",
+      packageId: "composio",
+      connectionTypeId: "gmail",
+      displayName: "Gmail",
+    });
+    await contribution.finishConnectionAuthorization("user-1", "gmail-1", {
+      state: "ready",
+      safeMetadata: { connectedAccountId: "account-1" },
+    });
+    let providerRevocations = 0;
+    const coordinator = new ComposioConnectionCoordinator({
+      client: new ComposioClient({
+        apiKey: "secret",
+        fetch: (_input, init) => {
+          expect(init?.method).toBe("POST");
+          providerRevocations += 1;
+          return Promise.resolve(Response.json({ success: true }));
+        },
+      }),
+      store: contribution,
+      callbackBaseUrl: "https://app.example.com",
+      connectionTypes: {},
+    });
+
+    const first = await coordinator.revoke("user-1", "gmail-1");
+    const replay = await coordinator.revoke("user-1", "gmail-1");
+
+    expect(first).toEqual({ schemaVersion: 1, status: "revoked" });
+    expect(replay).toEqual(first);
+    expect(providerRevocations).toBe(1);
+    const connection = await contribution.getConnection("user-1", "gmail-1");
+    expect(connection?.state).toBe("revoked");
   });
 });
 

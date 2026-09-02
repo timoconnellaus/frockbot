@@ -7,7 +7,8 @@
 // produce the same durable record with different recorded provenance.
 //
 // "Self-modification never widens authority": a Bot-authored Routine runs as the
-// Bot, with exactly the Connections its User has made. Nothing here grants anything.
+// Bot, with the User's enabled Packages and Connections. Nothing here grants
+// anything.
 //
 // `run_now` fires the Routine out of band. It enqueues rather than runs: the
 // tool is called from inside an admitted Turn, and a Bot Durable Object holds

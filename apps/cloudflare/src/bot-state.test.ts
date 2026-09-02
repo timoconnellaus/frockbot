@@ -163,6 +163,10 @@ describe("BotState Ollama execution", () => {
           },
         },
       ],
+      platformModel: {
+        connectionId: "ollama-1",
+        providerModelId: "glm-5.3-flash:cloud",
+      },
     };
     const leases: Array<Record<string, unknown>> = [];
     const settlements: Array<Record<string, unknown>> = [];
@@ -173,10 +177,6 @@ describe("BotState Ollama execution", () => {
           botId: "primary",
           registeredAt: "2026-08-30T00:00:00.000Z",
           initialName: "Ollama Bot",
-          initialModel: {
-            connectionId: "ollama-1",
-            providerModelId: "glm-5.3-flash:cloud",
-          },
           sheep: randomSheepRecipeV1(() => 0),
         }),
       readConfiguration: () => Promise.resolve(structuredClone(user)),
@@ -258,24 +258,6 @@ describe("BotState Ollama execution", () => {
         text: "hello",
       },
     });
-    await expect(
-      firstState.executeConfiguration({
-        schemaVersion: 1,
-        userId: "user-1",
-        botId: "primary",
-        command: {
-          schemaVersion: 1,
-          type: "bot/select-model",
-          commandId: "replace-initial-model",
-          botId: "primary",
-          expectedRevision: 0,
-          model: {
-            connectionId: "ollama-1",
-            providerModelId: "glm-5.3-flash:cloud",
-          },
-        },
-      }),
-    ).resolves.toMatchObject({ status: "applied" });
     const second = await state().run({
       schemaVersion: 1,
       userId: "user-1",

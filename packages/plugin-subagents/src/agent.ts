@@ -244,7 +244,7 @@ export interface SubagentsRuntimeHostV1 {
    * into each step of its Turn and folds what it gets into that step's inputs.
    */
   drainMessages?(): Promise<readonly PendingTaskMessageV1[]>;
-  /** The configured models this Turn may dispatch onto. */
+  /** The models this Turn may dispatch onto, resolved from enabled bindings. */
   models(): readonly SubagentModelOptionV1[];
   dispatch(
     request: SubagentDispatchRequestV1,

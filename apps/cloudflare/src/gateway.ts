@@ -467,6 +467,12 @@ export function createGateway(dependencies: GatewayDependencies) {
         if (isUserSettings && "botId" in command) {
           return jsonError(400, "User settings require a User command");
         }
+        if (command.type === "user/set-platform-model") {
+          return jsonError(
+            403,
+            "Platform model can only be set by a backend Contribution",
+          );
+        }
         if ("botId" in command) {
           return Response.json(
             decodeOperationReceiptV1(

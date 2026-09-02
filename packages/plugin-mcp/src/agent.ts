@@ -1,6 +1,6 @@
 /**
- * The runtime Contribution: one ready MCP Connection becomes one remote MCP
- * server's tools in the Bot's tool registry.
+ * The runtime Contribution: one enabled `mcp-tools` Capability becomes one
+ * remote MCP server's tools in the Bot's tool registry.
  *
  * Everything the Bot ever sees of a server passes through here, and every byte
  * of it is bounded. The server is contacted with the Package's own `fetch`, so
@@ -27,7 +27,7 @@ import {
 import { mcpAuthorizationRequiredV1 } from "./oauth.js";
 import { decodeOutboundMcpUrlV1 } from "./ssrf.js";
 import {
-  mcpConnectionResolutionKeyV1,
+  mcpCapabilityResolutionKeyV1,
   mcpFailureCodeV1,
   MAX_MCP_INSTRUCTIONS_BYTES_V1,
   type McpFailureCodeV1,
@@ -62,7 +62,8 @@ export const MCP_TOOL_SUBAGENT_ROLES: readonly string[] = ["executor"];
 
 /**
  * The durable per-User ceiling on remote MCP servers. Counted over the enabled
- * ready Connections of this Package, so a seventeenth server is refused.
+ * Capabilities of this Package, so a Bot cannot be handed a seventeenth server
+ * by enabling one more Connection.
  */
 export const MAX_MCP_SERVERS_PER_USER_V1 = 16;
 
@@ -199,17 +200,17 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 export interface McpRuntimeContributionConfig {
-  binding: {
+  capability: {
     packageId: string;
     capabilityId: string;
     connectionId?: string;
-    state: string;
   };
   /**
-   * This binding's ordinal among the ready Connections of this Package,
-   * which makes the per-User server ceiling countable from inside the factory.
+   * This Capability's ordinal among the enabled ones of this Package,
+   * which is what makes the per-User server ceiling countable from inside a
+   * per-Capability factory.
    */
-  bindingIndex?: number;
+  capabilityIndex?: number;
   userId: string;
   readSecret(name: string): string | undefined;
   authorizeConnection(): Promise<ConnectionView>;
@@ -238,7 +239,7 @@ export interface McpRuntimeContributionConfig {
 }
 
 /**
- * Resolve one ready Connection into a mounted runtime Plugin. The handshake and
+ * Resolve one enabled Capability into a mounted runtime Plugin. The handshake and
  * `tools/list` happen here, before the Plugin mounts, so a server that cannot
  * be reached contributes nothing instead of half-registering.
  */
@@ -246,23 +247,22 @@ export async function createConfiguredMcpRuntimeContribution(
   config: McpRuntimeContributionConfig,
 ): Promise<Plugin.Function | undefined> {
   if (
-    config.binding.packageId !== MCP_PACKAGE_ID ||
-    config.binding.capabilityId !== MCP_CAPABILITY_ID ||
-    config.binding.state !== "enabled" ||
-    !config.binding.connectionId
+    config.capability.packageId !== MCP_PACKAGE_ID ||
+    config.capability.capabilityId !== MCP_CAPABILITY_ID ||
+    !config.capability.connectionId
   ) {
     return undefined;
   }
-  if ((config.bindingIndex ?? 0) >= MAX_MCP_SERVERS_PER_USER_V1) {
+  if ((config.capabilityIndex ?? 0) >= MAX_MCP_SERVERS_PER_USER_V1) {
     config.onFailure?.(
-      `A User may connect at most ${MAX_MCP_SERVERS_PER_USER_V1} MCP servers`,
+      `A User may enable at most ${MAX_MCP_SERVERS_PER_USER_V1} MCP servers`,
     );
     return undefined;
   }
   const fetchImpl = config.fetch ?? boundFetch;
   let client: McpClient | undefined;
   let lifecycle: { serverEpoch?: number; instructions?: string } = {};
-  const connectionId = config.binding.connectionId;
+  const connectionId = config.capability.connectionId;
   try {
     const connection = await config.authorizeConnection();
     lifecycle = mcpConnectionLifecycleV1(connection);
@@ -273,7 +273,7 @@ export async function createConfiguredMcpRuntimeContribution(
     const apiKey =
       connection.connectionTypeId === MCP_KEYED_CONNECTION_TYPE_ID ||
       connection.connectionTypeId === MCP_OAUTH_CONNECTION_TYPE_ID
-        ? await openConnectionCredential(config, connection)
+        ? await openEnabledCredential(config, connection)
         : undefined;
     client = new McpClient({
       url: settings.url,
@@ -370,18 +370,18 @@ export async function createConfiguredMcpRuntimeContribution(
 }
 
 /**
- * What one ready MCP Connection resolves to, including the server's
+ * What one enabled `mcp-tools` Capability resolves to, including the server's
  * `serverEpoch`. A restart bumps the epoch, so this key changes, so the next
  * admitted Turn resolves a different mount and re-handshakes — while the
  * in-flight Turn, holding the client it already mounted, is untouched.
  */
-export function mcpConnectionResolutionV1(config: {
-  binding: { connectionId?: string };
+export function mcpCapabilityResolutionV1(config: {
+  capability: { connectionId?: string };
   connection: { generation?: string; safeMetadata?: Record<string, unknown> };
 }): string {
   const lifecycle = mcpConnectionLifecycleV1(config.connection);
-  return mcpConnectionResolutionKeyV1({
-    connectionId: config.binding.connectionId ?? "",
+  return mcpCapabilityResolutionKeyV1({
+    connectionId: config.capability.connectionId ?? "",
     ...(config.connection.generation === undefined
       ? {}
       : { connectionGeneration: config.connection.generation }),
@@ -391,7 +391,7 @@ export function mcpConnectionResolutionV1(config: {
   });
 }
 
-async function openConnectionCredential(
+async function openEnabledCredential(
   config: McpRuntimeContributionConfig,
   connection: ConnectionView,
 ): Promise<string> {

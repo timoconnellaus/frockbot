@@ -63,7 +63,7 @@ async function script(rule: FakeExecScript): Promise<void> {
   expect(response.status).toBe(200);
 }
 
-/** Install `mcp` and add the `Example` server Connection. */
+/** Install `mcp` and enable the `Example` server account-wide. */
 async function connectMcpServer(userId: string): Promise<void> {
   const settings = (await expectOkJson(
     await asUser(userId, "/api/settings"),

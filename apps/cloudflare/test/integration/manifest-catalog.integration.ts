@@ -47,9 +47,9 @@ describe("the live application manifest decodes with the client's decoder", () =
     expect(withConfiguration.length).toBeGreaterThan(0);
     expect(withoutConfiguration.length).toBeGreaterThan(0);
 
-    // The decoder keeps only Packages the Plugins surface can install or
-    // assign — the ones that declare a Connection Type or a Capability — so
-    // the provider Package must survive, and it is one of the Packages that
+    // The decoder keeps only Packages the Plugins surface can enable — the
+    // ones that declare settings, a Connection Type or a Capability — so the
+    // provider Package must survive, and it is one of the Packages that
     // carries `configuration`.
     const catalog = decodePluginCatalog(body);
     const provider = catalog.find(
@@ -70,6 +70,29 @@ describe("the live application manifest decodes with the client's decoder", () =
       "bot-self-management",
     );
     expect(flock?.connectionTypes).toEqual([]);
+
+    // Custom models deliberately contributes settings and client sections,
+    // with no Capability or Connection Type. Its enablement is what makes the
+    // retained settings active, so that legitimate Package shape must remain
+    // visible in Plugins.
+    const customModels = catalog.find(
+      (item) => item.packageId === "custom-models",
+    );
+    expect(customModels).toMatchObject({
+      displayName: "Custom models",
+      capabilities: [],
+      connectionTypes: [],
+    });
+    expect(
+      customModels?.settings?.map((setting) => [
+        setting.id,
+        setting.scopes,
+        setting.role,
+      ]),
+    ).toEqual([
+      ["account-model", ["user"], "model"],
+      ["model", ["bot"], "model"],
+    ]);
 
     // The application's own shell is mounted unconditionally and was never
     // installed, so the producer keeps it out of the catalog entirely.

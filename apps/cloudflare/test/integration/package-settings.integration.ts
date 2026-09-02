@@ -85,19 +85,18 @@ async function installPackage(
 
 /** What the fake `AI` binding has been asked to generate so far. */
 async function imageModelCalls(): Promise<Array<{ model: string }>> {
-  // SAFETY: the binding is declared as Workers AI in the production `Env`; the
-  // suite binds the same entrypoint a second time under `WORKERS_AI` so the
-  // call log is reachable without widening the production type.
+  // SAFETY: the suite binds the same RPC entrypoint a second time under
+  // `AI_PROBE` so the call log is reachable without widening production Env.
   const probe = (
     env as unknown as {
-      WORKERS_AI: { runCalls(): Promise<Array<{ model: string }>> };
+      AI_PROBE: { runCalls(): Promise<Array<{ model: string }>> };
     }
-  ).WORKERS_AI;
+  ).AI_PROBE;
   return probe.runCalls();
 }
 
-/** Connect Ollama Cloud; every Bot then holds its `web_search` capability. */
-async function prepareWebSearch(userId: string, botId: string): Promise<void> {
+/** Enable the Ollama Package and Connection account-wide. */
+async function grantWebSearch(userId: string, botId: string): Promise<void> {
   await provisionThroughGateway({ userId, botId });
 }
 
@@ -128,7 +127,7 @@ describe("a Package-level setting value reaching a Turn", () => {
   it("caps web_search at the value the User stored on the Package", async () => {
     const userId = freshUserId("package-settings");
     const botId = "configured-bot";
-    await prepareWebSearch(userId, botId);
+    await grantWebSearch(userId, botId);
 
     // Unset, the Package is on its own default and the model's request stands.
     expect(
@@ -154,7 +153,7 @@ describe("a Package-level setting value reaching a Turn", () => {
   it("refuses a value the Package's schema does not allow, with the reason", async () => {
     const userId = freshUserId("package-settings-invalid");
     const botId = "refusing-bot";
-    await prepareWebSearch(userId, botId);
+    await grantWebSearch(userId, botId);
 
     const refused = await setPackageSettings(userId, `bad-${botId}`, {
       [SETTING_ID]: 99,

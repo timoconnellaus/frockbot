@@ -15,9 +15,9 @@ import {
 } from "./fixtures.ts";
 
 // The run list projects a Session, and projecting one mounts the Bot's
-// Composition — which loads the built application artifact. A new Bot now
-// carries its User's ready Connections, so the route reaches the loader on the first
-// read rather than answering from an empty Session.
+// Composition — which loads the built application artifact. Account-wide
+// enablement means the route reaches the loader on the first read rather than
+// answering from an empty Session.
 useApplicationArtifact();
 
 interface BotSettings {

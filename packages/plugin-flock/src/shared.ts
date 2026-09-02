@@ -5,7 +5,6 @@ import {
   isPublicIdentifier,
   type BotNameProvenanceV1,
   type BotSelfWriterV1,
-  type ModelAssignment,
 } from "@frockbot/configuration-core";
 export type { BotSelfWriterV1 } from "@frockbot/configuration-core";
 import assetManifest from "../assets/manifest.json" with { type: "json" };
@@ -36,7 +35,6 @@ export interface BotRegistrationV1 {
    * Durable Object, which no other Bot may write.
    */
   initialDescription?: string;
-  initialModel?: ModelAssignment;
   /**
    * The Bot and Turn that created this Bot, when a Bot created it. Absent for
    * a User-created Bot and for every registration written before this existed.
@@ -252,19 +250,6 @@ function revision(value: unknown): number {
     throw new FlockDecodeError("revision is invalid");
   return value as number;
 }
-function modelAssignment(value: unknown): ModelAssignment {
-  const model = record(value, "initialModel");
-  exact(model, ["connectionId", "providerModelId"]);
-  return {
-    connectionId: identifier(model.connectionId, "initialModel.connectionId"),
-    providerModelId: boundedText(
-      model.providerModelId,
-      "initialModel.providerModelId",
-      256,
-    ),
-  };
-}
-
 export function decodeSheepRecipeV1(input: unknown): SheepRecipeV1 {
   const value = record(input, "sheep recipe");
   exact(value, ["schemaVersion", "background", "upper", "middle", "lower"]);
@@ -349,20 +334,10 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   exact(
     bot,
     ["schemaVersion", "botId", "registeredAt", "initialName", "sheep"],
-    [
-      "initialDescription",
-      "initialModel",
-      "initialModelBinding",
-      "initialAssignments",
-      "createdBy",
-    ],
+    ["initialDescription", "createdBy"],
   );
   if (bot.schemaVersion !== 1)
     throw new FlockDecodeError("unsupported Bot registration");
-  const initialModel =
-    bot.initialModel === undefined
-      ? undefined
-      : modelAssignment(bot.initialModel);
   const botId = botIdentifier(bot.botId);
   const createdBy = botWriter(bot.createdBy, "createdBy");
   if (createdBy && createdBy.botId === botId)
@@ -381,7 +356,6 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
             10_000,
           ),
         }),
-    ...(initialModel === undefined ? {} : { initialModel }),
     ...(createdBy ? { createdBy } : {}),
     sheep: decodeSheepRecipeV1(bot.sheep),
   };

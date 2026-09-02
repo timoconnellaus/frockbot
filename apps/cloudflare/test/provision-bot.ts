@@ -1,11 +1,11 @@
 // The production bootstrap for a Bot that can run a Turn, shared by every
 // workerd suite that needs one. It is the product's own path: the User
-// installs the provider Package, creates its Connection, chooses the model new
-// Bots start on, and only then creates the Bot.
+// enables custom models, installs the provider Package, creates its Connection,
+// chooses the account model, and only then creates the Bot.
 import { env } from "cloudflare:workers";
 import { expect } from "vitest";
 
-/** The provider, model, and Package the bootstrap binds a Bot to. */
+/** The provider, model, and Package the bootstrap enables account-wide. */
 export const PROVISIONED_MODEL = {
   packageId: "provider-ollama-cloud",
   connectionTypeId: "ollama-cloud-account",
@@ -19,9 +19,8 @@ function user(name: string) {
 }
 
 /**
- * A Bot receives model authority solely through that durable Connection and
- * its model setting, so this is the shortest path that is still the product's
- * own.
+ * A Bot receives model authority through account-wide Package and Connection
+ * enablement, so this is the shortest path that is still the product's own.
  */
 export async function provisionBot(identity: {
   userId: string;
@@ -29,6 +28,33 @@ export async function provisionBot(identity: {
 }): Promise<void> {
   const configuration = user(identity.userId);
   const suffix = identity.botId;
+  // SAFETY: the generated stub type for `readConfiguration` is too deep for the
+  // compiler to instantiate here; this names the one field the bootstrap reads.
+  const settingsRpc = configuration as unknown as {
+    readConfiguration(input: unknown): Promise<{ revision: number }>;
+  };
+  const revision = async (): Promise<number> =>
+    (
+      await settingsRpc.readConfiguration({
+        schemaVersion: 1,
+        userId: identity.userId,
+      })
+    ).revision;
+  // Custom models is seeded disabled for every User on first read; the product
+  // path is to switch it on, not to install it, and the seed owns the revision.
+  const seeded = await revision();
+  await configuration.executeConfiguration({
+    schemaVersion: 1,
+    userId: identity.userId,
+    command: {
+      schemaVersion: 1,
+      type: "user/set-package-enabled",
+      commandId: `enable-custom-models-${suffix}`,
+      expectedRevision: seeded,
+      packageId: "custom-models",
+      enabled: true,
+    },
+  });
   await configuration.executeConfiguration({
     schemaVersion: 1,
     userId: identity.userId,
@@ -36,7 +62,7 @@ export async function provisionBot(identity: {
       schemaVersion: 1,
       type: "user/install-package",
       commandId: `install-${suffix}`,
-      expectedRevision: 0,
+      expectedRevision: seeded + 1,
       packageId: "provider-ollama-cloud",
       version: "0.0.1",
     },
@@ -55,31 +81,21 @@ export async function provisionBot(identity: {
     },
   })) as unknown as { status: string; connectionId: string };
   expect(connection).toMatchObject({ status: "applied" });
-  // SAFETY: the generated stub type for `readConfiguration` is too deep for the
-  // compiler to instantiate here; this names the one field the bootstrap reads.
-  const settingsRpc = configuration as unknown as {
-    readConfiguration(input: unknown): Promise<{ revision: number }>;
-  };
-  const revision = async (): Promise<number> =>
-    (
-      await settingsRpc.readConfiguration({
-        schemaVersion: 1,
-        userId: identity.userId,
-      })
-    ).revision;
   await configuration.executeConfiguration({
     schemaVersion: 1,
     userId: identity.userId,
     command: {
       schemaVersion: 1,
-      type: "user/set-new-bot-model",
+      type: "user/set-package-settings",
       commandId: `model-${suffix}`,
       expectedRevision: await revision(),
-      model: {
-        connectionId: connection.connectionId,
-        providerModelId: "glm-5.3-flash:cloud",
+      packageId: "custom-models",
+      values: {
+        "account-model": {
+          connectionId: connection.connectionId,
+          providerModelId: "glm-5.3-flash:cloud",
+        },
       },
-      source: "user",
     },
   });
   await configuration.createBot({
@@ -98,7 +114,7 @@ export async function provisionBot(identity: {
 }
 
 /**
- * A second Bot for a User whose Packages, Connection and default model
+ * A second Bot for a User whose Packages, Connection and account model
  * `provisionBot` already set up. Only `bot/create` is left, and the Flock's
  * revision has moved on by one Bot.
  */

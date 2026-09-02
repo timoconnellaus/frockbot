@@ -15,10 +15,10 @@ if (!surfaces || !web)
     v-if="web.connectionsAvailable"
     class="settings-trigger"
     type="button"
-    @click="surfaces.open('plugins')"
+    @click="surfaces.open('connections')"
   >
     <span class="settings-trigger__icon"><UiIcon name="plugins" /></span>
-    Plugins
+    Connectors
   </button>
 </template>
 

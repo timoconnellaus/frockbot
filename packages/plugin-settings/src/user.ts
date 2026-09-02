@@ -2,6 +2,7 @@ import {
   configurationCommandFingerprintV1,
   ConfigurationConflictError,
   ConfigurationDecodeError,
+  decodePackageSettingIdsV1,
   decodePackageSettingsPatchV1,
   MAX_PACKAGE_SETTINGS_V1,
   decodeOperationReceiptV1,
@@ -12,6 +13,7 @@ import {
   USER_PROFILE_PLACEHOLDER_NAME_V1,
   type ConnectionView,
   type JsonValue,
+  type PackageSettingValueV1,
   type OperationReceiptV1,
   type PackageInstallationView,
   type UserConfigurationCommandV1,
@@ -125,6 +127,10 @@ export interface AvailableUserPackage {
    * from their first configuration read.
    */
   installByDefault?: boolean;
+  /** The seeded installation state. Omission preserves the enabled default. */
+  defaultEnablement?: "enabled" | "disabled";
+  /** The Package manifest's Package-id-to-version-range dependency record. */
+  dependencies?: Readonly<Record<string, string>>;
   /**
    * `configuration.settings` from this version's manifest. Absent is the same
    * as empty and means the Package offers no User-level setting, so every
@@ -225,13 +231,17 @@ function withCatalogPin(
  * client already reads needs no second source.
  */
 function mergePackageSettingValues(
-  current: Record<string, JsonValue> | undefined,
-  patch: Record<string, string | number | boolean>,
-): Record<string, JsonValue> {
-  const merged: Record<string, JsonValue> = { ...(current ?? {}) };
+  current: Record<string, JsonValue | PackageSettingValueV1> | undefined,
+  patch: Record<string, PackageSettingValueV1>,
+  unset: readonly string[],
+): Record<string, JsonValue | PackageSettingValueV1> {
+  const merged: Record<string, JsonValue | PackageSettingValueV1> = {
+    ...(current ?? {}),
+  };
   for (const [settingId, value] of Object.entries(patch)) {
     merged[settingId] = value;
   }
+  for (const settingId of unset) delete merged[settingId];
   if (Object.keys(merged).length > MAX_PACKAGE_SETTINGS_V1) {
     throw new ConfigurationDecodeError("Package settings are too many");
   }
@@ -250,12 +260,11 @@ function applyUserCommand(
   switch (command.type) {
     case "user/update-profile":
       return { ...current, revision, profile: command.profile };
-    case "user/set-new-bot-model":
+    case "user/set-platform-model":
       return {
         ...current,
         revision,
-        newBotModelTemplate: command.model,
-        newBotModelTemplateSource: command.source,
+        platformModel: command.model,
       };
     case "user/install-package": {
       const existing = current.packages.find(
@@ -279,7 +288,12 @@ function applyUserCommand(
           {
             packageId: command.packageId,
             version: command.version,
-            state: existing?.state === "failed" ? "failed" : "installed",
+            state:
+              existing?.state === "failed"
+                ? "failed"
+                : command.enabled === false
+                  ? "disabled"
+                  : "installed",
             failure: existing?.failure,
             // A Catalog install records where it came from; the compiled-in
             // path records nothing new, so an old row keeps its exact shape.
@@ -288,9 +302,6 @@ function applyUserCommand(
               : {
                   catalogId: command.catalogId,
                   catalogGeneration: command.catalogGeneration,
-                  ...(command.contentHash === undefined
-                    ? {}
-                    : { contentHash: command.contentHash }),
                   provenance: "catalog" as const,
                 }),
             ...(Object.keys(values).length === 0 ? {} : { values }),
@@ -300,7 +311,7 @@ function applyUserCommand(
     }
     case "user/uninstall-package": {
       // Removing the row is the whole effect. Connections are the User's own
-      // and outlive any Package; Bot authority follows their current state.
+      // and outlive any Package (ADR 0019).
       if (
         !current.packages.some((pkg) => pkg.packageId === command.packageId)
       ) {
@@ -325,20 +336,33 @@ function applyUserCommand(
       }
       // Validated against the manifest of the version this User has, not the
       // one the client happened to be looking at.
-      const patch = decodePackageSettingsPatchV1(
-        settingDefinitions(installed.packageId, installed.version),
-        command.values,
+      const definitions = settingDefinitions(
+        installed.packageId,
+        installed.version,
       );
+      const patch = command.values
+        ? decodePackageSettingsPatchV1(definitions, command.values)
+        : {};
+      const unset = command.unset
+        ? decodePackageSettingIdsV1(definitions, command.unset)
+        : [];
       return {
         ...current,
         revision,
         packages: current.packages.map((pkg) =>
-          pkg.packageId === command.packageId
-            ? {
-                ...pkg,
-                values: mergePackageSettingValues(pkg.values, patch),
-              }
-            : pkg,
+          pkg.packageId !== command.packageId
+            ? pkg
+            : (() => {
+                const values = mergePackageSettingValues(
+                  pkg.values,
+                  patch,
+                  unset,
+                );
+                const { values: _storedValues, ...withoutValues } = pkg;
+                return Object.keys(values).length > 0
+                  ? { ...withoutValues, values }
+                  : withoutValues;
+              })(),
         ),
       };
     }
@@ -369,6 +393,12 @@ function applyUserCommand(
 export class UserSettingsBackendContribution {
   private readonly availablePackages: ReadonlySet<string>;
 
+  /** Declared Package dependencies, by Package id and version. */
+  private readonly packageDependencies: ReadonlyMap<
+    string,
+    Readonly<Record<string, string>>
+  >;
+
   /** The immutable first-party installation rows written on first read. */
   private readonly defaultPackages: readonly PackageInstallationView[];
 
@@ -391,6 +421,12 @@ export class UserSettingsBackendContribution {
         ({ packageId, version }) => `${packageId}\u0000${version}`,
       ),
     );
+    this.packageDependencies = new Map(
+      host.availablePackages.map((pkg) => [
+        `${pkg.packageId}\u0000${pkg.version}`,
+        pkg.dependencies ?? {},
+      ]),
+    );
     this.packageSettingDefinitions = new Map(
       host.availablePackages.map((pkg) => [
         `${pkg.packageId}\u0000${pkg.version}`,
@@ -403,7 +439,10 @@ export class UserSettingsBackendContribution {
             {
               packageId: pkg.packageId,
               version: pkg.version,
-              state: "installed" as const,
+              state:
+                pkg.defaultEnablement === "disabled"
+                  ? ("disabled" as const)
+                  : ("installed" as const),
               provenance: "first-party" as const,
             },
           ]
@@ -483,6 +522,26 @@ export class UserSettingsBackendContribution {
     );
   }
 
+  private packageDependencyFailure(
+    packageId: string,
+    version: string,
+    settings: UserSettingsViewV1,
+  ): string | undefined {
+    const dependencies = this.packageDependencies.get(
+      `${packageId}\u0000${version}`,
+    );
+    if (!dependencies) return undefined;
+    for (const dependencyId of Object.keys(dependencies).sort()) {
+      const available = settings.packages.some(
+        (pkg) => pkg.packageId === dependencyId && pkg.state === "installed",
+      );
+      if (!available) {
+        return `Package "${packageId}" requires Package "${dependencyId}" to be installed and enabled; enable "${dependencyId}" first`;
+      }
+    }
+    return undefined;
+  }
+
   async readConfiguration(input: unknown): Promise<UserSettingsViewV1> {
     const request = decodeUserConfigurationReadRpcV1(input);
     for (const bootstrap of this.readBootstraps.values()) {
@@ -556,7 +615,6 @@ export class UserSettingsBackendContribution {
     version: string;
     catalogId: string;
     catalogGeneration: string;
-    contentHash?: string;
   }): Promise<CatalogEntryV1> {
     const catalog = this.host.catalog;
     if (!catalog) {
@@ -581,17 +639,6 @@ export class UserSettingsBackendContribution {
         `Catalog entry "${command.catalogId}" does not offer Package "${command.packageId}" at version "${command.version}"`,
       );
     }
-    if (entry.bundle) {
-      if (command.contentHash !== entry.bundle.contentHash) {
-        throw new Error(
-          `Catalog entry "${command.catalogId}" requires bundle hash "${entry.bundle.contentHash}"`,
-        );
-      }
-    } else if (command.contentHash !== undefined) {
-      throw new Error(
-        `Catalog entry "${command.catalogId}" does not carry a Package bundle`,
-      );
-    }
     return entry;
   }
 
@@ -609,9 +656,6 @@ export class UserSettingsBackendContribution {
             version: command.version,
             catalogId: command.catalogId,
             catalogGeneration: command.catalogGeneration,
-            ...(command.contentHash === undefined
-              ? {}
-              : { contentHash: command.contentHash }),
           })
         : undefined;
     return this.host.storage.transaction((storage) =>
@@ -703,6 +747,36 @@ export class UserSettingsBackendContribution {
     }
     if (command.expectedRevision !== current.revision) {
       throw new ConfigurationConflictError(current.revision);
+    }
+    let dependencyFailure: string | undefined;
+    if (command.type === "user/install-package" && command.enabled !== false) {
+      dependencyFailure = this.packageDependencyFailure(
+        command.packageId,
+        command.version,
+        current,
+      );
+    } else if (command.type === "user/set-package-enabled" && command.enabled) {
+      const installed = current.packages.find(
+        (pkg) => pkg.packageId === command.packageId,
+      );
+      if (installed) {
+        dependencyFailure = this.packageDependencyFailure(
+          installed.packageId,
+          installed.version,
+          current,
+        );
+      }
+    }
+    if (dependencyFailure) {
+      const receipt: OperationReceiptV1 = {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        revision: current.revision,
+        status: "rejected",
+        failure: dependencyFailure,
+      };
+      await storage.put(receiptKey, { commandFingerprint, receipt });
+      return receipt;
     }
     const next = applyUserCommand(current, command, (packageId, version) =>
       this.settingDefinitions(packageId, version),

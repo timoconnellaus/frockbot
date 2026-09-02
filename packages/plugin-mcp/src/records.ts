@@ -96,7 +96,7 @@ export interface McpServerRecordV1 {
   transport: "streamable-http" | "sse";
   instructions?: string;
   /**
-   * Bumped by `mcp/restart`. It participates in the Connection's resolution
+   * Bumped by `mcp/restart`. It participates in the Capability's resolution
    * key, so the next admitted Turn resolves a different mount and
    * re-handshakes; the in-flight Turn keeps the client it already has.
    */
@@ -393,8 +393,24 @@ export interface McpRestartCommandV1 {
   serverId: string;
 }
 
+/**
+ * GrokBot's `AuthenticateMcpServer`, as the constitution requires it to be: a
+ * Bot records a durable pending decision for its User and receives no link, no
+ * token and no grant. Chat-only, because an automation Turn has no User in
+ * front of it to decide.
+ */
+export interface McpRequestAuthorizationCommandV1 {
+  schemaVersion: 1;
+  type: "mcp/request-authorization";
+  commandId: string;
+  serverId: string;
+}
+
 export type McpLifecycleCommandV1 =
-  McpAddServerCommandV1 | McpSetInstructionsCommandV1 | McpRestartCommandV1;
+  | McpAddServerCommandV1
+  | McpSetInstructionsCommandV1
+  | McpRestartCommandV1
+  | McpRequestAuthorizationCommandV1;
 
 export function decodeMcpLifecycleCommandV1(
   input: unknown,
@@ -484,6 +500,19 @@ export function decodeMcpLifecycleCommandV1(
       return {
         schemaVersion: 1,
         type: "mcp/restart",
+        commandId,
+        serverId: text(value.serverId, "serverId", 128),
+      };
+    }
+    case "mcp/request-authorization": {
+      exact(
+        value,
+        ["schemaVersion", "type", "commandId", "serverId"],
+        "mcp/request-authorization",
+      );
+      return {
+        schemaVersion: 1,
+        type: "mcp/request-authorization",
         commandId,
         serverId: text(value.serverId, "serverId", 128),
       };
@@ -624,12 +653,12 @@ export function decodeMcpMountOutcomeV1(
 }
 
 /**
- * What one MCP Connection resolves to. The `serverEpoch` is in it,
+ * What one enabled `mcp-tools` Capability resolves to. The `serverEpoch` is in it,
  * which is the whole of restart semantics: a restart changes this key, the
  * next admitted Turn resolves a different mount and re-handshakes, and the
  * in-flight Turn — already holding its client — is untouched.
  */
-export function mcpConnectionResolutionKeyV1(input: {
+export function mcpCapabilityResolutionKeyV1(input: {
   connectionId: string;
   connectionGeneration?: string;
   serverEpoch?: number;

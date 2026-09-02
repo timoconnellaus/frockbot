@@ -21,9 +21,9 @@ from first principles. No schema parity is claimed.
 | Effect class   | read-only, `idempotent: true`                                          |
 | Turn types     | all four (manifest v4 `admission`)                                     |
 
-`web_fetch` needs no Connection: reading a public page needs no credential. An
-installed and enabled Web Package contributes it directly to the Bot's current
-Composition.
+`web_fetch` needs no Connection: reading a public page needs no credential. The
+Account-wide Package enablement is the fence — the Contribution mounts nothing
+unless `web-fetch` is in the User's enabled capability set.
 
 It is a plain outbound request, so it works while the User's Computer is
 hibernated and never wakes it. A page that needs a real browser is the

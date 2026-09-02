@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0019
 ---
 
 # Split Account Connections from Bot Assignments

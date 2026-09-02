@@ -147,6 +147,229 @@ describe("User settings backend Contribution", () => {
     ]);
   });
 
+  test("bootstraps a declared default-disabled Package without re-enabling it", async () => {
+    const settings = createUserSettingsBackendContribution({
+      storage: new MemoryStorage(),
+      availablePackages: [
+        {
+          packageId: "custom-models",
+          version: "0.0.1",
+          installByDefault: true,
+          defaultEnablement: "disabled",
+        },
+      ],
+    });
+
+    const first = await settings.readConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+    });
+    expect(first.packages).toEqual([
+      {
+        packageId: "custom-models",
+        version: "0.0.1",
+        state: "disabled",
+        provenance: "first-party",
+      },
+    ]);
+    expect(
+      await settings.readConfiguration({ schemaVersion: 1, userId: "user-1" }),
+    ).toEqual(first);
+  });
+
+  test("installs a Package disabled when explicitly requested", async () => {
+    const settings = contribution();
+    const receipt = await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-disabled",
+        expectedRevision: 0,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+        enabled: false,
+      },
+    });
+
+    expect(receipt).toMatchObject({ status: "applied", revision: 1 });
+    expect((await settings.read("user-1")).packages).toMatchObject([
+      { packageId: "provider-ollama-cloud", state: "disabled" },
+    ]);
+  });
+
+  test("does not clear an existing failed installation", async () => {
+    const storage = new MemoryStorage();
+    const settings = contribution(storage);
+    await storage.put("user-id", "user-1");
+    await storage.put("user-configuration", {
+      schemaVersion: 1,
+      revision: 0,
+      profile: { name: "User" },
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "failed",
+          failure: "activation failed",
+        },
+      ],
+      connections: [],
+    } satisfies UserSettingsViewV1);
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "retry-failed-disabled",
+        expectedRevision: 0,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+        enabled: false,
+      },
+    });
+
+    expect((await settings.read("user-1")).packages).toMatchObject([
+      {
+        packageId: "provider-ollama-cloud",
+        state: "failed",
+        failure: "activation failed",
+      },
+    ]);
+  });
+
+  test("refuses enabling until every declared dependency is enabled", async () => {
+    const settings = createUserSettingsBackendContribution({
+      storage: new MemoryStorage(),
+      availablePackages: [
+        { packageId: "custom-models", version: "0.0.1" },
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          dependencies: { "custom-models": ">=0.0.1" },
+        },
+      ],
+    });
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-custom-models-disabled",
+        expectedRevision: 0,
+        packageId: "custom-models",
+        version: "0.0.1",
+        enabled: false,
+      },
+    });
+    const refusedInstall = await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-ollama-enabled-too-soon",
+        expectedRevision: 1,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+      },
+    });
+    expect(refusedInstall).toMatchObject({
+      status: "rejected",
+      revision: 1,
+      failure: expect.stringContaining("custom-models"),
+    });
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-ollama-disabled",
+        expectedRevision: 1,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+        enabled: false,
+      },
+    });
+
+    const refused = await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "enable-ollama-too-soon",
+        expectedRevision: 2,
+        packageId: "provider-ollama-cloud",
+        enabled: true,
+      },
+    });
+    expect(refused).toMatchObject({
+      status: "rejected",
+      revision: 2,
+      failure: expect.stringContaining("custom-models"),
+    });
+    expect((await settings.read("user-1")).packages[1]?.state).toBe("disabled");
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "enable-custom-models",
+        expectedRevision: 2,
+        packageId: "custom-models",
+        enabled: true,
+      },
+    });
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-enabled",
+          commandId: "enable-ollama",
+          expectedRevision: 3,
+          packageId: "provider-ollama-cloud",
+          enabled: true,
+        },
+      }),
+    ).resolves.toMatchObject({ status: "applied", revision: 4 });
+  });
+
+  test("applies the platform model through the backend Contribution", async () => {
+    const storage = new MemoryStorage();
+    const settings = contribution(storage);
+
+    await expect(
+      settings.executeConfigurationCommand(
+        "user-1",
+        {
+          schemaVersion: 1,
+          type: "user/set-platform-model",
+          commandId: "bootstrap-platform-model",
+          expectedRevision: 0,
+          model: {
+            connectionId: "flock-default",
+            providerModelId: "@flock/auto",
+          },
+        },
+        storage,
+      ),
+    ).resolves.toMatchObject({ status: "applied", revision: 1 });
+    expect((await settings.read("user-1")).platformModel).toEqual({
+      connectionId: "flock-default",
+      providerModelId: "@flock/auto",
+    });
+  });
+
   test("owns durable User configuration independently of providers", async () => {
     const storage = new MemoryStorage();
     const settings = contribution(storage);
@@ -847,6 +1070,53 @@ describe("Package-level setting values", () => {
       packageId: "provider-ollama-cloud",
       values: { "web-search-max-results": 5, label: "work" },
     });
+  });
+
+  test("removes only declared setting ids and drops an emptied value bag", async () => {
+    const settings = contribution();
+    await installOllama(settings, "user-1");
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: "set-before-unset",
+        expectedRevision: 1,
+        packageId: "provider-ollama-cloud",
+        values: { "web-search-max-results": 4 },
+      },
+    });
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: "unset-value",
+        expectedRevision: 2,
+        packageId: "provider-ollama-cloud",
+        unset: ["web-search-max-results"],
+      },
+    });
+    expect((await settings.read("user-1")).packages[0]?.values).toBeUndefined();
+
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-settings",
+          commandId: "unset-unknown",
+          expectedRevision: 3,
+          packageId: "provider-ollama-cloud",
+          unset: ["unknown-setting"],
+        },
+      }),
+    ).rejects.toThrow(/not declared by this Package/);
+    expect((await settings.read("user-1")).revision).toBe(3);
   });
 
   test("a replayed command id returns its receipt without applying twice", async () => {

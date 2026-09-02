@@ -23,16 +23,10 @@ import type {
   BotIsolateLoader,
   BotIsolateWorkerCode,
 } from "@frockbot/kernel-composition/isolate";
-import type {
-  IsolateConnectionV1,
-  IsolateModelBindingV1,
-  LlmProvider,
-  LlmStreamEvent,
-} from "@frockbot/kernel-contracts";
+import type { LlmProvider, LlmStreamEvent } from "@frockbot/kernel-contracts";
 import {
   createPackageAuthoringHost,
   createR2AuthoringArtifactStore,
-  readAuthoredCompositionMemberSourceV1,
 } from "@frockbot/plugin-shell/backend-authoring";
 import { createShellCompositionHost } from "@frockbot/plugin-shell/backend-composition";
 import { executeBotTurn } from "@frockbot/plugin-shell/backend-runner";
@@ -41,32 +35,18 @@ import {
   createR2PackageArtifactStore,
   isolateBindingDigestV1,
   type BotCapabilitiesPropsV1,
+  type IsolateCapabilityV1,
 } from "@frockbot/plugin-shell/backend-isolate";
 import {
   authorshipFailureKey,
-  authorshipManifestKey,
   AUTHORSHIP_FAILURE_PREFIX,
   ARTIFACT_PREFIX,
   createAuthoringRuntimePlugin,
   authoringManifest,
   type AuthoredArtifactRecordV1,
-  type AuthoredManifestRecordV1,
   type AuthoringFailureRecordV1,
   type PackageAuthoringHost,
 } from "@frockbot/plugin-authoring";
-import {
-  createPackageCatalogRuntimePlugin,
-  packageCatalogManifest,
-} from "@frockbot/plugin-package-catalog";
-import {
-  createPackageCatalogHost,
-  createR2BotPackageCatalogReader,
-  type CatalogAwarePackageCatalogHost,
-} from "@frockbot/plugin-shell/backend-package-catalog";
-import {
-  decodeOperationReceiptV1,
-  decodeUserSettingsViewV1,
-} from "@frockbot/configuration-core";
 import {
   decodeAuthoringQuotaReceiptV1,
   type AuthoringQuotaBinding,
@@ -79,7 +59,6 @@ import { createCountingBundlerBinding } from "./package-bundler-fake.ts";
 export interface AuthoringProbeEnv {
   BOT_PACKAGES: BotIsolateLoader;
   APPLICATION_ARTIFACTS: R2Bucket;
-  PACKAGE_CATALOG: R2Bucket;
   USER_CONFIGURATIONS: DurableObjectNamespace;
 }
 
@@ -94,8 +73,7 @@ export interface AuthoringProbeTurn {
   botId: string;
   tool: string;
   input: unknown;
-  connections?: IsolateConnectionV1[];
-  model?: IsolateModelBindingV1;
+  capabilities?: IsolateCapabilityV1[];
 }
 
 const PROBE_BOOTSTRAP_AT = "2026-08-31T00:00:00.000Z";
@@ -151,24 +129,11 @@ function authoringPackage(host: PackageAuthoringHost): FoundationAgentPackage {
   };
 }
 
-function catalogPackage(
-  host: CatalogAwarePackageCatalogHost,
-): FoundationAgentPackage {
-  return {
-    specifier: "@frockbot/plugin-package-catalog",
-    contributionSpecifier: "@frockbot/plugin-package-catalog/agent",
-    manifest: packageCatalogManifest,
-    plugin: createPackageCatalogRuntimePlugin(host),
-  };
-}
-
 export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
   private readonly authority: BotDurableAuthority<undefined>;
   private turn: AuthoringProbeTurn | undefined;
   private lastPin: string | undefined;
   private loaderCalls = 0;
-  private loaderIds: string[] = [];
-  private currentToolNames: string[] = [];
 
   constructor(ctx: DurableObjectState, env: AuthoringProbeEnv) {
     super(ctx, env);
@@ -208,7 +173,6 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     return {
       get: (id: string, callback: () => Promise<BotIsolateWorkerCode>) => {
         this.loaderCalls += 1;
-        this.loaderIds.push(id);
         return loader.get(id, callback);
       },
     };
@@ -233,7 +197,6 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
       storage: {
         get: (key) => this.ctx.storage.get(key),
         put: (entries) => this.ctx.storage.put(entries),
-        list: (options) => this.ctx.storage.list(options),
       },
       composition: this.authority.composition,
       bundler: createCountingBundlerBinding(this.ctx.storage),
@@ -244,50 +207,6 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
       runId: turn.runId,
       turnId: turn.runId,
       compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
-      currentToolNames: () => this.currentToolNames,
-      activationFailures: this.authority.compositionFailures,
-    });
-  }
-
-  private catalogHost(
-    turn: AuthoringProbeTurn,
-  ): CatalogAwarePackageCatalogHost {
-    const id = this.env.USER_CONFIGURATIONS.idFromName(turn.userId);
-    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
-      readConfiguration(input: unknown): Promise<unknown>;
-      executeConfiguration(input: unknown): Promise<unknown>;
-    };
-    return createPackageCatalogHost({
-      storage: {
-        get: (key) => this.ctx.storage.get(key),
-        put: (entries) => this.ctx.storage.put(entries),
-      },
-      composition: this.authority.composition,
-      catalog: createR2BotPackageCatalogReader(
-        this.env.PACKAGE_CATALOG,
-        this.env.APPLICATION_ARTIFACTS,
-      ),
-      user: {
-        read: async () =>
-          decodeUserSettingsViewV1(
-            await rpc.readConfiguration({
-              schemaVersion: 1,
-              userId: turn.userId,
-            }),
-          ),
-        execute: async (command) =>
-          decodeOperationReceiptV1(
-            await rpc.executeConfiguration({
-              schemaVersion: 1,
-              userId: turn.userId,
-              command,
-            }),
-          ),
-      },
-      userId: turn.userId,
-      botId: turn.botId,
-      runId: turn.runId,
-      turnId: turn.runId,
     });
   }
 
@@ -306,15 +225,7 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
     // workers-types cannot infer the generated local RPC stubs.
     const exports = this.ctx.exports as unknown as ProbeExports;
-    const catalog = this.catalogHost(turn);
-    const baseAuthoring = this.authoringHost(turn);
-    const authoring: PackageAuthoringHost = {
-      ...baseAuthoring,
-      undo: async (request) =>
-        (await catalog.undoCatalogChange(request)) ??
-        baseAuthoring.undo(request),
-    };
-    const connections = turn.connections ?? [];
+    const capabilities = turn.capabilities ?? [];
     const host = createShellCompositionHost({
       admitEffect: () => Promise.resolve(true),
       botId: turn.botId,
@@ -323,8 +234,7 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
       persistSessionEvents: input.persistSessionEvents,
       agentPackages: [
         scriptedProviderPackage(turn.tool, turn.input),
-        authoringPackage(authoring),
-        catalogPackage(catalog),
+        authoringPackage(this.authoringHost(turn)),
       ],
       modelSelection: { provider: "scripted", model: "scripted-v1" },
       isolate: {
@@ -333,33 +243,21 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
         turnId: turn.runId,
         loader: this.countingLoader(),
         artifacts: createR2PackageArtifactStore(this.env.APPLICATION_ARTIFACTS),
-        manifestFor: async (member) => {
-          const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
-            authorshipManifestKey(member.manifestHash),
-          );
-          if (!stored) throw new Error("stored authored manifest is missing");
-          return stored.manifest;
-        },
         capabilitiesFor: (member) =>
           exports.BotCapabilities({
             props: {
               userId: turn.userId,
               botId: turn.botId,
-              runId: turn.runId,
-              sessionId: input.command.sessionId,
-              turnId: turn.runId,
               generationId: generation.generationId,
               packageId: member.packageId,
-              connections: structuredClone(connections),
-              ...(turn.model ? { model: structuredClone(turn.model) } : {}),
-              memory: false,
-              workspace: false,
+              capabilities: structuredClone(capabilities),
             },
           }),
         bindingDigest: await isolateBindingDigestV1({
-          connections,
-          ...(turn.model ? { model: turn.model } : {}),
-          compositionGenerationId: generation.generationId,
+          userId: turn.userId,
+          botId: turn.botId,
+          generationId: generation.generationId,
+          capabilities,
         }),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
       },
@@ -367,7 +265,6 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     const controller = new AbortController();
     const composition = await host.mount(generation, controller.signal);
     await composition.verify(controller.signal);
-    this.currentToolNames = composition.root.tools.registeredNames?.() ?? [];
     // Activation at the next admitted Turn: the pinned proposal becomes
     // active once it has mounted and verified.
     if (generation.status === "pending") {
@@ -387,11 +284,9 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     text: string;
     pinnedGenerationId: string | undefined;
     loaderCalls: number;
-    loaderIds: string[];
   }> {
     this.turn = turn;
     this.loaderCalls = 0;
-    this.loaderIds = [];
     const result = await this.authority.run({
       userId: turn.userId,
       botId: turn.botId,
@@ -404,7 +299,6 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
       text: result.text,
       pinnedGenerationId: this.lastPin,
       loaderCalls: this.loaderCalls,
-      loaderIds: [...this.loaderIds],
     };
   }
 
@@ -414,10 +308,6 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
 
   async currentGeneration(): Promise<CompositionGenerationV1> {
     return await this.authority.composition.current();
-  }
-
-  async lastKnownGoodGeneration(): Promise<CompositionGenerationV1> {
-    return await this.authority.composition.lastKnownGood();
   }
 
   async generation(generationId: string): Promise<CompositionGenerationV1> {
@@ -459,21 +349,5 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
       `packages/${contentHash}.mjs`,
     );
     return object ? await object.text() : undefined;
-  }
-
-  async memberSource(
-    generationId: string,
-    packageId: string,
-  ): Promise<string | undefined> {
-    const generation = await this.generation(generationId);
-    const member = generation.members.find(
-      (candidate) => candidate.packageId === packageId,
-    );
-    if (!member) return undefined;
-    return readAuthoredCompositionMemberSourceV1({
-      storage: { get: (key) => this.ctx.storage.get(key) },
-      artifacts: createR2AuthoringArtifactStore(this.env.APPLICATION_ARTIFACTS),
-      member,
-    });
   }
 }

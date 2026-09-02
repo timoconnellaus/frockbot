@@ -29,8 +29,7 @@ const filteredCatalog = computed(() => {
     (entry) =>
       entry.displayName.toLocaleLowerCase().includes(query) ||
       entry.packageId.toLocaleLowerCase().includes(query) ||
-      entry.description.toLocaleLowerCase().includes(query) ||
-      (entry.tags ?? []).some((tag) => tag.toLocaleLowerCase().includes(query)),
+      entry.description.toLocaleLowerCase().includes(query),
   );
 });
 
@@ -154,7 +153,7 @@ function isPackageInstalled(packageId: string): boolean {
   <div class="package-catalog-surface">
     <p class="catalog-intro">
       Browse published Packages. Installing one makes it available to every Bot
-      you own, with the Connections those Bots already hold.
+      you own when the Package is enabled.
     </p>
     <label class="catalog-search">
       <UiIcon name="search" />
@@ -240,7 +239,8 @@ function isPackageInstalled(packageId: string): boolean {
               >
                 <p>
                   Uninstalling {{ entry.displayName }} removes it from every
-                  Bot. Connections and credentials are kept.
+                  Bot. Connections and credentials are kept, and become usable
+                  again if you reinstall and enable the Package.
                 </p>
                 <div class="catalog-actions">
                   <UiButton @click="uninstallingPackageId = undefined">

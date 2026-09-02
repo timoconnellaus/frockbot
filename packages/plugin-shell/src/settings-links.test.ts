@@ -23,22 +23,16 @@ describe("settings link scheme", () => {
   test("renders against an origin when one is supplied", () => {
     expect(
       settingsLinkV1({
-        anchor: "bot-model",
+        anchor: "bot-name",
         botId: "alpha",
         origin: "https://app.example/",
       }),
-    ).toBe("https://app.example/?bot=alpha&settings=bot-settings#bot-model");
+    ).toBe("https://app.example/?bot=alpha&settings=bot-settings#bot-name");
   });
 
   test("refuses an anchor this build does not ship", () => {
     expect(() => settingsLinkV1({ anchor: "invented" })).toThrow(
       "unknown settings anchor: invented",
-    );
-  });
-
-  test("renders a Markdown citation a payload can carry verbatim", () => {
-    expect(renderSettingsLinkV1({ anchor: "bot-model", botId: "alpha" })).toBe(
-      "[Model](/?bot=alpha&settings=bot-settings#bot-model)",
     );
   });
 

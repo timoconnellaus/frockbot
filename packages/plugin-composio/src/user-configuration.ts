@@ -50,14 +50,8 @@ function readyAuthorizationMetadata(
   };
 }
 
-export interface UserConfigurationEnv {
-  BOT_STATES: DurableObjectNamespace;
-  COMPOSIO_API_KEY?: string;
-}
-
 export interface ComposioUserBackendHost {
   state: DurableObjectState;
-  env: UserConfigurationEnv;
   availablePackages: readonly { packageId: string; version: string }[];
   reconcileProviderConnection(
     request: ComposioProviderReconciliationRequest,
@@ -172,7 +166,6 @@ const initialState = (): UserSettingsViewV1 => ({
 
 export class ComposioUserBackendContribution {
   readonly ctx: DurableObjectState;
-  readonly env: UserConfigurationEnv;
   private readonly settings: UserSettingsBackendContribution;
   private readonly availablePackages: ReadonlySet<string>;
   private readonly reconcileProviderConnection: ComposioUserBackendHost["reconcileProviderConnection"];
@@ -180,7 +173,6 @@ export class ComposioUserBackendContribution {
 
   constructor(host: ComposioUserBackendHost) {
     this.ctx = host.state;
-    this.env = host.env;
     this.settings = createUserSettingsBackendContribution({
       storage: host.state.storage,
       availablePackages: host.availablePackages,
@@ -867,10 +859,10 @@ export class ComposioUserBackendContribution {
       } else {
         await transaction.setAlarm(Math.max(Date.now(), alarmAt));
       }
-      return { reconciliations };
+      return reconciliations;
     });
 
-    for (const reconciliation of pending.reconciliations) {
+    for (const reconciliation of pending) {
       try {
         const connection = reconciliation.connection;
         if (reconciliation.operation === "link") {

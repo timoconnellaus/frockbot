@@ -17,12 +17,7 @@ import type {
   ConnectionCommandV1,
 } from "@frockbot/connection-core";
 import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
-import {
-  decodePackageIframeCatalogV1,
-  packageIframeToolAllowedV1,
-  decodeSendToUserPayloadV1,
-  type PackageIframeContributionViewV1,
-} from "@frockbot/kernel-contracts";
+import { decodeSendToUserPayloadV1 } from "@frockbot/kernel-contracts";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
 import type {
   BotNameProvenanceV1,
@@ -31,10 +26,10 @@ import type {
   BotProfilePatchV1,
   BotSettingsViewV1,
   JsonValue,
-  ModelAssignment,
-  OperationReceiptV1,
+  PackageSettingValueV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
+import { resolveEffectiveBotModelV1 } from "@frockbot/configuration-core";
 import {
   decodeCatalogEntryV1,
   decodeCatalogIndexV1,
@@ -53,7 +48,6 @@ import {
 import { MCP_OAUTH_CONNECTION_TYPE_ID } from "@frockbot/plugin-mcp/agent";
 import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
-import { decodeClientTurnV1 } from "../run-protocol.js";
 import {
   decodeApprovalDecisionReceiptV1,
   decodeApprovalListViewV1,
@@ -62,7 +56,7 @@ import {
   decodeTaskListViewV1,
   decodeTaskViewV1,
 } from "@frockbot/plugin-subagents/shared";
-import { ref } from "vue";
+import { ref, toRaw, type Ref } from "vue";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,
@@ -75,7 +69,6 @@ import {
   type WebToolActivity,
 } from "../shared.js";
 import FrockBotApp from "./FrockBotApp.vue";
-import PackageIframeSettings from "./PackageIframeSettings.vue";
 import { modelRuntimeLabel } from "./model-presentation.js";
 import { showClientNotificationV1 } from "./notify.js";
 import "@frockbot/client-core/fonts.css";
@@ -178,7 +171,7 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
     return {
       runId: run.runId,
       status: run.status,
-      message: "Stop accepted; waiting for durable settlement.",
+      message: "Stop requested; finishing up.",
       canResume: false,
     };
   }
@@ -666,11 +659,21 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
         connectionTypes: capability.connectionTypes,
       }),
     );
-    // A Package with neither a Connection Type nor a Capability contributes
-    // nothing the Plugins surface can install or enable. A Capability that
-    // takes no Connection still counts: a credential-free tool Package a User
-    // installs is exactly that shape.
-    if (connectionTypes.length === 0 && decodedCapabilities.length === 0) {
+    // User- and Bot-scoped declarations are needed for generic effective
+    // model resolution. Connection-scoped settings stay with their Connection
+    // and never enter Package-level settings forms.
+    const settings = (decoded.configuration?.settings ?? []).filter((setting) =>
+      setting.scopes.some((scope) => scope === "user" || scope === "bot"),
+    );
+    // A settings-only Package still contributes enablement: disabling it is
+    // what makes its retained controls inert. A Capability that takes no
+    // Connection likewise counts because enabling its Package grants it to
+    // all of the User's Bots.
+    if (
+      connectionTypes.length === 0 &&
+      decodedCapabilities.length === 0 &&
+      settings.length === 0
+    ) {
       return [];
     }
     const decodedConnections = connectionTypes.map((connection) => {
@@ -694,12 +697,7 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
         version: candidate.version,
         capabilities: decodedCapabilities,
         connectionTypes: decodedConnections,
-        // User-scoped settings only: a `bot`-scoped one is not the Plugins
-        // surface's to edit, and a Connection-scoped one is edited with its
-        // Connection.
-        settings: (decoded.configuration?.settings ?? []).filter((setting) =>
-          setting.scopes.includes("user"),
-        ),
+        settings,
       },
     ];
   });
@@ -992,53 +990,55 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     web.value.settingsError = [...settingsLoadErrors.values()].at(-1);
   }
 
-  /**
-   * The Bot runs on its own model when it has one and on the User's default
-   * otherwise, so readiness and the composer label follow the effective model.
-   * A Bot following the default is ready as soon as the User's model-capable
-   * Connection is ready; there is no second Bot grant to wait for.
-   */
+  /** Readiness and the composer label follow the generic effective model. */
   function updateModelLabel(): void {
     const bot = web.value.botSettings;
     const user = web.value.userSettings;
-    const model = bot?.model ?? user?.newBotModelTemplate;
-    web.value.modelSource = bot?.model ? "bot" : model ? "default" : "none";
-    const connection = (user?.connections ?? []).find(
-      (candidate) => candidate.connectionId === model?.connectionId,
-    );
-    const packageInstalled = (user?.packages ?? []).some(
-      (pkg) =>
-        pkg.packageId === connection?.packageId && pkg.state === "installed",
-    );
-    const catalogPackage = web.value.pluginCatalog.find(
-      (pkg) => pkg.packageId === connection?.packageId,
-    );
-    const connectionType = catalogPackage?.connectionTypes.find(
-      (candidate) => candidate.id === connection?.connectionTypeId,
-    );
-    const modelCapabilities = new Set(
-      catalogPackage?.capabilities.flatMap((capability) =>
-        capability.kind === "model" &&
-        connectionType?.capabilities.includes(capability.id)
-          ? [capability.id]
-          : [],
-      ) ?? [],
-    );
+    if (!bot || !user) {
+      web.value.modelSource = "none";
+      web.value.modelReady = false;
+      web.value.modelLabel = modelRuntimeLabel({ source: "none" });
+      return;
+    }
+    const effective = resolveEffectiveBotModelV1({
+      bot: toRaw(bot),
+      user: toRaw(user),
+      packages: toRaw(web.value.pluginCatalog).map((pkg) => ({
+        packageId: pkg.packageId,
+        version: pkg.version,
+        settings: pkg.settings ?? [],
+        capabilities: pkg.capabilities,
+        connectionTypes: pkg.connectionTypes,
+      })),
+    });
+    // `FrockBotWebData`'s source vocabulary is owned outside this lane. Until
+    // it adopts the core's four sources, both inherited choices are its
+    // existing `default` projection; the label still preserves the exact core
+    // source below.
+    web.value.modelSource =
+      effective.source === "bot"
+        ? "bot"
+        : effective.source === "none"
+          ? "none"
+          : "default";
     web.value.modelReady = Boolean(
-      model &&
-      connection?.state === "ready" &&
-      packageInstalled &&
-      modelCapabilities.size > 0,
+      effective.binding && effective.binding.state !== "unavailable",
+    );
+    const connection = effective.binding?.connection;
+    const catalogPackage = web.value.pluginCatalog.find(
+      (pkg) => pkg.packageId === effective.binding?.packageId,
     );
     const catalogModel = connection?.modelCatalog?.models.find(
-      (candidate) => candidate.providerModelId === model?.providerModelId,
+      (candidate) =>
+        candidate.providerModelId === effective.model?.providerModelId,
     );
     web.value.modelLabel = modelRuntimeLabel({
+      source: effective.source,
       modelDisplayName: catalogModel?.displayName,
-      providerModelId: model?.providerModelId,
+      providerModelId: effective.model?.providerModelId,
       packageDisplayName: catalogPackage?.displayName,
       connectionDisplayName: connection?.displayName,
-      hasModel: Boolean(model),
+      failure: effective.binding?.failure,
     });
   }
 
@@ -1073,9 +1073,16 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     await web.value.loadMcpServers();
   }
 
-  const web = ref<FrockBotWebData>({
+  type ShellWebData = FrockBotWebData & {
+    saveBotPackageSettings(
+      packageId: string,
+      values: Record<string, PackageSettingValueV1>,
+    ): Promise<void>;
+  };
+
+  const web: Ref<ShellWebData> = ref({
     connection: "ready",
-    modelLabel: "No default model",
+    modelLabel: "Model unavailable",
     modelReady: false,
     modelSource: "none",
     settingsAvailable: true,
@@ -1088,7 +1095,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     skillCatalog: [],
     approvals: [],
     tasks: [],
-    packageUi: undefined,
     async selectBot(botId: string): Promise<void> {
       // Re-selecting the open Bot is not a switch: aborting the live Turn and
       // clearing the transcript would discard state the User is watching.
@@ -1107,7 +1113,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       web.value.skillCatalog = [];
       web.value.approvals = [];
       web.value.tasks = [];
-      web.value.packageUi = undefined;
       const url = URL.parse(window.location.href);
       if (url) {
         url.searchParams.set("bot", botId);
@@ -1191,68 +1196,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.tasks = [];
       }
     },
-    async loadPackageUi(): Promise<void> {
-      const read = ctx.transport.hostedRequest;
-      const botId = web.value.activeBotId;
-      if (!read || !botId) return;
-      const generation = selectionGeneration;
-      try {
-        const catalog = decodePackageIframeCatalogV1(
-          await read(`/api/bots/${encodeURIComponent(botId)}/package-ui`),
-        );
-        if (
-          generation !== selectionGeneration ||
-          web.value.activeBotId !== botId
-        )
-          return;
-        web.value.packageUi = catalog;
-      } catch {
-        if (
-          generation === selectionGeneration &&
-          web.value.activeBotId === botId
-        ) {
-          web.value.packageUi = undefined;
-        }
-      }
-    },
-    async callPackageUiTool(
-      contribution: PackageIframeContributionViewV1,
-      name: string,
-      input: unknown,
-    ): Promise<unknown> {
-      const post = ctx.transport.hostedRequest;
-      const botId = web.value.activeBotId;
-      const catalog = web.value.packageUi;
-      if (!post || !botId || !catalog || catalog.botId !== botId) {
-        throw new Error("Package UI is unavailable");
-      }
-      if (!packageIframeToolAllowedV1(contribution, name)) {
-        throw new Error(
-          `Package "${contribution.packageId}" did not declare tool "${name}"`,
-        );
-      }
-      const turn = decodeClientTurnV1(
-        await post(
-          `/api/bots/${encodeURIComponent(botId)}/package-ui/tools`,
-          "POST",
-          JSON.stringify({
-            schemaVersion: 1,
-            commandId: crypto.randomUUID(),
-            generationId: catalog.generationId,
-            packageId: contribution.packageId,
-            name,
-            input,
-          }),
-        ),
-      );
-      await deliverNotifications(botId);
-      const result = turn.events.findLast(
-        (event) => event.type === "tool/result",
-      );
-      return result?.type === "tool/result"
-        ? { content: result.content, isError: result.isError === true }
-        : { content: turn.text, isError: false };
-    },
     /**
      * Explicit, authenticated cancellation of one subagent from the client.
      *
@@ -1333,8 +1276,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         )
           return;
         web.value.botSettings = settings;
-        // The effective model may be the User's default, so Bot readiness
-        // needs the User settings too. Loading them never fails this read:
+        // The effective model may come from account or platform state, so Bot
+        // readiness needs the User settings too. Loading them never fails this read:
         // `loadUserSettings` reports its own failure.
         if (!web.value.userSettings) await web.value.loadUserSettings();
         if (
@@ -1345,7 +1288,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         updateModelLabel();
         updateSettingsLoadError("bot");
         await deliverNotifications(botId, generation);
-        await web.value.loadPackageUi();
       } catch (error) {
         if (
           generation !== selectionGeneration ||
@@ -1425,55 +1367,27 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       });
       await web.value.loadBotSettings();
     },
-    async saveBotModel(model: ModelAssignment): Promise<void> {
-      const current = web.value.botSettings;
-      const user = web.value.userSettings;
-      const botId = web.value.activeBotId;
-      if (!current || !user || !botId || !ctx.transport.executeConfiguration) {
-        throw new Error("Settings are unavailable");
-      }
-      if (
-        current.model?.connectionId === model.connectionId &&
-        current.model.providerModelId === model.providerModelId
-      ) {
-        return;
-      }
-      const connection = user.connections.find(
-        (candidate) =>
-          candidate.connectionId === model.connectionId &&
-          candidate.state === "ready",
-      );
-      if (!connection) {
-        throw new Error("The selected model Connection is unavailable");
-      }
-      const receipt = await ctx.transport.executeConfiguration({
-        schemaVersion: 1,
-        type: "bot/select-model",
-        commandId: crypto.randomUUID(),
-        botId,
-        expectedRevision: current.revision,
-        model,
-      });
-      await web.value.loadBotSettings();
-      if (receipt.status === "rejected") throw new Error(receipt.failure);
-    },
-    async clearBotModel(): Promise<void> {
+    async saveBotPackageSettings(
+      packageId: string,
+      values: Record<string, PackageSettingValueV1>,
+    ): Promise<void> {
       const current = web.value.botSettings;
       const botId = web.value.activeBotId;
-      if (!current?.model || !botId || !ctx.transport.executeConfiguration) {
+      if (!current || !botId || !ctx.transport.executeConfiguration) {
         throw new Error("Settings are unavailable");
       }
       const receipt = await ctx.transport.executeConfiguration({
         schemaVersion: 1,
-        type: "bot/unbind-model",
+        type: "bot/set-package-settings",
         commandId: crypto.randomUUID(),
         botId,
         expectedRevision: current.revision,
+        packageId,
+        values,
       });
       await web.value.loadBotSettings();
       if (receipt.status === "rejected") throw new Error(receipt.failure);
     },
-
     async loadUserSettings(): Promise<void> {
       if (!ctx.transport.readConfiguration) {
         updateSettingsLoadError("user", "Settings are unavailable");
@@ -1518,30 +1432,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         profile,
       });
       await web.value.loadUserSettings();
-    },
-    async saveDefaultModel(model: ModelAssignment | undefined): Promise<void> {
-      const settings = web.value.userSettings;
-      if (!settings || !ctx.transport.executeConfiguration) {
-        throw new Error("Settings are unavailable");
-      }
-      const current = settings.newBotModelTemplate;
-      if (
-        current?.connectionId === model?.connectionId &&
-        current?.providerModelId === model?.providerModelId &&
-        settings.newBotModelTemplateSource === "user"
-      ) {
-        return;
-      }
-      const receipt = await ctx.transport.executeConfiguration({
-        schemaVersion: 1,
-        type: "user/set-new-bot-model",
-        commandId: crypto.randomUUID(),
-        expectedRevision: settings.revision,
-        ...(model ? { model } : {}),
-        source: "user",
-      });
-      await web.value.loadUserSettings();
-      if (receipt.status === "rejected") throw new Error(receipt.failure);
     },
     async loadPluginCatalog(): Promise<void> {
       if (
@@ -1738,9 +1628,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         version: entry.version,
         catalogId: entry.catalogId,
         catalogGeneration: generation,
-        ...(entry.contentHash === undefined
-          ? {}
-          : { contentHash: entry.contentHash }),
         // GrokBot's `InstallPlugin{values}`: the entry's `setupFields`, filled
         // in by the User, recorded on the installation so the install is
         // reproducible from durable state rather than from a form that is gone.
@@ -1783,7 +1670,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       // Enablement is projected onto the installation row the Plugins surface
       // renders, so the toggle reads back what the User authority recorded.
       await web.value.loadPluginCatalog();
-      if (receipt.status === "rejected") throw new Error(receipt.failure);
+      if (receipt.status === "rejected") {
+        web.value.settingsError = receipt.failure;
+        throw new Error(receipt.failure);
+      }
     },
     async savePackageSettings(
       packageId: string,
@@ -2124,7 +2014,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           runId: pendingRunId,
           role: "assistant",
           text: aborted
-            ? "Request stopped locally; admission may still be durable."
+            ? "Request stopped locally; checking whether it started."
             : "Confirming whether this Turn was admitted.",
           at: optimisticAt,
           status: "interrupted",
@@ -2183,7 +2073,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       web.value.activeRun = {
         runId,
         status: "running",
-        message: "Reconciliation requested; waiting for durable progress.",
+        message: "Reconciliation requested; checking progress.",
         canResume: false,
       };
       const botId = web.value.activeBotId;
@@ -2251,20 +2141,17 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     async abort() {
       activeRequest?.abort();
     },
-  });
+  } satisfies Partial<ShellWebData>) as unknown as Ref<ShellWebData>;
 
   return [
     ctx.provide(clientSurfaceRegistryKey, surfaces),
-    ctx.provide(frockBotWebDataKey, web),
+    // The shared client projection is updated by the contracts lane. This cast
+    // is the seam between its retired methods and this lane's replacement.
+    ctx.provide(frockBotWebDataKey, web as unknown as Ref<FrockBotWebData>),
     ctx.slot({
       slot: "authenticated-root",
       order: 10_000,
       component: FrockBotApp,
-    }),
-    ctx.slot({
-      slot: "frockbot.bot-settings-sections",
-      order: 10_000,
-      component: PackageIframeSettings,
     }),
     () => {
       activeRequest?.abort();

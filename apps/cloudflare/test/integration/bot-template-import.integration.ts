@@ -8,7 +8,8 @@
 // The four claims: the card is shown before anything is applied; the imported
 // Skill is loadable on the new Bot, which is only true if its recorded writer
 // is user B; the imported webhook Routine is present but disabled; and **no
-// Connection was created by the import, even though the source Bot had one.
+// Connection** was created by the import, even though the source account had
+// one enabled.
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import {
@@ -233,8 +234,8 @@ describe("importing another User's Bot template", () => {
     });
     expect(JSON.stringify(routines)).not.toContain(MCP_GOOD_API_KEY);
 
-    // NO CONNECTION. User B's account gained none even though the source Bot
-    // had one.
+    // NO CONNECTION. User B's account gained none even though the source
+    // account had one enabled.
     const importerSettings = (await expectOkJson(
       await asUser(importerId, "/api/settings"),
     )) as { connections: { connectionTypeId: string }[] };
@@ -244,11 +245,6 @@ describe("importing another User's Bot template", () => {
       ),
     ).toBe(false);
     expect(JSON.stringify(importerSettings)).not.toContain(MCP_GOOD_API_KEY);
-
-    const importedSettings = (await expectOkJson(
-      await asUser(importerId, `/api/bots/${planned.botId}/settings`),
-    )) as Record<string, unknown>;
-    expect(importedSettings).not.toHaveProperty("connections");
 
     // REPLAY. Confirming again is a read: no second Bot, no second Routine.
     await expectOkJson(

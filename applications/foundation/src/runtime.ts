@@ -11,10 +11,11 @@ import type {
 } from "@frockbot/kernel-composition";
 import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import type {
+  BotExecutionPlanV1,
   ConnectionView,
+  EnabledCapabilityV1,
   PackageSettingValueV1,
   ResolvedModelBindingV1,
-  UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import auditManifest from "@frockbot/plugin-audit/manifest";
 import adminManifest from "@frockbot/plugin-admin/manifest";
@@ -54,11 +55,6 @@ import {
   createAuthoringRuntimePlugin,
   type PackageAuthoringHost,
 } from "@frockbot/plugin-authoring/agent";
-import packageCatalogManifest from "@frockbot/plugin-package-catalog/manifest";
-import {
-  createPackageCatalogRuntimePlugin,
-  type PackageCatalogHost,
-} from "@frockbot/plugin-package-catalog/agent";
 import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
 // Every selected package manifest participates in the compiled application hash.
 import clockManifest from "@frockbot/plugin-clock/manifest";
@@ -93,14 +89,20 @@ export interface BackendRouteContribution {
 import computerManifest from "@frockbot/plugin-computer/manifest";
 import {
   createComputerAgentPlugin,
+  type ComputerAgentPluginConfig,
   type ComputerProcessStorageV1,
 } from "@frockbot/plugin-computer/agent";
+import {
+  createComputerBackendPlugin,
+  type ComputerGatewayHost,
+} from "@frockbot/plugin-computer/backend";
 import {
   createSharedComputerProviderPlugin,
   type SharedComputerHostClient,
 } from "@frockbot/plugin-computer/shared-provider";
 import credentialsManifest from "@frockbot/plugin-credentials/manifest";
 import { createCredentialRuntimePlugin } from "@frockbot/plugin-credentials/user";
+import customModelsManifest from "@frockbot/plugin-custom-models/manifest";
 // Desktop and mobile Package manifests remain part of the immutable plan.
 import clipboardManifest from "@frockbot/plugin-desktop-clipboard/manifest";
 import directoryPickerManifest from "@frockbot/plugin-desktop-directory-picker/manifest";
@@ -181,8 +183,8 @@ import {
   createOllamaCloudRuntimePlugin,
   ollamaChatBaseUrl,
 } from "@frockbot/plugin-provider-ollama-cloud/runtime";
-import workersAiManifest from "@frockbot/plugin-provider-workers-ai/manifest";
-import { createWorkersAiRuntimePlugin } from "@frockbot/plugin-provider-workers-ai/runtime";
+import flockAiManifest from "@frockbot/plugin-provider-flock-ai/manifest";
+import { createFlockAiRuntimePlugin } from "@frockbot/plugin-provider-flock-ai/runtime";
 import routinesManifest from "@frockbot/plugin-routines/manifest";
 // The Routines gateway Contribution carries the Bot-scoped Routine routes.
 import {
@@ -308,13 +310,13 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-admin", adminManifest],
   ["@frockbot/plugin-bot-template", botTemplateManifest],
   ["@frockbot/plugin-authoring", authoringManifest],
-  ["@frockbot/plugin-package-catalog", packageCatalogManifest],
   ["@frockbot/plugin-identity", identityManifest],
   ["@frockbot/plugin-provider-foundation", foundationProviderManifest],
   ["@frockbot/plugin-credentials", credentialsManifest],
+  ["@frockbot/plugin-custom-models", customModelsManifest],
   ["@frockbot/plugin-web", webManifest],
   ["@frockbot/plugin-provider-ollama-cloud", ollamaCloudManifest],
-  ["@frockbot/plugin-provider-workers-ai", workersAiManifest],
+  ["@frockbot/plugin-provider-flock-ai", flockAiManifest],
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
   ["@frockbot/plugin-flock", flockManifest],
@@ -350,25 +352,19 @@ const runtimeContributions = new Map([
 ]);
 
 /**
- * What the host gives one Connection-derived runtime Contribution. The
- * binding is an ephemeral projection of an installed Package Capability and,
- * where required, one ready User Connection. It is not durable authority.
+ * What the host gives one enabled runtime Contribution. The Connection-bound
+ * fields are present only when the Capability names a
+ * Connection, so a Capability with `connectionTypes: []` receives an
+ * account-wide grant and nothing else.
  */
-export interface RuntimeCapabilityBindingV1 {
-  packageId: string;
-  capabilityId: string;
-  connectionId?: string;
-  state: "enabled";
-}
-
-type ConnectedRuntimeContributionFactory = (config: {
-  binding: RuntimeCapabilityBindingV1;
-  /** This binding's ordinal among the ready Connections of its Package. */
-  bindingIndex: number;
+type EnabledRuntimeContributionFactory = (config: {
+  capability: EnabledCapabilityV1;
+  /** This Capability's ordinal among the enabled ones from its Package. */
+  capabilityIndex: number;
   userId: string;
   /**
    * The Package-level setting values this User holds for the Package the
-   * binding names, already resolved against the manifest the pinned
+   * Capability names, already resolved against the manifest the pinned
    * Composition carries. Empty when the User has set none, so a Contribution
    * reads its own default exactly as before.
    *
@@ -382,13 +378,13 @@ type ConnectedRuntimeContributionFactory = (config: {
   /** The Package's own outbound seam, when the host owns one. */
   fetch?: typeof fetch;
   /**
-   * The already-authorized Connection, when the binding names one. A
-   * Capability with `connectionTypes: []` receives a binding and no
+   * The already-authorized Connection, when the Capability binds one. A
+   * Capability with `connectionTypes: []` receives no
    * Connection, so this is absent rather than empty.
    */
   connection?: ConnectionView;
   /**
-   * An expiring lease over the binding's Connection credential. Supplied
+   * An expiring lease over the Capability's Connection credential. Supplied
    * only by a host that carries the User's authority; a Contribution that
    * needs no credential never calls it.
    */
@@ -406,9 +402,9 @@ type ConnectedRuntimeContributionFactory = (config: {
   recordOutcome?(outcome: McpMountOutcomeV1): Promise<void>;
 }) => Plugin | undefined | Promise<Plugin | undefined>;
 
-const connectedRuntimeContributionFactories = new Map<
+const enabledRuntimeContributionFactories = new Map<
   string,
-  ConnectedRuntimeContributionFactory
+  EnabledRuntimeContributionFactory
 >([
   [
     "@frockbot/plugin-mcp/agent",
@@ -420,16 +416,16 @@ const connectedRuntimeContributionFactories = new Map<
   ],
   [
     "@frockbot/plugin-web/agent",
-    ({ binding, fetch: outbound }) =>
+    ({ capability, fetch: outbound }) =>
       createConfiguredWebFetchRuntimeContribution({
-        binding,
+        capability,
         ...(outbound ? { fetch: outbound } : {}),
       }),
   ],
   [
     "@frockbot/plugin-provider-ollama-cloud/runtime",
     ({
-      binding,
+      capability,
       userId,
       connection,
       leaseCredential,
@@ -437,20 +433,20 @@ const connectedRuntimeContributionFactories = new Map<
       fetch: outbound,
       packageSettings,
     }) => {
-      // `web_search` is authorized by its User Connection generation; a Bot
-      // whose model runs elsewhere still holds it.
+      // `web_search` is authorized by its own enabled Capability and its own
+      // Connection generation; a Bot whose model runs elsewhere still holds it.
       if (
         !connection?.generation ||
-        !binding.connectionId ||
+        !capability.connectionId ||
         !leaseCredential ||
         !settleCredential
       ) {
         return undefined;
       }
       return createConfiguredOllamaWebSearchRuntimeContribution({
-        binding,
+        capability,
         accountId: userId,
-        connectionId: binding.connectionId,
+        connectionId: capability.connectionId,
         connectionGeneration: connection.generation,
         // Every inbound value is decoded at its seam: the provider Package
         // validates the endpoint root before it composes a request URL.
@@ -480,10 +476,11 @@ interface ModelRuntimeContributionConfig {
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
   settleCredential?(effectId: string): Promise<void>;
-  runWorkersAi?: (
-    model: string,
-    input: Record<string, unknown>,
-  ) => Promise<unknown>;
+  flockAiAutoRoute?: string;
+  runFlockAiChatCompletion?: (
+    gatewayModel: string,
+    body: Record<string, unknown>,
+  ) => Promise<ReadableStream<Uint8Array>>;
   fetch?: typeof fetch;
   /**
    * Endpoint root carried on the Connection's settings bag, when its User
@@ -525,17 +522,27 @@ const modelRuntimeContributionFactories = new Map<
     },
   ],
   [
-    "@frockbot/plugin-provider-workers-ai/runtime",
+    "@frockbot/plugin-provider-flock-ai/runtime",
     {
-      providerType: "workers-ai",
-      create: ({ connectionId, connectionGeneration, runWorkersAi }) => {
-        if (!connectionGeneration || !runWorkersAi) {
-          throw new Error("Workers AI binding host is unavailable");
+      providerType: "flock-ai",
+      create: ({
+        connectionId,
+        connectionGeneration,
+        flockAiAutoRoute,
+        runFlockAiChatCompletion,
+      }) => {
+        if (
+          !connectionGeneration ||
+          !flockAiAutoRoute ||
+          !runFlockAiChatCompletion
+        ) {
+          throw new Error("Flock AI gateway host is unavailable");
         }
-        return createWorkersAiRuntimePlugin({
+        return createFlockAiRuntimePlugin({
           connectionId,
           connectionGeneration,
-          run: runWorkersAi,
+          autoRoute: flockAiAutoRoute,
+          runChatCompletion: runFlockAiChatCompletion,
         });
       },
     },
@@ -632,6 +639,7 @@ export type FoundationGatewayHost = {
   backendHost: "gateway";
 } & AdminGatewayHost &
   BotTemplateGatewayHostV1 &
+  ComputerGatewayHost &
   FlockGatewayHost &
   McpGatewayHost &
   SettingsGatewayHost &
@@ -685,6 +693,11 @@ export async function createFoundationBackendContributions<T>(
           specifier === "@frockbot/plugin-admin/backend"
         ) {
           plugin = createAdminGatewayPlugin(host, lifecycle);
+        } else if (
+          host.backendHost === "gateway" &&
+          specifier === "@frockbot/plugin-computer/backend"
+        ) {
+          plugin = createComputerBackendPlugin(host, lifecycle);
         } else if (
           host.backendHost === "gateway" &&
           specifier === "@frockbot/plugin-flock/backend"
@@ -804,6 +817,7 @@ function computerProviderPlugin(host: {
   computerSync?: ComputerSyncHostV1;
   computerHost?: SharedComputerHostClient;
   computerHostBinding?: ComputerHostBinding;
+  computerAgentControlOwnerId?: string;
 }): Plugin.Function {
   // `SPRITES_TOKEN` is no longer a credential here — the Computer host holds
   // the only copy, and this Worker could not use one if it had it. It survives
@@ -825,6 +839,9 @@ function computerProviderPlugin(host: {
         }
       : {}),
     ...(host.computerSync ? { sync: host.computerSync } : {}),
+    ...(host.computerAgentControlOwnerId
+      ? { agentControlOwnerId: host.computerAgentControlOwnerId }
+      : {}),
   });
   const shared = host.computerHost
     ? createSharedComputerProviderPlugin(host.computerHost)
@@ -876,8 +893,6 @@ export function createFoundationHostedRuntimePackages(
      * whose run and session its provenance can name.
      */
     authoring?: PackageAuthoringHost;
-    /** Catalog tools exist only for a Turn whose Bot/User authorities are bound. */
-    packageCatalog?: PackageCatalogHost;
     /**
      * The Skills seam, supplied by the Bot Durable Object for one admitted
      * Turn. Absent outside a Turn, and outside one whose Workspace reads are
@@ -939,6 +954,12 @@ export function createFoundationHostedRuntimePackages(
      * honest way to launch a process that outlives its Turn.
      */
     computerProcesses?: ComputerProcessStorageV1;
+    /** Wake-free access to the Bot DO's durable human-control record. */
+    computerControlRecords?: NonNullable<
+      ComputerAgentPluginConfig["controlRecords"]
+    >;
+    /** The `computerUse` task owner whose User-wide lease this child holds. */
+    computerAgentControlOwnerId?: string;
     /**
      * The Bot self-management seam, supplied by the Bot Durable Object for one
      * admitted Turn. Absent outside a Turn, and the Flock runtime Contribution
@@ -1055,15 +1076,6 @@ export function createFoundationHostedRuntimePackages(
           ),
         ]
       : []),
-    ...(host.packageCatalog
-      ? [
-          runtimePackage(
-            plan,
-            "package-catalog",
-            createPackageCatalogRuntimePlugin(host.packageCatalog),
-          ),
-        ]
-      : []),
     runtimePackage(
       plan,
       "credentials",
@@ -1088,6 +1100,9 @@ export function createFoundationHostedRuntimePackages(
         ...(host.computerProcesses
           ? { processes: host.computerProcesses }
           : {}),
+        ...(host.computerControlRecords
+          ? { controlRecords: host.computerControlRecords }
+          : {}),
       }),
     ),
   ];
@@ -1100,7 +1115,7 @@ export function createFoundationHostedRuntimePackages(
  * Plugin — `resolveContribution` takes the first match and `packages.install`
  * dedupes by specifier — so two entries naming the same Contribution silently
  * lose one. `plugin-mcp` produces several on purpose: one lifecycle
- * Contribution for the Turn, and one per assigned server, up to the per-User
+ * Contribution for the Turn, and one per enabled server, up to the per-User
  * ceiling. Merging them into a single Plugin that mounts each in order is how
  * all of them reach the Bot; the order is preserved, so the lifecycle tools
  * mount before the servers whose state they report.
@@ -1129,13 +1144,15 @@ export function mergeFoundationRuntimePackages(
   });
 }
 
-export async function createFoundationConnectedRuntimePackages(
+export async function createFoundationEnabledRuntimePackages(
   plan: ApplicationPlan,
-  user: UserSettingsViewV1,
+  execution: BotExecutionPlanV1,
   host: {
     userId: string;
     readSecret(name: string): string | undefined;
-    authorizeConnection(connection: ConnectionView): Promise<ConnectionView>;
+    authorizeConnection(
+      capability: EnabledCapabilityV1,
+    ): Promise<ConnectionView>;
     /**
      * One Package's durable User-level setting values. Supplied by the host
      * that read the User's settings for this Turn; a host that supplies none
@@ -1148,12 +1165,12 @@ export async function createFoundationConnectedRuntimePackages(
     fetch?: typeof fetch;
     /** The User's credential authority, for Contributions that hold a key. */
     leaseCredential?(
-      connection: ConnectionView,
+      capability: EnabledCapabilityV1,
       effectId: string,
       expectedGeneration?: string,
     ): Promise<CredentialLeaseV1>;
     settleCredential?(
-      connection: ConnectionView,
+      capability: EnabledCapabilityV1,
       effectId: string,
     ): Promise<void>;
     /** The durable home of a mount outcome, when the host has one. */
@@ -1161,96 +1178,53 @@ export async function createFoundationConnectedRuntimePackages(
   },
 ): Promise<FoundationRuntimePackage[]> {
   const result: FoundationRuntimePackage[] = [];
-  const bindingIndexes = new Map<string, number>();
-  for (const installation of user.packages) {
-    if (installation.state !== "installed") continue;
+  const capabilityIndexes = new Map<string, number>();
+  for (const capability of execution.capabilities) {
     const pkg = plan.packages.find(
-      (candidate) =>
-        candidate.id === installation.packageId &&
-        candidate.version === installation.version,
+      (candidate) => candidate.id === capability.packageId,
     );
     const runtime = pkg?.manifest.contributions.runtime;
     if (!pkg || !runtime) continue;
     const specifier = contributionSpecifier(pkg.specifier, runtime.entry);
-    const factory = connectedRuntimeContributionFactories.get(specifier);
+    const factory = enabledRuntimeContributionFactories.get(specifier);
     if (!factory) continue;
-    for (const capability of pkg.manifest.configuration?.capabilities ?? []) {
-      const candidates: Array<ConnectionView | undefined> =
-        capability.connectionTypes.length === 0
-          ? [undefined]
-          : user.connections.filter((connection) => {
-              if (
-                connection.packageId !== pkg.id ||
-                connection.state !== "ready" ||
-                !capability.connectionTypes.includes(
-                  connection.connectionTypeId,
-                )
-              ) {
-                return false;
-              }
-              const connectionType =
-                pkg.manifest.configuration?.connectionTypes.find(
-                  (candidate) => candidate.id === connection.connectionTypeId,
-                );
-              return (
-                connectionType?.capabilities.includes(capability.id) === true
-              );
-            });
-      for (const candidate of candidates) {
-        const connection = candidate
-          ? await host.authorizeConnection(candidate)
-          : undefined;
-        const binding: RuntimeCapabilityBindingV1 = {
-          packageId: pkg.id,
-          capabilityId: capability.id,
-          ...(connection ? { connectionId: connection.connectionId } : {}),
-          state: "enabled",
-        };
-        const bindingIndex = bindingIndexes.get(pkg.id) ?? 0;
-        bindingIndexes.set(pkg.id, bindingIndex + 1);
-        const plugin = await factory({
-          binding,
-          bindingIndex,
-          userId: host.userId,
-          packageSettings: host.packageSettings?.(pkg.id) ?? {},
-          readSecret: host.readSecret,
-          authorizeConnection: () => {
-            if (!connection) {
-              return Promise.reject(
-                new Error("Connection-backed capability is unavailable"),
-              );
-            }
-            return host.authorizeConnection(connection);
-          },
-          ...(connection ? { connection } : {}),
-          ...(host.fetch ? { fetch: host.fetch } : {}),
-          ...(host.leaseCredential && connection
-            ? {
-                leaseCredential: (effectId, expectedGeneration) =>
-                  host.leaseCredential!(
-                    connection,
-                    effectId,
-                    expectedGeneration,
-                  ),
-              }
-            : {}),
-          ...(host.settleCredential && connection
-            ? {
-                settleCredential: (effectId) =>
-                  host.settleCredential!(connection, effectId),
-              }
-            : {}),
-          ...(host.recordOutcome ? { recordOutcome: host.recordOutcome } : {}),
-        });
-        if (!plugin) continue;
-        result.push({
-          specifier: pkg.specifier,
-          contributionSpecifier: specifier,
-          manifest: pkg.manifest,
-          plugin,
-        });
-      }
-    }
+    // A Capability with no Connection type is authorized by account-wide
+    // Package enablement alone, so it never asks the host for a Connection.
+    const connection = capability.connectionId
+      ? await host.authorizeConnection(capability)
+      : undefined;
+    const capabilityIndex = capabilityIndexes.get(pkg.id) ?? 0;
+    capabilityIndexes.set(pkg.id, capabilityIndex + 1);
+    const plugin = await factory({
+      capability,
+      capabilityIndex,
+      userId: host.userId,
+      packageSettings: host.packageSettings?.(pkg.id) ?? {},
+      readSecret: host.readSecret,
+      authorizeConnection: () => host.authorizeConnection(capability),
+      ...(connection ? { connection } : {}),
+      ...(host.fetch ? { fetch: host.fetch } : {}),
+      ...(host.leaseCredential
+        ? {
+            leaseCredential: (effectId, expectedGeneration) =>
+              host.leaseCredential!(capability, effectId, expectedGeneration),
+          }
+        : {}),
+      ...(host.settleCredential
+        ? {
+            settleCredential: (effectId) =>
+              host.settleCredential!(capability, effectId),
+          }
+        : {}),
+      ...(host.recordOutcome ? { recordOutcome: host.recordOutcome } : {}),
+    });
+    if (!plugin) continue;
+    result.push({
+      specifier: pkg.specifier,
+      contributionSpecifier: specifier,
+      manifest: pkg.manifest,
+      plugin,
+    });
   }
   return result;
 }
@@ -1350,8 +1324,6 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // Computer providers require host authority and are added only by a capable runtime.
   // Authoring mounts only for an admitted Turn, which supplies its host.
   runtimeIds.delete("authoring");
-  // Catalog changes likewise require the Bot and User durable authorities.
-  runtimeIds.delete("package-catalog");
   // Skills mount only for a Turn whose instruction root the host can read.
   runtimeIds.delete("skills");
   // Memory mounts only for a Turn whose Memory roots the host can reach.
@@ -1386,13 +1358,15 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   runtimeIds.delete("fly-sprite");
   // Package publication is mounted with the current User's durable host.
   runtimeIds.delete("package-publisher");
-  // Provider Packages mount only after durable Connections resolve.
+  // Enabled provider Packages mount only after durable Connections resolve.
   runtimeIds.delete("composio");
-  // Remote MCP servers mount after the Connection and its handshake resolve.
+  // Remote MCP servers mount per enabled Capability, after the Connection and
+  // its handshake resolve.
   runtimeIds.delete("mcp");
   runtimeIds.delete("provider-ollama-cloud");
-  runtimeIds.delete("provider-workers-ai");
-  // The Web Package's `web_fetch` mounts whenever the Package is enabled.
+  runtimeIds.delete("provider-flock-ai");
+  // The Web Package's `web_fetch` mounts only while its User keeps the
+  // `web-fetch` Capability enabled.
   runtimeIds.delete("web");
   return {
     plan,

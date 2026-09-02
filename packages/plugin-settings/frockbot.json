@@ -46,6 +46,7 @@
         "frockbot.user-settings-sections",
         "frockbot.bot-settings-sections",
         "frockbot.bot-settings-primary-sections",
+        "frockbot.models-sections",
         "frockbot.bot-panel-sections",
         "frockbot.bot-avatar-editor"
       ]

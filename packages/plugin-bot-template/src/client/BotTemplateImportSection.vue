@@ -3,14 +3,13 @@
 //
 // The review card is the whole point of this surface. A template is prose from
 // a stranger, and it names Packages, Skills and Routines that are about to
-// become durable state in this User's account — so it is shown as four honest
-// sections before anything happens, and `Create the Bot` is the only control
-// that writes. Planning is a read; the record stays `planned` until it is
-// pressed.
+// become part of this User's account — so it is shown as four honest sections
+// before anything happens, and `Create the Bot` is the only control that
+// writes. Planning is a read; the record stays `planned` until it is pressed.
 //
 // What the card never offers is a way to connect anything. An import creates no
-// Connection, so "Needs your own Connection" is a list of things the User must
-// go and do themselves, not a checkbox.
+// Connection or credential, so "Needs your own Connection" is a list of things
+// the User must go and do themselves, not a checkbox.
 import { UiButton, UiField, UiIcon } from "@frockbot/client-ui";
 import { computed, inject, ref } from "vue";
 import { botTemplateStateKey } from "./state.js";
@@ -73,7 +72,7 @@ async function plan(): Promise<void> {
         <small>
           Paste a template link to see exactly what it would create before
           anything happens. Importing never brings across Memory, credentials,
-          Connections.
+          or Connections.
         </small>
       </span>
     </header>
@@ -167,8 +166,8 @@ async function plan(): Promise<void> {
           </li>
         </ul>
         <p class="import__note">
-          None of these is created for you. Add each one yourself on your
-          Connections surface; every Bot will hold it once it is ready.
+          None of these is created for you. Add each one in Connectors; once
+          enabled, it is available to every Bot you own.
         </p>
       </section>
 

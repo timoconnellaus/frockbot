@@ -187,7 +187,7 @@ describe("the step list", () => {
 });
 
 describe("what an import never does", () => {
-  it("plans no Connection, only lines telling the User", () => {
+  it("plans no Connection or credential, only lines telling the User", () => {
     const plan = planBotTemplateImportV1(input());
     expect(plan.connections).toEqual([
       {
@@ -260,6 +260,6 @@ describe("the card's prose", () => {
     expect(described).toContain('Will create the Bot "Budget"');
     expect(described).toContain("missing from your catalog");
     expect(described).toContain("need your own Connection");
-    expect(described).toContain("No Connection is created");
+    expect(described).toContain("No Connection or credential");
   });
 });

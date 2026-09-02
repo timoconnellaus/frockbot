@@ -1,11 +1,11 @@
 // GrokBot's `add-connector`, end to end: a Catalog entry with setup fields and
-// an OAuth server, installed with the values a User typed, connected, used —
-// and then broken by the server and repaired by the User.
+// an OAuth server, installed with the values a User typed, connected, enabled,
+// used — and then broken by the server and repaired by the User.
 //
 // The seam this exercises that no other test does is the *sequence*: catalog
 // entry detail → `setupFields` → `user/install-package{values}` → the Package's
-// own authorization route → the public callback → a Turn. Everything crosses
-// the gateway, and the connector is impersonated at
+// own authorization route → the public callback → account enablement →
+// a Turn. Everything crosses the gateway, and the connector is impersonated at
 // the outbound seam, so nothing is injected past a Package boundary.
 import {
   catalogContentHashV1,
@@ -260,7 +260,7 @@ describe("installing a connector from the Catalog and connecting it", () => {
     expect(connection.state).toBe("ready");
     expect(connection.pendingAuthorization).toBeUndefined();
 
-    // 4. The ready Connection's tools reach every Bot on its next Turn.
+    // 4. The enabled Connection's tools reach every Bot.
     expect(
       (await runTurn(userId, botId, "hello", "guided-turn-1")).status,
     ).toBe(200);
@@ -283,7 +283,7 @@ describe("installing a connector from the Catalog and connecting it", () => {
       ),
     ).toEqual({ echoed: { message: "ping" } });
 
-    // 5. The connector stops honouring its OAuth token. The next Turn loses the
+    // 5. The connector stops honouring the grant. The next Turn loses the
     //    tools, and the User gets a card rather than silence.
     await fetch(mcpOAuthRejectEndpoint(TENANT), { method: "POST" });
     expect(

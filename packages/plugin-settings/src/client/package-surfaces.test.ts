@@ -72,12 +72,33 @@ const settingsOnly = catalogItem({
   ] as PluginCatalogItem["settings"],
 });
 
+const customModels = catalogItem({
+  packageId: "custom-models",
+  settings: [
+    {
+      id: "model",
+      schemaVersion: 1,
+      scopes: ["user", "bot"],
+      role: "model",
+      schema: {
+        type: "object",
+        properties: {
+          connectionId: { type: "string" },
+          providerModelId: { type: "string" },
+        },
+        required: ["connectionId", "providerModelId"],
+        additionalProperties: false,
+      },
+    },
+  ],
+});
+
 const plain = catalogItem({
   packageId: "web",
   capabilities: [{ id: "web-tools", kind: "tool", connectionTypes: [] }],
 });
 
-const catalog = [provider, connector, settingsOnly, plain];
+const catalog = [provider, connector, settingsOnly, customModels, plain];
 
 function installation(
   packageId: string,
@@ -91,6 +112,7 @@ describe("Package configuration homes", () => {
     expect(packageConfigurationHome(provider)).toBe("models");
     expect(packageConfigurationHome(connector)).toBe("connections");
     expect(packageConfigurationHome(settingsOnly)).toBe("user-settings");
+    expect(packageConfigurationHome(customModels)).toBe("models");
     // Nothing declared is nothing to configure: the Package appears in Plugins
     // to be enabled and disabled, and on no configuration surface at all.
     expect(packageConfigurationHome(plain)).toBe("none");
@@ -103,11 +125,15 @@ describe("Package configuration homes", () => {
       ["provider-ollama-cloud", "models"],
       ["composio", "connections"],
       ["image", "user-settings"],
+      ["custom-models", "models"],
     ]);
   });
 
   test("a model provider that declares Connections is Models', not Connections'", () => {
-    expect(packagesForHome(catalog, "models")).toEqual([provider]);
+    expect(packagesForHome(catalog, "models")).toEqual([
+      provider,
+      customModels,
+    ]);
     expect(packagesForHome(catalog, "connections")).toEqual([connector]);
     expect(packagesForHome(catalog, "user-settings")).toEqual([settingsOnly]);
   });
@@ -138,7 +164,7 @@ describe("Package configuration homes", () => {
 
   test("names the surface a Plugins row points at", () => {
     expect(configurationHomeLabel("models")).toBe("Models");
-    expect(configurationHomeLabel("connections")).toBe("Connections");
+    expect(configurationHomeLabel("connections")).toBe("Connectors");
     expect(configurationHomeLabel("user-settings")).toBe(
       "Application settings",
     );

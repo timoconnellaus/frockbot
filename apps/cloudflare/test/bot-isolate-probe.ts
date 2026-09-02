@@ -8,12 +8,7 @@
 // `BOT_ISOLATE_WRAPPER_SOURCE`, `BotCapabilities`), and only the Turn's
 // surrounding configuration is fixture.
 import { DurableObject } from "cloudflare:workers";
-import type {
-  LlmProvider,
-  LlmStreamEvent,
-  NormalizedModelRequest,
-  SessionEvent,
-} from "@frockbot/kernel-contracts";
+import type { LlmProvider, LlmStreamEvent } from "@frockbot/kernel-contracts";
 import {
   bootstrapGeneration,
   compositionArtifactSetHashV1,
@@ -22,7 +17,6 @@ import {
   type CompositionGenerationV1,
   type CompositionMemberV1,
 } from "@frockbot/kernel-composition/generation";
-import { canonicalJson } from "@frockbot/kernel-composition/compiler";
 import type {
   BotIsolateLoader,
   BotIsolateWorkerCode,
@@ -35,11 +29,8 @@ import {
   BOT_ISOLATE_COMPATIBILITY_DATE,
   isolateBindingDigestV1,
   type BotCapabilitiesPropsV1,
+  type IsolateCapabilityV1,
 } from "@frockbot/plugin-shell/backend-isolate";
-import type {
-  IsolateConnectionV1,
-  IsolateModelBindingV1,
-} from "@frockbot/kernel-contracts";
 import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import type { Plugin } from "cordis";
 import type { BotCapabilities } from "../src/bot-capabilities.ts";
@@ -66,12 +57,6 @@ async function sha256Hex(value: string): Promise<string> {
     .join("");
 }
 
-const PROBE_HOOK_BODY = `return [...payload.tools, {
-    name: "hook_marker",
-    description: "Added by the Bot-authored hook for this step",
-    inputSchema: { type: "object" },
-  }];`;
-
 /** A hand-seeded Bot Package. No authoring tool exists until Step 5. */
 export const PROBE_PACKAGE_SOURCE = `
 export const tools = [
@@ -79,22 +64,11 @@ export const tools = [
   { name: "env_keys", description: "Reports the bindings this isolate can see", inputSchema: {}, idempotent: true },
   { name: "leak_probe", description: "Reports whether host state leaked in", inputSchema: {}, idempotent: true },
   { name: "reach_network", description: "Attempts egress", inputSchema: {}, idempotent: false },
+  { name: "ask_authority", description: "Asks for authority it does not hold", inputSchema: {}, idempotent: false },
+  { name: "ask_bad_authority", description: "Sends a request the contract refuses", inputSchema: {}, idempotent: false },
   { name: "call_model", description: "Calls the model binding", inputSchema: {}, idempotent: false },
-  { name: "list_capabilities", description: "Lists the Bot's authority", inputSchema: {}, idempotent: true },
-  { name: "connection_lease", description: "Requests a lease for one Connection", inputSchema: {}, idempotent: true },
-  { name: "schedule_surface", description: "Reports whether durable scheduling is present", inputSchema: {}, idempotent: true },
-  { name: "context_keys", description: "Lists the generated narrow context keys", inputSchema: {}, idempotent: true },
+  { name: "list_capabilities", description: "Lists User-enabled capabilities", inputSchema: {}, idempotent: true },
 ];
-
-export const hooks = {
-  "agent/tool-exposure": async function (payload, ctx) {
-    if (ctx.event !== "agent/tool-exposure" || ctx.tool !== undefined) {
-      throw new Error("hook received the wrong narrowed context");
-    }
-    if (payload.step.step !== 1) return undefined;
-    ${PROBE_HOOK_BODY}
-  },
-};
 
 export async function execute(tool, input, ctx) {
   switch (tool) {
@@ -116,16 +90,18 @@ export async function execute(tool, input, ctx) {
     case "reach_network":
       await fetch("https://example.com");
       return "egress-allowed";
+    case "ask_authority":
+      return JSON.stringify(
+        await ctx.requestAuthority({ capabilityId: "memory:write", reason: "probe" }),
+      );
+    case "ask_bad_authority":
+      return JSON.stringify(
+        await ctx.requestAuthority({ capabilityId: 42, reason: "probe" }),
+      );
     case "list_capabilities":
-      return JSON.stringify(await ctx.capabilities.list());
-    case "connection_lease":
-      return JSON.stringify(await ctx.connection(String(input?.connectionId ?? "")));
-    case "schedule_surface":
-      return typeof ctx.schedule;
-    case "context_keys":
-      return JSON.stringify(Object.keys(ctx).sort());
+      return JSON.stringify(await ctx.listCapabilities());
     case "call_model": {
-      const outcome = await ctx.model.invoke(input);
+      const outcome = await ctx.invokeModel(input);
       if (outcome.status !== "streaming") return JSON.stringify(outcome);
       let text = "";
       for await (const event of outcome.events) {
@@ -139,51 +115,6 @@ export async function execute(tool, input, ctx) {
 }
 `;
 
-export const PROBE_THROWING_HOOK_SOURCE = PROBE_PACKAGE_SOURCE.replace(
-  PROBE_HOOK_BODY,
-  `throw new Error("probe hook exploded");`,
-);
-
-export const PROBE_TIMEOUT_HOOK_SOURCE = PROBE_PACKAGE_SOURCE.replace(
-  PROBE_HOOK_BODY,
-  `await new Promise(function () {});`,
-);
-
-export const PROBE_UNDECODABLE_HOOK_SOURCE = PROBE_PACKAGE_SOURCE.replace(
-  PROBE_HOOK_BODY,
-  `return [{
-    name: "not_exact",
-    description: "Carries an executable field across a schema-only seam",
-    inputSchema: {},
-    execute: "undeclared",
-  }];`,
-);
-
-const PROBE_PACKAGE_MANIFEST = {
-  schemaVersion: 3,
-  id: "bot-authored",
-  displayName: "Bot authored probe",
-  version: "0.0.1",
-  compatibility: { frockbot: ">=0.0.1" },
-  dependencies: {},
-  contributions: {
-    runtime: { entry: "./package.js", host: "bot-isolate" },
-  },
-  tools: [
-    "reverse_text",
-    "env_keys",
-    "leak_probe",
-    "reach_network",
-    "call_model",
-    "list_capabilities",
-    "connection_lease",
-    "schedule_surface",
-    "context_keys",
-  ].map((name) => ({ name, description: name, inputSchema: {} })),
-  hooks: ["agent/tool-exposure"],
-  permissions: [],
-} as const;
-
 /** A deliberate syntax error: `prepare()` must fail with a diagnostic, not hang. */
 export const PROBE_BROKEN_SOURCE = `
 export const tools = [{ name: "broken", description: "", inputSchema: {} }];
@@ -195,14 +126,10 @@ export async function execute(tool, input, ctx) {
  * A provider that scripts one tool-call turn, so an isolate tool is reached
  * through `ctx.tools` by the Agent loop rather than by the test.
  */
-function scriptedProviderPackage(
-  toolName: string,
-  requests: NormalizedModelRequest[],
-): FoundationAgentPackage {
+function scriptedProviderPackage(toolName: string): FoundationAgentPackage {
   const provider: LlmProvider = {
     id: "scripted",
     async *stream(request): AsyncGenerator<LlmStreamEvent> {
-      requests.push(structuredClone(request));
       const latest = request.messages.at(-1);
       if (latest?.role === "tool") {
         yield { type: "text-delta", text: `tool:${latest.content}` };
@@ -245,7 +172,6 @@ function scriptedProviderPackage(
 export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
   private loaderIds: string[] = [];
   private loadedCode: BotIsolateWorkerCode[] = [];
-  private providerRequests: NormalizedModelRequest[] = [];
 
   /** Counts every `.get()` on the Bot Package loader for this probe. */
   private countingLoader(): BotIsolateLoader {
@@ -331,7 +257,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
         packageId: "bot-authored",
         specifier: "@bot/authored",
         version: "0.0.1",
-        manifestHash: await sha256Hex(canonicalJson(PROBE_PACKAGE_MANIFEST)),
+        manifestHash: await sha256Hex("bot-authored"),
         provenance: {
           kind: "bot" as const,
           packageId: "bot-authored",
@@ -359,13 +285,9 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     userId: string;
     botId: string;
     artifact?: ArtifactRefV1;
-    connections?: IsolateConnectionV1[];
-    model?: IsolateModelBindingV1;
-    memory?: boolean;
-    workspace?: boolean;
+    capabilities?: IsolateCapabilityV1[];
     /** Varies the generation without varying the artifact. */
     generationCreatedAt?: string;
-    deadlineMs?: number;
   }): Promise<{
     composition: ShellMountedComposition;
     generation: CompositionGenerationV1;
@@ -382,14 +304,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
       botId: input.botId,
       sessionId: `${input.userId}:${input.botId}`,
       sessionEvents: [],
-      persistSessionEvents: async (_sessionId, events) => {
-        const durable =
-          (await this.ctx.storage.get<SessionEvent[]>("session-events")) ?? [];
-        await this.ctx.storage.put("session-events", [...durable, ...events]);
-      },
-      agentPackages: [
-        scriptedProviderPackage("reverse_text", this.providerRequests),
-      ],
+      agentPackages: [scriptedProviderPackage("reverse_text")],
       modelSelection: { provider: "scripted", model: "scripted-v1" },
       isolate: {
         userId: input.userId,
@@ -413,32 +328,23 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
             return module;
           },
         },
-        manifestFor: () => Promise.resolve(PROBE_PACKAGE_MANIFEST),
         capabilitiesFor: (member) =>
           exports.BotCapabilities({
             props: {
               userId: input.userId,
               botId: input.botId,
-              runId: "run-1",
-              sessionId: `${input.userId}:${input.botId}`,
-              turnId: "turn-1",
               generationId: generation.generationId,
               packageId: member.packageId,
-              connections: structuredClone(input.connections ?? []),
-              ...(input.model ? { model: structuredClone(input.model) } : {}),
-              memory: input.memory ?? false,
-              workspace: input.workspace ?? false,
+              capabilities: input.capabilities ?? [],
             },
           }),
         bindingDigest: await isolateBindingDigestV1({
-          connections: input.connections ?? [],
-          ...(input.model ? { model: input.model } : {}),
-          compositionGenerationId: generation.generationId,
+          userId: input.userId,
+          botId: input.botId,
+          generationId: generation.generationId,
+          capabilities: input.capabilities ?? [],
         }),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
-        ...(input.deadlineMs === undefined
-          ? {}
-          : { deadlineMs: input.deadlineMs }),
       },
     }).mount(generation, new AbortController().signal);
     return { composition, generation };
@@ -459,10 +365,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     artifact: ArtifactRefV1;
     tool: string;
     toolInput?: unknown;
-    connections?: IsolateConnectionV1[];
-    model?: IsolateModelBindingV1;
-    memory?: boolean;
-    workspace?: boolean;
+    capabilities?: IsolateCapabilityV1[];
     generationCreatedAt?: string;
   }): Promise<{ content: string; isError: boolean }> {
     const { composition, generation } = await this.mount(input);
@@ -501,25 +404,8 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     botId: string;
     artifact?: ArtifactRefV1;
     text: string;
-    deadlineMs?: number;
-  }): Promise<{
-    text: string;
-    loaderCalls: number;
-    providerRequestsJson: string;
-    loggedRequestsJson: string;
-    firstStepToolNames: string[];
-    secondStepToolNames: string[];
-    durableHookFailures: Array<{
-      type: "package/hook-failed";
-      packageId: string;
-      event: string;
-      generationId: string;
-      message: string;
-    }>;
-  }> {
+  }): Promise<{ text: string; loaderCalls: number }> {
     this.loaderIds = [];
-    this.providerRequests = [];
-    await this.ctx.storage.delete("session-events");
     const { composition } = await this.mount(input);
     try {
       await composition.verify(new AbortController().signal);
@@ -528,33 +414,9 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
       const message = composition.runtime.agent.agent.session
         .deriveMessages()
         .at(-1);
-      const loggedRequests = composition.runtime.agent.agent.session.events
-        .filter((event) => event.type === "model/request")
-        .map((event) => structuredClone(event.request));
-      const durableHookFailures = (
-        (await this.ctx.storage.get<SessionEvent[]>("session-events")) ?? []
-      ).filter(
-        (
-          event,
-        ): event is Extract<SessionEvent, { type: "package/hook-failed" }> =>
-          event.type === "package/hook-failed",
-      );
       return {
         text: message?.role === "assistant" ? message.content : "",
         loaderCalls: this.loaderIds.length,
-        providerRequestsJson: JSON.stringify(this.providerRequests),
-        loggedRequestsJson: JSON.stringify(loggedRequests),
-        firstStepToolNames:
-          this.providerRequests[0]?.tools.map((tool) => tool.name) ?? [],
-        secondStepToolNames:
-          this.providerRequests[1]?.tools.map((tool) => tool.name) ?? [],
-        durableHookFailures: durableHookFailures.map((event) => ({
-          type: event.type,
-          packageId: event.packageId,
-          event: event.event,
-          generationId: event.generationId,
-          message: event.message,
-        })),
       };
     } finally {
       await composition.dispose();
@@ -583,9 +445,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     userId: string;
     botId: string;
     artifact: ArtifactRefV1;
-    connections?: IsolateConnectionV1[];
-    model?: IsolateModelBindingV1;
-    generationCreatedAt?: string;
+    capabilities?: IsolateCapabilityV1[];
   }): Promise<string[]> {
     this.loaderIds = [];
     const { composition } = await this.mount(input);

@@ -331,8 +331,9 @@ describe("bot_create", () => {
     expect(created.botId).toBe(
       await createdBotIdV1(OWNER, CONTEXT.effectId, "Budget"),
     );
-    // A registration contains identity and provenance, never an authority snapshot.
-    expect(created).not.toHaveProperty("initialModel");
+    // Model and Capability authority resolve account-wide on the new Bot's
+    // next admitted Turn; neither is copied into its registration.
+    expect(Object.hasOwn(created, "initialModel")).toBe(false);
     expect(result.content).toContain(created.botId);
   });
 

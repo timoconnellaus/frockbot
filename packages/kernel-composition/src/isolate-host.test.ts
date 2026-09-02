@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Context } from "cordis";
-import { BOT_ISOLATE_HOOK_EVENTS_V1 } from "@frockbot/kernel-contracts";
 import type {
   BotCapabilitiesStub,
-  BotIsolateHookEventNameV1,
-  IsolateHookInvocationV1,
   TurnTypeV1,
   BotIsolateEntrypoint,
   IsolateToolInvocationV1,
@@ -25,7 +21,7 @@ import { decodeFrockBotManifest } from "./manifest.ts";
 
 const CONTENT_HASH = "a".repeat(64);
 
-function manifest(hooks: BotIsolateHookEventNameV1[] = []) {
+function manifest() {
   return decodeFrockBotManifest({
     schemaVersion: 3,
     id: "bot-authored",
@@ -33,27 +29,15 @@ function manifest(hooks: BotIsolateHookEventNameV1[] = []) {
     version: "0.0.1",
     compatibility: { frockbot: "^0.0.1" },
     dependencies: {},
-    contributions: {
-      runtime: { entry: "./package.js", host: "bot-isolate" },
-    },
-    tools: [
-      {
-        name: "reverse_text",
-        description: "Reverses text",
-        inputSchema: { type: "object" },
-      },
-    ],
-    ...(hooks.length === 0 ? {} : { hooks }),
+    contributions: { runtime: { entry: "./runtime.js" } },
     permissions: [],
   });
 }
 
-function descriptor(
-  hooks: BotIsolateHookEventNameV1[] = [],
-): PackageDescriptor {
+function descriptor(): PackageDescriptor {
   return {
     specifier: "@bot/authored",
-    manifest: manifest(hooks),
+    manifest: manifest(),
     artifact: {
       contentHash: CONTENT_HASH,
       size: 12,
@@ -83,7 +67,6 @@ function fakeIsolate(
           ({
             health: () => Promise.reject(new Error("health was not stubbed")),
             execute: () => Promise.reject(new Error("execute was not stubbed")),
-            hook: () => Promise.reject(new Error("hook was not stubbed")),
             ...entrypoint,
           }) as BotIsolateEntrypoint,
       };
@@ -139,15 +122,12 @@ function host(
         };
       },
     },
-    loop: new Context(),
     userId: "user-1",
     botId: "bot-1",
     sessionId: "session-1",
     runId: "run-1",
     turnId: "turn-1",
     generationId: "gen-1",
-    turnType: "chat",
-    recordHookFailure: () => Promise.resolve(),
     capabilities: {} as BotCapabilitiesStub,
     bindingDigest: BINDING_DIGEST,
     compatibilityDate: "2026-08-27",
@@ -198,7 +178,7 @@ describe("Bot isolate contribution host", () => {
   test("a caller that omits the binding digest does not compile", () => {
     // @ts-expect-error the binding digest is required: an isolate loaded with
     // no digest of its granted bindings would share a loader id across
-    // Connection authority and generations.
+    // enabled bindings and generations.
     void botIsolateModuleSetHashV1(CONTENT_HASH);
     expect(true).toBe(true);
   });
@@ -211,20 +191,60 @@ describe("Bot isolate contribution host", () => {
     expect(loads[0]!.loaderId).not.toBe(other.loads[0]!.loaderId);
   });
 
-  test("keys the loader id on the User, the Bot and the module set", async () => {
+  test("reuses the loader id only for the same Bot, generation, and enabled set", async () => {
     const { host: subject, loads } = host();
     await subject.prepare(descriptor());
-    const other = host({ botId: "bot-2" });
-    await other.host.prepare(descriptor());
+    const same = host();
+    await same.host.prepare(descriptor());
     const expected = await botIsolateModuleSetHashV1(
       CONTENT_HASH,
       BINDING_DIGEST,
     );
-    expect(loads[0]!.loaderId).toBe(`bot-package:user-1:bot-1:${expected}`);
-    expect(other.loads[0]!.loaderId).toBe(
-      `bot-package:user-1:bot-2:${expected}`,
+    expect(loads[0]!.loaderId).toBe(`bot-package:user-1:${expected}`);
+    expect(same.loads[0]!.loaderId).toBe(loads[0]!.loaderId);
+  });
+
+  test("changes the loader id with the Bot, generation, or enabled set", async () => {
+    const first = host();
+    const otherBot = host({ botId: "bot-2", bindingDigest: "d".repeat(64) });
+    const otherGeneration = host({
+      generationId: "gen-2",
+      bindingDigest: "e".repeat(64),
+    });
+    const otherEnabledSet = host({ bindingDigest: "f".repeat(64) });
+
+    await Promise.all([
+      first.host.prepare(descriptor()),
+      otherBot.host.prepare(descriptor()),
+      otherGeneration.host.prepare(descriptor()),
+      otherEnabledSet.host.prepare(descriptor()),
+    ]);
+
+    const loaderIds = [
+      first.loads[0]!.loaderId,
+      otherBot.loads[0]!.loaderId,
+      otherGeneration.loads[0]!.loaderId,
+      otherEnabledSet.loads[0]!.loaderId,
+    ];
+    expect(new Set(loaderIds).size).toBe(loaderIds.length);
+  });
+
+  test("never shares a loader id across Users", async () => {
+    const first = host();
+    const otherUser = host({ userId: "user-2" });
+
+    await Promise.all([
+      first.host.prepare(descriptor()),
+      otherUser.host.prepare(descriptor()),
+    ]);
+
+    expect(first.loads[0]!.loaderId).toMatch(
+      /^bot-package:user-1:[0-9a-f]{64}$/,
     );
-    expect(loads[0]!.loaderId).not.toBe(other.loads[0]!.loaderId);
+    expect(otherUser.loads[0]!.loaderId).toMatch(
+      /^bot-package:user-2:[0-9a-f]{64}$/,
+    );
+    expect(otherUser.loads[0]!.loaderId).not.toBe(first.loads[0]!.loaderId);
   });
 
   test("health failure is a prepare failure with a diagnostic", async () => {
@@ -259,311 +279,6 @@ describe("Bot isolate contribution host", () => {
       entrypoint: { health: () => Promise.resolve(healthy([])) },
     });
     await expect(subject.prepare(descriptor())).rejects.toThrow(/unhealthy/);
-  });
-
-  test("rejects isolate tool names that differ from the stored manifest", async () => {
-    const { host: subject } = host({
-      entrypoint: {
-        health: () =>
-          Promise.resolve(
-            healthy([
-              {
-                name: "undeclared_tool",
-                description: "Not in the manifest",
-                inputSchema: { type: "object" },
-                idempotent: false,
-              },
-            ]),
-          ),
-      },
-    });
-    await expect(subject.prepare(descriptor())).rejects.toThrow(
-      /tools do not match its stored manifest/,
-    );
-  });
-
-  test("rejects isolate hooks that differ from the stored manifest", async () => {
-    const { host: subject } = host({
-      entrypoint: {
-        health: () =>
-          Promise.resolve({
-            ...healthy(),
-            contractVersion: 3 as const,
-            hooks: ["tools/post-execute" as const],
-          }),
-      },
-    });
-    await expect(
-      subject.prepare(descriptor(["agent/tool-exposure"])),
-    ).rejects.toThrow(/hooks do not match its stored manifest/);
-  });
-
-  test("runs a declared hook after first-party policy with a snapshot", async () => {
-    const loop = new Context();
-    const order: string[] = [];
-    let seen: IsolateHookInvocationV1 | undefined;
-    loop.on(
-      "agent/tool-exposure",
-      async (_agent, tools, _turn, _step, _signal, next) => {
-        order.push(`first-party:${tools[0]?.name}`);
-        return next();
-      },
-    );
-    const { host: subject } = host({
-      loop,
-      entrypoint: {
-        health: () =>
-          Promise.resolve({
-            ...healthy(),
-            contractVersion: 3 as const,
-            hooks: ["agent/tool-exposure" as const],
-          }),
-        hook: (invocation) => {
-          seen = invocation;
-          order.push(`hook:${invocation.event}`);
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            status: "replaced" as const,
-            replacement: [
-              {
-                name: "hook_visible",
-                description: "Visible only for this step.",
-                inputSchema: { type: "object" },
-              },
-            ],
-          });
-        },
-      },
-    });
-    const prepared = await subject.prepare(descriptor(["agent/tool-exposure"]));
-    const active = await prepared!.commit();
-    const original = [
-      {
-        name: "reverse_text",
-        description: "Reverses text",
-        inputSchema: { type: "object" },
-      },
-    ];
-    const agent = {
-      id: "bot-1",
-      botId: "bot-1",
-      status: "running" as const,
-      session: { id: "session-1" },
-    } as never;
-    const result = await loop.waterfall(
-      "agent/tool-exposure",
-      agent,
-      original,
-      1,
-      2,
-      new AbortController().signal,
-      () => Promise.resolve(original),
-    );
-    const otherBotResult = await loop.waterfall(
-      "agent/tool-exposure",
-      {
-        id: "bot-2",
-        botId: "bot-2",
-        status: "running" as const,
-        session: { id: "session-2" },
-      } as never,
-      original,
-      1,
-      2,
-      new AbortController().signal,
-      () => Promise.resolve(original),
-    );
-
-    expect(order).toEqual([
-      "first-party:reverse_text",
-      "hook:agent/tool-exposure",
-      "first-party:reverse_text",
-    ]);
-    expect(result.map((tool) => tool.name)).toEqual(["hook_visible"]);
-    expect(otherBotResult).toEqual(original);
-    expect(seen?.payload).toMatchObject({
-      step: {
-        botId: "bot-1",
-        sessionId: "session-1",
-        compositionGenerationId: "gen-1",
-        turn: 1,
-        step: 2,
-      },
-      tools: original,
-    });
-    expect(seen?.payload).not.toHaveProperty("agent");
-    expect(seen?.payload).not.toHaveProperty("signal");
-
-    await active.dispose();
-  });
-
-  test("bridges every declared isolate waterfall", async () => {
-    const loop = new Context();
-    const seen: string[] = [];
-    const replacement: Record<string, unknown> = {
-      "agent/pre-step": { kind: "reject", reason: "hook rejected" },
-      "system-prompt/assemble": {
-        text: "hook prompt",
-        sections: [{ id: "hook", text: "hook prompt" }],
-      },
-      "agent/message-window": [{ role: "user", content: "hook window" }],
-      "agent/tool-exposure": [],
-      "tools/pre-execute": {
-        kind: "denied",
-        call: { id: "call-1", name: "reverse_text", input: {} },
-        result: { content: "hook denied", isError: true },
-      },
-      "tools/post-execute": { content: "hook result", isError: false },
-      "agent/step-continuation": { kind: "stop" },
-    };
-    const { host: subject } = host({
-      loop,
-      entrypoint: {
-        health: () =>
-          Promise.resolve({
-            ...healthy(),
-            contractVersion: 3 as const,
-            hooks: [...BOT_ISOLATE_HOOK_EVENTS_V1],
-          }),
-        hook: (invocation) => {
-          seen.push(invocation.event);
-          return Promise.resolve({
-            schemaVersion: 1,
-            status: "replaced",
-            replacement: replacement[invocation.event],
-          });
-        },
-      },
-    });
-    const prepared = await subject.prepare(
-      descriptor([...BOT_ISOLATE_HOOK_EVENTS_V1]),
-    );
-    const active = await prepared!.commit();
-    const agent = {
-      id: "bot-1",
-      botId: "bot-1",
-      status: "running" as const,
-      session: { id: "session-1" },
-    } as never;
-    const signal = new AbortController().signal;
-    const call = { id: "call-1", name: "reverse_text", input: {} };
-    const toolContext = executionContext();
-
-    expect(
-      await loop.waterfall("agent/pre-step", agent, [], 1, 1, () =>
-        Promise.resolve({ kind: "enter", inputs: [] }),
-      ),
-    ).toMatchObject({ kind: "reject" });
-    expect(
-      await loop.waterfall(
-        "system-prompt/assemble",
-        {
-          sessionId: "session-1",
-          provider: "scripted",
-          model: "scripted-v1",
-          turnType: "chat",
-        },
-        () => Promise.resolve({ text: "core", sections: [] }),
-      ),
-    ).toMatchObject({ text: "hook prompt" });
-    expect(
-      await loop.waterfall(
-        "agent/message-window",
-        agent,
-        [],
-        1,
-        1,
-        signal,
-        () => Promise.resolve([]),
-      ),
-    ).toEqual([{ role: "user", content: "hook window" }]);
-    expect(
-      await loop.waterfall("agent/tool-exposure", agent, [], 1, 1, signal, () =>
-        Promise.resolve([]),
-      ),
-    ).toEqual([]);
-    expect(
-      await loop.waterfall("tools/pre-execute", call, toolContext, () =>
-        Promise.resolve({ kind: "ready", call, idempotent: true }),
-      ),
-    ).toMatchObject({ kind: "denied" });
-    expect(
-      await loop.waterfall(
-        "tools/post-execute",
-        call,
-        { content: "core", isError: false },
-        toolContext,
-        () => Promise.resolve({ content: "core", isError: false }),
-      ),
-    ).toMatchObject({ content: "hook result" });
-    expect(
-      await loop.waterfall(
-        "agent/step-continuation",
-        agent,
-        { kind: "continue" },
-        1,
-        1,
-        signal,
-        () => Promise.resolve({ kind: "continue" }),
-      ),
-    ).toEqual({ kind: "stop" });
-    expect(seen.toSorted()).toEqual([...BOT_ISOLATE_HOOK_EVENTS_V1].toSorted());
-
-    await active.dispose();
-  });
-
-  test("a throwing or timed-out hook passes through and records failure", async () => {
-    for (const hook of [
-      () => Promise.reject(new Error("hook exploded")),
-      () => new Promise<never>(() => {}),
-    ]) {
-      const failures: string[] = [];
-      const loop = new Context();
-      const { host: subject } = host({
-        loop,
-        deadlineMs: 5,
-        recordHookFailure: (failure) => {
-          failures.push(failure.message);
-          return Promise.resolve();
-        },
-        entrypoint: {
-          health: () =>
-            Promise.resolve({
-              ...healthy(),
-              contractVersion: 3 as const,
-              hooks: ["agent/tool-exposure" as const],
-            }),
-          hook,
-        },
-      });
-      const prepared = await subject.prepare(
-        descriptor(["agent/tool-exposure"]),
-      );
-      await prepared!.commit();
-      const original = [
-        {
-          name: "reverse_text",
-          description: "Reverses text",
-          inputSchema: { type: "object" },
-        },
-      ];
-      const result = await loop.waterfall(
-        "agent/tool-exposure",
-        {
-          id: "bot-1",
-          botId: "bot-1",
-          status: "running",
-          session: { id: "session-1" },
-        } as never,
-        original,
-        1,
-        1,
-        new AbortController().signal,
-        () => Promise.resolve(original),
-      );
-      expect(result).toEqual(original);
-      expect(failures).toHaveLength(1);
-    }
   });
 
   test("registers one tool per health entry and executes it over RPC", async () => {
@@ -673,16 +388,7 @@ describe("the manifest bounds the turn types an isolate's tools reach", () => {
       version: "0.0.1",
       compatibility: { frockbot: "^0.0.1" },
       dependencies: {},
-      contributions: {
-        runtime: { entry: "./package.js", host: "bot-isolate" },
-      },
-      tools: [
-        {
-          name: "reverse_text",
-          description: "Reverses text",
-          inputSchema: { type: "object" },
-        },
-      ],
+      contributions: { runtime: { entry: "./runtime.js" } },
       permissions: [],
       configuration: { capabilities },
     });

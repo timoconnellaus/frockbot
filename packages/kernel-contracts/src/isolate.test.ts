@@ -485,38 +485,34 @@ describe("isolate capability failure v1", () => {
 });
 
 describe("isolate loader identity", () => {
-  test("is the Bot, the User, and the content address — nothing else", () => {
+  test("is the User and the content address — nothing else", () => {
     expect(
       isolateLoaderIdV1({
         userId: "user-1",
-        botId: "bot-1",
         artifactSetHash: "a".repeat(64),
       }),
-    ).toBe(`bot-package:user-1:bot-1:${"a".repeat(64)}`);
+    ).toBe(`bot-package:user-1:${"a".repeat(64)}`);
   });
 
-  test("two Bots of one User never share an id", () => {
+  test("two Users never share an id", () => {
     const hash = "b".repeat(64);
     expect(
       isolateLoaderIdV1({
         userId: "user-1",
-        botId: "bot-1",
         artifactSetHash: hash,
       }),
     ).not.toBe(
       isolateLoaderIdV1({
-        userId: "user-1",
-        botId: "bot-2",
+        userId: "user-2",
         artifactSetHash: hash,
       }),
     );
   });
 
-  test("rejects a component that could forge another Bot's id", () => {
+  test("rejects a component that could forge another User's id", () => {
     expect(() =>
       isolateLoaderIdV1({
-        userId: "user-1:bot-2",
-        botId: "bot-1",
+        userId: "user-1:other",
         artifactSetHash: "c".repeat(64),
       }),
     ).toThrow(/components are invalid/);
@@ -526,7 +522,6 @@ describe("isolate loader identity", () => {
     expect(() =>
       isolateLoaderIdV1({
         userId: "user-1",
-        botId: "bot-1",
         artifactSetHash: "not-a-hash",
       }),
     ).toThrow(/components are invalid/);

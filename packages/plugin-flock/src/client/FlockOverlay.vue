@@ -185,8 +185,8 @@ onBeforeUnmount(() => restoreFocus?.focus());
             </div>
           </fieldset>
           <div class="flock-note">
-            This identity is durable. Refreshing or switching devices won’t
-            re-roll it.
+            This identity stays with your Bot. Refreshing or switching devices
+            won’t re-roll it.
           </div>
           <p
             v-if="flock.error"

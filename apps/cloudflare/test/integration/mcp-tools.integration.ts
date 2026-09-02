@@ -135,7 +135,7 @@ async function toolResult(
     { name: string; content: string; isError: boolean } | undefined;
 }
 
-describe("a remote MCP server reaching a Bot through its User's Connection", () => {
+describe("a remote MCP server reaching every Bot through account enablement", () => {
   it("validates the server, offers its tools, and calls one", async () => {
     const userId = freshUserId("mcp");
     const botId = "mcp-bot";
@@ -155,11 +155,11 @@ describe("a remote MCP server reaching a Bot through its User's Connection", () 
       serverName: "Example MCP",
     });
 
-    // The next admitted Turn carries the connected server's tools in the exact
+    // The next admitted Turn carries the enabled server's tools in the exact
     // normalized model request the session log records.
-    const after = await runTurn(userId, botId, "hello", "mcp-turn-connected");
+    const after = await runTurn(userId, botId, "hello", "mcp-turn-after");
     expect(after.status).toBe(200);
-    expect(await offeredTools(userId, botId, "mcp-turn-connected")).toContain(
+    expect(await offeredTools(userId, botId, "mcp-turn-after")).toContain(
       ECHO_TOOL,
     );
 
@@ -180,25 +180,23 @@ describe("a remote MCP server reaching a Bot through its User's Connection", () 
       echoed: { message: "ping" },
     });
 
-    // Disconnecting takes the tools away at the next admitted Turn.
+    // Disabling the Package takes its tools away from every Bot at the next
+    // admitted Turn without changing the Connection.
+    const enabled = await readUserSettings(userId);
     await expectOkJson(
-      await postAsUser(userId, "/api/connections", {
+      await postAsUser(userId, "/api/settings", {
         schemaVersion: 1,
-        type: "connection/disconnect",
-        commandId: "disconnect-mcp-1",
-        connectionId: connection.connectionId,
-        revokeUpstream: false,
+        type: "user/set-package-enabled",
+        commandId: "disable-mcp",
+        expectedRevision: enabled.revision,
+        packageId: MCP_PACKAGE,
+        enabled: false,
       }),
     );
-    const disconnected = await runTurn(
-      userId,
-      botId,
-      "hello",
-      "mcp-turn-disconnected",
-    );
-    expect(disconnected.status).toBe(200);
+    const disabled = await runTurn(userId, botId, "hello", "mcp-turn-disabled");
+    expect(disabled.status).toBe(200);
     expect(
-      await offeredTools(userId, botId, "mcp-turn-disconnected"),
+      await offeredTools(userId, botId, "mcp-turn-disabled"),
     ).not.toContain(ECHO_TOOL);
   });
 

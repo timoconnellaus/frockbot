@@ -1,5 +1,13 @@
 import type { Entry } from "@cordisjs/plugin-webui";
+import { ComputerError } from "@frockbot/computer-core";
 import type { ComputerState } from "@frockbot/plugin-computer/shared";
+import { computerUpdateLabelV1 } from "@frockbot/plugin-computer/protocol";
+import {
+  initialComputerMachineState,
+  transitionComputerState,
+  type ComputerMachineEvent,
+  type ComputerMachineState,
+} from "@frockbot/plugin-computer/client-state-machine";
 import type { Context, Plugin } from "cordis";
 import {
   type ComputerBotIdentity,
@@ -21,7 +29,11 @@ class FlySpriteHostController {
   private readonly configured: boolean;
   private readonly entry: Entry<ComputerState>;
   private readonly data: ComputerState;
-  private heartbeat?: ReturnType<typeof setInterval>;
+  private machine: ComputerMachineState;
+  private controlHeartbeat?: ReturnType<typeof setInterval>;
+  private viewerHeartbeat?: ReturnType<typeof setInterval>;
+  private viewerSessionId?: string;
+  private controlRequest?: Promise<void>;
   private takingControl = false;
 
   constructor(
@@ -31,15 +43,20 @@ class FlySpriteHostController {
   ) {
     this.computer = computer.bot(identity);
     this.configured = computer.configured;
-    const data: ComputerState = {
-      phase: computer.configured ? "idle" : "unconfigured",
+    this.machine = transitionComputerState(initialComputerMachineState(), {
+      type: "configured",
       botId: this.computer.botId,
       providerLabel: "Fly Sprites",
+      configured: computer.configured,
       message: computer.configured
         ? "Persistent Fly Sprite computer"
         : "Set SPRITES_TOKEN to attach a computer",
-      takingControl: false,
+    });
+    const data: ComputerState = {
+      ...this.machine,
       connect: () => this.connect(),
+      openViewer: () => this.openViewer(),
+      closeViewer: () => this.closeViewer(),
       takeControl: () => this.takeOver(),
       releaseControl: () => this.release(),
       runDoctor: () => this.runDoctor(),
@@ -58,7 +75,8 @@ class FlySpriteHostController {
   }
 
   async dispose(): Promise<void> {
-    this.stopHeartbeat();
+    this.stopControlHeartbeat();
+    this.stopViewerHeartbeat();
     if (this.takingControl) {
       try {
         await this.computer.releaseControl();
@@ -71,40 +89,59 @@ class FlySpriteHostController {
 
   private async connect(): Promise<void> {
     if (!this.configured) return;
-    this.mutate({
-      phase: "provisioning",
-      message: "Waking and preparing the Sprite computer…",
-    });
+    this.apply({ type: "connect-requested" });
     try {
-      const connection = await this.computer.ensure();
-      this.mutate({
-        phase: "ready",
-        message: "Computer ready",
-        viewerUrl: connection.viewerUrl,
-        takingControl: false,
-      });
+      const connection = await this.computer.connect();
+      this.viewerSessionId = connection.viewerSessionId;
+      this.apply({ type: "connected", viewerUrl: connection.viewerUrl });
+      const updateLabel = computerUpdateLabelV1(connection.message);
+      if (updateLabel) {
+        this.apply({ type: "update-reported", message: updateLabel });
+      }
     } catch (error) {
       this.fail(error);
     }
   }
 
-  private async takeOver(): Promise<void> {
+  private async openViewer(): Promise<void> {
+    if (this.machine.expanded) return;
+    const wake = this.machine.phase === "idle";
+    this.apply({ type: "viewer-expanded" });
+    if (wake) await this.connect();
+  }
+
+  private async closeViewer(): Promise<void> {
+    if (!this.machine.expanded) return;
+    if (this.controlRequest) {
+      try {
+        await this.controlRequest;
+      } catch {
+        // The acquisition failure is already the visible machine state.
+      }
+    }
+    if (this.takingControl) await this.release();
+    this.apply({ type: "viewer-collapsed" });
+  }
+
+  private takeOver(): Promise<void> {
+    if (this.controlRequest) return this.controlRequest;
+    const pending = this.acquireControl();
+    this.controlRequest = pending.finally(() => {
+      this.controlRequest = undefined;
+    });
+    return this.controlRequest;
+  }
+
+  private async acquireControl(): Promise<void> {
     if (!this.configured || this.takingControl) return;
     if (!this.current().viewerUrl) await this.connect();
     if (!this.current().viewerUrl) return;
-    this.mutate({
-      phase: "taking-control",
-      message: "Pausing new agent computer actions…",
-    });
+    this.apply({ type: "take-control-requested" });
     try {
       await this.computer.takeControl();
       this.takingControl = true;
-      this.startHeartbeat();
-      this.mutate({
-        phase: "human-control",
-        message: "You have control. Release when finished with private data.",
-        takingControl: true,
-      });
+      this.startControlHeartbeat();
+      this.apply({ type: "control-acquired" });
     } catch (error) {
       this.fail(error);
     }
@@ -114,15 +151,12 @@ class FlySpriteHostController {
     if (!this.takingControl) return;
     try {
       await this.computer.releaseControl();
-      this.stopHeartbeat();
+      this.stopControlHeartbeat();
       this.takingControl = false;
-      this.mutate({
-        phase: "ready",
-        message: "Computer ready",
-        takingControl: false,
-      });
+      this.apply({ type: "control-released" });
     } catch (error) {
       this.fail(error);
+      throw error;
     }
   }
 
@@ -137,20 +171,25 @@ class FlySpriteHostController {
     if (!this.configured) return;
     try {
       const report = await this.computer.doctor(new AbortController().signal);
-      this.mutate({
+      this.apply({
+        type: "doctor-updated",
         doctor: {
+          version: 1,
           capturedAt: report.capturedAt,
           summary: report.summary,
-          checks: report.checks,
+          checks: report.checks.map((check) => ({ version: 1, ...check })),
         },
       });
     } catch (error) {
-      this.mutate({
+      this.apply({
+        type: "doctor-updated",
         doctor: {
+          version: 1,
           capturedAt: new Date().toISOString(),
           summary: "the self-check could not be run",
           checks: [
             {
+              version: 1,
               name: "self-check",
               status: "fail",
               detail: error instanceof Error ? error.message : String(error),
@@ -165,46 +204,88 @@ class FlySpriteHostController {
     return this.data;
   }
 
-  private startHeartbeat(): void {
-    this.stopHeartbeat();
-    this.heartbeat = setInterval(() => void this.refreshControl(), 30_000);
+  private startControlHeartbeat(): void {
+    this.stopControlHeartbeat();
+    this.controlHeartbeat = setInterval(
+      () => void this.refreshControl(),
+      30_000,
+    );
   }
 
-  private stopHeartbeat(): void {
-    if (this.heartbeat) clearInterval(this.heartbeat);
-    this.heartbeat = undefined;
+  private stopControlHeartbeat(): void {
+    if (this.controlHeartbeat) clearInterval(this.controlHeartbeat);
+    this.controlHeartbeat = undefined;
+  }
+
+  private syncViewerHeartbeat(): void {
+    if (!this.machine.expanded || !this.viewerSessionId) {
+      this.stopViewerHeartbeat();
+      return;
+    }
+    if (!this.viewerHeartbeat) {
+      this.viewerHeartbeat = setInterval(
+        () => void this.refreshViewer(),
+        30_000,
+      );
+    }
+  }
+
+  private stopViewerHeartbeat(): void {
+    if (this.viewerHeartbeat) clearInterval(this.viewerHeartbeat);
+    this.viewerHeartbeat = undefined;
+  }
+
+  private async refreshViewer(): Promise<void> {
+    const sessionId = this.viewerSessionId;
+    if (!sessionId) return;
+    try {
+      await this.computer.refreshViewer(sessionId);
+      const viewerUrl = this.current().viewerUrl;
+      if (this.machine.phase === "updating" && viewerUrl) {
+        this.apply({ type: "connected", viewerUrl });
+      }
+    } catch (error) {
+      this.viewerSessionId = undefined;
+      const detail = error instanceof Error ? error.message : String(error);
+      this.apply({
+        type: "viewer-disconnected",
+        message: `Viewer disconnected: ${detail}`,
+      });
+    }
   }
 
   private async refreshControl(): Promise<void> {
     try {
       await this.computer.refreshControl();
     } catch (error) {
-      this.stopHeartbeat();
+      this.stopControlHeartbeat();
       this.takingControl = false;
       const detail = error instanceof Error ? error.message : String(error);
-      this.mutate({
-        phase: "error",
+      this.apply({
+        type: "failed",
         message: `Human control lease was lost: ${detail}`,
         takingControl: false,
       });
     }
   }
 
-  private mutate(
-    patch: Partial<
-      Pick<
-        ComputerState,
-        "phase" | "message" | "viewerUrl" | "takingControl" | "doctor"
-      >
-    >,
-  ): void {
-    Object.assign(this.data, patch);
-    this.entry.mutate((data) => Object.assign(data, patch));
+  private apply(event: ComputerMachineEvent): void {
+    this.machine = transitionComputerState(this.machine, event);
+    Object.assign(this.data, this.machine);
+    this.entry.mutate((data) => Object.assign(data, this.machine));
+    this.syncViewerHeartbeat();
   }
 
   private fail(error: unknown): void {
-    this.mutate({
-      phase: "error",
+    if (error instanceof ComputerError && error.code === "updating") {
+      this.apply({
+        type: "update-reported",
+        message: computerUpdateLabelV1(error.message) ?? error.message,
+      });
+      return;
+    }
+    this.apply({
+      type: "failed",
       message: error instanceof Error ? error.message : String(error),
       takingControl: this.takingControl,
     });

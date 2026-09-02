@@ -1,8 +1,10 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const root = new URL("../", import.meta.url);
 const file = (path: string) => Bun.file(new URL(path, root));
@@ -20,6 +22,35 @@ async function pngInfo(path: string) {
     height: view.getUint32(20),
     colorType: view.getUint8(25),
   };
+}
+
+/** A present but broken iconutil is no more useful to the generator than none. */
+function iconutilCanRoundTrip(): boolean {
+  const directory = mkdtempSync(join(tmpdir(), "frockbot-iconutil-probe-"));
+  try {
+    const iconset = join(directory, "Probe.iconset");
+    const unpacked = Bun.spawnSync([
+      "iconutil",
+      "--convert",
+      "iconset",
+      "--output",
+      iconset,
+      fileURLToPath(new URL("apps/desktop/resources/icon.icns", root)),
+    ]);
+    if (unpacked.exitCode !== 0) return false;
+    return (
+      Bun.spawnSync([
+        "iconutil",
+        "--convert",
+        "icns",
+        "--output",
+        join(directory, "Probe.icns"),
+        iconset,
+      ]).exitCode === 0
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 describe("generated app icons", () => {
@@ -116,9 +147,10 @@ describe("generated app icons", () => {
     ).toEqual({ width: 1024, height: 1024, colorType: 2 });
   });
 
-  const generatorTools = ["magick", "iconutil"].filter(
-    (tool) => Bun.which(tool) === null,
-  );
+  const generatorTools = ["magick"].filter((tool) => Bun.which(tool) === null);
+  if (Bun.which("iconutil") === null || !iconutilCanRoundTrip()) {
+    generatorTools.push("iconutil");
+  }
 
   test.skipIf(generatorTools.length > 0)(
     "the repeatable generator recreates the committed artifact tree from only the canonical marketing sheep icon",

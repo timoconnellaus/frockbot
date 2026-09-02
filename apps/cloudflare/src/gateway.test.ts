@@ -113,6 +113,7 @@ class MemoryBotState implements BotStateBinding {
         revision: 0,
         profile: { name: "Internal Bot configuration" },
         notifications: { enabled: false },
+        packageValues: {},
       },
       previousEventCount: previousEvents.length,
     };
@@ -255,20 +256,6 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     assertRegistered: () => Promise.resolve(),
     listSkills: () =>
       Promise.resolve({ schemaVersion: 1 as const, skills: [] }),
-    listPackageUi: ({ botId }) =>
-      Promise.resolve({
-        schemaVersion: 1 as const,
-        botId,
-        generationId: "generation-1",
-        contributions: [],
-      }),
-    runPackageUiTool: ({ command }) =>
-      Promise.resolve({
-        schemaVersion: 1 as const,
-        runId: command.commandId,
-        text: "",
-        events: [],
-      }),
     readWorkspaceFileV1: () =>
       Promise.resolve({
         schemaVersion: 1 as const,
@@ -332,6 +319,7 @@ class MemoryConfiguration
       revision: 0,
       profile: { name: query.botId },
       notifications: { enabled: false },
+      packageValues: {},
     };
     this.bots.set(query.botId, current);
     return Promise.resolve(current);
@@ -368,22 +356,25 @@ class MemoryConfiguration
               }
             : command.type === "bot/update-notifications"
               ? { notifications: command.notifications }
-              : command.type === "bot/select-model"
-                ? { model: command.model }
-                : command.type === "bot/unbind-model"
-                  ? { model: undefined }
-                  : {}),
+              : {
+                  packageValues: {
+                    ...bot.packageValues,
+                    [command.packageId]: {
+                      ...bot.packageValues[command.packageId],
+                      ...command.values,
+                    },
+                  },
+                }),
       });
     } else {
       const user = current as UserSettingsViewV1;
       if (command.type === "user/update-profile") {
         this.user = { ...user, revision, profile: command.profile };
-      } else if (command.type === "user/set-new-bot-model") {
+      } else if (command.type === "user/set-platform-model") {
         this.user = {
           ...user,
           revision,
-          newBotModelTemplate: command.model,
-          newBotModelTemplateSource: command.source,
+          platformModel: command.model,
         };
       } else if (command.type === "user/install-package") {
         this.user = {
@@ -396,7 +387,7 @@ class MemoryConfiguration
             {
               packageId: command.packageId,
               version: command.version,
-              state: "installed",
+              state: command.enabled === false ? "disabled" : "installed",
             },
           ],
         };
@@ -1289,6 +1280,7 @@ describe("Cloudflare user application gateway", () => {
         revision: 0,
         profile: { name: "Bot" },
         notifications: { enabled: false },
+        packageValues: {},
         secret: "must-not-cross-the-seam",
       });
       configurations.set("alice", configuration);
@@ -1484,6 +1476,99 @@ describe("Cloudflare user application gateway", () => {
     expect(await lifecycles.json()).toMatchObject({
       lifecycles: [{ botId: "primary", status: "archived" }],
     });
+  });
+
+  test("writes enablement only through an authenticated, receipted User command", async () => {
+    const { gateway } = createTestGateway();
+    await gateway(
+      request("/api/settings", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "user/install-package",
+          commandId: "install-composio-disabled",
+          expectedRevision: 0,
+          packageId: "composio",
+          version: "0.0.1",
+          enabled: false,
+        }),
+      }),
+    );
+    const body = JSON.stringify({
+      schemaVersion: 1,
+      type: "user/set-package-enabled",
+      commandId: "enable-composio",
+      expectedRevision: 1,
+      packageId: "composio",
+      enabled: true,
+    });
+
+    expect(
+      (
+        await gateway(
+          new Request("https://bot.frockbot.com/api/settings", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body,
+          }),
+        )
+      ).status,
+    ).toBe(401);
+    const enable = () =>
+      gateway(
+        request("/api/settings", "alice", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+        }),
+      );
+
+    expect((await (await enable()).json()) as OperationReceiptV1).toEqual({
+      schemaVersion: 1,
+      commandId: "enable-composio",
+      revision: 2,
+      status: "applied",
+    });
+    expect((await (await enable()).json()) as OperationReceiptV1).toEqual({
+      schemaVersion: 1,
+      commandId: "enable-composio",
+      revision: 2,
+      status: "applied",
+    });
+    const settings = await gateway(request("/api/settings", "alice"));
+    expect(await settings.json()).toMatchObject({
+      revision: 2,
+      packages: [{ packageId: "composio", state: "installed" }],
+    });
+  });
+
+  test("refuses a client command that attempts to set the platform model", async () => {
+    const { gateway } = createTestGateway();
+    const response = await gateway(
+      request("/api/settings", "alice", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "user/set-platform-model",
+          commandId: "client-platform-model",
+          expectedRevision: 0,
+          model: {
+            connectionId: "flock-default",
+            providerModelId: "@flock/auto",
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect((await response.json()) as unknown).toEqual({
+      error: "Platform model can only be set by a backend Contribution",
+    });
+    expect(
+      await (await gateway(request("/api/settings", "alice"))).json(),
+    ).toMatchObject({ revision: 0 });
   });
 
   test("replays and acknowledges durable Bot notification intents", async () => {

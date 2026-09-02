@@ -43,7 +43,7 @@ test("a good key reaches ready and lists the endpoint's models", async ({
   // The catalog the Connection resolved is the one the configured endpoint
   // serves, and it is what the model choosers offer — on the same surface the
   // account was connected on, because Models owns both.
-  const models = page.getByLabel(/^Default model/);
+  const models = page.getByLabel(/^Account model/);
   await expect(models).toBeVisible();
   await expect(
     models.getByRole("option", {

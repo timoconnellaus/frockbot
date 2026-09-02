@@ -7,23 +7,22 @@ import {
 } from "./models.js";
 import type { TaskModelBindingV1 } from "./records.js";
 
-function assignment(
+function binding(
   packageId: string,
   providerModelId: string,
-  assignmentId = `asg-${providerModelId}`,
+  connectionId = `conn-${providerModelId}`,
 ): TaskModelBindingV1 {
   return {
-    assignmentId,
     packageId,
     capabilityId: `${packageId}-models`,
-    connectionId: `conn-${assignmentId}`,
+    connectionId,
     provider: packageId,
     providerModelId,
   };
 }
 
-const DEFAULT = assignment("provider-ollama-cloud", "glm-5.3-flash:cloud");
-const SECOND = assignment("provider-foundation", "sand-automation");
+const DEFAULT = binding("provider-ollama-cloud", "glm-5.3-flash:cloud");
+const SECOND = binding("provider-foundation", "sand-automation");
 
 describe("the slug", () => {
   test("is the Package and the provider model, and nothing else", () => {
@@ -34,7 +33,7 @@ describe("the slug", () => {
 });
 
 describe("the catalog one Turn is offered", () => {
-  test("is built from the Bot's model bindings, default first", () => {
+  test("is built from the User's enabled model bindings, default first", () => {
     const catalog = subagentModelCatalogV1({
       bindings: [SECOND, DEFAULT],
       defaultBinding: DEFAULT,
@@ -49,7 +48,7 @@ describe("the catalog one Turn is offered", () => {
   });
 
   test("keeps one entry per slug when two bindings name one model", () => {
-    const twin = assignment(
+    const twin = binding(
       "provider-ollama-cloud",
       "glm-5.3-flash:cloud",
       "asg-twin",
@@ -76,7 +75,7 @@ describe("the catalog one Turn is offered", () => {
     }
   });
 
-  test("is empty for a Bot with no configured model", () => {
+  test("is empty for a Bot with no enabled model binding", () => {
     expect(subagentModelCatalogV1({ bindings: [], turnType: "chat" })).toEqual(
       [],
     );
@@ -105,7 +104,7 @@ describe("resolving a `Task` model against the catalog", () => {
     );
     expect(resolved).toMatchObject({
       status: "resolved",
-      model: { binding: { assignmentId: SECOND.assignmentId } },
+      model: { binding: { connectionId: SECOND.connectionId } },
     });
   });
 
@@ -128,7 +127,7 @@ describe("resolving a `Task` model against the catalog", () => {
     ).toMatchObject({ status: "refused" });
   });
 
-  test("a Bot with no configured model is refused rather than defaulted", () => {
+  test("a Bot with no model binding is refused rather than defaulted", () => {
     expect(resolveSubagentModelV1([], undefined)).toMatchObject({
       status: "refused",
     });

@@ -1,7 +1,7 @@
 // The Routines authority: the Bot Durable Object's durable Routine records.
 //
 // "The Bot's Durable Object is the authority for everything Bot-scoped: …
-// durable scheduling and Routines." This class is that authority's
+// durable scheduling, Routines, and Composition." This class is that authority's
 // implementation; the Durable Object hands it a storage seam and calls it. It is
 // a deep module: `execute`, `list` and `listRuns` are the whole surface, and
 // every command — from the hosted client, from the `routine_manage` tool, from a

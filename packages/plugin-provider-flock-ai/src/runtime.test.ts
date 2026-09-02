@@ -6,16 +6,16 @@ import {
 import { LlmRegistry } from "@frockbot/plugin-models";
 import { Context } from "cordis";
 import {
-  WORKERS_AI_CONNECTION_GENERATION,
-  WORKERS_AI_CONNECTION_ID,
-  WORKERS_AI_DEFAULT_MODEL,
+  FLOCK_AI_CONNECTION_GENERATION,
+  FLOCK_AI_CONNECTION_ID,
+  FLOCK_AI_DEFAULT_MODEL,
 } from "./catalog.js";
-import { createWorkersAiRuntimePlugin } from "./runtime.js";
+import { createFlockAiRuntimePlugin } from "./runtime.js";
 
 const request: NormalizedModelRequest = {
   requestId: "effect-1",
-  provider: "workers-ai",
-  model: WORKERS_AI_DEFAULT_MODEL,
+  provider: "flock-ai",
+  model: FLOCK_AI_DEFAULT_MODEL,
   system: "Be concise.",
   messages: [{ role: "user", content: "hello" }],
   tools: [
@@ -26,8 +26,8 @@ const request: NormalizedModelRequest = {
     },
   ],
   modelBinding: {
-    connectionId: WORKERS_AI_CONNECTION_ID,
-    connectionGeneration: WORKERS_AI_CONNECTION_GENERATION,
+    connectionId: FLOCK_AI_CONNECTION_ID,
+    connectionGeneration: FLOCK_AI_CONNECTION_GENERATION,
   },
 };
 
@@ -37,17 +37,71 @@ function sse(text: string): ReadableStream<Uint8Array> {
   return body;
 }
 
-describe("Workers AI runtime Contribution", () => {
-  test("translates the request and normalizes text and tool-call deltas", async () => {
-    const calls: Array<{ model: string; input: Record<string, unknown> }> = [];
+function runtimeConfig(
+  runChatCompletion: Parameters<
+    typeof createFlockAiRuntimePlugin
+  >[0]["runChatCompletion"],
+) {
+  return {
+    connectionId: FLOCK_AI_CONNECTION_ID,
+    connectionGeneration: FLOCK_AI_CONNECTION_GENERATION,
+    autoRoute: "configured-auto",
+    runChatCompletion,
+  };
+}
+
+describe("Flock AI runtime Contribution", () => {
+  test.each([
+    [FLOCK_AI_DEFAULT_MODEL, "dynamic/configured-auto"],
+    [
+      "@flock/deepseek-ai/deepseek-v4-flash-0731",
+      "workers-ai/@cf/deepseek-ai/deepseek-v4-flash-0731",
+    ],
+  ])("maps %s to gateway model %s", async (model, expectedGatewayModel) => {
+    const calls: Array<{
+      gatewayModel: string;
+      body: Record<string, unknown>;
+    }> = [];
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createWorkersAiRuntimePlugin({
-        connectionId: WORKERS_AI_CONNECTION_ID,
-        connectionGeneration: WORKERS_AI_CONNECTION_GENERATION,
-        run: (model, input) => {
-          calls.push({ model, input });
+      createFlockAiRuntimePlugin(
+        runtimeConfig((gatewayModel, body) => {
+          calls.push({ gatewayModel, body });
+          return Promise.resolve(
+            sse(
+              'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n' +
+                "data: [DONE]\n\n",
+            ),
+          );
+        }),
+      ),
+    );
+
+    for await (const event of root.llm.stream(
+      { ...request, model },
+      new AbortController().signal,
+    )) {
+      void event;
+    }
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.gatewayModel).toBe(expectedGatewayModel);
+    expect(calls[0]?.body).not.toHaveProperty("model");
+    await root.fiber.dispose();
+  });
+
+  test("normalizes gateway text and tool-call deltas", async () => {
+    const calls: Array<{
+      gatewayModel: string;
+      body: Record<string, unknown>;
+    }> = [];
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await root.plugin(
+      createFlockAiRuntimePlugin(
+        runtimeConfig((gatewayModel, body) => {
+          calls.push({ gatewayModel, body });
           return Promise.resolve(
             sse(
               'data: {"choices":[{"delta":{"content":"Working"}}]}\n\n' +
@@ -55,8 +109,8 @@ describe("Workers AI runtime Contribution", () => {
                 "data: [DONE]\n\n",
             ),
           );
-        },
-      }),
+        }),
+      ),
     );
 
     const events = [];
@@ -69,8 +123,8 @@ describe("Workers AI runtime Contribution", () => {
 
     expect(calls).toEqual([
       {
-        model: WORKERS_AI_DEFAULT_MODEL,
-        input: {
+        gatewayModel: "dynamic/configured-auto",
+        body: {
           stream: true,
           messages: [
             { role: "system", content: "Be concise." },
@@ -109,14 +163,12 @@ describe("Workers AI runtime Contribution", () => {
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createWorkersAiRuntimePlugin({
-        connectionId: WORKERS_AI_CONNECTION_ID,
-        connectionGeneration: WORKERS_AI_CONNECTION_GENERATION,
-        run: () => {
+      createFlockAiRuntimePlugin(
+        runtimeConfig(() => {
           calls += 1;
           return Promise.resolve(sse(""));
-        },
-      }),
+        }),
+      ),
     );
     const mismatched = {
       ...request,
@@ -140,15 +192,13 @@ describe("Workers AI runtime Contribution", () => {
     await root.fiber.dispose();
   });
 
-  test("cancels the native response stream when the Turn is aborted", async () => {
+  test("cancels the gateway response stream when the Turn is aborted", async () => {
     let cancelled = false;
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createWorkersAiRuntimePlugin({
-        connectionId: WORKERS_AI_CONNECTION_ID,
-        connectionGeneration: WORKERS_AI_CONNECTION_GENERATION,
-        run: () =>
+      createFlockAiRuntimePlugin(
+        runtimeConfig(() =>
           Promise.resolve(
             new ReadableStream({
               cancel() {
@@ -156,7 +206,8 @@ describe("Workers AI runtime Contribution", () => {
               },
             }),
           ),
-      }),
+        ),
+      ),
     );
     const controller = new AbortController();
     const consume = (async () => {

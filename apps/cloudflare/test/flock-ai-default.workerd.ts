@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
 import {
-  WORKERS_AI_CONNECTION_ID,
-  WORKERS_AI_DEFAULT_MODEL,
-} from "@frockbot/plugin-provider-workers-ai/catalog";
+  FLOCK_AI_CONNECTION_ID,
+  FLOCK_AI_DEFAULT_MODEL,
+} from "@frockbot/plugin-provider-flock-ai/catalog";
 
 interface FreshUserRpc {
   readConfiguration(input: unknown): Promise<{
@@ -14,20 +14,19 @@ interface FreshUserRpc {
       state: string;
       providerType?: string;
     }>;
-    newBotModelTemplate?: {
+    platformModel?: {
       connectionId: string;
       providerModelId: string;
     };
-    newBotModelTemplateSource?: string;
   }>;
   createBot(input: unknown): Promise<{ status: string }>;
 }
 
-describe("ambient Workers AI default", () => {
+describe("ambient Flock AI default", () => {
   test("a fresh User can run a Turn without configuring credentials", async () => {
     const suffix = crypto.randomUUID();
-    const userId = `workers-ai-user-${suffix}`;
-    const botId = `workers-ai-bot-${suffix}`;
+    const userId = `flock-ai-user-${suffix}`;
+    const botId = `flock-ai-bot-${suffix}`;
     const user = env.USER_CONFIGURATIONS.getByName(
       userId,
     ) as unknown as FreshUserRpc;
@@ -39,22 +38,21 @@ describe("ambient Workers AI default", () => {
     expect(settings).toMatchObject({
       packages: expect.arrayContaining([
         expect.objectContaining({
-          packageId: "provider-workers-ai",
+          packageId: "provider-flock-ai",
           state: "installed",
         }),
       ]),
       connections: expect.arrayContaining([
         expect.objectContaining({
-          connectionId: WORKERS_AI_CONNECTION_ID,
+          connectionId: FLOCK_AI_CONNECTION_ID,
           state: "ready",
-          providerType: "workers-ai",
+          providerType: "flock-ai",
         }),
       ]),
-      newBotModelTemplate: {
-        connectionId: WORKERS_AI_CONNECTION_ID,
-        providerModelId: WORKERS_AI_DEFAULT_MODEL,
+      platformModel: {
+        connectionId: FLOCK_AI_CONNECTION_ID,
+        providerModelId: FLOCK_AI_DEFAULT_MODEL,
       },
-      newBotModelTemplateSource: "auto",
     });
 
     await expect(
@@ -67,7 +65,7 @@ describe("ambient Workers AI default", () => {
           commandId: `create-${suffix}`,
           expectedRevision: 0,
           botId,
-          name: "Workers AI Bot",
+          name: "Flock AI Bot",
         },
       }),
     ).resolves.toMatchObject({ status: "applied" });
@@ -84,6 +82,6 @@ describe("ambient Workers AI default", () => {
         text: "Say hello.",
       },
     });
-    expect(result.text).toBe("Workers AI reply");
+    expect(result.text).toBe("Flock AI reply");
   });
 });

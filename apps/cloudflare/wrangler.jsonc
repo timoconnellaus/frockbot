@@ -108,6 +108,10 @@
   ],
   "vars": {
     "DEFAULT_APPLICATION_HASH": "foundation-v1",
+    "FLOCK_AI_GATEWAY_ID": "flock",
+    // The `flock-auto` dynamic route's target model is configured and deployed
+    // in the Cloudflare AI Gateway dashboard, never selected in application code.
+    "FLOCK_AI_AUTO_ROUTE": "flock-auto",
     // Comma-separated webview origins allowed to call /api/* cross-origin.
     "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
     "UI_ARTIFACT_HOSTS": "ui.bot.frockbot.com",
@@ -187,6 +191,8 @@
       },
       "vars": {
         "DEFAULT_APPLICATION_HASH": "foundation-v1",
+        "FLOCK_AI_GATEWAY_ID": "flock",
+        "FLOCK_AI_AUTO_ROUTE": "flock-auto",
         "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
         "UI_ARTIFACT_HOSTS": "ui.localhost",
         // Placeholder only. Production supplies this as a secret.
@@ -336,8 +342,8 @@
         },
         {
           "binding": "AI",
-          "service": "frockbot-workers-ai-e2e",
-          "entrypoint": "WorkersAiFake",
+          "service": "frockbot-flock-ai-e2e",
+          "entrypoint": "FlockAiFake",
         },
       ],
       "r2_buckets": [
@@ -384,6 +390,8 @@
       },
       "vars": {
         "DEFAULT_APPLICATION_HASH": "foundation-v1",
+        "FLOCK_AI_GATEWAY_ID": "flock",
+        "FLOCK_AI_AUTO_ROUTE": "flock-auto",
         "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
         "UI_ARTIFACT_HOSTS": "ui.localhost",
         // The canonical `development` identity is admin in this environment;
