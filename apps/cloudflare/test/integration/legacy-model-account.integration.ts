@@ -65,16 +65,15 @@ describe("legacy model account migration through the gateway", () => {
     )) as { status: string };
     expect(enabled.status).toBe("applied");
 
-    await expectOkJson(
-      await postAsUser(userId, "/api/bots", {
-        schemaVersion: 1,
-        type: "bot/create",
-        commandId: "create-legacy-primary",
-        expectedRevision: 0,
-        botId,
-        name: "Primary",
-      }),
-    );
+    const created = await postAsUser(userId, "/api/bots", {
+      schemaVersion: 1,
+      type: "bot/create",
+      commandId: "create-legacy-primary",
+      expectedRevision: 0,
+      botId,
+      name: "Primary",
+    });
+    expect(created.status).toBe(201);
     await runInDurableObject(
       botStateStubV1(userId, botId),
       async (_instance, state) => {
