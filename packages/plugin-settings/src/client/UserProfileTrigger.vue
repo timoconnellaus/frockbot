@@ -3,6 +3,7 @@ import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { authSessionClientKey } from "@frockbot/plugin-auth/shared";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
+import { resolveUserDisplayName } from "./user-display-name.js";
 
 const providedAuth = inject(authSessionClientKey);
 const surfaces = inject(clientSurfaceRegistryKey);
@@ -17,11 +18,13 @@ const sessionUser = computed(() =>
     ? auth.projection.value.user
     : undefined,
 );
-const displayName = computed(() => {
-  const fromSession =
-    sessionUser.value?.name.trim() || sessionUser.value?.email.trim();
-  return fromSession || web.value.userSettings?.profile.name || "FrockBot user";
-});
+const displayName = computed(() =>
+  resolveUserDisplayName({
+    savedName: web.value.userSettings?.profile.name,
+    sessionName: sessionUser.value?.name,
+    sessionEmail: sessionUser.value?.email,
+  }),
+);
 const developmentIdentity = computed(
   () =>
     auth.projection.value.status === "authenticated" &&

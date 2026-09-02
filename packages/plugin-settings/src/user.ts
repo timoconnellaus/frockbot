@@ -10,6 +10,7 @@ import {
   decodeUserConfigurationReadRpcV1,
   decodeUserSettingsViewV1,
   MAX_USER_CONNECTIONS_V1,
+  USER_PROFILE_PLACEHOLDER_NAME_V1,
   type ConnectionDependencyRequirementV1,
   type ConnectionView,
   type JsonValue,
@@ -154,7 +155,7 @@ function initialState(): UserSettingsViewV1 {
   return {
     schemaVersion: 1,
     revision: 0,
-    profile: { name: "FrockBot user" },
+    profile: { name: USER_PROFILE_PLACEHOLDER_NAME_V1 },
     packages: [],
     connections: [],
   };

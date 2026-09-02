@@ -195,6 +195,18 @@ export interface RevokeConnectionCommandV1 {
 
 export const MAX_USER_CONNECTIONS_V1 = 100;
 
+/**
+ * The stored name of a User who has not chosen one. The contract requires a
+ * non-empty name, so "unset" is spelled with this sentinel.
+ */
+export const USER_PROFILE_PLACEHOLDER_NAME_V1 = "FrockBot user";
+
+/** Whether a profile name is one the User actually chose (not blank, not the sentinel). */
+export function isChosenUserName(name: string | undefined): name is string {
+  const candidate = name?.trim();
+  return Boolean(candidate && candidate !== USER_PROFILE_PLACEHOLDER_NAME_V1);
+}
+
 export interface UserSettingsViewV1 {
   schemaVersion: 1;
   revision: number;

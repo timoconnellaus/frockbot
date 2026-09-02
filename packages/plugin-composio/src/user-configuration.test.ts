@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type {
-  ConnectionView,
-  UserConfigurationCommandV1,
-  UserSettingsViewV1,
+import {
+  USER_PROFILE_PLACEHOLDER_NAME_V1,
+  type ConnectionView,
+  type UserConfigurationCommandV1,
+  type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import {
   createComposioUserBackendContribution,
@@ -306,7 +307,7 @@ describe("Connection dependency admission", () => {
       redeployed.readConfiguration({ schemaVersion: 1, userId: "user-1" }),
     ).resolves.toMatchObject({
       revision: 1,
-      profile: { name: "FrockBot user" },
+      profile: { name: USER_PROFILE_PLACEHOLDER_NAME_V1 },
       packages: [{ packageId: "composio", state: "installed" }],
     });
   });

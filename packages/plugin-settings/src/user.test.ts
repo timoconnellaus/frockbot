@@ -4,6 +4,7 @@ import {
   capabilityAssignmentFailureV1,
   initializeBotSettingsV1,
   resolveBotExecutionPlanV1,
+  USER_PROFILE_PLACEHOLDER_NAME_V1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import {
@@ -158,7 +159,7 @@ describe("User settings backend Contribution", () => {
     ).toEqual({
       schemaVersion: 1,
       revision: 0,
-      profile: { name: "FrockBot user" },
+      profile: { name: USER_PROFILE_PLACEHOLDER_NAME_V1 },
       packages: [],
       connections: [],
     });
