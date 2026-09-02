@@ -295,6 +295,83 @@ describe("PackageCatalog", () => {
 });
 
 describe("decodeFrockBotManifest", () => {
+  test("accepts iframe UI only in settings or its own declared tool-result slots", () => {
+    const manifest = {
+      schemaVersion: 3,
+      id: "weather-page",
+      displayName: "Weather page",
+      version: "0.0.1",
+      compatibility: { frockbot: ">=0.0.1" },
+      dependencies: {},
+      contributions: {
+        runtime: { entry: "./package.js", host: "bot-isolate" },
+        client: {
+          kind: "iframe",
+          artifact: {
+            contentHash: "a".repeat(64),
+            size: 123,
+            mediaType: "text/html",
+            bundlerVersion: "frockbot-inline-html@1",
+          },
+          mounts: [
+            { slot: "frockbot.tool-result:weather_lookup" },
+            { slot: "frockbot.bot-settings-sections", order: 10 },
+          ],
+        },
+      },
+      tools: [
+        { name: "weather_lookup", description: "Weather", inputSchema: {} },
+      ],
+      permissions: [],
+    };
+    const decoded = decodeFrockBotManifest(manifest).contributions.client;
+    expect(decoded && "kind" in decoded ? decoded.kind : undefined).toBe(
+      "iframe",
+    );
+    expect(decoded?.mounts[0]).toEqual({
+      slot: "frockbot.tool-result:weather_lookup",
+    });
+    expect(() =>
+      decodeFrockBotManifest({
+        ...manifest,
+        contributions: {
+          ...manifest.contributions,
+          client: {
+            ...manifest.contributions.client,
+            mounts: [{ slot: "root" }],
+          },
+        },
+      }),
+    ).toThrow("not iframe-safe");
+    expect(() =>
+      decodeFrockBotManifest({
+        ...manifest,
+        contributions: {
+          ...manifest.contributions,
+          client: {
+            ...manifest.contributions.client,
+            mounts: [{ slot: "frockbot.tool-result:package_author" }],
+          },
+        },
+      }),
+    ).toThrow("undeclared tool");
+    expect(() =>
+      decodeFrockBotManifest({
+        ...manifest,
+        contributions: {
+          ...manifest.contributions,
+          client: {
+            ...manifest.contributions.client,
+            artifact: {
+              ...manifest.contributions.client.artifact,
+              size: 256 * 1024 + 1,
+            },
+          },
+        },
+      }),
+    ).toThrow("256 KB quota");
+  });
+
   test("keeps trusted Electron main execution exclusive to manifest v3", () => {
     const contribution = {
       desktop: {

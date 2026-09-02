@@ -19,11 +19,13 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import {
   BUNDLER_ENTRY,
   BUNDLER_MAX_SOURCE_BYTES,
+  BUNDLER_UI_ARTIFACT_VERSION,
   BundleDecodeError,
   decodeBundleRequestV1,
   failedResult,
   findUnresolvedSpecifier,
   type ArtifactRefV1,
+  type UiArtifactRefV1,
   type BundleRequestV1,
   type BundleResultV1,
   type BundlerBinding,
@@ -78,6 +80,14 @@ export async function bundlePackage(input: unknown): Promise<BundleResultV1> {
       `${BUNDLER_ENTRY} is ${sourceBytes} bytes; the limit is ${BUNDLER_MAX_SOURCE_BYTES}`,
     ]);
   }
+  const uiBytes = request.ui
+    ? new TextEncoder().encode(request.ui.html)
+    : undefined;
+  if (uiBytes && uiBytes.byteLength > BUNDLER_MAX_SOURCE_BYTES) {
+    return failedResult(request.effectId, "ui-too-large", [
+      `ui.html is ${uiBytes.byteLength} bytes; the limit is ${BUNDLER_MAX_SOURCE_BYTES}`,
+    ]);
+  }
 
   let mainModule: string;
   let modules: Modules;
@@ -124,12 +134,21 @@ export async function bundlePackage(input: unknown): Promise<BundleResultV1> {
     mediaType: "application/javascript",
     bundlerVersion: BUNDLER_VERSION,
   };
+  const uiArtifact: UiArtifactRefV1 | undefined = uiBytes
+    ? {
+        contentHash: await sha256Hex(uiBytes),
+        size: uiBytes.byteLength,
+        mediaType: "text/html",
+        bundlerVersion: BUNDLER_UI_ARTIFACT_VERSION,
+      }
+    : undefined;
   return {
     schemaVersion: 1,
     effectId: request.effectId,
     status: "bundled",
     artifact,
     module: code,
+    ...(uiArtifact ? { uiArtifact, uiHtml: request.ui!.html } : {}),
     diagnostics: warnings,
   };
 }

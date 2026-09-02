@@ -23,6 +23,7 @@ import {
   type AuthoringFailureRecordV1,
   type AuthorPackageRequestV1,
   type AuthorshipIntentV1,
+  sha256HexV1,
 } from "@frockbot/plugin-authoring";
 import {
   createPackageAuthoringHost,
@@ -214,6 +215,7 @@ describe("a Bot authoring a Package", () => {
   let composition: Awaited<ReturnType<typeof memoryComposition>>;
   let written: string[];
   let writtenSources: string[];
+  let writtenUi: string[];
   let sourceContents: Map<string, string>;
   let reservations: unknown[];
 
@@ -222,6 +224,7 @@ describe("a Bot authoring a Package", () => {
     composition = await memoryComposition();
     written = [];
     writtenSources = [];
+    writtenUi = [];
     sourceContents = new Map();
     reservations = [];
   });
@@ -245,6 +248,10 @@ describe("a Bot authoring a Package", () => {
         putPackageSource: (sourceHash, source) => {
           writtenSources.push(sourceHash);
           sourceContents.set(sourceHash, source);
+          return Promise.resolve();
+        },
+        putPackageUiArtifact: (contentHash) => {
+          writtenUi.push(contentHash);
           return Promise.resolve();
         },
         loadPackageSource: (sourceHash) =>
@@ -320,6 +327,52 @@ describe("a Bot authoring a Package", () => {
       version: "0.0.1",
       contributions: { runtime: { host: "bot-isolate" } },
       tools: [{ name: "hello" }],
+    });
+  });
+
+  test("stores the second immutable artifact and records it in the same manifest", async () => {
+    const html = "<!doctype html><h1>Hello</h1>";
+    const contentHash = await sha256HexV1(html);
+    const bundler = countingBundler((effectId) => ({
+      ...bundledResult(effectId),
+      uiArtifact: {
+        contentHash,
+        size: new TextEncoder().encode(html).byteLength,
+        mediaType: "text/html",
+        bundlerVersion: "frockbot-inline-html@1",
+      },
+      uiHtml: html,
+    }));
+    const request = requestFor();
+    const outcome = await host({ bundler }).author({
+      ...request,
+      input: {
+        ...request.input,
+        ui: {
+          html,
+          mounts: [{ slot: "frockbot.tool-result:hello" }],
+        },
+      },
+    });
+    expect(outcome.status).toBe("authored");
+    expect(writtenUi).toEqual([contentHash]);
+    const artifact = storage.values.get(
+      artifactKey("b".repeat(64)),
+    ) as AuthoredArtifactRecordV1;
+    const stored = storage.values.get(
+      authorshipManifestKey(artifact.manifestHash),
+    ) as AuthoredManifestRecordV1;
+    expect(
+      decodeFrockBotManifest(stored.manifest).contributions.client,
+    ).toEqual({
+      kind: "iframe",
+      artifact: {
+        contentHash,
+        size: new TextEncoder().encode(html).byteLength,
+        mediaType: "text/html",
+        bundlerVersion: "frockbot-inline-html@1",
+      },
+      mounts: [{ slot: "frockbot.tool-result:hello" }],
     });
   });
 
@@ -772,6 +825,8 @@ describe("a Bot authoring a Package", () => {
     expect(view.contextContract).toContain(
       "interface BotPackageExecutionContextV1",
     );
+    expect(view.contextContract).toContain("interface FrockBotIframeBridgeV1");
+    expect(view.contextContract).toContain("window.frockbot=");
     expect(view.composition.members).toContainEqual(
       expect.objectContaining({
         packageId: "hello-world",

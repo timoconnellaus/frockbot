@@ -2,6 +2,7 @@ import {
   type ContributionKind,
   decodeFrockBotManifest,
   declaredContributionKinds,
+  isClientIframeContribution,
   type FrockBotManifest,
 } from "@frockbot/kernel-composition";
 import { Context, type Plugin } from "cordis";
@@ -70,11 +71,14 @@ export function verifyPluginPackage(
   requireExport(exports, "./package.json", issues);
   for (const contribution of [
     manifest.contributions.runtime,
-    manifest.contributions.client,
     manifest.contributions.desktop,
     manifest.contributions.mobile,
   ]) {
     if (contribution) requireExport(exports, contribution.entry, issues);
+  }
+  const client = manifest.contributions.client;
+  if (client && !isClientIframeContribution(client)) {
+    requireExport(exports, client.entry, issues);
   }
   if (new Set(manifest.permissions).size !== manifest.permissions.length) {
     issues.push("manifest permissions must not contain duplicates");

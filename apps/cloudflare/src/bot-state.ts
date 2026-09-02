@@ -65,6 +65,7 @@ import {
 } from "@frockbot/plugin-shell/approvals";
 import {
   decodeIsolateAuthorityRequestV1,
+  decodePackageIframeToolCommandV1,
   decodeNormalizedModelRequestV1,
 } from "@frockbot/kernel-contracts";
 import type {
@@ -838,6 +839,31 @@ export class BotState extends DurableObject<BotStateEnv> {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
     return shell.listSkills(identity);
+  }
+
+  async listPackageUi(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { shell } = await this.materialized(identity);
+    return shell.listPackageUi(identity);
+  }
+
+  async runPackageUiTool(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodePackageIframeToolCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    const command =
+      request.command as import("@frockbot/kernel-contracts").PackageIframeToolCommandV1;
+    const turn = await shell.runPackageUiTool(identity, command);
+    await this.projectSettledRun(shell, identity, command.commandId);
+    await this.projectSettledAudit(shell, identity, command.commandId);
+    return turn;
   }
 
   /**

@@ -17,6 +17,11 @@ export interface AuthorPackageInputV1 {
   tools: Array<{ name: string; description: string; inputSchema: unknown }>;
   /** TypeScript text; exactly one `package.ts`. */
   source: string;
+  /** Optional sandboxed page. All CSS and JavaScript must be inline. */
+  ui?: {
+    html: string;
+    mounts: Array<{ slot: string; order?: number }>;
+  };
 }
 
 export type AuthorPackageOutcomeV1 =
@@ -164,7 +169,7 @@ export function decodeAuthorPackageInputV1(
   exactKeys(
     value,
     ["packageId", "displayName", "source"],
-    ["tools", "tool"],
+    ["tools", "tool", "ui"],
     label,
   );
   if (
@@ -225,11 +230,72 @@ export function decodeAuthorPackageInputV1(
   ) {
     throw new Error(`${label}.source exceeds the per-Package source quota`);
   }
+  let ui: AuthorPackageInputV1["ui"];
+  if (value.ui !== undefined) {
+    const rawUi = record(value.ui, `${label}.ui`);
+    exactKeys(rawUi, ["html", "mounts"], [], `${label}.ui`);
+    const html = boundedString(
+      rawUi.html,
+      `${label}.ui.html`,
+      PACKAGE_BUNDLE_MAX_SOURCE_BYTES,
+    );
+    if (
+      new TextEncoder().encode(html).byteLength >
+      PACKAGE_BUNDLE_MAX_SOURCE_BYTES
+    ) {
+      throw new Error(`${label}.ui.html exceeds the per-Package source quota`);
+    }
+    if (
+      /<(?:script|iframe|img|audio|video|source|embed|input)\b[^>]*\bsrc\s*=\s*["'](?!data:)/i.test(
+        html,
+      ) ||
+      /<object\b[^>]*\bdata\s*=\s*["'](?!data:)/i.test(html) ||
+      /\bsrcset\s*=/i.test(html) ||
+      /<link\b/i.test(html) ||
+      /@import\b/i.test(html) ||
+      /<meta\b[^>]*http-equiv\s*=\s*["']?refresh/i.test(html) ||
+      /url\(\s*["']?(?!data:|["']?\s*\))/i.test(html)
+    ) {
+      throw new Error(`${label}.ui.html may contain inline resources only`);
+    }
+    if (
+      !Array.isArray(rawUi.mounts) ||
+      rawUi.mounts.length === 0 ||
+      rawUi.mounts.length > 64
+    ) {
+      throw new Error(`${label}.ui.mounts must be a non-empty bounded array`);
+    }
+    const mounts = rawUi.mounts.map((candidate, index) => {
+      const mount = record(candidate, `${label}.ui.mounts[${index}]`);
+      exactKeys(mount, ["slot"], ["order"], `${label}.ui.mounts[${index}]`);
+      const slot = boundedString(
+        mount.slot,
+        `${label}.ui.mounts[${index}].slot`,
+        160,
+      );
+      if (
+        slot !== "frockbot.bot-settings-sections" &&
+        !slot.startsWith("frockbot.tool-result:")
+      ) {
+        throw new Error(`${label}.ui.mounts[${index}].slot is not iframe-safe`);
+      }
+      const order = mount.order;
+      if (
+        order !== undefined &&
+        (typeof order !== "number" || !Number.isFinite(order))
+      ) {
+        throw new Error(`${label}.ui.mounts[${index}].order must be finite`);
+      }
+      return { slot, ...(order === undefined ? {} : { order }) };
+    });
+    ui = { html, mounts };
+  }
   return {
     packageId,
     displayName,
     tools,
     source,
+    ...(ui ? { ui } : {}),
   };
 }
 
@@ -264,6 +330,36 @@ export const AUTHOR_PACKAGE_INPUT_SCHEMA_V1 = {
       type: "string",
       description:
         "TypeScript for one package.ts that exports `tools` and `execute(tool, input, ctx)`. No imports: the isolate has no network and no npm. `ctx.invokeModel(request)` is the only model path.",
+    },
+    ui: {
+      type: "object",
+      additionalProperties: false,
+      required: ["html", "mounts"],
+      properties: {
+        html: {
+          type: "string",
+          description:
+            "One ui.html page (maximum 256 KB). CSS and JavaScript must be inline; images may use data: URLs.",
+        },
+        mounts: {
+          type: "array",
+          minItems: 1,
+          maxItems: 64,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["slot"],
+            properties: {
+              slot: {
+                type: "string",
+                description:
+                  "frockbot.bot-settings-sections or frockbot.tool-result:<declaredToolName>",
+              },
+              order: { type: "number" },
+            },
+          },
+        },
+      },
     },
   },
 } as const;
@@ -359,6 +455,15 @@ export function authoredManifestV1(input: {
   displayName: string;
   version: string;
   tools: AuthorPackageInputV1["tools"];
+  ui?: {
+    artifact: {
+      contentHash: string;
+      size: number;
+      mediaType: "text/html";
+      bundlerVersion: string;
+    };
+    mounts: Array<{ slot: string; order?: number }>;
+  };
 }): Record<string, unknown> {
   return {
     schemaVersion: 3,
@@ -369,6 +474,15 @@ export function authoredManifestV1(input: {
     dependencies: {},
     contributions: {
       runtime: { entry: "./package.js", host: "bot-isolate" },
+      ...(input.ui
+        ? {
+            client: {
+              kind: "iframe",
+              artifact: { ...input.ui.artifact },
+              mounts: input.ui.mounts.map((mount) => ({ ...mount })),
+            },
+          }
+        : {}),
     },
     tools: input.tools.map((tool) => ({ ...tool })),
     permissions: [],

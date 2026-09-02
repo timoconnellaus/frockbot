@@ -1,4 +1,5 @@
 export * from "./authoring.js";
+export * from "./iframe-ui.js";
 export * from "./isolate.js";
 export * from "./isolate-context-catalog.generated.js";
 export * from "./model-invocation.js";

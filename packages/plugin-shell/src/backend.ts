@@ -9,9 +9,15 @@ import {
   type IsolatePendingDecisionV1,
   type NormalizedModelRequest,
   type PackageBundlerBinding,
+  type PackageIframeCompositionV1,
+  type PackageIframeToolCommandV1,
   type TurnTypeV1,
   type WorkspaceFilesV1,
 } from "@frockbot/kernel-contracts";
+import {
+  decodeFrockBotManifest,
+  isClientIframeContribution,
+} from "@frockbot/kernel-composition";
 import type { Plugin } from "cordis";
 import {
   ACTIVE_RUN_KEY,
@@ -322,7 +328,7 @@ import {
   type McpServerStatusViewV1,
 } from "@frockbot/plugin-mcp/records";
 import { projectCompositionGenerationV1 } from "./composition-views.js";
-import { executeBotTurn } from "./backend-runner.js";
+import { executeBotTurn, executeDirectToolTurn } from "./backend-runner.js";
 import { shellTerminalRecordsV1 } from "./terminal-records.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
@@ -537,6 +543,29 @@ interface BotAnnouncementTransaction {
 
 function optionalStoredRun(input: unknown): StoredRun | undefined {
   return input === undefined ? undefined : requireStoredRunV1(input);
+}
+
+/** Server-side allowlist for the untrusted page's only effectful message. */
+export function requirePackageUiToolDeclarationV1(
+  catalog: PackageIframeCompositionV1,
+  command: Pick<
+    PackageIframeToolCommandV1,
+    "generationId" | "packageId" | "name"
+  >,
+): PackageIframeCompositionV1["contributions"][number] {
+  const contribution = catalog.contributions.find(
+    (candidate) => candidate.packageId === command.packageId,
+  );
+  if (
+    catalog.generationId !== command.generationId ||
+    !contribution ||
+    !contribution.declaredTools.includes(command.name)
+  ) {
+    throw new Error(
+      `Package "${command.packageId}" did not declare tool "${command.name}" in generation "${command.generationId}"`,
+    );
+  }
+  return contribution;
 }
 
 export class ShellBotBackendContribution {
@@ -1949,6 +1978,30 @@ export class ShellBotBackendContribution {
     return projectClientTurnV1(await this.authority.run(command));
   }
 
+  async runPackageUiTool(
+    identity: BotIdentity,
+    command: PackageIframeToolCommandV1,
+  ): Promise<ClientTurnV1> {
+    await this.validateIdentity(identity);
+    const catalog = await this.listPackageUi(identity);
+    const contribution = requirePackageUiToolDeclarationV1(catalog, command);
+    return projectClientTurnV1(
+      await this.authority.run({
+        ...identity,
+        runId: command.commandId,
+        sessionId: `${identity.userId}:${identity.botId}`,
+        acceptedAt: new Date().toISOString(),
+        text: `${contribution.displayName} · ${command.name}`,
+        directTool: {
+          generationId: command.generationId,
+          packageId: command.packageId,
+          name: command.name,
+          input: command.input,
+        },
+      }),
+    );
+  }
+
   /**
    * The Bot's invocable Skills, for the composer's `/` and `@` popover.
    *
@@ -1995,6 +2048,47 @@ export class ShellBotBackendContribution {
       );
     }
     return { schemaVersion: 1, skills: entries };
+  }
+
+  /** Active fail-closed Composition projected as inert iframe metadata. */
+  async listPackageUi(
+    identity: BotIdentity,
+  ): Promise<PackageIframeCompositionV1> {
+    await this.validateIdentity(identity);
+    const current = await this.authority.composition.current();
+    const generation =
+      current.status === "active" || current.status === "superseded"
+        ? current
+        : await this.authority.composition.lastKnownGood();
+    const contributions: PackageIframeCompositionV1["contributions"] = [];
+    for (const member of generation.members) {
+      if (member.provenance.kind === "first-party") continue;
+      const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
+        authorshipManifestKey(member.manifestHash),
+      );
+      if (!stored) continue;
+      const manifest = decodeFrockBotManifest(stored.manifest);
+      const client = manifest.contributions.client;
+      if (!client || !isClientIframeContribution(client)) continue;
+      contributions.push({
+        packageId: member.packageId,
+        displayName: manifest.displayName,
+        provenance:
+          member.provenance.kind === "bot" ? "Bot-authored" : "User-installed",
+        artifact: { ...client.artifact },
+        mounts: client.mounts.map((mount) => ({ ...mount })),
+        declaredTools: (manifest.tools ?? []).map((tool) => tool.name),
+      });
+    }
+    contributions.sort((left, right) =>
+      left.packageId.localeCompare(right.packageId),
+    );
+    return {
+      schemaVersion: 1,
+      botId: identity.botId,
+      generationId: generation.generationId,
+      contributions,
+    };
   }
 
   /**
@@ -2305,10 +2399,58 @@ export class ShellBotBackendContribution {
     const active = {
       runId: input.command.runId,
       sessionId: input.command.sessionId,
-      cancel: () => activation.mounted.runtime.agent.agent.cancel("user"),
+      cancel: () => {
+        controller.abort("user");
+        activation.mounted.runtime.agent.agent.cancel("user");
+      },
     };
     this.activeTurn = active;
     try {
+      const directTool = input.command.directTool;
+      if (directTool) {
+        if (
+          directTool.generationId !== activation.mounted.generation.generationId
+        ) {
+          throw new Error(
+            "Package UI command does not match the mounted Composition generation",
+          );
+        }
+        const member = activation.mounted.generation.members.find(
+          (candidate) =>
+            candidate.packageId === directTool.packageId &&
+            candidate.provenance.kind !== "first-party",
+        );
+        if (!member)
+          throw new Error("Package UI command names an unavailable Package");
+        const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
+          authorshipManifestKey(member.manifestHash),
+        );
+        if (!stored) throw new Error("Package UI manifest is unavailable");
+        const manifest = decodeFrockBotManifest(stored.manifest);
+        const client = manifest.contributions.client;
+        if (
+          !client ||
+          !isClientIframeContribution(client) ||
+          !(manifest.tools ?? []).some((tool) => tool.name === directTool.name)
+        ) {
+          throw new Error(
+            `Package "${directTool.packageId}" did not declare tool "${directTool.name}" for its iframe`,
+          );
+        }
+        return await executeDirectToolTurn({
+          command: { ...input.command, directTool },
+          previousEvents: input.previousEvents,
+          composition: activation.mounted,
+          admitEffect: (effect) =>
+            this.admitRunEffect(
+              input.identity,
+              input.command.runId,
+              input.command.sessionId,
+              effect,
+            ),
+          signal: controller.signal,
+        });
+      }
       const ordinaryInput = await this.turnInputTextV1(input.command);
       const durableInput =
         activation.status === "failed-closed"

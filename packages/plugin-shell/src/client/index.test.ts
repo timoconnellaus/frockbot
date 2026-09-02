@@ -2545,4 +2545,57 @@ describe("Connection operation reconciliation", () => {
     expect(commandIds).toHaveLength(2);
     expect(commandIds[1]).not.toBe(commandIds[0]);
   });
+
+  test("registers the sandbox settings host and refuses undeclared iframe tools before transport", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const slots: string[] = [];
+    let calls = 0;
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        hostedRequest: () => {
+          calls += 1;
+          return Promise.resolve({});
+        },
+      },
+      slot: (registration) => {
+        slots.push(registration.slot);
+        return () => {};
+      },
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    expect(slots).toContain("frockbot.bot-settings-sections");
+    provided.value.activeBotId = "primary";
+    provided.value.packageUi = {
+      schemaVersion: 1,
+      botId: "primary",
+      generationId: "generation-1",
+      artifactOrigin: "https://ui.bot.frockbot.com",
+      contributions: [],
+    };
+    const contribution = {
+      packageId: "weather-page",
+      displayName: "Weather page",
+      provenance: "Bot-authored" as const,
+      artifact: {
+        contentHash: "a".repeat(64),
+        size: 1,
+        mediaType: "text/html" as const,
+        bundlerVersion: "frockbot-inline-html@1",
+      },
+      mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+      declaredTools: ["weather_lookup"],
+    };
+    await expect(
+      provided.value.callPackageUiTool(contribution, "package_author", {}),
+    ).rejects.toThrow("did not declare");
+    expect(calls).toBe(0);
+  });
 });
