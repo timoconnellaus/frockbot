@@ -474,8 +474,8 @@ export class ComputerHostClient {
         action,
         ownerId,
         maxAgeSeconds,
-        // Absent ⇒ `bot`: the per-tenant takeover lease. `desktop-gui` is the
-        // User-wide one a `computerUse` subagent holds the screen under.
+        // Absent ⇒ legacy `bot`. Human sessions and `computerUse` explicitly
+        // name the User-wide `desktop-gui` screen lease.
         ...(options?.scope === undefined ? {} : { scope: options.scope }),
       },
       decodeComputerHostControlResultV1,

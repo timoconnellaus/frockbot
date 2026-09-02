@@ -2,7 +2,7 @@
 
 ## Status
 
-in progress. Steps 1–4 below; each records its own status when it lands.
+landed. Steps 1–4 below each record their status.
 
 ## Why
 
@@ -129,6 +129,8 @@ under a fresh lease is deferred and recorded; a Bot tool call during an update
 returns the retryable failure with the phase label; the card shows `updating`.
 
 ## Step 4 — User-wide human fence
+
+**Status:** landed.
 
 **Goal.** P7.
 

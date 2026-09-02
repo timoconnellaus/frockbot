@@ -94,6 +94,10 @@
   background: var(--frock-computer-accent);
 }
 
+.computer-strip-dot.phase-updating {
+  background: var(--frock-warning);
+}
+
 .computer-strip-dot.phase-error,
 .computer-strip-dot.phase-disconnected {
   background: var(--frock-danger-strong);
@@ -121,6 +125,12 @@
   border-color: var(--frock-computer-border);
   color: var(--frock-computer-accent-text);
   background: var(--frock-computer-surface);
+}
+
+.computer-status.status-updating {
+  border-color: var(--frock-warning-border);
+  color: var(--frock-warning);
+  background: var(--frock-warning-surface);
 }
 
 .computer-status.status-error,

@@ -64,6 +64,28 @@ describe("Computer client state machine", () => {
     });
   });
 
+  test("moves into updating with its label and out when connection completes", () => {
+    const updating = transitionComputerState(initialComputerMachineState(), {
+      type: "update-reported",
+      message: "Updating the Computer runtime",
+    });
+    const ready = transitionComputerState(updating, {
+      type: "connected",
+      viewerUrl: "https://viewer.invalid/session",
+    });
+
+    expect(updating).toMatchObject({
+      phase: "updating",
+      message: "Updating the Computer runtime",
+      viewerUrl: undefined,
+    });
+    expect(ready).toMatchObject({
+      phase: "ready",
+      message: "Computer ready",
+      viewerUrl: "https://viewer.invalid/session",
+    });
+  });
+
   test("marks a dead viewer disconnected and clears the frozen session", () => {
     const disconnected = transitionComputerState(
       {

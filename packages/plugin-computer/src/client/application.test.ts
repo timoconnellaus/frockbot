@@ -63,7 +63,7 @@ class FakeRuntime implements ComputerClientRuntime {
   }
 }
 
-type Phase = "idle" | "ready" | "human-control" | "disconnected";
+type Phase = "idle" | "updating" | "ready" | "human-control" | "disconnected";
 
 function mountHostedProvider() {
   const shell = ref({ activeBotId: "scout" });
@@ -119,7 +119,9 @@ function mountHostedProvider() {
           message:
             phase === "idle"
               ? "Persistent Computer available"
-              : "Computer ready",
+              : phase === "updating"
+                ? "Updating the Computer runtime"
+                : "Computer ready",
           ...(phase === "idle" || phase === "disconnected"
             ? {}
             : {
@@ -169,6 +171,9 @@ function mountHostedProvider() {
     },
     failRenewal() {
       renewFails = true;
+    },
+    setUpdating() {
+      phase = "updating";
     },
     dispose() {
       if (Array.isArray(disposers)) {
@@ -227,6 +232,28 @@ describe("hosted Computer provider", () => {
     mounted.runtime.tick(VIEWER_REFRESH_INTERVAL_MS);
     await flush();
     expect(postedTypes(mounted.calls)).toEqual(["connect", "refreshViewer"]);
+    mounted.dispose();
+  });
+
+  test("an updating strip click only expands the progress view", async () => {
+    const mounted = mountHostedProvider();
+    await flush();
+    mounted.setUpdating();
+    mounted.runtime.tick(PROJECTION_POLL_INTERVAL_MS);
+    await flush();
+    expect(mounted.state).toMatchObject({
+      phase: "updating",
+      message: "Updating the Computer runtime",
+      expanded: false,
+    });
+
+    await mounted.state.openViewer();
+
+    expect(mounted.state).toMatchObject({
+      phase: "updating",
+      expanded: true,
+    });
+    expect(postedTypes(mounted.calls)).toEqual([]);
     mounted.dispose();
   });
 

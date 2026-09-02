@@ -471,8 +471,8 @@ function handle(
     },
     control: {
       // The scope and the owner travel with the call, so one Computer surface
-      // serves both leases: the per-tenant human takeover it always did, and
-      // the User-wide `desktop-gui` lease a `computerUse` subagent holds.
+      // serves legacy per-tenant leases and the User-wide `desktop-gui` lease
+      // on which human sessions and `computerUse` subagents contend.
       acquire: async (request, options) =>
         lease(await computer.takeControl(options, request)),
       renew: async (_current, request, options) =>
@@ -514,6 +514,8 @@ export class FlySpriteComputerProvider implements ComputerProvider {
      * than a sync with nowhere to record its intent.
      */
     private readonly syncHost?: ComputerSyncHostV1,
+    /** The active `computerUse` task owner, on that task's child Turn. */
+    private readonly agentControlOwnerId?: string,
   ) {}
 
   /**
@@ -530,6 +532,9 @@ export class FlySpriteComputerProvider implements ComputerProvider {
         ...(this.host ? { host: this.host } : {}),
         respectHumanControl: true,
         spriteName: flySpriteNameForComputer(identity),
+        ...(this.agentControlOwnerId
+          ? { agentControlOwnerId: this.agentControlOwnerId }
+          : {}),
       });
       this.computers.set(key, computer);
     }
@@ -563,11 +568,20 @@ export class FlySpriteComputerProvider implements ComputerProvider {
 
 export function createFlySpriteProviderPlugin(
   computer?: FlySpriteComputer,
-  options?: { host?: ComputerHostFactoryV1; sync?: ComputerSyncHostV1 },
+  options?: {
+    host?: ComputerHostFactoryV1;
+    sync?: ComputerSyncHostV1;
+    agentControlOwnerId?: string;
+  },
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx) =>
     ctx.computers.register(
-      new FlySpriteComputerProvider(computer, options?.host, options?.sync),
+      new FlySpriteComputerProvider(
+        computer,
+        options?.host,
+        options?.sync,
+        options?.agentControlOwnerId,
+      ),
     );
   plugin.inject = ["computers"];
   return plugin;

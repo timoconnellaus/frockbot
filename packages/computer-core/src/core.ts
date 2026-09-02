@@ -549,18 +549,17 @@ export interface ComputerControlLease {
 /**
  * What a control lease covers.
  *
- * `bot` is the human-takeover lease on one tenant's own desktop slot — the
- * only scope that existed before subagent roles. `desktop-gui` is User-wide:
- * one Computer serves all of a User's Bots and there is one screen on it, so
- * serializing GUI work means holding the *box*, not a tenant directory. It is
- * what a `computerUse` subagent holds while it runs, and it is why only one of
- * them runs at a time.
+ * `bot` is the legacy lease on one tenant's own desktop slot. `desktop-gui`
+ * is User-wide: one Computer serves all of a User's Bots and there is one
+ * screen on it, so serializing GUI work means holding the *box*, not a tenant
+ * directory. Human takeover and a `computerUse` subagent both hold it, which
+ * is why neither can drive the shared screen while the other is active.
  */
 export type ComputerControlScopeV1 = "bot" | "desktop-gui";
 
 /**
- * Who and what a lease is taken for. Absent ⇒ the `bot` scope under the
- * Computer's own owner identity, which is every caller that existed before.
+ * Who and what a lease is taken for. Absent is retained for legacy provider
+ * callers; a human session and `computerUse` name `desktop-gui` explicitly.
  */
 export interface ComputerControlRequestV1 {
   scope?: ComputerControlScopeV1;

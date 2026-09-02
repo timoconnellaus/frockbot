@@ -8,7 +8,11 @@ const computer = inject(computerKey) ?? useRpc<ComputerState>();
 const busy = ref(false);
 const state = computed(() => computer.value);
 const screenshot = computed(() => state.value.screenshots?.[0]);
-const phaseLabel = computed(() => state.value.phase.replaceAll("-", " "));
+const phaseLabel = computed(() =>
+  state.value.phase === "updating"
+    ? state.value.message
+    : state.value.phase.replaceAll("-", " "),
+);
 
 async function open(): Promise<void> {
   if (busy.value) return;

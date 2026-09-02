@@ -210,6 +210,16 @@ export function createComputerClientPlugin(
         await post(type);
         await load();
       } catch (error) {
+        // A connect can be refused because the host is already applying an
+        // update. The Bot authority records that typed phase even though the
+        // command receipt is rejected, so read its durable projection before
+        // deciding this is a generic client error.
+        try {
+          await load();
+        } catch {
+          // The original command failure remains the useful answer.
+        }
+        if (type === "connect" && machine.phase === "updating") return;
         apply({ type: "failed", message: errorMessage(error) });
         throw error;
       }

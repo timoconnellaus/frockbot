@@ -26,6 +26,7 @@ export type ComputerMachineEvent =
       message: string;
     }
   | { type: "connect-requested" }
+  | { type: "update-reported"; message: string }
   | { type: "connected"; viewerUrl: string }
   | { type: "take-control-requested" }
   | { type: "control-acquired" }
@@ -87,6 +88,13 @@ export function transitionComputerState(
         phase: "ready",
         message: "Computer ready",
         viewerUrl: event.viewerUrl,
+        takingControl: false,
+      };
+    case "update-reported":
+      return {
+        ...state,
+        phase: "updating",
+        message: event.message,
         takingControl: false,
       };
     case "take-control-requested":

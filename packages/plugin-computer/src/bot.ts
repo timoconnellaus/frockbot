@@ -6,6 +6,7 @@
 // the URL is held in this Contribution instance until a read projects it.
 import {
   computerBotPathKeyV1,
+  ComputerError,
   decodeComputerDoctorReportV1,
   type ComputerControlLease,
   type ComputerHandle,
@@ -23,6 +24,7 @@ import {
 import {
   ComputerProtocolDecodeError,
   computerCommandFingerprintV1,
+  computerUpdateLabelV1,
   decodeComputerCommandReceiptV1,
   decodeComputerCommandV1,
   type ComputerCommandReceiptV1,
@@ -33,9 +35,16 @@ import {
   type ComputerScreenshotViewV1,
   type ComputerViewerSessionViewV1,
 } from "./protocol.js";
+import {
+  COMPUTER_CONTROL_RECORD_KEY,
+  decodeStoredComputerControlV1,
+  isStoredComputerControlFreshV1,
+  type StoredComputerControlV1,
+} from "./control-record.js";
+
+export { COMPUTER_CONTROL_RECORD_KEY } from "./control-record.js";
 
 export const COMPUTER_VIEWER_RECORD_KEY = "computer:viewer:v1";
-export const COMPUTER_CONTROL_RECORD_KEY = "computer:control:v1";
 export const COMPUTER_PROVIDER_RECORD_KEY = "computer:provider:v1";
 export const COMPUTER_INTENT_PREFIX = "computer:intent:v1:";
 export const COMPUTER_RECEIPT_PREFIX = "computer:receipt:v1:";
@@ -73,16 +82,9 @@ interface StoredViewerV1 {
   expiresAt: string;
 }
 
-interface StoredControlV1 {
-  version: 1;
-  ownerId: string;
-  acquiredAt: string;
-  expiresAt: string;
-}
-
 interface StoredProviderAnswerV1 {
   version: 1;
-  phase: "provisioning" | "ready" | "disconnected" | "error";
+  phase: "provisioning" | "updating" | "ready" | "disconnected" | "error";
   message: string;
   recordedAt: string;
 }
@@ -159,27 +161,6 @@ function decodeStoredViewer(value: unknown): StoredViewerV1 {
   };
 }
 
-function decodeStoredControl(value: unknown): StoredControlV1 {
-  const record = object(value, "Computer control record");
-  exact(
-    record,
-    ["version", "ownerId", "acquiredAt", "expiresAt"],
-    [],
-    "Computer control record",
-  );
-  if (record.version !== 1)
-    throw new Error("Computer control record is corrupt");
-  return {
-    version: 1,
-    ownerId: storedText(record.ownerId, "Computer control ownerId"),
-    acquiredAt: storedTimestamp(
-      record.acquiredAt,
-      "Computer control acquiredAt",
-    ),
-    expiresAt: storedTimestamp(record.expiresAt, "Computer control expiresAt"),
-  };
-}
-
 function decodeStoredProvider(value: unknown): StoredProviderAnswerV1 {
   const record = object(value, "Computer provider record");
   exact(
@@ -191,6 +172,7 @@ function decodeStoredProvider(value: unknown): StoredProviderAnswerV1 {
   if (
     record.version !== 1 ||
     (record.phase !== "provisioning" &&
+      record.phase !== "updating" &&
       record.phase !== "ready" &&
       record.phase !== "disconnected" &&
       record.phase !== "error")
@@ -319,7 +301,7 @@ export class ComputerBotBackendContribution {
         command,
         admittedAt,
         ...(command.type === "takeControl"
-          ? { ownerId: this.newId(), acquiredAt: admittedAt }
+          ? { ownerId: `human:${this.newId()}`, acquiredAt: admittedAt }
           : {}),
       } satisfies StoredIntentV1;
       // The durable intent is committed by this transaction before the
@@ -424,17 +406,28 @@ export class ComputerBotBackendContribution {
       return this.settle(command, admitted.fingerprint, "applied");
     } catch (error) {
       const failure = failureText(error);
+      const updating =
+        command.type === "connect" &&
+        error instanceof ComputerError &&
+        error.code === "updating";
       if (command.type === "refreshViewer") {
         this.#liveViewer = undefined;
         await this.host.storage.delete(COMPUTER_VIEWER_RECORD_KEY);
       }
       await this.host.storage.put(COMPUTER_PROVIDER_RECORD_KEY, {
         version: 1,
-        phase: command.type === "refreshViewer" ? "disconnected" : "error",
+        phase:
+          command.type === "refreshViewer"
+            ? "disconnected"
+            : updating
+              ? "updating"
+              : "error",
         message:
           command.type === "refreshViewer"
             ? `Viewer disconnected: ${failure}`
-            : failure,
+            : updating
+              ? (computerUpdateLabelV1(failure) ?? failure)
+              : failure,
         recordedAt: this.now().toISOString(),
       } satisfies StoredProviderAnswerV1);
       return this.settle(command, admitted.fingerprint, "rejected", failure);
@@ -471,12 +464,13 @@ export class ComputerBotBackendContribution {
       id: session.id,
       expiresAt: session.expiresAt,
     } satisfies StoredViewerV1;
+    const updateLabel = computerUpdateLabelV1(session.message);
     await this.host.storage.put({
       [COMPUTER_VIEWER_RECORD_KEY]: stored,
       [COMPUTER_PROVIDER_RECORD_KEY]: {
         version: 1,
-        phase: "ready",
-        message: "Computer ready",
+        phase: updateLabel ? "updating" : "ready",
+        message: updateLabel ?? "Computer ready",
         recordedAt: this.now().toISOString(),
       } satisfies StoredProviderAnswerV1,
     });
@@ -496,8 +490,8 @@ export class ComputerBotBackendContribution {
       COMPUTER_CONTROL_RECORD_KEY,
     );
     if (currentValue !== undefined) {
-      const current = decodeStoredControl(currentValue);
-      if (isFresh(current.expiresAt, this.now())) return;
+      const current = decodeStoredComputerControlV1(currentValue);
+      if (isStoredComputerControlFreshV1(current, this.now())) return;
     }
     if (!intent.ownerId || !intent.acquiredAt) {
       throw new Error("Computer control intent has no durable owner");
@@ -512,7 +506,7 @@ export class ComputerBotBackendContribution {
           );
         }
         return computer.control.acquire(
-          { scope: "bot", ownerId: intent.ownerId },
+          { scope: "desktop-gui", ownerId: intent.ownerId },
           { effectId: `computer:${command.commandId}:take-control` },
         );
       },
@@ -522,7 +516,7 @@ export class ComputerBotBackendContribution {
       ownerId: intent.ownerId,
       acquiredAt: intent.acquiredAt,
       expiresAt: acquired.expiresAt,
-    } satisfies StoredControlV1);
+    } satisfies StoredComputerControlV1);
   }
 
   private async refreshControl(
@@ -534,7 +528,7 @@ export class ComputerBotBackendContribution {
     );
     if (currentValue === undefined)
       throw new Error("No control lease is active");
-    const current = decodeStoredControl(currentValue);
+    const current = decodeStoredComputerControlV1(currentValue);
     const renewed = await this.withComputer(
       userId,
       command,
@@ -550,7 +544,7 @@ export class ComputerBotBackendContribution {
         };
         return computer.control.renew(
           lease,
-          { scope: "bot", ownerId: current.ownerId },
+          { scope: "desktop-gui", ownerId: current.ownerId },
           { effectId: `computer:${command.commandId}:refresh-control` },
         );
       },
@@ -558,7 +552,7 @@ export class ComputerBotBackendContribution {
     await this.host.storage.put(COMPUTER_CONTROL_RECORD_KEY, {
       ...current,
       expiresAt: renewed.expiresAt,
-    } satisfies StoredControlV1);
+    } satisfies StoredComputerControlV1);
   }
 
   private async refreshViewer(
@@ -614,14 +608,14 @@ export class ComputerBotBackendContribution {
       COMPUTER_CONTROL_RECORD_KEY,
     );
     if (currentValue === undefined) return;
-    const current = decodeStoredControl(currentValue);
+    const current = decodeStoredComputerControlV1(currentValue);
     await this.withComputer(userId, command, async (computer) => {
       if (!computer.control) {
         throw new Error("The selected Computer does not support human control");
       }
       await computer.control.release(
         { id: current.ownerId, expiresAt: current.expiresAt },
-        { scope: "bot", ownerId: current.ownerId },
+        { scope: "desktop-gui", ownerId: current.ownerId },
         { effectId: `computer:${command.commandId}:release-control` },
       );
     });
@@ -748,7 +742,7 @@ export class ComputerBotBackendContribution {
     const control =
       controlValue === undefined
         ? undefined
-        : decodeStoredControl(controlValue);
+        : decodeStoredComputerControlV1(controlValue);
     const provider =
       providerValue === undefined
         ? undefined
@@ -760,7 +754,9 @@ export class ComputerBotBackendContribution {
         ? this.#liveViewer
         : undefined;
     const activeControl =
-      control && isFresh(control.expiresAt, now) ? control : undefined;
+      control && isStoredComputerControlFreshV1(control, now)
+        ? control
+        : undefined;
     let phase: ComputerPhase;
     let message: string;
     if (!this.host.configured) {
@@ -777,6 +773,9 @@ export class ComputerBotBackendContribution {
       message = provider.message;
     } else if (provider?.phase === "provisioning") {
       phase = "provisioning";
+      message = provider.message;
+    } else if (provider?.phase === "updating") {
+      phase = "updating";
       message = provider.message;
     } else if (liveViewer) {
       phase = "ready";

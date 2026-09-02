@@ -30,16 +30,22 @@ const actions = createComputerViewerActions(
     confirming.value = open;
   },
 );
-const hasViewer = computed(() => Boolean(state.value.viewerUrl));
+const hasViewer = computed(
+  () =>
+    Boolean(state.value.viewerUrl) &&
+    state.value.phase !== "provisioning" &&
+    state.value.phase !== "updating",
+);
 const isHuman = computed(() => state.value.takingControl);
 const viewerSrc = computed(() =>
-  state.value.viewerUrl
+  hasViewer.value && state.value.viewerUrl
     ? viewerUrlForControlV1(state.value.viewerUrl, isHuman.value)
     : undefined,
 );
 const statusLabel = computed(() => {
   if (isHuman.value) return "Your control";
   if (state.value.phase === "ready") return "View only";
+  if (state.value.phase === "updating") return state.value.message;
   return state.value.phase.replaceAll("-", " ");
 });
 
@@ -183,6 +189,9 @@ onBeforeUnmount(() => {
           >
           <strong v-else-if="state.phase === 'provisioning'"
             >Preparing computer…</strong
+          >
+          <strong v-else-if="state.phase === 'updating'"
+            >Updating computer…</strong
           >
           <strong v-else-if="state.phase === 'disconnected'"
             >Viewer disconnected</strong

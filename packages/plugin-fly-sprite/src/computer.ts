@@ -19,6 +19,7 @@ import {
   BOUNDED_LOG_SCRIPT,
   CONTROL_SCRIPT,
   DATA_ROOT,
+  DESKTOP_GUI_LEASE_KEY,
   DOCTOR_MARKER,
   DOCTOR_SCRIPT,
   HOME_ROOT,
@@ -171,6 +172,12 @@ export interface FlySpriteComputerOptions {
   host?: ComputerHostFactoryV1;
   /** The Sprite name this Computer expects, before the host answers with one. */
   spriteName?: string;
+  /**
+   * The owner guarded commands name. A `computerUse` child receives the task
+   * owner that already holds `desktop-gui`, so its own commands pass the same
+   * fence that refuses every other Bot and human session.
+   */
+  agentControlOwnerId?: string;
   respectHumanControl?: boolean;
 }
 
@@ -481,9 +488,9 @@ export class FlySpriteAgentComputer {
     );
   }
 
-  /** The human-control lease owner this Computer holds leases under. */
+  /** The human session owner this Computer uses for local takeover. */
   get controlOwnerId(): string {
-    return this.computer.ownerId;
+    return this.computer.humanControlOwnerId;
   }
 }
 
@@ -500,8 +507,10 @@ export class FlySpriteAgentComputer {
  */
 export class FlySpriteComputer {
   readonly configured: boolean;
-  /** The lease owner every human-control call from this Computer names. */
-  readonly ownerId = randomUUID();
+  /** The caller identity guarded Bot commands name on the Computer. */
+  readonly ownerId: string;
+  /** The local viewer session, kept distinct from the guarded Bot caller. */
+  readonly humanControlOwnerId = `human:${randomUUID()}`;
   private readonly identity: { userId: string };
   private readonly host?: ComputerHostFactoryV1;
   private readonly respectHumanControl: boolean;
@@ -521,6 +530,7 @@ export class FlySpriteComputer {
     };
     this.host = options.host;
     this.expectedSpriteName = options.spriteName ?? configuredName();
+    this.ownerId = options.agentControlOwnerId ?? `agent:${randomUUID()}`;
     this.configured = Boolean(options.host);
     this.respectHumanControl = options.respectHumanControl ?? true;
   }
@@ -1062,15 +1072,19 @@ export class FlySpriteComputer {
     request?: ComputerControlRequestV1,
     effectId?: string,
   ): Promise<ComputerHostControlResultV1> {
+    const lease = request ?? {
+      scope: "desktop-gui" as const,
+      ownerId: this.humanControlOwnerId,
+    };
     return this.hostFor(layout).control(
       action,
-      request?.ownerId ?? this.ownerId,
+      lease.ownerId ?? this.humanControlOwnerId,
       LEASE_MAX_AGE_SECONDS,
       {
         signal,
         effectId,
         timeoutMs: TIMEOUTS.control,
-        ...(request?.scope ? { scope: request.scope } : {}),
+        ...(lease.scope ? { scope: lease.scope } : {}),
       },
     );
   }
@@ -1082,16 +1096,20 @@ export class FlySpriteComputer {
     effectId?: string,
   ): Promise<void> {
     if (!this.host) return;
+    const lease = request ?? {
+      scope: "desktop-gui" as const,
+      ownerId: this.humanControlOwnerId,
+    };
     try {
       await this.hostFor(layout).control(
         "release",
-        request?.ownerId ?? this.ownerId,
+        lease.ownerId ?? this.humanControlOwnerId,
         LEASE_MAX_AGE_SECONDS,
         {
           signal,
           effectId,
           timeoutMs: TIMEOUTS.control,
-          ...(request?.scope ? { scope: request.scope } : {}),
+          ...(lease.scope ? { scope: lease.scope } : {}),
         },
       );
     } catch (error) {
@@ -1265,9 +1283,7 @@ export class FlySpriteComputer {
   ): Promise<void> {
     await this.execute(
       host,
-      `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(
-        this.ownerId,
-      )} ${LEASE_MAX_AGE_SECONDS}\n`,
+      `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(DESKTOP_GUI_LEASE_KEY)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS}\n`,
       {
         signal,
         effectId,
@@ -1313,7 +1329,7 @@ export class FlySpriteComputer {
    */
   private agentControlGuard(layout: AgentLayout): string {
     return [
-      `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS} || exit $?`,
+      `${CONTROL_SCRIPT} assert-agent ${shellQuote(layout.key)} ${shellQuote(DESKTOP_GUI_LEASE_KEY)} ${shellQuote(this.ownerId)} ${LEASE_MAX_AGE_SECONDS} || exit $?`,
       this.tenantStamp(layout),
     ].join("\n");
   }
@@ -1365,6 +1381,9 @@ export class FlySpriteComputer {
         outputText(outcome.stderr).trim() ||
         outputText(outcome.stdout).trim() ||
         `exit ${String(outcome.exitCode)}`;
+      if (outcome.exitCode === 73) {
+        throw new ComputerError("human-control-active", detail);
+      }
       throw new Error(`${label}: ${detail}`);
     }
     return outcome;

@@ -3,6 +3,7 @@ import type {
   ComputerControlLease,
   ComputerHandle,
 } from "@frockbot/computer-core";
+import { ComputerError } from "@frockbot/computer-core";
 import {
   COMPUTER_CONTROL_RECORD_KEY,
   COMPUTER_INTENT_PREFIX,
@@ -58,13 +59,21 @@ function command(
 }
 
 function fakeHandle(options: {
-  presence?(): Promise<{ id: string; url: string; expiresAt: string }>;
+  presence?(): Promise<{
+    id: string;
+    url: string;
+    expiresAt: string;
+    message?: string;
+  }>;
   renewViewer?(
     sessionId: string,
   ): Promise<{ id: string; url: string; expiresAt: string }>;
-  acquire?(ownerId: string): Promise<ComputerControlLease>;
-  renew?(lease: ComputerControlLease): Promise<ComputerControlLease>;
-  release?(lease: ComputerControlLease): Promise<void>;
+  acquire?(ownerId: string, scope?: string): Promise<ComputerControlLease>;
+  renew?(
+    lease: ComputerControlLease,
+    scope?: string,
+  ): Promise<ComputerControlLease>;
+  release?(lease: ComputerControlLease, scope?: string): Promise<void>;
 }): ComputerHandle {
   return {
     assignment: { providerId: "fake", generation: 1 },
@@ -81,9 +90,10 @@ function fakeHandle(options: {
         }
       : {}),
     control: {
-      acquire: (request) => options.acquire!(request?.ownerId ?? "missing"),
-      renew: (lease) => options.renew!(lease),
-      release: (lease) => options.release!(lease),
+      acquire: (request) =>
+        options.acquire!(request?.ownerId ?? "missing", request?.scope),
+      renew: (lease, request) => options.renew!(lease, request?.scope),
+      release: (lease, request) => options.release!(lease, request?.scope),
     },
     close: () => Promise.resolve(),
   };
@@ -188,11 +198,81 @@ describe("Computer Bot Durable Object Contribution", () => {
     );
   });
 
+  test("projects update-kind provider progress as updating with its label", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            presence: () =>
+              Promise.resolve({
+                id: "viewer-1",
+                url: "https://viewer.invalid/secret",
+                expiresAt: "2026-09-02T00:01:30.000Z",
+                message: "Updating the Computer: Updating the Computer runtime",
+              }),
+          }),
+        ),
+      now: () => new Date("2026-09-02T00:00:00.000Z"),
+    });
+
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-update"),
+    );
+
+    expect(await contribution.read("user-1", "scout")).toMatchObject({
+      phase: "updating",
+      message: "Updating the Computer runtime",
+      viewerSession: { id: "viewer-1" },
+    });
+  });
+
+  test("projects an updating provider error during connect", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            presence: () =>
+              Promise.reject(
+                new ComputerError(
+                  "updating",
+                  "Updating the Computer runtime",
+                  true,
+                ),
+              ),
+          }),
+        ),
+      now: () => new Date("2026-09-02T00:00:00.000Z"),
+    });
+
+    const receipt = await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-updating"),
+    );
+
+    expect(receipt.status).toBe("rejected");
+    expect(await contribution.read("user-1", "scout")).toMatchObject({
+      phase: "updating",
+      message: "Updating the Computer runtime",
+    });
+  });
+
   test("reconstructs a live lease after eviction and renews then releases it", async () => {
     const storage = new MemoryStorage();
     let now = new Date("2026-09-02T00:00:00.000Z");
     let heldOwner = "";
     const owners: string[] = [];
+    const scopes: string[] = [];
     const host = {
       storage,
       configured: true,
@@ -202,22 +282,25 @@ describe("Computer Bot Durable Object Contribution", () => {
       openComputer: () =>
         Promise.resolve(
           fakeHandle({
-            acquire: (ownerId) => {
+            acquire: (ownerId, scope) => {
               heldOwner = ownerId;
               owners.push(ownerId);
+              scopes.push(scope ?? "missing");
               return Promise.resolve({
                 id: ownerId,
                 expiresAt: "2026-09-02T00:01:30.000Z",
               });
             },
-            renew: (lease) => {
+            renew: (lease, scope) => {
+              scopes.push(scope ?? "missing");
               expect(lease.id).toBe(heldOwner);
               return Promise.resolve({
                 id: lease.id,
                 expiresAt: "2026-09-02T00:02:00.000Z",
               });
             },
-            release: (lease) => {
+            release: (lease, scope) => {
+              scopes.push(scope ?? "missing");
               expect(lease.id).toBe(heldOwner);
               return Promise.resolve();
             },
@@ -229,7 +312,7 @@ describe("Computer Bot Durable Object Contribution", () => {
     const reconstructed = createComputerBotBackendContribution(host);
     now = new Date("2026-09-02T00:00:30.000Z");
     const projected = await reconstructed.read("user-1", "scout");
-    expect(projected.controlLease?.ownerId).toBe("owner-1");
+    expect(projected.controlLease?.ownerId).toBe("human:owner-1");
     await reconstructed.execute(
       "user-1",
       "scout",
@@ -240,7 +323,8 @@ describe("Computer Bot Durable Object Contribution", () => {
       "scout",
       command("releaseControl", "release-1"),
     );
-    expect(owners).toEqual(["owner-1"]);
+    expect(owners).toEqual(["human:owner-1"]);
+    expect(scopes).toEqual(["desktop-gui", "desktop-gui", "desktop-gui"]);
     expect(storage.values.has(COMPUTER_CONTROL_RECORD_KEY)).toBe(false);
   });
 
@@ -279,7 +363,7 @@ describe("Computer Bot Durable Object Contribution", () => {
       "scout",
       command("takeControl", "take-2"),
     );
-    expect(acquired).toEqual(["owner-1", "owner-2"]);
+    expect(acquired).toEqual(["human:owner-1", "human:owner-2"]);
   });
 
   test("projects reconstructed durable state without opening the Computer", async () => {

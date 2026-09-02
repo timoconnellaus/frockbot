@@ -46,6 +46,9 @@ async function open(): Promise<void> {
         <strong v-else-if="state.phase === 'provisioning'"
           >Preparing computer…</strong
         >
+        <strong v-else-if="state.phase === 'updating'"
+          >Updating computer…</strong
+        >
         <strong v-else-if="state.phase === 'disconnected'"
           >Viewer disconnected</strong
         >

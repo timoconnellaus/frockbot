@@ -11,6 +11,10 @@ const overlaySource = readFileSync(
   new URL("./ComputerViewerOverlay.vue", import.meta.url),
   "utf8",
 );
+const cardSource = readFileSync(
+  new URL("./ComputerCard.vue", import.meta.url),
+  "utf8",
+);
 
 describe("Computer viewer", () => {
   test("keeps one noVNC session view-only until human control is held", () => {
@@ -78,5 +82,15 @@ describe("Computer viewer", () => {
     expect(template).toContain(
       "The Bot will be fenced from this desktop until you release control.",
     );
+  });
+
+  test("the card shows the update phase label", () => {
+    const parsed = parse(cardSource, { filename: "ComputerCard.vue" });
+    expect(parsed.errors).toEqual([]);
+    const template = parsed.descriptor.template?.content ?? "";
+
+    expect(template).toContain("state.phase === 'updating'");
+    expect(template).toContain("Updating computer…");
+    expect(template).toContain("{{ state.message }}");
   });
 });

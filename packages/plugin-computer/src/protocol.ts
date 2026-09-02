@@ -65,6 +65,7 @@ export const COMPUTER_PHASES = [
   "unconfigured",
   "idle",
   "provisioning",
+  "updating",
   "ready",
   "taking-control",
   "human-control",
@@ -73,6 +74,17 @@ export const COMPUTER_PHASES = [
 ] as const;
 
 export type ComputerPhase = (typeof COMPUTER_PHASES)[number];
+
+export const COMPUTER_UPDATE_MESSAGE_PREFIX = "Updating the Computer: ";
+
+/** Extracts the provider's update phase label without coupling to a provider. */
+export function computerUpdateLabelV1(
+  message: string | undefined,
+): string | undefined {
+  if (!message?.startsWith(COMPUTER_UPDATE_MESSAGE_PREFIX)) return undefined;
+  const label = message.slice(COMPUTER_UPDATE_MESSAGE_PREFIX.length).trim();
+  return label || undefined;
+}
 
 export interface ComputerProjectionV1 {
   version: 1;

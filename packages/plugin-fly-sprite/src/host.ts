@@ -1,5 +1,7 @@
 import type { Entry } from "@cordisjs/plugin-webui";
+import { ComputerError } from "@frockbot/computer-core";
 import type { ComputerState } from "@frockbot/plugin-computer/shared";
+import { computerUpdateLabelV1 } from "@frockbot/plugin-computer/protocol";
 import {
   initialComputerMachineState,
   transitionComputerState,
@@ -92,6 +94,10 @@ class FlySpriteHostController {
       const connection = await this.computer.connect();
       this.viewerSessionId = connection.viewerSessionId;
       this.apply({ type: "connected", viewerUrl: connection.viewerUrl });
+      const updateLabel = computerUpdateLabelV1(connection.message);
+      if (updateLabel) {
+        this.apply({ type: "update-reported", message: updateLabel });
+      }
     } catch (error) {
       this.fail(error);
     }
@@ -234,6 +240,10 @@ class FlySpriteHostController {
     if (!sessionId) return;
     try {
       await this.computer.refreshViewer(sessionId);
+      const viewerUrl = this.current().viewerUrl;
+      if (this.machine.phase === "updating" && viewerUrl) {
+        this.apply({ type: "connected", viewerUrl });
+      }
     } catch (error) {
       this.viewerSessionId = undefined;
       const detail = error instanceof Error ? error.message : String(error);
@@ -267,6 +277,13 @@ class FlySpriteHostController {
   }
 
   private fail(error: unknown): void {
+    if (error instanceof ComputerError && error.code === "updating") {
+      this.apply({
+        type: "update-reported",
+        message: computerUpdateLabelV1(error.message) ?? error.message,
+      });
+      return;
+    }
     this.apply({
       type: "failed",
       message: error instanceof Error ? error.message : String(error),

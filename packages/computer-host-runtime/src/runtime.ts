@@ -380,20 +380,34 @@ if [ ! -s "$BOT/slot" ]; then
     # a live tenant the new tenant is refused: sharing a display would put two
     # Bots on one screen, which is worse than an unavailable desktop.
     NOW=$(date +%s)
-    VICTIM=""
-    for FILE in $(ls -1tr "$ROOT"/bots/*/slot 2>/dev/null); do
-      CANDIDATE_BOT=$(dirname "$FILE")
-      SEEN=0
-      if [ -f "$CANDIDATE_BOT/last-seen" ]; then SEEN=$(stat -c %Y "$CANDIDATE_BOT/last-seen"); fi
-      if [ $((NOW - SEEN)) -le ${SLOT_IDLE_SECONDS} ]; then continue; fi
-      if [ -f "$CANDIDATE_BOT/human-control" ]; then
-        LEASED=$(stat -c %Y "$CANDIDATE_BOT/human-control")
-        if [ $((NOW - LEASED)) -le ${LEASE_MAX_AGE_SECONDS} ]; then continue; fi
+    DESKTOP_LEASE="$ROOT/bots/${DESKTOP_GUI_LEASE_KEY}/human-control"
+    DESKTOP_LEASE_FRESH=0
+    if [ -f "$DESKTOP_LEASE" ]; then
+      DESKTOP_LEASED=$(stat -c %Y "$DESKTOP_LEASE")
+      if [ $((NOW - DESKTOP_LEASED)) -le ${LEASE_MAX_AGE_SECONDS} ]; then
+        DESKTOP_LEASE_FRESH=1
       fi
-      VICTIM="$FILE"
-      SLOT=$(cat "$FILE")
-      break
-    done
+    fi
+    VICTIM=""
+    # Human takeover and computerUse hold the User-wide screen. Reclaiming
+    # any tenant's display while that lease is fresh would replace the screen
+    # underneath its holder, even when another Bot owned the slot. Avoid the
+    # whole per-tenant scan in that case: no candidate can be eligible.
+    if [ "$DESKTOP_LEASE_FRESH" -ne 1 ]; then
+      for FILE in $(ls -1tr "$ROOT"/bots/*/slot 2>/dev/null); do
+        CANDIDATE_BOT=$(dirname "$FILE")
+        SEEN=0
+        if [ -f "$CANDIDATE_BOT/last-seen" ]; then SEEN=$(stat -c %Y "$CANDIDATE_BOT/last-seen"); fi
+        if [ $((NOW - SEEN)) -le ${SLOT_IDLE_SECONDS} ]; then continue; fi
+        if [ -f "$CANDIDATE_BOT/human-control" ]; then
+          LEASED=$(stat -c %Y "$CANDIDATE_BOT/human-control")
+          if [ $((NOW - LEASED)) -le ${LEASE_MAX_AGE_SECONDS} ]; then continue; fi
+        fi
+        VICTIM="$FILE"
+        SLOT=$(cat "$FILE")
+        break
+      done
+    fi
     if [ -z "$VICTIM" ]; then
       # Said both ways: the exit code is for a caller that gets one, and
       # the marker is for a transport that hands back output instead.
@@ -482,51 +496,73 @@ done
 export const controlScript = `#!/usr/bin/env bash
 set -eu
 if [ "$1" != "--locked" ]; then
+  ACTION="$1"
   KEY="$2"
   BOT=${BOTS_ROOT}/$KEY
   mkdir -p "$BOT"
+  if [ "$ACTION" = "assert-agent" ]; then
+    DESKTOP_KEY="$3"
+    DESKTOP=${BOTS_ROOT}/$DESKTOP_KEY
+    mkdir -p "$DESKTOP"
+    # Every guarded command reads two independently writable leases. Taking
+    # the shared lock first keeps their check in one fixed order and prevents
+    # an acquire from changing the desktop lease midway through the snapshot.
+    exec flock -x "$DESKTOP/control.lock" flock -x "$BOT/control.lock" "$0" --locked "$@"
+  fi
   exec flock -x "$BOT/control.lock" "$0" --locked "$@"
 fi
 shift
 ACTION="$1"
 KEY="$2"
-OWNER="$3"
-MAX_AGE="$4"
 BOT=${BOTS_ROOT}/$KEY
 LEASE="$BOT/human-control"
-current_owner() { sed -n '1p' "$LEASE" 2>/dev/null || true; }
+if [ "$ACTION" = "assert-agent" ]; then
+  DESKTOP_KEY="$3"
+  OWNER="$4"
+  MAX_AGE="$5"
+else
+  OWNER="$3"
+  MAX_AGE="$4"
+fi
+current_owner() { sed -n '1p' "$1" 2>/dev/null || true; }
 is_fresh() {
-  [ -e "$LEASE" ] || return 1
+  CANDIDATE="$1"
+  [ -e "$CANDIDATE" ] || return 1
   NOW=$(date +%s)
-  CHANGED=$(stat -c %Y "$LEASE")
+  CHANGED=$(stat -c %Y "$CANDIDATE")
   [ $((NOW - CHANGED)) -le "$MAX_AGE" ]
+}
+assert_available() {
+  CANDIDATE="$1"
+  EXISTING=$(current_owner "$CANDIDATE")
+  if [ -n "$EXISTING" ] && [ "$EXISTING" != "$OWNER" ]; then
+    if is_fresh "$CANDIDATE"; then echo "This Computer's control lease is held by $EXISTING" >&2; exit 73; fi
+    rm -f "$CANDIDATE"
+  fi
 }
 case "$ACTION" in
   assert-agent)
-    EXISTING=$(current_owner)
-    if [ -n "$EXISTING" ] && [ "$EXISTING" != "$OWNER" ]; then
-      if is_fresh; then echo "The user is controlling this agent's computer" >&2; exit 73; fi
-      rm -f "$LEASE"
-    fi
+    assert_available "$LEASE"
+    assert_available "${BOTS_ROOT}/$DESKTOP_KEY/human-control"
     ;;
   acquire)
-    EXISTING=$(current_owner)
+    EXISTING=$(current_owner "$LEASE")
     if [ "$EXISTING" = "$OWNER" ]; then touch "$LEASE"; exit 0; fi
     # The refusal names the holder: "busy" is not something a caller can act on
     # and "held by <owner>" is — the owner is the task id a computerUse
     # dispatch leased the desktop under.
-    if [ -n "$EXISTING" ] && is_fresh; then echo "This computer's control lease is held by $EXISTING" >&2; exit 73; fi
+    if [ -n "$EXISTING" ] && is_fresh "$LEASE"; then echo "This Computer's control lease is held by $EXISTING" >&2; exit 73; fi
     TMP=$(mktemp "$BOT/human-control.XXXXXX")
     printf '%s\n' "$OWNER" > "$TMP"
     chmod 600 "$TMP"
     mv "$TMP" "$LEASE"
     ;;
   renew)
-    [ "$(current_owner)" = "$OWNER" ] || { echo "Human control lease owner changed" >&2; exit 73; }
+    [ "$(current_owner "$LEASE")" = "$OWNER" ] || { echo "Human control lease owner changed" >&2; exit 73; }
     touch "$LEASE"
     ;;
   release)
-    if [ "$(current_owner)" = "$OWNER" ]; then rm -f "$LEASE"; fi
+    if [ "$(current_owner "$LEASE")" = "$OWNER" ]; then rm -f "$LEASE"; fi
     ;;
   *) echo "unknown control action" >&2; exit 64;;
 esac

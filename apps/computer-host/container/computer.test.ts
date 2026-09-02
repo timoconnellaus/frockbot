@@ -1,4 +1,14 @@
 import { createHash } from "node:crypto";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  rm,
+  utimes,
+  writeFile as writeLocalFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
   COMPUTER_HOST_ROUTES,
@@ -19,6 +29,8 @@ import {
 import {
   BOTS_ROOT,
   CONTROL_SCRIPT,
+  controlScript,
+  DESKTOP_GUI_LEASE_KEY,
   DESKTOP_SERVICE,
   ENSURE_AGENT_SCRIPT,
   NO_SLOTS_MARKER,
@@ -1119,7 +1131,7 @@ describe("files", () => {
 });
 
 describe("control", () => {
-  test("acquires a lease through the on-Sprite control script", async () => {
+  test("a human acquire uses the User-wide desktop lease key", async () => {
     const { host, sprite } = provisioned();
     const result = decodeComputerHostControlResultV1(
       await (
@@ -1129,6 +1141,7 @@ describe("control", () => {
             action: "acquire",
             ownerId: "owner-1",
             maxAgeSeconds: 90,
+            scope: "desktop-gui",
           }),
         )
       ).json(),
@@ -1136,7 +1149,140 @@ describe("control", () => {
     expect(result.action).toBe("acquire");
     expect(result.expiresAt).toBe("2026-08-31T00:01:30.000Z");
     expect(sprite.commands.at(-1)?.stdin).toContain(CONTROL_SCRIPT);
+    expect(sprite.commands.at(-1)?.stdin).toContain(
+      `'${DESKTOP_GUI_LEASE_KEY}'`,
+    );
     expect(sprite.commands.at(-1)?.stdin).toContain("'owner-1'");
+  });
+
+  test("Bot B's guarded exec is refused by Bot A's User-wide lease until release", async () => {
+    const { host, sprite } = provisioned();
+    sprite.scripts = [
+      { exitCode: 0 },
+      {
+        stderr: ["This Computer's control lease is held by human-session-a"],
+        exitCode: 73,
+      },
+      { exitCode: 0 },
+      { stdout: ["released"], exitCode: 0 },
+    ];
+    await host.handle(
+      request(
+        {
+          kind: "control",
+          action: "acquire",
+          ownerId: "human-session-a",
+          maxAgeSeconds: 90,
+          scope: "desktop-gui",
+        },
+        { tenant: { botId: "bot-a" } },
+      ),
+    );
+    const botBKey = `bot-b-${digest("bot-b").slice(0, 12)}`;
+    const guarded = `${CONTROL_SCRIPT} assert-agent '${botBKey}' '${DESKTOP_GUI_LEASE_KEY}' 'agent-b' 90\nprintf guarded`;
+    const refused = decodeComputerHostExecResultV1(
+      await (
+        await host.handle(
+          request(exec({ script: guarded }), {
+            tenant: { botId: "bot-b" },
+          }),
+        )
+      ).json(),
+    );
+    expect(refused.exitCode).toBe(73);
+    expect(Buffer.from(refused.stderrBase64, "base64").toString()).toContain(
+      "human-session-a",
+    );
+
+    await host.handle(
+      request(
+        {
+          kind: "control",
+          action: "release",
+          ownerId: "human-session-a",
+          maxAgeSeconds: 90,
+          scope: "desktop-gui",
+        },
+        { tenant: { botId: "bot-a" } },
+      ),
+    );
+    const released = decodeComputerHostExecResultV1(
+      await (
+        await host.handle(
+          request(exec({ script: guarded }), {
+            tenant: { botId: "bot-b" },
+          }),
+        )
+      ).json(),
+    );
+    expect(released.exitCode).toBe(0);
+    expect(Buffer.from(released.stdoutBase64, "base64").toString()).toBe(
+      "released",
+    );
+  });
+
+  test("a stale User-wide lease no longer refuses a guarded command", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "frockbot-host-control-"));
+    const runtimeRoot = join(directory, "runtime");
+    const scriptPath = join(directory, "control.sh");
+    const statPath = join(directory, "stat");
+    const desktopLeaseRoot = join(runtimeRoot, "bots", DESKTOP_GUI_LEASE_KEY);
+    const desktopLease = join(desktopLeaseRoot, "human-control");
+    try {
+      await mkdir(desktopLeaseRoot, { recursive: true });
+      await writeLocalFile(
+        scriptPath,
+        controlScript.replaceAll(RUNTIME_ROOT, runtimeRoot),
+      );
+      await writeLocalFile(
+        statPath,
+        [
+          "#!/usr/bin/env bash",
+          'if /usr/bin/stat -f %m / >/dev/null 2>&1; then exec /usr/bin/stat -f %m "${@: -1}"; fi',
+          'exec /usr/bin/stat -c %Y "${@: -1}"',
+          "",
+        ].join("\n"),
+      );
+      await chmod(statPath, 0o700);
+      await writeLocalFile(desktopLease, "human-session-stale\n");
+
+      const assert = async () => {
+        const child = Bun.spawn(
+          [
+            "bash",
+            scriptPath,
+            "--locked",
+            "assert-agent",
+            "bot-b-key",
+            DESKTOP_GUI_LEASE_KEY,
+            "agent-b",
+            "90",
+          ],
+          {
+            env: {
+              ...process.env,
+              PATH: `${directory}:${process.env.PATH ?? ""}`,
+            },
+            stdout: "pipe",
+            stderr: "pipe",
+          },
+        );
+        const [exitCode, stderr] = await Promise.all([
+          child.exited,
+          new Response(child.stderr).text(),
+        ]);
+        return { exitCode, stderr };
+      };
+
+      const fresh = await assert();
+      expect(fresh.exitCode).toBe(73);
+      expect(fresh.stderr).toContain("human-session-stale");
+      const expiredAt = new Date(Date.now() - 120_000);
+      await utimes(desktopLease, expiredAt, expiredAt);
+      expect((await assert()).exitCode).toBe(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   test("a lease held by a human is a declared conflict", async () => {
@@ -1171,6 +1317,7 @@ describe("control", () => {
             action: "release",
             ownerId: "owner-1",
             maxAgeSeconds: 90,
+            scope: "desktop-gui",
           }),
         )
       ).json(),

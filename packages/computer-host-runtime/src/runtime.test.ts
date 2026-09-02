@@ -39,6 +39,7 @@ import {
   computerSpriteNameV1,
   CONTROL_SCRIPT,
   DATA_ROOT,
+  DESKTOP_GUI_LEASE_KEY,
   ENSURE_AGENT_SCRIPT,
   HOME_ROOT,
   PROVISION_LOCK,
@@ -100,7 +101,11 @@ async function runControl(
   owner: string,
   maxAge = "90",
 ): Promise<{ exitCode: number; stderr: string }> {
-  const child = Bun.spawn([scriptPath, action, key, owner, maxAge], {
+  const args =
+    action === "assert-agent"
+      ? [scriptPath, action, key, DESKTOP_GUI_LEASE_KEY, owner, maxAge]
+      : [scriptPath, action, key, owner, maxAge];
+  const child = Bun.spawn(args, {
     env: {
       ...process.env,
       PATH: `${dirname(scriptPath)}:${process.env.PATH ?? ""}`,
@@ -525,6 +530,36 @@ describe("installed shell scripts", () => {
         (await runControl(scriptPath, "assert-agent", key, "agent-runtime"))
           .exitCode,
       ).toBe(0);
+
+      expect(
+        (
+          await runControl(
+            scriptPath,
+            "acquire",
+            DESKTOP_GUI_LEASE_KEY,
+            "human-session",
+          )
+        ).exitCode,
+      ).toBe(0);
+      const fenced = await runControl(
+        scriptPath,
+        "assert-agent",
+        key,
+        "agent-runtime",
+      );
+      expect(fenced.exitCode).toBe(73);
+      expect(fenced.stderr).toContain("human-session");
+      const desktopLease = join(
+        runtimeRoot,
+        "bots",
+        DESKTOP_GUI_LEASE_KEY,
+        "human-control",
+      );
+      await utimes(desktopLease, expiredAt, expiredAt);
+      expect(
+        (await runControl(scriptPath, "assert-agent", key, "agent-runtime"))
+          .exitCode,
+      ).toBe(0);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -676,6 +711,25 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
           slot === 3 ? 5 : undefined,
         );
       }
+
+      const ensured = await run("newcomer");
+
+      expect(ensured.exitCode).toBe(75);
+      expect(existsSync(join(runtimeRoot, "bots/tenant-003/slot"))).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("a fresh User-wide desktop lease keeps every idle display", async () => {
+    const { directory, runtimeRoot, run } = await installEnsureScript();
+    try {
+      for (let slot = 0; slot < 100; slot += 1) {
+        await seedTenant(runtimeRoot, slot, SLOT_IDLE_SECONDS + 600);
+      }
+      const leaseRoot = join(runtimeRoot, "bots", DESKTOP_GUI_LEASE_KEY);
+      await mkdir(leaseRoot, { recursive: true });
+      await writeFile(join(leaseRoot, "human-control"), "human-session\n");
 
       const ensured = await run("newcomer");
 
