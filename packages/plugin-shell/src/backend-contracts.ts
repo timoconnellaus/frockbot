@@ -8,6 +8,7 @@ import {
 import {
   decodeBotSettingsViewV1,
   isPublicIdentifier,
+  migrateStoredBotSettingsV1,
   type BotSettingsViewV1,
 } from "@frockbot/configuration-core";
 
@@ -36,7 +37,8 @@ export function decodeRunIdV1(value: unknown): string {
 export const storedRunCodecV1: StoredRunCodecV1<BotSettingsViewV1> =
   createStoredRunCodecV1<BotSettingsViewV1>({
     decodeRunId: decodeRunIdV1,
-    decodeConfigurationSnapshot: decodeBotSettingsViewV1,
+    decodeConfigurationSnapshot: (stored) =>
+      decodeBotSettingsViewV1(migrateStoredBotSettingsV1(stored)),
   });
 
 export function requireStoredRunV1(input: unknown): StoredRun {

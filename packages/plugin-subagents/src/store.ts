@@ -22,6 +22,7 @@ import {
   decodeTaskRecordV1,
   isTaskIdV1,
   isTerminalTaskStatusV1,
+  migrateStoredTaskRecordV1,
   SubagentDecodeError,
   TASK_CONCURRENCY_PER_BOT_V1,
   TASK_DEADLINE_MS_V1,
@@ -139,7 +140,10 @@ export class TaskStore {
       if (existing !== undefined) {
         // A resumed Turn re-executing the same tool call reads its own task
         // back rather than dispatching a second child.
-        return { status: "replayed", record: decodeTaskRecordV1(existing) };
+        return {
+          status: "replayed",
+          record: decodeStoredTaskRecordV1(existing),
+        };
       }
       const active = await transaction.list<unknown>({
         prefix: TASK_ACTIVE_PREFIX,
@@ -266,7 +270,7 @@ export class TaskStore {
     const holder = await transaction.get<unknown>(taskKeyV1(lease.taskId));
     if (holder === undefined) return undefined;
     try {
-      if (isTerminalTaskStatusV1(decodeTaskRecordV1(holder).status)) {
+      if (isTerminalTaskStatusV1(decodeStoredTaskRecordV1(holder).status)) {
         return undefined;
       }
     } catch {
@@ -596,7 +600,7 @@ export class TaskStore {
     if (!isTaskIdV1(taskId)) throw new TaskNotFoundError(String(taskId));
     const stored = await reads.get<unknown>(taskKeyV1(taskId));
     if (stored === undefined) throw new TaskNotFoundError(taskId);
-    return decodeTaskRecordV1(stored);
+    return decodeStoredTaskRecordV1(stored);
   }
 
   async read(taskId: string): Promise<TaskRecordV1> {
@@ -671,10 +675,14 @@ export class TaskStore {
       // `task:` is a prefix of `task-active:` in neither direction — the
       // separator differs — but list is a byte-range scan, so be exact.
       if (!key.startsWith(TASK_PREFIX)) continue;
-      records.push(decodeTaskRecordV1(value));
+      records.push(decodeStoredTaskRecordV1(value));
     }
     return records;
   }
+}
+
+function decodeStoredTaskRecordV1(stored: unknown): TaskRecordV1 {
+  return decodeTaskRecordV1(migrateStoredTaskRecordV1(stored));
 }
 
 /**

@@ -24,6 +24,7 @@ These rules govern production features and architecture. Treat them as invariant
 - The Bot's Durable Object is the authority for everything Bot-scoped: command admission, the append-only event log, the resumable execution cursor, idempotency records, cancellation, serialization, durable scheduling, Routines, and the pinned Composition of every admitted Turn.
 - The User's Durable Object is the authority for everything User-scoped: Package availability, Connections, credentials, the Computer assignment, User settings, quotas, and the generation records of User and Project Memory roots.
 - The Workspace and its object-storage twin are the only durable state outside a Durable Object. They hold files, never authority: a Durable Object records every intent, effect, and generation that concerns them, and the rules under Computer and Workspace and Memory govern their reconciliation. Immutable content-addressed Package artifacts are durable content, not state: addressed by hash, never mutated, and holding no authority.
+- Durable state is migrated forward, never honoured backward. A stored record of an older shape is migrated to the current shape by a versioned, tested migration at the seam that reads it, and the migrated record is written back on the next write; a field that belonged to a removed feature is dropped by that migration, never read as the feature. A feature is never kept for compatibility: removing one removes its surfaces and code, and only the migration of its records remains.
 - A Bot's conversational Turns run in its Bot Durable Object; each concurrent child Turn runs in a Subagent Durable Object of the same Bot that holds no authority — the Bot Durable Object admits it, pins its Composition, and records its lifecycle and terminal result. When resident, the Durable Object constructs one application root from the Bot's durable Composition. The root and its Plugins are ephemeral projections of durable state, not authorities that must remain resident.
 - Gateways, application Workers, and Dynamic Workers route commands, serve immutable artifacts, or execute Package code loaded for a Bot. They own no Agent loop and no durable state.
 - Admit input durably before acknowledging it.
@@ -164,6 +165,7 @@ Add automated checks for constitutional rules whenever they can be enforced mech
 
 - admitted work survives client shutdown and Durable Object restart;
 - a reconstructed Bot Durable Object remounts its pinned Composition and resumes from its durable cursor;
+- a durable record written by the previous released shape of every stored DTO decodes through its migration and round-trips to the current shape;
 - duplicate delivery does not duplicate effects;
 - cancellation is explicit and durable;
 - browser and native shells use the same backend execution path;

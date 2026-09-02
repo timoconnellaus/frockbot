@@ -1777,6 +1777,115 @@ function schemaVersion(value: Record<string, unknown>): void {
   }
 }
 
+function storedPlainRecordV1(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function storedDataValueV1(
+  value: Record<string, unknown>,
+  key: string,
+): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  return descriptor && "value" in descriptor ? descriptor.value : undefined;
+}
+
+function cloneStoredRecordV1(
+  value: Record<string, unknown>,
+  changes: Readonly<Record<string, unknown>>,
+  removed: readonly string[] = [],
+): Record<string, unknown> {
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const key of removed) delete descriptors[key];
+  for (const [key, next] of Object.entries(changes)) {
+    const descriptor = descriptors[key];
+    descriptors[key] =
+      descriptor && "value" in descriptor
+        ? { ...descriptor, value: next }
+        : {
+            configurable: true,
+            enumerable: true,
+            value: next,
+            writable: true,
+          };
+  }
+  return Object.create(Object.getPrototypeOf(value), descriptors) as Record<
+    string,
+    unknown
+  >;
+}
+
+const PRE_ACCOUNT_WIDE_USER_FIELDS_V1 = [
+  "newBotModelTemplate",
+  "newBotModelTemplateSource",
+] as const;
+const PRE_ACCOUNT_WIDE_CONNECTION_METADATA_FIELDS_V1 = [
+  "dependentAssignments",
+] as const;
+
+/**
+ * Migrates one raw User settings record across known durable shapes before the
+ * current exact-field decoder sees it. Commit 1571b62 removed the model
+ * template and commit d6730ad removed the Connection dependency ledger along
+ * with the Assignment feature; migration drops those fields without
+ * interpreting them.
+ */
+export function migrateStoredUserSettingsV1(stored: unknown): unknown {
+  const settings = storedPlainRecordV1(stored);
+  if (!settings || storedDataValueV1(settings, "schemaVersion") !== 1) {
+    return stored;
+  }
+
+  let changed = false;
+  const removedSettingsFields = PRE_ACCOUNT_WIDE_USER_FIELDS_V1.filter((key) =>
+    Object.hasOwn(settings, key),
+  );
+  changed ||= removedSettingsFields.length > 0;
+
+  const storedConnections = storedDataValueV1(settings, "connections");
+  let connections = storedConnections;
+  if (Array.isArray(storedConnections)) {
+    let connectionsChanged = false;
+    const nextConnections = storedConnections.map((storedConnection) => {
+      const connection = storedPlainRecordV1(storedConnection);
+      if (!connection) return storedConnection;
+      const storedMetadata = storedDataValueV1(connection, "safeMetadata");
+      const metadata = storedPlainRecordV1(storedMetadata);
+      if (!metadata) return storedConnection;
+      const removedMetadataFields =
+        PRE_ACCOUNT_WIDE_CONNECTION_METADATA_FIELDS_V1.filter((key) =>
+          Object.hasOwn(metadata, key),
+        );
+      if (removedMetadataFields.length === 0) return storedConnection;
+      connectionsChanged = true;
+      const safeMetadata = cloneStoredRecordV1(
+        metadata,
+        {},
+        removedMetadataFields,
+      );
+      return cloneStoredRecordV1(connection, { safeMetadata });
+    });
+    if (connectionsChanged) {
+      changed = true;
+      connections = nextConnections;
+    }
+  }
+
+  if (!changed) return stored;
+  return cloneStoredRecordV1(
+    settings,
+    connections === storedConnections ? {} : { connections },
+    removedSettingsFields,
+  );
+}
+
 export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
   const value = exactRecord(
     input,
@@ -1894,6 +2003,35 @@ export function decodeBotSettingsViewV1(input: unknown): BotSettingsViewV1 {
     notifications: notifications(value.notifications),
     packageValues: packageValueBags(value.packageValues),
   };
+}
+
+const PRE_ACCOUNT_WIDE_BOT_FIELDS_V1 = [
+  "assignments",
+  "assignmentOperations",
+  "model",
+  // Some pre-release records used this name for the same removed feature.
+  "modelAssignment",
+] as const;
+
+/**
+ * Migrates one raw Bot settings record across known durable shapes before the
+ * current exact-field decoder sees it. The removed Assignment/model fields are
+ * discarded; their presence identifies the shape that predates packageValues.
+ */
+export function migrateStoredBotSettingsV1(stored: unknown): unknown {
+  const settings = storedPlainRecordV1(stored);
+  if (!settings || storedDataValueV1(settings, "schemaVersion") !== 1) {
+    return stored;
+  }
+  const removed = PRE_ACCOUNT_WIDE_BOT_FIELDS_V1.filter((key) =>
+    Object.hasOwn(settings, key),
+  );
+  if (removed.length === 0) return stored;
+  return cloneStoredRecordV1(
+    settings,
+    Object.hasOwn(settings, "packageValues") ? {} : { packageValues: {} },
+    removed,
+  );
 }
 
 export function decodeConfigurationViewV1(input: unknown): ConfigurationViewV1 {
