@@ -1,8 +1,10 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # The Bot is the primary path for changing its own setup
+
+Accepted by the owner on 2026-09-02.
 
 FrockBot will make conversation with a Bot the primary — and for most Users the only — way its setup changes: the Bot authors, installs, revises, and undoes its own Packages, Skills, and settings, immediately and without approval, and the User's whole share of the model is to connect accounts, chat, and say "undo". This follows DeepSeek Harness's experience (`docs/research/deepseek-harness-extension.md`) while closing the hole it leaves open: there, agent-authored host code runs with the process's full ambient authority and no durable record; here, every non-first-party Package runs in an isolate with only the Bot's own bindings, and every change is a recorded, revertible generation.
 

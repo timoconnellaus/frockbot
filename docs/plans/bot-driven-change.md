@@ -2,7 +2,7 @@
 
 ## Status
 
-proposed; ADR 0019 and the `AGENTS.md` amendment in this branch gate slices 1, 3, 4 (isolate half), and 5. Slice 2 is inside the current constitution and runs now.
+accepted 2026-09-02; ADR 0019 and the `AGENTS.md` amendment gate slices 1, 3, 4 (isolate half), and 5. Slice 2 is inside the current constitution and runs now.
 
 ## Intent
 
