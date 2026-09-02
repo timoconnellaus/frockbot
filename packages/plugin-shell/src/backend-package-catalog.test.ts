@@ -9,6 +9,11 @@ import {
   decodeCompositionGenerationV1,
   type CompositionGenerationV1,
 } from "@frockbot/kernel-composition/generation";
+import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
+import {
+  authorshipManifestKey,
+  type AuthoredManifestRecordV1,
+} from "@frockbot/plugin-authoring/records";
 import {
   createPackageCatalogHost,
   type BotPackageCatalogReader,
@@ -18,6 +23,8 @@ import {
 
 const CONTENT_HASH = "b".repeat(64);
 const MANIFEST_HASH = "a".repeat(64);
+const UI_CONTENT_HASH = "d".repeat(64);
+const UI_SIZE = 42;
 const CREATED_AT = "2026-09-02T00:00:00.000Z";
 
 const manifest = {
@@ -29,6 +36,16 @@ const manifest = {
   dependencies: {},
   contributions: {
     runtime: { entry: "./package.js", host: "bot-isolate" as const },
+    client: {
+      kind: "iframe" as const,
+      artifact: {
+        contentHash: UI_CONTENT_HASH,
+        size: UI_SIZE,
+        mediaType: "text/html" as const,
+        bundlerVersion: "frockbot-inline-html@1",
+      },
+      mounts: [{ slot: "frockbot.tool-result:track_parcel" }],
+    },
   },
   configuration: {
     settings: [],
@@ -37,7 +54,7 @@ const manifest = {
         id: "shipping-account",
         displayName: "Shipping account",
         allowMultiple: false,
-        authorization: { kind: "grant" as const },
+        authorization: { kind: "grant" as const, driverId: "shipping-oauth" },
         capabilities: ["track"],
       },
     ],
@@ -124,7 +141,9 @@ async function bootstrap(): Promise<CompositionGenerationV1> {
   });
 }
 
-async function fixture(options: { connected?: boolean } = {}) {
+async function fixture(
+  options: { connected?: boolean; uiAvailable?: boolean } = {},
+) {
   const log: string[] = [];
   const records = new Map<string, unknown>();
   const storage: PackageCatalogStorage = {
@@ -176,6 +195,8 @@ async function fixture(options: { connected?: boolean } = {}) {
       Promise.resolve(catalogId === entry.catalogId ? entry : undefined),
     readSource: () => Promise.resolve(undefined),
     headArtifact: () => Promise.resolve({ size: 512 }),
+    headUiArtifact: () =>
+      Promise.resolve(options.uiAvailable === false ? undefined : { size: 42 }),
   };
   let user: UserSettingsViewV1 = {
     schemaVersion: 1,
@@ -280,7 +301,7 @@ describe("Bot Package Catalog host", () => {
     });
   });
 
-  test("records intent before the User effect, appends a summary generation, and replays", async () => {
+  test("persists the iframe manifest before the User effect, appends a summary generation, and replays", async () => {
     const test = await fixture();
     const request = {
       effectId: "catalog-effect-1",
@@ -325,6 +346,36 @@ describe("Bot Package Catalog host", () => {
     expect(first).toMatchObject({
       missingConnectionTypes: ["shipping-account"],
     });
+    const stored = test.records.get(
+      authorshipManifestKey(MANIFEST_HASH),
+    ) as AuthoredManifestRecordV1;
+    expect(
+      decodeFrockBotManifest(stored.manifest).contributions.client,
+    ).toEqual(manifest.contributions.client);
+  });
+
+  test("refuses an install whose manifest-referenced iframe artifact was not published", async () => {
+    const test = await fixture({ uiAvailable: false });
+
+    await expect(
+      test.host.change({
+        effectId: "catalog-missing-ui",
+        sessionId: "user-1:bot-1",
+        position: { turn: 1, step: 1 },
+        change: {
+          action: "install",
+          input: {
+            catalogId: "parcel-tracking",
+            contentHash: CONTENT_HASH,
+          },
+        },
+      }),
+    ).resolves.toMatchObject({
+      status: "refused",
+      reason: expect.stringContaining("iframe artifact"),
+    });
+    expect(test.commands).toHaveLength(0);
+    expect(test.proposed).toHaveLength(0);
   });
 
   test("hash mismatch and required-core removal are refused before User state changes", async () => {

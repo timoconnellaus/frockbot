@@ -106,7 +106,9 @@ export interface CatalogSkillV1 {
  * The manifest is decoded with the same kernel decoder used for a stored
  * Bot-authored manifest. `sourceHash` is optional because source publication
  * is optional; when present it addresses the retained `.ts` object in the
- * shared Package artifact store.
+ * shared Package artifact store. A sandboxed page needs no duplicate bundle
+ * field: its canonical artifact descriptor is the decoded manifest's iframe
+ * client Contribution.
  */
 export interface CatalogPackageBundleV1 {
   contentHash: string;
@@ -612,6 +614,11 @@ export function catalogPackageArtifactKeyV1(contentHash: string): string {
 
 export function catalogPackageSourceKeyV1(sourceHash: string): string {
   return `packages/${decodeCatalogContentHashV1(sourceHash)}.ts`;
+}
+
+/** Sandboxed UI artifacts share the authored Package artifact layout too. */
+export function catalogPackageUiArtifactKeyV1(contentHash: string): string {
+  return `packages/${decodeCatalogContentHashV1(contentHash)}.html`;
 }
 
 /**

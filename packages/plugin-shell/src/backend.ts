@@ -17,6 +17,7 @@ import {
 import {
   decodeFrockBotManifest,
   isClientIframeContribution,
+  type FrockBotManifest,
 } from "@frockbot/kernel-composition";
 import type { Plugin } from "cordis";
 import {
@@ -333,7 +334,10 @@ import {
   type McpMountOutcomeReportV1,
   type McpServerStatusViewV1,
 } from "@frockbot/plugin-mcp/records";
-import { projectCompositionGenerationV1 } from "./composition-views.js";
+import {
+  projectCompositionGenerationV1,
+  projectPackageIframeCompositionV1,
+} from "./composition-views.js";
 import { executeBotTurn, executeDirectToolTurn } from "./backend-runner.js";
 import { shellTerminalRecordsV1 } from "./terminal-records.js";
 import {
@@ -2056,6 +2060,28 @@ export class ShellBotBackendContribution {
     return { schemaVersion: 1, skills: entries };
   }
 
+  /** The one durable manifest lookup used by mounts, commands, and UI views. */
+  private async readCompositionMemberManifest(
+    member: CompositionMemberV1,
+  ): Promise<FrockBotManifest | undefined> {
+    const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
+      authorshipManifestKey(member.manifestHash),
+    );
+    return stored ? decodeFrockBotManifest(stored.manifest) : undefined;
+  }
+
+  private async requireCompositionMemberManifest(
+    member: CompositionMemberV1,
+  ): Promise<FrockBotManifest> {
+    const manifest = await this.readCompositionMemberManifest(member);
+    if (!manifest) {
+      throw new Error(
+        `package "${member.packageId}" manifest "${member.manifestHash}" is unavailable`,
+      );
+    }
+    return manifest;
+  }
+
   /** Active fail-closed Composition projected as inert iframe metadata. */
   async listPackageUi(
     identity: BotIdentity,
@@ -2066,35 +2092,12 @@ export class ShellBotBackendContribution {
       current.status === "active" || current.status === "superseded"
         ? current
         : await this.authority.composition.lastKnownGood();
-    const contributions: PackageIframeCompositionV1["contributions"] = [];
-    for (const member of generation.members) {
-      if (member.provenance.kind === "first-party") continue;
-      const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
-        authorshipManifestKey(member.manifestHash),
-      );
-      if (!stored) continue;
-      const manifest = decodeFrockBotManifest(stored.manifest);
-      const client = manifest.contributions.client;
-      if (!client || !isClientIframeContribution(client)) continue;
-      contributions.push({
-        packageId: member.packageId,
-        displayName: manifest.displayName,
-        provenance:
-          member.provenance.kind === "bot" ? "Bot-authored" : "User-installed",
-        artifact: { ...client.artifact },
-        mounts: client.mounts.map((mount) => ({ ...mount })),
-        declaredTools: (manifest.tools ?? []).map((tool) => tool.name),
-      });
-    }
-    contributions.sort((left, right) =>
-      left.packageId.localeCompare(right.packageId),
-    );
-    return {
-      schemaVersion: 1,
+    return projectPackageIframeCompositionV1({
       botId: identity.botId,
-      generationId: generation.generationId,
-      contributions,
-    };
+      generation,
+      readMemberManifest: (member) =>
+        this.readCompositionMemberManifest(member),
+    });
   }
 
   /**
@@ -2428,11 +2431,7 @@ export class ShellBotBackendContribution {
         );
         if (!member)
           throw new Error("Package UI command names an unavailable Package");
-        const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
-          authorshipManifestKey(member.manifestHash),
-        );
-        if (!stored) throw new Error("Package UI manifest is unavailable");
-        const manifest = decodeFrockBotManifest(stored.manifest);
+        const manifest = await this.requireCompositionMemberManifest(member);
         const client = manifest.contributions.client;
         if (
           !client ||
@@ -2583,17 +2582,7 @@ export class ShellBotBackendContribution {
       turnId: turn.runId,
       loader,
       artifacts: createR2PackageArtifactStore(artifacts),
-      manifestFor: async (member) => {
-        const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
-          authorshipManifestKey(member.manifestHash),
-        );
-        if (!stored) {
-          throw new Error(
-            `package "${member.packageId}" manifest "${member.manifestHash}" is unavailable`,
-          );
-        }
-        return stored.manifest;
-      },
+      manifestFor: (member) => this.requireCompositionMemberManifest(member),
       capabilitiesFor: (member) =>
         mintCapabilities({
           props: {
