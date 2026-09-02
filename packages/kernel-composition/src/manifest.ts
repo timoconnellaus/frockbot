@@ -5,10 +5,10 @@ export type ManifestContributionKind =
   "backend" | "runtime" | "client" | "desktop" | "mobile";
 
 /**
- * Every execution host a Contribution can be mounted in. `bot-isolate` is not
- * manifest-declared: it is derived from a Composition member carrying an
- * immutable artifact, so a Package's provenance — not its manifest — decides
- * whether it runs in the kernel isolate or a loaded Dynamic Worker.
+ * Every execution host a Contribution can be mounted in. A Bot-authored
+ * manifest declares `bot-isolate`, but provenance and an immutable artifact
+ * still decide whether the host accepts it; a manifest never grants itself
+ * that execution authority.
  */
 export type ContributionKind = ManifestContributionKind | "bot-isolate";
 
@@ -19,6 +19,15 @@ export interface BackendContribution {
 
 export interface RuntimeContribution {
   entry: string;
+  /** Present only on a Bot-authored manifest; provenance still decides host authority. */
+  host?: "bot-isolate";
+}
+
+/** A Bot-authored manifest's durable declaration; isolate health supplies details at mount. */
+export interface ManifestToolDeclaration {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
 }
 
 export interface ClientMount {
@@ -139,6 +148,8 @@ export interface FrockBotManifest {
   };
   permissions: string[];
   configuration?: PackageConfiguration;
+  /** Present exactly when `contributions.runtime.host` is `bot-isolate`. */
+  tools?: ManifestToolDeclaration[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -157,6 +168,69 @@ function exactFields(
   if (unknown !== undefined) {
     throw new Error(`${boundary} has unknown field "${String(unknown)}"`);
   }
+}
+
+function validateManifestJson(value: unknown, label: string, depth = 0): void {
+  if (depth > 16) throw new Error(`${label} is too deeply nested`);
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) validateManifestJson(entry, label, depth + 1);
+    return;
+  }
+  if (!isRecord(value)) throw new Error(`${label} must contain only JSON`);
+  for (const entry of Object.values(value)) {
+    validateManifestJson(entry, label, depth + 1);
+  }
+}
+
+function decodeManifestTools(
+  value: unknown,
+): ManifestToolDeclaration[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 64) {
+    throw new Error("manifest tools must be a non-empty bounded array");
+  }
+  const tools = value.map((candidate, index) => {
+    if (!isRecord(candidate)) {
+      throw new Error(`manifest tools[${index}] must be an object`);
+    }
+    exactFields(
+      candidate,
+      ["name", "description", "inputSchema"],
+      `manifest tools[${index}]`,
+    );
+    const name = requiredString(candidate, "name");
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(name)) {
+      throw new Error(`manifest tools[${index}] name is invalid`);
+    }
+    const description = requiredString(candidate, "description");
+    if (description.length > 1_024) {
+      throw new Error(`manifest tools[${index}] description is too long`);
+    }
+    if (!isRecord(candidate.inputSchema)) {
+      throw new Error(`manifest tools[${index}] inputSchema must be an object`);
+    }
+    validateManifestJson(
+      candidate.inputSchema,
+      `manifest tools[${index}] inputSchema`,
+    );
+    return {
+      name,
+      description,
+      inputSchema: structuredClone(candidate.inputSchema),
+    };
+  });
+  if (new Set(tools.map((tool) => tool.name)).size !== tools.length) {
+    throw new Error("manifest tools contains duplicate names");
+  }
+  return tools;
 }
 
 function requiredString(record: Record<string, unknown>, key: string): string {
@@ -348,11 +422,16 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     }
     exactFields(
       value.contributions.runtime,
-      ["entry"],
+      ["entry", ...(isV3OrLater(value) ? ["host"] : [])],
       "manifest runtime contribution",
     );
+    const host = value.contributions.runtime.host;
+    if (host !== undefined && host !== "bot-isolate") {
+      throw new Error("manifest runtime host is invalid");
+    }
     contributions.runtime = {
       entry: relativeEntry(value.contributions.runtime, "entry"),
+      ...(host === "bot-isolate" ? { host } : {}),
     };
   }
   if (value.contributions.client !== undefined) {
@@ -1147,20 +1226,36 @@ function decodeConfiguration(
 
 function decodeV3(value: Record<string, unknown>): FrockBotManifest {
   const base = decodeV2(value);
+  const tools = decodeManifestTools(value.tools);
+  const botIsolate = base.contributions.runtime?.host === "bot-isolate";
+  if (botIsolate !== (tools !== undefined)) {
+    throw new Error(
+      "manifest bot-isolate runtime and tools declaration must appear together",
+    );
+  }
   return {
     ...base,
     schemaVersion: 3,
     configuration: decodeConfiguration(value.configuration, false),
+    ...(tools ? { tools } : {}),
   };
 }
 
 /** v4 is v3 plus the Capability admission ceiling, and nothing else. */
 function decodeV4(value: Record<string, unknown>): FrockBotManifest {
   const base = decodeV2(value);
+  const tools = decodeManifestTools(value.tools);
+  const botIsolate = base.contributions.runtime?.host === "bot-isolate";
+  if (botIsolate !== (tools !== undefined)) {
+    throw new Error(
+      "manifest bot-isolate runtime and tools declaration must appear together",
+    );
+  }
   return {
     ...base,
     schemaVersion: 4,
     configuration: decodeConfiguration(value.configuration, true),
+    ...(tools ? { tools } : {}),
   };
 }
 
@@ -1198,6 +1293,7 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
         "dependencies",
         "contributions",
         ...(isV3OrLater(value) ? ["configuration"] : []),
+        ...(isV3OrLater(value) ? ["tools"] : []),
       ],
       "manifest",
     );

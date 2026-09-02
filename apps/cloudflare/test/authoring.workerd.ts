@@ -57,11 +57,13 @@ function authorInput(overrides: Record<string, unknown> = {}) {
   return {
     packageId: "greeter",
     displayName: "Greeter",
-    tool: {
-      name: "greet",
-      description: "Greets by name",
-      inputSchema: { type: "object" },
-    },
+    tools: [
+      {
+        name: "greet",
+        description: "Greets by name",
+        inputSchema: { type: "object" },
+      },
+    ],
     source: GREETER_SOURCE,
     ...overrides,
   };
@@ -105,6 +107,13 @@ describe("a Bot authoring a Package", () => {
     );
     expect(artifacts[0]!.r2Key).toBe(
       `packages/${artifacts[0]!.contentHash}.mjs`,
+    );
+    expect(artifacts[0]!.sourceR2Key).toBe(
+      `packages/${artifacts[0]!.sourceHash}.ts`,
+    );
+    const generation = await stub.currentGeneration();
+    expect(await stub.memberSource(generation.generationId, "greeter")).toBe(
+      GREETER_SOURCE,
     );
     expect(await stub.sessionEventTypes()).toEqual(
       expect.arrayContaining(["package/author-intent", "package/authored"]),
@@ -197,6 +206,122 @@ describe("a Bot authoring a Package", () => {
     expect(await evicted.bundlerCalls()).toBe(1);
     expect(await evicted.artifactRecords()).toHaveLength(1);
     expect(replay.text).toBe(first.text);
+  });
+
+  test("package_undo records a Bot-origin pending revert and replay does not append another generation", async () => {
+    const id = suffix();
+    const stub = probe(`undo-${id}`);
+    const before = await stub.currentGeneration();
+    await stub.runTurn({
+      runId: `run-author-${id}`,
+      userId: `user-${id}`,
+      botId: `bot-${id}`,
+      tool: "package_author",
+      input: authorInput(),
+    });
+
+    const undo = await stub.runTurn({
+      runId: `run-undo-${id}`,
+      userId: `user-${id}`,
+      botId: `bot-${id}`,
+      tool: "package_undo",
+      input: {},
+    });
+    const reverted = await stub.currentGeneration();
+    const good = await stub.lastKnownGoodGeneration();
+    const replay = await stub.runTurn({
+      runId: `run-undo-${id}`,
+      userId: `user-${id}`,
+      botId: `bot-${id}`,
+      tool: "package_undo",
+      input: {},
+    });
+
+    expect(undo.text).toContain("ok:Package setup will return");
+    expect(replay.text).toBe(undo.text);
+    expect(reverted.status).toBe("pending");
+    expect(reverted.origin).toMatchObject({
+      kind: "revert",
+      revertsTo: before.generationId,
+      botId: `bot-${id}`,
+      runId: `run-undo-${id}`,
+    });
+    expect(reverted.members.map((member) => member.packageId)).toEqual([
+      "shell",
+    ]);
+    expect(good.generationId).not.toBe(reverted.generationId);
+    expect((await stub.currentGeneration()).generationId).toBe(
+      reverted.generationId,
+    );
+    expect(await stub.sessionEventTypes()).toEqual(
+      expect.arrayContaining(["package/undo-intent", "package/undo-recorded"]),
+    );
+  });
+
+  test("package_inspect_self returns the generated context and retained authored source", async () => {
+    const id = suffix();
+    const stub = probe(`inspect-${id}`);
+    await stub.runTurn({
+      runId: `run-author-${id}`,
+      userId: `user-${id}`,
+      botId: `bot-${id}`,
+      tool: "package_author",
+      input: authorInput(),
+    });
+
+    const inspected = await stub.runTurn({
+      runId: `run-inspect-${id}`,
+      userId: `user-${id}`,
+      botId: `bot-${id}`,
+      tool: "package_inspect_self",
+      input: {},
+    });
+    const view = JSON.parse(inspected.text.replace(/^ok:/, "")) as {
+      contextContract: string;
+      composition: {
+        members: Array<{
+          packageId: string;
+          declaredTools: string[];
+          source?: string;
+        }>;
+      };
+    };
+
+    expect(view.contextContract).toContain(
+      "interface BotPackageExecutionContextV1",
+    );
+    expect(view.composition.members).toContainEqual(
+      expect.objectContaining({
+        packageId: "greeter",
+        declaredTools: ["greet"],
+        source: GREETER_SOURCE,
+      }),
+    );
+  });
+
+  test("a declared collision is refused before quota or bundling", async () => {
+    const id = suffix();
+    const stub = probe(`collision-${id}`);
+
+    const turn = await stub.runTurn({
+      runId: `run-author-${id}`,
+      userId: `user-${id}`,
+      botId: `bot-${id}`,
+      tool: "package_author",
+      input: authorInput({
+        tools: [
+          {
+            name: "package_author",
+            description: "collides",
+            inputSchema: {},
+          },
+        ],
+      }),
+    });
+
+    expect(turn.text).toContain("already registered");
+    expect(await stub.bundlerCalls()).toBe(0);
+    expect(await stub.artifactRecords()).toHaveLength(0);
   });
 
   test("re-authoring the same packageId appends a version and supersedes it", async () => {
@@ -336,16 +461,14 @@ describe("a Bot authoring a Package", () => {
       input: {
         packageId: "summarizer",
         displayName: "Summarizer",
-        tool: {
-          name: "summarize",
-          description: "Summarizes",
-          inputSchema: { type: "object" },
-        },
+        tools: [
+          {
+            name: "summarize",
+            description: "Summarizes",
+            inputSchema: { type: "object" },
+          },
+        ],
         source: MODEL_ADAPTER_SOURCE,
-        model: {
-          providerId: "provider-foundation",
-          modelId: "deterministic-v1",
-        },
       },
     });
     const generation = await stub.currentGeneration();
@@ -402,16 +525,14 @@ describe("a Bot authoring a Package", () => {
       input: {
         packageId: "summarizer",
         displayName: "Summarizer",
-        tool: {
-          name: "summarize",
-          description: "Summarizes",
-          inputSchema: { type: "object" },
-        },
+        tools: [
+          {
+            name: "summarize",
+            description: "Summarizes",
+            inputSchema: { type: "object" },
+          },
+        ],
         source: MODEL_ADAPTER_SOURCE,
-        model: {
-          providerId: "provider-foundation",
-          modelId: "deterministic-v1",
-        },
       },
     });
 

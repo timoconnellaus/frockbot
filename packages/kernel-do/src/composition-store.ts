@@ -162,6 +162,8 @@ export class DurableCompositionStore implements CompositionStore {
     await assertCompositionArtifactSetHashV1(proposed);
     await this.materialize();
     await this.ctx.storage.transaction(async (transaction) => {
+      const bootstrap = await this.bootstrapGeneration(transaction);
+      this.assertRequiredCoreSet(bootstrap, proposed);
       const key = compositionGenerationKey(proposed.generationId);
       if ((await transaction.get<unknown>(key)) !== undefined) {
         throw new Error(
@@ -342,6 +344,7 @@ export class DurableCompositionStore implements CompositionStore {
   async revert(
     toGenerationId: string,
     origin: Extract<CompositionOriginV1, { kind: "revert" }>,
+    options: { createdAt?: string } = {},
   ): Promise<CompositionGenerationV1> {
     if (origin.kind !== "revert" || origin.revertsTo !== toGenerationId) {
       throw new Error("composition revert origin does not name its target");
@@ -356,7 +359,7 @@ export class DurableCompositionStore implements CompositionStore {
     if (!target) {
       throw new Error(`composition generation "${toGenerationId}" is unknown`);
     }
-    const createdAt = this.now().toISOString();
+    const createdAt = options.createdAt ?? this.now().toISOString();
     const generation = decodeCompositionGenerationV1({
       schemaVersion: 1,
       generationId: compositionGenerationIdV1(
@@ -370,6 +373,18 @@ export class DurableCompositionStore implements CompositionStore {
       members: target.members,
       status: "pending",
     });
+    const existing = await this.read(generation.generationId);
+    if (existing) {
+      if (
+        existing.artifactSetHash === generation.artifactSetHash &&
+        JSON.stringify(existing.origin) === JSON.stringify(origin)
+      ) {
+        return existing;
+      }
+      throw new Error(
+        `composition generation "${generation.generationId}" already exists for another operation`,
+      );
+    }
     await this.propose(generation, { pin: true });
     return generation;
   }
@@ -429,6 +444,39 @@ export class DurableCompositionStore implements CompositionStore {
       throw new Error("bot has no bootstrap Composition generation");
     }
     return decodeCompositionGenerationV1(stored);
+  }
+
+  /**
+   * Every first-party bootstrap member is required core. No proposal path may
+   * remove it or replace its provenance: callers can append generations, but
+   * they cannot turn reviewed kernel-resident Packages into authored code.
+   */
+  private assertRequiredCoreSet(
+    bootstrap: CompositionGenerationV1,
+    proposed: CompositionGenerationV1,
+  ): void {
+    for (const required of bootstrap.members.filter(
+      (member) => member.provenance.kind === "first-party",
+    )) {
+      const candidate = proposed.members.find(
+        (member) => member.packageId === required.packageId,
+      );
+      if (!candidate) {
+        throw new Error(
+          `composition generation "${proposed.generationId}" omits required first-party Package "${required.packageId}"`,
+        );
+      }
+      if (candidate.provenance.kind !== "first-party") {
+        throw new Error(
+          `composition generation "${proposed.generationId}" replaces required first-party Package "${required.packageId}" with ${candidate.provenance.kind} provenance`,
+        );
+      }
+      if (JSON.stringify(candidate) !== JSON.stringify(required)) {
+        throw new Error(
+          `composition generation "${proposed.generationId}" changes required first-party Package "${required.packageId}"`,
+        );
+      }
+    }
   }
 
   /**

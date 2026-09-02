@@ -349,6 +349,21 @@ export interface SessionEventMap {
     contentHash: string;
     generationId: string;
   };
+  /** Durable intent before a Bot-origin Composition revert is proposed. */
+  "package/undo-intent": {
+    turn: number;
+    step: number;
+    effectId: string;
+    requestedGenerationId?: string;
+  };
+  /** The new pending generation recorded by a Bot-origin revert. */
+  "package/undo-recorded": {
+    turn: number;
+    step: number;
+    effectId: string;
+    generationId: string;
+    targetGenerationId: string;
+  };
   /**
    * The Skills this Turn loaded as instructions, and the candidates it
    * refused. Constitution, Memory: "the session event log records exactly what
@@ -1200,6 +1215,41 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       eventString(event.version, "session event.version");
       eventString(event.contentHash, "session event.contentHash");
       eventString(event.generationId, "session event.generationId");
+      break;
+    case "package/undo-intent":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          ...(Object.hasOwn(event, "requestedGenerationId")
+            ? ["requestedGenerationId"]
+            : []),
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      if (event.requestedGenerationId !== undefined) {
+        eventString(
+          event.requestedGenerationId,
+          "session event.requestedGenerationId",
+        );
+      }
+      break;
+    case "package/undo-recorded":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "effectId", "generationId", "targetGenerationId"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      eventString(event.generationId, "session event.generationId");
+      eventString(event.targetGenerationId, "session event.targetGenerationId");
       break;
     case "skill/injected": {
       requireEventKeys(

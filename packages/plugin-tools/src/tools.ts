@@ -73,6 +73,10 @@ export class ToolRegistry extends Service implements ToolExecution {
     };
   }
 
+  registeredNames(): string[] {
+    return [...this.definitions.keys()].toSorted();
+  }
+
   schemas(admission: {
     turnType: TurnTypeV1;
     subagentRole?: string;

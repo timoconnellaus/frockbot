@@ -10,23 +10,26 @@ import {
 const VALID = {
   packageId: "weather-lookup",
   displayName: "Weather lookup",
-  tool: {
-    name: "weather_lookup",
-    description: "Looks up the weather",
-    inputSchema: { type: "object", properties: { city: { type: "string" } } },
-  },
+  tools: [
+    {
+      name: "weather_lookup",
+      description: "Looks up the weather",
+      inputSchema: {
+        type: "object",
+        properties: { city: { type: "string" } },
+      },
+    },
+  ],
   source: "export const tools = [];\nexport async function execute() {}\n",
 };
 
 describe("decodeAuthorPackageInputV1", () => {
-  test("accepts the exact v1 shape and the optional model Contribution", () => {
+  test("accepts the exact plural shape and canonicalizes the legacy singular shape", () => {
     expect(decodeAuthorPackageInputV1(VALID)).toEqual(VALID);
+    const { tools: _tools, ...rest } = VALID;
     expect(
-      decodeAuthorPackageInputV1({
-        ...VALID,
-        model: { providerId: "ollama-cloud", modelId: "qwen3-coder:480b" },
-      }).model,
-    ).toEqual({ providerId: "ollama-cloud", modelId: "qwen3-coder:480b" });
+      decodeAuthorPackageInputV1({ ...rest, tool: VALID.tools[0] }),
+    ).toEqual(VALID);
   });
 
   test.each([
@@ -37,16 +40,17 @@ describe("decodeAuthorPackageInputV1", () => {
     ["a one-character package id", { ...VALID, packageId: "a" }],
     [
       "a tool name with a dash",
-      { ...VALID, tool: { ...VALID.tool, name: "a-b" } },
+      { ...VALID, tools: [{ ...VALID.tools[0]!, name: "a-b" }] },
     ],
     ["an empty source", { ...VALID, source: "" }],
     [
       "a non-object input schema",
-      { ...VALID, tool: { ...VALID.tool, inputSchema: "object" } },
+      { ...VALID, tools: [{ ...VALID.tools[0]!, inputSchema: "object" }] },
     ],
+    ["a removed model declaration", { ...VALID, model: { providerId: "x" } }],
     [
-      "a partial model Contribution",
-      { ...VALID, model: { providerId: "ollama-cloud" } },
+      "duplicate tool names",
+      { ...VALID, tools: [VALID.tools[0], VALID.tools[0]] },
     ],
   ])("rejects %s", (_label, input) => {
     expect(() => decodeAuthorPackageInputV1(input)).toThrow();
@@ -98,40 +102,38 @@ describe("authoring identity", () => {
     expect(() => authoredVersionV1(0)).toThrow();
   });
 
-  test("the synthesized manifest declares only the isolate host", () => {
+  test("the synthesized manifest declares only the isolate host and its tools", () => {
     const manifest = authoredManifestV1({
       packageId: VALID.packageId,
       displayName: VALID.displayName,
       version: "0.0.1",
-      tool: VALID.tool,
-      model: { providerId: "ollama-cloud", modelId: "qwen3-coder:480b" },
+      tools: VALID.tools,
     });
     const contributions = manifest.contributions as Record<
       string,
       { host?: string; binding?: string }
     >;
-    expect(Object.keys(contributions).toSorted()).toEqual(["model", "runtime"]);
+    expect(Object.keys(contributions)).toEqual(["runtime"]);
     expect(contributions.runtime?.host).toBe("bot-isolate");
-    expect(contributions.model?.host).toBe("bot-isolate");
-    // A Bot-authored model adapter is a translation layer over a kernel
-    // binding, never a network client.
-    expect(contributions.model?.binding).toBe("capabilities.invokeModel");
+    expect(manifest.tools).toEqual(VALID.tools);
     expect(manifest.permissions).toEqual([]);
   });
 
-  test("the manifest hash moves when the declared model Contribution moves", () => {
+  test("the manifest moves when its declared tool set moves", () => {
     const base = authoredManifestV1({
       packageId: VALID.packageId,
       displayName: VALID.displayName,
       version: "0.0.1",
-      tool: VALID.tool,
+      tools: VALID.tools,
     });
     const withModel = authoredManifestV1({
       packageId: VALID.packageId,
       displayName: VALID.displayName,
       version: "0.0.1",
-      tool: VALID.tool,
-      model: { providerId: "ollama-cloud", modelId: "qwen3-coder:480b" },
+      tools: [
+        ...VALID.tools,
+        { name: "forecast", description: "Forecasts", inputSchema: {} },
+      ],
     });
     expect(JSON.stringify(base)).not.toBe(JSON.stringify(withModel));
   });

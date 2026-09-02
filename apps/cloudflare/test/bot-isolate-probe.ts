@@ -17,6 +17,7 @@ import {
   type CompositionGenerationV1,
   type CompositionMemberV1,
 } from "@frockbot/kernel-composition/generation";
+import { canonicalJson } from "@frockbot/kernel-composition/compiler";
 import type {
   BotIsolateLoader,
   BotIsolateWorkerCode,
@@ -114,6 +115,29 @@ export async function execute(tool, input, ctx) {
   }
 }
 `;
+
+const PROBE_PACKAGE_MANIFEST = {
+  schemaVersion: 3,
+  id: "bot-authored",
+  displayName: "Bot authored probe",
+  version: "0.0.1",
+  compatibility: { frockbot: ">=0.0.1" },
+  dependencies: {},
+  contributions: {
+    runtime: { entry: "./package.js", host: "bot-isolate" },
+  },
+  tools: [
+    "reverse_text",
+    "env_keys",
+    "leak_probe",
+    "reach_network",
+    "ask_authority",
+    "ask_bad_authority",
+    "call_model",
+    "list_capabilities",
+  ].map((name) => ({ name, description: name, inputSchema: {} })),
+  permissions: [],
+} as const;
 
 /** A deliberate syntax error: `prepare()` must fail with a diagnostic, not hang. */
 export const PROBE_BROKEN_SOURCE = `
@@ -257,7 +281,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
         packageId: "bot-authored",
         specifier: "@bot/authored",
         version: "0.0.1",
-        manifestHash: await sha256Hex("bot-authored"),
+        manifestHash: await sha256Hex(canonicalJson(PROBE_PACKAGE_MANIFEST)),
         provenance: {
           kind: "bot" as const,
           packageId: "bot-authored",
@@ -328,6 +352,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
             return module;
           },
         },
+        manifestFor: () => Promise.resolve(PROBE_PACKAGE_MANIFEST),
         capabilitiesFor: (member) =>
           exports.BotCapabilities({
             props: {

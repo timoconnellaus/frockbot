@@ -27,6 +27,7 @@ import type { LlmProvider, LlmStreamEvent } from "@frockbot/kernel-contracts";
 import {
   createPackageAuthoringHost,
   createR2AuthoringArtifactStore,
+  readAuthoredCompositionMemberSourceV1,
 } from "@frockbot/plugin-shell/backend-authoring";
 import { createShellCompositionHost } from "@frockbot/plugin-shell/backend-composition";
 import { executeBotTurn } from "@frockbot/plugin-shell/backend-runner";
@@ -39,11 +40,13 @@ import {
 } from "@frockbot/plugin-shell/backend-isolate";
 import {
   authorshipFailureKey,
+  authorshipManifestKey,
   AUTHORSHIP_FAILURE_PREFIX,
   ARTIFACT_PREFIX,
   createAuthoringRuntimePlugin,
   authoringManifest,
   type AuthoredArtifactRecordV1,
+  type AuthoredManifestRecordV1,
   type AuthoringFailureRecordV1,
   type PackageAuthoringHost,
 } from "@frockbot/plugin-authoring";
@@ -134,6 +137,7 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
   private turn: AuthoringProbeTurn | undefined;
   private lastPin: string | undefined;
   private loaderCalls = 0;
+  private currentToolNames: string[] = [];
 
   constructor(ctx: DurableObjectState, env: AuthoringProbeEnv) {
     super(ctx, env);
@@ -197,6 +201,7 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
       storage: {
         get: (key) => this.ctx.storage.get(key),
         put: (entries) => this.ctx.storage.put(entries),
+        list: (options) => this.ctx.storage.list(options),
       },
       composition: this.authority.composition,
       bundler: createCountingBundlerBinding(this.ctx.storage),
@@ -207,6 +212,8 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
       runId: turn.runId,
       turnId: turn.runId,
       compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+      currentToolNames: () => this.currentToolNames,
+      activationFailures: this.authority.compositionFailures,
     });
   }
 
@@ -243,6 +250,13 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
         turnId: turn.runId,
         loader: this.countingLoader(),
         artifacts: createR2PackageArtifactStore(this.env.APPLICATION_ARTIFACTS),
+        manifestFor: async (member) => {
+          const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
+            authorshipManifestKey(member.manifestHash),
+          );
+          if (!stored) throw new Error("stored authored manifest is missing");
+          return stored.manifest;
+        },
         capabilitiesFor: (member) =>
           exports.BotCapabilities({
             props: {
@@ -263,6 +277,7 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     const controller = new AbortController();
     const composition = await host.mount(generation, controller.signal);
     await composition.verify(controller.signal);
+    this.currentToolNames = composition.root.tools.registeredNames?.() ?? [];
     // Activation at the next admitted Turn: the pinned proposal becomes
     // active once it has mounted and verified.
     if (generation.status === "pending") {
@@ -308,6 +323,10 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     return await this.authority.composition.current();
   }
 
+  async lastKnownGoodGeneration(): Promise<CompositionGenerationV1> {
+    return await this.authority.composition.lastKnownGood();
+  }
+
   async generation(generationId: string): Promise<CompositionGenerationV1> {
     const generation = await this.authority.composition.read(generationId);
     if (!generation) throw new Error(`generation "${generationId}" is unknown`);
@@ -347,5 +366,21 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
       `packages/${contentHash}.mjs`,
     );
     return object ? await object.text() : undefined;
+  }
+
+  async memberSource(
+    generationId: string,
+    packageId: string,
+  ): Promise<string | undefined> {
+    const generation = await this.generation(generationId);
+    const member = generation.members.find(
+      (candidate) => candidate.packageId === packageId,
+    );
+    if (!member) return undefined;
+    return readAuthoredCompositionMemberSourceV1({
+      storage: { get: (key) => this.ctx.storage.get(key) },
+      artifacts: createR2AuthoringArtifactStore(this.env.APPLICATION_ARTIFACTS),
+      member,
+    });
   }
 }

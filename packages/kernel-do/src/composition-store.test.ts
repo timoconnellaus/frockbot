@@ -161,6 +161,89 @@ describe("Bot Durable Object Composition records", () => {
     await expect(store.propose(next)).rejects.toThrow("already exists");
   });
 
+  test("refuses proposals that remove or replace the first-party bootstrap core", async () => {
+    const storage = new MemoryStorage();
+    const store = createStore(storage);
+    const parent = await store.current();
+    const createdAt = "2026-09-01T00:00:00.000Z";
+
+    const omittedHash = await compositionArtifactSetHashV1([]);
+    await expect(
+      store.propose({
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, omittedHash),
+        artifactSetHash: omittedHash,
+        parentGenerationId: parent.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-1",
+          sessionId: "s",
+          turnId: "t",
+        },
+        members: [],
+        status: "pending",
+      }),
+    ).rejects.toThrow(/omits required first-party Package "shell"/);
+
+    const shadow: CompositionMemberV1 = {
+      ...authoredMember,
+      packageId: "shell",
+      specifier: "bot-authored:shell",
+      provenance: {
+        ...authoredMember.provenance,
+        packageId: "shell",
+      },
+    };
+    const replacedHash = await compositionArtifactSetHashV1([shadow]);
+    await expect(
+      store.propose({
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, replacedHash),
+        artifactSetHash: replacedHash,
+        parentGenerationId: parent.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-1",
+          sessionId: "s",
+          turnId: "t",
+        },
+        members: [shadow],
+        status: "pending",
+      }),
+    ).rejects.toThrow(
+      /replaces required first-party Package "shell" with bot provenance/,
+    );
+
+    const changedCore = {
+      ...parent.members[0]!,
+      version: "9.9.9",
+      provenance: {
+        ...parent.members[0]!.provenance,
+        version: "9.9.9",
+      },
+    };
+    const changedHash = await compositionArtifactSetHashV1([changedCore]);
+    await expect(
+      store.propose({
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, changedHash),
+        artifactSetHash: changedHash,
+        parentGenerationId: parent.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-1",
+          sessionId: "s",
+          turnId: "t",
+        },
+        members: [changedCore],
+        status: "pending",
+      }),
+    ).rejects.toThrow(/changes required first-party Package "shell"/);
+  });
+
   test("reverting records a new pending generation with the target's members", async () => {
     const storage = new MemoryStorage();
     const store = createStore(
@@ -242,6 +325,41 @@ describe("Bot Durable Object Composition records", () => {
       authored.generationId,
       bootstrapped.generationId,
     ]);
+  });
+
+  test("a Bot-origin revert is idempotent and cannot mark its generation last-known-good", async () => {
+    const storage = new MemoryStorage();
+    const store = createStore(storage);
+    const bootstrapped = await store.current();
+    const authored = await grownSuccessor(
+      bootstrapped,
+      "2026-09-01T00:00:00.000Z",
+    );
+    await store.propose(authored);
+    await store.commit(authored.generationId);
+    const origin = {
+      kind: "revert" as const,
+      revertsTo: bootstrapped.generationId,
+      botId: "bot-1",
+      runId: "run-undo",
+      turnId: "turn-undo",
+    };
+
+    const reverted = await store.revert(bootstrapped.generationId, origin, {
+      createdAt: "2026-09-02T00:00:00.000Z",
+    });
+    const replay = await store.revert(bootstrapped.generationId, origin, {
+      createdAt: "2026-09-02T00:00:00.000Z",
+    });
+
+    expect(replay).toEqual(reverted);
+    expect((await store.lastKnownGood()).generationId).toBe(
+      authored.generationId,
+    );
+    await store.fail(reverted.generationId, { quarantined: false });
+    expect((await store.lastKnownGood()).generationId).toBe(
+      authored.generationId,
+    );
   });
 
   test("refuses an unknown target and the generation that is already current", async () => {

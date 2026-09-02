@@ -100,6 +100,7 @@ import {
   type ShellIsolateMountOptions,
   type ShellMountedComposition,
 } from "./backend-composition.js";
+import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
 import {
   activateCompositionV1,
   type CompositionFailureV1,
@@ -109,6 +110,7 @@ import {
 import {
   createPackageAuthoringHost,
   createR2AuthoringArtifactStore,
+  readAuthoredCompositionMemberSourceV1,
 } from "./backend-authoring.js";
 import { createBotComputerSyncHost } from "./backend-computer.js";
 import {
@@ -288,7 +290,9 @@ import type {
   RoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
 import {
+  authorshipManifestKey,
   decodeAuthoringQuotaReceiptV1,
+  type AuthoredManifestRecordV1,
   type AuthoringQuotaBinding,
   type PackageAuthoringHost,
 } from "@frockbot/plugin-authoring";
@@ -2204,11 +2208,17 @@ export class ShellBotBackendContribution {
         ? { subagentTaskId: input.command.origin.taskId }
         : {}),
     };
+    let mountedRoot: ShellMountedComposition["root"] | undefined;
+    let mountedGeneration: CompositionGenerationV1 | undefined;
+    const currentToolNames = (): readonly string[] =>
+      mountedRoot?.tools.registeredNames?.() ?? [];
     const runtime = await this.agentRuntime(
       input.identity,
       settings,
       input.admittedRequest,
       turn,
+      currentToolNames,
+      () => mountedGeneration,
     );
     const promptParts = [
       `You are ${settings.profile.name}.`,
@@ -2227,7 +2237,7 @@ export class ShellBotBackendContribution {
           generationId: mounting.generationId,
           assignments: settings.assignments,
         });
-        return createShellCompositionHost({
+        const mounted = await createShellCompositionHost({
           botId: input.identity.botId,
           sessionId: input.command.sessionId,
           sessionEvents: input.previousEvents,
@@ -2253,6 +2263,9 @@ export class ShellBotBackendContribution {
             ),
           ...(isolate ? { isolate } : {}),
         }).mount(mounting, signal);
+        mountedRoot = mounted.root;
+        mountedGeneration = mounted.generation;
+        return mounted;
       },
     };
     const controller = new AbortController();
@@ -2296,10 +2309,22 @@ export class ShellBotBackendContribution {
     };
     this.activeTurn = active;
     try {
+      const ordinaryInput = await this.turnInputTextV1(input.command);
+      const durableInput =
+        activation.status === "failed-closed"
+          ? compositionFailureTurnTextV1(ordinaryInput, {
+              attemptedGenerationId: input.compositionGenerationId,
+              ...(activation.generation
+                ? { generation: activation.generation }
+                : {}),
+              ...(activation.failure ? { failure: activation.failure } : {}),
+              quarantined: activation.quarantined,
+            })
+          : ordinaryInput;
       return await executeBotTurn({
         command: {
           ...input.command,
-          text: await this.turnInputTextV1(input.command),
+          text: durableInput,
         },
         previousEvents: input.previousEvents,
         composition: activation.mounted,
@@ -2410,6 +2435,17 @@ export class ShellBotBackendContribution {
       turnId: turn.runId,
       loader,
       artifacts: createR2PackageArtifactStore(artifacts),
+      manifestFor: async (member) => {
+        const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
+          authorshipManifestKey(member.manifestHash),
+        );
+        if (!stored) {
+          throw new Error(
+            `package "${member.packageId}" manifest "${member.manifestHash}" is unavailable`,
+          );
+        }
+        return stored.manifest;
+      },
       capabilitiesFor: (member) =>
         mintCapabilities({
           props: {
@@ -3839,12 +3875,15 @@ export class ShellBotBackendContribution {
   private authoringHost(
     identity: BotIdentity,
     turn: { runId: string; turnId: string },
+    currentToolNames: () => readonly string[],
+    mountedGeneration: () => CompositionGenerationV1 | undefined,
   ): PackageAuthoringHost {
     const artifacts = this.env.APPLICATION_ARTIFACTS;
     return createPackageAuthoringHost({
       storage: {
         get: (key) => this.ctx.storage.get(key),
         put: (entries) => this.ctx.storage.put(entries),
+        list: (options) => this.ctx.storage.list(options),
       },
       composition: this.authority.composition,
       ...(this.env.PACKAGE_BUNDLER
@@ -3859,6 +3898,9 @@ export class ShellBotBackendContribution {
       runId: turn.runId,
       turnId: turn.turnId,
       compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
+      currentToolNames,
+      mountedGeneration,
+      activationFailures: this.authority.compositionFailures,
     });
   }
 
@@ -3883,6 +3925,9 @@ export class ShellBotBackendContribution {
       /** The task a child Turn is running, in a Subagent Durable Object. */
       subagentTaskId?: string;
     },
+    currentToolNames: () => readonly string[] = () => [],
+    mountedGeneration: () => CompositionGenerationV1 | undefined = () =>
+      undefined,
   ): Promise<{
     agentPackages: FoundationAgentPackage[];
     modelSelection: RuntimeModelSelection;
@@ -3966,7 +4011,16 @@ export class ShellBotBackendContribution {
         readSecret,
         // A Bot authors a Package only inside an admitted Turn, whose run and
         // session the artifact provenance names.
-        ...(turn ? { authoring: this.authoringHost(identity, turn) } : {}),
+        ...(turn
+          ? {
+              authoring: this.authoringHost(
+                identity,
+                turn,
+                currentToolNames,
+                mountedGeneration,
+              ),
+            }
+          : {}),
         ...(turn
           ? {
               skills: createBotSkillsHost(
@@ -4869,15 +4923,17 @@ export class ShellBotBackendContribution {
     return quarantine === undefined ? {} : { quarantine };
   }
 
-  /**
-   * SEAM — plan Step 5 (authoring) owns `authorship:intent:<effectId>` and
-   * `artifact:<contentHash>`. Those records do not exist yet, so an isolate
-   * member has no recorded source to show and the view carries members only.
-   */
-  private readCompositionMemberSource(
-    _member: CompositionMemberV1,
+  /** Reads the immutable TypeScript source retained beside an authored artifact. */
+  private async readCompositionMemberSource(
+    member: CompositionMemberV1,
   ): Promise<string | undefined> {
-    return Promise.resolve(undefined);
+    const bucket = this.env.APPLICATION_ARTIFACTS;
+    if (!bucket) return undefined;
+    return readAuthoredCompositionMemberSourceV1({
+      storage: { get: (key) => this.ctx.storage.get(key) },
+      artifacts: createR2AuthoringArtifactStore(bucket),
+      member,
+    });
   }
 
   /**

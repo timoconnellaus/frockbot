@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/kernel-contracts";
 import {
   BOT_ISOLATE_DEADLINE_SOURCE,
   BOT_ISOLATE_INVOCATION_SOURCE,
   BOT_ISOLATE_MAIN_MODULE,
+  BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1,
   BOT_ISOLATE_PACKAGE_MODULE,
   BOT_ISOLATE_WRAPPER_SOURCE,
   botIsolateModuleMap,
@@ -99,6 +101,12 @@ describe("the generated wrapper's invocation decoder", () => {
 });
 
 describe("the generated wrapper module map", () => {
+  test("the wrapper context keys equal the generated contract catalog", () => {
+    expect(BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1).toEqual([
+      ...BOT_ISOLATE_CONTEXT_KEYS_V1,
+    ]);
+  });
+
   test("is exactly two entries", () => {
     const modules = botIsolateModuleMap("export const tools = [];");
     expect(Object.keys(modules).sort()).toEqual([

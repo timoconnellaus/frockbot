@@ -1,5 +1,6 @@
 export * from "./authoring.js";
 export * from "./isolate.js";
+export * from "./isolate-context-catalog.generated.js";
 export * from "./model-invocation.js";
 export * from "./prompt-assembly.js";
 export * from "./send-to-user.js";

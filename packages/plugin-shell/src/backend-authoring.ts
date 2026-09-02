@@ -15,10 +15,15 @@
 // re-authored Package appends a version and supersedes its predecessor inside
 // a new generation.
 import {
+  BOT_ISOLATE_CONTEXT_DTS_V1,
   decodePackageBundleResultV1,
   type PackageBundleRequestV1,
   type PackageBundlerBinding,
 } from "@frockbot/kernel-contracts";
+import type {
+  CompositionFailureV1,
+  CompositionQuarantineV1,
+} from "@frockbot/kernel-composition/activation";
 import { canonicalJson, sha256 } from "@frockbot/kernel-composition/compiler";
 import {
   compositionArtifactSetHashV1,
@@ -27,6 +32,7 @@ import {
   type CompositionGenerationV1,
   type CompositionMemberV1,
 } from "@frockbot/kernel-composition/generation";
+import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
 import {
   artifactKey,
   artifactR2KeyV1,
@@ -34,13 +40,19 @@ import {
   authoredSpecifierV1,
   authoredVersionV1,
   authoringEffectIdV1,
+  packageUndoEffectIdV1,
   authoringQuotaDayV1,
   authorshipArtifactKey,
   authorshipFailureKey,
   authorshipIntentKey,
+  authorshipLatestFailureKey,
+  authorshipManifestKey,
   authorshipPackageKey,
+  authorshipUndoIntentKey,
+  authorshipUndoOutcomeKey,
   classifyAuthoringEffectV1,
   type AuthoredArtifactRecordV1,
+  type AuthoredManifestRecordV1,
   type AuthoredPackageRecordV1,
   type AuthoringEffectOutcomeV1,
   type AuthoringFailureRecordV1,
@@ -49,28 +61,54 @@ import {
   type AuthorPackageRequestV1,
   type AuthorshipIntentV1,
   type PackageAuthoringHost,
+  type PackageInspectFailureV1,
+  type PackageInspectSelfOutcomeV1,
+  type PackageUndoIntentV1,
+  type PackageUndoOutcomeV1,
+  type PackageUndoRecordV1,
+  type PackageUndoRequestV1,
+  sourceR2KeyV1,
 } from "@frockbot/plugin-authoring";
 
 /** The narrow Bot Durable Object storage surface authoring needs. */
 export interface AuthoringStorage {
   get<T>(key: string): Promise<T | undefined>;
   put(entries: Record<string, unknown>): Promise<void>;
+  list?<T>(options: { prefix: string }): Promise<Map<string, T>>;
 }
 
 /** The Composition surface authoring needs; `DurableCompositionStore` satisfies it. */
 export interface AuthoringCompositionStore {
   current(): Promise<CompositionGenerationV1>;
+  lastKnownGood(): Promise<CompositionGenerationV1>;
   read(generationId: string): Promise<CompositionGenerationV1 | undefined>;
   propose(
     generation: CompositionGenerationV1,
     options?: { pin?: boolean },
   ): Promise<void>;
   retainedCount(): Promise<number>;
+  revert(
+    toGenerationId: string,
+    origin: {
+      kind: "revert";
+      revertsTo: string;
+      botId: string;
+      runId: string;
+      turnId: string;
+    },
+    options?: { createdAt?: string },
+  ): Promise<CompositionGenerationV1>;
+  list(query: {
+    limit: number;
+    cursor?: string;
+  }): Promise<{ generations: CompositionGenerationV1[]; cursor?: string }>;
 }
 
 /** Immutable content, written once and addressed by hash. */
 export interface AuthoringArtifactStore {
   putPackageArtifact(contentHash: string, module: string): Promise<void>;
+  putPackageSource(sourceHash: string, source: string): Promise<void>;
+  loadPackageSource(sourceHash: string): Promise<string | undefined>;
   headPackageArtifact(
     contentHash: string,
   ): Promise<{ contentHash: string; size: number } | undefined>;
@@ -89,6 +127,16 @@ export interface PackageAuthoringHostOptions {
   runId: string;
   turnId: string;
   compatibilityDate: string;
+  /** The mounted root's exact catalog, read only when `author` is called. */
+  currentToolNames?(): readonly string[];
+  /** The generation actually mounted after fail-closed fallback. */
+  mountedGeneration?(): CompositionGenerationV1 | undefined;
+  activationFailures?: {
+    list(generationId: string): Promise<CompositionFailureV1[]>;
+    quarantine(
+      generationId: string,
+    ): Promise<CompositionQuarantineV1 | undefined>;
+  };
   now?(): Date;
   newId?(): string;
 }
@@ -127,7 +175,10 @@ export function createPackageAuthoringHost(
       diagnostics: input.diagnostics ?? [],
       recordedAt: now().toISOString(),
     };
-    await options.storage.put({ [authorshipFailureKey(failureId)]: record });
+    await options.storage.put({
+      [authorshipFailureKey(failureId)]: record,
+      [authorshipLatestFailureKey(input.packageId)]: record,
+    });
     return record;
   }
 
@@ -141,6 +192,27 @@ export function createPackageAuthoringHost(
     };
   }
 
+  async function undoRefused(
+    record: AuthoringFailureRecordV1,
+  ): Promise<Extract<PackageUndoOutcomeV1, { status: "refused" }>> {
+    const outcome = {
+      status: "refused",
+      reason: record.reason,
+      failureId: record.failureId,
+    } as const;
+    await options.storage.put({
+      [authorshipUndoOutcomeKey(record.effectId)]: {
+        schemaVersion: 1,
+        effectId: record.effectId,
+        failureId: record.failureId,
+        reason: record.reason,
+        recordedAt: record.recordedAt,
+        status: "refused",
+      } satisfies PackageUndoRecordV1,
+    });
+    return outcome;
+  }
+
   /**
    * The constitutional shadowing rule: a Bot authors only over its own
    * Packages. A member of the current Composition whose provenance is
@@ -151,17 +223,85 @@ export function createPackageAuthoringHost(
   async function shadowedMember(
     packageId: string,
   ): Promise<CompositionMemberV1 | undefined> {
-    const parent = await options.composition.current();
-    return parent.members.find(
-      (member) =>
-        member.packageId === packageId && member.provenance.kind !== "bot",
+    const current = await options.composition.current();
+    const lastKnownGood = await options.composition.lastKnownGood();
+    return [current, lastKnownGood]
+      .flatMap((generation) => generation.members)
+      .find(
+        (member) =>
+          member.packageId === packageId && member.provenance.kind !== "bot",
+      );
+  }
+
+  async function storedManifest(
+    member: CompositionMemberV1,
+  ): Promise<AuthoredManifestRecordV1 | undefined> {
+    if (member.provenance.kind !== "bot") return undefined;
+    const stored = await options.storage.get<AuthoredManifestRecordV1>(
+      authorshipManifestKey(member.manifestHash),
     );
+    if (
+      !stored ||
+      stored.manifestHash !== member.manifestHash ||
+      stored.packageId !== member.packageId ||
+      stored.version !== member.version
+    ) {
+      return undefined;
+    }
+    return stored;
+  }
+
+  async function compositionHistory(): Promise<CompositionGenerationV1[]> {
+    const generations: CompositionGenerationV1[] = [];
+    let cursor: string | undefined;
+    for (let pageNumber = 0; pageNumber < 100; pageNumber += 1) {
+      const page = await options.composition.list({
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      });
+      generations.push(...page.generations);
+      if (!page.cursor) return generations;
+      if (page.cursor === cursor) {
+        throw new Error("Composition history returned a repeated cursor");
+      }
+      cursor = page.cursor;
+    }
+    throw new Error("Composition history exceeds its durable bound");
   }
 
   /**
-   * The member set of the next generation: every member of the pinned-forward
-   * current generation except the one this Package supersedes, plus the new
-   * one. A recorded generation is never edited.
+   * A declaration that would collide is refused before quota reservation.
+   * Re-authoring may keep or rename tools owned by that same Package, so its
+   * currently stored declarations are subtracted from the mounted catalog;
+   * every first-party tool and every other authored Package remains reserved.
+   */
+  async function collidingToolName(
+    packageId: string,
+    declaredNames: readonly string[],
+  ): Promise<string | undefined> {
+    const registered = new Set(options.currentToolNames?.() ?? []);
+    const mounted =
+      options.mountedGeneration?.() ??
+      (await options.composition.lastKnownGood());
+    const own = mounted.members.find(
+      (member) =>
+        member.packageId === packageId && member.provenance.kind === "bot",
+    );
+    if (own) {
+      const recorded = await storedManifest(own);
+      const manifest = recorded
+        ? decodeFrockBotManifest(recorded.manifest)
+        : undefined;
+      for (const tool of manifest?.tools ?? []) registered.delete(tool.name);
+    }
+    return declaredNames.find((name) => registered.has(name));
+  }
+
+  /**
+   * New authoring always branches from last-known-good, replacing only the
+   * Package being authored. This deliberately drops every pending, failed, or
+   * quarantined proposal: a broken member can be repaired by re-authoring its
+   * packageId, but it can never poison a later, unrelated generation.
    */
   async function nextGeneration(input: {
     member: CompositionMemberV1;
@@ -171,7 +311,7 @@ export function createPackageAuthoringHost(
     generation: CompositionGenerationV1;
     supersededVersion?: string;
   }> {
-    const parent = await options.composition.current();
+    const parent = await options.composition.lastKnownGood();
     const superseded = parent.members.find(
       (member) => member.packageId === input.member.packageId,
     );
@@ -205,10 +345,11 @@ export function createPackageAuthoringHost(
 
   async function compose(input: {
     request: AuthorPackageRequestV1;
+    intent: AuthorshipIntentV1;
     outcome: Extract<AuthoringEffectOutcomeV1, { status: "bundled" }>;
     artifact: AuthoredArtifactRecordV1;
   }): Promise<AuthorPackageOutcomeV1> {
-    const { request, outcome, artifact } = input;
+    const { request, intent, outcome, artifact } = input;
     if (outcome.generationId) {
       const recorded = await options.composition.read(outcome.generationId);
       if (recorded) {
@@ -221,18 +362,39 @@ export function createPackageAuthoringHost(
         };
       }
     }
-    const manifest = authoredManifestV1({
-      packageId: request.input.packageId,
-      displayName: request.input.displayName,
-      version: outcome.version,
-      tool: request.input.tool,
-      ...(request.input.model ? { model: request.input.model } : {}),
-    });
+    const manifestRecord = await options.storage.get<AuthoredManifestRecordV1>(
+      authorshipManifestKey(intent.manifestHash),
+    );
+    if (!manifestRecord) {
+      return refused(
+        await recordFailure({
+          effectId: request.effectId,
+          packageId: request.input.packageId,
+          phase: "recovery",
+          reason: `authoring effect "${request.effectId}" has no stored manifest "${intent.manifestHash}"`,
+        }),
+      );
+    }
+    const manifest = decodeFrockBotManifest(manifestRecord.manifest);
+    if (
+      manifestRecord.manifestHash !== intent.manifestHash ||
+      manifest.id !== request.input.packageId ||
+      manifest.version !== outcome.version
+    ) {
+      return refused(
+        await recordFailure({
+          effectId: request.effectId,
+          packageId: request.input.packageId,
+          phase: "recovery",
+          reason: `stored manifest "${intent.manifestHash}" does not match this authoring effect`,
+        }),
+      );
+    }
     const member: CompositionMemberV1 = {
       packageId: request.input.packageId,
       specifier: authoredSpecifierV1(request.input.packageId),
       version: outcome.version,
-      manifestHash: await sha256(canonicalJson(manifest)),
+      manifestHash: intent.manifestHash,
       provenance: artifact.provenance,
       artifact: {
         contentHash: artifact.contentHash,
@@ -273,6 +435,12 @@ export function createPackageAuthoringHost(
         sourceHash: input.sourceHash,
       }),
 
+    undoEffectIdFor: (input) =>
+      packageUndoEffectIdV1({
+        runId: options.runId,
+        ...(input.generationId ? { generationId: input.generationId } : {}),
+      }),
+
     async author(
       request: AuthorPackageRequestV1,
     ): Promise<AuthorPackageOutcomeV1> {
@@ -289,6 +457,20 @@ export function createPackageAuthoringHost(
             packageId,
             phase: "compose",
             reason: `Package "${packageId}" is already in this Bot's Composition with ${shadowed.provenance.kind} provenance, and a Bot may author only over its own Packages`,
+          }),
+        );
+      }
+      const collision = await collidingToolName(
+        packageId,
+        request.input.tools.map((tool) => tool.name),
+      );
+      if (collision) {
+        return refused(
+          await recordFailure({
+            effectId,
+            packageId,
+            phase: "compose",
+            reason: `Tool "${collision}" is already registered in this Bot's current Composition; choose a different tool name`,
           }),
         );
       }
@@ -325,6 +507,9 @@ export function createPackageAuthoringHost(
         };
       }
       if (classification.kind === "settled") {
+        if (!intent) {
+          throw new Error("a settled authoring effect has no durable intent");
+        }
         const artifact = await options.storage.get<AuthoredArtifactRecordV1>(
           artifactKey(classification.outcome.contentHash),
         );
@@ -340,6 +525,7 @@ export function createPackageAuthoringHost(
         }
         return await compose({
           request,
+          intent,
           outcome: classification.outcome,
           artifact,
         });
@@ -362,6 +548,16 @@ export function createPackageAuthoringHost(
       );
       const ordinal = (previous?.ordinal ?? 0) + 1;
       const version = authoredVersionV1(ordinal);
+      const rawManifest = authoredManifestV1({
+        packageId,
+        displayName: request.input.displayName,
+        version,
+        tools: request.input.tools,
+      });
+      // The generated document crosses the same strict seam as every other
+      // manifest before it becomes durable or participates in a generation.
+      decodeFrockBotManifest(rawManifest);
+      const manifestHash = await sha256(canonicalJson(rawManifest));
       const sourceBytes = new TextEncoder().encode(
         request.input.source,
       ).byteLength;
@@ -404,12 +600,21 @@ export function createPackageAuthoringHost(
         packageId,
         version,
         sourceHash: request.sourceHash,
+        manifestHash,
         sourceBytes,
         recordedAt,
         status: "recorded",
       };
       await options.storage.put({
         [authorshipIntentKey(effectId)]: recordedIntent,
+        [authorshipManifestKey(manifestHash)]: {
+          schemaVersion: 1,
+          manifestHash,
+          packageId,
+          version,
+          manifest: rawManifest,
+          createdAt: recordedAt,
+        } satisfies AuthoredManifestRecordV1,
       });
 
       const bundleRequest: PackageBundleRequestV1 = {
@@ -465,6 +670,10 @@ export function createPackageAuthoringHost(
         artifact.contentHash,
         bundled.module,
       );
+      await options.artifacts.putPackageSource(
+        request.sourceHash,
+        request.input.source,
+      );
       const artifactRecord: AuthoredArtifactRecordV1 = {
         schemaVersion: 1,
         contentHash: artifact.contentHash,
@@ -473,6 +682,9 @@ export function createPackageAuthoringHost(
         bundlerVersion: artifact.bundlerVersion,
         effectId,
         r2Key: artifactR2KeyV1(artifact.contentHash),
+        sourceHash: request.sourceHash,
+        sourceR2Key: sourceR2KeyV1(request.sourceHash),
+        manifestHash,
         provenance: {
           kind: "bot",
           packageId,
@@ -505,7 +717,261 @@ export function createPackageAuthoringHost(
           updatedAt: recordedAt,
         } satisfies AuthoredPackageRecordV1,
       });
-      return await compose({ request, outcome, artifact: artifactRecord });
+      return await compose({
+        request,
+        intent: recordedIntent,
+        outcome,
+        artifact: artifactRecord,
+      });
+    },
+
+    async undo(request: PackageUndoRequestV1): Promise<PackageUndoOutcomeV1> {
+      const replay = await options.storage.get<PackageUndoRecordV1>(
+        authorshipUndoOutcomeKey(request.effectId),
+      );
+      if (replay) {
+        return replay.status === "recorded"
+          ? {
+              status: "recorded",
+              effectId: replay.effectId,
+              generationId: replay.generationId,
+              targetGenerationId: replay.targetGenerationId,
+            }
+          : {
+              status: "refused",
+              reason: replay.reason,
+              failureId: replay.failureId,
+            };
+      }
+
+      const existingIntent = await options.storage.get<PackageUndoIntentV1>(
+        authorshipUndoIntentKey(request.effectId),
+      );
+      const history = (await options.composition.list({ limit: 100 }))
+        .generations;
+      const currentGood = await options.composition.lastKnownGood();
+      const current = await options.composition.current();
+      let target: CompositionGenerationV1 | undefined;
+      if (existingIntent) {
+        target = await options.composition.read(
+          existingIntent.targetGenerationId,
+        );
+      } else if (request.input.generationId) {
+        target = await options.composition.read(request.input.generationId);
+      } else {
+        const latestAuthored = history.find(
+          (generation) => generation.origin.kind === "bot-authored",
+        );
+        target = latestAuthored?.parentGenerationId
+          ? await options.composition.read(latestAuthored.parentGenerationId)
+          : undefined;
+      }
+      if (!target) {
+        return undoRefused(
+          await recordFailure({
+            effectId: request.effectId,
+            packageId: "composition",
+            phase: "compose",
+            reason: request.input.generationId
+              ? `Composition generation "${request.input.generationId}" is unavailable`
+              : "There is no earlier Bot-authored Package setup change to undo",
+          }),
+        );
+      }
+      if (target.status !== "active" && target.status !== "superseded") {
+        return undoRefused(
+          await recordFailure({
+            effectId: request.effectId,
+            packageId: "composition",
+            phase: "compose",
+            reason: `Composition generation "${target.generationId}" was never successfully mounted and cannot be an undo target`,
+          }),
+        );
+      }
+      if (target.generationId === current.generationId) {
+        return undoRefused(
+          await recordFailure({
+            effectId: request.effectId,
+            packageId: "composition",
+            phase: "compose",
+            reason: `Package setup already matches Composition generation "${target.generationId}"`,
+          }),
+        );
+      }
+
+      // A Bot-origin undo may change only Bot-provenance members. First-party
+      // and User members must be byte-for-byte identical to the current good
+      // setup, so this path cannot become an alternate authority grant/revoke.
+      const nonBot = (generation: CompositionGenerationV1) =>
+        generation.members
+          .filter((member) => member.provenance.kind !== "bot")
+          .sort((left, right) => left.packageId.localeCompare(right.packageId));
+      if (
+        canonicalJson(nonBot(target)) !== canonicalJson(nonBot(currentGood))
+      ) {
+        return undoRefused(
+          await recordFailure({
+            effectId: request.effectId,
+            packageId: "composition",
+            phase: "compose",
+            reason:
+              "That generation changes first-party or User Package setup; package_undo may revert only this Bot's authored Packages",
+          }),
+        );
+      }
+
+      const recordedAt = existingIntent?.recordedAt ?? now().toISOString();
+      const intent: PackageUndoIntentV1 = existingIntent ?? {
+        schemaVersion: 1,
+        effectId: request.effectId,
+        botId: options.botId,
+        runId: options.runId,
+        turnId: options.turnId,
+        ...(request.input.generationId
+          ? { requestedGenerationId: request.input.generationId }
+          : {}),
+        targetGenerationId: target.generationId,
+        recordedAt,
+        status: "recorded",
+      };
+      // Intent before effect. `createdAt` makes the new generation id stable
+      // when a Durable Object resumes after `revert` but before outcome write.
+      if (!existingIntent) {
+        await options.storage.put({
+          [authorshipUndoIntentKey(request.effectId)]: intent,
+        });
+      }
+      const generation = await options.composition.revert(
+        target.generationId,
+        {
+          kind: "revert",
+          revertsTo: target.generationId,
+          botId: options.botId,
+          runId: options.runId,
+          turnId: options.turnId,
+        },
+        { createdAt: intent.recordedAt },
+      );
+      const outcome: PackageUndoRecordV1 = {
+        schemaVersion: 1,
+        effectId: request.effectId,
+        generationId: generation.generationId,
+        targetGenerationId: target.generationId,
+        recordedAt,
+        status: "recorded",
+      };
+      await options.storage.put({
+        [authorshipUndoOutcomeKey(request.effectId)]: outcome,
+      });
+      return {
+        status: "recorded",
+        effectId: request.effectId,
+        generationId: generation.generationId,
+        targetGenerationId: target.generationId,
+      };
+    },
+
+    async inspectSelf(): Promise<PackageInspectSelfOutcomeV1> {
+      const composition =
+        options.mountedGeneration?.() ?? (await options.composition.current());
+      const history = await compositionHistory();
+      const members = await Promise.all(
+        composition.members.map(async (member) => {
+          const recorded = await storedManifest(member);
+          const manifest = recorded
+            ? decodeFrockBotManifest(recorded.manifest)
+            : undefined;
+          const source =
+            member.provenance.kind === "bot" && options.artifacts
+              ? await readAuthoredCompositionMemberSourceV1({
+                  storage: options.storage,
+                  artifacts: options.artifacts,
+                  member,
+                })
+              : undefined;
+          return {
+            packageId: member.packageId,
+            version: member.version,
+            provenance: structuredClone(member.provenance) as unknown as Record<
+              string,
+              unknown
+            >,
+            declaredTools: (manifest?.tools ?? []).map((tool) => tool.name),
+            ...(source === undefined ? {} : { source }),
+          };
+        }),
+      );
+      const packageIds = new Set(
+        history.flatMap((generation) =>
+          generation.members
+            .filter((member) => member.provenance.kind === "bot")
+            .map((member) => member.packageId),
+        ),
+      );
+      const failures: PackageInspectFailureV1[] = [];
+      for (const packageId of [...packageIds].sort()) {
+        const authoring = await options.storage.get<AuthoringFailureRecordV1>(
+          authorshipLatestFailureKey(packageId),
+        );
+        let activation: PackageInspectFailureV1["activation"] | undefined;
+        if (options.activationFailures) {
+          for (const generation of history) {
+            if (activation || generation.origin.kind !== "bot-authored") {
+              continue;
+            }
+            const origin = generation.origin;
+            const authoredMember = generation.members.find(
+              (member) =>
+                member.packageId === packageId &&
+                member.provenance.kind === "bot" &&
+                member.provenance.runId === origin.runId,
+            );
+            if (!authoredMember) continue;
+            const recorded = await options.activationFailures.list(
+              generation.generationId,
+            );
+            const latest = recorded.at(-1);
+            if (!latest) continue;
+            activation = {
+              generationId: generation.generationId,
+              attempt: latest.attempt,
+              phase: latest.phase,
+              message: latest.message,
+              diagnostics: latest.diagnostics,
+              at: latest.at,
+              quarantined: Boolean(
+                await options.activationFailures.quarantine(
+                  generation.generationId,
+                ),
+              ),
+            };
+          }
+        }
+        failures.push({
+          packageId,
+          ...(authoring
+            ? {
+                authoring: {
+                  failureId: authoring.failureId,
+                  phase: authoring.phase,
+                  reason: authoring.reason,
+                  diagnostics: authoring.diagnostics,
+                  recordedAt: authoring.recordedAt,
+                },
+              }
+            : {}),
+          ...(activation ? { activation } : {}),
+        });
+      }
+      return {
+        contextContract: BOT_ISOLATE_CONTEXT_DTS_V1,
+        composition: {
+          generationId: composition.generationId,
+          status: composition.status,
+          members,
+        },
+        failures,
+      };
     },
   };
 }
@@ -523,9 +989,46 @@ export function createR2AuthoringArtifactStore(
         httpMetadata: { contentType: "application/javascript" },
       });
     },
+    async putPackageSource(sourceHash: string, source: string) {
+      await bucket.put(sourceR2KeyV1(sourceHash), source, {
+        httpMetadata: { contentType: "text/typescript; charset=utf-8" },
+      });
+    },
+    async loadPackageSource(sourceHash: string) {
+      const object = await bucket.get(sourceR2KeyV1(sourceHash));
+      if (!object) return undefined;
+      const source = await object.text();
+      if ((await sha256(source)) !== sourceHash) {
+        throw new Error(
+          `Package source "${sourceHash}" failed hash verification`,
+        );
+      }
+      return source;
+    },
     async headPackageArtifact(contentHash: string) {
       const object = await bucket.head(artifactR2KeyV1(contentHash));
       return object ? { contentHash, size: object.size } : undefined;
     },
   };
+}
+
+/** Reads one Bot-authored member's retained source through its durable record. */
+export async function readAuthoredCompositionMemberSourceV1(input: {
+  storage: Pick<AuthoringStorage, "get">;
+  artifacts: Pick<AuthoringArtifactStore, "loadPackageSource">;
+  member: CompositionMemberV1;
+}): Promise<string | undefined> {
+  const { member } = input;
+  if (member.provenance.kind !== "bot" || !member.artifact) return undefined;
+  const artifact = await input.storage.get<AuthoredArtifactRecordV1>(
+    artifactKey(member.artifact.contentHash),
+  );
+  if (
+    !artifact ||
+    artifact.contentHash !== member.artifact.contentHash ||
+    artifact.manifestHash !== member.manifestHash
+  ) {
+    return undefined;
+  }
+  return input.artifacts.loadPackageSource(artifact.sourceHash);
 }

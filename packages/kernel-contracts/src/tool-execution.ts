@@ -187,6 +187,8 @@ export interface ToolRegistrationOptions {
 
 /** Contributing Packages register tool definitions through this surface. */
 export interface ToolRegistration {
+  /** Every registered name, before turn/role admission trims the catalog. */
+  registeredNames?(): string[];
   register(
     definition: ToolDefinition,
     options?: ToolRegistrationOptions,

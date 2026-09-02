@@ -9,6 +9,7 @@
 //
 // The wrapper is emitted as plain JavaScript because it is a module in the
 // loaded Worker's module map, not a source file this repository compiles.
+import type { BotPackageExecutionContextV1 } from "@frockbot/kernel-contracts";
 
 /**
  * The deadline guard, shared verbatim between the generated wrapper and the
@@ -99,6 +100,44 @@ export const BOT_ISOLATE_MODEL_SOURCE = `async function* modelEvents(stream) {
   }
 }`;
 
+const BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1 = {
+  tool: "invocation.tool",
+  botId: "invocation.botId",
+  sessionId: "invocation.sessionId",
+  runId: "invocation.runId",
+  turnId: "invocation.turnId",
+  generationId: "invocation.generationId",
+  packageId: "env.IDENTITY.packageId",
+  deadlineMs: "invocation.deadlineMs",
+  bindings: "Object.keys(env).sort()",
+  listCapabilities: "function () { return capabilities.list(); }",
+  requestAuthority:
+    "function (request) { return capabilities.requestAuthority(request); }",
+  invokeModel: `async function (request) {
+      const outcome = await capabilities.invokeModel(request);
+      if (!outcome || outcome.status !== "streaming") return outcome;
+      return {
+        status: "streaming",
+        requestId: outcome.requestId,
+        events: modelEvents(outcome.events),
+      };
+    }`,
+} satisfies Record<keyof BotPackageExecutionContextV1, string>;
+
+/** The keys the generated wrapper actually places on `ctx`. */
+export const BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1 = Object.keys(
+  BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1,
+) as Array<keyof BotPackageExecutionContextV1>;
+
+export const BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1 = `function narrowContext(env, invocation) {
+  const capabilities = env.CAPABILITIES;
+  return {
+${Object.entries(BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1)
+  .map(([key, source]) => `    ${JSON.stringify(key)}: ${source},`)
+  .join("\n")}
+  };
+}`;
+
 /**
  * The wrapper module text. Content-addressed with `package.js`; bump
  * `BOT_ISOLATE_WRAPPER_VERSION` whenever this string changes so the mounted
@@ -155,37 +194,7 @@ function declaredTools() {
   });
 }
 
-function narrowContext(env, invocation) {
-  const capabilities = env.CAPABILITIES;
-  return {
-    tool: invocation.tool,
-    botId: invocation.botId,
-    sessionId: invocation.sessionId,
-    runId: invocation.runId,
-    turnId: invocation.turnId,
-    generationId: invocation.generationId,
-    packageId: env.IDENTITY.packageId,
-    deadlineMs: invocation.deadlineMs,
-    // What this isolate holds, by name. Everything else is out of scope:
-    // globalOutbound is null and no host binding is in env.
-    bindings: Object.keys(env).sort(),
-    listCapabilities: function () {
-      return capabilities.list();
-    },
-    requestAuthority: function (request) {
-      return capabilities.requestAuthority(request);
-    },
-    invokeModel: async function (request) {
-      const outcome = await capabilities.invokeModel(request);
-      if (!outcome || outcome.status !== "streaming") return outcome;
-      return {
-        status: "streaming",
-        requestId: outcome.requestId,
-        events: modelEvents(outcome.events),
-      };
-    },
-  };
-}
+${BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1}
 
 export default class extends WorkerEntrypoint {
   async health() {
@@ -231,7 +240,7 @@ export default class extends WorkerEntrypoint {
 `;
 
 /** Bumped with any change to the wrapper text; folded into the loader id. */
-export const BOT_ISOLATE_WRAPPER_VERSION = "wrapper-v2";
+export const BOT_ISOLATE_WRAPPER_VERSION = "wrapper-v3";
 
 export const BOT_ISOLATE_MAIN_MODULE = "index.js";
 export const BOT_ISOLATE_PACKAGE_MODULE = "package.js";

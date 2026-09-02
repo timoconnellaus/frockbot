@@ -169,6 +169,41 @@ export interface BotCapabilitiesStub {
   ): Promise<IsolateAuthorityOutcomeV1>;
 }
 
+/** The model outcome Bot-authored `package.js` receives after wrapper narrowing. */
+export type BotPackageModelOutcomeV1 =
+  | {
+      status: "streaming";
+      requestId: string;
+      events: AsyncIterable<LlmStreamEvent>;
+    }
+  | IsolatePendingDecisionV1
+  | IsolateCapabilityFailureV1;
+
+/**
+ * The exact `ctx` passed to a Bot-authored Package's
+ * `execute(tool, input, ctx)`. The model-facing declaration is generated from
+ * this interface, and the wrapper's implementation is compile- and test-
+ * checked against the same keys.
+ */
+export interface BotPackageExecutionContextV1 {
+  readonly tool: string;
+  readonly botId: string;
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly turnId: string;
+  readonly generationId: string;
+  readonly packageId: string;
+  readonly deadlineMs: number;
+  readonly bindings: string[];
+  listCapabilities(): Promise<IsolateCapabilityListOutcomeV1>;
+  requestAuthority(
+    request: IsolateAuthorityRequestV1,
+  ): Promise<IsolateAuthorityOutcomeV1>;
+  invokeModel(
+    request: NormalizedModelRequest,
+  ): Promise<BotPackageModelOutcomeV1>;
+}
+
 /**
  * Everything Bot code can see. Nothing else is in scope: `globalOutbound` is
  * null, so `Object.keys(env)` inside the isolate is exactly
