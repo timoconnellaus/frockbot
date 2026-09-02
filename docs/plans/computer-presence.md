@@ -127,6 +127,10 @@ mid-update waits up to a bounded time then receives `computer-updating`
 Computer with no digest file is treated as stale and updated once; an update
 under a fresh lease is deferred and recorded; a Bot tool call during an update
 returns the retryable failure with the phase label; the card shows `updating`.
+An update the host finishes inside the same open reports no progress, so the
+Bot authority records `ready`, not a stale `updating`; while the User has an
+updating Computer open, the client rejoins on every poll so the viewer arrives
+as soon as the host is done.
 
 ## Step 4 — User-wide human fence
 
