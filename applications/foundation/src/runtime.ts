@@ -55,6 +55,11 @@ import {
   createAuthoringRuntimePlugin,
   type PackageAuthoringHost,
 } from "@frockbot/plugin-authoring/agent";
+import packageCatalogManifest from "@frockbot/plugin-package-catalog/manifest";
+import {
+  createPackageCatalogRuntimePlugin,
+  type PackageCatalogHost,
+} from "@frockbot/plugin-package-catalog/agent";
 import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
 // Every selected package manifest participates in the compiled application hash.
 import clockManifest from "@frockbot/plugin-clock/manifest";
@@ -304,6 +309,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-admin", adminManifest],
   ["@frockbot/plugin-bot-template", botTemplateManifest],
   ["@frockbot/plugin-authoring", authoringManifest],
+  ["@frockbot/plugin-package-catalog", packageCatalogManifest],
   ["@frockbot/plugin-identity", identityManifest],
   ["@frockbot/plugin-provider-foundation", foundationProviderManifest],
   ["@frockbot/plugin-credentials", credentialsManifest],
@@ -865,6 +871,8 @@ export function createFoundationHostedRuntimePackages(
      * whose run and session its provenance can name.
      */
     authoring?: PackageAuthoringHost;
+    /** Catalog tools exist only for a Turn whose Bot/User authorities are bound. */
+    packageCatalog?: PackageCatalogHost;
     /**
      * The Skills seam, supplied by the Bot Durable Object for one admitted
      * Turn. Absent outside a Turn, and outside one whose Workspace reads are
@@ -1039,6 +1047,15 @@ export function createFoundationHostedRuntimePackages(
             plan,
             "authoring",
             createAuthoringRuntimePlugin(host.authoring),
+          ),
+        ]
+      : []),
+    ...(host.packageCatalog
+      ? [
+          runtimePackage(
+            plan,
+            "package-catalog",
+            createPackageCatalogRuntimePlugin(host.packageCatalog),
           ),
         ]
       : []),
@@ -1298,6 +1315,8 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // Computer providers require host authority and are added only by a capable runtime.
   // Authoring mounts only for an admitted Turn, which supplies its host.
   runtimeIds.delete("authoring");
+  // Catalog changes likewise require the Bot and User durable authorities.
+  runtimeIds.delete("package-catalog");
   // Skills mount only for a Turn whose instruction root the host can read.
   runtimeIds.delete("skills");
   // Memory mounts only for a Turn whose Memory roots the host can reach.

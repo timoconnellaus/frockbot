@@ -48,6 +48,7 @@ import {
   decodeBotConfigurationExecuteRpcV1,
   decodeBotConfigurationReadRpcV1,
   decodeCompositionCommandReceiptV1,
+  decodeOperationReceiptV1,
   MAX_COMPOSITION_GENERATION_PAGE_V1,
   type CompositionCommandReceiptV1,
   type CompositionGenerationListViewV1,
@@ -112,6 +113,11 @@ import {
   createR2AuthoringArtifactStore,
   readAuthoredCompositionMemberSourceV1,
 } from "./backend-authoring.js";
+import {
+  type CatalogAwarePackageCatalogHost,
+  createPackageCatalogHost,
+  createR2BotPackageCatalogReader,
+} from "./backend-package-catalog.js";
 import { createBotComputerSyncHost } from "./backend-computer.js";
 import {
   decodeDirectoryViewV1,
@@ -3904,6 +3910,45 @@ export class ShellBotBackendContribution {
     });
   }
 
+  /** Catalog reads plus the two-authority mutation seam for one admitted Turn. */
+  private packageCatalogHost(
+    identity: BotIdentity,
+    turn: { runId: string; turnId: string },
+  ): CatalogAwarePackageCatalogHost | undefined {
+    if (!this.env.PACKAGE_CATALOG || !this.env.APPLICATION_ARTIFACTS) {
+      return undefined;
+    }
+    const user = this.userConfiguration(identity);
+    return createPackageCatalogHost({
+      storage: {
+        get: (key) => this.ctx.storage.get(key),
+        put: (entries) => this.ctx.storage.put(entries),
+      },
+      composition: this.authority.composition,
+      catalog: createR2BotPackageCatalogReader(
+        this.env.PACKAGE_CATALOG,
+        this.env.APPLICATION_ARTIFACTS,
+      ),
+      user: {
+        read: () =>
+          user.readConfiguration({
+            schemaVersion: 1,
+            userId: identity.userId,
+          }),
+        execute: (command) =>
+          user.executeConfiguration({
+            schemaVersion: 1,
+            userId: identity.userId,
+            command,
+          }),
+      },
+      userId: identity.userId,
+      botId: identity.botId,
+      runId: turn.runId,
+      turnId: turn.turnId,
+    });
+  }
+
   private async agentRuntime(
     identity: BotIdentity,
     settings: BotSettingsViewV1,
@@ -4005,22 +4050,29 @@ export class ShellBotBackendContribution {
     // Filled in once this Turn's model binding is resolved, below. The tool
     // and the prompt section both read it lazily, from inside the Turn.
     const subagentModels: SubagentModelOptionV1[] = [];
+    const packageCatalog = turn
+      ? this.packageCatalogHost(identity, turn)
+      : undefined;
+    const baseAuthoring = turn
+      ? this.authoringHost(identity, turn, currentToolNames, mountedGeneration)
+      : undefined;
+    const authoring: PackageAuthoringHost | undefined =
+      baseAuthoring && packageCatalog
+        ? {
+            ...baseAuthoring,
+            undo: async (request) =>
+              (await packageCatalog.undoCatalogChange(request)) ??
+              baseAuthoring.undo(request),
+          }
+        : baseAuthoring;
     const resolvedAgentPackages: FoundationAgentPackage[] = [
       ...createFoundationHostedRuntimePackages(application, {
         userId: identity.userId,
         readSecret,
         // A Bot authors a Package only inside an admitted Turn, whose run and
         // session the artifact provenance names.
-        ...(turn
-          ? {
-              authoring: this.authoringHost(
-                identity,
-                turn,
-                currentToolNames,
-                mountedGeneration,
-              ),
-            }
-          : {}),
+        ...(authoring ? { authoring } : {}),
+        ...(packageCatalog ? { packageCatalog } : {}),
         ...(turn
           ? {
               skills: createBotSkillsHost(
@@ -5480,6 +5532,11 @@ export class ShellBotBackendContribution {
       schemaVersion: 1;
       userId: string;
     }): Promise<UserSettingsViewV1>;
+    executeConfiguration(input: {
+      schemaVersion: 1;
+      userId: string;
+      command: ConfigurationCommandV1;
+    }): Promise<OperationReceiptV1>;
     readPackageRevisions(
       userId: string,
     ): ReturnType<PackagePublisherAgentHost["read"]>;
@@ -5585,6 +5642,7 @@ export class ShellBotBackendContribution {
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
     const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
+      executeConfiguration(input: unknown): Promise<unknown>;
       readPackageRevisions(
         input: unknown,
       ): ReturnType<PackagePublisherAgentHost["read"]>;
@@ -5621,6 +5679,8 @@ export class ShellBotBackendContribution {
     };
     return {
       readConfiguration: (input) => rpc.readConfiguration(input),
+      executeConfiguration: async (input) =>
+        decodeOperationReceiptV1(await rpc.executeConfiguration(input)),
       // A machine is a User asset, so every one of these crosses the seam and
       // is decoded on arrival rather than trusted in the shape RPC returned.
       listMachines: async (userId) =>

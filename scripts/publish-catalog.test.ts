@@ -31,6 +31,35 @@ function sourcePackage(
   return { id, version: manifest.version, manifest };
 }
 
+function publishedPackage(): CatalogSourcePackage {
+  const pkg = sourcePackage("parcel-tracking", {
+    contributions: {
+      runtime: { entry: "./package.js", host: "bot-isolate" },
+    },
+    tools: [
+      {
+        name: "track_parcel",
+        description: "Tracks one parcel.",
+        inputSchema: { type: "object" },
+      },
+    ],
+  });
+  return {
+    ...pkg,
+    catalog: {
+      description: "Tracks parcels across carriers.",
+      tags: ["shipping", "tracking"],
+      bundle: {
+        contentHash: "b".repeat(64),
+        size: 1_024,
+        mediaType: "application/javascript",
+        bundlerVersion: "authoring-bundler@1",
+        sourceHash: "c".repeat(64),
+      },
+    },
+  };
+}
+
 describe("seed catalog generation", () => {
   test("indexes every compiled-in Package and writes one entry each", async () => {
     const built = await buildCatalogGeneration([
@@ -99,6 +128,52 @@ describe("seed catalog generation", () => {
       built.files
         .slice(0, -1)
         .every((file) => file.key.startsWith(`catalog/${built.generation}/`)),
+    ).toBe(true);
+  });
+
+  test("publishes a User-selected authored bundle as a hash-pinned Catalog entry", async () => {
+    const built = await buildCatalogGeneration([
+      sourcePackage("echo"),
+      publishedPackage(),
+    ]);
+    const row = built.index.entries.find(
+      (entry) => entry.catalogId === "parcel-tracking",
+    );
+    const entry = built.entries.find(
+      (candidate) => candidate.catalogId === "parcel-tracking",
+    );
+
+    expect(row).toMatchObject({
+      contentHash: "b".repeat(64),
+      tags: ["shipping", "tracking"],
+    });
+    expect(entry?.bundle).toMatchObject({
+      contentHash: "b".repeat(64),
+      sourceHash: "c".repeat(64),
+      mediaType: "application/javascript",
+      manifest: {
+        id: "parcel-tracking",
+        contributions: {
+          runtime: { entry: "./package.js", host: "bot-isolate" },
+        },
+      },
+    });
+    expect(entry?.description).toBe("Tracks parcels across carriers.");
+  });
+
+  test("delisting changes only the new pointer generation, never an old entry or artifact identity", async () => {
+    const listed = await buildCatalogGeneration([publishedPackage()]);
+    const delisted = await buildCatalogGeneration([]);
+
+    expect(delisted.generation).not.toBe(listed.generation);
+    expect(delisted.entries).toEqual([]);
+    expect(listed.entries[0]?.bundle?.contentHash).toBe("b".repeat(64));
+    expect(
+      listed.files.some(
+        (file) =>
+          file.key ===
+          `catalog/${listed.generation}/entry/parcel-tracking.json`,
+      ),
     ).toBe(true);
   });
 });

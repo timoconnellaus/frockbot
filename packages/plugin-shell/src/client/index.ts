@@ -1804,6 +1804,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         version: entry.version,
         catalogId: entry.catalogId,
         catalogGeneration: generation,
+        ...(entry.contentHash === undefined
+          ? {}
+          : { contentHash: entry.contentHash }),
         // GrokBot's `InstallPlugin{values}`: the entry's `setupFields`, filled
         // in by the User, recorded on the installation so the install is
         // reproducible from durable state rather than from a form that is gone.

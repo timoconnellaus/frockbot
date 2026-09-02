@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 3,
+  "id": "package-catalog",
+  "displayName": "Package Catalog",
+  "version": "0.0.1",
+  "compatibility": {
+    "frockbot": ">=0.0.1"
+  },
+  "dependencies": {
+    "shell": ">=0.0.1"
+  },
+  "contributions": {
+    "runtime": {
+      "entry": "./agent"
+    }
+  },
+  "permissions": ["packages:install"]
+}

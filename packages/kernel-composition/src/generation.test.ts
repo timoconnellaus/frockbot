@@ -200,4 +200,59 @@ describe("Composition generation v1", () => {
       }),
     ).toThrow("mediaType is invalid");
   });
+
+  test("decodes a Catalog isolate member and its plain-language generation summary", async () => {
+    const generation = await bootstrap();
+    const member = {
+      packageId: "parcel-tracking",
+      specifier: "catalog:parcel-tracking",
+      version: "0.0.1",
+      manifestHash: "c".repeat(64),
+      provenance: {
+        kind: "catalog" as const,
+        packageId: "parcel-tracking",
+        version: "0.0.1",
+        catalogId: "parcel-tracking",
+        catalogGeneration: "catalog-1",
+        contentHash: "d".repeat(64),
+      },
+      artifact: {
+        contentHash: "d".repeat(64),
+        size: 512,
+        mediaType: "application/javascript" as const,
+        bundlerVersion: "catalog-test@1",
+      },
+    };
+    const decoded = decodeCompositionGenerationV1({
+      ...generation,
+      members: [member],
+      artifactSetHash: await compositionArtifactSetHashV1([member]),
+      origin: {
+        kind: "bot-catalog",
+        action: "install",
+        packageId: "parcel-tracking",
+        catalogId: "parcel-tracking",
+        botId: "primary",
+        runId: "run-1",
+        sessionId: "user-1:primary",
+        turnId: "turn-1",
+      },
+      summary: "Added parcel tracking",
+    });
+
+    expect(decoded.summary).toBe("Added parcel tracking");
+    expect(decoded.members[0]?.provenance.kind).toBe("catalog");
+    expect(() =>
+      decodeCompositionGenerationV1({
+        ...decoded,
+        members: [{ ...member, artifact: undefined }],
+      }),
+    ).toThrow("must match its Bot-isolate artifact");
+    expect(() =>
+      decodeCompositionGenerationV1({
+        ...decoded,
+        summary: "Added\nparcel tracking",
+      }),
+    ).toThrow("must be one trimmed line");
+  });
 });

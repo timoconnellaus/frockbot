@@ -29,7 +29,8 @@ const filteredCatalog = computed(() => {
     (entry) =>
       entry.displayName.toLocaleLowerCase().includes(query) ||
       entry.packageId.toLocaleLowerCase().includes(query) ||
-      entry.description.toLocaleLowerCase().includes(query),
+      entry.description.toLocaleLowerCase().includes(query) ||
+      (entry.tags ?? []).some((tag) => tag.toLocaleLowerCase().includes(query)),
   );
 });
 

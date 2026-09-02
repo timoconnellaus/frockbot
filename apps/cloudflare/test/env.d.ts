@@ -10,6 +10,7 @@ import type { UserConfiguration } from "../src/user-configuration.ts";
 import type { DeploymentPolicy } from "../src/deployment-policy.ts";
 
 interface FlyTestEnv {
+  APPLICATION_ARTIFACTS: R2Bucket;
   AUTHORING: DurableObjectNamespace<AuthoringProbe>;
   AI: Ai;
   BOT_ISOLATES: DurableObjectNamespace<BotIsolateProbe>;

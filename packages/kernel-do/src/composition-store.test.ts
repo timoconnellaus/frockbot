@@ -216,6 +216,47 @@ describe("Bot Durable Object Composition records", () => {
       /replaces required first-party Package "shell" with bot provenance/,
     );
 
+    const catalogShadow: CompositionMemberV1 = {
+      packageId: "shell",
+      specifier: "catalog:shell",
+      version: "0.0.1",
+      manifestHash: authoredMember.manifestHash,
+      provenance: {
+        kind: "catalog",
+        packageId: "shell",
+        version: "0.0.1",
+        catalogId: "shell",
+        catalogGeneration: "catalog-1",
+        contentHash: authoredMember.artifact!.contentHash,
+      },
+      artifact: authoredMember.artifact,
+    };
+    const catalogHash = await compositionArtifactSetHashV1([catalogShadow]);
+    await expect(
+      store.propose({
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, catalogHash),
+        artifactSetHash: catalogHash,
+        parentGenerationId: parent.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-catalog",
+          action: "install",
+          packageId: "shell",
+          catalogId: "shell",
+          botId: "bot-1",
+          runId: "run-1",
+          sessionId: "s",
+          turnId: "t",
+        },
+        summary: "Added shell",
+        members: [catalogShadow],
+        status: "pending",
+      }),
+    ).rejects.toThrow(
+      /replaces required first-party Package "shell" with catalog provenance/,
+    );
+
     const changedCore = {
       ...parent.members[0]!,
       version: "9.9.9",
