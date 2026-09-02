@@ -108,7 +108,21 @@ bun scripts/ci-watch.ts pr 128 --once    # report now and exit, for a caller tha
 
 It reports the two quiet failures by name rather than waiting them out: a pull request whose checks all passed but whose merge was never queued, and a release whose packages published while `Deploy FrockBot app` failed — a GitHub release standing in front of a production that never moved.
 
-For the first publication, add a granular npm automation token with access to the `@frockbot` scope as the `NPM_TOKEN` repository secret. After each package exists on npm, configure its trusted publisher for repository `timoconnellaus/frockbot` and workflow `release.yml`; the workflow can then publish through GitHub OIDC without a long-lived token, and `NPM_TOKEN` can be deleted.
+### Trusted publishing
+
+Releases publish to npm through GitHub OIDC. There is no `NPM_TOKEN`, and no registry credential exists in this repository at all: each package names `timoconnellaus/frockbot` and the workflow file `release.yml` as its trusted publisher, and npm exchanges the job's OIDC identity for a credential that expires with the job. Provenance attestation comes with it, so `--provenance` is never passed.
+
+Trusted publishing cannot bootstrap itself. npm will only attach a trusted publisher to a package that already exists, so the very first publication of a name cannot come from a workflow that holds no token. `scripts/bootstrap-npm-trust.ts` breaks that loop once, from a maintainer's own npm session:
+
+```
+npm login                                     # a 2FA session; npm trust rejects tokens
+bun scripts/bootstrap-npm-trust.ts            # show the plan, change nothing
+bun scripts/bootstrap-npm-trust.ts --confirm  # publish placeholders, then trust each
+```
+
+It publishes a deprecated `0.0.0` placeholder under any name the registry does not have yet, then configures that package's trusted publisher. It is idempotent, so a name that already exists is never republished and a package that is already trusted is skipped. It needs npm 11.15.0 or later, which is what `npm trust` requires; the workflow itself only needs 11.5.1 and checks that before publishing.
+
+Once it has run, nothing about a release is manual again. A failure in the publish step reporting a 404 from the token exchange means the trusted publisher for that package is missing or misconfigured, not that the package is absent — re-run the bootstrap to reconcile it.
 
 ## Staging deployment
 
