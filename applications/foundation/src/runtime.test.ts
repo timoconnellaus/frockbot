@@ -59,7 +59,7 @@ describe("foundation application", () => {
       "provider-foundation",
       "web",
       "provider-ollama-cloud",
-      "provider-workers-ai",
+      "provider-flock-ai",
       "routines",
       "search",
       "skills",
@@ -78,7 +78,7 @@ describe("foundation application", () => {
         "mcp",
         "package-publisher",
         "provider-ollama-cloud",
-        "provider-workers-ai",
+        "provider-flock-ai",
         "routines",
         "search",
         "subagents",
@@ -103,7 +103,7 @@ describe("foundation application", () => {
         "provider-foundation",
         "web",
         "provider-ollama-cloud",
-        "provider-workers-ai",
+        "provider-flock-ai",
         "routines",
         "skills",
         "subagents",
@@ -212,39 +212,41 @@ describe("foundation application", () => {
     ).toThrow('Bot model provider "foundation" is unavailable');
   });
 
-  test("mounts an assigned Workers AI model through the native host seam", async () => {
+  test("mounts an assigned Flock AI model through the gateway host seam", async () => {
     const plan = await compileFoundationApplication();
     const runtimePackage = createFoundationModelRuntimePackage(
       plan,
       {
         assignment: {
-          connectionId: "workers-ai-ambient",
-          providerModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+          connectionId: "flock-ai-ambient",
+          providerModelId: "@flock/auto",
         },
         state: "ready",
-        packageId: "provider-workers-ai",
-        providerType: "workers-ai",
+        packageId: "provider-flock-ai",
+        providerType: "flock-ai",
         connection: {
-          connectionId: "workers-ai-ambient",
-          packageId: "provider-workers-ai",
-          connectionTypeId: "workers-ai-account",
-          displayName: "Cloudflare Workers AI",
+          connectionId: "flock-ai-ambient",
+          packageId: "provider-flock-ai",
+          connectionTypeId: "flock-ai-account",
+          displayName: "Flock AI",
           state: "ready",
-          generation: "workers-ai-ambient-v1",
-          providerType: "workers-ai",
+          generation: "flock-ai-ambient-v1",
+          providerType: "flock-ai",
           safeMetadata: {},
         },
       },
       {
         accountId: "account-1",
-        connectionId: "workers-ai-ambient",
-        runWorkersAi: () => Promise.reject(new Error("not executed")),
+        connectionId: "flock-ai-ambient",
+        flockAiAutoRoute: "flock-auto",
+        runFlockAiChatCompletion: () =>
+          Promise.reject(new Error("not executed")),
       },
     );
 
     expect(runtimePackage).toMatchObject({
-      specifier: "@frockbot/plugin-provider-workers-ai",
-      contributionSpecifier: "@frockbot/plugin-provider-workers-ai/runtime",
+      specifier: "@frockbot/plugin-provider-flock-ai",
+      contributionSpecifier: "@frockbot/plugin-provider-flock-ai/runtime",
     });
   });
 
@@ -498,7 +500,7 @@ describe("foundation application", () => {
     expect(
       userSpecifiers.indexOf("@frockbot/plugin-settings/user"),
     ).toBeLessThan(
-      userSpecifiers.indexOf("@frockbot/plugin-provider-workers-ai/user"),
+      userSpecifiers.indexOf("@frockbot/plugin-provider-flock-ai/user"),
     );
     expect(
       userSpecifiers.indexOf("@frockbot/plugin-credentials/user"),

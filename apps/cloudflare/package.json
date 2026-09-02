@@ -41,7 +41,7 @@
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/plugin-package-publisher": "workspace:*",
     "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
-    "@frockbot/plugin-provider-workers-ai": "workspace:*",
+    "@frockbot/plugin-provider-flock-ai": "workspace:*",
     "@frockbot/plugin-routines": "workspace:*",
     "@frockbot/plugin-search": "workspace:*",
     "@frockbot/plugin-settings": "workspace:*",

@@ -177,8 +177,8 @@ import {
   createOllamaCloudRuntimePlugin,
   ollamaChatBaseUrl,
 } from "@frockbot/plugin-provider-ollama-cloud/runtime";
-import workersAiManifest from "@frockbot/plugin-provider-workers-ai/manifest";
-import { createWorkersAiRuntimePlugin } from "@frockbot/plugin-provider-workers-ai/runtime";
+import flockAiManifest from "@frockbot/plugin-provider-flock-ai/manifest";
+import { createFlockAiRuntimePlugin } from "@frockbot/plugin-provider-flock-ai/runtime";
 import routinesManifest from "@frockbot/plugin-routines/manifest";
 // The Routines gateway Contribution carries the Bot-scoped Routine routes.
 import {
@@ -309,7 +309,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-credentials", credentialsManifest],
   ["@frockbot/plugin-web", webManifest],
   ["@frockbot/plugin-provider-ollama-cloud", ollamaCloudManifest],
-  ["@frockbot/plugin-provider-workers-ai", workersAiManifest],
+  ["@frockbot/plugin-provider-flock-ai", flockAiManifest],
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
   ["@frockbot/plugin-flock", flockManifest],
@@ -469,10 +469,11 @@ interface ModelRuntimeContributionConfig {
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
   settleCredential?(effectId: string): Promise<void>;
-  runWorkersAi?: (
-    model: string,
-    input: Record<string, unknown>,
-  ) => Promise<unknown>;
+  flockAiAutoRoute?: string;
+  runFlockAiChatCompletion?: (
+    gatewayModel: string,
+    body: Record<string, unknown>,
+  ) => Promise<ReadableStream<Uint8Array>>;
   fetch?: typeof fetch;
   /**
    * Endpoint root carried on the Connection's settings bag, when its User
@@ -514,17 +515,27 @@ const modelRuntimeContributionFactories = new Map<
     },
   ],
   [
-    "@frockbot/plugin-provider-workers-ai/runtime",
+    "@frockbot/plugin-provider-flock-ai/runtime",
     {
-      providerType: "workers-ai",
-      create: ({ connectionId, connectionGeneration, runWorkersAi }) => {
-        if (!connectionGeneration || !runWorkersAi) {
-          throw new Error("Workers AI binding host is unavailable");
+      providerType: "flock-ai",
+      create: ({
+        connectionId,
+        connectionGeneration,
+        flockAiAutoRoute,
+        runFlockAiChatCompletion,
+      }) => {
+        if (
+          !connectionGeneration ||
+          !flockAiAutoRoute ||
+          !runFlockAiChatCompletion
+        ) {
+          throw new Error("Flock AI gateway host is unavailable");
         }
-        return createWorkersAiRuntimePlugin({
+        return createFlockAiRuntimePlugin({
           connectionId,
           connectionGeneration,
-          run: runWorkersAi,
+          autoRoute: flockAiAutoRoute,
+          runChatCompletion: runFlockAiChatCompletion,
         });
       },
     },
@@ -1338,7 +1349,7 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   // its handshake resolve.
   runtimeIds.delete("mcp");
   runtimeIds.delete("provider-ollama-cloud");
-  runtimeIds.delete("provider-workers-ai");
+  runtimeIds.delete("provider-flock-ai");
   // The Web Package's `web_fetch` mounts only for a Bot whose User assigned
   // the `web-fetch` Capability to it.
   runtimeIds.delete("web");

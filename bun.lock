@@ -48,7 +48,7 @@
         "@frockbot/plugin-package-publisher": "workspace:*",
         "@frockbot/plugin-provider-foundation": "workspace:*",
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
-        "@frockbot/plugin-provider-workers-ai": "workspace:*",
+        "@frockbot/plugin-provider-flock-ai": "workspace:*",
         "@frockbot/plugin-routines": "workspace:*",
         "@frockbot/plugin-search": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
@@ -117,7 +117,7 @@
         "@frockbot/plugin-memory": "workspace:*",
         "@frockbot/plugin-package-publisher": "workspace:*",
         "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
-        "@frockbot/plugin-provider-workers-ai": "workspace:*",
+        "@frockbot/plugin-provider-flock-ai": "workspace:*",
         "@frockbot/plugin-routines": "workspace:*",
         "@frockbot/plugin-search": "workspace:*",
         "@frockbot/plugin-settings": "workspace:*",
@@ -904,15 +904,14 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/plugin-provider-workers-ai": {
-      "name": "@frockbot/plugin-provider-workers-ai",
+    "packages/plugin-provider-flock-ai": {
+      "name": "@frockbot/plugin-provider-flock-ai",
       "version": "0.0.1",
       "dependencies": {
         "@frockbot/configuration-core": "workspace:*",
         "@frockbot/connection-core": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
         "@frockbot/plugin-models": "workspace:*",
-        "@frockbot/plugin-settings": "workspace:*",
         "@frockbot/provider-openai-compatible": "workspace:*",
         "cordis": "4.0.0-rc.8",
       },
@@ -1494,7 +1493,7 @@
 
     "@frockbot/plugin-provider-ollama-cloud": ["@frockbot/plugin-provider-ollama-cloud@workspace:packages/plugin-provider-ollama-cloud"],
 
-    "@frockbot/plugin-provider-workers-ai": ["@frockbot/plugin-provider-workers-ai@workspace:packages/plugin-provider-workers-ai"],
+    "@frockbot/plugin-provider-flock-ai": ["@frockbot/plugin-provider-flock-ai@workspace:packages/plugin-provider-flock-ai"],
 
     "@frockbot/plugin-routines": ["@frockbot/plugin-routines@workspace:packages/plugin-routines"],
 

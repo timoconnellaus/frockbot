@@ -1,5 +1,5 @@
 {
-  "name": "@frockbot/plugin-provider-workers-ai",
+  "name": "@frockbot/plugin-provider-flock-ai",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -24,7 +24,6 @@
     "@frockbot/connection-core": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/plugin-models": "workspace:*",
-    "@frockbot/plugin-settings": "workspace:*",
     "@frockbot/provider-openai-compatible": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
