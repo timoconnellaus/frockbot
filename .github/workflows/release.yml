@@ -101,16 +101,31 @@ jobs:
           }
           NODE
 
-      - name: Configure npm token when provided
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Check npm can publish through OIDC
+        # Publishing carries no registry token. npm exchanges this job's OIDC
+        # identity for a short-lived credential, which it only does from
+        # 11.5.1 onward; an older npm would fall back to unauthenticated
+        # publishing and fail one package at a time. Fail here instead, where
+        # the reason is legible, if a Node image ever ships an older npm.
         shell: bash
         run: |
-          if [[ -n "$NODE_AUTH_TOKEN" ]]; then
-            npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          required=11.5.1
+          installed="$(npm --version)"
+          if [[ "$(printf '%s\n%s\n' "$required" "$installed" | sort -V | head -n 1)" != "$required" ]]; then
+            echo "npm $installed cannot publish through OIDC; $required or later is required" >&2
+            exit 1
           fi
+          echo "npm $installed supports trusted publishing"
 
       - name: Publish packages
+        # No NPM_TOKEN: each package names this repository and this workflow
+        # file as its trusted publisher, and npm mints a short-lived
+        # credential from the job's OIDC identity. A package whose trusted
+        # publisher is unconfigured fails here with a 404 from the token
+        # exchange, which reads as "package not found" but means "this
+        # workflow is not trusted to publish it" — see the release runbook.
+        # Provenance attestation is automatic under trusted publishing, so
+        # --provenance is not passed.
         env:
           VERSION: ${{ steps.version.outputs.version }}
         shell: bash
