@@ -147,8 +147,12 @@ describe("npm trusted publishing bootstrap", () => {
       (call) => call.args[0] === "trust" && call.args[1] === "github",
     );
     expect(trusts.length).toBeGreaterThan(0);
-    for (const trust of trusts)
+    for (const trust of trusts) {
       expect(trust.args).not.toContain("--userconfig");
+      // It needs the terminal for the same reason: npm trust demands a
+      // second factor, and a captured prompt is an unanswerable one.
+      expect(trust.interactive).toBe(true);
+    }
   });
 
   test("without a token npm is handed the terminal to ask for a second factor", async () => {

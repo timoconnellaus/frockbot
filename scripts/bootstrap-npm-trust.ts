@@ -251,8 +251,12 @@ export async function bootstrap(options: {
       }
 
       log(`  ${entry.name}: configuring trusted publisher`);
-      // Never the token: `npm trust` requires the interactive 2FA session.
-      const result = await run("npm", trustArguments(entry.name));
+      // Never the token: `npm trust` requires the interactive 2FA session, so
+      // it also gets the terminal — a second factor it cannot ask for is a
+      // second factor nobody can answer.
+      const result = await run("npm", trustArguments(entry.name), {
+        interactive: true,
+      });
       if (result.exitCode !== 0) {
         const reason = result.stderr.trim() || "see the output above";
         throw new Error(
