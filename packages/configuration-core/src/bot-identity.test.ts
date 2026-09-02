@@ -18,8 +18,7 @@ function settings(profile: Record<string, unknown>): Record<string, unknown> {
     revision: 2,
     profile,
     notifications: { enabled: false },
-    assignments: [],
-    assignmentOperations: [],
+    packageValues: {},
   };
 }
 

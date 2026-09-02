@@ -427,6 +427,90 @@ describe("decodeFrockBotManifest", () => {
     });
   });
 
+  test("decodes the exact provider-neutral model setting role", () => {
+    const decoded = decodeFrockBotManifest({
+      ...manifest("custom-models"),
+      configuration: {
+        settings: [
+          {
+            id: "model",
+            schemaVersion: 1,
+            scopes: ["user", "bot"],
+            role: "model",
+            schema: {
+              type: "object",
+              properties: {
+                connectionId: { type: "string" },
+                providerModelId: { type: "string" },
+              },
+              required: ["connectionId", "providerModelId"],
+              additionalProperties: false,
+            },
+          },
+        ],
+      },
+    });
+
+    expect(decoded.configuration?.settings).toEqual([
+      {
+        id: "model",
+        schemaVersion: 1,
+        scopes: ["user", "bot"],
+        role: "model",
+        schema: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string" },
+            providerModelId: { type: "string" },
+          },
+          required: ["connectionId", "providerModelId"],
+          additionalProperties: false,
+        },
+      },
+    ]);
+  });
+
+  test("rejects any other schema for a model-role setting", () => {
+    const exact = {
+      type: "object",
+      properties: {
+        connectionId: { type: "string" },
+        providerModelId: { type: "string" },
+      },
+      required: ["connectionId", "providerModelId"],
+      additionalProperties: false,
+    };
+    for (const schema of [
+      { ...exact, additionalProperties: true },
+      { ...exact, required: ["connectionId"] },
+      {
+        ...exact,
+        properties: {
+          ...exact.properties,
+          providerModelId: { type: "number" },
+        },
+      },
+      { ...exact, title: "Choose a model" },
+    ]) {
+      expect(() =>
+        decodeFrockBotManifest({
+          ...manifest("custom-models"),
+          configuration: {
+            settings: [
+              {
+                id: "model",
+                schemaVersion: 1,
+                scopes: ["user"],
+                role: "model",
+                schema,
+              },
+            ],
+          },
+        }),
+      ).toThrow(/model setting schema must be exactly/);
+    }
+  });
+
   test("decodes an ambient-native Connection without an authorization driver", () => {
     const decoded = decodeFrockBotManifest({
       schemaVersion: 4,

@@ -81,6 +81,12 @@ export interface PackageSettingDefinition {
   id: string;
   schemaVersion: number;
   scopes: SettingScope[];
+  /**
+   * A kernel-consumed semantic role. The model role is deliberately generic:
+   * ADR 0019 lets a Package opt the User into model choice without teaching
+   * the kernel that Package's identity or policy.
+   */
+  role?: "model";
   schema: PackageSettingSchema;
 }
 
@@ -905,6 +911,44 @@ function safeSchema(value: unknown): PackageSettingSchema {
   return decodeSafeSchema(value, 0);
 }
 
+/**
+ * The one object contract the kernel interprets from a setting value. Keeping
+ * this exact prevents a Package from smuggling provider policy into the model
+ * seam while still letting ordinary settings use the supported schema subset.
+ */
+function assertModelBindingSchema(schema: PackageSettingSchema): void {
+  const fields = Reflect.ownKeys(schema);
+  const properties = schema.properties;
+  const required = schema.required;
+  if (
+    fields.length !== 4 ||
+    !fields.every((field) =>
+      ["type", "properties", "required", "additionalProperties"].includes(
+        String(field),
+      ),
+    ) ||
+    schema.type !== "object" ||
+    schema.additionalProperties !== false ||
+    !properties ||
+    Reflect.ownKeys(properties).length !== 2 ||
+    !Object.hasOwn(properties, "connectionId") ||
+    !Object.hasOwn(properties, "providerModelId") ||
+    Reflect.ownKeys(properties.connectionId ?? {}).length !== 1 ||
+    properties.connectionId?.type !== "string" ||
+    Reflect.ownKeys(properties.providerModelId ?? {}).length !== 1 ||
+    properties.providerModelId?.type !== "string" ||
+    !required ||
+    required.length !== 2 ||
+    new Set(required).size !== 2 ||
+    !required.includes("connectionId") ||
+    !required.includes("providerModelId")
+  ) {
+    throw new Error(
+      'manifest model setting schema must be exactly an object with required string properties "connectionId" and "providerModelId" and no additional properties',
+    );
+  }
+}
+
 function decodeCapabilityAdmission(value: unknown): {
   turnTypes: TurnTypeV1[];
   subagentRoles?: string[];
@@ -984,7 +1028,13 @@ function settingDefinitions(
     // that round-trips through this decoder decodes again unchanged.
     exactFields(
       setting,
-      ["id", "schemaVersion", "schema", "scopes"],
+      [
+        "id",
+        "schemaVersion",
+        "schema",
+        "scopes",
+        ...(scope === "package" ? ["role"] : []),
+      ],
       "manifest setting definition",
     );
     const schemaVersion = setting.schemaVersion;
@@ -1019,11 +1069,17 @@ function settingDefinitions(
     ) {
       throw new Error("manifest setting scopes must contain user or bot");
     }
+    if (setting.role !== undefined && setting.role !== "model") {
+      throw new Error('manifest setting role must be "model"');
+    }
+    const schema = safeSchema(setting.schema);
+    if (setting.role === "model") assertModelBindingSchema(schema);
     return {
       id: definitionId(setting),
       schemaVersion: schemaVersion as number,
       scopes: scopes as SettingScope[],
-      schema: safeSchema(setting.schema),
+      ...(setting.role === undefined ? {} : { role: setting.role }),
+      schema,
     };
   });
 }
