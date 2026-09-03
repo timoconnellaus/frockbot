@@ -342,15 +342,25 @@ describe("the Computer tools' subagent roles", () => {
     // `browserUse` is "page-level Chrome" (`docs/research/
     // grokbot-computer.md` l.351–356): the browser, and not the shell, the
     // screen, or the processes a shell left behind.
-    expect(named("browserUse")).toEqual(["computer_browser"]);
+    expect(named("browserUse")).toEqual([
+      "computer_browser",
+      "get_dynamic_tools",
+      "call_dynamic_tool",
+    ]);
     expect(named("browserUse")).not.toContain("computer_exec");
     expect(named("computerUse")).toContain("computer_exec");
     expect(named("computerUse")).toContain("computer_screenshot");
     expect(named("computerUse")).toContain("computer_browser");
     expect(named("executor")).toContain("computer_exec");
     // The two video roles have no Computer at all.
-    expect(named("watchVideo")).toEqual([]);
-    expect(named("videoReview")).toEqual([]);
+    expect(named("watchVideo")).toEqual([
+      "get_dynamic_tools",
+      "call_dynamic_tool",
+    ]);
+    expect(named("videoReview")).toEqual([
+      "get_dynamic_tools",
+      "call_dynamic_tool",
+    ]);
     await harness.dispose();
   });
 });

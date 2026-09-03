@@ -127,7 +127,7 @@ The kernel is `@frockbot/kernel-contracts` (session events plus the declared `To
 
 **LLM registry** selects a provider adapter and streams normalized response chunks. A separate optional reconciliation capability retrieves an original result by its durable provider effect ID; adapters without a provider-guaranteed retrieval path return reconciliation unavailable. Provider SDK choice is internal to each adapter and does not enter the agent-loop interface. The generic `@frockbot/provider-openai-compatible` adapter normalizes messages and tools, parses streamed SSE text and fragmented tool calls under per-event and cumulative byte bounds, rejects terminal streams without any valid choice, bounds HTTP errors, and receives credentials only inside its backend provider Plugin, but does not claim idempotency or repeat an uncertain request.
 
-**Tool registry** owns tool definitions, per-agent visibility, input decoding, execution policy, and result finalization.
+**Tool registry** owns tool definitions, per-agent visibility, input decoding, execution policy, progressive disclosure, and result finalization. Native definitions are sent to the model directly. A definition carrying a Tool Namespace is hidden behind the always-present `get_dynamic_tools` and `call_dynamic_tool` meta-tools; the registry owns discovery and runs an invocation through the inner definition's ordinary preparation, guards, hooks, idempotency, reconciliation, and result events. Namespace metadata is lifecycle-registered separately, so a tool may exist before its description or readiness state arrives and duplicate `namespace/tool` identities still fail closed.
 
 **Agent registry** exposes live agents, creation and disposal, inbox delivery, cancellation, status, and live agent events. Consumers do not import the concrete loop.
 
@@ -286,6 +286,8 @@ tools/pre-execute
 ```
 
 No side-effecting tool implementation runs before its `tool/call` intent is durable. A crash before effect admission is structurally repaired as interrupted. After admission, an uncertain tool effect remains reconciling: an idempotent tool may retry with the same `effectId`, while other tools use provider-neutral reconciliation and remain resumable when the outcome is unavailable.
+
+The model-facing surface is two-tier. Native tools and the two meta-tools are schemas in every request; namespaced tools appear only as names in the prompt's XML-escaped `<dynamic_tool_catalog>`. `get_dynamic_tools` returns bounded catalog/search summaries or full schemas for a namespace or exact tool. `call_dynamic_tool` remains the durable outer intent but reuses its call ID for an inner call whose name and arguments traverse the same registry pipeline. The host stores no expanded catalog: discovery results in the transcript are the cache. The existing `model/request` event already records the exact assembled prompt and exposed schemas, so progressive disclosure adds no parallel recording mechanism.
 
 A tool definition declares whether calls may run concurrently, which resources they mutate, and whether it supports idempotent retry. The loop may use bounded parallelism only when definitions and policy allow it. Permission prompts and sandbox selection are plugins at the tool seam, not branches in the loop.
 

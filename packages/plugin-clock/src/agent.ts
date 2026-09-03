@@ -14,6 +14,7 @@ function currentTime(): string {
 
 const clockTool: ToolDefinition = {
   name: "current_time",
+  namespace: "frockbot",
   description: "Return the current local date and time.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   idempotent: true,
@@ -28,7 +29,15 @@ async function* requestClockTool(
   yield {
     // pi-lens-ignore: ts:2322
     type: "tool-call",
-    call: { id: crypto.randomUUID(), name: "current_time", input: {} },
+    call: {
+      id: crypto.randomUUID(),
+      name: "call_dynamic_tool",
+      input: {
+        namespace: "frockbot",
+        toolName: "current_time",
+        arguments: {},
+      },
+    },
   };
   yield {
     type: "finish",

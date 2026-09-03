@@ -14,11 +14,34 @@ export interface ComposioPluginConfig {
   client: ComposioClient;
   userId: string;
   connectedAccountId: string;
+  toolkitSlug: string;
   tools: ComposioToolDeclaration[];
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function slugSegment(value: string): string {
+  return value
+    .trim()
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** The stable, account-specific namespace exposed to the model. */
+export function composioNamespaceV1(
+  toolkitSlug: string,
+  connectedAccountId: string,
+): string {
+  const toolkit = slugSegment(toolkitSlug);
+  const account = slugSegment(connectedAccountId);
+  if (!toolkit || !account) {
+    throw new Error("Composio toolkit and connected account must be slug-like");
+  }
+  const displayToolkit =
+    toolkit.charAt(0).toUpperCase() + toolkit.slice(1).toLowerCase();
+  return `user-${displayToolkit}--${account}`;
 }
 
 export interface ComposioRouterPluginConfig {
@@ -75,6 +98,7 @@ export function createComposioRouterPlugin(
 ): Plugin.Function {
   const allowedToolSlugs = new Set<string>();
   let runtimeContext: Context | undefined;
+  let runtimeNamespace: string | undefined;
   const search: ToolDefinition = {
     name: "composio_search_tools",
     // A general work tool: the full toolset an `executor` subagent gets, and
@@ -130,29 +154,37 @@ export function createComposioRouterPlugin(
       ) {
         return { content: "Invalid Composio tool input", isError: true };
       }
-      const wasDurablySearched = runtimeContext?.sessions
-        .get(context.sessionId)
-        ?.events.some((event) => {
-          if (
-            event.type !== "tool/result" ||
-            event.name !== "composio_search_tools" ||
-            event.isError
-          ) {
-            return false;
-          }
-          try {
-            const result: unknown = JSON.parse(event.content);
-            return (
-              Array.isArray(result) &&
-              result.some(
-                (candidate) =>
-                  isObject(candidate) && candidate.slug === input.toolSlug,
-              )
-            );
-          } catch {
-            return false;
-          }
-        });
+      const events = runtimeContext?.sessions.get(context.sessionId)?.events;
+      const wasDurablySearched = events?.some((event) => {
+        if (event.type !== "tool/result" || event.isError) {
+          return false;
+        }
+        const isSearchResult =
+          event.name === "composio_search_tools" ||
+          (event.name === "call_dynamic_tool" &&
+            events?.some(
+              (candidate) =>
+                candidate.type === "tool/call" &&
+                candidate.occurrenceId === event.occurrenceId &&
+                candidate.name === "call_dynamic_tool" &&
+                isObject(candidate.input) &&
+                candidate.input.namespace === runtimeNamespace &&
+                candidate.input.toolName === "composio_search_tools",
+            ));
+        if (!isSearchResult) return false;
+        try {
+          const result: unknown = JSON.parse(event.content);
+          return (
+            Array.isArray(result) &&
+            result.some(
+              (candidate) =>
+                isObject(candidate) && candidate.slug === input.toolSlug,
+            )
+          );
+        } catch {
+          return false;
+        }
+      });
       if (!allowedToolSlugs.has(input.toolSlug) && !wasDurablySearched) {
         return {
           content:
@@ -176,14 +208,35 @@ export function createComposioRouterPlugin(
       return { content: JSON.stringify(result), isError: false };
     },
   };
-  const plugin: Plugin.Function = (ctx: Context) => {
+  const plugin: Plugin.Function = async (ctx: Context) => {
+    const grant = await config.authorizeEffect();
+    if (grant.toolkitSlug !== config.toolkitSlug) {
+      throw new Error("Composio effect grant changed toolkit");
+    }
+    runtimeNamespace = composioNamespaceV1(
+      grant.toolkitSlug,
+      grant.connectedAccountId,
+    );
     runtimeContext = ctx;
-    const removeSearch = ctx.tools.register(search);
-    const removeExecute = ctx.tools.register(execute);
+    const removeNamespace = ctx.tools.registerNamespace({
+      name: runtimeNamespace,
+      external: true,
+      status: "ready",
+    });
+    const removeSearch = ctx.tools.register({
+      ...search,
+      namespace: runtimeNamespace,
+    });
+    const removeExecute = ctx.tools.register({
+      ...execute,
+      namespace: runtimeNamespace,
+    });
     return () => {
       runtimeContext = undefined;
+      runtimeNamespace = undefined;
       removeExecute();
       removeSearch();
+      removeNamespace();
     };
   };
   plugin.inject = ["tools", "sessions"];
@@ -194,9 +247,19 @@ export function createComposioPlugin(
   config: ComposioPluginConfig,
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx: Context) => {
+    const namespace = composioNamespaceV1(
+      config.toolkitSlug,
+      config.connectedAccountId,
+    );
+    const removeNamespace = ctx.tools.registerNamespace({
+      name: namespace,
+      external: true,
+      status: "ready",
+    });
     const disposers = config.tools.map((declaration) => {
       const tool: ToolDefinition = {
         name: declaration.name,
+        namespace,
         description: declaration.description,
         inputSchema: declaration.inputSchema,
         validate: isObject,
@@ -218,6 +281,7 @@ export function createComposioPlugin(
     });
     return () => {
       for (const dispose of disposers.toReversed()) dispose();
+      removeNamespace();
     };
   };
   plugin.inject = ["tools"];

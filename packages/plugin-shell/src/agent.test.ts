@@ -86,8 +86,16 @@ describe("the Shell's tool admission", () => {
       expect(chat).toContain(SEND_TO_USER_TOOL_V1);
       expect(chat).toContain(SEND_MESSAGE_ALIAS_V1);
       expect(chat).not.toContain(WAKE_PARENT_TOOL_V1);
-      expect(automation).toEqual([WAKE_PARENT_TOOL_V1]);
-      expect(subagent).toEqual([WAKE_PARENT_TOOL_V1]);
+      expect(automation).toEqual([
+        WAKE_PARENT_TOOL_V1,
+        "get_dynamic_tools",
+        "call_dynamic_tool",
+      ]);
+      expect(subagent).toEqual([
+        WAKE_PARENT_TOOL_V1,
+        "get_dynamic_tools",
+        "call_dynamic_tool",
+      ]);
     } finally {
       await mounted.dispose();
     }
@@ -111,7 +119,11 @@ describe("the Shell's tool admission", () => {
         // thing any subagent role is offered here.
         expect(names).not.toContain(SEND_TO_USER_TOOL_V1);
         expect(names).not.toContain(SEND_MESSAGE_ALIAS_V1);
-        expect(names).toEqual([WAKE_PARENT_TOOL_V1]);
+        expect(names).toEqual([
+          WAKE_PARENT_TOOL_V1,
+          "get_dynamic_tools",
+          "call_dynamic_tool",
+        ]);
       }
     } finally {
       await mounted.dispose();

@@ -177,6 +177,8 @@ describe("mounting one enabled Capability", () => {
 
     expect(schemas.map((schema) => schema.name)).toEqual([
       "mcp__example__echo",
+      "get_dynamic_tools",
+      "call_dynamic_tool",
     ]);
     expect(schemas[0]!.inputSchema).toEqual({
       type: "object",
@@ -189,7 +191,7 @@ describe("mounting one enabled Capability", () => {
 
     for (const turnType of ["chat", "automation", "subagent"] as const) {
       expect(root.tools.schemas({ turnType }).map((tool) => tool.name)).toEqual(
-        ["mcp__example__echo"],
+        ["mcp__example__echo", "get_dynamic_tools", "call_dynamic_tool"],
       );
     }
   });
@@ -260,7 +262,9 @@ describe("mounting one enabled Capability", () => {
     });
 
     expect(mounted).toBe(false);
-    expect(root.tools.schemas({ turnType: "chat" })).toEqual([]);
+    expect(
+      root.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
+    ).toEqual(["get_dynamic_tools", "call_dynamic_tool"]);
     expect(failures[0]).toContain("401");
   });
 
@@ -327,7 +331,9 @@ describe("the durable lifecycle a mount participates in", () => {
       }),
     });
 
-    const [schema] = root.tools.schemas({ turnType: "chat" });
+    const schema = root.tools
+      .schemas({ turnType: "chat" })
+      .find((candidate) => candidate.name === "mcp__example__echo");
     expect(schema?.name).toBe("mcp__example__echo");
     // The instructions reach the model in the exact normalized request the
     // session log records, which is the only place a User can prove it.

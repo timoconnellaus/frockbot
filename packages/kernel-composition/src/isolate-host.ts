@@ -91,7 +91,7 @@ export interface BotIsolateHostOptions {
   loader: BotIsolateLoader;
   artifacts: BotIsolateArtifactStore;
   /** Where the isolate's tools are registered — the kernel's tool surface. */
-  tools: Pick<ToolRegistration, "register">;
+  tools: Pick<ToolRegistration, "register" | "registerNamespace">;
   /** The mounted Bot/generation root. Isolate hook listeners live only here. */
   loop: Context;
   userId: string;
@@ -370,6 +370,13 @@ export class BotIsolateContributionHost implements ContributionHost {
                 ...(subagentRoleCeiling ? { subagentRoleCeiling } : {}),
               }
             : undefined;
+        registered.push(
+          this.options.tools.registerNamespace({
+            name: packageId,
+            external: true,
+            status: "ready",
+          }),
+        );
         for (const descriptor of health.tools) {
           registered.push(
             this.options.tools.register(
@@ -663,6 +670,7 @@ export class BotIsolateContributionHost implements ContributionHost {
     const options = this.options;
     return {
       ...isolateToolSchemaV1(descriptor),
+      namespace: packageId,
       idempotent: descriptor.idempotent,
       // A contract v1 isolate declares none, and its tools stay on every turn.
       ...(descriptor.admission ? { admission: descriptor.admission } : {}),

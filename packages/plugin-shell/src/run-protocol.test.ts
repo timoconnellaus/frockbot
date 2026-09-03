@@ -571,6 +571,58 @@ describe("client run protocol v1", () => {
     }
   });
 
+  test("projects dynamic call identity so the client can show the inner tool", () => {
+    const projected = projectClientTurnV1({
+      runId: "run-dynamic-tool",
+      text: "",
+      events: [
+        event({
+          type: "tool/call",
+          seq: 0,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "call_dynamic_tool",
+          input: {
+            namespace: "user-Github--acme",
+            toolName: "search_issues",
+            arguments: { query: "is:open" },
+            mcpDetails: { description: "Find open issues." },
+          },
+        }),
+        event({
+          type: "tool/result",
+          seq: 1,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "call_dynamic_tool",
+          content: "[]",
+          isError: false,
+          status: "completed",
+        }),
+      ],
+    });
+
+    expect(projected.events[0]).toEqual({
+      type: "tool/call",
+      call: {
+        id: "tool-1",
+        name: "call_dynamic_tool",
+        input: {
+          namespace: "user-Github--acme",
+          toolName: "search_issues",
+          argumentsJson: '{"query":"is:open"}',
+        },
+      },
+    });
+    expect(decodeClientTurnV1(structuredClone(projected)).events[0]).toEqual(
+      projected.events[0],
+    );
+  });
+
   test("projects only bounded user-visible run state", () => {
     const stored = {
       runId: "run-1",

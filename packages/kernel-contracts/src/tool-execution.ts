@@ -125,6 +125,12 @@ export type ToolEffectReconciliation =
   | { status: "unavailable"; reason: string };
 
 export interface ToolDefinition extends ToolSchema {
+  /**
+   * A dynamic Tool Namespace. Absent means the tool is native and its schema
+   * is offered to the model directly; present means the schema is disclosed
+   * and the tool is invoked only through the registry's two meta-tools.
+   */
+  namespace?: string;
   idempotent?: boolean;
   /** The turn types this tool is offered on. Absent means all of them. */
   admission?: TurnAdmissionV1;
@@ -185,10 +191,24 @@ export interface ToolRegistrationOptions {
   subagentRoleCeiling?: readonly string[];
 }
 
+export interface ToolNamespaceRegistration {
+  name: string;
+  description?: string;
+  status?: "ready" | "needsAuth" | "error";
+  /** External namespaces require call metadata before an effect is admitted. */
+  external?: boolean;
+  /** Namespace-level instructions rendered in the dynamic catalog prompt. */
+  useInstructions?: string;
+}
+
 /** Contributing Packages register tool definitions through this surface. */
 export interface ToolRegistration {
-  /** Every registered name, before turn/role admission trims the catalog. */
+  /**
+   * Every registered identity, before turn/role admission trims the catalog.
+   * Native tools use their bare name; dynamic tools use `namespace/name`.
+   */
   registeredNames?(): string[];
+  registerNamespace(namespace: ToolNamespaceRegistration): () => void;
   register(
     definition: ToolDefinition,
     options?: ToolRegistrationOptions,

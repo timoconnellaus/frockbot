@@ -31,7 +31,7 @@ import {
 
 export interface ClientTurnEvent {
   type: string;
-  call?: { id: string; name: string };
+  call?: { id: string; name: string; input?: unknown };
   callId?: string;
   content?: string;
   isError?: boolean;
@@ -242,12 +242,16 @@ function decodeTurnEvent(value: unknown): ClientTurnEvent {
     decoded.call = {
       id: responseString(event, "occurrenceId", "turn event"),
       name: responseString(event, "name", "turn event"),
+      ...(event.name === "call_dynamic_tool" ? { input: event.input } : {}),
     };
   } else if (event.call !== undefined) {
     const call = responseRecord(event.call, "tool call");
     decoded.call = {
       id: responseString(call, "id", "tool call"),
       name: responseString(call, "name", "tool call"),
+      ...(call.name === "call_dynamic_tool" && Object.hasOwn(call, "input")
+        ? { input: call.input }
+        : {}),
     };
   }
   if (event.type === "tool/result" && event.occurrenceId !== undefined) {

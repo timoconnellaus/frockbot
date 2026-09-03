@@ -53,7 +53,11 @@ export type ClientRunEventV1 =
     }
   | {
       type: "tool/call";
-      call: { id: string; name: string };
+      call: {
+        id: string;
+        name: string;
+        input?: ClientDynamicToolCallInputV1;
+      };
     }
   | {
       type: "tool/result";
@@ -101,6 +105,14 @@ export type ClientRunEventV1 =
       model: string;
       background: boolean;
     };
+
+/** The bounded, public identity needed to present a dynamic tool call. */
+export interface ClientDynamicToolCallInputV1 {
+  namespace: string;
+  toolName: string;
+  /** JSON keeps this cross-runtime DTO shallow while preserving tool input. */
+  argumentsJson?: string;
+}
 
 export type ClientRunOutcomeV1 =
   | { type: "completed"; text: string }
@@ -313,6 +325,67 @@ interface ProjectionUnitV1 {
   droppable: boolean;
 }
 
+function dynamicToolCallInput(
+  value: unknown,
+): ClientDynamicToolCallInputV1 | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const input = value as Record<string, unknown>;
+  if (
+    typeof input.namespace !== "string" ||
+    typeof input.toolName !== "string"
+  ) {
+    return undefined;
+  }
+  const argumentsJson = Object.hasOwn(input, "arguments")
+    ? JSON.stringify(input.arguments)
+    : undefined;
+  return {
+    namespace: truncateWireString(input.namespace, MAX_EVENT_NAME_BYTES),
+    toolName: truncateWireString(input.toolName, MAX_EVENT_NAME_BYTES),
+    ...(argumentsJson !== undefined &&
+    wireBytes(argumentsJson) <= MAX_INPUT_BYTES
+      ? { argumentsJson }
+      : {}),
+  };
+}
+
+function decodeDynamicToolCallInput(
+  value: unknown,
+): ClientDynamicToolCallInputV1 {
+  const input = record(value, "run event.call.input");
+  exactKeys(
+    input,
+    ["namespace", "toolName", "argumentsJson"],
+    "run event.call.input",
+  );
+  return {
+    namespace: wireString(
+      input,
+      "namespace",
+      MAX_EVENT_NAME_BYTES,
+      "run event.call.input",
+    ),
+    toolName: wireString(
+      input,
+      "toolName",
+      MAX_EVENT_NAME_BYTES,
+      "run event.call.input",
+    ),
+    ...(Object.hasOwn(input, "argumentsJson")
+      ? {
+          argumentsJson: wireString(
+            input,
+            "argumentsJson",
+            MAX_INPUT_BYTES,
+            "run event.call.input",
+          ),
+        }
+      : {}),
+  };
+}
+
 function projectionUnits(
   events: readonly SessionEvent[],
   status: ClientRunStatusV1,
@@ -328,11 +401,16 @@ function projectionUnits(
         );
       }
       callCount += 1;
+      const dynamicInput =
+        event.name === "call_dynamic_tool"
+          ? dynamicToolCallInput(event.input)
+          : undefined;
       const call: ClientToolCallV1 = {
         type: "tool/call",
         call: {
           id: `tool-${callCount}`,
           name: truncateWireString(event.name, MAX_EVENT_NAME_BYTES),
+          ...(dynamicInput ? { input: dynamicInput } : {}),
         },
       };
       const unit: ProjectionUnitV1 = { events: [call], droppable: false };
@@ -714,7 +792,21 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
   if (event.type === "tool/call") {
     exactKeys(event, ["type", "call"], "run event");
     const call = record(event.call, "run event.call");
-    exactKeys(call, ["id", "name"], "run event.call");
+    exactKeys(call, ["id", "name", "input"], "run event.call");
+    const name = wireString(
+      call,
+      "name",
+      MAX_EVENT_NAME_BYTES,
+      "run event.call",
+    );
+    const input = Object.hasOwn(call, "input")
+      ? decodeDynamicToolCallInput(call.input)
+      : undefined;
+    if (input && name !== "call_dynamic_tool") {
+      throw new Error(
+        "run event.call.input is valid only for a dynamic tool call",
+      );
+    }
     return {
       type: "tool/call",
       call: {
@@ -722,7 +814,8 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
           string(call, "id", MAX_EVENT_ID_LENGTH, "run event.call"),
           "run event.call.id",
         ),
-        name: wireString(call, "name", MAX_EVENT_NAME_BYTES, "run event.call"),
+        name,
+        ...(input ? { input } : {}),
       },
     };
   }

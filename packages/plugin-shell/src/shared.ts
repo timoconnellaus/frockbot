@@ -42,6 +42,7 @@ export interface WebToolAttachment {
 export interface WebToolActivity {
   id: string;
   name: string;
+  input?: unknown;
   status: "running" | "completed" | "failed";
   text?: string;
   attachments?: WebToolAttachment[];

@@ -330,7 +330,10 @@ describe("the Ollama Cloud web_search Capability", () => {
       expect({
         turnType,
         names: root.tools.schemas({ turnType }).map((schema) => schema.name),
-      }).toEqual({ turnType, names: ["web_search"] });
+      }).toEqual({
+        turnType,
+        names: ["web_search", "get_dynamic_tools", "call_dynamic_tool"],
+      });
     }
     await root.fiber.dispose();
   });

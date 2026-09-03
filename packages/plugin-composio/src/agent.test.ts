@@ -2,10 +2,32 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { type SessionEvent, SessionStore } from "@frockbot/kernel-contracts";
 import { ToolRegistry } from "@frockbot/plugin-tools";
 import { Context } from "cordis";
-import { createComposioRouterPlugin } from "./agent.js";
+import {
+  composioNamespaceV1,
+  createComposioPlugin,
+  createComposioRouterPlugin,
+} from "./agent.js";
 import { ComposioClient } from "./composio-client.js";
 
 const roots: Context[] = [];
+const namespace = composioNamespaceV1("gmail", "ca_123");
+
+function dynamicCall(
+  id: string,
+  toolName: string,
+  arguments_: Record<string, unknown>,
+) {
+  return {
+    id,
+    name: "call_dynamic_tool",
+    input: {
+      namespace,
+      toolName,
+      arguments: arguments_,
+      mcpDetails: { description: `Use ${toolName} for this test.` },
+    },
+  };
+}
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => root.fiber.dispose()));
@@ -65,11 +87,10 @@ describe("Composio router Plugin", () => {
     };
 
     const invented = await root.tools.prepare(
-      {
-        id: "invented",
-        name: "composio_execute_tool",
-        input: { toolSlug: "GMAIL_FETCH_EMAILS", arguments: {} },
-      },
+      dynamicCall("invented", "composio_execute_tool", {
+        toolSlug: "GMAIL_FETCH_EMAILS",
+        arguments: {},
+      }),
       context,
     );
     if (invented.kind !== "ready") throw new Error("execute tool was denied");
@@ -79,11 +100,9 @@ describe("Composio router Plugin", () => {
     expect(calls).toEqual([]);
 
     const search = await root.tools.prepare(
-      {
-        id: "search",
-        name: "composio_search_tools",
-        input: { query: "fetch emails" },
-      },
+      dynamicCall("search", "composio_search_tools", {
+        query: "fetch emails",
+      }),
       context,
     );
     if (search.kind !== "ready") throw new Error("search tool was denied");
@@ -92,11 +111,10 @@ describe("Composio router Plugin", () => {
     });
 
     const exact = await root.tools.prepare(
-      {
-        id: "exact",
-        name: "composio_execute_tool",
-        input: { toolSlug: "GMAIL_FETCH_EMAILS", arguments: {} },
-      },
+      dynamicCall("exact", "composio_execute_tool", {
+        toolSlug: "GMAIL_FETCH_EMAILS",
+        arguments: {},
+      }),
       context,
     );
     if (exact.kind !== "ready") throw new Error("execute tool was denied");
@@ -104,7 +122,7 @@ describe("Composio router Plugin", () => {
       isError: false,
     });
     expect(calls).toHaveLength(2);
-    expect(authorizationCalls).toBe(2);
+    expect(authorizationCalls).toBe(3);
   });
 
   test("restores searched slug authorization from the durable session", async () => {
@@ -123,8 +141,12 @@ describe("Composio router Plugin", () => {
         toolCalls: [
           {
             id: "search-before-eviction",
-            name: "composio_search_tools",
-            input: {},
+            name: "call_dynamic_tool",
+            input: dynamicCall(
+              "search-before-eviction",
+              "composio_search_tools",
+              {},
+            ).input,
           },
         ],
       },
@@ -133,15 +155,19 @@ describe("Composio router Plugin", () => {
         turn: 1,
         step: 1,
         occurrenceId: "tool:1:1:0",
-        name: "composio_search_tools",
-        input: {},
+        name: "call_dynamic_tool",
+        input: dynamicCall(
+          "search-before-eviction",
+          "composio_search_tools",
+          {},
+        ).input,
       },
       {
         type: "tool/result",
         turn: 1,
         step: 1,
         occurrenceId: "tool:1:1:0",
-        name: "composio_search_tools",
+        name: "call_dynamic_tool",
         content: JSON.stringify([
           {
             slug: "GMAIL_FETCH_EMAILS",
@@ -190,11 +216,10 @@ describe("Composio router Plugin", () => {
       signal: new AbortController().signal,
     };
     const execution = await root.tools.prepare(
-      {
-        id: "execute-after-eviction",
-        name: "composio_execute_tool",
-        input: { toolSlug: "GMAIL_FETCH_EMAILS", arguments: {} },
-      },
+      dynamicCall("execute-after-eviction", "composio_execute_tool", {
+        toolSlug: "GMAIL_FETCH_EMAILS",
+        arguments: {},
+      }),
       context,
     );
     if (execution.kind !== "ready") throw new Error("execute tool was denied");
@@ -203,5 +228,61 @@ describe("Composio router Plugin", () => {
       root.tools.executePrepared(execution, context),
     ).resolves.toMatchObject({ isError: false });
     expect(calls).toHaveLength(1);
+  });
+
+  test("derives a stable GrokBot-style namespace from toolkit and account", () => {
+    expect(composioNamespaceV1("github", "acct_acme-42")).toBe(
+      "user-Github--acct-acme-42",
+    );
+  });
+
+  test("registers static per-tool integrations under the account namespace", async () => {
+    const root = new Context();
+    roots.push(root);
+    await root.plugin(ToolRegistry);
+    await root.plugin(
+      createComposioPlugin({
+        client: new ComposioClient({ apiKey: "secret" }),
+        userId: "user-1",
+        toolkitSlug: "github",
+        connectedAccountId: "acct_acme-42",
+        tools: [
+          {
+            slug: "GITHUB_SEARCH_ISSUES",
+            name: "search_issues",
+            description: "Search issues.",
+            inputSchema: { type: "object" },
+          },
+        ],
+      }),
+    );
+
+    expect(root.tools.registeredNames?.()).toContain(
+      "user-Github--acct-acme-42/search_issues",
+    );
+    const call = {
+      id: "static",
+      name: "call_dynamic_tool",
+      input: {
+        namespace: "user-Github--acct-acme-42",
+        toolName: "search_issues",
+      },
+    };
+    const preparation = await root.tools.prepare(call, {
+      botId: "primary",
+      agentId: "primary",
+      compositionGenerationId: "bootstrap",
+      turnType: "chat",
+      sessionId: "user-1:primary",
+      effectId: "tool:1:1:0",
+      signal: new AbortController().signal,
+    });
+    expect(preparation).toMatchObject({
+      kind: "denied",
+      result: {
+        content:
+          'External namespace "user-Github--acct-acme-42" requires mcpDetails.description',
+      },
+    });
   });
 });

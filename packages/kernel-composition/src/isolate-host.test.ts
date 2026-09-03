@@ -10,6 +10,7 @@ import type {
   IsolateToolInvocationV1,
   ToolDefinition,
   ToolExecutionContext,
+  ToolNamespaceRegistration,
 } from "@frockbot/kernel-contracts";
 import type { PackageDescriptor } from "./index.ts";
 import {
@@ -119,6 +120,7 @@ function host(
 ) {
   const loads: RecordedLoad[] = [];
   const registered: ToolDefinition[] = [];
+  const namespaces: ToolNamespaceRegistration[] = [];
   const ceilings: (readonly TurnTypeV1[] | undefined)[] = [];
   const { entrypoint, ...rest } = overrides;
   const options: BotIsolateHostOptions = {
@@ -130,6 +132,13 @@ function host(
       loadPackageArtifact: () => Promise.resolve("export const tools = [];"),
     },
     tools: {
+      registerNamespace: (namespace) => {
+        namespaces.push(namespace);
+        return () => {
+          const index = namespaces.indexOf(namespace);
+          if (index >= 0) namespaces.splice(index, 1);
+        };
+      },
       register: (definition, registration) => {
         registered.push(definition);
         ceilings.push(registration?.admissionCeiling);
@@ -157,6 +166,7 @@ function host(
     host: new BotIsolateContributionHost(options),
     loads,
     registered,
+    namespaces,
     ceilings,
   };
 }
@@ -562,7 +572,11 @@ describe("Bot isolate contribution host", () => {
 
   test("registers one tool per health entry and executes it over RPC", async () => {
     let seen: IsolateToolInvocationV1 | undefined;
-    const { host: subject, registered } = host({
+    const {
+      host: subject,
+      registered,
+      namespaces,
+    } = host({
       entrypoint: {
         health: () => Promise.resolve(healthy()),
         execute: (invocation) => {
@@ -579,7 +593,15 @@ describe("Bot isolate contribution host", () => {
     const active = await prepared!.commit();
     expect(registered).toHaveLength(1);
     expect(registered[0]!.name).toBe("reverse_text");
+    expect(registered[0]!.namespace).toBe("bot-authored");
     expect(registered[0]!.idempotent).toBe(true);
+    expect(namespaces).toEqual([
+      {
+        name: "bot-authored",
+        external: true,
+        status: "ready",
+      },
+    ]);
 
     const result = await registered[0]!.execute(
       { text: "ab" },
@@ -591,6 +613,7 @@ describe("Bot isolate contribution host", () => {
 
     await active.dispose();
     expect(registered).toHaveLength(0);
+    expect(namespaces).toHaveLength(0);
   });
 
   test("an undecodable isolate result is a tool error, not a throw", async () => {

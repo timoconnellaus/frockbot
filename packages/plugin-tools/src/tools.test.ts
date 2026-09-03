@@ -249,6 +249,21 @@ describe("ToolRegistry turn admission", () => {
     return root;
   }
 
+  function admittedNames(
+    root: Context,
+    admission: {
+      turnType: ToolExecutionContext["turnType"];
+      subagentRole?: string;
+    },
+  ): string[] {
+    return root.tools
+      .schemas(admission)
+      .map((schema) => schema.name)
+      .filter(
+        (name) => name !== "get_dynamic_tools" && name !== "call_dynamic_tool",
+      );
+  }
+
   const work: ToolDefinition = {
     name: "work",
     description: "A work tool.",
@@ -290,9 +305,7 @@ describe("ToolRegistry turn admission", () => {
     const root = await admissionRoot();
     root.tools.register(work);
     for (const turnType of ["chat", "automation", "subagent"] as const) {
-      expect(root.tools.schemas({ turnType }).map((s) => s.name)).toEqual([
-        "work",
-      ]);
+      expect(admittedNames(root, { turnType })).toEqual(["work"]);
     }
   });
 
@@ -302,12 +315,14 @@ describe("ToolRegistry turn admission", () => {
     root.tools.register(chatOnly);
     root.tools.register(automationOnly);
 
-    expect(root.tools.schemas({ turnType: "chat" }).map((s) => s.name)).toEqual(
-      ["work", "send_to_user"],
-    );
-    expect(
-      root.tools.schemas({ turnType: "automation" }).map((s) => s.name),
-    ).toEqual(["work", "wake_parent"]);
+    expect(admittedNames(root, { turnType: "chat" })).toEqual([
+      "work",
+      "send_to_user",
+    ]);
+    expect(admittedNames(root, { turnType: "automation" })).toEqual([
+      "work",
+      "wake_parent",
+    ]);
   });
 
   test("bounds a tool declaration by the manifest ceiling", async () => {
@@ -317,10 +332,8 @@ describe("ToolRegistry turn admission", () => {
       admissionCeiling: ["automation", "subagent"],
     });
 
-    expect(root.tools.schemas({ turnType: "chat" })).toEqual([]);
-    expect(
-      root.tools.schemas({ turnType: "automation" }).map((s) => s.name),
-    ).toEqual(["work"]);
+    expect(admittedNames(root, { turnType: "chat" })).toEqual([]);
+    expect(admittedNames(root, { turnType: "automation" })).toEqual(["work"]);
   });
 
   test("denies an out-of-admission call without executing it", async () => {
@@ -431,9 +444,10 @@ describe("ToolRegistry turn admission", () => {
     const root = await admissionRoot();
     root.tools.register(work);
     root.tools.register(desktop);
-    expect(root.tools.schemas({ turnType: "chat" }).map((s) => s.name)).toEqual(
-      ["work", "computer_exec"],
-    );
+    expect(admittedNames(root, { turnType: "chat" })).toEqual([
+      "work",
+      "computer_exec",
+    ]);
   });
 
   test("trims the catalog to what the subagent role admits", async () => {
@@ -443,19 +457,22 @@ describe("ToolRegistry turn admission", () => {
     root.tools.register(browser);
 
     expect(
-      root.tools
-        .schemas({ turnType: "subagent", subagentRole: "browserUse" })
-        .map((s) => s.name),
+      admittedNames(root, {
+        turnType: "subagent",
+        subagentRole: "browserUse",
+      }),
     ).toEqual(["work", "computer_browser"]);
     expect(
-      root.tools
-        .schemas({ turnType: "subagent", subagentRole: "computerUse" })
-        .map((s) => s.name),
+      admittedNames(root, {
+        turnType: "subagent",
+        subagentRole: "computerUse",
+      }),
     ).toEqual(["work", "computer_exec", "computer_browser"]);
     expect(
-      root.tools
-        .schemas({ turnType: "subagent", subagentRole: "watchVideo" })
-        .map((s) => s.name),
+      admittedNames(root, {
+        turnType: "subagent",
+        subagentRole: "watchVideo",
+      }),
     ).toEqual(["work"]);
   });
 
@@ -463,14 +480,16 @@ describe("ToolRegistry turn admission", () => {
     const root = await admissionRoot();
     root.tools.register(browser, { subagentRoleCeiling: ["executor"] });
     expect(
-      root.tools
-        .schemas({ turnType: "subagent", subagentRole: "browserUse" })
-        .map((s) => s.name),
+      admittedNames(root, {
+        turnType: "subagent",
+        subagentRole: "browserUse",
+      }),
     ).toEqual([]);
     expect(
-      root.tools
-        .schemas({ turnType: "subagent", subagentRole: "executor" })
-        .map((s) => s.name),
+      admittedNames(root, {
+        turnType: "subagent",
+        subagentRole: "executor",
+      }),
     ).toEqual(["computer_browser"]);
   });
 

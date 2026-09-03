@@ -669,7 +669,10 @@ describe("foundation Cordis runtime", () => {
       runtime.agent.agent.session.events.find(
         (event) => event.type === "tool/call",
       ),
-    ).toMatchObject({ name: "current_time" });
+    ).toMatchObject({
+      name: "call_dynamic_tool",
+      input: { namespace: "frockbot", toolName: "current_time" },
+    });
     expect(runtime.agent.agent.session.deriveMessages().at(-1)).toMatchObject({
       role: "assistant",
     });

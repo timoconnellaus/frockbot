@@ -512,6 +512,8 @@ describe("AgentLoop", () => {
     if (request?.type !== "model/request") throw new Error("request missing");
     expect(request.request.tools.map((schema) => schema.name)).toEqual([
       "work",
+      "get_dynamic_tools",
+      "call_dynamic_tool",
     ]);
   });
 
@@ -556,6 +558,8 @@ describe("AgentLoop", () => {
     if (request?.type !== "model/request") throw new Error("request missing");
     expect(request.request.tools.map((schema) => schema.name)).toEqual([
       "send_to_user",
+      "get_dynamic_tools",
+      "call_dynamic_tool",
     ]);
     expect(
       handle.agent.session.events.some(
@@ -1664,7 +1668,11 @@ describe("AgentLoop", () => {
         provider: "scripted",
         model: "test-model",
         system: "You are the FrockBot test agent.",
-        tools: [{ name: "echo" }],
+        tools: expect.arrayContaining([
+          expect.objectContaining({ name: "echo" }),
+          expect.objectContaining({ name: "get_dynamic_tools" }),
+          expect.objectContaining({ name: "call_dynamic_tool" }),
+        ]),
       },
     });
     expect(events.at(-1)).toMatchObject({

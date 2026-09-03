@@ -54,7 +54,14 @@ describe("echo plugin", () => {
     expect(events).toHaveLength(2);
     expect(events[0]).toMatchObject({
       type: "tool-call",
-      call: { name: ECHO_TOOL_NAME, input: { text: "hello plugins" } },
+      call: {
+        name: "call_dynamic_tool",
+        input: {
+          namespace: "frockbot",
+          toolName: ECHO_TOOL_NAME,
+          arguments: { text: "hello plugins" },
+        },
+      },
     });
     const first = events[0];
     if (first?.type !== "tool-call") throw new Error("expected a tool call");
@@ -81,7 +88,9 @@ describe("echo plugin", () => {
     ).toEqual({ content: "hello plugins", isError: false });
 
     await fiber.dispose();
-    expect(harness.root.tools.schemas({ turnType: "chat" })).toEqual([]);
+    expect(
+      harness.root.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
+    ).toEqual(["get_dynamic_tools", "call_dynamic_tool"]);
     await harness.dispose();
   });
 

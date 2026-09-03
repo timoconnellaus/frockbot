@@ -192,8 +192,15 @@ function attachmentsOf(message: WebChatMessage): WebToolAttachment[] {
 }
 
 function iframeEntriesFor(tool: WebToolActivity) {
-  const slot = `frockbot.tool-result:${tool.name}`;
+  const separator = tool.name.indexOf("/");
+  const namespace = separator < 0 ? undefined : tool.name.slice(0, separator);
+  const toolName = separator < 0 ? tool.name : tool.name.slice(separator + 1);
+  const slot = `frockbot.tool-result:${toolName}`;
   return (state.value.packageUi?.contributions ?? [])
+    .filter(
+      (contribution) =>
+        namespace === undefined || contribution.packageId === namespace,
+    )
     .flatMap((contribution) =>
       contribution.mounts
         .filter((mount) => mount.slot === slot)

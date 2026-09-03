@@ -12,8 +12,14 @@ describe("Package iframe direct tool Turn", () => {
     await root.plugin(ToolRegistry);
     const session = root.sessions.create("user:bot");
     let calls = 0;
+    root.tools.registerNamespace({
+      name: "weather-page",
+      external: true,
+      status: "ready",
+    });
     root.tools.register({
       name: "weather_lookup",
+      namespace: "weather-page",
       description: "Weather",
       inputSchema: {},
       idempotent: true,
@@ -69,6 +75,9 @@ describe("Package iframe direct tool Turn", () => {
     );
     expect(
       result.events.find((event) => event.type === "tool/result"),
-    ).toMatchObject({ name: "weather_lookup", content: '{"temperature":21}' });
+    ).toMatchObject({
+      name: "call_dynamic_tool",
+      content: '{"temperature":21}',
+    });
   });
 });

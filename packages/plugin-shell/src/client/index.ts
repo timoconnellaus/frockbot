@@ -81,13 +81,49 @@ import { showClientNotificationV1 } from "./notify.js";
 import "@frockbot/client-core/fonts.css";
 import "./styles.css";
 
+function presentedToolCall(call: NonNullable<ClientTurnEvent["call"]>): {
+  name: string;
+  input?: unknown;
+} {
+  if (
+    call.name === "call_dynamic_tool" &&
+    typeof call.input === "object" &&
+    call.input !== null &&
+    !Array.isArray(call.input)
+  ) {
+    const input = call.input as Record<string, unknown>;
+    if (
+      typeof input.namespace === "string" &&
+      typeof input.toolName === "string"
+    ) {
+      let innerArguments: unknown = {};
+      if (typeof input.argumentsJson === "string") {
+        try {
+          innerArguments = JSON.parse(input.argumentsJson) as unknown;
+        } catch {
+          innerArguments = {};
+        }
+      }
+      return {
+        name: `${input.namespace}/${input.toolName}`,
+        input: innerArguments,
+      };
+    }
+  }
+  return {
+    name: call.name,
+    ...(call.input === undefined ? {} : { input: call.input }),
+  };
+}
+
 function toolsFrom(events: ClientTurnEvent[]): WebToolActivity[] {
   const tools = new Map<string, WebToolActivity>();
   for (const event of events) {
     if (event.type === "tool/call" && event.call) {
+      const presented = presentedToolCall(event.call);
       tools.set(event.call.id, {
         id: event.call.id,
-        name: event.call.name,
+        ...presented,
         status: "running",
       });
     }

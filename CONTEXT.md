@@ -40,6 +40,10 @@ _Avoid_: User Connection, credential, integration, account
 Behavior made available by an installed Package, such as a model, tool set, memory provider, or notification adapter.
 _Avoid_: Plugin, feature
 
+**Tool Namespace**:
+A model-facing group of dynamic tools disclosed by name in the system prompt and by schema only on request. A tool without a namespace is native; a namespaced tool is discovered and invoked through the registry's two meta-tools.
+_Avoid_: Package, Connection, tool prefix
+
 **Enablement**:
 A User-owned grant turning a Package or Connection on for every one of that user's bots. There is no per-bot grant.
 _Avoid_: Assignment, installation, per-bot permission

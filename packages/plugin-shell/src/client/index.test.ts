@@ -968,6 +968,52 @@ describe("Bot selection", () => {
 });
 
 describe("detached Turn projection", () => {
+  test("shows a dynamic call as its namespace/tool with inner arguments", () => {
+    const messages: Parameters<typeof projectCompletedRuns>[0] = [];
+    projectCompletedRuns(
+      messages,
+      [],
+      [
+        {
+          runId: "run-dynamic",
+          input: "Find open issues",
+          status: "completed",
+          responseText: "Done",
+          events: [
+            {
+              type: "tool/call",
+              call: {
+                id: "tool-1",
+                name: "call_dynamic_tool",
+                input: {
+                  namespace: "user-Github--acme",
+                  toolName: "search_issues",
+                  argumentsJson: '{"query":"is:open"}',
+                },
+              },
+            },
+            {
+              type: "tool/result",
+              callId: "tool-1",
+              content: "[]",
+              isError: false,
+            },
+          ],
+        },
+      ],
+    );
+
+    expect(messages[1]?.tools).toEqual([
+      {
+        id: "tool-1",
+        name: "user-Github--acme/search_issues",
+        input: { query: "is:open" },
+        status: "completed",
+        text: "[]",
+      },
+    ]);
+  });
+
   test("projects a completed run before it can be acknowledged", () => {
     const messages: Parameters<typeof projectCompletedRuns>[0] = [];
     const projected = projectCompletedRuns(
