@@ -52,6 +52,8 @@ import {
   ROUTINE_DEFERRAL_MS,
   ROUTINE_FIRE_LEASE_MS,
   ROUTINE_FIRE_PREFIX,
+  ROUTINE_FAILURE_BACKOFF_MS,
+  ROUTINE_FAILURE_PAUSE_AFTER,
   ROUTINE_FIRE_TIMEOUT_MS,
   ROUTINE_LIMIT_PER_BOT,
   ROUTINE_MISSED_GRACE_MS,
@@ -570,10 +572,17 @@ export class RoutineScheduler {
       record.timezone,
     );
     const anchor = new Date(record.updatedAt);
-    const late = now.getTime() - state.dueAt > ROUTINE_MISSED_GRACE_MS;
-    const missedCount = late
-      ? missedRoutineRunsV1(normalized, new Date(state.dueAt), now, anchor)
-      : 1;
+    // Every occurrence that has already elapsed coalesces into this one firing,
+    // not only the ones past the grace window. A `@every 1m` Routine after a
+    // four-minute stall used to run four Turns back to back, because inside
+    // the grace each occurrence was claimed on its own and one drain takes
+    // eight: lateness is lateness, and the rule is that it coalesces.
+    const missedCount = missedRoutineRunsV1(
+      normalized,
+      new Date(state.dueAt),
+      now,
+      anchor,
+    );
     const fire: RoutineFireV1 = {
       schemaVersion: 1,
       routineId: record.routineId,
@@ -590,10 +599,11 @@ export class RoutineScheduler {
       ...(missedCount > 1 ? { missedCount } : {}),
       entryId: `${routineFireIdV1(record.routineId, String(state.dueAt))}-entry`,
     };
-    // Recompute forward from now when the firing was late, and from the
-    // occurrence itself when it was on time; either way the clock advances
-    // before the Turn runs, so a crash mid-Turn cannot re-owe this occurrence.
-    const from = late ? now : new Date(state.dueAt);
+    // Recompute forward from now when the firing covered more than its own
+    // occurrence, and from the occurrence itself when it was on time; either
+    // way the clock advances before the Turn runs, so a crash mid-Turn cannot
+    // re-owe this occurrence.
+    const from = missedCount > 1 ? now : new Date(state.dueAt);
     const next = nextRoutineRunV1(normalized, from, anchor);
     await transaction.put(routineScheduleKeyV1(record.routineId), {
       schemaVersion: 1,
@@ -602,6 +612,9 @@ export class RoutineScheduler {
       dueAt: (
         next ?? new Date(now.getTime() + ROUTINE_MISSED_GRACE_MS)
       ).getTime(),
+      ...(state.consecutiveFailures === undefined
+        ? {}
+        : { consecutiveFailures: state.consecutiveFailures }),
     } satisfies RoutineScheduleStateV1);
     if (missedCount > 1) {
       // One entry says what was slept through. It is `skipped`, not `ok`: the
@@ -646,13 +659,93 @@ export class RoutineScheduler {
     } satisfies RoutineRecordV1);
   }
 
+  /**
+   * What a settled firing does to its Routine's clock.
+   *
+   * A firing that failed will most likely fail again on the next occurrence,
+   * and each attempt is a whole model Turn. Consecutive failures back the
+   * Routine off, and past the threshold it pauses itself and says why — where
+   * before it re-armed identically and burned a Turn a minute for ever with
+   * nothing on screen to say so.
+   */
+  async #recordOutcomeOnClock(
+    transaction: RoutineStorageWritesV1,
+    fire: RoutineFireV1,
+    outcome: RoutineFireOutcomeV1,
+    now: Date,
+  ): Promise<void> {
+    const stored = await transaction.get<unknown>(
+      routineScheduleKeyV1(fire.routineId),
+    );
+    if (stored === undefined) return;
+    let state: RoutineScheduleStateV1;
+    try {
+      state = decodeRoutineScheduleStateV1(stored);
+    } catch {
+      return;
+    }
+    if (outcome.status === "ok") {
+      if (state.consecutiveFailures === undefined) return;
+      const { consecutiveFailures: _cleared, ...cleared } = state;
+      await transaction.put(routineScheduleKeyV1(fire.routineId), cleared);
+      return;
+    }
+    const failures = (state.consecutiveFailures ?? 0) + 1;
+    if (failures >= ROUTINE_FAILURE_PAUSE_AFTER) {
+      const record = await transaction.get<unknown>(
+        routineKeyV1(fire.routineId),
+      );
+      if (record !== undefined) {
+        let decoded: RoutineRecordV1 | undefined;
+        try {
+          decoded = decodeRoutineRecordV1(record);
+        } catch {
+          decoded = undefined;
+        }
+        if (decoded && decoded.enabled) {
+          await transaction.put(routineKeyV1(fire.routineId), {
+            ...decoded,
+            enabled: false,
+            updatedAt: now.toISOString(),
+          } satisfies RoutineRecordV1);
+          await appendRoutineRunEntryV1(transaction, {
+            schemaVersion: 1,
+            entryId: `${fire.entryId}-paused`,
+            routineId: fire.routineId,
+            runId: fire.fireId,
+            fireId: fire.fireId,
+            trigger: fire.trigger,
+            status: "skipped",
+            startedAt: now.toISOString(),
+            finishedAt: now.toISOString(),
+            summary: `This Routine failed ${failures} times in a row and has been turned off. Turn it back on once the cause is fixed.`,
+          } satisfies RoutineRunEntryV1);
+        }
+      }
+    }
+    const backoff =
+      ROUTINE_FAILURE_BACKOFF_MS[
+        Math.min(failures, ROUTINE_FAILURE_BACKOFF_MS.length) - 1
+      ] ?? 0;
+    await transaction.put(routineScheduleKeyV1(fire.routineId), {
+      ...state,
+      consecutiveFailures: failures,
+      deferredUntil: Math.max(
+        state.deferredUntil ?? 0,
+        now.getTime() + backoff,
+      ),
+    } satisfies RoutineScheduleStateV1);
+  }
+
   async #settleFiring(
     fire: RoutineFireV1,
     outcome: RoutineFireOutcomeV1,
   ): Promise<void> {
-    const finishedAt = this.#now().toISOString();
+    const at = this.#now();
+    const finishedAt = at.toISOString();
     await this.#storage.transaction(async (transaction) => {
       await transaction.delete(routineFireKeyV1(fire.routineId));
+      await this.#recordOutcomeOnClock(transaction, fire, outcome, at);
       const startedAt = fire.mintedAt;
       await appendRoutineRunEntryV1(transaction, {
         schemaVersion: 1,

@@ -10,6 +10,7 @@ import { createMemoryRoutineStorageV1 } from "./testing.js";
 import {
   routineFireKeyV1,
   routineScheduleKeyV1,
+  ROUTINE_FAILURE_PAUSE_AFTER,
   ROUTINE_FIRE_LEASE_MS,
   ROUTINE_QUEUE_LIMIT,
   ROUTINE_RUN_PREFIX,
@@ -617,5 +618,91 @@ describe("a firing that never comes back", () => {
     );
     expect(entries[0]).toMatchObject({ status: "failed" });
     expect(entries[0]?.summary).toContain("longer than");
+  });
+});
+
+describe("a firing that keeps failing", () => {
+  test("backs off instead of re-arming identically, and pauses itself", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+
+    // The live wedge was `ok, ok, ok, failed, failed, …` at exactly 60s
+    // intervals, for ever: every failure re-armed the next occurrence
+    // identically and nothing paused, backed off, or said so.
+    const failing = async () =>
+      scheduler.settle(async () => {
+        firedAt.push(time.now().getTime());
+        return { status: "failed", summary: "the provider refused" };
+      });
+    const firedAt: number[] = [];
+
+    time.set("2026-01-01T00:01:00.000Z");
+    await failing();
+    time.set("2026-01-01T00:02:00.000Z");
+    await failing();
+    expect(firedAt).toHaveLength(2);
+    // The third occurrence is due — and the backoff holds it, where before
+    // every failure re-armed the next occurrence identically.
+    time.set("2026-01-01T00:03:00.000Z");
+    await failing();
+    expect(firedAt).toHaveLength(2);
+
+    // Given all the time in the world it still fires only until it gives up.
+    for (let step = 1; step <= 10; step += 1) {
+      time.set(
+        new Date(
+          Date.parse("2026-01-01T00:02:00.000Z") + step * 60 * 60_000,
+        ).toISOString(),
+      );
+      await failing();
+    }
+    expect(firedAt).toHaveLength(ROUTINE_FAILURE_PAUSE_AFTER);
+    const listed = await store.list("scout", await scheduler.nextRuns());
+    expect(listed.routines[0]).toMatchObject({ enabled: false });
+    // The reason is durable and in the run log the panel already renders.
+    const runs = await storage.list<unknown>({ prefix: ROUTINE_RUN_PREFIX });
+    const paused = [...runs.values()]
+      .map((value) => decodeRoutineRunEntryV1(value))
+      .find((entry) => entry.summary?.includes("times in a row"));
+    expect(paused).toMatchObject({ status: "skipped" });
+  });
+
+  test("a firing that succeeds clears the backoff", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+
+    time.set("2026-01-01T00:01:00.000Z");
+    await drain(scheduler, { status: "failed", summary: "flaked" });
+    expect((await state(storage)).consecutiveFailures).toBe(1);
+
+    time.set("2026-01-01T00:05:00.000Z");
+    await drain(scheduler);
+    expect((await state(storage)).consecutiveFailures).toBeUndefined();
+  });
+});
+
+describe("a burst of missed occurrences", () => {
+  test("coalesces into one firing even inside the grace window", async () => {
+    const { time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+
+    // Four minutes of stall — well inside the five-minute grace, which is
+    // exactly where each occurrence used to be claimed on its own and one
+    // drain ran four Turns back to back.
+    time.set("2026-01-01T00:04:30.000Z");
+    const fired = await drain(scheduler);
+
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.missedCount).toBe(4);
+    expect(fired[0]?.cue).toContain("4 scheduled occurrences elapsed");
   });
 });

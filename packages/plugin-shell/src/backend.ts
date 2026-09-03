@@ -3012,7 +3012,18 @@ export class ShellBotBackendContribution {
     // here whenever the Turn is executing in this isolate, but a durable active
     // run outlives an eviction, and admitting a firing against one would burn
     // the occurrence on an error instead of holding the debt.
-    if (await this.authority.readActiveRunId()) return;
+    //
+    // Returning was not enough: the debt stayed past-due, so `deadlines()`
+    // re-armed on a moment already gone and the alarm spun straight back into
+    // this same bail-out — which is how a Routine racing a long chat Turn
+    // failed once a minute for ever. The hold is what turns the bail-out into
+    // a deferral: `dueAt` does not move, so the firing still lands.
+    if (await this.authority.readActiveRunId()) {
+      await this.ctx.storage.transaction((transaction) =>
+        this.routineScheduler.defer(transaction),
+      );
+      return;
+    }
     await this.routineScheduler.settle(async (fire) => {
       try {
         await this.authority.run(
