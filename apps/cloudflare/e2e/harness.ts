@@ -65,11 +65,20 @@ export const E2E_CREDENTIAL_KEYRING = JSON.stringify({
  * `slow` answers exactly as `ok` does, after a pause long enough for a spec to
  * reload the page while the Turn is still running. It is the only way to test
  * what a browser does with a Turn it is not holding open.
+ *
+ * `streaming` answers with the same words, split across two deltas with a gap
+ * between them, so the first half of the reply is durable while the Turn is
+ * still running. It is the only way to see what a browser draws mid-sentence.
  */
-export type FakeOllamaChatMode = "ok" | "unauthorized" | "slow";
+export type FakeOllamaChatMode = "ok" | "unauthorized" | "slow" | "streaming";
 
 /** How long `slow` holds a chat completion before it answers. */
 export const E2E_SLOW_CHAT_DELAY_MS = 10_000;
+
+/** The first delta `streaming` sends, and the gap before the rest follows. */
+export const E2E_STREAMED_REPLY_HEAD = "Reply from the ";
+export const E2E_STREAMED_REPLY_TAIL = "**local Ollama stub**.";
+export const E2E_STREAM_GAP_MS = 8_000;
 
 const READY_TIMEOUT_MS = 120_000;
 const SHUTDOWN_GRACE_MS = 5_000;
@@ -202,7 +211,9 @@ export function startFakeOllama(port: number): Promise<{
           ).mode,
         );
         chatMode =
-          requested === "unauthorized" || requested === "slow"
+          requested === "unauthorized" ||
+          requested === "slow" ||
+          requested === "streaming"
             ? requested
             : "ok";
         json(200, { mode: chatMode });
@@ -257,6 +268,7 @@ export function startFakeOllama(port: number): Promise<{
       }
       const chunks: Buffer[] = [];
       const slow = chatMode === "slow";
+      const streaming = chatMode === "streaming";
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
       request.on("end", () => {
         const answer = () => {
@@ -289,6 +301,29 @@ export function startFakeOllama(port: number): Promise<{
                 choices: [{ delta: {}, finish_reason: "tool_calls" }],
               })}\n\n`,
             );
+          } else if (streaming) {
+            // Half the answer now, half after a gap: the words the person can
+            // already read are durable while the Turn is still running.
+            response.write(
+              `data: ${JSON.stringify({
+                choices: [{ delta: { content: E2E_STREAMED_REPLY_HEAD } }],
+              })}\n\n`,
+            );
+            setTimeout(() => {
+              response.write(
+                `data: ${JSON.stringify({
+                  choices: [{ delta: { content: E2E_STREAMED_REPLY_TAIL } }],
+                })}\n\n`,
+              );
+              response.write(
+                `data: ${JSON.stringify({
+                  choices: [{ delta: {}, finish_reason: "stop" }],
+                })}\n\n`,
+              );
+              response.write("data: [DONE]\n\n");
+              response.end();
+            }, E2E_STREAM_GAP_MS).unref();
+            return;
           } else {
             response.write(
               `data: ${JSON.stringify({

@@ -14,6 +14,30 @@ const CHANNEL_META_KEY = "bot-state-channel:meta:v1";
 const CHANNEL_EVENT_PREFIX = "bot-state-channel:event:v1:";
 export const BOT_STATE_CHANNEL_RETENTION = 64;
 
+/**
+ * The shortest gap between two `runs` invalidations.
+ *
+ * A Turn's answer is journaled a text delta at a time, so a streaming reply
+ * lands one durable run write per token and, uncoalesced, one notice and one
+ * `GET /turns` per token with it. The observer only ever needs to know that it
+ * should read again, so the burst is spread: the first write notices at once —
+ * a Turn that starts, ends, or says one short thing is never delayed — and
+ * everything behind it is collapsed into one notice per interval. The last
+ * write always gets a notice, because the pending flag outlives the wait.
+ */
+export const BOT_STATE_RUNS_NOTICE_INTERVAL_MS = 250;
+
+export interface BotStateChannelOptionsV1 {
+  /** Overridden only by tests, which cannot wait a real quarter of a second. */
+  runsNoticeIntervalMs?: number;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 interface ChannelMetaV1 {
   schemaVersion: 1;
   first: number;
@@ -221,9 +245,17 @@ export class BotStateChannel {
   /** The in-flight `runs` notice, and whether another write arrived behind it. */
   private runsNotice: Promise<void> | undefined;
   private runsPending = false;
+  /** When the last `runs` notice was appended; the throttle's only clock. */
+  private runsNoticeAt = 0;
+  private readonly runsNoticeIntervalMs: number;
 
-  constructor(private readonly state: DurableObjectState) {
+  constructor(
+    private readonly state: DurableObjectState,
+    options: BotStateChannelOptionsV1 = {},
+  ) {
     this.computerStorage = new ChannelComputerStorage(this, state.storage);
+    this.runsNoticeIntervalMs =
+      options.runsNoticeIntervalMs ?? BOT_STATE_RUNS_NOTICE_INTERVAL_MS;
   }
 
   /**
@@ -322,7 +354,16 @@ export class BotStateChannel {
     if (this.runsNotice) return;
     this.runsNotice = (async () => {
       while (this.runsPending) {
+        // A notice inside the interval since the last one waits out the
+        // remainder, so a streaming answer's per-token writes become one
+        // notice per interval rather than one each. Whatever arrived during
+        // the wait is still pending, so the loop runs again and the final
+        // write always notices.
+        const wait =
+          this.runsNoticeIntervalMs - (Date.now() - this.runsNoticeAt);
+        if (wait > 0) await delay(wait);
         this.runsPending = false;
+        this.runsNoticeAt = Date.now();
         let event: StoredChannelEventV1 | undefined;
         await this.state.storage.transaction(async (transaction) => {
           event = await this.append(transaction, "runs");

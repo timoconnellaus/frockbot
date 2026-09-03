@@ -218,6 +218,14 @@ export interface ClientRunV1 {
    * the flag is durable state, so a reload draws the same thing.
    */
   queued?: true;
+  /**
+   * The answer the Bot has written so far, present only while the run is still
+   * running and has produced text. The thread draws it in the bubble it is
+   * already drawing for the Turn, so a reply appears as it is written instead
+   * of arriving whole at settlement. A settled run carries its answer in
+   * `outcome` instead, and never both.
+   */
+  partialText?: string;
   outcome?: ClientRunOutcomeV1;
   recovery?: ClientRunRecoveryV1;
 }
@@ -641,10 +649,13 @@ function visibleEvents(
  * fact about what the person watched arrive, not a claim that the Turn
  * succeeded, and the thread keeps it instead of replacing it with a notice.
  */
-function interruptedOutcomeTextV1(run: StoredRun): { text?: string } {
+export function assistantTextSoFarV1(
+  events: readonly SessionEvent[],
+  responseText = "",
+): string {
   let requestId: string | undefined;
-  let text = run.responseText ?? "";
-  for (const event of run.events) {
+  let text = responseText;
+  for (const event of events) {
     if (event.type === "assistant/chunk") {
       if (event.requestId !== requestId) {
         requestId = event.requestId;
@@ -656,7 +667,29 @@ function interruptedOutcomeTextV1(run: StoredRun): { text?: string } {
       text = event.text;
     }
   }
+  return text;
+}
+
+function interruptedOutcomeTextV1(run: StoredRun): { text?: string } {
+  const text = assistantTextSoFarV1(run.events, run.responseText ?? "");
   return text ? { text: truncateWireString(text, MAX_OUTCOME_BYTES) } : {};
+}
+
+/**
+ * What a still-running Turn has said so far, read out of the same journal an
+ * interrupted one is read from.
+ *
+ * The kernel appends an `assistant/chunk` per provider text delta and each
+ * append lands on the run record, so the words are already durable while the
+ * Turn runs; nothing here is a second copy and nothing crosses the channel.
+ * Bounded exactly as an outcome is, because a long answer must not be able to
+ * grow the run list past its wire budget.
+ */
+function partialTextV1(run: StoredRun): { partialText?: string } {
+  const text = assistantTextSoFarV1(run.events);
+  return text
+    ? { partialText: truncateWireString(text, MAX_OUTCOME_BYTES) }
+    : {};
 }
 
 function runStatus(run: StoredRun): ClientRunStatusV1 {
@@ -713,6 +746,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     input: truncateWireString(run.input, MAX_INPUT_BYTES),
     status,
     events: visibleEvents(run.events, status),
+    ...(status === "running" ? partialTextV1(run) : {}),
     ...(run.stopRequestedAt
       ? {
           stopRequestedAt: truncate(run.stopRequestedAt, MAX_TIMESTAMP_LENGTH),
@@ -1200,6 +1234,7 @@ function decodeRun(value: unknown): ClientRun {
       "events",
       "stopRequestedAt",
       "queued",
+      "partialText",
       "outcome",
       "recovery",
     ],
@@ -1247,6 +1282,16 @@ function decodeRun(value: unknown): ClientRun {
   if (run.queued === true && runStatus !== "running") {
     throw new Error("only a running run may be queued");
   }
+  let partialText: string | undefined;
+  if (run.partialText !== undefined) {
+    // A settled run's answer is its outcome. Carrying both would give the
+    // thread two sources for one bubble, which is the duplication the
+    // one-bubble contract exists to prevent.
+    if (runStatus !== "running") {
+      throw new Error("only a running run may carry partial text");
+    }
+    partialText = wireString(run, "partialText", MAX_OUTCOME_BYTES, "run");
+  }
   return {
     runId,
     admittedAt,
@@ -1255,6 +1300,7 @@ function decodeRun(value: unknown): ClientRun {
     events: decodeEvents(run.events, runStatus),
     ...(stopRequestedAt ? { stopRequestedAt } : {}),
     ...(run.queued === true ? { queued: true as const } : {}),
+    ...(partialText ? { partialText } : {}),
     ...(outcome?.type === "completed" ? { responseText: outcome.text } : {}),
     ...(outcome?.type === "failed"
       ? {
