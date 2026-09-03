@@ -332,7 +332,10 @@ function isPackageInstalled(packageId: string): boolean {
     >
       The Catalog has nothing to offer yet.
     </p>
-    <p v-else-if="filteredCatalog.length === 0" class="catalog-empty">
+    <p
+      v-else-if="filteredCatalog.length === 0 && !web.settingsError"
+      class="catalog-empty"
+    >
       No Catalog entry matches that search.
     </p>
     <p v-if="web.settingsError" class="settings-error" role="alert">

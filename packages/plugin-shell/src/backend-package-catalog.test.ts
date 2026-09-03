@@ -147,7 +147,12 @@ async function bootstrap(): Promise<CompositionGenerationV1> {
 }
 
 async function fixture(
-  options: { connected?: boolean; uiAvailable?: boolean } = {},
+  options: {
+    connected?: boolean;
+    uiAvailable?: boolean;
+    /** A deployment with no published Catalog pins no generation. */
+    pinned?: boolean;
+  } = {},
 ) {
   const log: string[] = [];
   const records = new Map<string, unknown>();
@@ -220,8 +225,9 @@ async function fixture(
           },
         ]
       : [],
-    catalogGeneration: "catalog-1",
-    catalogIndexHash: "d".repeat(64),
+    ...(options.pinned === false
+      ? {}
+      : { catalogGeneration: "catalog-1", catalogIndexHash: "d".repeat(64) }),
   };
   const commands: UserConfigurationCommandV1[] = [];
   const userAuthority = {
@@ -304,6 +310,20 @@ describe("Bot Package Catalog host", () => {
       missingConnectionTypes: ["shipping-account"],
       inert: true,
     });
+  });
+
+  test("explains an unpinned Catalog in words a person can act on", async () => {
+    const { host } = await fixture({ pinned: false });
+    // F4: an unpinned User used to be told "this User has no pinned Package
+    // Catalog generation", which the Bot then relayed verbatim.
+    for (const call of [
+      () => host.search({ query: "shipping" }),
+      () => host.inspect({ catalogId: "parcel-tracking" }),
+    ]) {
+      await expect(call()).rejects.toThrow(
+        "No Package Catalog is published for this deployment, so there is nothing to search or install",
+      );
+    }
   });
 
   test("persists the iframe manifest before the User effect, appends a summary generation, and replays", async () => {

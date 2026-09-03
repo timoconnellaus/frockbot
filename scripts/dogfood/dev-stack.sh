@@ -18,6 +18,17 @@ client_port="${FROCKBOT_DEV_CLIENT_PORT:-5173}"
 worker_url="http://127.0.0.1:${worker_port}"
 client_url="http://127.0.0.1:${client_port}"
 
+# The R2 bucket names bound by the `development` environment in
+# `apps/cloudflare/wrangler.jsonc`. `wrangler r2 object put` addresses a bucket
+# by *name*, not by binding, so a name that drifts from the environment seeds a
+# bucket the Worker never opens: the Catalog was seeded into
+# `frockbot-package-catalog` for months while `development` read
+# `frockbot-package-catalog-development`, which left every fresh User with no
+# `catalog/current` pointer to pin and killed `package_search` on its first
+# call. `scripts/dogfood/dev-stack.test.ts` keeps the two in step.
+artifact_bucket="frockbot-application-artifacts"
+catalog_bucket="frockbot-package-catalog-development"
+
 state_dir="$repo_root/.dogfood"
 log_dir="${CLAUDE_JOB_DIR:+$CLAUDE_JOB_DIR/tmp}"
 log_dir="${log_dir:-$state_dir/logs}"
@@ -149,7 +160,7 @@ build_and_seed() {
 
   say "seeding applications/foundation-v1.mjs into the local R2 bucket"
   (cd "$cloudflare_root" && bunx wrangler --env development r2 object put \
-    frockbot-application-artifacts/applications/foundation-v1.mjs \
+    "${artifact_bucket}/applications/foundation-v1.mjs" \
     --file dist/artifacts/foundation-v1.mjs --local)
 
   # Without this the better-auth tables do not exist and /api/debug/users
@@ -168,15 +179,15 @@ build_and_seed() {
 
   # The index and the entries first, so the pointer never names a generation
   # whose documents are not there yet.
-  seed_object "frockbot-package-catalog/catalog/${generation}/index.json" \
+  seed_object "${catalog_bucket}/catalog/${generation}/index.json" \
     "$source_dir/catalog/${generation}/index.json"
   for entry in "$source_dir/catalog/${generation}/entry/"*.json; do
     [ -e "$entry" ] || break
     seed_object \
-      "frockbot-package-catalog/catalog/${generation}/entry/$(basename "$entry")" \
+      "${catalog_bucket}/catalog/${generation}/entry/$(basename "$entry")" \
       "$entry"
   done
-  seed_object "frockbot-package-catalog/catalog/current" \
+  seed_object "${catalog_bucket}/catalog/current" \
     "$source_dir/catalog/current"
 }
 
