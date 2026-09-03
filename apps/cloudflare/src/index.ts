@@ -4,8 +4,11 @@ import {
   type MachineResultDeliveryV1,
 } from "@frockbot/plugin-user-machine/delivery";
 import {
+  APPLET_ID_V1,
   decodeSkillRefsV1,
   decodePackageIframeToolCommandV1,
+  type AppletBuildViewV1,
+  type AppletSourceViewV1,
   type PackageIframeCompositionV1,
 } from "@frockbot/kernel-contracts";
 import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
@@ -149,6 +152,7 @@ import {
   rpcIdentifier,
   rpcJsonSnapshotV1,
   rpcObject,
+  rpcPattern,
   rpcString,
 } from "./durable-rpc.js";
 import { createImmutablePlanRequestFactory } from "./immutable-application.js";
@@ -265,6 +269,8 @@ interface BotStateRpc extends BotConfigurationBinding {
     command: import("@frockbot/kernel-contracts").PackageIframeToolCommandV1,
   ): Promise<BotTurnResult>;
   readWorkspaceFileV1(path: unknown): Promise<ClientWorkspaceFileV1>;
+  readAppletSourceV1(appletId: string): Promise<AppletSourceViewV1>;
+  readAppletBuildV1(appletId: string): Promise<AppletBuildViewV1>;
   listNotifications(): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(notificationId: string): Promise<void>;
   listApprovals(): Promise<ApprovalListViewV1>;
@@ -372,6 +378,10 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       rpc.runPackageUiTool({ schemaVersion: 1, userId, botId, command }),
     readWorkspaceFileV1: (path) =>
       rpc.readWorkspaceFileV1({ schemaVersion: 1, userId, botId, path }),
+    readAppletSourceV1: (appletId) =>
+      rpc.readAppletSourceV1({ schemaVersion: 1, userId, botId, appletId }),
+    readAppletBuildV1: (appletId) =>
+      rpc.readAppletBuildV1({ schemaVersion: 1, userId, botId, appletId }),
     listNotifications: () =>
       rpc.listNotifications({ schemaVersion: 1, userId, botId }),
     listApprovals: () => rpc.listApprovals({ schemaVersion: 1, userId, botId }),
@@ -702,6 +712,30 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       this.ctx.props.userId,
       request.botId as string,
     ).readWorkspaceFileV1(request.path);
+  }
+
+  async readAppletSourceV1(input: unknown): Promise<AppletSourceViewV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      appletId: rpcPattern(APPLET_ID_V1, 129),
+    });
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId as string,
+    ).readAppletSourceV1(request.appletId as string);
+  }
+
+  async readAppletBuildV1(input: unknown): Promise<AppletBuildViewV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      appletId: rpcPattern(APPLET_ID_V1, 129),
+    });
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId as string,
+    ).readAppletBuildV1(request.appletId as string);
   }
 
   async listNotifications(input: unknown): Promise<BotNotificationIntent[]> {

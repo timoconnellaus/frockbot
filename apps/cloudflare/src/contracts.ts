@@ -265,6 +265,22 @@ export interface UserBotStateBinding {
     botId: string;
     path: unknown;
   }): Promise<ClientWorkspaceFileV1>;
+  /**
+   * An Applet's source, for the Applet canvas's building state. The root is
+   * User-scoped, so any of the User's Bots reads the same files; the Bot names
+   * the Durable Object that holds the Workspace binding and nothing more.
+   */
+  readAppletSourceV1(input: {
+    schemaVersion: 1;
+    botId: string;
+    appletId: string;
+  }): Promise<import("@frockbot/kernel-contracts").AppletSourceViewV1>;
+  /** The outcome last recorded for `applet check` or `applet build`. */
+  readAppletBuildV1(input: {
+    schemaVersion: 1;
+    botId: string;
+    appletId: string;
+  }): Promise<import("@frockbot/kernel-contracts").AppletBuildViewV1>;
   listNotifications(input: {
     schemaVersion: 1;
     botId: string;

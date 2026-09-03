@@ -49,6 +49,15 @@
   --panel-current: var(--panel-surface-width);
 }
 
+/*
+ * An Applet needs room a summary column does not have, and how much is the
+ * User's: `--applet-panel-width` is the width they last dragged, written by
+ * the component and remembered per browser.
+ */
+.app-shell.panel-open.panel-applet {
+  --panel-current: var(--applet-panel-width, 480px);
+}
+
 /* Sidebar */
 
 .sidebar {
@@ -583,6 +592,44 @@
  * message being composed, not a separate control.
  */
 
+/*
+ * The focused Applet, on a phone, while its panel is closed.
+ *
+ * It sits above the composer rather than inside it: the composer's row is the
+ * message and the send control, and squeezing a third thing into it is what
+ * makes a phone composer unusable.
+ */
+.applet-chip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  display: inline-flex;
+  max-width: 100%;
+  height: var(--frock-control-md);
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--frock-border-strong);
+  border-radius: 999px;
+  color: var(--frock-text);
+  background: var(--frock-surface-raised);
+  box-shadow: var(--frock-shadow-control);
+  font-size: var(--frock-text-sm);
+  cursor: pointer;
+}
+
+.applet-chip-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.applet-chip-action {
+  flex: 0 0 auto;
+  color: var(--frock-action-primary);
+  font-weight: 600;
+}
+
 .composer-body {
   display: flex;
   width: 100%;
@@ -708,6 +755,50 @@
   flex-direction: column;
 }
 
+.panel-applet .right-panel-content {
+  width: var(--applet-panel-width, 480px);
+}
+
+/*
+ * The Applet panel's drag edge. It is 8px of grab area over a 1px seam, it
+ * takes focus, and the arrow keys resize by the same amounts the drag does, so
+ * the width is not a mouse-only setting.
+ */
+.applet-panel-handle {
+  position: absolute;
+  z-index: 16;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.applet-panel-handle::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  content: "";
+  transition: background-color var(--frock-motion-fast);
+}
+
+.applet-panel-handle:hover::after,
+.applet-panel-handle:focus-visible::after {
+  background: var(--frock-action-primary);
+}
+
+.applet-panel-handle:focus-visible {
+  outline: 2px solid var(--frock-border-focus);
+  outline-offset: -2px;
+}
+
 .right-panel-header {
   display: flex;
   height: var(--frock-titlebar-height);
@@ -792,6 +883,11 @@
 
   .app-shell.panel-surface .right-panel {
     width: var(--panel-surface-width);
+  }
+
+  .app-shell.panel-applet .right-panel {
+    width: var(--applet-panel-width, 480px);
+    max-width: 100%;
   }
 
   /*
@@ -900,13 +996,23 @@
 
   /* The right panel is a drawer too, and on a phone it takes the whole width. */
   .right-panel,
-  .app-shell.panel-surface .right-panel {
+  .app-shell.panel-surface .right-panel,
+  .app-shell.panel-applet .right-panel {
     width: 100%;
   }
 
   .right-panel-content,
+  .panel-applet .right-panel-content,
   .panel-surface-view {
     width: 100%;
+  }
+
+  /*
+   * A focused Applet on a phone is a full-height sheet, not a wider column:
+   * there is one column, so the canvas is the whole of it while it is open.
+   */
+  .app-shell.panel-open.panel-applet {
+    --applet-panel-width: 100%;
   }
 
   /* There is no window chrome to drag and no traffic lights to clear. */

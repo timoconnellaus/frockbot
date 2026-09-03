@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import type { PackageIframeHostMessageV1 } from "@frockbot/kernel-contracts";
+import type { PackageIframeHostMessageV2 } from "@frockbot/kernel-contracts";
 import { postPackageIframeHostMessage } from "./package-iframe-host-message.js";
 
 describe("Package iframe host messages", () => {
   test("posts unchanged state once and posts changed state again", () => {
-    const posted: PackageIframeHostMessageV1[] = [];
+    const posted: PackageIframeHostMessageV2[] = [];
     const target = {
-      postMessage(message: PackageIframeHostMessageV1): void {
+      postMessage(message: PackageIframeHostMessageV2): void {
         posted.push(message);
       },
     } as Pick<Window, "postMessage">;

@@ -1,9 +1,27 @@
-/** Versioned, deliberately tiny postMessage seam for sandboxed Package pages. */
-export const PACKAGE_IFRAME_BRIDGE_VERSION = 1 as const;
+import {
+  APPLET_ID_V1,
+  type AppletBuildViewV1,
+  type AppletSourceViewV1,
+  type AppletSummaryV1,
+} from "./applets.js";
 
-export type PackageIframeHostMessageV1 =
+/** Versioned, deliberately tiny postMessage seam for sandboxed Package pages. */
+export const PACKAGE_IFRAME_BRIDGE_VERSION = 2 as const;
+
+/**
+ * The bridge a page speaks.
+ *
+ * Version 1 is `init`, `state`, `callTool` and `resize`. Version 2 adds the
+ * `applets` state feed and the `hello`, `focus` and `openExternal` page
+ * messages. A page announces its version with `hello`; a page that never does
+ * is a v1 page and only ever receives `schemaVersion: 1` messages, so a page
+ * published against v1 keeps working with no change.
+ */
+export type PackageIframeBridgeVersionV2 = 1 | 2;
+
+export type PackageIframeHostMessageV2 =
   | {
-      schemaVersion: 1;
+      schemaVersion: PackageIframeBridgeVersionV2;
       type: "init";
       themeTokens: Record<string, string>;
       packageId: string;
@@ -13,24 +31,72 @@ export type PackageIframeHostMessageV1 =
       pageId?: string;
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: PackageIframeBridgeVersionV2;
       type: "state";
       name: string;
       value: unknown;
     };
 
-export type PackageIframePageMessageV1 =
+export type PackageIframePageMessageV2 =
   | {
-      schemaVersion: 1;
+      schemaVersion: PackageIframeBridgeVersionV2;
       type: "callTool";
       name: string;
       input: unknown;
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: PackageIframeBridgeVersionV2;
       type: "resize";
       height: number;
+    }
+  /** v2: the page announcing which bridge it speaks, once, on load. */
+  | {
+      schemaVersion: 2;
+      type: "hello";
+      bridgeVersion: PackageIframeBridgeVersionV2;
+    }
+  /**
+   * v2: focus one Applet for this Session, or clear the focus. Allowed only
+   * for a page of the Package that declares the Applet focus tool; the host
+   * gates on that declaration and the backend gates the route again.
+   */
+  | {
+      schemaVersion: 2;
+      type: "focus";
+      appletId: string | null;
+    }
+  /** v2: open a URL on the Package artifact origin in a new tab. */
+  | {
+      schemaVersion: 2;
+      type: "openExternal";
+      url: string;
     };
+
+/** The tool a Package declares before its pages may change the focused Applet. */
+export const PACKAGE_IFRAME_FOCUS_TOOL_V2 = "applet_focus";
+
+/** The host state name that carries the Applets feed to a v2 page. */
+export const PACKAGE_IFRAME_APPLETS_STATE_V2 = "applets";
+
+/**
+ * What a v2 page receives on the `applets` state.
+ *
+ * The viewer credential is short-lived and scoped to one Applet generation, so
+ * a page holding one past its expiry reconnects; nothing here is durable
+ * state, and nothing here is an authority.
+ */
+export interface PackageIframeAppletsStateV2 {
+  focused: AppletSummaryV1 | null;
+  list: AppletSummaryV1[];
+  viewer: {
+    token: string;
+    socketUrl: string;
+    uiUrl: string;
+    generationId: string;
+  } | null;
+  source?: AppletSourceViewV1;
+  build?: AppletBuildViewV1;
+}
 
 /** The only entry slot in this slice. */
 export const PACKAGE_IFRAME_ENTRY_SLOT_V1 = "frockbot.sidebar-actions";
@@ -182,14 +248,22 @@ function boundedJsonWire(value: unknown, label: string): void {
   }
 }
 
-/** Exact host-side decoder; unknown message types and fields fail closed. */
-export function decodePackageIframePageMessageV1(
+/**
+ * Exact host-side decoder; unknown message types and fields fail closed.
+ *
+ * Both bridge versions decode here: a v1 page's messages keep their
+ * `schemaVersion: 1`, and the three v2-only messages are refused at v1 rather
+ * than silently accepted, so a page cannot reach a v2 capability by claiming
+ * the older version.
+ */
+export function decodePackageIframePageMessageV2(
   input: unknown,
-): PackageIframePageMessageV1 {
+): PackageIframePageMessageV2 {
   const value = record(input, "Package iframe message");
   boundedJsonWire(input, "Package iframe message");
-  if (value.schemaVersion !== 1)
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2)
     throw new Error("Package iframe schemaVersion is unsupported");
+  const schemaVersion = value.schemaVersion as PackageIframeBridgeVersionV2;
   if (value.type === "callTool") {
     exact(
       value,
@@ -201,7 +275,7 @@ export function decodePackageIframePageMessageV1(
       throw new Error("Package iframe tool name is invalid");
     json(value.input, "Package iframe callTool.input");
     return {
-      schemaVersion: 1,
+      schemaVersion,
       type: "callTool",
       name,
       input: structuredClone(value.input),
@@ -212,9 +286,88 @@ export function decodePackageIframePageMessageV1(
     if (typeof value.height !== "number" || !Number.isFinite(value.height)) {
       throw new Error("Package iframe resize.height must be finite");
     }
-    return { schemaVersion: 1, type: "resize", height: value.height };
+    return { schemaVersion, type: "resize", height: value.height };
+  }
+  if (schemaVersion === 2 && value.type === "hello") {
+    exact(
+      value,
+      ["schemaVersion", "type", "bridgeVersion"],
+      "Package iframe hello",
+    );
+    if (value.bridgeVersion !== 1 && value.bridgeVersion !== 2) {
+      throw new Error("Package iframe hello.bridgeVersion is unsupported");
+    }
+    return {
+      schemaVersion: 2,
+      type: "hello",
+      bridgeVersion: value.bridgeVersion as PackageIframeBridgeVersionV2,
+    };
+  }
+  if (schemaVersion === 2 && value.type === "focus") {
+    exact(value, ["schemaVersion", "type", "appletId"], "Package iframe focus");
+    if (value.appletId === null) {
+      return { schemaVersion: 2, type: "focus", appletId: null };
+    }
+    const appletId = boundedString(
+      value.appletId,
+      "Package iframe focus.appletId",
+      129,
+    );
+    if (!APPLET_ID_V1.test(appletId)) {
+      throw new Error("Package iframe focus.appletId is invalid");
+    }
+    return { schemaVersion: 2, type: "focus", appletId };
+  }
+  if (schemaVersion === 2 && value.type === "openExternal") {
+    exact(
+      value,
+      ["schemaVersion", "type", "url"],
+      "Package iframe openExternal",
+    );
+    const url = boundedString(
+      value.url,
+      "Package iframe openExternal.url",
+      2_048,
+    );
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error("Package iframe openExternal.url is invalid");
+    }
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error("Package iframe openExternal.url is invalid");
+    }
+    return { schemaVersion: 2, type: "openExternal", url };
   }
   throw new Error("Package iframe message type is invalid");
+}
+
+/**
+ * The one origin a page may hand the host to open. A page is served from the
+ * anonymous artifact origin and has no business steering the User anywhere
+ * else, so anything other than that origin is refused rather than sanitized.
+ */
+export function packageIframeExternalUrlAllowedV2(
+  url: string,
+  artifactOrigin: string,
+): boolean {
+  try {
+    return new URL(url).origin === new URL(artifactOrigin).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a page of this Package may change the Session's focused Applet.
+ * Focus is an Applet capability, so it belongs to the Package that owns the
+ * Applet tools and to no other.
+ */
+export function packageIframeFocusAllowedV2(
+  contribution: Pick<PackageIframeContributionViewV1, "declaredTools">,
+): boolean {
+  return contribution.declaredTools.includes(PACKAGE_IFRAME_FOCUS_TOOL_V2);
 }
 
 export function decodePackageIframeToolCommandV1(
@@ -526,14 +679,31 @@ export function decodePackageIframeCatalogV1(
 
 /** TypeScript contract shown by package_inspect_self. */
 export const PACKAGE_IFRAME_BRIDGE_DTS_V1 = `
-interface FrockBotIframeBridgeV1 {
+interface FrockBotAppletSummary { appletId: string; displayName: string; status: "draft" | "published" | "deleted"; currentGenerationId?: string; tools: string[]; createdAt: string }
+interface FrockBotAppletsState {
+  focused: FrockBotAppletSummary | null;
+  list: FrockBotAppletSummary[];
+  viewer: { token: string; socketUrl: string; uiUrl: string; generationId: string } | null;
+  source?: { appletId: string; files: Array<{ path: string; text: string; generationId: string; changedAt?: string }>; truncated: boolean };
+  build?: { status: "unknown" | "passed" | "failed"; command?: "check" | "build"; at?: string; summary?: string; diagnostics?: string[] };
+}
+interface FrockBotIframeBridgeV2 {
   readonly ready: Promise<{ themeTokens: Record<string, string>; packageId: string; botId: string; slot: string; pageId?: string }>;
   callTool(name: string, input: unknown): void;
   subscribe(name: string, listener: (value: unknown) => void): () => void;
   resize(height?: number): void;
+  /** v2. Focus one Applet for this Session, or clear it. Requires the applet_focus tool. */
+  focus(appletId: string | null): void;
+  /** v2. Open a URL on this Package's artifact origin in a new tab. */
+  openExternal(url: string): void;
 }
-declare global { interface Window { frockbot: FrockBotIframeBridgeV1 } }
-// Messages are schemaVersion: 1. Results arrive on state name tool:<name>.
+declare global { interface Window { frockbot: FrockBotIframeBridgeV2 } }
+// The bridge is version 2. A page announces itself with hello and then
+// receives schemaVersion: 2 messages; a page using the version 1 helper keeps
+// receiving schemaVersion: 1 messages and works unchanged.
+// Results arrive on state name tool:<name>. A page mounted in
+// frockbot.right-panel or a surface also receives state name "applets" with
+// FrockBotAppletsState.
 //
 // A Package declares 1..8 UI pages. Each page has an id (/^[a-z][a-z0-9-]{0,31}$/,
 // unique in the Package), one inline ui.html, and 1..64 mounts. The slot of a
@@ -549,5 +719,11 @@ declare global { interface Window { frockbot: FrockBotIframeBridgeV1 } }
 // page this frame is showing.
 `;
 
-/** Tiny inline helper authored pages may paste verbatim. */
-export const PACKAGE_IFRAME_HELPER_JS_V1 = `(()=>{const V=1,L=new Map(),obj=v=>v&&typeof v==='object'&&!Array.isArray(v),exact=(v,ks)=>obj(v)&&Object.keys(v).length===ks.length&&ks.every(k=>Object.prototype.hasOwnProperty.call(v,k)),str=(v,n)=>typeof v==='string'&&v.length>0&&v.length<=n,json=(v,d=0)=>d<=16&&(v===null||typeof v==='string'||typeof v==='boolean'||typeof v==='number'&&Number.isFinite(v)||Array.isArray(v)&&v.length<=256&&v.every(x=>json(x,d+1))||obj(v)&&Object.keys(v).length<=256&&Object.values(v).every(x=>json(x,d+1))),wire=v=>{try{return new TextEncoder().encode(JSON.stringify(v)).byteLength<=65536}catch{return false}};let ok,fail;const ready=new Promise((r,j)=>{ok=r;fail=j});addEventListener('message',e=>{if(e.source!==parent)return;const m=e.data;if(m?.schemaVersion!==V||!wire(m))return;if(m.type==='init'&&(exact(m,['schemaVersion','type','themeTokens','packageId','botId','slot'])||exact(m,['schemaVersion','type','themeTokens','packageId','botId','slot','pageId'])&&str(m.pageId,32))&&obj(m.themeTokens)&&Object.keys(m.themeTokens).length<=64&&Object.values(m.themeTokens).every(v=>typeof v==='string')&&str(m.packageId,64)&&str(m.botId,256)&&str(m.slot,160)){for(const [k,v] of Object.entries(m.themeTokens))document.documentElement.style.setProperty('--frockbot-'+k,v);ok({themeTokens:m.themeTokens,packageId:m.packageId,botId:m.botId,slot:m.slot,...(m.pageId===undefined?{}:{pageId:m.pageId})});return}if(m.type==='state'&&exact(m,['schemaVersion','type','name','value'])&&str(m.name,256)&&json(m.value))for(const fn of L.get(m.name)||[])fn(m.value)});window.frockbot={ready,callTool(name,input){parent.postMessage({schemaVersion:V,type:'callTool',name,input},'*')},subscribe(name,fn){const s=L.get(name)||new Set();s.add(fn);L.set(name,s);return()=>s.delete(fn)},resize(height=document.documentElement.scrollHeight){parent.postMessage({schemaVersion:V,type:'resize',height},'*')}};setTimeout(()=>fail(new Error('FrockBot iframe init timed out')),10000)})();`;
+/**
+ * Tiny inline helper authored pages may paste verbatim.
+ *
+ * It announces `hello` before anything else, so the host knows this page reads
+ * version 2 messages; a page carrying the older helper never announces, and the
+ * host keeps speaking version 1 to it.
+ */
+export const PACKAGE_IFRAME_HELPER_JS_V1 = `(()=>{const V=2,L=new Map(),obj=v=>v&&typeof v==='object'&&!Array.isArray(v),exact=(v,ks)=>obj(v)&&Object.keys(v).length===ks.length&&ks.every(k=>Object.prototype.hasOwnProperty.call(v,k)),str=(v,n)=>typeof v==='string'&&v.length>0&&v.length<=n,json=(v,d=0)=>d<=16&&(v===null||typeof v==='string'||typeof v==='boolean'||typeof v==='number'&&Number.isFinite(v)||Array.isArray(v)&&v.length<=256&&v.every(x=>json(x,d+1))||obj(v)&&Object.keys(v).length<=256&&Object.values(v).every(x=>json(x,d+1))),wire=v=>{try{return new TextEncoder().encode(JSON.stringify(v)).byteLength<=65536}catch{return false}};let ok,fail;const ready=new Promise((r,j)=>{ok=r;fail=j});addEventListener('message',e=>{if(e.source!==parent)return;const m=e.data;if(m?.schemaVersion!==1&&m?.schemaVersion!==2||!wire(m))return;if(m.type==='init'&&(exact(m,['schemaVersion','type','themeTokens','packageId','botId','slot'])||exact(m,['schemaVersion','type','themeTokens','packageId','botId','slot','pageId'])&&str(m.pageId,32))&&obj(m.themeTokens)&&Object.keys(m.themeTokens).length<=64&&Object.values(m.themeTokens).every(v=>typeof v==='string')&&str(m.packageId,64)&&str(m.botId,256)&&str(m.slot,160)){for(const [k,v] of Object.entries(m.themeTokens))document.documentElement.style.setProperty('--frockbot-'+k,v);ok({themeTokens:m.themeTokens,packageId:m.packageId,botId:m.botId,slot:m.slot,...(m.pageId===undefined?{}:{pageId:m.pageId})});return}if(m.type==='state'&&exact(m,['schemaVersion','type','name','value'])&&str(m.name,256)&&json(m.value))for(const fn of L.get(m.name)||[])fn(m.value)});window.frockbot={ready,callTool(name,input){parent.postMessage({schemaVersion:V,type:'callTool',name,input},'*')},subscribe(name,fn){const s=L.get(name)||new Set();s.add(fn);L.set(name,s);return()=>s.delete(fn)},resize(height=document.documentElement.scrollHeight){parent.postMessage({schemaVersion:V,type:'resize',height},'*')},focus(appletId){parent.postMessage({schemaVersion:2,type:'focus',appletId:appletId===undefined?null:appletId},'*')},openExternal(url){parent.postMessage({schemaVersion:2,type:'openExternal',url},'*')}};parent.postMessage({schemaVersion:2,type:'hello',bridgeVersion:V},'*');setTimeout(()=>fail(new Error('FrockBot iframe init timed out')),10000)})();`;

@@ -1,16 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import {
   decodePackageIframeCatalogV1,
-  decodePackageIframePageMessageV1,
+  decodePackageIframePageMessageV2,
   decodePackageIframeToolCommandV1,
   iframePageSlotAllowedV1,
+  packageIframeExternalUrlAllowedV2,
+  packageIframeFocusAllowedV2,
   packageIframeToolAllowedV1,
+  PACKAGE_IFRAME_BRIDGE_VERSION,
 } from "./iframe-ui.js";
 
-describe("Package iframe bridge v1", () => {
+describe("Package iframe bridge v2", () => {
   test("exactly decodes the two page-to-host messages", () => {
     expect(
-      decodePackageIframePageMessageV1({
+      decodePackageIframePageMessageV2({
         schemaVersion: 1,
         type: "callTool",
         name: "weather_lookup",
@@ -18,20 +21,119 @@ describe("Package iframe bridge v1", () => {
       }),
     ).toMatchObject({ type: "callTool", name: "weather_lookup" });
     expect(
-      decodePackageIframePageMessageV1({
+      decodePackageIframePageMessageV2({
         schemaVersion: 1,
         type: "resize",
         height: 320,
       }),
     ).toEqual({ schemaVersion: 1, type: "resize", height: 320 });
     expect(() =>
-      decodePackageIframePageMessageV1({
+      decodePackageIframePageMessageV2({
         schemaVersion: 1,
         type: "resize",
         height: 320,
         token: "secret",
       }),
     ).toThrow("invalid fields");
+  });
+
+  test("keeps a version 1 page working and adds the version 2 messages", () => {
+    // A v1 page's message decodes as v1 and is answered at v1, so a page
+    // published before this bridge existed is unaffected by the bump.
+    expect(
+      decodePackageIframePageMessageV2({
+        schemaVersion: 1,
+        type: "resize",
+        height: 120,
+      }).schemaVersion,
+    ).toBe(1);
+    expect(PACKAGE_IFRAME_BRIDGE_VERSION).toBe(2);
+    expect(
+      decodePackageIframePageMessageV2({
+        schemaVersion: 2,
+        type: "hello",
+        bridgeVersion: 2,
+      }),
+    ).toEqual({ schemaVersion: 2, type: "hello", bridgeVersion: 2 });
+    expect(
+      decodePackageIframePageMessageV2({
+        schemaVersion: 2,
+        type: "focus",
+        appletId: "todo.abc123",
+      }),
+    ).toEqual({ schemaVersion: 2, type: "focus", appletId: "todo.abc123" });
+    expect(
+      decodePackageIframePageMessageV2({
+        schemaVersion: 2,
+        type: "focus",
+        appletId: null,
+      }),
+    ).toEqual({ schemaVersion: 2, type: "focus", appletId: null });
+    expect(
+      decodePackageIframePageMessageV2({
+        schemaVersion: 2,
+        type: "openExternal",
+        url: "https://ui.example.com/packages/a.html",
+      }),
+    ).toMatchObject({ type: "openExternal" });
+  });
+
+  test("fails closed on v2 messages claiming version 1 and on bad payloads", () => {
+    // A page cannot reach a v2 capability by claiming the older version.
+    for (const type of ["hello", "focus", "openExternal"]) {
+      expect(() =>
+        decodePackageIframePageMessageV2({
+          schemaVersion: 1,
+          type,
+          appletId: null,
+          url: "https://ui.example.com/",
+          bridgeVersion: 1,
+        }),
+      ).toThrow("type is invalid");
+    }
+    expect(() =>
+      decodePackageIframePageMessageV2({
+        schemaVersion: 2,
+        type: "focus",
+        appletId: "Not An Applet",
+      }),
+    ).toThrow("appletId is invalid");
+    expect(() =>
+      decodePackageIframePageMessageV2({
+        schemaVersion: 2,
+        type: "openExternal",
+        url: "javascript:alert(1)",
+      }),
+    ).toThrow("url is invalid");
+    expect(() =>
+      decodePackageIframePageMessageV2({
+        schemaVersion: 3,
+        type: "resize",
+        height: 1,
+      }),
+    ).toThrow("schemaVersion is unsupported");
+  });
+
+  test("an external open is limited to the artifact origin", () => {
+    const origin = "https://ui.example.com";
+    expect(
+      packageIframeExternalUrlAllowedV2(`${origin}/packages/a.html`, origin),
+    ).toBe(true);
+    expect(
+      packageIframeExternalUrlAllowedV2("https://evil.example.com/", origin),
+    ).toBe(false);
+    expect(packageIframeExternalUrlAllowedV2("not a url", origin)).toBe(false);
+  });
+
+  test("only the Package that owns the focus tool may change the focus", () => {
+    expect(
+      packageIframeFocusAllowedV2({
+        declaredTools: ["applet_focus", "applet_list"],
+      }),
+    ).toBe(true);
+    expect(
+      packageIframeFocusAllowedV2({ declaredTools: ["weather_lookup"] }),
+    ).toBe(false);
   });
 
   test("refuses a tool the Package did not declare", () => {

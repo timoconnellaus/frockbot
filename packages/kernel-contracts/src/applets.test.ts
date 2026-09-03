@@ -4,7 +4,11 @@ import {
   decodeAppletGenerationSummaryV1,
   decodeAppletGenerationV1,
   decodeAppletPublishResultV1,
+  decodeAppletBuildViewV1,
+  decodeAppletListViewV1,
+  decodeAppletSourceViewV1,
   decodeAppletSummaryV1,
+  decodeAppletUiViewV1,
   decodeAppletViewerTokenV1,
 } from "./applets.js";
 
@@ -204,5 +208,92 @@ describe("Applet views and viewer tokens", () => {
     expect(() =>
       decodeAppletViewerTokenV1({ ...token, expiresAt: "soon" }),
     ).toThrow("ISO timestamp");
+  });
+});
+
+describe("Applet canvas projections", () => {
+  const summary = {
+    appletId: "u1abc.todo",
+    displayName: "Todo",
+    status: "published" as const,
+    currentGenerationId: "generation-2",
+    tools: ["add_todo"],
+    createdAt: "2026-09-03T00:00:00.000Z",
+  };
+
+  test("decodes the Applet list a canvas reads", () => {
+    expect(
+      decodeAppletListViewV1({ schemaVersion: 1, applets: [summary] }),
+    ).toEqual({ schemaVersion: 1, applets: [summary] });
+    expect(() =>
+      decodeAppletListViewV1({ schemaVersion: 1, applets: [summary, summary] }),
+    ).toThrow("duplicate Applets");
+    expect(() =>
+      decodeAppletListViewV1({ schemaVersion: 2, applets: [] }),
+    ).toThrow("unsupported");
+  });
+
+  test("bounds the source read the building canvas draws", () => {
+    const view = {
+      appletId: "u1abc.todo",
+      files: [
+        {
+          path: "src/server.ts",
+          text: "export class TodoApplet {}",
+          generationId: "w-1",
+          changedAt: "2026-09-03T00:01:00.000Z",
+        },
+      ],
+      truncated: false,
+    };
+    expect(decodeAppletSourceViewV1(view)).toEqual(view);
+    expect(() =>
+      decodeAppletSourceViewV1({
+        ...view,
+        files: [{ ...view.files[0]!, path: "../escape.ts" }],
+      }),
+    ).toThrow("path is invalid");
+    expect(() =>
+      decodeAppletSourceViewV1({
+        ...view,
+        files: [
+          { path: "big.ts", text: "x".repeat(600 * 1024), generationId: "w-1" },
+        ],
+      }),
+    ).toThrow("source read limit");
+    expect(() =>
+      decodeAppletSourceViewV1({
+        ...view,
+        files: [...view.files, ...view.files],
+      }),
+    ).toThrow("duplicate paths");
+  });
+
+  test("an unrecorded build outcome is unknown rather than a failure", () => {
+    expect(decodeAppletBuildViewV1({ status: "unknown" })).toEqual({
+      status: "unknown",
+    });
+    const failed = {
+      status: "failed" as const,
+      command: "check" as const,
+      at: "2026-09-03T00:02:00.000Z",
+      summary: "2 type errors",
+      diagnostics: ["src/server.ts:3:1 - error TS2339"],
+    };
+    expect(decodeAppletBuildViewV1(failed)).toEqual(failed);
+    expect(() => decodeAppletBuildViewV1({ status: "broken" })).toThrow(
+      "status is invalid",
+    );
+  });
+
+  test("the UI route names an http origin and a generation", () => {
+    const ui = {
+      uiUrl: "https://ui.bot.frockbot.com/packages/aa.html",
+      generationId: "generation-2",
+    };
+    expect(decodeAppletUiViewV1(ui)).toEqual(ui);
+    expect(() =>
+      decodeAppletUiViewV1({ ...ui, uiUrl: "ftp://example.com/x" }),
+    ).toThrow("uiUrl is invalid");
   });
 });

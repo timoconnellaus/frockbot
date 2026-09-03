@@ -29,8 +29,28 @@ const PUBLIC_ASSET_PATHS = new Set([
   "/favicon.ico",
 ]);
 const PACKAGE_UI_PATH = /^\/packages\/([0-9a-f]{64})\.html$/;
-export const PACKAGE_UI_CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'";
+/**
+ * What a Package page may do.
+ *
+ * Still `default-src 'none'`: a page loads nothing from anywhere, and its
+ * script and style are the inline ones in the artifact itself. Two openings,
+ * both named rather than wildcarded:
+ *
+ * - `frame-src <artifact origin>` lets a page nest another page on the same
+ *   anonymous origin — the Applets canvas page nesting the Applet's own UI.
+ *   The nested frame is served by this very route, with this very policy.
+ * - `connect-src <gateway origin> wss:` lets an Applet's UI open its viewer
+ *   socket back to the gateway, which is the only endpoint it is given.
+ *
+ * The origins are derived from the request rather than configured, so a
+ * deployment on any hostname gets exactly its own two.
+ */
+export function packageUiCspV1(url: URL): string {
+  const artifactOrigin = url.origin;
+  const applicationHost = url.hostname.replace(/^ui\./, "");
+  const applicationOrigin = `${url.protocol}//${applicationHost}${url.port ? `:${url.port}` : ""}`;
+  return `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src ${applicationOrigin} wss:; frame-src ${artifactOrigin}; base-uri 'none'; form-action 'none'`;
+}
 export const SIGNUPS_CLOSED_MESSAGE =
   "FrockBot isn't taking new signups right now.";
 
@@ -76,7 +96,7 @@ export async function servePackageUiArtifact(
   const headers = {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "public, max-age=31536000, immutable",
-    "content-security-policy": PACKAGE_UI_CSP,
+    "content-security-policy": packageUiCspV1(url),
     "cross-origin-resource-policy": "cross-origin",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",

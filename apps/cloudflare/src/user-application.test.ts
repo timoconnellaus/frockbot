@@ -32,6 +32,9 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
         status: "not-found" as const,
         reason: "no workspace in this test",
       }),
+    readAppletSourceV1: ({ appletId }) =>
+      Promise.resolve({ appletId, files: [], truncated: false }),
+    readAppletBuildV1: () => Promise.resolve({ status: "unknown" as const }),
     run: ({ botId, command }) => state.run(botId, command),
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),

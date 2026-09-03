@@ -62,7 +62,7 @@ import {
   decodeTaskListViewV1,
   decodeTaskViewV1,
 } from "@frockbot/plugin-subagents/shared";
-import { ref, toRaw, type Ref } from "vue";
+import { defineComponent, h, ref, toRaw, watch, type Ref } from "vue";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,
@@ -75,7 +75,23 @@ import {
   type WebToolActivity,
 } from "../shared.js";
 import FrockBotApp from "./FrockBotApp.vue";
+import PackageEntryTrigger from "./PackageEntryTrigger.vue";
 import PackageIframeSettings from "./PackageIframeSettings.vue";
+import PackageSurfacePage from "./PackageSurfacePage.vue";
+import {
+  packageIframeEntriesV1,
+  type PackageIframeEntryV1,
+} from "./package-iframe-entries.js";
+import { appletsAvailableV1 } from "./applets-state.js";
+import {
+  readAppletBuild,
+  readAppletList,
+  readAppletSource,
+  readAppletUi,
+  readAppletViewerToken,
+  readFocusedAppletId,
+  writeFocusedAppletId,
+} from "./applets-client.js";
 import { modelRuntimeLabel } from "./model-presentation.js";
 import { showClientNotificationV1 } from "./notify.js";
 import "@frockbot/client-core/fonts.css";
@@ -1108,6 +1124,22 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     approvals: [],
     tasks: [],
     packageUi: undefined,
+    applets: [],
+    focusedAppletId: undefined,
+    appletViewer: undefined,
+    appletSource: undefined,
+    appletBuild: undefined,
+    appletCanvas: "idle",
+    /*
+     * The focused Applet, joined with the list the User owns. A getter rather
+     * than a stored field so the two can never disagree: the id is what the
+     * Bot Durable Object recorded, and this is what that id currently names.
+     */
+    get focusedApplet() {
+      const appletId = web.value.focusedAppletId;
+      if (!appletId) return undefined;
+      return web.value.applets.find((applet) => applet.appletId === appletId);
+    },
     async selectBot(botId: string): Promise<void> {
       // Re-selecting the open Bot is not a switch: aborting the live Turn and
       // clearing the transcript would discard state the User is watching.
@@ -1127,6 +1159,14 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       web.value.approvals = [];
       web.value.tasks = [];
       web.value.packageUi = undefined;
+      // The focus is per Session, so switching Bots drops what the previous
+      // Bot's canvas was showing rather than carrying it across.
+      web.value.focusedAppletId = undefined;
+      web.value.appletViewer = undefined;
+      web.value.appletSource = undefined;
+      web.value.appletBuild = undefined;
+      web.value.appletCanvas = "idle";
+      web.value.appletCanvasError = undefined;
       const url = URL.parse(window.location.href);
       if (url) {
         url.searchParams.set("bot", botId);
@@ -1232,6 +1272,162 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         ) {
           web.value.packageUi = undefined;
         }
+      }
+    },
+    /*
+     * The Applets the User owns.
+     *
+     * Account-shaped, so this is read once per selection rather than per Bot,
+     * and a deployment with no Applet routes reads as an empty list instead of
+     * an error over the conversation.
+     */
+    async loadApplets(): Promise<void> {
+      const read = ctx.transport.hostedRequest;
+      if (!read || !appletsAvailableV1(web.value.packageUi)) return;
+      const generation = selectionGeneration;
+      try {
+        const applets = await readAppletList(read);
+        if (generation !== selectionGeneration) return;
+        web.value.applets = applets;
+      } catch {
+        if (generation === selectionGeneration) web.value.applets = [];
+      }
+    },
+    async loadFocusedApplet(): Promise<void> {
+      const read = ctx.transport.hostedRequest;
+      const botId = web.value.activeBotId;
+      if (!read || !botId || !appletsAvailableV1(web.value.packageUi)) return;
+      const generation = selectionGeneration;
+      try {
+        const appletId = await readFocusedAppletId(read, botId);
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        web.value.focusedAppletId = appletId;
+      } catch {
+        if (
+          generation === selectionGeneration &&
+          web.value.activeBotId === botId
+        )
+          web.value.focusedAppletId = null;
+      }
+      await web.value.refreshAppletCanvas();
+    },
+    async setFocusedApplet(appletId: string | null): Promise<void> {
+      const post = ctx.transport.hostedRequest;
+      const botId = web.value.activeBotId;
+      if (!post || !botId || !appletsAvailableV1(web.value.packageUi)) return;
+      const generation = selectionGeneration;
+      try {
+        const recorded = await writeFocusedAppletId(post, botId, appletId);
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        // What the canvas shows is the focus the backend recorded, never the
+        // one the click asked for.
+        web.value.focusedAppletId = recorded;
+        web.value.appletViewer = undefined;
+        web.value.appletSource = undefined;
+        web.value.appletBuild = undefined;
+        web.value.appletCanvasError = undefined;
+        // Focusing is also when the list is re-read: a publish that landed
+        // between selections is why the canvas has an Applet to show at all,
+        // and a stale list would leave it in the building state forever.
+        await web.value.loadApplets();
+      } catch (error) {
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        web.value.appletCanvas = "failed";
+        web.value.appletCanvasError =
+          error instanceof Error
+            ? error.message
+            : "Could not focus that Applet";
+        return;
+      }
+      await web.value.refreshAppletCanvas();
+    },
+    /*
+     * What the canvas draws for the focused Applet.
+     *
+     * The source read is the building state and never waits on the Computer:
+     * the Workspace store is read, so a hibernated Computer costs nothing. The
+     * viewer credential is only fetched once a generation is active, because
+     * there is nothing to view before one is.
+     */
+    async refreshAppletCanvas(): Promise<void> {
+      const read = ctx.transport.hostedRequest;
+      const appletId = web.value.focusedAppletId;
+      const botId = web.value.activeBotId;
+      if (!read || !appletId || !botId) {
+        web.value.appletCanvas = "idle";
+        return;
+      }
+      const generation = selectionGeneration;
+      const stale = () =>
+        generation !== selectionGeneration ||
+        web.value.focusedAppletId !== appletId;
+      if (web.value.appletViewer?.appletId !== appletId) {
+        web.value.appletCanvas = "loading";
+      }
+      web.value.appletCanvasError = undefined;
+      try {
+        const [source, build] = await Promise.all([
+          readAppletSource(read, botId, appletId),
+          readAppletBuild(read, botId, appletId).catch(() => ({
+            status: "unknown" as const,
+          })),
+        ]);
+        if (stale()) return;
+        web.value.appletSource = source;
+        web.value.appletBuild = build;
+      } catch (error) {
+        if (stale()) return;
+        web.value.appletCanvas = "failed";
+        web.value.appletCanvasError =
+          error instanceof Error ? error.message : "Could not read this Applet";
+        return;
+      }
+      const applet = web.value.applets.find(
+        (candidate) => candidate.appletId === appletId,
+      );
+      if (!applet?.currentGenerationId) {
+        // No active generation is the building state, not a failure.
+        if (!stale()) {
+          web.value.appletViewer = undefined;
+          web.value.appletCanvas = "ready";
+        }
+        return;
+      }
+      try {
+        const [ui, token] = await Promise.all([
+          readAppletUi(read, appletId),
+          readAppletViewerToken(read, appletId),
+        ]);
+        if (stale()) return;
+        web.value.appletViewer = {
+          appletId,
+          token: token.token,
+          expiresAt: token.expiresAt,
+          socketUrl: token.socketUrl,
+          uiUrl: ui.uiUrl,
+          generationId: ui.generationId ?? applet.currentGenerationId,
+        };
+        web.value.appletCanvas = "ready";
+      } catch (error) {
+        if (stale()) return;
+        // A published Applet whose viewer cannot be opened keeps the code view
+        // up and says so; it never shows an empty frame pretending to work.
+        web.value.appletViewer = undefined;
+        web.value.appletCanvas = "failed";
+        web.value.appletCanvasError =
+          error instanceof Error ? error.message : "Could not open this Applet";
       }
     },
     async callPackageUiTool(
@@ -1365,6 +1561,18 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         updateSettingsLoadError("bot");
         await deliverNotifications(botId, generation);
         await web.value.loadPackageUi();
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        await web.value.loadApplets();
+        if (
+          generation !== selectionGeneration ||
+          web.value.activeBotId !== botId
+        )
+          return;
+        await web.value.loadFocusedApplet();
       } catch (error) {
         if (
           generation !== selectionGeneration ||
@@ -2224,6 +2432,50 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     },
   } satisfies Partial<ShellWebData>) as unknown as Ref<ShellWebData>;
 
+  /*
+   * Declarative Package entries.
+   *
+   * An entry is manifest data, so the sidebar control and the surface it opens
+   * are registered from the Bot's Composition rather than by Package code:
+   * nothing a Package ships executes in the app origin. The registrations are
+   * disposed and rebuilt whenever the catalog changes, so switching Bots never
+   * leaves the previous Bot's entries in the sidebar.
+   */
+  let entryDisposers: Array<() => void> = [];
+
+  function syncPackageEntries(entries: PackageIframeEntryV1[]): void {
+    for (const dispose of entryDisposers.splice(0).toReversed()) dispose();
+    entryDisposers = entries.flatMap((entry) => {
+      const trigger = defineComponent({
+        name: `PackageEntry_${entry.contribution.packageId}_${entry.entry.id}`,
+        setup: () => () => h(PackageEntryTrigger, { entry }),
+      });
+      const page = defineComponent({
+        name: `PackageSurface_${entry.contribution.packageId}_${entry.page.id}`,
+        setup: () => () => h(PackageSurfacePage, { entry }),
+      });
+      return [
+        surfaces.register({
+          id: entry.surfaceId,
+          title: entry.entry.label,
+          component: page,
+        }),
+        ctx.slot({
+          slot: entry.entry.slot,
+          order: entry.order,
+          key: entry.surfaceId,
+          component: trigger,
+        }),
+      ];
+    });
+  }
+
+  const stopEntrySync = watch(
+    () => packageIframeEntriesV1(web.value.packageUi),
+    (entries) => syncPackageEntries(entries),
+    { deep: true },
+  );
+
   return [
     ctx.provide(clientSurfaceRegistryKey, surfaces),
     // The shared client projection is updated by the contracts lane. This cast
@@ -2240,6 +2492,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       component: PackageIframeSettings,
     }),
     () => {
+      stopEntrySync();
+      for (const dispose of entryDisposers.splice(0).toReversed()) dispose();
       activeRequest?.abort();
       admissionObserver?.abort();
       runObserver?.abort();

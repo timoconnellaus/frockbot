@@ -27,6 +27,7 @@ import {
 } from "../shared.js";
 import { ComposerDraftStore } from "./composer-draft.js";
 import SendPayloadView from "./SendPayloadView.vue";
+import AppletCanvas from "./AppletCanvas.vue";
 import PackageIframeHost from "./PackageIframeHost.vue";
 import type { ClientSkillCatalogEntryV1 } from "../skill-protocol.js";
 import {
@@ -127,11 +128,113 @@ function closeDrawers(): void {
   if (!panelSurface.value) rightPanelOpen.value = false;
 }
 
+/*
+ * Escape, wherever the focus is.
+ *
+ * A drawer's own trigger disappears when the drawer opens, so focus can land
+ * back on the document body — outside this component's element — and a handler
+ * bound to the root would never see the key. The window is where "give the
+ * conversation back" has to be heard.
+ */
 function onRootKeydown(event: KeyboardEvent): void {
-  if (event.key !== "Escape" || !navOpen.value) return;
-  event.preventDefault();
-  closeNav();
+  if (event.key !== "Escape" || event.defaultPrevented) return;
+  if (navOpen.value) {
+    event.preventDefault();
+    closeNav();
+    return;
+  }
+  // An open overlay owns Escape; closing the panel underneath it would be a
+  // second dismissal the User did not ask for.
+  if (overlaySurface.value) return;
+  // On a phone the right panel covers the conversation, so Escape gives the
+  // conversation back — the same thing tapping the scrim does.
+  if (phoneLayout.value && rightPanelOpen.value && !panelSurface.value) {
+    event.preventDefault();
+    rightPanelOpen.value = false;
+  }
 }
+
+/*
+ * The Applet canvas.
+ *
+ * A Session with a focused Applet gives the right panel to the canvas; without
+ * one the panel keeps the content its plugins put there. The canvas is wider
+ * than a summary column, and how much wider is the User's: the width they drag
+ * is theirs and is remembered per browser, which is a per-viewer convenience
+ * rather than durable state and belongs in local storage.
+ */
+const APPLET_PANEL_WIDTH_KEY = "frockbot.applet-panel-width";
+const APPLET_PANEL_MIN = 320;
+const APPLET_PANEL_MAX = 900;
+const APPLET_PANEL_DEFAULT = 480;
+
+function readStoredPanelWidth(): number {
+  try {
+    const stored = Number(window.localStorage.getItem(APPLET_PANEL_WIDTH_KEY));
+    if (!Number.isFinite(stored) || stored <= 0) return APPLET_PANEL_DEFAULT;
+    return Math.min(APPLET_PANEL_MAX, Math.max(APPLET_PANEL_MIN, stored));
+  } catch {
+    return APPLET_PANEL_DEFAULT;
+  }
+}
+
+const appletPanelWidth = ref(
+  typeof window === "undefined" ? APPLET_PANEL_DEFAULT : readStoredPanelWidth(),
+);
+const appletCanvasOpen = computed(() =>
+  Boolean(state.value.focusedAppletId && !panelSurface.value),
+);
+
+function storePanelWidth(width: number): void {
+  try {
+    window.localStorage.setItem(APPLET_PANEL_WIDTH_KEY, String(width));
+  } catch {
+    // A browser that refuses storage still resizes; it just forgets.
+  }
+}
+
+function setPanelWidth(width: number): void {
+  appletPanelWidth.value = Math.min(
+    APPLET_PANEL_MAX,
+    Math.max(APPLET_PANEL_MIN, Math.round(width)),
+  );
+}
+
+function onPanelHandlePointerDown(event: PointerEvent): void {
+  if (phoneLayout.value) return;
+  const target = event.currentTarget as HTMLElement;
+  target.setPointerCapture(event.pointerId);
+  const move = (moveEvent: PointerEvent) => {
+    setPanelWidth(window.innerWidth - moveEvent.clientX);
+  };
+  const stop = () => {
+    target.removeEventListener("pointermove", move);
+    target.removeEventListener("pointerup", stop);
+    target.removeEventListener("pointercancel", stop);
+    storePanelWidth(appletPanelWidth.value);
+  };
+  target.addEventListener("pointermove", move);
+  target.addEventListener("pointerup", stop);
+  target.addEventListener("pointercancel", stop);
+}
+
+/** The keyboard's way to do what the drag does. */
+function onPanelHandleKeydown(event: KeyboardEvent): void {
+  const step = event.shiftKey ? 64 : 16;
+  if (event.key === "ArrowLeft") setPanelWidth(appletPanelWidth.value + step);
+  else if (event.key === "ArrowRight")
+    setPanelWidth(appletPanelWidth.value - step);
+  else return;
+  event.preventDefault();
+  storePanelWidth(appletPanelWidth.value);
+}
+
+/** The phone's way into a focused Applet while the panel is closed. */
+const appletChip = computed(() =>
+  phoneLayout.value && !rightPanelOpen.value && state.value.focusedAppletId
+    ? (state.value.focusedApplet?.displayName ?? "Applet")
+    : undefined,
+);
 /*
  * Skill invocation. `/` or `@` at a word boundary opens a popover over the
  * Bot's catalog; choosing one attaches a ref chip and removes the trigger from
@@ -394,12 +497,14 @@ onMounted(() => {
   window.addEventListener("popstate", applySettingsDeepLink);
   window.addEventListener("hashchange", applySettingsDeepLink);
   phoneLayoutMedia?.addEventListener("change", onPhoneLayoutChange);
+  window.addEventListener("keydown", onRootKeydown);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("popstate", applySettingsDeepLink);
   window.removeEventListener("hashchange", applySettingsDeepLink);
   phoneLayoutMedia?.removeEventListener("change", onPhoneLayoutChange);
+  window.removeEventListener("keydown", onRootKeydown);
 });
 
 watch(
@@ -591,16 +696,18 @@ function handleComposerKeydown(event: KeyboardEvent): void {
 </script>
 
 <template>
-  <div class="frockbot-root" @keydown="onRootKeydown">
+  <div class="frockbot-root">
     <div
       class="app-shell"
       :class="{
         'panel-open': rightPanelOpen,
         'panel-surface': Boolean(panelSurface),
+        'panel-applet': appletCanvasOpen,
         'mac-desktop': macDesktop,
         'phone-layout': phoneLayout,
         'nav-open': navOpen,
       }"
+      :style="{ '--applet-panel-width': `${appletPanelWidth}px` }"
     >
       <aside
         class="sidebar"
@@ -729,8 +836,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                   :contribution="entry.contribution"
                   :page="entry.page"
                   :slot="entry.slot"
-                  :state-name="`tool:${tool.name}`"
-                  :state-value="toolResultState(tool)"
+                  :states="{ [`tool:${tool.name}`]: toolResultState(tool) }"
                 />
               </template>
               <!--
@@ -882,6 +988,21 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               </span>
             </li>
           </ul>
+          <!--
+            The phone's way back to a focused Applet. The panel is a drawer
+            here, so with it closed there is nothing on screen that says an
+            Applet is in play; this chip both says so and opens it.
+          -->
+          <button
+            v-if="appletChip"
+            type="button"
+            class="applet-chip"
+            @click="toggleRightPanel"
+          >
+            <UiIcon name="applets" size="sm" />
+            <span class="applet-chip-name">Applet: {{ appletChip }}</span>
+            <span class="applet-chip-action">Open</span>
+          </button>
           <div class="composer-body">
             <ul v-if="attachedSkills.length > 0" class="skill-chips">
               <li v-for="entry in attachedSkills" :key="entry.ref">
@@ -948,15 +1069,40 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           Both layers live in one stack so panel plugins keep their state
           while a surface holds their place.
         -->
+        <!--
+          The edge the User drags to make room for an Applet. It is a real
+          control, not a hairline: it takes focus and the arrow keys do what
+          the drag does.
+        -->
+        <div
+          v-if="appletCanvasOpen && !phoneLayout"
+          class="applet-panel-handle"
+          role="separator"
+          tabindex="0"
+          aria-orientation="vertical"
+          aria-label="Resize the Applet panel"
+          :aria-valuenow="appletPanelWidth"
+          :aria-valuemin="320"
+          :aria-valuemax="900"
+          @pointerdown="onPanelHandlePointerDown"
+          @keydown="onPanelHandleKeydown"
+        />
         <div class="right-panel-stack">
           <Transition name="panel-swap">
             <div v-show="!panelSurface" class="right-panel-content">
-              <header class="right-panel-header">
-                <k-slot name="frockbot.bot-actions" />
-              </header>
-              <div class="right-panel-body">
-                <k-slot name="frockbot.right-panel" />
-              </div>
+              <!--
+                A focused Applet takes the panel; with none, the panel is the
+                one its plugins have always drawn.
+              -->
+              <AppletCanvas v-if="appletCanvasOpen" />
+              <template v-else>
+                <header class="right-panel-header">
+                  <k-slot name="frockbot.bot-actions" />
+                </header>
+                <div class="right-panel-body">
+                  <k-slot name="frockbot.right-panel" />
+                </div>
+              </template>
             </div>
           </Transition>
           <Transition name="panel-swap">

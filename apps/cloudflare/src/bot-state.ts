@@ -84,13 +84,31 @@ import {
   decodeNormalizedModelRequestV1,
 } from "@frockbot/kernel-contracts";
 import type {
+  AppletBuildViewV1,
+  AppletSourceViewV1,
   NormalizedModelRequest,
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
   WorkspacePathV1,
+  WorkspaceRootV1,
   WorkspaceSyncEffectsV1,
 } from "@frockbot/kernel-contracts";
-import { decodeWorkspacePathV1 } from "@frockbot/kernel-contracts";
+import {
+  APPLET_ID_V1,
+  APPLET_SOURCE_MAX_BYTES_V1,
+  APPLET_SOURCE_MAX_FILES_V1,
+  decodeWorkspacePathV1,
+} from "@frockbot/kernel-contracts";
+
+/*
+ * Where an Applet's source lives.
+ *
+ * The Applets Package declares this root in its manifest (plan §7); these are
+ * the ids that name it, restated here because the canvas's read is served from
+ * the Bot Durable Object rather than from the Package's own module.
+ */
+const APPLETS_SOURCE_PACKAGE_ID_V1 = "applets";
+const APPLETS_SOURCE_ROOT_ID_V1 = "source";
 
 /** Base64 without a Node Buffer: this object runs in workerd. */
 function bytesToBase64(bytes: Uint8Array): string {
@@ -166,6 +184,7 @@ import {
   rpcIdentifier,
   rpcInteger,
   rpcObject,
+  rpcPattern,
   rpcString,
 } from "./durable-rpc.js";
 
@@ -1007,6 +1026,95 @@ export class BotState extends DurableObject<BotStateEnv> {
       size: outcome.file.generation.size,
       bytesBase64: bytesToBase64(outcome.file.bytes),
     };
+  }
+
+  /*
+   * An Applet's source, for the canvas's building state.
+   *
+   * The Workspace store is read and nothing else: the Applets Package's
+   * declared root is User-scoped, so this answers from object storage while
+   * the Computer is hibernated, exactly as the plan requires ("the store is
+   * read, never the Sprite"). Text only and bounded, because this is a
+   * projection for a person watching a Bot write code, not a file transfer.
+   */
+  async readAppletSourceV1(input: unknown): Promise<AppletSourceViewV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      appletId: rpcPattern(APPLET_ID_V1, 129),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const appletId = request.appletId as string;
+    const files = this.backendEnv.WORKSPACE_FILES;
+    if (!files) return { appletId, files: [], truncated: false };
+    const root: WorkspaceRootV1 = {
+      kind: "package-declared",
+      userId: identity.userId,
+      packageId: APPLETS_SOURCE_PACKAGE_ID_V1,
+      rootId: APPLETS_SOURCE_ROOT_ID_V1,
+    };
+    const listing = await files.list({
+      root,
+      prefix: appletId,
+      limit: APPLET_SOURCE_MAX_FILES_V1,
+    });
+    if (listing.status !== "ok")
+      return { appletId, files: [], truncated: false };
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const source: AppletSourceViewV1["files"] = [];
+    let bytes = 0;
+    let truncated = listing.cursor !== undefined;
+    for (const entry of listing.entries) {
+      const relative = entry.path.path.slice(appletId.length + 1);
+      if (!relative) continue;
+      if (bytes + entry.generation.size > APPLET_SOURCE_MAX_BYTES_V1) {
+        truncated = true;
+        continue;
+      }
+      const outcome = await files.read(entry.path);
+      if (outcome.status !== "ok") continue;
+      let text: string;
+      try {
+        text = decoder.decode(outcome.file.bytes);
+      } catch {
+        // A binary artifact under the root is not source; the canvas says
+        // nothing about it rather than drawing mojibake.
+        continue;
+      }
+      bytes += outcome.file.generation.size;
+      source.push({
+        path: relative,
+        text,
+        generationId: outcome.file.generation.generationId,
+        changedAt: outcome.file.generation.writtenAt,
+      });
+    }
+    return { appletId, files: source, truncated };
+  }
+
+  /**
+   * The outcome the Bot last recorded for `applet check` or `applet build`.
+   * Until the Applet authority records one, this is honestly `unknown` rather
+   * than a green tick nobody earned.
+   */
+  async readAppletBuildV1(input: unknown): Promise<AppletBuildViewV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      appletId: rpcPattern(APPLET_ID_V1, 129),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return { status: "unknown" };
   }
 
   async listSkills(input: unknown) {

@@ -123,6 +123,63 @@ export interface AppletViewerTokenV1 {
   socketUrl: string;
 }
 
+/** Where the canvas reads an Applet's live UI from. */
+export interface AppletUiViewV1 {
+  uiUrl: string;
+  /** Absent while the Applet has no active generation. */
+  generationId?: string;
+}
+
+/**
+ * The Session's focused Applet. One per Session, and `null` is a value: it is
+ * the Session having deliberately no Applet in the canvas, not a missing read.
+ */
+export interface AppletFocusViewV1 {
+  appletId: string | null;
+}
+
+/** The Applets the User owns, as a client reads them. */
+export interface AppletListViewV1 {
+  schemaVersion: 1;
+  applets: AppletSummaryV1[];
+}
+
+/** One text file of an Applet's source, as the canvas draws it. */
+export interface AppletSourceFileV1 {
+  /** Relative to `applets/<appletId>/` in the Applets Package's durable root. */
+  path: string;
+  text: string;
+  /** The Workspace generation this text was read at. */
+  generationId: string;
+  /** When the Workspace last recorded a write, when the store knows it. */
+  changedAt?: string;
+}
+
+/**
+ * An Applet's source as the canvas shows it while the Bot is still writing it.
+ * `truncated` says the store held more than the read limit, so the canvas can
+ * say so rather than implying the Applet is smaller than it is.
+ */
+export interface AppletSourceViewV1 {
+  appletId: string;
+  files: AppletSourceFileV1[];
+  truncated: boolean;
+}
+
+/** The outcome the Bot last recorded for `applet check` or `applet build`. */
+export interface AppletBuildViewV1 {
+  status: "unknown" | "passed" | "failed";
+  command?: "check" | "build";
+  at?: string;
+  summary?: string;
+  diagnostics?: string[];
+}
+
+/** Bounds on the source read, so a canvas load can never be unbounded. */
+export const APPLET_SOURCE_MAX_BYTES_V1 = 512 * 1024;
+export const APPLET_SOURCE_MAX_FILES_V1 = 256;
+export const APPLET_SOURCE_MAX_DIAGNOSTICS_V1 = 64;
+
 export const APPLET_ID_V1 = /^[a-z0-9][a-z0-9-]{0,63}\.[a-z0-9-]{1,64}$/;
 export const APPLET_TOOL_NAME_V1 = /^[a-z][a-z0-9_]{0,63}$/;
 export const APPLET_MAX_TOOLS_V1 = 64;
@@ -591,6 +648,176 @@ export function decodeAppletPublishResultV1(
     };
   }
   throw new Error(`${label}.status is invalid`);
+}
+
+export function decodeAppletListViewV1(
+  input: unknown,
+  label = "Applet list",
+): AppletListViewV1 {
+  const value = record(input, label);
+  exactKeys(value, ["schemaVersion", "applets"], [], label);
+  if (value.schemaVersion !== 1)
+    throw new Error(`${label} version is unsupported`);
+  if (!Array.isArray(value.applets) || value.applets.length > 256)
+    throw new Error(`${label}.applets must be a bounded array`);
+  const applets = value.applets.map((candidate, index) =>
+    decodeAppletSummaryV1(candidate, `${label}.applets[${index}]`),
+  );
+  if (new Set(applets.map((applet) => applet.appletId)).size !== applets.length)
+    throw new Error(`${label}.applets contains duplicate Applets`);
+  return { schemaVersion: 1, applets };
+}
+
+export function decodeAppletUiViewV1(
+  input: unknown,
+  label = "Applet UI",
+): AppletUiViewV1 {
+  const value = record(input, label);
+  exactKeys(value, ["uiUrl"], ["generationId"], label);
+  const uiUrl = boundedString(value.uiUrl, `${label}.uiUrl`, 2_048);
+  let parsed: URL;
+  try {
+    parsed = new URL(uiUrl);
+  } catch {
+    throw new Error(`${label}.uiUrl is invalid`);
+  }
+  if (!["http:", "https:"].includes(parsed.protocol))
+    throw new Error(`${label}.uiUrl is invalid`);
+  return {
+    uiUrl,
+    ...(value.generationId === undefined
+      ? {}
+      : {
+          generationId: boundedString(
+            value.generationId,
+            `${label}.generationId`,
+            128,
+          ),
+        }),
+  };
+}
+
+/** The focus read and write share one shape, so a write reads back exactly. */
+export function decodeAppletFocusViewV1(
+  input: unknown,
+  label = "Applet focus",
+): AppletFocusViewV1 {
+  const value = record(input, label);
+  exactKeys(value, ["appletId"], ["schemaVersion"], label);
+  if (value.schemaVersion !== undefined && value.schemaVersion !== 1)
+    throw new Error(`${label} version is unsupported`);
+  return {
+    appletId:
+      value.appletId === null
+        ? null
+        : appletId(value.appletId, `${label}.appletId`),
+  };
+}
+
+/**
+ * The Applet's source as the canvas reads it. Text only and bounded: this is a
+ * projection for a person watching a Bot write code, never a file transfer.
+ */
+export function decodeAppletSourceViewV1(
+  input: unknown,
+  label = "Applet source",
+): AppletSourceViewV1 {
+  const value = record(input, label);
+  exactKeys(value, ["appletId", "files", "truncated"], [], label);
+  if (typeof value.truncated !== "boolean")
+    throw new Error(`${label}.truncated must be a boolean`);
+  if (
+    !Array.isArray(value.files) ||
+    value.files.length > APPLET_SOURCE_MAX_FILES_V1
+  ) {
+    throw new Error(`${label}.files must be a bounded array`);
+  }
+  let bytes = 0;
+  const files = value.files.map((candidate, index) => {
+    const fileLabel = `${label}.files[${index}]`;
+    const file = record(candidate, fileLabel);
+    exactKeys(file, ["path", "text", "generationId"], ["changedAt"], fileLabel);
+    const path = boundedString(file.path, `${fileLabel}.path`, 512);
+    if (path.startsWith("/") || path.includes("..") || path.includes("\\"))
+      throw new Error(`${fileLabel}.path is invalid`);
+    if (typeof file.text !== "string")
+      throw new Error(`${fileLabel}.text must be a string`);
+    bytes += file.text.length;
+    if (bytes > APPLET_SOURCE_MAX_BYTES_V1)
+      throw new Error(`${label} exceeds the source read limit`);
+    return {
+      path,
+      text: file.text,
+      generationId: boundedString(
+        file.generationId,
+        `${fileLabel}.generationId`,
+        128,
+      ),
+      ...(file.changedAt === undefined
+        ? {}
+        : { changedAt: timestamp(file.changedAt, `${fileLabel}.changedAt`) }),
+    };
+  });
+  if (new Set(files.map((file) => file.path)).size !== files.length)
+    throw new Error(`${label}.files contains duplicate paths`);
+  return {
+    appletId: appletId(value.appletId, `${label}.appletId`),
+    files,
+    truncated: value.truncated,
+  };
+}
+
+export function decodeAppletBuildViewV1(
+  input: unknown,
+  label = "Applet build",
+): AppletBuildViewV1 {
+  const value = record(input, label);
+  exactKeys(
+    value,
+    ["status"],
+    ["command", "at", "summary", "diagnostics"],
+    label,
+  );
+  if (
+    value.status !== "unknown" &&
+    value.status !== "passed" &&
+    value.status !== "failed"
+  ) {
+    throw new Error(`${label}.status is invalid`);
+  }
+  if (
+    value.command !== undefined &&
+    value.command !== "check" &&
+    value.command !== "build"
+  ) {
+    throw new Error(`${label}.command is invalid`);
+  }
+  if (
+    value.diagnostics !== undefined &&
+    (!Array.isArray(value.diagnostics) ||
+      value.diagnostics.length > APPLET_SOURCE_MAX_DIAGNOSTICS_V1)
+  ) {
+    throw new Error(`${label}.diagnostics must be a bounded array`);
+  }
+  return {
+    status: value.status,
+    ...(value.command === undefined
+      ? {}
+      : { command: value.command as "check" | "build" }),
+    ...(value.at === undefined
+      ? {}
+      : { at: timestamp(value.at, `${label}.at`) }),
+    ...(value.summary === undefined
+      ? {}
+      : { summary: boundedString(value.summary, `${label}.summary`, 512) }),
+    ...(value.diagnostics === undefined
+      ? {}
+      : {
+          diagnostics: (value.diagnostics as unknown[]).map((line, index) =>
+            boundedString(line, `${label}.diagnostics[${index}]`, 1_024),
+          ),
+        }),
+  };
 }
 
 export function decodeAppletViewerTokenV1(
