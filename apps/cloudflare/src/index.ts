@@ -901,6 +901,8 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
         appletId: request.appletId as string | null,
       }),
     );
+  }
+
   async readAppletSourceV1(input: unknown): Promise<AppletSourceViewV1> {
     const request = decodeRpcEnvelopeV1(input, {
       botId: rpcBotId,

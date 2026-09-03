@@ -295,6 +295,7 @@ export interface UserBotStateBinding {
     botId: string;
     appletId: string | null;
   }): Promise<unknown>;
+  /**
    * An Applet's source, for the Applet canvas's building state. The root is
    * User-scoped, so any of the User's Bots reads the same files; the Bot names
    * the Durable Object that holds the Workspace binding and nothing more.
