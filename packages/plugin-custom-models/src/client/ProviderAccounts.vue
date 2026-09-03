@@ -39,6 +39,73 @@ const labelingConnectionId = ref<string>();
 const connectionLabel = ref("");
 const rotatingConnectionId = ref<string>();
 const rotationKey = ref("");
+/**
+ * Errors belong to the action that produced them, not to one global slot: a
+ * failure here disappears when that same action next succeeds, and closing the
+ * form takes it with it.
+ */
+const connectError = ref<string>();
+const rowErrors = ref<Record<string, string>>({});
+/** Whether the connect form has a command in flight. */
+const connecting = ref(false);
+/** Connection ids with a command in flight, so their row can say so. */
+const busyConnections = ref<string[]>([]);
+
+function failureMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function rowError(connectionId: string): string | undefined {
+  return rowErrors.value[connectionId];
+}
+
+function isBusy(connectionId: string): boolean {
+  return busyConnections.value.includes(connectionId);
+}
+
+/** Run a Connection-scoped action, holding its busy and error state. */
+async function runForConnection(
+  connectionId: string,
+  fallback: string,
+  action: () => Promise<unknown>,
+): Promise<boolean> {
+  const { [connectionId]: _cleared, ...rest } = rowErrors.value;
+  rowErrors.value = rest;
+  busyConnections.value = [...busyConnections.value, connectionId];
+  try {
+    await action();
+    return true;
+  } catch (error) {
+    rowErrors.value = {
+      ...rowErrors.value,
+      [connectionId]: failureMessage(error, fallback),
+    };
+    return false;
+  } finally {
+    busyConnections.value = busyConnections.value.filter(
+      (id) => id !== connectionId,
+    );
+  }
+}
+
+function accountCount(item: PluginCatalogItem): string {
+  const count = connections(item).length;
+  if (count === 0) return "No account connected";
+  return count === 1 ? "1 account" : `${count} accounts`;
+}
+
+/** A `failed` Connection is retried in place rather than left to accumulate. */
+function retryConnection(
+  item: PluginCatalogItem,
+  connection: ConnectionView,
+): void {
+  beginConnect(item);
+  apiKeyLabel.value = connection.displayName;
+  apiKeyBaseUrl.value = connection.settings?.["api-base-url"] ?? "";
+  retryingConnectionId.value = connection.connectionId;
+}
+
+const retryingConnectionId = ref<string>();
 
 function connections(item: PluginCatalogItem): ConnectionView[] {
   return (web.value.userSettings?.connections ?? []).filter(
@@ -69,6 +136,8 @@ function beginConnect(item: PluginCatalogItem): void {
   apiKeyLabel.value = item.displayName;
   apiKey.value = "";
   apiKeyBaseUrl.value = "";
+  connectError.value = undefined;
+  retryingConnectionId.value = undefined;
 }
 
 function cancelConnect(): void {
@@ -76,10 +145,16 @@ function cancelConnect(): void {
   apiKeyConnectionTypeId.value = undefined;
   apiKey.value = "";
   apiKeyBaseUrl.value = "";
+  connectError.value = undefined;
+  retryingConnectionId.value = undefined;
 }
 
 async function connectApiKey(): Promise<void> {
   if (!apiKeyPackageId.value || !apiKeyConnectionTypeId.value) return;
+  if (connecting.value) return;
+  connecting.value = true;
+  connectError.value = undefined;
+  const superseded = retryingConnectionId.value;
   try {
     const apiBaseUrl = apiKeyBaseUrl.value.trim();
     await web.value.createApiKeyConnection({
@@ -89,11 +164,17 @@ async function connectApiKey(): Promise<void> {
       apiKey: apiKey.value,
       ...(apiBaseUrl ? { settings: { "api-base-url": apiBaseUrl } } : {}),
     });
+    // The attempt this one replaces goes away instead of accumulating as a
+    // dead row the User has to clear by hand.
+    if (superseded) {
+      await web.value.disconnectConnection(superseded).catch(() => undefined);
+    }
     cancelConnect();
   } catch (error) {
     apiKey.value = "";
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not create Connection";
+    connectError.value = failureMessage(error, "Could not create Connection");
+  } finally {
+    connecting.value = false;
   }
 }
 
@@ -103,65 +184,52 @@ function beginLabeling(connection: ConnectionView): void {
 }
 
 async function saveLabel(connectionId: string): Promise<void> {
-  try {
-    await web.value.updateConnectionLabel(connectionId, connectionLabel.value);
-    labelingConnectionId.value = undefined;
-    connectionLabel.value = "";
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not rename Connection";
-  }
+  const saved = await runForConnection(
+    connectionId,
+    "Could not rename Connection",
+    () => web.value.updateConnectionLabel(connectionId, connectionLabel.value),
+  );
+  if (!saved) return;
+  labelingConnectionId.value = undefined;
+  connectionLabel.value = "";
 }
 
 async function rotateApiKey(connectionId: string): Promise<void> {
-  try {
-    await web.value.rotateApiKeyConnection(connectionId, rotationKey.value);
-    rotatingConnectionId.value = undefined;
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not rotate credential";
-  } finally {
-    rotationKey.value = "";
-  }
+  const key = rotationKey.value;
+  rotationKey.value = "";
+  const rotated = await runForConnection(
+    connectionId,
+    "Could not rotate credential",
+    () => web.value.rotateApiKeyConnection(connectionId, key),
+  );
+  if (rotated) rotatingConnectionId.value = undefined;
 }
 
 async function refreshModels(connectionId: string): Promise<void> {
-  try {
-    await web.value.refreshConnectionModels(connectionId);
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not refresh models";
-  }
+  await runForConnection(connectionId, "Could not refresh models", () =>
+    web.value.refreshConnectionModels(connectionId),
+  );
 }
 
 async function setEnabled(
   connectionId: string,
   enabled: boolean,
 ): Promise<void> {
-  try {
-    await web.value.setConnectionEnabled(connectionId, enabled);
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not update Connection";
-  }
+  await runForConnection(connectionId, "Could not update Connection", () =>
+    web.value.setConnectionEnabled(connectionId, enabled),
+  );
 }
 
 async function disconnect(connectionId: string): Promise<void> {
-  try {
-    await web.value.disconnectConnection(connectionId);
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not disconnect";
-  }
+  await runForConnection(connectionId, "Could not disconnect", () =>
+    web.value.disconnectConnection(connectionId),
+  );
 }
 
 async function revoke(packageId: string, connectionId: string): Promise<void> {
-  try {
-    await web.value.revokeConnection(packageId, connectionId);
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not revoke Connection";
-  }
+  await runForConnection(connectionId, "Could not revoke Connection", () =>
+    web.value.revokeConnection(packageId, connectionId),
+  );
 }
 </script>
 
@@ -178,13 +246,7 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
         </span>
         <span class="provider-copy">
           <strong>{{ item.displayName }}</strong>
-          <small>
-            {{
-              connections(item).length === 0
-                ? "No account connected"
-                : `${connections(item).length} account(s)`
-            }}
-          </small>
+          <small class="provider-count">{{ accountCount(item) }}</small>
         </span>
         <UiButton v-if="mayConnect(item)" @click="beginConnect(item)">
           {{
@@ -245,8 +307,16 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
               Rotate key
             </UiButton>
             <UiButton
+              v-if="connection.state === 'failed'"
+              variant="primary"
+              @click="retryConnection(item, connection)"
+            >
+              Try again
+            </UiButton>
+            <UiButton
               v-if="connection.state !== 'revoking'"
               variant="danger"
+              :disabled="isBusy(connection.connectionId)"
               @click="disconnect(connection.connectionId)"
             >
               Disconnect
@@ -260,6 +330,16 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
             Revoke
           </UiButton>
         </div>
+        <p v-if="isBusy(connection.connectionId)" class="connection-busy">
+          Working…
+        </p>
+        <p
+          v-if="rowError(connection.connectionId)"
+          class="connection-failure"
+          role="alert"
+        >
+          {{ rowError(connection.connectionId) }}
+        </p>
         <p v-if="connection.failure" class="connection-failure" role="alert">
           {{ connection.failure }}
         </p>
@@ -332,9 +412,16 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
           Leave empty for Ollama Cloud. Point this at a local Ollama server or
           another Ollama-compatible endpoint.
         </p>
+        <p v-if="connectError" class="connection-failure" role="alert">
+          {{ connectError }}
+        </p>
         <div class="api-key-actions">
-          <UiButton @click="cancelConnect">Cancel</UiButton>
-          <UiButton type="submit" variant="primary">Connect account</UiButton>
+          <UiButton :disabled="connecting" @click="cancelConnect">
+            Cancel
+          </UiButton>
+          <UiButton type="submit" variant="primary" :disabled="connecting">
+            {{ connecting ? "Connecting…" : "Connect account" }}
+          </UiButton>
         </div>
       </form>
 
@@ -386,6 +473,18 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
 
 .provider-copy {
   min-width: 0;
+}
+
+/* Written as it should read; no transform decides its capitalisation. */
+.provider-count,
+.connection-busy {
+  text-transform: none;
+}
+
+.connection-busy {
+  margin: 4px 0 0;
+  color: var(--frock-text-muted, inherit);
+  font-size: 0.85em;
 }
 
 .provider-copy strong,

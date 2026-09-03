@@ -464,6 +464,43 @@ describe("Ollama Cloud User Contribution", () => {
     ).toMatchObject({ displayName: "Recovered 2" });
   });
 
+  test("abandons a Connection whose provider never answers", async () => {
+    // A provider that accepts the request and never responds: the connect
+    // command must not re-drive forever, and the Connection must not sit in
+    // `authorizing` where the User is shown nothing at all.
+    const { settings, ollama } = await fixture((_input, init) =>
+      Promise.reject(init?.signal?.reason ?? new Error("provider never answered")),
+    );
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-hang",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Hang",
+      apiKey: "valid-key",
+    });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await ollama.alarm().catch(() => undefined);
+    }
+
+    const connection = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    expect(connection).toMatchObject({
+      state: "failed",
+      failure: expect.any(String),
+    });
+    expect(connection?.authorization).toMatchObject({
+      credential: { configured: false },
+    });
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "connect-hang"),
+    ).resolves.toMatchObject({ status: "failed" });
+  });
+
   test("keeps the active generation when rotation validation fails", async () => {
     const { settings, ollama, rejectCatalog } = await fixture();
     const created = await ollama.executeConnection("account-1", {

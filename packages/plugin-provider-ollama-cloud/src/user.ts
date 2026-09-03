@@ -41,6 +41,13 @@ const MAX_COMMAND_TOMBSTONES = 128;
 const MAX_MANUAL_COMMANDS = MAX_MANUAL_RECEIPTS + MAX_COMMAND_TOMBSTONES;
 const MAX_PENDING_COMMANDS = 64;
 const MAX_PENDING_RECOVERIES_PER_ALARM = 1;
+/**
+ * How many alarm-driven attempts a pending Connection command gets before it is
+ * abandoned. Without a cap an endpoint that accepts the connection and never
+ * answers is re-driven once a minute forever and its Connection sits in
+ * `authorizing` with nothing to show the User.
+ */
+const MAX_PENDING_RECOVERY_ATTEMPTS = 3;
 const MAX_CATALOG_REFRESHES_PER_ALARM = 1;
 const ACCOUNT_KEY = "ollama-connection-account";
 const AUTOMATIC_REFRESH_RECEIPT_PREFIX = "ollama-refresh-receipt:";
@@ -81,6 +88,8 @@ interface StoredCommand {
   validationFailure?: string;
   validationStatus?: "applied" | "failed";
   providerRetryPolicy?: "safe-metadata-read";
+  /** Alarm-driven resume attempts so far; capped, so a command always settles. */
+  recoveryAttempts?: number;
 }
 
 interface StoredModelResolution {
@@ -379,6 +388,7 @@ function decodeStoredCommand(input: unknown): StoredCommand {
       "validationFailure",
       "validationStatus",
       "providerRetryPolicy",
+      "recoveryAttempts",
     ],
   );
   const operations: StoredCommand["operation"][] = [
@@ -1895,6 +1905,53 @@ export class OllamaCloudUserBackendContribution {
     return this.finishRecord(record, terminalStatus);
   }
 
+  /**
+   * Settle a command that has exhausted its attempts. The Connection it created
+   * leaves `authorizing` for `failed` with a reason the User can act on, rather
+   * than staying in a state that only a page reload even renders.
+   */
+  private async abandonPendingCommand(record: StoredCommand): Promise<void> {
+    const failure =
+      "The provider did not respond. The connection attempt was abandoned.";
+    const generation = record.credentialGeneration;
+    if (generation) {
+      await this.host.credentials
+        .discardPending(record.connectionId, generation)
+        .catch(() => undefined);
+    }
+    const current = await this.host.settings.getConnection(
+      record.accountId,
+      record.connectionId,
+    );
+    if (
+      current &&
+      current.packageId === PACKAGE_ID &&
+      current.state === "authorizing"
+    ) {
+      await this.host.settings.replaceConnection(
+        record.accountId,
+        record.connectionId,
+        current.generation,
+        {
+          ...current,
+          state: "failed",
+          authorization: {
+            schemaVersion: 1,
+            kind: "api-key",
+            credential: {
+              schemaVersion: 1,
+              configured: false,
+              source: "api-key",
+              writable: true,
+            },
+          },
+          failure,
+        },
+      );
+    }
+    await this.finishRecord({ ...record, validationFailure: failure }, "failed");
+  }
+
   private async finishRecord(
     record: StoredCommand,
     status: ConnectionCommandReceiptV1["status"],
@@ -2307,7 +2364,17 @@ export class OllamaCloudUserBackendContribution {
       );
       if (recordValue === undefined) continue;
       const record = decodeStoredCommand(recordValue);
-      if (!record.receipt) await this.resumeOnce(record);
+      if (record.receipt) continue;
+      const attempts = (record.recoveryAttempts ?? 0) + 1;
+      if (attempts > MAX_PENDING_RECOVERY_ATTEMPTS) {
+        await this.abandonPendingCommand(record);
+        continue;
+      }
+      // Counted before the attempt, so an attempt that throws still counts and
+      // the command cannot be re-driven indefinitely.
+      const attempted = { ...record, recoveryAttempts: attempts };
+      await this.host.storage.put({ [commandKey(commandId)]: attempted });
+      await this.resumeOnce(attempted);
     }
     const accountValue = await this.host.storage.get<unknown>(ACCOUNT_KEY);
     if (accountValue === undefined) return;

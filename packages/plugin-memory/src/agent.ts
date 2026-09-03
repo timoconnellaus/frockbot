@@ -1149,7 +1149,31 @@ export function createMemoryRuntimePlugin(
         // own prompt on the next Turn, which is what makes the injected block
         // and the `memory/injected` record describe the same thing.
         if (step === 1 || projection.loadedTurn() !== turn) {
-          await projection.refresh(turn, agent.session);
+          try {
+            await projection.refresh(turn, agent.session);
+          } catch (error) {
+            // Memory is remote, and a remote read that throws used to fail
+            // the whole Turn as `model-error`. A Turn with no Memory is a
+            // worse Turn; a Turn that does not happen is no Turn at all. The
+            // gap is recorded so it is visible in durable state rather than
+            // being a silent change in the Bot's behaviour.
+            agent.session.append({
+              type: "memory/injected",
+              turn,
+              sources: [],
+              facts: [],
+              omissions: [
+                {
+                  scope: "bot",
+                  reason:
+                    error instanceof Error
+                      ? error.message
+                      : "Memory could not be read for this Turn",
+                },
+              ],
+            });
+            await agent.session.flush();
+          }
         }
         return next();
       }),

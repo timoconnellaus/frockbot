@@ -9,7 +9,10 @@
 // Precedence here is the Memory precedence: own (`bot`) before `project`
 // before `user`, "the most specific wins", applied after scoring so a strong
 // shared hit still ranks above a weak own one within the same document.
-import type { MemoryScopeNameV1 } from "@frockbot/kernel-contracts";
+import {
+  remoteCallV1,
+  type MemoryScopeNameV1,
+} from "@frockbot/kernel-contracts";
 import {
   memoryVectorNamespaceV1,
   type MemoryIndexChunkV1,
@@ -93,11 +96,13 @@ export async function searchMemoryV1(
           candidates.map((chunk) => [chunk.hash, chunk] as const),
         );
         for (const namespace of namespaces) {
-          const response = await options.vectorize.query(vector, {
-            topK: Math.min(options.maxResults * 3, 20),
-            namespace,
-            returnMetadata: "all",
-          });
+          const response = await remoteCallV1("the memory index", () =>
+            options.vectorize!.query(vector, {
+              topK: Math.min(options.maxResults * 3, 20),
+              namespace,
+              returnMetadata: "all",
+            }),
+          );
           for (const match of response.matches) {
             const hash = match.metadata?.hash;
             const chunk =
