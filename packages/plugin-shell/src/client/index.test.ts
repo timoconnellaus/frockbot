@@ -1688,9 +1688,7 @@ describe("active durable Turn projection", () => {
           events: [
             {
               type: "send/to-user",
-              sendId: "send-1",
-              kind: "text",
-              text: "Here you go.",
+              payload: { type: "text", text: "Here you go." },
             },
           ],
           status: "running",

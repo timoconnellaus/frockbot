@@ -1502,7 +1502,7 @@ describe("dispatched subagents in the run projection", () => {
     expect(projected.outcome).toMatchObject({ type: "completed" });
 
     const page = createClientRunListV1([projected], { truncated: false });
-    const tampered = structuredClone(page) as {
+    const tampered = structuredClone(page) as unknown as {
       runs: Array<Record<string, unknown>>;
     };
     tampered.runs[0]!.partialText = "words";
