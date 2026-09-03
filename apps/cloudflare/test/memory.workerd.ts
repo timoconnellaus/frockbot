@@ -44,7 +44,7 @@ function day(offset: number): string {
 const FACT = "Tim runs the gym build out of Wollongong.";
 
 describe("Memory in Workerd", () => {
-  test("a user-scope write records its generation in the User Durable Object, and another Bot of the same User is told who learned it", async () => {
+  test("a user-scope write records its generation in the User Durable Object, and another Bot of the same User reads the fact without being given a sibling's id", async () => {
     const suffix = crypto.randomUUID();
     const userId = `memory-user-${suffix}`;
     const learner = { userId, botId: `memory-bot-a-${suffix}` };
@@ -117,7 +117,13 @@ describe("Memory in Workerd", () => {
     if (request?.type !== "model/request") throw new Error("unreachable");
     expect(request.request.system).toContain("User memory:");
     expect(request.request.system).toContain("About the user (shared):");
-    expect(request.request.system).toContain(`[via ${learner.botId}] ${FACT}`);
+    expect(request.request.system).toContain(FACT);
+    // A shared fact is credited by name or not at all. This deployment gives
+    // the memory store no Bot names, so the fact is uncredited rather than
+    // tagged with a sibling's id — which the model reads as a name and says
+    // out loud to the User.
+    expect(request.request.system).not.toContain(`[via ${learner.botId}]`);
+    expect(request.request.system).not.toContain(learner.botId);
 
     const injected = events.find((event) => event.type === "memory/injected");
     if (injected?.type !== "memory/injected") throw new Error("unreachable");
@@ -125,7 +131,9 @@ describe("Memory in Workerd", () => {
       scope: "user",
       projectId: "",
       tier: "profile",
-      via: learner.botId,
+      // Empty, not the learner's id: the durable record credits a name or
+      // nobody, exactly as the prompt does.
+      via: "",
       learnedAt: expect.any(String),
       text: FACT,
     });

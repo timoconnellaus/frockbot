@@ -214,6 +214,11 @@ import {
 } from "./backend-routines.js";
 import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
 import {
+  ROUTINE_INBOX_LIMIT,
+  ROUTINE_INBOX_PREFIX,
+} from "@frockbot/plugin-routines/storage-keys";
+import {
+  decodeRoutineInboxEntryV1,
   routineFailureSentenceV1,
   subagentAttributionV1,
   ROUTINE_INBOX_TEXT_MAX,
@@ -5293,9 +5298,24 @@ export class ShellBotBackendContribution {
     const index = await this.authority.listRunIndex({
       limit: UNREAD_COUNT_CAP + 1,
     });
-    const failures = (await this.routineInbox.list()).filter(
-      (entry) => entry.failure === true && !entry.acknowledged,
-    ).length;
+    // Counted straight off the keys rather than through `RoutineInboxStore`:
+    // its `list()` trims the inbox, and the unread fan-out is a read every
+    // sidebar poll makes for every Bot — it must not write, least of all into
+    // an object that is running a Turn. An undecodable row is skipped, because
+    // a badge is never worth failing a read for.
+    const stored = await this.ctx.storage.list<unknown>({
+      prefix: ROUTINE_INBOX_PREFIX,
+      limit: ROUTINE_INBOX_LIMIT,
+    });
+    let failures = 0;
+    for (const value of stored.values()) {
+      try {
+        const entry = decodeRoutineInboxEntryV1(value);
+        if (entry.failure === true && !entry.acknowledged) failures += 1;
+      } catch {
+        continue;
+      }
+    }
     return projectBotUnreadViewV1(
       identity.botId,
       state,
