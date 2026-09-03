@@ -46,6 +46,7 @@ import {
   parseProjectDocumentV1,
   projectDocumentPathV1,
   renderProjectDocumentV1,
+  type MemoryProjectsOutcomeV1,
   type MemoryProjectsV1,
 } from "./projects.js";
 export type {
@@ -1040,17 +1041,46 @@ export function createProjectTools(
         }
       }
 
-      const outcome =
-        action === "create"
-          ? await host.projects.create({
-              projectId: decoded.project,
-              name: decoded.name || decoded.project,
-              description: decoded.description ?? "",
-            })
-          : action === "join"
-            ? await host.projects.join(decoded.project)
-            : await host.projects.leave(decoded.project);
+      // The descriptor above is already durable in object storage. If the
+      // membership authority now refuses or throws, the file is real, the
+      // membership is unchanged, and — before this — nothing was recorded at
+      // all, so the durable log said no Project change happened while a
+      // descriptor for it sat in R2. Whatever the answer, it is recorded.
+      let outcome: MemoryProjectsOutcomeV1;
+      try {
+        outcome =
+          action === "create"
+            ? await host.projects.create({
+                projectId: decoded.project,
+                name: decoded.name || decoded.project,
+                description: decoded.description ?? "",
+              })
+            : action === "join"
+              ? await host.projects.join(decoded.project)
+              : await host.projects.leave(decoded.project);
+      } catch (error) {
+        outcome = {
+          status: "refused",
+          reason:
+            error instanceof Error
+              ? error.message
+              : "the Project membership authority is unavailable",
+        };
+      }
       if (outcome.status !== "ok") {
+        session.append({
+          type: "memory/project-changed",
+          ...position,
+          effectId,
+          action,
+          projectId: decoded.project,
+          // Membership did not change, and the event says so by carrying the
+          // membership as it stands rather than the one that was asked for.
+          projects: (await host.projects.joined().catch(() => [])).map(
+            (project) => project.projectId,
+          ),
+        });
+        await session.flush();
         return refusal(`${name} was refused: ${outcome.reason}`);
       }
       session.append({

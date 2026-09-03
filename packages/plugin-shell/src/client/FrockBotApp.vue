@@ -288,7 +288,7 @@ const threadHeading = computed(() => {
 const threadHint = computed(() => {
   if (!hasBot.value) return "Add your first sheep to start a conversation.";
   if (state.value.modelReady) {
-    return "Start with a conversation. Cordis plugins can add the rest.";
+    return "Say anything to get started.";
   }
   return state.value.modelLabel;
 });

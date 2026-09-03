@@ -272,14 +272,21 @@ export class MemoryStore {
     }
     if (omissions.length > 0) result.omitted = omissions.join("; ");
 
+    // Every unreadable file is named, not just the last one. Assigning
+    // `result.unavailable` per file overwrote the reason each time, so a tier
+    // where three files failed reported one reason and was injected as if it
+    // were whole.
+    const unreadable: string[] = [];
     for (const { entry, classified } of files) {
       if (entry.generation.size > MEMORY_MAX_FILE_BYTES) {
-        result.unavailable = `a Memory file exceeds ${MEMORY_MAX_FILE_BYTES} bytes`;
+        unreadable.push(
+          `"${entry.path.path}" exceeds ${MEMORY_MAX_FILE_BYTES} bytes`,
+        );
         continue;
       }
       const read = await this.#files.read(entry.path);
       if (read.status !== "ok") {
-        result.unavailable = read.reason;
+        unreadable.push(`"${entry.path.path}": ${read.reason}`);
         continue;
       }
       result.sources.push({
@@ -299,6 +306,10 @@ export class MemoryStore {
       }));
       if (classified.kind === "profile") profile.push(...sourced);
       else log.push(...sourced);
+    }
+
+    if (unreadable.length > 0) {
+      result.unavailable = `${unreadable.length} Memory file(s) could not be read: ${unreadable.join("; ")}`;
     }
 
     // Retractions cross files inside a tier: a `[forgotten]` line in the log
@@ -329,9 +340,19 @@ export class MemoryStore {
     fact: string;
     writer: WorkspaceWriterV1;
     at?: Date;
+    /** Set only by `forget`: a retraction of a fact already on disk. */
+    retraction?: true;
   }): Promise<MemoryWriteOutcomeV1> {
     const text = request.fact.trim();
-    if (!text || text.length > MEMORY_MAX_FACT_LENGTH) {
+    // The cap bounds what a Bot may *record*. A retraction is a fact the
+    // Package writes about a fact that is already on disk, so measuring the
+    // retraction against the same cap made a fact longer than
+    // `MEMORY_MAX_FACT_LENGTH` minus the prefix impossible to forget — the
+    // one operation that shrinks Memory refused because Memory was too big.
+    const cap = request.retraction
+      ? MEMORY_MAX_FACT_LENGTH + MEMORY_RETRACTION_HEADROOM
+      : MEMORY_MAX_FACT_LENGTH;
+    if (!text || text.length > cap) {
       return {
         status: "refused",
         reason: `a fact must be between 1 and ${MEMORY_MAX_FACT_LENGTH} characters`,
@@ -505,6 +526,7 @@ export class MemoryStore {
         fact: memoryRetractionTextV1(recorded),
         writer: request.writer,
         at,
+        retraction: true,
       });
       if (retraction.status !== "ok") return { ...retraction, written };
       last = retraction;
