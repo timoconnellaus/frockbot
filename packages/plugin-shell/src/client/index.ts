@@ -1988,14 +1988,26 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         updateSettingsLoadError("package-catalog");
       } catch (error) {
         if (generation !== packageCatalogGeneration) return;
+        // The gateway answers 404 `catalog generation was not found` when the
+        // deployment has published no Catalog at all. That is a state, not a
+        // fault, and the raw server sentence means nothing to a person — so it
+        // is translated here and the surface renders it instead of the
+        // "nothing matched your search" empty state.
+        // The one server sentence worth reading is the one that says there is
+        // nothing to read: everything else becomes the shared failure line,
+        // because a raw fault text means nothing to the person looking at it.
+        const detail = clientFailureDetailV1(error);
+        web.value.packageCatalog = [];
+        web.value.packageCatalogGeneration = undefined;
         updateSettingsLoadError(
           "package-catalog",
-          presentClientFailureV1(error, "load the plugin catalog"),
+          /catalog generation was not found|Package Catalog is not configured/.test(
+            detail,
+          )
+            ? "No plugins are published for this deployment yet."
+            : presentClientFailureV1(error, "load the plugin catalog"),
         );
-        console.debug(
-          "package catalog load failed",
-          clientFailureDetailV1(error),
-        );
+        console.debug("package catalog load failed", detail);
       }
     },
     async loadCatalogEntry(

@@ -575,6 +575,49 @@ describe("Bot selection", () => {
     );
   });
 
+  test("says a deployment has no Catalog instead of relaying the gateway's sentence", async () => {
+    // F4: the Plugins/Catalog surface rendered `catalog generation was not
+    // found` beside "No Catalog entry matches that search", for a User who had
+    // searched nothing on a deployment that had published nothing.
+    let provided: Ref<FrockBotWebData> | undefined;
+    let failure = new Error("catalog generation was not found");
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: () => Promise.reject(new Error("unused")),
+        hostedRequest: (path) => {
+          expect(path).toBe("/catalog/v1/index");
+          return Promise.reject(failure);
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+
+    await provided.value.loadPackageCatalog();
+    expect(provided.value.packageCatalog).toEqual([]);
+    expect(provided.value.packageCatalogGeneration).toBeUndefined();
+    expect(provided.value.settingsError).toBe(
+      "No plugins are published for this deployment yet.",
+    );
+
+    // A genuine fault is labelled as one — and says what failed rather than
+    // what the storage layer called it. "R2 is down" is for the console.
+    failure = new Error("R2 is down");
+    await provided.value.loadPackageCatalog();
+    expect(provided.value.settingsError).toBe(
+      "Couldn't load the plugin catalog.",
+    );
+    expect(provided.value.settingsError).not.toContain("R2");
+  });
+
   test("commits a catalog without overwriting newer User settings", async () => {
     let provided: Ref<FrockBotWebData> | undefined;
     const catalogManifest = Promise.withResolvers<unknown>();

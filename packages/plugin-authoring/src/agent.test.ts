@@ -172,6 +172,56 @@ describe("the package_author tool", () => {
     await dispose();
   });
 
+  test("every refusal and every throw closes the intent with a failure event", async () => {
+    // F12: `package/author-intent` was written, the host refused, and the run
+    // reached `turn/end` with no `package/authored` and no failure event of
+    // any kind — the session log said an effect was intended and never said
+    // how it ended (user `packages-4`, Bot `maker-2351d56c`, run `e015c05e`).
+    for (const scenario of [
+      {
+        host: stubHost({
+          status: "refused" as const,
+          reason: "the Package bundler could not be reached",
+          failureId: "authoring-failure-2",
+        }),
+        expected: {
+          effect: "author",
+          reason: "the Package bundler could not be reached",
+          failureId: "authoring-failure-2",
+        },
+      },
+      {
+        // An unmodelled throw escaped `execute` the same way.
+        host: {
+          ...stubHost({
+            status: "refused" as const,
+            reason: "unused",
+            failureId: "unused",
+          }),
+          author: () => Promise.reject(new Error("storage is unavailable")),
+        },
+        expected: { effect: "author", reason: "storage is unavailable" },
+      },
+    ]) {
+      const { session, sessions, dispose } = await openSession();
+      const tool = createPackageAuthorTool(scenario.host as never, sessions);
+
+      const result = await tool.execute(INPUT, CONTEXT);
+
+      expect(result.isError).toBe(true);
+      const types = session.events.map((event) => event.type);
+      expect(types).toContain("package/author-intent");
+      expect(types).not.toContain("package/authored");
+      expect(types.at(-1)).toBe("package/effect-failed");
+      expect(session.events.at(-1)).toMatchObject({
+        ...scenario.expected,
+        turn: 4,
+        step: 2,
+      });
+      await dispose();
+    }
+  });
+
   test("a refusal leaves the intent recorded and no authored event", async () => {
     const { session, sessions, dispose } = await openSession();
     const tool = createPackageAuthorTool(

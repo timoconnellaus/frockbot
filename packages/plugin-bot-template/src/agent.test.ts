@@ -81,10 +81,16 @@ function contextFor(turnType: TurnTypeV1): ToolExecutionContext {
   };
 }
 
+// The tool lives in the `frockbot` namespace, so it is reached the way every
+// namespaced tool is: through the `call_dynamic_tool` envelope (ADR 0023).
 const call: ToolCall = {
   id: "call-1",
-  name: BOT_EXPORT_TEMPLATE_TOOL_V1,
-  input: {},
+  name: "call_dynamic_tool",
+  input: {
+    namespace: "frockbot",
+    toolName: BOT_EXPORT_TEMPLATE_TOOL_V1,
+    arguments: {},
+  },
 };
 
 async function invoke(
@@ -98,15 +104,39 @@ async function invoke(
 }
 
 describe("bot_export_template", () => {
-  it("is offered on chat turns only", async () => {
+  it("is discoverable on chat turns only", async () => {
+    // F36: journey 10 step 1 never called this tool — the Bot invented
+    // `package_inspect_self` instead. Registered outside a namespace it
+    // appeared in no `<dynamic_tool_catalog>` entry, no
+    // `get_dynamic_tools({namespace})` result and no pattern search, so a Bot
+    // asked to share itself had nothing to find.
     const mounted = await mount();
     try {
-      const names = (turnType: TurnTypeV1) =>
-        mounted.root.tools.schemas({ turnType }).map((tool) => tool.name);
-      expect(names("chat")).toContain(BOT_EXPORT_TEMPLATE_TOOL_V1);
+      const discovered = async (turnType: TurnTypeV1) => {
+        const context = contextFor(turnType);
+        const discovery: ToolCall = {
+          id: "call-discover",
+          name: "get_dynamic_tools",
+          input: { pattern: "template" },
+        };
+        const preparation = await mounted.root.tools.prepare(
+          discovery,
+          context,
+        );
+        if (preparation.kind === "denied") return preparation.result.content;
+        return (await mounted.root.tools.executePrepared(preparation, context))
+          .content;
+      };
+      expect(await discovered("chat")).toContain(BOT_EXPORT_TEMPLATE_TOOL_V1);
       for (const turnType of ["automation", "subagent"] as const) {
-        expect(names(turnType)).not.toContain(BOT_EXPORT_TEMPLATE_TOOL_V1);
+        expect(await discovered(turnType)).not.toContain(
+          BOT_EXPORT_TEMPLATE_TOOL_V1,
+        );
       }
+      // And it is not offered as a top-level schema, because it is namespaced.
+      expect(
+        mounted.root.tools.schemas({ turnType: "chat" }).map((t) => t.name),
+      ).not.toContain(BOT_EXPORT_TEMPLATE_TOOL_V1);
     } finally {
       await mounted.dispose();
     }

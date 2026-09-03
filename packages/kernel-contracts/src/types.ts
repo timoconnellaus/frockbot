@@ -375,6 +375,22 @@ export interface SessionEventMap {
     contentHash: string;
     generationId: string;
   };
+  /**
+   * A recorded Package effect intent that ended without its outcome: the host
+   * refused, or the attempt threw. Every `package/*-intent` closes with either
+   * its outcome event or this one, so the session log never says an effect was
+   * intended and then falls silent about how it ended — which is exactly what
+   * the intent/outcome pair is for (finding F12).
+   */
+  "package/effect-failed": {
+    turn: number;
+    step: number;
+    effectId: string;
+    effect: "author" | "undo" | "catalog-change";
+    reason: string;
+    /** The durable failure record, when the host wrote one. */
+    failureId?: string;
+  };
   /** A Bot-isolate loop hook failed open for one invocation. */
   "package/hook-failed": {
     packageId: string;
@@ -1331,6 +1347,36 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       eventString(event.version, "session event.version");
       eventString(event.contentHash, "session event.contentHash");
       eventString(event.generationId, "session event.generationId");
+      break;
+    case "package/effect-failed":
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "effectId",
+          "effect",
+          "reason",
+          ...(Object.hasOwn(event, "failureId") ? ["failureId"] : []),
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.effectId, "session event.effectId");
+      if (
+        event.effect !== "author" &&
+        event.effect !== "undo" &&
+        event.effect !== "catalog-change"
+      ) {
+        throw new Error(
+          'session event.effect must be "author", "undo" or "catalog-change"',
+        );
+      }
+      eventString(event.reason, "session event.reason", true);
+      if (Object.hasOwn(event, "failureId")) {
+        eventString(event.failureId, "session event.failureId");
+      }
       break;
     case "package/hook-failed":
       requireEventKeys(
