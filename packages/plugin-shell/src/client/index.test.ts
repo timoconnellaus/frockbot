@@ -1911,7 +1911,10 @@ describe("hosted Stop", () => {
 
     await provided.value.stopRun();
 
-    expect(lookups).toBe(1);
+    // Two, and deliberately: a client that finds itself holding an active run
+    // it did not start now observes it (a reload mid-Turn, a second tab), and
+    // Stop then observes the settlement it asked for.
+    expect(lookups).toBe(2);
     expect(provided.value.activeRun).toBeUndefined();
     expect(provided.value.activeRunId).toBeUndefined();
     expect(provided.value.messages.at(-1)).toMatchObject({

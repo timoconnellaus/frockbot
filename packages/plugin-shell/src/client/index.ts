@@ -2296,6 +2296,12 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       const observed = web.value.activeRunId;
       const supersedes = observed ? { runId: observed } : {};
       web.value.activeRunId = pendingRunId;
+      // Stop is offered for the whole of the Turn the User just started, not
+      // only from the moment a projection happens to arrive. A send that
+      // supersedes a running Turn is the exception: the Turn Stop targets is
+      // still the one executing, and this one is queued behind it. The durable
+      // projection corrects both the instant it arrives.
+      if (!observed) web.value.runningRunId = pendingRunId;
       web.value.error = undefined;
       web.value.messages.push(
         {
@@ -2434,6 +2440,14 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.activeRun?.runId !== pendingRunId
         ) {
           web.value.activeRunId = undefined;
+        }
+        // The optimistic Stop target goes with it: a Turn nobody is running is
+        // not a Turn anybody can stop.
+        if (
+          web.value.runningRunId === pendingRunId &&
+          web.value.activeRunId !== pendingRunId
+        ) {
+          web.value.runningRunId = undefined;
         }
       }
     },
@@ -2606,6 +2620,70 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     },
   );
 
+  /*
+   * A running Turn reaches every browser that is looking, not only the one
+   * holding its POST.
+   *
+   * The reply to `POST /api/bots/:bot/turns` is one client's copy of a Turn.
+   * A reload, a second tab, or a dropped request has no such copy, so the
+   * transcript would sit on a spinner until somebody reloaded again. Two
+   * seams close that: the Bot's state channel pushes a `runs` invalidation
+   * whenever the durable run records move, and — for any client that has no
+   * socket — the run is polled to its terminal state. Both end in the same
+   * `GET /api/bots/:bot/turns` projection, so neither invents client state
+   * and the one-bubble-per-send contract is untouched.
+   */
+  let stopRunChannel: (() => void) | undefined;
+  const stopRunChannelWatch = watch(
+    () => web.value.activeBotId,
+    (botId) => {
+      stopRunChannel?.();
+      stopRunChannel = undefined;
+      if (!botId || !ctx.transport.watchBotState) return;
+      const generation = selectionGeneration;
+      stopRunChannel = ctx.transport.watchBotState(botId, {
+        async invalidate(topic) {
+          // A reset carries no topic and means "read everything again".
+          if (topic !== undefined && topic !== "runs") return;
+          if (
+            generation !== selectionGeneration ||
+            web.value.activeBotId !== botId
+          )
+            return;
+          await deliverNotifications(botId, generation);
+        },
+        status() {
+          // The channel's health is not the transcript's: an unavailable
+          // socket falls back to the observation below, which is what a
+          // client without one uses anyway.
+        },
+      });
+    },
+    { immediate: true },
+  );
+
+  const stopRunObservation = watch(
+    () => [web.value.activeBotId, web.value.activeRunId] as const,
+    ([botId, runId]) => {
+      // The send path owns the run it started: its POST is the observation,
+      // and `stopRun` starts its own. This is for every other way a client
+      // finds itself watching a Turn it is not holding open.
+      if (!botId || !runId || activeRequest || runObserver) return;
+      const generation = selectionGeneration;
+      const observer = new AbortController();
+      runObserver = observer;
+      void observeRunUntilTerminal(botId, runId, generation, observer.signal)
+        .catch(() => {
+          // `observeRunUntilTerminal` reports its own failures; a rejection
+          // here would be an unhandled one.
+        })
+        .finally(() => {
+          if (runObserver === observer) runObserver = undefined;
+        });
+    },
+    { immediate: true },
+  );
+
   return [
     ctx.provide(clientSurfaceRegistryKey, surfaces),
     // The shared client projection is updated by the contracts lane. This cast
@@ -2624,6 +2702,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     () => {
       stopEntrySync();
       stopRunFollow();
+      stopRunChannelWatch();
+      stopRunChannel?.();
+      stopRunObservation();
       stopSourceFollow();
       for (const dispose of entryDisposers.splice(0).toReversed()) dispose();
       activeRequest?.abort();

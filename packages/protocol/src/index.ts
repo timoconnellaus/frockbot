@@ -9,7 +9,12 @@ export interface PromptRequest {
  */
 export const BOT_STATE_CHANNEL_VERSION = 1 as const;
 
-export type BotStateTopicV1 = "computer";
+/**
+ * What a frame says has moved. `computer` is the Computer projection;
+ * `runs` is this Bot's durable run records — a Turn started, said more, or
+ * settled — so a client that is not holding the Turn's POST still learns.
+ */
+export type BotStateTopicV1 = "computer" | "runs";
 
 export type BotStateChannelFrameV1 =
   | {
@@ -84,7 +89,10 @@ export function decodeBotStateChannelFrameV1(
       "cursor",
       "topic",
     ]);
-    if (frame.schemaVersion !== 1 || frame.topic !== "computer") {
+    if (
+      frame.schemaVersion !== 1 ||
+      (frame.topic !== "computer" && frame.topic !== "runs")
+    ) {
       throw new Error("invalid Bot-state frame");
     }
     return {

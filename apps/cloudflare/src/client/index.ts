@@ -81,27 +81,60 @@ async function apiRequest(
         headers: body ? { "content-type": "application/json" } : undefined,
         body,
       });
-  const value: unknown = await response.json();
-  if (!response.ok) {
-    const error =
-      typeof value === "object" &&
-      value !== null &&
-      "error" in value &&
-      typeof value.error === "string"
-        ? value.error
-        : "Hosted request failed";
-    const failure = new Error(error) as Error & { definitive?: boolean };
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      "definitive" in value &&
-      value.definitive === true
-    ) {
-      failure.definitive = true;
-    }
-    throw failure;
+  const answer = await readApiBody(response);
+  if (!response.ok) throw apiFailure(response, answer, "Hosted request failed");
+  if (answer.value === undefined) {
+    throw new Error("Hosted request returned a body that is not JSON");
   }
-  return value;
+  return answer.value;
+}
+
+/**
+ * A gateway answer, decoded without assuming it is JSON.
+ *
+ * The gateway answers JSON for everything it decides, but a failure below it —
+ * a Worker that would not start, an edge error page — is text. Parsing that as
+ * JSON reported `Unexpected token 'I'` to the User instead of what broke, so a
+ * body that will not parse is carried through as its own text.
+ */
+async function readApiBody(
+  response: Response,
+): Promise<{ value: unknown; text?: string }> {
+  const text = await response.text();
+  if (text === "") return { value: null };
+  try {
+    return { value: JSON.parse(text) as unknown };
+  } catch {
+    return { value: undefined, text };
+  }
+}
+
+function apiFailure(
+  response: Response,
+  answer: { value: unknown; text?: string },
+  fallback: string,
+): Error & { definitive?: boolean } {
+  const value = answer.value;
+  const message =
+    typeof value === "object" &&
+    value !== null &&
+    "error" in value &&
+    typeof value.error === "string"
+      ? value.error
+      : (answer.text?.trim().slice(0, 200) ??
+        `${fallback} (${String(response.status)})`);
+  const failure = new Error(message || fallback) as Error & {
+    definitive?: boolean;
+  };
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "definitive" in value &&
+    value.definitive === true
+  ) {
+    failure.definitive = true;
+  }
+  return failure;
 }
 
 const botStateChannel = new BrowserBotStateChannel();
@@ -153,18 +186,14 @@ const application = new ClientApplication({
           signal,
         });
     signal.throwIfAborted();
-    const result: unknown = await response.json();
+    const answer = await readApiBody(response);
     if (!response.ok) {
-      const error =
-        typeof result === "object" &&
-        result !== null &&
-        "error" in result &&
-        typeof result.error === "string"
-          ? result.error
-          : "Agent request failed";
-      throw new Error(error);
+      throw apiFailure(response, answer, "Agent request failed");
     }
-    return decodeClientTurnV1(result);
+    if (answer.value === undefined) {
+      throw new Error("The Turn returned a body that is not JSON");
+    }
+    return decodeClientTurnV1(answer.value);
   },
   readConfiguration(query: ConfigurationQueryV1) {
     const path =
