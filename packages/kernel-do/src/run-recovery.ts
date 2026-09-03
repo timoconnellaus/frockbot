@@ -11,10 +11,41 @@ import type { StoredRunCodecV1, StoredRunV1 } from "./run-records.js";
 
 export type BotRunRecoveryPlan =
   | { kind: "complete"; responseText: string }
-  | { kind: "fail"; failure: string }
+  | { kind: "fail"; failure: string; repairs?: SessionEvent[] }
   | { kind: "restart"; previous: SessionEvent[] }
   | { kind: "resume" }
   | { kind: "reconcile"; repairs: SessionEvent[] };
+
+/**
+ * What a Turn says when a restart caught it mid-answer and nobody can be asked
+ * how it ended (ADR 0027).
+ *
+ * It is written for the person watching, not for an operator: they saw the Bot
+ * start talking and then stop, and the only useful thing to tell them is that
+ * it will not be finishing that sentence and sending again is safe.
+ */
+export const UNRECONCILABLE_RUN_FAILURE_V1 =
+  "This Turn stopped partway — the service restarted while the model was answering, and there is no way to find out how that request ended. Try sending it again.";
+
+/**
+ * Whether the provider a run was talking to can be asked what happened to a
+ * request it never answered.
+ *
+ * Given the provider id off the run's own durable `model/request`, so the
+ * answer is the same on every recovery of the same run, with no dependency on
+ * what happens to be mounted or resident.
+ */
+export type ProviderReconcilesV1 = (providerId: string) => boolean;
+
+/** The provider the run's most recent durable model request was addressed to. */
+export function latestModelRequestProviderV1(
+  events: readonly SessionEvent[],
+): string | undefined {
+  const request = events.findLast((event) => event.type === "model/request");
+  return request?.type === "model/request"
+    ? request.request.provider
+    : undefined;
+}
 
 export type ModelRequestJournalState =
   | { status: "none" }
@@ -90,6 +121,7 @@ export function planBotRunRecovery<Snapshot>(
   run: StoredRunV1<Snapshot>,
   latest: readonly SessionEvent[],
   codec: StoredRunCodecV1<Snapshot>,
+  providerReconciles: ProviderReconcilesV1 = () => true,
 ): BotRunRecoveryPlan {
   codec.require(run);
   let toolJournal: ReturnType<typeof validateToolOccurrenceJournal>;
@@ -179,7 +211,19 @@ export function planBotRunRecovery<Snapshot>(
     };
   }
   const session = new Session(run.sessionId, () => {}, latest);
-  return { kind: "reconcile", repairs: session.reconcileForResume() };
+  const repairs = session.reconcileForResume();
+  // ADR 0027. A Turn whose model outcome is unknown is parked only when
+  // somebody can actually be asked. When the provider offers no retrieval,
+  // parking is not caution — it is a dead end: nothing will ever arrive to
+  // resolve it, the Bot stays wedged behind it, and the person is handed a
+  // Resolve button whose only possible answer is "give up". So the run is
+  // settled `failed` here, with its repairs and every streamed word it had
+  // already sent kept in the journal.
+  const provider = latestModelRequestProviderV1(run.events);
+  if (provider !== undefined && !providerReconciles(provider)) {
+    return { kind: "fail", failure: UNRECONCILABLE_RUN_FAILURE_V1, repairs };
+  }
+  return { kind: "reconcile", repairs };
 }
 
 /** True when the durable log ends inside a Turn nothing is going to finish. */

@@ -34,6 +34,7 @@ import {
   eventsForFailedRun,
   latestModelRequestJournalState,
   planBotRunRecovery,
+  type ProviderReconcilesV1,
   repairOrphanedOpenTurnV1,
   unresolvedModelRequestFailure,
 } from "./run-recovery.js";
@@ -144,6 +145,16 @@ export interface BotDurableAuthorityHooks<Snapshot> {
     run: StoredRunV1<Snapshot>;
     read<T>(key: string): Promise<T | undefined>;
   }): Promise<Record<string, unknown>>;
+  /**
+   * Whether the named provider can be asked what happened to a model request
+   * it never answered (ADR 0027).
+   *
+   * Synchronous and pure, because it is consulted inside the recovery
+   * transaction: it answers from what the deployment knows about a provider
+   * Package, never by reaching one. Absent means every provider reconciles,
+   * which is the behaviour that predates the ADR.
+   */
+  providerReconciles?: ProviderReconcilesV1;
 }
 
 /** What a `turn/end` records when a later user message took a Turn's place. */
@@ -1418,7 +1429,12 @@ export class BotDurableAuthority<Snapshot> {
       const latest = (
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
       ).map(decodeSessionEvent);
-      const plan = planBotRunRecovery(run, latest, this.codec);
+      const plan = planBotRunRecovery(
+        run,
+        latest,
+        this.codec,
+        this.hooks.providerReconciles ?? (() => true),
+      );
       if (plan.kind === "complete") {
         const result = {
           runId: run.runId,
@@ -1443,13 +1459,19 @@ export class BotDurableAuthority<Snapshot> {
         return undefined;
       }
       if (plan.kind === "fail") {
+        // The repairs matter when the failure is ADR 0027's: they close the
+        // tool occurrences the restart left open, so the settled run's journal
+        // is a complete account rather than one that stops mid-sentence twice.
+        const events = plan.repairs
+          ? [...run.events, ...plan.repairs]
+          : run.events;
         await failStoredRun(
           this.codec,
           transaction,
           this.terminalKeys(run.runId),
           run.runId,
           latest.slice(0, run.previousEventCount),
-          run.events,
+          events,
           plan.failure,
           this.supersededPackageRecords(),
         );
