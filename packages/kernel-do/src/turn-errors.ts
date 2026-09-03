@@ -27,10 +27,7 @@ export class BotTurnReconciliationRequiredError extends Error {
 
 /** Why the Bot declined to admit a Turn. */
 export type BotTurnRefusalCodeV1 =
-  | "busy"
-  | "reconciliation-required"
-  | "fenced"
-  | "duplicate";
+  "busy" | "reconciliation-required" | "fenced" | "duplicate";
 
 const BOT_TURN_REFUSAL_PREFIX_V1 = "BotTurnRefusedError:";
 

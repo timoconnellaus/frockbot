@@ -1020,9 +1020,9 @@ export class BotDurableAuthority<Snapshot> {
       );
       if (fences.includes(command.runId) || (await transaction.get(fenceKey))) {
         throw new BotTurnRefusedError(
-        "fenced",
-        `run "${command.runId}" admission was fenced`,
-      );
+          "fenced",
+          `run "${command.runId}" admission was fenced`,
+        );
       }
       const identity = await transaction.get<BotIdentity>(IDENTITY_KEY);
       if (
@@ -1146,7 +1146,8 @@ export class BotDurableAuthority<Snapshot> {
     const active = this.codec.optional(
       await transaction.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
     );
-    if (!active) throw new BotTurnRefusedError("busy", "bot already has an active run");
+    if (!active)
+      throw new BotTurnRefusedError("busy", "bot already has an active run");
     if (active.status === "reconciliation-required") {
       // An uncertain external effect is never abandoned to admit something
       // else: the outcome has to be retrieved before this object runs again.

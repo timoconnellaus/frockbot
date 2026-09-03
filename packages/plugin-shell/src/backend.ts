@@ -5371,7 +5371,9 @@ export class ShellBotBackendContribution {
       // still not part of the conversation: the visible transcript never
       // shows one, running or settled.
       if (active && isVisibleRunV1(active))
-        selected.set(active.runId, { run: projectClientRunOrDegradedV1(active) });
+        selected.set(active.runId, {
+          run: projectClientRunOrDegradedV1(active),
+        });
     }
     const available = candidates.slice(0, CLIENT_RUN_PAGE_LIMIT);
     let stoppedEarly = false;

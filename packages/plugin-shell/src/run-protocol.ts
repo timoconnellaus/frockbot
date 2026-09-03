@@ -60,10 +60,7 @@ const SUPERSEDED_RUN_MESSAGE = "Interrupted by your next message.";
  * treating it as a failure of the send.
  */
 export type ClientTurnRefusalReasonV1 =
-  | "busy"
-  | "reconciliation-required"
-  | "fenced"
-  | "duplicate";
+  "busy" | "reconciliation-required" | "fenced" | "duplicate";
 
 /** The versioned body a refused Turn answers with, decoded by the client. */
 export interface ClientTurnRefusalV1 {

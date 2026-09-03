@@ -2977,7 +2977,11 @@ describe("AgentLoop", () => {
       async *stream() {
         yield {
           type: "tool-call",
-          call: { id: `call-${crypto.randomUUID()}`, name: "loop_tool", input: {} },
+          call: {
+            id: `call-${crypto.randomUUID()}`,
+            name: "loop_tool",
+            input: {},
+          },
         };
         yield { type: "finish", reason: "tool-calls" };
       },
@@ -3050,7 +3054,9 @@ describe("AgentLoop", () => {
     expect(writes).toBe(attempts);
     expect(streams).toBe(0);
     expect(
-      handle.agent.session.events.filter((event) => event.type === "turn/start"),
+      handle.agent.session.events.filter(
+        (event) => event.type === "turn/start",
+      ),
     ).toHaveLength(1);
   });
 });
