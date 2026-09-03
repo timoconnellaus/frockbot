@@ -827,3 +827,95 @@ describe("an interrupt while the model is streaming", () => {
     expect((await next).text).toBe("done: second");
   });
 });
+
+describe("a discarded Turn never crashes the object", () => {
+  test("the long-lived caller is answered with the cancelled run, not a throw", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage, { uncertain: () => true });
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    const stopped = storedRun(storage, "run-1");
+    storage.values.set("run:run-1", {
+      ...stopped,
+      stopRequestedAt: "2026-09-03T00:00:05.000Z",
+    });
+    probe.handle("run-1").interrupt("agent cancelled by user");
+
+    // The composer is still holding this request open when Stop is pressed. It
+    // used to be answered with a 500 and a red console error while the UI
+    // beside it said "You stopped this." A Turn the person stopped on purpose
+    // is an ordinary outcome and settles as one.
+    const settled = await first;
+    expect(settled.runId).toBe("run-1");
+    expect(settled.text).toBe("");
+    expect(storedRun(storage, "run-1").status).toBe("cancelled");
+    expect(storage.values.get("active-run")).toBeUndefined();
+  });
+
+  test("recovery settles a stopped Turn instead of re-entering it", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage, { uncertain: () => true });
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    const running = storedRun(storage, "run-1");
+    storage.values.set("run:run-1", {
+      ...running,
+      stopRequestedAt: "2026-09-03T00:00:05.000Z",
+    });
+    // The object is evicted with the Stop durable and the Turn still active:
+    // exactly the state the recovery alarm wakes up to.
+    first.catch(() => undefined);
+
+    const evicted = createAuthority(storage, { uncertain: () => true });
+    await expect(evicted.authority.alarm()).resolves.toBeUndefined();
+
+    // Re-entering it is what took the dev Worker down: the run resumed, reached
+    // "Model response outcome is uncertain after cancellation", and the alarm
+    // had nobody to hand the rejection to. There is nothing to recover — the
+    // User already said to throw it away.
+    expect(evicted.observed).toEqual([]);
+    expect(storedRun(storage, "run-1").status).toBe("cancelled");
+    expect(storage.values.get("active-run")).toBeUndefined();
+  });
+
+  test("recovery settles a superseded Turn instead of re-entering it", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage, { uncertain: () => true });
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    const running = storedRun(storage, "run-1");
+    storage.values.set("run:run-1", {
+      ...running,
+      supersededAt: "2026-09-03T00:00:05.000Z",
+      supersededBy: "run-2",
+    });
+    first.catch(() => undefined);
+
+    const evicted = createAuthority(storage, { uncertain: () => true });
+    await expect(evicted.authority.alarm()).resolves.toBeUndefined();
+
+    expect(evicted.observed).toEqual([]);
+    expect(storedRun(storage, "run-1").status).toBe("superseded");
+    expect(storage.values.get("active-run")).toBeUndefined();
+  });
+
+  test("an alarm records a recovery failure instead of rejecting", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage, { failRecovery: () => true });
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    first.catch(() => undefined);
+
+    // A recovery that cannot run the Turn is a durable fact, not a fault of the
+    // alarm: an alarm has no caller, so anything it lets escape is an uncaught
+    // exception in the object — one of the ways the dev Worker died.
+    const evicted = createAuthority(storage, { failRecovery: () => true });
+    await expect(evicted.authority.alarm()).resolves.toBeUndefined();
+    // And the object still has a deadline, so the next firing tries again.
+    expect(storage.alarmAt).toBeGreaterThan(0);
+  });
+});

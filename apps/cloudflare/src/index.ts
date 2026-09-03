@@ -1914,6 +1914,40 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
     }),
 );
 
+/**
+ * The last net under every entry point, for the rejections no boundary caught.
+ *
+ * `answeredEntryV1`/`loggedEntryV1` cover the entry points we know about, and a
+ * detached promise is by definition one nobody is awaiting — so an isolate that
+ * loses one has nowhere to report it. In the dev Worker that is not a quiet
+ * loss: a run of uncaught rejections (`BotNotFoundError`, a refused Turn, a
+ * provider that offers no retrieval) preceded wrangler exiting and taking the
+ * shared stack down mid-test for every agent using it.
+ *
+ * Logging is all this does. It cannot make the rejection safe — the code that
+ * produced it is what has to — but it names the failure that would otherwise
+ * only ever appear as `exceptionId, url 'undefined'`, and it keeps the isolate
+ * from treating the rejection as fatal.
+ *
+ * Registration is guarded because the event is a host capability, not a
+ * language one: a runtime that does not offer it must not fail to boot.
+ */
+try {
+  addEventListener("unhandledrejection", (event) => {
+    const reason = (event as { reason?: unknown }).reason;
+    console.error(
+      `Unhandled rejection escaped an entry point: ${
+        reason instanceof Error
+          ? (reason.stack ?? reason.message)
+          : String(reason)
+      }`,
+    );
+    (event as { preventDefault?: () => void }).preventDefault?.();
+  });
+} catch {
+  // A runtime without the event still runs; it just reports less.
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     let mountedBackend:
