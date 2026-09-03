@@ -37,8 +37,14 @@ import {
 import { decodeApprovalDecisionCommandV1 } from "@frockbot/plugin-shell/approvals";
 import { botTurnRefusalCodeV1 } from "@frockbot/kernel-do";
 import type { UserApplicationEnv } from "./contracts.js";
-
-const MAX_INPUT_LENGTH = 32_000;
+import {
+  drainedAnswerV1,
+  isRequestTooLargeV1,
+  RequestTooLargeError,
+  TURN_BODY_MAX_BYTES_V1,
+  TURN_TOO_LONG_MESSAGE_V1,
+  turnBodyIsOversizedV1,
+} from "./request-body.js";
 
 declare const __FROCKBOT_CLIENT_JS__: string;
 declare const __FROCKBOT_CLIENT_CSS__: string;
@@ -234,15 +240,67 @@ async function requireRegisteredBot(
   }
 }
 
+/**
+ * Read a send, refusing an oversized one before the body is touched.
+ *
+ * The refusal is typed rather than prose so the route can answer 413 with the
+ * sentence the composer shows, and so it is told apart from a body that simply
+ * would not parse. The gateway checks the same length one isolate earlier;
+ * this check is the one that holds however else a request reaches this Worker.
+ */
 async function readTurnCommand(request: Request): Promise<ClientTurnCommandV1> {
   const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (contentLength > MAX_INPUT_LENGTH * 2) {
-    throw new Error("prompt is too large");
+  if (contentLength > TURN_BODY_MAX_BYTES_V1) {
+    throw new RequestTooLargeError();
   }
-  return decodeClientTurnCommandV1(await request.json());
+  try {
+    return decodeClientTurnCommandV1(await request.json());
+  } catch (error) {
+    // The decoder's own bound on `text`. Same refusal, said the same way: a
+    // body under the wire limit can still carry a message over the text one.
+    if (
+      error instanceof Error &&
+      /turn command\.text\b.*\b(exceeds|too long|too large)/i.test(
+        error.message,
+      )
+    ) {
+      throw new RequestTooLargeError();
+    }
+    throw error;
+  }
 }
 
 export function createUserApplication() {
+  const route = createUserApplicationRoute();
+  /*
+   * The User application's own outermost wrapper.
+   *
+   * This Worker is loaded into its own isolate and receives its own `Request`,
+   * so the gateway's drain does nothing for it: an early return here — a 404
+   * on a POST, a body refused for its size — is exactly the shape that makes
+   * workerd tear the isolate down with "Can't read from request stream after
+   * response has been sent". Every answer passes through the drain, and the
+   * size refusal is given before any route runs so an oversized send is never
+   * parsed.
+   */
+  return async (
+    request: Request,
+    env: UserApplicationEnv,
+  ): Promise<Response> => {
+    let oversized = false;
+    try {
+      oversized = turnBodyIsOversizedV1(request, new URL(request.url));
+    } catch {
+      // An unparseable URL is the route's 400 to give, not this guard's.
+    }
+    if (oversized) {
+      return drainedAnswerV1(request, jsonError(413, TURN_TOO_LONG_MESSAGE_V1));
+    }
+    return drainedAnswerV1(request, await route(request, env));
+  };
+}
+
+function createUserApplicationRoute() {
   const application = createFoundationRuntimeApplication();
   return async (
     request: Request,
@@ -993,6 +1051,9 @@ export function createUserApplication() {
     try {
       turnCommand = await readTurnCommand(request);
     } catch (error) {
+      if (isRequestTooLargeV1(error)) {
+        return jsonError(413, TURN_TOO_LONG_MESSAGE_V1);
+      }
       return jsonError(
         400,
         error instanceof Error ? error.message : "invalid prompt",

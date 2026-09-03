@@ -24,6 +24,11 @@ import type {
   WorkerCode,
 } from "./contracts.js";
 import { createDebugRoute } from "./debug.js";
+import {
+  drainedAnswerV1,
+  TURN_TOO_LONG_MESSAGE_V1,
+  turnBodyIsOversizedV1,
+} from "./request-body.js";
 
 const PUBLIC_APPLICATION_USER_ID = "anonymous";
 const PUBLIC_ASSET_PATHS = new Set([
@@ -103,6 +108,7 @@ export function applicationDeploymentId(
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
+
 
 /** Anonymous immutable artifact route. A configured UI host serves nothing else. */
 export async function servePackageUiArtifact(
@@ -921,12 +927,24 @@ export function createGateway(dependencies: GatewayDependencies) {
    * failure, which tells the User nothing about what actually broke.
    */
   return async (request: Request): Promise<Response> => {
+    let refusedForSize: Response | undefined;
     try {
-      return await handle(request);
+      refusedForSize = turnBodyIsOversizedV1(request, new URL(request.url))
+        ? jsonError(413, TURN_TOO_LONG_MESSAGE_V1)
+        : undefined;
+    } catch {
+      // An unparseable URL is `handle`'s 400 to give, not this guard's.
+    }
+    if (refusedForSize) return drainedAnswerV1(request, refusedForSize);
+    try {
+      return await drainedAnswerV1(request, await handle(request));
     } catch (error) {
-      return jsonError(
-        500,
-        error instanceof Error ? error.message : "gateway request failed",
+      return drainedAnswerV1(
+        request,
+        jsonError(
+          500,
+          error instanceof Error ? error.message : "gateway request failed",
+        ),
       );
     }
   };
