@@ -19,6 +19,7 @@ import {
   AUDIT_TARGET_COMPUTER_V1,
   AUDIT_TARGET_MACHINE_PREFIX_V1,
   AUDIT_TARGET_REMOTE_PREFIX_V1,
+  AUDIT_TARGET_WORKSPACE_V1,
   type AuditKindV1,
 } from "./shared.js";
 
@@ -41,16 +42,27 @@ export interface AuditClassificationV1 {
  * costs one table row and no new authority.
  */
 const FILE_TOOLS = new Set([
-  "memory_write",
-  "memory_forget",
-  "skill_write",
-  "package_author",
   // The registered machine's file verbs (register rows 48, 49). They are file
   // effects on "a separate filesystem" — the User's own laptop — which is why
   // their target is `machine:<id>` and never `computer`.
   "machine_read",
   "machine_copy_to_computer",
   "machine_copy_from_computer",
+]);
+
+/**
+ * File effects that land in the User's Workspace, not on the Computer.
+ *
+ * Memory and Skills are object storage: they are written while the Computer is
+ * hibernated, and by Bots whose User has no Computer configured at all. Their
+ * rows said "This Computer", which named the wrong place and, in the case we
+ * saw, a place that did not exist.
+ */
+const WORKSPACE_FILE_TOOLS = new Set([
+  "memory_write",
+  "memory_forget",
+  "skill_write",
+  "package_author",
 ]);
 
 /**
@@ -191,6 +203,9 @@ export function auditKindForToolV1(
   }
   if (name.startsWith(MACHINE_MESSAGES_PREFIX)) {
     return { kind: "mcp", target: onComputer };
+  }
+  if (WORKSPACE_FILE_TOOLS.has(name)) {
+    return { kind: "file", target: AUDIT_TARGET_WORKSPACE_V1 };
   }
   if (FILE_TOOLS.has(name)) return { kind: "file", target: onComputer };
   const mcp = MCP_TOOL.exec(name);

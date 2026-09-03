@@ -205,7 +205,10 @@ describe("memory_forget", () => {
     );
 
     expect(result.isError).toBe(false);
-    expect(result.content).toContain("retraction");
+    // The result the model paraphrases says what happened, not how: the
+    // retraction, the shard and "newest wins" are this Package's mechanics.
+    expect(result.content).toContain("Forgotten");
+    expect(result.content).not.toContain("shard");
     const written = session.events.find(
       (event) => event.type === "memory/written",
     );

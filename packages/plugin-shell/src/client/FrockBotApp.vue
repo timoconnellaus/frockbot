@@ -1189,6 +1189,19 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               @blur="closeSkillPopover"
             />
           </div>
+          <!--
+            Start a new conversation. Sits beside the composer because that is
+            where you are when you decide the last one is finished. Disabled
+            while a Turn is running: the Bot is still writing to it.
+          -->
+          <UiIconButton
+            icon="plus"
+            label="New conversation"
+            variant="ghost"
+            class="new-conversation-button"
+            :disabled="isRunning"
+            @click="web.startConversation()"
+          />
           <UiIconButton
             v-if="showStop"
             class="stop-button"

@@ -137,4 +137,35 @@ describe("Ollama Cloud client", () => {
       "Ollama Cloud request failed (401)",
     );
   });
+  test("bounds a provider that accepts the request and never answers", async () => {
+    const client = new OllamaCloudClient({
+      requestTimeoutMs: 20,
+      fetch: (_input, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(init.signal?.reason ?? new Error("aborted")),
+          );
+        }),
+    });
+
+    await expect(client.listModels("account-key")).rejects.toThrow(
+      "Ollama Cloud did not answer within 20ms",
+    );
+  });
+
+  test("bounds an inference probe that never answers", async () => {
+    const client = new OllamaCloudClient({
+      probeTimeoutMs: 20,
+      fetch: (_input, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(init.signal?.reason ?? new Error("aborted")),
+          );
+        }),
+    });
+
+    await expect(
+      client.probeInference("account-key", "glm-5.3-flash:cloud"),
+    ).rejects.toThrow("Ollama Cloud did not answer within 20ms");
+  });
 });

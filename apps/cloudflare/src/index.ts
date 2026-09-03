@@ -37,6 +37,7 @@ import {
   decodeClientRunStopCommandV1,
   type ClientRunLookupQueryV1,
   type ClientRunLookupV1,
+  type ClientConversationListV1,
   type ClientRunListQueryV1,
   type ClientRunListV1,
   type ClientRunStopCommandV1,
@@ -307,6 +308,8 @@ interface BotStateRpc extends BotConfigurationBinding {
   executeComputerPresenceCommand(command: ComputerCommandV1): Promise<unknown>;
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
+  listConversations(): Promise<ClientConversationListV1>;
+  startConversation(): Promise<ClientConversationListV1>;
   debugSnapshot(query: BotDebugQueryV1): Promise<unknown>;
   readFocusedApplet(input: unknown): Promise<unknown>;
   setFocusedApplet(input: unknown): Promise<unknown>;
@@ -423,6 +426,10 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       }),
     listRuns: (query) =>
       rpc.listRuns({ schemaVersion: 1, userId, botId, query }),
+    listConversations: () =>
+      rpc.listConversations({ schemaVersion: 1, userId, botId }),
+    startConversation: () =>
+      rpc.startConversation({ schemaVersion: 1, userId, botId }),
     debugSnapshot: (query) =>
       rpc.debugSnapshot({ schemaVersion: 1, userId, botId, query }),
     lookupRun: (query) =>
@@ -734,6 +741,24 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       this.ctx.props.userId,
       request.botId as string,
     ).listRuns(request.query as ClientRunListQueryV1);
+  }
+
+  async listConversations(input: unknown): Promise<ClientConversationListV1> {
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId as string,
+    ).listConversations();
+  }
+
+  async startConversation(input: unknown): Promise<ClientConversationListV1> {
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId as string,
+    ).startConversation();
   }
 
   async lookupRun(input: unknown): Promise<ClientRunLookupV1> {

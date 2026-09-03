@@ -9,6 +9,16 @@ export type OllamaFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+/**
+ * Every provider call is bounded. A provider that accepts the connection and
+ * then never answers is the failure this defends against: without a deadline
+ * the connect command's promise never settles and the Connection sits in
+ * `authorizing` forever.
+ */
+export const DEFAULT_OLLAMA_REQUEST_TIMEOUT_MS = 15_000;
+/** Inference is slower than a catalog read, so the probe gets its own budget. */
+export const DEFAULT_OLLAMA_PROBE_TIMEOUT_MS = 30_000;
+
 export interface OllamaCloudClientConfig {
   /**
    * Endpoint root, without the `/api` or `/v1` path segment: the Package
@@ -17,6 +27,25 @@ export interface OllamaCloudClientConfig {
    */
   apiBaseUrl?: string;
   fetch?: OllamaFetch;
+  /** Deadline for a catalog or model-detail read. */
+  requestTimeoutMs?: number;
+  /** Deadline for the authenticated inference probe. */
+  probeTimeoutMs?: number;
+}
+
+/**
+ * Bound one provider call: the caller's signal still cancels it, and a deadline
+ * of its own settles it when the provider simply never answers.
+ */
+export function withDeadlineV1(
+  timeoutMs: number,
+  signal?: AbortSignal,
+): { signal: AbortSignal; timedOut: () => boolean } {
+  const deadline = AbortSignal.timeout(timeoutMs);
+  return {
+    signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
+    timedOut: () => deadline.aborted,
+  };
 }
 
 /** The endpoint every Connection uses until its User points it elsewhere. */
@@ -191,8 +220,14 @@ async function mapConcurrent<T, R>(
 export class OllamaCloudClient {
   private readonly apiBaseUrl: string;
   private readonly fetcher: OllamaFetch;
+  private readonly requestTimeoutMs: number;
+  private readonly probeTimeoutMs: number;
 
   constructor(config: OllamaCloudClientConfig = {}) {
+    this.requestTimeoutMs =
+      config.requestTimeoutMs ?? DEFAULT_OLLAMA_REQUEST_TIMEOUT_MS;
+    this.probeTimeoutMs =
+      config.probeTimeoutMs ?? DEFAULT_OLLAMA_PROBE_TIMEOUT_MS;
     this.apiBaseUrl = `${decodeOllamaApiBaseUrl(
       config.apiBaseUrl ?? DEFAULT_OLLAMA_API_BASE_URL,
     )}/api`;
@@ -207,21 +242,45 @@ export class OllamaCloudClient {
     apiKey: string,
     init: RequestInit,
   ): Promise<unknown> {
-    const response = await this.fetcher(`${this.apiBaseUrl}${path}`, {
-      ...init,
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-        ...init.headers,
-      },
-    });
+    const deadline = withDeadlineV1(
+      this.requestTimeoutMs,
+      init.signal ?? undefined,
+    );
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.apiBaseUrl}${path}`, {
+        ...init,
+        signal: deadline.signal,
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+          ...init.headers,
+        },
+      });
+    } catch (error) {
+      throw deadline.timedOut()
+        ? new Error(
+            `Ollama Cloud did not answer within ${this.requestTimeoutMs}ms`,
+          )
+        : error;
+    }
     if (!response.ok) {
       throw new Error(`Ollama Cloud request failed (${response.status})`);
     }
-    return boundedJson(
-      response,
-      path === "/tags" ? MAX_CATALOG_RESPONSE_BYTES : MAX_MODEL_RESPONSE_BYTES,
-    );
+    try {
+      return await boundedJson(
+        response,
+        path === "/tags"
+          ? MAX_CATALOG_RESPONSE_BYTES
+          : MAX_MODEL_RESPONSE_BYTES,
+      );
+    } catch (error) {
+      throw deadline.timedOut()
+        ? new Error(
+            `Ollama Cloud did not answer within ${this.requestTimeoutMs}ms`,
+          )
+        : error;
+    }
   }
 
   async listModels(
@@ -319,20 +378,30 @@ export class OllamaCloudClient {
     signal?: AbortSignal,
   ): Promise<void> {
     const model = modelId(providerModelId);
-    const response = await this.fetcher(`${this.apiBaseUrl}/chat`, {
-      method: "POST",
-      signal,
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: "hi" }],
-        stream: false,
-        options: { num_predict: PROBE_PREDICTED_TOKENS },
-      }),
-    });
+    const deadline = withDeadlineV1(this.probeTimeoutMs, signal);
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.apiBaseUrl}/chat`, {
+        method: "POST",
+        signal: deadline.signal,
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: "hi" }],
+          stream: false,
+          options: { num_predict: PROBE_PREDICTED_TOKENS },
+        }),
+      });
+    } catch (error) {
+      throw deadline.timedOut()
+        ? new Error(
+            `Ollama Cloud did not answer within ${this.probeTimeoutMs}ms`,
+          )
+        : error;
+    }
     if (!response.ok) {
       const reported = await boundedText(response);
       if (response.status === 401 || response.status === 403) {
