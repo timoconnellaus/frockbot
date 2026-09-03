@@ -33,6 +33,7 @@ import type {
   ComputerHostCallOptions,
   ComputerHostExecCommandV1,
   ComputerHostExecOutcomeV1,
+  ComputerHostOpenOptionsV1,
 } from "./host-client.ts";
 
 /** What a suite's runner says one script did. */
@@ -84,6 +85,7 @@ export class FakeComputerHost {
   display: string | undefined = ":100";
   generation = 1;
   provisioning?: ComputerHostProvisioningV1;
+  readonly openProgress: ComputerHostProvisioningV1[] = [];
   /** Set to refuse the next `open`, the way an exhausted slot pool does. */
   openFailure?: Error;
   /** The bytes `file/read` answers with, by absolute path on the Computer. */
@@ -110,12 +112,15 @@ export class FakeComputerHost {
     const host = this;
     const botKey = computerBotKey(botId);
     return {
-      open(
-        options?: ComputerHostCallOptions,
+      async open(
+        options?: ComputerHostOpenOptionsV1,
       ): Promise<ComputerHostOpenResultV1> {
         options?.signal?.throwIfAborted();
-        if (host.openFailure) return Promise.reject(host.openFailure);
-        return Promise.resolve({
+        if (host.openFailure) throw host.openFailure;
+        for (const progress of host.openProgress) {
+          await options?.onProgress?.(progress);
+        }
+        return {
           version: 1,
           effectId: options?.effectId ?? "effect-open",
           spriteName: host.spriteName,
@@ -123,7 +128,7 @@ export class FakeComputerHost {
           ...(host.display ? { display: host.display } : {}),
           generation: host.generation,
           ...(host.provisioning ? { provisioning: host.provisioning } : {}),
-        });
+        };
       },
 
       async exec(

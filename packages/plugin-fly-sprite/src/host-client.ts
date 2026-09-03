@@ -20,10 +20,10 @@
  * Two behaviours are load-bearing and are the reason this is a class rather
  * than a function:
  *
- * - **Framing.** A streamed exec answers NDJSON, and a transport chunk
+ * - **Framing.** Streamed open and exec answer NDJSON, and a transport chunk
  *   boundary means nothing: a frame may be split across two chunks or three
- *   frames may arrive in one. `ComputerHostExecFrameReaderV1` finds the
- *   newline; this client never reads a chunk as a frame.
+ *   frames may arrive in one. Their frame readers find the newline; this
+ *   client never reads a chunk as a frame.
  * - **Cancellation.** "Connections to the Computer are expected to drop on
  *   every pause." A caller's abort aborts the fetch *and* posts a `cancel` for
  *   the same `effectId`, because a dropped connection alone leaves the process
@@ -37,6 +37,7 @@ import {
   COMPUTER_HOST_ROUTES,
   COMPUTER_HOST_TOKEN_HEADER,
   ComputerHostExecFrameReaderV1,
+  ComputerHostOpenFrameReaderV1,
   decodeComputerHostCancelResultV1,
   decodeComputerHostControlResultV1,
   decodeComputerHostExecResultV1,
@@ -63,6 +64,7 @@ import {
   type ComputerHostOpenResultV1,
   type ComputerHostOperationKindV1,
   type ComputerHostOperationV1,
+  type ComputerHostProvisioningV1,
   type ComputerHostServiceResultV1,
   type ComputerHostViewerResultV1,
 } from "@frockbot/computer-host-protocol";
@@ -127,6 +129,14 @@ export interface ComputerHostCallOptions {
   effectId?: string;
   /** Overrides the deadline this call is given, in milliseconds. */
   timeoutMs?: number;
+}
+
+export interface ComputerHostOpenOptionsV1 extends ComputerHostCallOptions {
+  /**
+   * Receives each provisioning phase while `open` remains in flight. Its
+   * presence selects the NDJSON response; without it `open` stays buffered.
+   */
+  onProgress?(progress: ComputerHostProvisioningV1): void | Promise<void>;
 }
 
 export interface ComputerHostExecCommandV1 {
@@ -323,8 +333,33 @@ export class ComputerHostClient {
     });
   }
 
-  open(options?: ComputerHostCallOptions): Promise<ComputerHostOpenResultV1> {
-    return this.json({ kind: "open" }, decodeComputerHostOpenResultV1, options);
+  async open(
+    options?: ComputerHostOpenOptionsV1,
+  ): Promise<ComputerHostOpenResultV1> {
+    if (!options?.onProgress) {
+      return this.json(
+        { kind: "open" },
+        decodeComputerHostOpenResultV1,
+        options,
+      );
+    }
+    const effectId = this.effectIdFor(options);
+    const lease = this.lease(COMPUTER_HOST_DEFAULT_TIMEOUT_MS, options);
+    try {
+      const response = await this.send(
+        { kind: "open", stream: true },
+        effectId,
+        lease,
+      );
+      return await this.readOpenStream(
+        response,
+        lease,
+        effectId,
+        options.onProgress,
+      );
+    } finally {
+      lease.release();
+    }
   }
 
   /**
@@ -614,6 +649,83 @@ export class ComputerHostClient {
     } catch (error) {
       throw this.refuse(error, lease, effectId, false);
     }
+  }
+
+  /**
+   * Reads an NDJSON open stream to its terminal result.
+   *
+   * The body is drained even after a progress callback fails, because the
+   * result is what makes the already-admitted open's outcome known. An EOF
+   * without that result is the shape of a container restart and is therefore
+   * retryable unavailability, exactly as it is for streamed exec.
+   */
+  private async readOpenStream(
+    response: Response,
+    lease: CallLease,
+    effectId: string,
+    onProgress: (progress: ComputerHostProvisioningV1) => void | Promise<void>,
+  ): Promise<ComputerHostOpenResultV1> {
+    if (!response.body) {
+      throw new ComputerError(
+        "provider-failure",
+        "The Computer host answered an open stream with no body",
+      );
+    }
+    const reader = response.body.getReader();
+    const frames = new ComputerHostOpenFrameReaderV1();
+    let result: ComputerHostOpenResultV1 | undefined;
+    let failure: ComputerError | undefined;
+    let callbackFailed = false;
+    let callbackFailure: unknown;
+
+    const consume = async (
+      batch: ReturnType<ComputerHostOpenFrameReaderV1["push"]>,
+    ): Promise<void> => {
+      for (const frame of batch) {
+        if (frame.type === "progress") {
+          if (!callbackFailed) {
+            try {
+              await onProgress(frame.progress);
+            } catch (error) {
+              callbackFailed = true;
+              callbackFailure = error;
+            }
+          }
+        } else if (frame.type === "result") {
+          result = frame.result;
+        } else {
+          failure ??= new ComputerError(
+            ERROR_CODES[frame.code],
+            frame.message,
+            frame.retryable,
+          );
+        }
+      }
+    };
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) await consume(frames.push(value));
+      }
+      await consume(frames.end());
+    } catch (error) {
+      throw this.refuse(error, lease, effectId, true);
+    } finally {
+      reader.releaseLock();
+    }
+
+    if (callbackFailed) throw callbackFailure;
+    if (failure) throw failure;
+    if (!result) {
+      throw new ComputerError(
+        "provider-unavailable",
+        "The Computer host open stream ended before the Computer opened",
+        true,
+      );
+    }
+    return result;
   }
 
   /**

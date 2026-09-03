@@ -43,8 +43,8 @@ const host = new ComputerHost({
   client: new SpritesClient(spritesToken) as unknown as SpritesClientHandle,
   baseSpriteName,
   digest: (value) => createHash("sha256").update(value).digest("hex"),
-  // Provisioning a cold Computer takes minutes and `open` answers once, at
-  // the end. The container says where it has got to while it is getting there.
+  // Provisioning a cold Computer takes minutes. Streamed callers see these
+  // phases on the wire; the process log keeps the same account for operators.
   onProvisionProgress: (spriteName, progress) => {
     process.stdout.write(
       `provisioning ${spriteName}: ${progress.label} (${progress.index}/${progress.total}) ${progress.status}${progress.resumed ? " [resumed]" : ""}\n`,
@@ -113,8 +113,9 @@ async function send(
     outgoing.end();
     return;
   }
-  // Piped rather than buffered: an exec stream must reach the caller while the
-  // command is still running, or a streaming caller learns nothing early.
+  // Piped rather than buffered: an open or exec stream must reach the caller
+  // while the operation is still running, or a streaming caller learns
+  // nothing early.
   await new Promise<void>((resolve, reject) => {
     Readable.fromWeb(
       response.body as unknown as Parameters<typeof Readable.fromWeb>[0],

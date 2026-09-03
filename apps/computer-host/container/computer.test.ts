@@ -13,6 +13,7 @@ import { describe, expect, test } from "bun:test";
 import {
   COMPUTER_HOST_ROUTES,
   ComputerHostExecFrameReaderV1,
+  ComputerHostOpenFrameReaderV1,
   decodeComputerHostCancelResultV1,
   decodeComputerHostControlResultV1,
   decodeComputerHostExecResultV1,
@@ -23,6 +24,7 @@ import {
   decodeComputerHostProblemV1,
   decodeComputerHostServiceResultV1,
   type ComputerHostExecFrameV1,
+  type ComputerHostOpenFrameV1,
   type ComputerHostOperationV1,
   type ComputerHostRequestV1,
 } from "@frockbot/computer-host-protocol";
@@ -218,6 +220,23 @@ async function readFrames(
   return frames;
 }
 
+async function readOpenFrames(
+  response: Response,
+): Promise<ComputerHostOpenFrameV1[]> {
+  const reader = new ComputerHostOpenFrameReaderV1();
+  const frames: ComputerHostOpenFrameV1[] = [];
+  const body = response.body;
+  if (!body) return frames;
+  const stream = body.getReader();
+  for (;;) {
+    const { done, value } = await stream.read();
+    if (done) break;
+    frames.push(...reader.push(value));
+  }
+  frames.push(...reader.end());
+  return frames;
+}
+
 describe("Sprite naming", () => {
   test("derives one Sprite per User, from the User alone", () => {
     const host = hostWith(new FakeSpritesClient());
@@ -237,6 +256,38 @@ describe("Sprite naming", () => {
 });
 
 describe("open", () => {
+  test("streams provisioning phases and ends with the open result", async () => {
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      sprite.scripts = [
+        report("running", installing),
+        report("running", installing),
+        report("stopped", ready),
+      ];
+    };
+
+    const response = await host.handle(request({ kind: "open", stream: true }));
+    expect(response.headers.get("content-type")).toContain(
+      "application/x-ndjson",
+    );
+    const frames = await readOpenFrames(response);
+
+    expect(
+      frames
+        .filter((frame) => frame.type === "progress")
+        .map((frame) => frame.progress.label),
+    ).toEqual(["installing the desktop packages", "the Computer is ready"]);
+    expect(frames.at(-1)).toMatchObject({
+      type: "result",
+      result: {
+        effectId: "effect-1",
+        provisioning: { status: "complete", index: 5 },
+      },
+    });
+    expect(host.inFlightCount).toBe(0);
+  });
+
   test("provisions a new Computer and adopts it thereafter", async () => {
     const client = new FakeSpritesClient();
     const host = hostWith(client);

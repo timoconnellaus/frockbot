@@ -6,7 +6,10 @@ import {
   COMPUTER_HOST_TOKEN_HEADER,
   computerHostProblemV1,
   encodeComputerHostExecFrameV1,
+  encodeComputerHostOpenFrameV1,
   type ComputerHostExecFrameV1,
+  type ComputerHostOpenFrameV1,
+  type ComputerHostProvisioningV1,
 } from "@frockbot/computer-host-protocol";
 import {
   ComputerHostClient,
@@ -79,6 +82,29 @@ function ndjson(
 ): Response {
   const bytes = new TextEncoder().encode(
     frames.map(encodeComputerHostExecFrameV1).join(""),
+  );
+  let offset = 0;
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset >= bytes.byteLength) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(bytes.subarray(offset, offset + size));
+        offset += size;
+      },
+    }),
+    { headers: { "content-type": COMPUTER_HOST_STREAM_MEDIA_TYPE } },
+  );
+}
+
+function openNdjson(
+  frames: readonly ComputerHostOpenFrameV1[],
+  size: number,
+): Response {
+  const bytes = new TextEncoder().encode(
+    frames.map(encodeComputerHostOpenFrameV1).join(""),
   );
   let offset = 0;
   return new Response(
@@ -182,6 +208,75 @@ describe("ComputerHostClient envelope", () => {
     await client(fetcher).forTenant("bot-2").cancel("effect-1");
     expect(calls[0]?.body.identity).toEqual({ userId: "user-1" });
     expect(calls[0]?.body.tenant).toEqual({ botId: "bot-2" });
+  });
+});
+
+describe("ComputerHostClient open", () => {
+  const starting: ComputerHostProvisioningV1 = {
+    kind: "provision",
+    phase: "starting",
+    label: "starting the Computer provisioner",
+    index: 0,
+    total: 5,
+    status: "running",
+    resumed: false,
+  };
+  const installing: ComputerHostProvisioningV1 = {
+    ...starting,
+    phase: "desktop",
+    label: "installing the desktop packages",
+    index: 2,
+  };
+
+  test("streams provisioning progress before the terminal open result", async () => {
+    const result = {
+      version: 1 as const,
+      effectId: "effect-1",
+      spriteName: "frockbot-abc",
+      directory: "/home/box/agent-data/agents/bot-1",
+      generation: 1,
+      provisioning: {
+        ...installing,
+        phase: "ready",
+        label: "the Computer is ready",
+        status: "complete" as const,
+        index: 5,
+      },
+    };
+    const { fetcher, calls } = recorder(() =>
+      openNdjson(
+        [
+          { type: "progress", progress: starting },
+          { type: "progress", progress: installing },
+          { type: "result", result },
+        ],
+        3,
+      ),
+    );
+    const seen: ComputerHostProvisioningV1[] = [];
+
+    const opened = await client(fetcher).open({
+      onProgress: (progress: ComputerHostProvisioningV1) => {
+        seen.push(progress);
+      },
+    });
+
+    expect(calls[0]?.body.stream).toBe(true);
+    expect(seen).toEqual([starting, installing]);
+    expect(opened).toEqual(result);
+  });
+
+  test("a stream that ends before its result is unavailable and retryable", async () => {
+    const { fetcher } = recorder(() =>
+      openNdjson([{ type: "progress", progress: starting }], 5),
+    );
+    const error = await client(fetcher)
+      .open({ onProgress: () => undefined })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(ComputerError);
+    expect((error as ComputerError).code).toBe("provider-unavailable");
+    expect((error as ComputerError).retryable).toBe(true);
   });
 });
 

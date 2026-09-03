@@ -126,12 +126,27 @@ describe("Computer Bot Durable Object Contribution", () => {
                 label: "Starting the desktop",
                 index: 3,
                 total: 5,
+                provisioning: {
+                  version: 1,
+                  kind: "provision",
+                  label: "installing the browser",
+                  index: 4,
+                  total: 5,
+                  resumed: false,
+                },
               });
               expect(await contribution.read("user-1", "scout")).toMatchObject({
                 phase: "provisioning",
                 progress: {
                   version: 1,
                   kind: "connect",
+                  provisioning: {
+                    kind: "provision",
+                    label: "installing the browser",
+                    index: 4,
+                    total: 5,
+                    resumed: false,
+                  },
                   steps: [
                     { id: "waking", status: "complete" },
                     { id: "attaching", status: "complete" },
@@ -206,6 +221,56 @@ describe("Computer Bot Durable Object Contribution", () => {
       version: 2,
       phase: "ready",
     });
+  });
+
+  test("reads a previous V2 progress record without provisioning detail", async () => {
+    const storage = new MemoryStorage();
+    storage.values.set(COMPUTER_PROVIDER_RECORD_KEY, {
+      version: 2,
+      phase: "provisioning",
+      message: "Attaching the Bot",
+      recordedAt: "2026-09-03T00:00:01.000Z",
+      progress: {
+        version: 1,
+        kind: "connect",
+        startedAt: "2026-09-03T00:00:00.000Z",
+        updatedAt: "2026-09-03T00:00:01.000Z",
+        index: 2,
+        total: 5,
+        steps: [
+          {
+            version: 1,
+            id: "waking",
+            label: "Waking the Computer",
+            status: "complete",
+          },
+          {
+            version: 1,
+            id: "attaching",
+            label: "Attaching the Bot",
+            status: "active",
+          },
+        ],
+      },
+    });
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () => Promise.reject(new Error("not used")),
+    });
+
+    expect(await contribution.read("user-1", "scout")).toMatchObject({
+      progress: {
+        version: 1,
+        kind: "connect",
+        index: 2,
+        total: 5,
+      },
+    });
+    expect(
+      (await contribution.read("user-1", "scout")).progress?.provisioning,
+    ).toBeUndefined();
   });
 
   test("commits intent before it asks the provider and replays one receipt", async () => {

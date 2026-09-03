@@ -1,6 +1,7 @@
 /// <reference types="bun" />
 
 import { describe, expect, test } from "bun:test";
+import type { ComputerConnectionProgressV1 } from "@frockbot/computer-core";
 import { verifyPluginPackage } from "@frockbot/plugin-testkit";
 import { DESKTOP_GUI_LEASE_KEY } from "@frockbot/computer-host-runtime";
 import manifest from "../frockbot.json" with { type: "json" };
@@ -249,6 +250,67 @@ describe("Fly Sprite computer", () => {
       "minting-viewer",
       "connecting",
     ]);
+  });
+
+  test("projects streamed provisioning under waking without regressing", async () => {
+    const host = fakeHost();
+    const phase = {
+      kind: "provision" as const,
+      total: 5,
+      status: "running" as const,
+      resumed: false,
+    };
+    host.openProgress.push(
+      {
+        ...phase,
+        phase: "packages",
+        label: "installing the desktop packages",
+        index: 2,
+      },
+      {
+        ...phase,
+        phase: "layout",
+        label: "preparing the Computer layout",
+        index: 1,
+      },
+      {
+        ...phase,
+        phase: "browser",
+        label: "installing the browser",
+        index: 4,
+      },
+    );
+    const provider = new FlySpriteComputerProvider(attach(host));
+    const computer = await provider.open(
+      { userId: "owner" },
+      { botId: "general" },
+      { providerId: "fly-sprite", generation: 1 },
+    );
+    const progress: ComputerConnectionProgressV1[] = [];
+
+    await computer.presence?.connect({
+      onProgress: (step) => {
+        progress.push(step);
+      },
+    });
+
+    expect(progress.map((step) => step.index)).toEqual([1, 1, 2, 3, 4, 5]);
+    expect(
+      progress.flatMap((step) =>
+        step.provisioning ? [step.provisioning.index] : [],
+      ),
+    ).toEqual([2, 4]);
+    expect(progress[0]).toMatchObject({
+      kind: "connect",
+      step: "waking",
+      label: "Waking the Computer",
+      provisioning: {
+        version: 1,
+        kind: "provision",
+        label: "installing the desktop packages",
+        resumed: false,
+      },
+    });
   });
 
   test("an unconfigured Computer refuses rather than pretending", async () => {

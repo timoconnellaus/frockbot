@@ -223,6 +223,9 @@ function projectedProgress(
   startedAt: string,
   updatedAt: string,
 ): ComputerProgressViewV1 {
+  const provisioning = progress.provisioning
+    ? { provisioning: { ...progress.provisioning } }
+    : {};
   if (progress.kind === "update") {
     return {
       version: 1,
@@ -231,6 +234,7 @@ function projectedProgress(
       updatedAt,
       index: progress.index,
       total: progress.total,
+      ...provisioning,
       steps: [
         {
           version: 1,
@@ -248,6 +252,7 @@ function projectedProgress(
     updatedAt,
     index: progress.index,
     total: progress.total,
+    ...provisioning,
     steps: CONNECT_PROGRESS_STEPS.map((step, index) => ({
       version: 1,
       ...step,

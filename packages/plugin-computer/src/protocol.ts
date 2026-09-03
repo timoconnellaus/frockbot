@@ -70,6 +70,15 @@ export interface ComputerProgressStepViewV1 {
   status: ComputerProgressStepStatusV1;
 }
 
+export interface ComputerProvisioningProgressViewV1 {
+  version: 1;
+  kind: "provision" | "update";
+  label: string;
+  index: number;
+  total: number;
+  resumed: boolean;
+}
+
 /** Durable progress projected from the Bot authority; it contains no secrets. */
 export interface ComputerProgressViewV1 {
   version: 1;
@@ -78,6 +87,7 @@ export interface ComputerProgressViewV1 {
   updatedAt: string;
   index: number;
   total: number;
+  provisioning?: ComputerProvisioningProgressViewV1;
   steps: ComputerProgressStepViewV1[];
 }
 
@@ -238,6 +248,46 @@ function decodeProgressStepV1(value: unknown): ComputerProgressStepViewV1 {
   };
 }
 
+function decodeProvisioningProgressV1(
+  value: unknown,
+): ComputerProvisioningProgressViewV1 {
+  const candidate = record(value, "Computer provisioning progress");
+  exactKeys(
+    candidate,
+    ["version", "kind", "label", "index", "total", "resumed"],
+    [],
+    "Computer provisioning progress",
+  );
+  if (
+    candidate.version !== 1 ||
+    (candidate.kind !== "provision" && candidate.kind !== "update") ||
+    typeof candidate.resumed !== "boolean"
+  ) {
+    throw new ComputerProtocolDecodeError(
+      "Computer provisioning progress is invalid",
+    );
+  }
+  const total = boundedInteger(
+    candidate.total,
+    1,
+    1_000,
+    "Computer provisioning progress total",
+  );
+  return {
+    version: 1,
+    kind: candidate.kind,
+    label: text(candidate.label, "Computer provisioning progress label"),
+    index: boundedInteger(
+      candidate.index,
+      0,
+      total,
+      "Computer provisioning progress index",
+    ),
+    total,
+    resumed: candidate.resumed,
+  };
+}
+
 export function decodeComputerProgressViewV1(
   value: unknown,
 ): ComputerProgressViewV1 {
@@ -245,7 +295,7 @@ export function decodeComputerProgressViewV1(
   exactKeys(
     candidate,
     ["version", "kind", "startedAt", "updatedAt", "index", "total", "steps"],
-    [],
+    ["provisioning"],
     "Computer progress",
   );
   if (
@@ -282,6 +332,11 @@ export function decodeComputerProgressViewV1(
     updatedAt: timestamp(candidate.updatedAt, "Computer progress updatedAt"),
     index,
     total,
+    ...(candidate.provisioning === undefined
+      ? {}
+      : {
+          provisioning: decodeProvisioningProgressV1(candidate.provisioning),
+        }),
     steps,
   };
 }
