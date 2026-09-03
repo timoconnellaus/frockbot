@@ -11,11 +11,7 @@
       "version": "0.0.1",
       "grants": ["identity:authenticate"]
     },
-    {
-      "specifier": "@frockbot/plugin-admin",
-      "version": "0.0.1",
-      "grants": []
-    },
+    { "specifier": "@frockbot/plugin-admin", "version": "0.0.1", "grants": [] },
     {
       "specifier": "@frockbot/plugin-identity",
       "version": "0.0.1",
@@ -41,11 +37,7 @@
       "version": "0.0.1",
       "grants": ["skills:author"]
     },
-    {
-      "specifier": "@frockbot/plugin-echo",
-      "version": "0.0.1",
-      "grants": []
-    },
+    { "specifier": "@frockbot/plugin-echo", "version": "0.0.1", "grants": [] },
     {
       "specifier": "@frockbot/plugin-shell",
       "version": "0.0.1",
@@ -111,11 +103,7 @@
       "version": "0.0.1",
       "grants": []
     },
-    {
-      "specifier": "@frockbot/plugin-audit",
-      "version": "0.0.1",
-      "grants": []
-    },
+    { "specifier": "@frockbot/plugin-audit", "version": "0.0.1", "grants": [] },
     {
       "specifier": "@frockbot/plugin-clock",
       "version": "0.0.1",
@@ -185,6 +173,17 @@
       "specifier": "@frockbot/plugin-subagents",
       "version": "0.0.1",
       "grants": ["subagents:dispatch"]
+    },
+    {
+      "specifier": "@frockbot/plugin-applets",
+      "version": "0.0.1",
+      "grants": ["applets:manage", "workspace:write"],
+      "artifact": {
+        "contentHash": "e2787b45d8d82c25abade8230cd4521b9d8834148a2feec6f65f9d436471227a",
+        "size": 17094,
+        "mediaType": "application/javascript",
+        "bundlerVersion": "frockbot-applets-esbuild@0.28.2"
+      }
     }
   ]
 }

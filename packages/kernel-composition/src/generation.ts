@@ -659,6 +659,19 @@ export interface BootstrapCompositionMemberV1 {
   specifier: string;
   version: string;
   manifest: unknown;
+  /**
+   * The immutable module bytes this first-party member loads from, when the
+   * application declared one.
+   *
+   * ADR 0022 decision 8: a first-party Package that declares only
+   * Bot-authorable Contribution kinds "ships as an artifact-backed member and
+   * loads through the same path as a Bot-authored one". The bootstrap is where
+   * that member enters a Bot's Composition, so it is where the artifact has to
+   * survive — dropping it here would silently turn the member into an
+   * in-process one the application has no table entry for, which is a Bot with
+   * no Applets rather than a mount failure.
+   */
+  artifact?: ArtifactRefV1;
 }
 
 /**
@@ -680,6 +693,7 @@ export async function bootstrapGeneration(
         packageId: member.packageId,
         version: member.version,
       },
+      ...(member.artifact ? { artifact: member.artifact } : {}),
     })),
   );
   const ordered = composed.sort((left, right) =>

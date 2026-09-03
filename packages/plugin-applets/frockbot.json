@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 5,
+  "id": "applets",
+  "displayName": "Applets",
+  "version": "0.0.1",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {},
+  "defaultEnablement": "enabled",
+  "contributions": {
+    "runtime": { "entry": "./package", "host": "bot-isolate" },
+    "client": {
+      "kind": "iframe",
+      "pages": [
+        {
+          "id": "list",
+          "artifact": {
+            "contentHash": "db52548255ebe482df18a1be2a22034fbaf40b97464d95729b053b1ca94aaf98",
+            "size": 7253,
+            "mediaType": "text/html",
+            "bundlerVersion": "frockbot-inline-html@1"
+          },
+          "mounts": [{ "slot": "frockbot.surface:list" }]
+        },
+        {
+          "id": "canvas",
+          "artifact": {
+            "contentHash": "3d9c78811f638e7ee65a695cf325fdfbe757837bff18b6625e7f709eef896f6b",
+            "size": 6017,
+            "mediaType": "text/html",
+            "bundlerVersion": "frockbot-inline-html@1"
+          },
+          "mounts": [{ "slot": "frockbot.right-panel" }]
+        }
+      ],
+      "entries": [
+        {
+          "id": "open",
+          "slot": "frockbot.sidebar-actions",
+          "order": 5,
+          "label": "Applets",
+          "icon": "applets",
+          "opens": { "kind": "surface", "page": "list" }
+        }
+      ]
+    }
+  },
+  "permissions": ["applets:manage", "workspace:write"],
+  "roots": [{ "id": "source", "scope": "user" }],
+  "tools": [
+    {
+      "name": "applet_list",
+      "description": "List this User's Applets: the small real-time apps that appear beside the conversation. Every Bot of this User sees every Applet. Call this before creating one, so you extend an Applet that already exists instead of building a second one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "applet_create",
+      "description": "Create a new Applet and scaffold its source. This makes the directory entry, writes a working todo-list starting point into the Applet's source directory on this User's Computer, and focuses it so the User watches you build it. It does not publish anything: edit the files, run `applet check` and `applet build` on the Computer, then call applet_publish. Load the `applets` Skill before you start editing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "description": "What the User will call this Applet, in their words. 1-128 characters.",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": ["displayName"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "applet_publish",
+      "description": "Publish what `applet build` last wrote for this Applet. Reads dist/server.js, dist/ui.html and dist/manifest.json from the Applet's source directory, records an immutable generation, mounts it, and offers its tools to every Bot of this User from the next Turn. Run `applet check` and `applet build` on the Computer first; a publish of a stale or failing build is refused and tells you why.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appletId": { "type": "string", "description": "The Applet's id." }
+        },
+        "required": ["appletId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "applet_revert",
+      "description": "Move an Applet back to an earlier generation. The revert is itself recorded as a generation, and the Applet's stored data is untouched — reverting the code never clears what the User put in it. Use applet_generations to find the id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appletId": { "type": "string", "description": "The Applet's id." },
+          "generationId": {
+            "type": "string",
+            "description": "The generation to make current again."
+          }
+        },
+        "required": ["appletId", "generationId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "applet_delete",
+      "description": "Delete an Applet permanently: its stored data, its versions, and its entry. This cannot be undone and it is the User's decision, not yours — ask before calling it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appletId": { "type": "string", "description": "The Applet's id." }
+        },
+        "required": ["appletId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "applet_focus",
+      "description": "Show one Applet in the panel beside this conversation, or clear it. Pass null to close the panel. Creating and publishing already focus the Applet, so use this when the User asks to look at a different one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appletId": {
+            "type": ["string", "null"],
+            "description": "The Applet to show, or null to close the panel."
+          }
+        },
+        "required": ["appletId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "applet_generations",
+      "description": "List an Applet's version history, newest first: which generation is current, which failed, and what tools each one offered. Read this before applet_revert.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appletId": { "type": "string", "description": "The Applet's id." }
+        },
+        "required": ["appletId"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

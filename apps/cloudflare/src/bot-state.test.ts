@@ -6,6 +6,7 @@ import {
 import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
 import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
+import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import type { BotStateEnv } from "./bot-state.js";
 
 // `mock.module` is process-global and the first registration in a suite run
@@ -105,6 +106,25 @@ function memoryIndex() {
     upsert: () => Promise.resolve({ count: 0 }),
     query: () => Promise.resolve({ matches: [], count: 0 }),
     deleteByIds: () => Promise.resolve(),
+  };
+}
+
+/*
+ * The application as a host with no Worker Loader can mount it.
+ *
+ * This suite runs under `bun test`, where there is no `BOT_PACKAGES` binding
+ * and no `BotCapabilities` loopback, so an artifact-backed member — the
+ * Applets Package, ADR 0022 decision 8 — has nowhere to load from and the
+ * Composition fails verification closed, which is correct and is not what
+ * this test is about. workerd's suites mount the real thing.
+ */
+async function compileWithoutIsolateMembers(): ReturnType<
+  typeof compileFoundationApplication
+> {
+  const application = await compileFoundationApplication();
+  return {
+    ...application,
+    packages: application.packages.filter((pkg) => pkg.artifact === undefined),
   };
 }
 
@@ -244,6 +264,7 @@ describe("BotState Ollama execution", () => {
     const state = () =>
       new BotState({ storage } as unknown as DurableObjectState, env, {
         outboundFetch,
+        compileApplication: compileWithoutIsolateMembers,
       });
 
     const firstState = state();

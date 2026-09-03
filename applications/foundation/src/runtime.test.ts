@@ -35,6 +35,7 @@ describe("foundation application", () => {
       "ui-theme",
       "shell",
       "admin",
+      "applets",
       "flock",
       "audit",
       "auth",
@@ -90,6 +91,7 @@ describe("foundation application", () => {
       ],
       runtime: [
         "shell",
+        "applets",
         "flock",
         "authoring",
         "bot-template",
@@ -118,6 +120,7 @@ describe("foundation application", () => {
         "ui-theme",
         "shell",
         "admin",
+        "applets",
         "flock",
         "audit",
         "auth",

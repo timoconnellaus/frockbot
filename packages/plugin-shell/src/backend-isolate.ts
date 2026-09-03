@@ -290,17 +290,30 @@ async function sha256Hex(value: string): Promise<string> {
  * Reads a Bot Package artifact from object storage and verifies its content
  * address before a byte of it becomes code. Artifacts are immutable content,
  * not state; the hash is the only thing that makes them safe to mount.
+ *
+ * `bundled` is a second *place* to find the same immutable bytes, not a second
+ * kind of thing. A first-party Package that ships as an artifact-backed member
+ * (ADR 0022 decision 8) is built at build time and travels inside this bundle,
+ * so its bytes are already here and object storage never has to be seeded for
+ * a deploy to be correct. Object storage still wins when it holds the object,
+ * the digest is still verified either way, and nothing is ever *built* here —
+ * which is what "Composition consumes immutable content-addressed artifacts and
+ * never builds them" asks of this seam.
  */
 export function createR2PackageArtifactStore(
   bucket: R2Bucket,
+  bundled?: ReadonlyMap<string, string>,
 ): BotIsolateArtifactStore {
   return {
     async loadPackageArtifact(contentHash: string): Promise<string> {
-      const object = await bucket.get(`packages/${contentHash}.mjs`);
-      if (!object) {
-        throw new Error(`package artifact "${contentHash}" is missing`);
-      }
-      const module = await object.text();
+      const key = `packages/${contentHash}.mjs`;
+      const object = await bucket.get(key);
+      const module = object
+        ? await object.text()
+        : (bundled?.get(key) ??
+          (() => {
+            throw new Error(`package artifact "${contentHash}" is missing`);
+          })());
       if ((await sha256Hex(module)) !== contentHash) {
         throw new Error(
           `package artifact "${contentHash}" failed hash verification`,

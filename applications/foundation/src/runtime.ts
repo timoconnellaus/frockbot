@@ -3,6 +3,7 @@ import {
   compileApplicationPlan,
   type ApplicationDeclarationPlan,
   type ApplicationPlan,
+  type ApplicationPackageSelection,
   type ApplicationSource,
 } from "@frockbot/kernel-composition/compiler";
 import type {
@@ -159,7 +160,12 @@ import {
   type SkillsRuntimeHostV1,
 } from "@frockbot/plugin-skills/agent";
 import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
+import appletsManifest from "@frockbot/plugin-applets/manifest";
 import applicationJson from "../frockbot.application.json" with { type: "json" };
+// The Applets Package has no runtime plugin to import: it is artifact-backed
+// (ADR 0022 decision 8), so the application declares only its manifest here and
+// its artifact in `frockbot.application.json`, and the isolate host mounts it
+// like a Bot-authored Package.
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 
@@ -198,6 +204,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-settings", settingsManifest],
   ["@frockbot/plugin-routines", routinesManifest],
   ["@frockbot/plugin-subagents", subagentsManifest],
+  ["@frockbot/plugin-applets", appletsManifest],
   ["@frockbot/plugin-user-machine", userMachineManifest],
   ["@frockbot/plugin-machine-messages", machineMessagesManifest],
 ]);
@@ -409,9 +416,18 @@ const modelRuntimeContributionFactories = new Map<
   ],
 ]);
 
+/*
+ * The application's own declaration, cast once at the JSON boundary.
+ *
+ * A JSON module infers `mediaType: string` where `ArtifactRefV1` wants the
+ * literal, so the artifact-backed member's selection would not structurally
+ * satisfy `ApplicationPackageSelection` without this. Nothing is trusted by the
+ * cast: `compileApplicationDeclarations` runs every selection, artifact
+ * included, through `decodeArtifactRefV1` before it reaches a plan.
+ */
 const applicationSource: ApplicationSource = {
   schemaVersion: 1,
-  packages: applicationJson.packages,
+  packages: applicationJson.packages as ApplicationPackageSelection[],
 };
 
 /**
@@ -1141,7 +1157,12 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   return {
     plan,
     packages: plan.packages
-      .filter((pkg) => runtimeIds.has(pkg.id))
+      // An artifact-backed member is not in this table and never should be: its
+      // runtime Contribution is immutable bytes the isolate host loads, not a
+      // plugin compiled into this bundle (ADR 0022 decision 8). The test is the
+      // artifact, so a first-party Package that ships as one needs no entry
+      // here and no name anywhere in this function.
+      .filter((pkg) => pkg.artifact === undefined && runtimeIds.has(pkg.id))
       .map((pkg) => ({
         specifier: pkg.specifier,
         manifest: {

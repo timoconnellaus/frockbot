@@ -49,6 +49,9 @@ export function bootstrapCompositionGeneration(
       specifier: pkg.specifier,
       version: pkg.version,
       manifest: pkg.manifest,
+      // A first-party member the application declared an artifact for loads
+      // through the isolate host, not the application's Contribution table.
+      ...(pkg.artifact ? { artifact: pkg.artifact } : {}),
     })),
     { createdAt },
   );

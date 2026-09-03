@@ -36,6 +36,7 @@ import {
   isClientIframeContribution,
   type FrockBotManifest,
 } from "@frockbot/kernel-composition";
+import { canonicalJson, sha256 } from "@frockbot/kernel-composition/compiler";
 import type { Plugin } from "cordis";
 import {
   ACTIVE_RUN_KEY,
@@ -593,6 +594,13 @@ export interface ShellBotBackendHost {
    * Durable Object has no honest way to dispatch one.
    */
   subagents?: SubagentDurableBindingV1;
+  /**
+   * Immutable Package artifacts this bundle already carries, by object key.
+   *
+   * The application supplies these; the shell only hands them to the artifact
+   * store as a second place to look. See `createR2PackageArtifactStore`.
+   */
+  bundledPackageArtifacts?: ReadonlyMap<string, string>;
 }
 
 /** The narrow storage seam the Bot's announcement log is written through. */
@@ -634,6 +642,7 @@ export class ShellBotBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: BotStateEnv;
   private readonly compileApplication: typeof compileFoundationApplication;
+  private readonly bundledPackageArtifacts?: ReadonlyMap<string, string>;
   private readonly lifecycleAdmission?: ShellBotBackendHost["assertLifecycleActive"];
   private readonly reconciliationActivities = new Map<
     string,
@@ -694,6 +703,7 @@ export class ShellBotBackendContribution {
     this.env = host.env;
     this.compileApplication =
       host.compileApplication ?? compileFoundationApplication;
+    this.bundledPackageArtifacts = host.bundledPackageArtifacts;
     this.lifecycleAdmission = host.assertLifecycleActive;
     this.outboundFetch = host.outboundFetch;
     const routines = createBotRoutines(
@@ -1158,7 +1168,34 @@ export class ShellBotBackendContribution {
     const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
       authorshipManifestKey(member.manifestHash),
     );
-    return stored ? decodeFrockBotManifest(stored.manifest) : undefined;
+    if (stored) return decodeFrockBotManifest(stored.manifest);
+    return await this.readApplicationMemberManifest(member);
+  }
+
+  /**
+   * The manifest of a member the *application* declared, not the Bot.
+   *
+   * `authorship:manifest:<hash>` is written by the authoring path and by a
+   * Catalog install, so it exists for every member a Bot or its User put into
+   * the Composition. A first-party artifact-backed member (ADR 0022 decision
+   * 8) came from neither: it is in the compiled application, whose manifests
+   * are already in this bundle. The `manifestHash` is still what decides —
+   * the plan's manifest is accepted only when it hashes to exactly what the
+   * generation recorded — so this is a second *place* to look, never a second
+   * answer.
+   */
+  private async readApplicationMemberManifest(
+    member: CompositionMemberV1,
+  ): Promise<FrockBotManifest | undefined> {
+    if (!member.artifact) return undefined;
+    const application = await this.compileApplication();
+    const declared = application.packages.find(
+      (candidate) => candidate.id === member.packageId,
+    );
+    if (!declared) return undefined;
+    const hash = await sha256(canonicalJson(declared.manifest));
+    if (hash !== member.manifestHash) return undefined;
+    return declared.manifest;
   }
 
   private async requireCompositionMemberManifest(
@@ -1539,10 +1576,14 @@ export class ShellBotBackendContribution {
             "Package UI command does not match the mounted Composition generation",
           );
         }
+        // Artifact-backed, not "not first-party": what makes a Package's page
+        // able to name one of its tools is that the Package is loaded from an
+        // immutable artifact with a manifest, which is exactly what ADR 0022
+        // decision 8 gives a first-party Package too.
         const member = activation.mounted.generation.members.find(
           (candidate) =>
             candidate.packageId === directTool.packageId &&
-            candidate.provenance.kind !== "first-party",
+            candidate.artifact !== undefined,
         );
         if (!member)
           throw new Error("Package UI command names an unavailable Package");
@@ -1698,7 +1739,10 @@ export class ShellBotBackendContribution {
       runId: turn.runId,
       turnId: turn.runId,
       loader,
-      artifacts: createR2PackageArtifactStore(artifacts),
+      artifacts: createR2PackageArtifactStore(
+        artifacts,
+        this.bundledPackageArtifacts,
+      ),
       manifestFor: (member) => this.requireCompositionMemberManifest(member),
       capabilitiesFor: (member) =>
         mintCapabilities({

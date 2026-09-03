@@ -16,6 +16,7 @@ import {
   compileFoundationApplication,
   createFoundationBackendContributions,
 } from "@frockbot/application-foundation/runtime";
+import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/application-foundation/generated/applets-artifact";
 import {
   decodeBotLifecycleDirectoryViewV1,
   decodeBotLifecycleReceiptV1,
@@ -1049,12 +1050,23 @@ class R2ApplicationArtifacts
     return object.text();
   }
 
+  /**
+   * A Package's page, from object storage or from this bundle.
+   *
+   * A first-party artifact-backed member (ADR 0022 decision 8) is built at
+   * build time and its pages travel here, so the anonymous serving origin can
+   * answer for them with nothing seeded into the bucket. The digest decides in
+   * both cases; object storage wins when it holds the object.
+   */
   async loadPackageUiArtifact(
     contentHash: string,
   ): Promise<string | undefined> {
-    const object = await this.bucket.get(packageUiArtifactKey(contentHash));
-    if (!object) return undefined;
-    const html = await object.text();
+    const key = packageUiArtifactKey(contentHash);
+    const object = await this.bucket.get(key);
+    const html = object
+      ? await object.text()
+      : FIRST_PARTY_PACKAGE_ARTIFACTS_V1.get(key);
+    if (html === undefined) return undefined;
     if ((await sha256Hex(html)) !== contentHash) {
       throw new Error(
         `package UI artifact "${contentHash}" failed hash verification`,
@@ -1089,11 +1101,15 @@ class R2ApplicationArtifacts
 
   /** Hash-verified read: mismatched bytes are never handed to a loader. */
   async loadPackageArtifact(contentHash: string): Promise<string> {
-    const object = await this.bucket.get(packageArtifactKey(contentHash));
-    if (!object) {
+    const key = packageArtifactKey(contentHash);
+    const object = await this.bucket.get(key);
+    const bundled = object
+      ? undefined
+      : FIRST_PARTY_PACKAGE_ARTIFACTS_V1.get(key);
+    if (!object && bundled === undefined) {
       throw new Error(`package artifact "${contentHash}" was not found`);
     }
-    const module = await object.text();
+    const module = object ? await object.text() : bundled!;
     if ((await sha256Hex(module)) !== contentHash) {
       throw new Error(
         `package artifact "${contentHash}" failed hash verification`,

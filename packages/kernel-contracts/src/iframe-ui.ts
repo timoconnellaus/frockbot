@@ -153,10 +153,19 @@ export interface PackageIframeEntryViewV1 {
   opens: { kind: "surface"; page: string };
 }
 
+export type PackageIframeProvenanceV1 =
+  "Bot-authored" | "User-installed" | "FrockBot";
+
+export const PACKAGE_IFRAME_PROVENANCES_V1: readonly PackageIframeProvenanceV1[] =
+  ["Bot-authored", "User-installed", "FrockBot"];
+
 export interface PackageIframeContributionViewV1 {
   packageId: string;
   displayName: string;
-  provenance: "Bot-authored" | "User-installed";
+  /** How the shell attributes the page. `FrockBot` is a first-party
+   * artifact-backed member (ADR 0022 decision 8): shipped by FrockBot, loaded
+   * through the same path as a Bot-authored Package. */
+  provenance: PackageIframeProvenanceV1;
   /** Manifest v5: 1..8 pages. A v3/v4 single-page record migrates to one. */
   pages: PackageIframePageViewV1[];
   entries: PackageIframeEntryViewV1[];
@@ -637,8 +646,9 @@ export function decodePackageIframeCatalogV1(
       throw new Error(`${label}.entries contains duplicate ids`);
     }
     if (
-      contribution.provenance !== "Bot-authored" &&
-      contribution.provenance !== "User-installed"
+      !PACKAGE_IFRAME_PROVENANCES_V1.includes(
+        contribution.provenance as PackageIframeProvenanceV1,
+      )
     ) {
       throw new Error(`${label}.provenance is invalid`);
     }
@@ -653,7 +663,7 @@ export function decodePackageIframeCatalogV1(
         `${label}.displayName`,
         128,
       ),
-      provenance: contribution.provenance as "Bot-authored" | "User-installed",
+      provenance: contribution.provenance as PackageIframeProvenanceV1,
       pages,
       entries,
       declaredTools,

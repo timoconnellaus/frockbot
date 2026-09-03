@@ -27,6 +27,10 @@ import {
   isSkillSlugV1,
 } from "./skill-md.js";
 import type { LoadedSkillV1, SkillRefusalV1 } from "./catalog.js";
+import {
+  APPLETS_SKILL_DOCUMENT_V1,
+  APPLETS_SKILL_SLUG_V1,
+} from "./managed-applets.generated.js";
 
 /** The directory prefix a managed Skill's synthetic path carries. */
 export const MANAGED_SKILL_PATH_PREFIX = "managed";
@@ -167,6 +171,12 @@ export const MANAGED_SKILL_DOCUMENTS_V1: readonly ManagedSkillDocumentV1[] = [
   { slug: "export-bot-template", text: EXPORT_BOT_TEMPLATE },
   { slug: "import-bot-template", text: IMPORT_BOT_TEMPLATE },
   { slug: "learn-from-demonstration", text: LEARN_FROM_DEMONSTRATION },
+  // The Applets SDK reference (ADR 0022). It is authored in
+  // `packages/plugin-applets/skills/applets.md`, beside the Package it
+  // documents, and copied here by `scripts/build-applets-package.ts`: the
+  // Applets Package has no in-process code to carry it, and the managed set is
+  // the mechanism a first-party Skill already ships through.
+  { slug: APPLETS_SKILL_SLUG_V1, text: APPLETS_SKILL_DOCUMENT_V1 },
 ];
 
 /** The synthetic path a managed Skill is listed and loadable under. */

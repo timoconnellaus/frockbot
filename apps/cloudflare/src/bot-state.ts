@@ -12,6 +12,7 @@ import {
   plannedFoundationBackendContributions,
   shellBotContribution,
 } from "@frockbot/application-foundation/contributions";
+import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/application-foundation/generated/applets-artifact";
 import {
   createFoundationResidentRuntime,
   type FoundationResidentRuntime,
@@ -367,6 +368,16 @@ export class BotState extends DurableObject<BotStateEnv> {
               state: this.ctx,
               env: this.backendEnv,
               outboundFetch: this.outboundFetch,
+              // One application, compiled once: the Contributions mounted here
+              // and the Composition the Shell bootstraps have to be the same
+              // plan, or a member could be in one and not the other.
+              compileApplication: this.compileApplication,
+              // The immutable bytes of every first-party artifact-backed
+              // member the application ships (ADR 0022 decision 8). The store
+              // reads object storage first and falls back to these, so a
+              // deploy needs no seeding step for a Package that is already in
+              // this bundle.
+              bundledPackageArtifacts: FIRST_PARTY_PACKAGE_ARTIFACTS_V1,
               // The Durable Object owns the kernel authority; the Shell
               // Package supplies only its configuration and Composition
               // hooks.

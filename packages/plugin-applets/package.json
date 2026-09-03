@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./manifest": "./src/manifest.ts",
     "./root": "./src/root.ts",
     "./package.json": "./package.json"
   },
@@ -26,5 +27,10 @@
     "type": "git",
     "url": "git+https://github.com/timoconnellaus/frockbot.git",
     "directory": "packages/plugin-applets"
-  }
+  },
+  "files": [
+    "frockbot.json",
+    "skills",
+    "src"
+  ]
 }
