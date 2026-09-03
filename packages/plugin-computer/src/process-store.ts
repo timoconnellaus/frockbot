@@ -6,8 +6,8 @@
 // outlives its Turn, and after a Durable Object eviction the record is the only
 // thing that knows the process was ever launched.
 //
-// A deep, small module: `record`, `read`, `update`, `list`. Every write goes
-// through a decoder, so a value that reaches storage is a value the codec
+// A deep, small module: `record`, `read`, `update`, `delete`, `list`. Every
+// write goes through a decoder, so a value that reaches storage is a value the codec
 // accepts, and a stored record the codec later refuses is a visible failure
 // rather than a silently reshaped one.
 import {
@@ -41,7 +41,7 @@ export class ComputerProcessStore {
    */
   async record(intent: ComputerProcessRecordV1): Promise<void> {
     const decoded = decodeComputerProcessRecordV1(intent);
-    const held = await this.storage.list<unknown>({
+    let held = await this.storage.list<unknown>({
       prefix: COMPUTER_PROCESS_PREFIX,
       limit: COMPUTER_PROCESS_LIMIT_PER_BOT + 1,
     });
@@ -49,11 +49,66 @@ export class ComputerProcessStore {
       held.size >= COMPUTER_PROCESS_LIMIT_PER_BOT &&
       !held.has(computerProcessKeyV1(decoded.processId))
     ) {
+      // A finished process's record has already answered every question
+      // anyone can ask of it. Without this prune the hundredth background
+      // command a Bot ever ran disabled `computer_exec{background:true}`
+      // permanently: no tool, no command and no UI could forget a record.
+      held = await this.prune(held, decoded.processId);
+    }
+    if (
+      held.size >= COMPUTER_PROCESS_LIMIT_PER_BOT &&
+      !held.has(computerProcessKeyV1(decoded.processId))
+    ) {
       throw new ComputerProcessLimitError(
-        `this Bot already holds ${COMPUTER_PROCESS_LIMIT_PER_BOT} background process records; end or forget one first`,
+        `this Bot already has ${COMPUTER_PROCESS_LIMIT_PER_BOT} background processes that have not finished; stop one with computer_process_stop first`,
       );
     }
     await this.storage.put(computerProcessKeyV1(decoded.processId), decoded);
+  }
+
+  /**
+   * Drops finished records, oldest first, until the cap has room again.
+   *
+   * Terminal only: a `starting` or `running` record is the only thing that
+   * remembers the process exists, so it is never pruned to make space. An
+   * undecodable row goes too — it can answer nothing, and leaving it would let
+   * one bad value hold a slot for the life of the Bot.
+   */
+  private async prune(
+    held: Map<string, unknown>,
+    incoming: string,
+  ): Promise<Map<string, unknown>> {
+    const terminal: Array<{ key: string; startedAt: string }> = [];
+    for (const [key, value] of held) {
+      if (key === computerProcessKeyV1(incoming)) continue;
+      try {
+        const record = decodeComputerProcessRecordV1(value);
+        if (record.status === "exited" || record.status === "unknown") {
+          terminal.push({ key, startedAt: record.startedAt });
+        }
+      } catch (error) {
+        if (!(error instanceof ComputerProcessDecodeError)) throw error;
+        terminal.push({ key, startedAt: "" });
+      }
+    }
+    terminal.sort((left, right) =>
+      left.startedAt.localeCompare(right.startedAt),
+    );
+    const remaining = new Map(held);
+    for (const { key } of terminal) {
+      if (remaining.size < COMPUTER_PROCESS_LIMIT_PER_BOT) break;
+      await this.storage.delete(key);
+      remaining.delete(key);
+    }
+    return remaining;
+  }
+
+  /**
+   * Forgets one record. The process it described is over: the caller has read
+   * a terminal status, or is reconciling an intent whose launch never ran.
+   */
+  async delete(processId: string): Promise<void> {
+    await this.storage.delete(computerProcessKeyV1(processId));
   }
 
   async read(processId: string): Promise<ComputerProcessRecordV1 | undefined> {

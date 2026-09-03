@@ -102,6 +102,53 @@ describe("the process store", () => {
     expect((await store.read(record.processId))?.status).toBe("exited");
   });
 
+  test("prunes finished records rather than disabling background exec forever", async () => {
+    const held = storage();
+    const store = new ComputerProcessStore(held);
+    for (let index = 0; index < COMPUTER_PROCESS_LIMIT_PER_BOT; index += 1) {
+      await store.record({
+        ...record,
+        processId: `p-${index}`,
+        // Ordered oldest first, so the prune has an unambiguous victim.
+        startedAt: new Date(Date.UTC(2026, 7, 31, 0, 0, index)).toISOString(),
+        status: "exited",
+        exitCode: 0,
+      });
+    }
+    expect(held.map.size).toBe(COMPUTER_PROCESS_LIMIT_PER_BOT);
+
+    // The 101st launch is admitted: a finished process's record has already
+    // answered everything anyone can ask of it.
+    await store.record({ ...record, processId: "p-next", status: "starting" });
+
+    expect(await store.read("p-next")).toMatchObject({ status: "starting" });
+    expect(await store.read("p-0")).toBeUndefined();
+    expect(await store.read("p-1")).toMatchObject({ status: "exited" });
+    expect(held.map.size).toBe(COMPUTER_PROCESS_LIMIT_PER_BOT);
+
+    // A record that has not finished is never pruned to make room: it is the
+    // only thing that remembers the process exists.
+    for (let index = 1; index < COMPUTER_PROCESS_LIMIT_PER_BOT; index += 1) {
+      await store.update({
+        ...record,
+        processId: `p-${index}`,
+        status: "running",
+      });
+    }
+    await expect(
+      store.record({ ...record, processId: "p-one-too-many" }),
+    ).rejects.toBeInstanceOf(ComputerProcessLimitError);
+  });
+
+  test("forgets one record on request", async () => {
+    const held = storage();
+    const store = new ComputerProcessStore(held);
+    await store.record(record);
+    await store.delete(record.processId);
+    expect(await store.read(record.processId)).toBeUndefined();
+    expect(held.map.size).toBe(0);
+  });
+
   test("drops a stored value the codec refuses rather than failing the listing", async () => {
     const held = storage();
     const store = new ComputerProcessStore(held);
