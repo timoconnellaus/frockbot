@@ -9,6 +9,7 @@ import {
   createUserApplication,
   HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1,
 } from "./user-application.js";
+import { BotTurnRefusedError } from "@frockbot/kernel-do";
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
@@ -323,9 +324,12 @@ describe("user application Bot seam", () => {
       { thrown: 'run "run-1" admission was fenced', reason: "fenced" },
       { thrown: 'run "run-1" already exists', reason: "duplicate" },
     ] as const;
-    const post = async (thrown: string): Promise<Response> => {
+    const post = async (thrown: string | Error): Promise<Response> => {
       const botState = {
-        run: () => Promise.reject(new Error(thrown)),
+        run: () =>
+          Promise.reject(
+            typeof thrown === "string" ? new Error(thrown) : thrown,
+          ),
         assertRegistered: () => Promise.resolve(),
       } as unknown as BotStateBinding;
       return createUserApplication()(
@@ -359,6 +363,20 @@ describe("user application Bot seam", () => {
         error: refusal.thrown,
       });
     }
+
+    // A refusal the authority typed is classified by what it says it is, so
+    // rewording the sentence can never turn a 409 into a 500 again.
+    const typed = await post(
+      new BotTurnRefusedError(
+        "reconciliation-required",
+        'run "run-1" is queued: the Bot owes an answer first',
+      ),
+    );
+    expect(typed.status).toBe(409);
+    expect(await typed.json<unknown>()).toMatchObject({
+      status: "refused",
+      reason: "reconciliation-required",
+    });
 
     // Anything the Bot did not refuse on purpose is still a fault.
     const broken = await post("the Composition could not mount");

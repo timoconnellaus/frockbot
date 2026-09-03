@@ -368,6 +368,32 @@ describe("SessionStore", () => {
     ]);
   });
 
+  test("a failed durable write is reported and does not stop later writes", async () => {
+    const persisted: string[][] = [];
+    let failNext = true;
+    const root = await createStore(undefined, {
+      persistEvents: async (_sessionId, events) => {
+        await Promise.resolve();
+        if (failNext) {
+          failNext = false;
+          throw new Error("storage hiccup");
+        }
+        persisted.push(events.map((event) => event.type));
+      },
+    });
+    const session = root.sessions.create("durable-session");
+
+    // The Turn fails loudly rather than carrying on in memory over a log that
+    // silently stopped being written.
+    await expect(session.flush()).rejects.toThrow("storage hiccup");
+
+    // And the chain is not poisoned: chaining with `then` alone made every
+    // later write skip its callback for the life of the Session.
+    session.append({ type: "turn/start", turn: 1 });
+    await session.flush().catch(() => undefined);
+    expect(persisted).toEqual([["turn/start"]]);
+  });
+
   test("rehydrates a session and continues its sequence", async () => {
     const firstRoot = await createStore();
     const first = firstRoot.sessions.create("durable-session");

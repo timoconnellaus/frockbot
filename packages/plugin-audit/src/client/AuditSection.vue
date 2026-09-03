@@ -85,9 +85,8 @@ function when(entry: AuditEntryV1): string {
       <span class="audit__intro">
         <strong>Audit log</strong>
         <small>
-          Every shell command, browser action, remote tool call and Workspace
-          write this Bot has made. Arguments are never kept — only a digest and
-          a redacted preview.
+          Every shell command, browser action, remote tool call and file write
+          this Bot has made. Command details aren't stored.
         </small>
       </span>
       <UiButton
@@ -108,17 +107,15 @@ function when(entry: AuditEntryV1): string {
       class="audit__banner"
       role="status"
     >
-      Older activity has been trimmed to this account's retention bound — 20 000
-      entries, or 180 days. Rebuilding restores everything the Bots' own turns
-      still hold.
+      Older activity has been trimmed. Rebuild to restore what's still
+      available.
     </p>
     <p
       v-else-if="audit.indexState === 'rebuilding'"
       class="audit__banner"
       role="status"
     >
-      A rebuild is in progress. What is shown may be incomplete until it
-      finishes.
+      Rebuilding. What's shown may be incomplete until it finishes.
     </p>
 
     <div v-if="audit.receipt" class="audit-receipt">
@@ -127,10 +124,9 @@ function when(entry: AuditEntryV1): string {
         {{ audit.receipt.bots }} Bots
       </strong>
       <small>
-        {{ audit.receipt.unknownOutcomes }} with an outcome the turn log cannot
-        explain, and {{ audit.receipt.hostJournalDiscrepancies }} effect(s) the
-        Computer host reported that no turn accounts for. A discrepancy is
-        counted here, never written in as if a turn had recorded it.
+        {{ audit.receipt.unknownOutcomes }} with an outcome this log can't
+        explain, and {{ audit.receipt.hostJournalDiscrepancies }} action(s) the
+        computer reported that this log can't match to anything the Bot did.
       </small>
       <div class="audit-receipt__actions">
         <UiButton type="button" @click="audit.dismissReceipt()">
@@ -161,7 +157,7 @@ function when(entry: AuditEntryV1): string {
     </div>
 
     <p v-if="audit.loaded && audit.entries.length === 0" class="audit__empty">
-      No audited activity yet. A turn that only talks records nothing here.
+      Nothing here yet. Only actions get logged, not conversation.
     </p>
 
     <ol v-else class="audit__rows">

@@ -31,12 +31,14 @@ describe("model runtime presentation", () => {
       "Llama 3 · Ollama Cloud · Account model",
     );
     expect(modelRuntimeLabel({ ...label, source: "bot" })).toBe(
-      "Llama 3 · Ollama Cloud · Bot override",
+      "Llama 3 · Ollama Cloud · this Bot only",
     );
   });
 
   test("shows unavailable and backend failure states", () => {
-    expect(modelRuntimeLabel({ source: "none" })).toBe("Model unavailable");
+    expect(modelRuntimeLabel({ source: "none" })).toBe(
+      "No model available — set one up in Models",
+    );
     expect(
       modelRuntimeLabel({
         source: "account",

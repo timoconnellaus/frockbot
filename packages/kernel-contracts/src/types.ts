@@ -170,7 +170,12 @@ export function turnEndReason(value: unknown): string | undefined {
   return bounded.length > 0 ? bounded : undefined;
 }
 
-/** The failure text a User sees for a Turn that did not complete. */
+/**
+ * The failure text recorded against a Turn that did not complete. It names the
+ * outcome and the provider's own reason, which the debug surface and the API
+ * both need. It is a diagnostic, not copy: the client never renders it into the
+ * conversation — see `runFailureCopyV1` in the shell's client.
+ */
 export function turnFailureMessage(
   outcome: TurnOutcome,
   reason?: string,
@@ -1497,7 +1502,11 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         const label = `session event.refusals[${index}]`;
         const entry = eventRecord(refusal, label);
         requireEventKeys(entry, ["path", "reason"], label);
-        eventString(entry.path, `${label}.path`);
+        // A refusal that names no path is still a refusal — the read was
+        // declined at the root, and the reason is the part that matters.
+        // Rejecting it here killed the Turn *after* the event was appended,
+        // which left the durable log open inside that Turn and wedged the Bot.
+        eventString(entry.path, `${label}.path`, true);
         eventString(entry.reason, `${label}.reason`);
       });
       break;

@@ -53,7 +53,11 @@ import {
 import { MCP_OAUTH_CONNECTION_TYPE_ID } from "@frockbot/plugin-mcp/agent";
 import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
-import { decodeClientTurnV1 } from "../run-protocol.js";
+import {
+  ClientTurnRefusedErrorV1,
+  type ClientTurnRefusalReasonV1,
+  decodeClientTurnV1,
+} from "../run-protocol.js";
 import {
   decodeApprovalDecisionReceiptV1,
   decodeApprovalListViewV1,
@@ -242,14 +246,30 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
       runId: run.runId,
       status: run.status,
       message: run.stopRequestedAt
-        ? "Stop accepted; reconciling the provider outcome before cancelling."
-        : (run.recovery?.message ??
-          run.failure ??
-          "This Turn requires provider reconciliation before it can continue."),
-      canResume: !run.stopRequestedAt && run.recovery?.action === "resume",
+        ? "Stopping…"
+        : "Something went wrong mid-reply. Try again to pick it up.",
+      // Offered whenever the run is parked, Stop included. Hiding it there
+      // hid it in exactly the case Stop creates: a Turn that was stopped
+      // while the model was mid-answer parks, and the person was left with a
+      // banner and no way to act on it.
+      canResume: run.recovery?.action === "resume",
     };
   }
   return undefined;
+}
+
+/**
+ * What a refused send tells the person. The refusal's own `error` names the
+ * durable invariant that declined it, which the debug surface needs and the
+ * composer does not, so the typed reason picks the sentence instead.
+ */
+function turnRefusalCopyV1(reason: ClientTurnRefusalReasonV1): string {
+  if (reason === "busy")
+    return "This Bot is still working on your last message.";
+  if (reason === "reconciliation-required")
+    return "This Bot's last reply stopped partway. Try again to continue it.";
+  if (reason === "duplicate") return "That message was already sent.";
+  return "That message didn't go through. Try sending it again.";
 }
 
 function isTerminalRun(run: ClientRun): boolean {
@@ -289,7 +309,8 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.failure ?? "Interrupted by your next message.",
+      text: run.responseText ?? "",
+      notice: "Interrupted by your next message.",
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -301,10 +322,7 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text:
-        run.recovery?.message ??
-        run.failure ??
-        "Provider reconciliation is required before this Turn can continue.",
+      text: "This reply stopped partway. Try again to continue it.",
       status: "reconciliation-required",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -316,7 +334,8 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.failure ?? "Stopped by an authenticated Stop command.",
+      text: run.responseText ?? "",
+      notice: "You stopped this.",
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -329,7 +348,7 @@ function assistantMessage(
     role: "assistant",
     text:
       run.status === "failed"
-        ? (run.failure ?? "Agent request failed.")
+        ? "This Bot couldn't finish its reply. Try again."
         : (run.responseText ?? notification?.body ?? ""),
     status: run.status === "failed" ? "error" : "completed",
     tools: toolsFrom(run.events),
@@ -697,7 +716,7 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
     !Array.isArray(value.packages) ||
     value.packages.length > 256
   ) {
-    throw new Error("Application manifest is invalid");
+    throw new Error("FrockBot couldn't load this deployment. Reload the page.");
   }
   return value.packages.flatMap((candidate) => {
     if (
@@ -730,7 +749,9 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
           kind === "mobile",
       )
     ) {
-      throw new Error("Application Package metadata is invalid");
+      throw new Error(
+        "FrockBot couldn't load this deployment. Reload the page.",
+      );
     }
     const decoded = decodeFrockBotManifest({
       // v4, so a Capability carrying an admission ceiling decodes here too.
@@ -805,6 +826,15 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   let admissionObserver: AbortController | undefined;
   let runObserver: AbortController | undefined;
   let selectionGeneration = 0;
+  /*
+   * Which conversation the transcript is showing.
+   *
+   * A read that was already in flight when the User starts a new conversation
+   * answers with the conversation that just ended, and projecting it puts the
+   * old Turns back on a transcript the User has just been told is empty. The
+   * epoch is bumped at the boundary so those answers are dropped.
+   */
+  let conversationGeneration = 0;
   let userSettingsGeneration = 0;
   let pluginCatalogGeneration = 0;
   let packageCatalogGeneration = 0;
@@ -912,7 +942,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     web.value.activeRun = {
       runId,
       status: "running",
-      message: "Confirming whether this Turn was admitted.",
+      message: "Checking whether your message went through…",
       canResume: false,
     };
     if (!ctx.transport.lookupRun || !ctx.transport.fenceRunAdmission) {
@@ -952,7 +982,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         reconciliationError = `${
           error instanceof Error
             ? error.message
-            : "Turn admission lookup failed"
+            : "Couldn't check on your message."
         } Retrying…`;
         web.value.settingsError = reconciliationError;
       }
@@ -971,6 +1001,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     if (!ctx.transport.lookupRun) return;
     let delayMs = 250;
     let observationError: string | undefined;
+    const conversation = conversationGeneration;
     while (!signal.aborted) {
       try {
         const run = await observeWhileAttached(
@@ -980,11 +1011,14 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         if (
           signal.aborted ||
           generation !== selectionGeneration ||
+          // The Turn belongs to the conversation it was sent in, so a new one
+          // ends the observation rather than drawing it on an empty thread.
+          conversation !== conversationGeneration ||
           web.value.activeBotId !== botId
         ) {
           return;
         }
-        if (!run) throw new Error("Stopped Turn is unavailable");
+        if (!run) throw new Error("Couldn't load that reply.");
         if (web.value.settingsError === observationError) {
           web.value.settingsError = undefined;
         }
@@ -994,7 +1028,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       } catch (error) {
         if (signal.aborted) return;
         observationError = `${
-          error instanceof Error ? error.message : "Turn lookup failed"
+          error instanceof Error ? error.message : "Couldn't load that reply."
         } Retrying…`;
         web.value.settingsError = observationError;
       }
@@ -1007,15 +1041,18 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     botId: string,
     generation = selectionGeneration,
   ): Promise<void> {
+    const conversation = conversationGeneration;
+    const current = () =>
+      generation === selectionGeneration &&
+      conversation === conversationGeneration &&
+      web.value.activeBotId === botId;
     const runs = await (ctx.transport.listRuns?.(botId) ?? Promise.resolve([]));
-    if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-      return;
+    if (!current()) return;
     projectDurableRuns(web.value, [], runs);
     try {
       const announcements = await (ctx.transport.listAnnouncements?.(botId) ??
         Promise.resolve([]));
-      if (generation === selectionGeneration && web.value.activeBotId === botId)
-        projectAnnouncements(web.value.messages, announcements);
+      if (current()) projectAnnouncements(web.value.messages, announcements);
     } catch {
       // Announcements are conversational history, never admission: a Session
       // that cannot read them still shows every Turn.
@@ -1024,17 +1061,14 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     try {
       notifications = await (ctx.transport.listNotifications?.(botId) ??
         Promise.resolve([]));
-      if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-        return;
+      if (!current()) return;
     } catch (error) {
-      if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-        return;
+      if (!current()) return;
       web.value.settingsError =
         error instanceof Error ? error.message : "Could not load notifications";
       return;
     }
-    if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-      return;
+    if (!current()) return;
     const projected = projectDurableRuns(web.value, notifications, runs);
     // A decision may have been recorded on another device since the last poll,
     // and an expiry is recorded by an alarm nobody clicked.
@@ -1042,12 +1076,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     // A background subagent settles after its Turn is over, so the chips in
     // the transcript learn what became of it here and not from the run.
     await web.value.loadTasks();
-    if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-      return;
+    if (!current()) return;
     if (!ctx.transport.acknowledgeNotification) return;
     for (const notification of notifications) {
-      if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-        return;
+      if (!current()) return;
       if (!projected.has(notification.notificationId)) {
         web.value.settingsError = "A completed Bot result is waiting to load";
         continue;
@@ -1198,7 +1230,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   const web: Ref<ShellWebData> = ref({
     connection: "ready",
     ...(connectionReturn ? { connectionReturn } : {}),
-    modelLabel: "Model unavailable",
+    modelLabel: "No model available — set one up in Models",
     modelReady: false,
     modelSource: "none",
     settingsAvailable: true,
@@ -1287,6 +1319,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       }
       if (generation !== selectionGeneration || web.value.activeBotId !== botId)
         return;
+      // Reads already in flight answer with the conversation that just ended;
+      // the epoch drops them instead of letting them redraw it.
+      conversationGeneration += 1;
+      runObserver?.abort();
+      runObserver = undefined;
       web.value.messages = [];
       web.value.activeRun = undefined;
       web.value.activeRunId = undefined;
@@ -1558,12 +1595,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       const botId = web.value.activeBotId;
       const catalog = web.value.packageUi;
       if (!post || !botId || !catalog || catalog.botId !== botId) {
-        throw new Error("Package UI is unavailable");
+        throw new Error("That plugin's page isn't available.");
       }
       if (!packageIframeToolAllowedV1(contribution, name)) {
-        throw new Error(
-          `Package "${contribution.packageId}" did not declare tool "${name}"`,
-        );
+        throw new Error(`That plugin isn't allowed to use ${name}.`);
       }
       const turn = decodeClientTurnV1(
         await post(
@@ -2022,7 +2057,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!settings || !ctx.transport.executeConfiguration) {
         throw new Error("Plugins are unavailable");
       }
-      if (!generation) throw new Error("The Catalog generation is unknown");
+      if (!generation)
+        throw new Error("The catalog isn't loaded yet. Try again in a moment.");
       const receipt = await ctx.transport.executeConfiguration({
         schemaVersion: 1,
         type: "user/install-package",
@@ -2305,8 +2341,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (result.status !== "applied") {
         throw new Error(
           result.status === "reconciliation-required"
-            ? "Connection revocation requires reconciliation"
-            : "Connection revocation failed",
+            ? "Disconnecting didn't finish. Try again."
+            : "Couldn't disconnect that account.",
         );
       }
     },
@@ -2344,6 +2380,12 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       const observed = web.value.activeRunId;
       const supersedes = observed ? { runId: observed } : {};
       web.value.activeRunId = pendingRunId;
+      // Stop is offered for the whole of the Turn the User just started, not
+      // only from the moment a projection happens to arrive. A send that
+      // supersedes a running Turn is the exception: the Turn Stop targets is
+      // still the one executing, and this one is queued behind it. The durable
+      // projection corrects both the instant it arrives.
+      if (!observed) web.value.runningRunId = pendingRunId;
       web.value.error = undefined;
       web.value.messages.push(
         {
@@ -2428,15 +2470,23 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.activeBotId !== botId
         )
           return { accepted: true, runId: pendingRunId };
+        // A refusal is a normal answer, not an uncertain send: the Bot
+        // declined and said why. Show that, drop the optimistic bubbles, and
+        // let the composer give the person their text back — fencing a run
+        // that was never admitted only threw the reason away.
+        if (error instanceof ClientTurnRefusedErrorV1) {
+          removeMessages(web.value.messages, pendingRunId);
+          const refusal = turnRefusalCopyV1(error.refusal.reason);
+          web.value.error = refusal;
+          return { accepted: false, error: refusal };
+        }
         const aborted =
           error instanceof DOMException && error.name === "AbortError";
         replaceMessage(web.value.messages, pendingRunId, {
           id: `${pendingRunId}:assistant`,
           runId: pendingRunId,
           role: "assistant",
-          text: aborted
-            ? "Request stopped locally; checking whether it started."
-            : "Confirming whether this Turn was admitted.",
+          text: "Checking whether your message went through…",
           at: optimisticAt,
           status: "interrupted",
           tools: [],
@@ -2465,14 +2515,18 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             id: `${pendingRunId}:assistant`,
             runId: pendingRunId,
             role: "assistant",
-            text: "Turn was not admitted.",
+            text: "Your message didn't go through. Try sending it again.",
             at: optimisticAt,
             status: "error",
             tools: [],
             sends: [],
           });
-          web.value.error = "Turn was not admitted";
-          return { accepted: false, error: "Turn was not admitted" };
+          web.value.error =
+            "Your message didn't go through. Try sending it again.";
+          return {
+            accepted: false,
+            error: "Your message didn't go through. Try sending it again.",
+          };
         }
         return { accepted: true, runId: pendingRunId };
       } finally {
@@ -2483,18 +2537,26 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         ) {
           web.value.activeRunId = undefined;
         }
+        // The optimistic Stop target goes with it: a Turn nobody is running is
+        // not a Turn anybody can stop.
+        if (
+          web.value.runningRunId === pendingRunId &&
+          web.value.activeRunId !== pendingRunId
+        ) {
+          web.value.runningRunId = undefined;
+        }
       }
     },
     async resumeRun(runId: string): Promise<void> {
       if (!ctx.transport.reconcileRun) {
-        web.value.settingsError = "Turn reconciliation is unavailable";
+        web.value.settingsError = "Can't retry this right now.";
         return;
       }
       if (web.value.activeRun?.runId !== runId) return;
       web.value.activeRun = {
         runId,
         status: "running",
-        message: "Reconciliation requested; checking progress.",
+        message: "Retrying…",
         canResume: false,
       };
       const botId = web.value.activeBotId;
@@ -2503,7 +2565,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         await ctx.transport.reconcileRun(botId, runId);
       } catch (error) {
         web.value.settingsError =
-          error instanceof Error ? error.message : "Reconciliation failed";
+          error instanceof Error ? error.message : "Couldn't retry that.";
       }
       try {
         await deliverNotifications(botId);
@@ -2511,7 +2573,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         web.value.settingsError =
           error instanceof Error
             ? error.message
-            : "Could not refresh the reconciled Turn";
+            : "Couldn't refresh this reply.";
       }
     },
     async stopRun(): Promise<void> {
@@ -2654,6 +2716,70 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     },
   );
 
+  /*
+   * A running Turn reaches every browser that is looking, not only the one
+   * holding its POST.
+   *
+   * The reply to `POST /api/bots/:bot/turns` is one client's copy of a Turn.
+   * A reload, a second tab, or a dropped request has no such copy, so the
+   * transcript would sit on a spinner until somebody reloaded again. Two
+   * seams close that: the Bot's state channel pushes a `runs` invalidation
+   * whenever the durable run records move, and — for any client that has no
+   * socket — the run is polled to its terminal state. Both end in the same
+   * `GET /api/bots/:bot/turns` projection, so neither invents client state
+   * and the one-bubble-per-send contract is untouched.
+   */
+  let stopRunChannel: (() => void) | undefined;
+  const stopRunChannelWatch = watch(
+    () => web.value.activeBotId,
+    (botId) => {
+      stopRunChannel?.();
+      stopRunChannel = undefined;
+      if (!botId || !ctx.transport.watchBotState) return;
+      const generation = selectionGeneration;
+      stopRunChannel = ctx.transport.watchBotState(botId, {
+        async invalidate(topic) {
+          // A reset carries no topic and means "read everything again".
+          if (topic !== undefined && topic !== "runs") return;
+          if (
+            generation !== selectionGeneration ||
+            web.value.activeBotId !== botId
+          )
+            return;
+          await deliverNotifications(botId, generation);
+        },
+        status() {
+          // The channel's health is not the transcript's: an unavailable
+          // socket falls back to the observation below, which is what a
+          // client without one uses anyway.
+        },
+      });
+    },
+    { immediate: true },
+  );
+
+  const stopRunObservation = watch(
+    () => [web.value.activeBotId, web.value.activeRunId] as const,
+    ([botId, runId]) => {
+      // The send path owns the run it started: its POST is the observation,
+      // and `stopRun` starts its own. This is for every other way a client
+      // finds itself watching a Turn it is not holding open.
+      if (!botId || !runId || activeRequest || runObserver) return;
+      const generation = selectionGeneration;
+      const observer = new AbortController();
+      runObserver = observer;
+      void observeRunUntilTerminal(botId, runId, generation, observer.signal)
+        .catch(() => {
+          // `observeRunUntilTerminal` reports its own failures; a rejection
+          // here would be an unhandled one.
+        })
+        .finally(() => {
+          if (runObserver === observer) runObserver = undefined;
+        });
+    },
+    { immediate: true },
+  );
+
   return [
     ctx.provide(clientSurfaceRegistryKey, surfaces),
     // The shared client projection is updated by the contracts lane. This cast
@@ -2672,6 +2798,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     () => {
       stopEntrySync();
       stopRunFollow();
+      stopRunChannelWatch();
+      stopRunChannel?.();
+      stopRunObservation();
       stopSourceFollow();
       for (const dispose of entryDisposers.splice(0).toReversed()) dispose();
       activeRequest?.abort();
@@ -2690,6 +2819,13 @@ function replaceMessage(
     (message) => message.runId === runId && message.role === "assistant",
   );
   if (index >= 0) messages[index] = replacement;
+}
+
+/** Takes back both optimistic lines of a send the Bot never admitted. */
+function removeMessages(messages: WebChatMessage[], runId: string): void {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.runId === runId) messages.splice(index, 1);
+  }
 }
 
 export default shellClientPlugin;

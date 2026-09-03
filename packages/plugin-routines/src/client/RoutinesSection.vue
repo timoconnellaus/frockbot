@@ -158,8 +158,8 @@ async function toggleLog(routineId: string): Promise<void> {
       <span class="routines__intro">
         <strong>Routines</strong>
         <small>
-          Standing instructions this Bot runs on a schedule or on a delivered
-          webhook, as their own Turns.
+          Standing instructions this Bot runs on a schedule, or when a webhook
+          fires.
         </small>
       </span>
       <UiButton type="button" :disabled="!botId" @click="startCreate">
@@ -175,8 +175,7 @@ async function toggleLog(routineId: string): Promise<void> {
       v-if="routines.loaded && routines.routines.length === 0"
       class="routines__empty"
     >
-      No Routines yet. A Routine fires on its own and reports back on this Bot's
-      next conversation.
+      No Routines yet. Set one up to have this Bot do something on a schedule.
     </p>
 
     <article
@@ -204,8 +203,8 @@ async function toggleLog(routineId: string): Promise<void> {
           >Webhook key, version {{ routines.mintedHook.keyVersion }}</strong
         >
         <small>
-          This is the only time it is shown. Copy it now; rotating is the only
-          way to see a key again.
+          This is the only time you'll see this key. Copy it now — you'll need a
+          new one otherwise.
         </small>
         <code>{{ hookUrl() }}</code>
         <code class="routine-hook__token">{{ routines.mintedHook.token }}</code>

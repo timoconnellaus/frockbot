@@ -89,3 +89,58 @@ describe("the argument digest", () => {
     );
   });
 });
+
+describe("secrets a preview must not carry", () => {
+  test("redacts an env-var assignment whose keyword sits behind an underscore", () => {
+    // `_` is a word character, so the old `\bsecret\b` anchor did not match
+    // inside `AWS_SECRET_ACCESS_KEY` and these landed verbatim in a durable
+    // table a person reads — the exact shape a leased credential takes in a
+    // `computer_exec` command.
+    for (const command of [
+      "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY aws s3 ls",
+      "GITHUB_TOKEN=abcdefghijklmnopqrst gh pr list",
+      "MYSQL_PASSWORD=hunter2hunter2 mysql -u root",
+    ]) {
+      const preview = auditPreviewV1("shell", "computer_exec", { command });
+      expect(preview).toContain("[redacted:credential-assignment]");
+      expect(preview).not.toContain("wJalrXUtnFEMIK");
+      expect(preview).not.toContain("abcdefghijklmnopqrst");
+      expect(preview).not.toContain("hunter2hunter2");
+    }
+  });
+
+  test("redacts credentials carried in a URL", () => {
+    const withUser = auditPreviewV1("browser", "computer_browser", {
+      action: "open",
+      url: "https://alice:s3cr3tpass@internal.example.com/reports",
+    });
+    expect(withUser).toContain("[redacted:url-credentials]");
+    expect(withUser).not.toContain("s3cr3tpass");
+
+    for (const [url, secret] of [
+      ["https://example.com/cb?token=abcdefghijklmnop", "abcdefghijklmnop"],
+      ["https://example.com/cb?code=4%2F0AeanS0abcdefgh", "AeanS0abcdefgh"],
+      ["https://example.com/f.zip?sig=aGVsbG93b3JsZA", "aGVsbG93b3JsZA"],
+    ] as const) {
+      const preview = auditPreviewV1("browser", "computer_browser", {
+        action: "open",
+        url,
+      });
+      // Which shape catches it does not matter; that it never reaches the
+      // durable table does.
+      expect(preview).toMatch(/\[redacted:/);
+      expect(preview).not.toContain(secret);
+    }
+  });
+
+  test("never previews the body of a memory or skill write", () => {
+    const preview = auditPreviewV1("file", "memory_write", {
+      path: "by-agent/scout/profile.md",
+      text: "Tim's home address is 12 Somewhere Street and his PIN is 4021.",
+    });
+    // The audit row says where something was written. What was written is the
+    // Workspace's business and the digest's.
+    expect(preview).toBe("by-agent/scout/profile.md");
+    expect(preview).not.toContain("Somewhere Street");
+  });
+});

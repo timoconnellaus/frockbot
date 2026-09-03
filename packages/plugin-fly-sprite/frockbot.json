@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "id": "fly-sprite",
-  "displayName": "Fly Sprite Computer",
+  "displayName": "Computer",
   "version": "0.0.1",
   "compatibility": { "frockbot": ">=0.0.1" },
   "contributions": {

@@ -34,11 +34,13 @@ import {
   eventsForFailedRun,
   latestModelRequestJournalState,
   planBotRunRecovery,
+  repairOrphanedOpenTurnV1,
   unresolvedModelRequestFailure,
 } from "./run-recovery.js";
 import {
   BotTurnReconciliationRequiredError,
   BotTurnRecoveryRequiredError,
+  BotTurnRefusedError,
 } from "./turn-errors.js";
 import {
   botConversationBaseSessionIdV1,
@@ -162,6 +164,22 @@ export const SUPERSEDED_TURN_REASON_V1 = "superseded by a new user message";
 /** How many times a queued Turn retries the object before giving up. */
 const MAX_QUEUED_RUN_START_ATTEMPTS = 8;
 
+/**
+ * True when this object has already durably decided to throw the Turn away.
+ *
+ * Reconciliation exists to retrieve an external outcome the Turn still needs.
+ * A Turn a Stop or a supersede has already discarded needs nothing: its
+ * provider outcome cannot change what it settles as, and parking it would keep
+ * the active-run marker — and so refuse every later message — over an answer
+ * nobody is waiting for. The intent the User expressed wins, and the run
+ * settles `cancelled` or `superseded` with everything it had already said.
+ */
+function runWasDiscardedV1(
+  run: { stopRequestedAt?: string; supersededAt?: string } | undefined,
+): boolean {
+  return Boolean(run?.stopRequestedAt || run?.supersededAt);
+}
+
 export interface BotDurableAuthorityOptions<Snapshot> {
   state: DurableObjectState;
   codec: StoredRunCodecV1<Snapshot>;
@@ -206,7 +224,14 @@ export class BotDurableAuthority<Snapshot> {
   async run(input: OwnedBotTurnCommand): Promise<BotTurnCompletion> {
     const command = await this.conversationScopedCommand(input);
     await this.assertMatchingRunCommand(command);
-    await this.recoverActiveRun();
+    // Recovering whatever this object was left holding must never decide the
+    // fate of a new command. `recoverActiveRun` executes the *previous* Turn
+    // inline and rethrows, so a recovery that failed — an uncertain effect, a
+    // mount failure, a provider that was down — threw before the new message
+    // was ever admitted, and the person's message was simply lost. The old
+    // Turn is durable either way and the alarm retries it; admission now
+    // refuses or supersedes on its own terms.
+    await this.recoverActiveRun().catch(() => undefined);
     const replay = await this.settledRunResult(command);
     if (replay) return replay;
     const admission = await this.acceptRun(command);
@@ -253,8 +278,10 @@ export class BotDurableAuthority<Snapshot> {
         const promoted = await this.promoteQueuedRun(command.runId);
         if (promoted === "blocked") {
           // Another Turn holds the object. Recovery drives it to its own
-          // durable terminal or resumable state, and this one tries again.
-          await this.recoverActiveRun();
+          // durable terminal or resumable state, and this one tries again —
+          // including when that recovery fails, which is the other Turn's
+          // problem and not this one's.
+          await this.recoverActiveRun().catch(() => undefined);
           // Unless what holds the object is an uncertain effect. That is
           // settled by an explicit reconciliation the User asks for, on their
           // own clock, and retrying against it would only burn this caller's
@@ -262,11 +289,14 @@ export class BotDurableAuthority<Snapshot> {
           // run is durable: it stays queued, and the reconciliation's own
           // settlement — or the recovery alarm — starts it.
           if (await this.activeRunAwaitsReconciliation()) {
-            return {
-              runId: command.runId,
-              text: "",
-              events: [],
-            } satisfies BotTurnCompletion;
+            // A Turn that has not run is not a completed Turn. Answering with
+            // an empty completion made the browser render the person's new
+            // message as answered with silence; the durable queue entry stays,
+            // and the refusal says why nothing has happened yet.
+            throw new BotTurnRefusedError(
+              "reconciliation-required",
+              `run "${command.runId}" is queued: the active run requires reconciliation before another Turn can be admitted`,
+            );
           }
           continue;
         }
@@ -382,12 +412,22 @@ export class BotDurableAuthority<Snapshot> {
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
       ).map(decodeSessionEvent);
       const settings = run.configurationSnapshot;
-      await transaction.put(key, {
-        ...run,
-        status: "running",
-        phase: "executing",
-        failure: undefined,
-      } satisfies StoredRunV1<Snapshot>);
+      // The failure is *removed*, not set to `undefined`: a running run that
+      // carries a `failure` key is a shape the run record does not allow, and
+      // writing one turned "resolve this Turn" into a record nothing could
+      // read afterwards. `require` checks it here, where the write is, rather
+      // than leaving the projector to fail on every later read.
+      const { failure: _failure, ...resumed } = run;
+      await transaction.put(
+        key,
+        structuredClone(
+          this.codec.require({
+            ...resumed,
+            status: "running",
+            phase: "executing",
+          } satisfies StoredRunV1<Snapshot>),
+        ),
+      );
       await this.refreshRecoveryAlarm(transaction);
       return { run, latest, settings };
     });
@@ -493,8 +533,9 @@ export class BotDurableAuthority<Snapshot> {
       }
       const modelState = latestModelRequestJournalState(events);
       if (
-        error instanceof BotTurnReconciliationRequiredError ||
-        modelState.status === "unresolved"
+        (error instanceof BotTurnReconciliationRequiredError ||
+          modelState.status === "unresolved") &&
+        !runWasDiscardedV1(durableRun)
       ) {
         await this.requireRunReconciliation(
           command.runId,
@@ -625,8 +666,9 @@ export class BotDurableAuthority<Snapshot> {
       }
       const modelState = latestModelRequestJournalState(events);
       if (
-        error instanceof BotTurnReconciliationRequiredError ||
-        modelState.status === "unresolved"
+        (error instanceof BotTurnReconciliationRequiredError ||
+          modelState.status === "unresolved") &&
+        !runWasDiscardedV1(durableRun)
       ) {
         await this.requireRunReconciliation(
           run.runId,
@@ -672,7 +714,8 @@ export class BotDurableAuthority<Snapshot> {
     );
     if (!run) return undefined;
     if (run.commandFingerprint !== botTurnCommandFingerprintV1(command)) {
-      throw new Error(
+      throw new BotTurnRefusedError(
+        "duplicate",
         `Turn idempotency key "${runId}" was reused for a different command`,
       );
     }
@@ -687,7 +730,8 @@ export class BotDurableAuthority<Snapshot> {
       };
     }
     if (run.status !== "completed") {
-      throw new Error(
+      throw new BotTurnRefusedError(
+        "duplicate",
         `run "${runId}" already exists with status ${run.status}`,
       );
     }
@@ -715,7 +759,8 @@ export class BotDurableAuthority<Snapshot> {
       run &&
       run.commandFingerprint !== botTurnCommandFingerprintV1(command)
     ) {
-      throw new Error(
+      throw new BotTurnRefusedError(
+        "duplicate",
         `Turn idempotency key "${command.runId}" was reused for a different command`,
       );
     }
@@ -801,7 +846,16 @@ export class BotDurableAuthority<Snapshot> {
         this.ctx.storage.get<BotIdentity>(IDENTITY_KEY),
       ]);
       const run = this.codec.optional(storedRun);
-      if (run?.status === "reconciliation-required" && identity) return;
+      if (run?.status === "reconciliation-required" && identity) {
+        // A parked run is not this alarm's to settle — only an explicit
+        // reconciliation settles it — but returning without rescheduling
+        // dropped the object's *other* deadlines with it: a Routine due while
+        // a Bot sat parked never fired, and nothing set the alarm again.
+        await this.ctx.storage.transaction((transaction) =>
+          this.refreshRecoveryAlarm(transaction),
+        );
+        return;
+      }
     }
     await this.recoverActiveRun();
   }
@@ -1020,17 +1074,15 @@ export class BotDurableAuthority<Snapshot> {
         const storedFences = storedRunAdmissionFences(
           await transaction.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
         );
-        if (
-          !storedFences.includes(runId) &&
-          storedFences.length >= MAX_RUN_ADMISSION_FENCES
-        ) {
-          throw new Error("Run admission fence capacity reached");
-        }
+        // A bounded FIFO, not a cliff. Nothing ever evicted an entry, so a Bot
+        // that had refused 256 sends over its life answered every later fence
+        // with a 500 and left the client retrying "Turn admission lookup
+        // failed" forever. A run id old enough to age out here can no longer
+        // be admitted by any live caller.
+        const kept = storedFences.filter((fenced) => fenced !== runId);
+        while (kept.length >= MAX_RUN_ADMISSION_FENCES) kept.shift();
         await transaction.put({
-          [RUN_ADMISSION_FENCE_INDEX_KEY]: [
-            ...storedFences.filter((fenced) => fenced !== runId),
-            runId,
-          ],
+          [RUN_ADMISSION_FENCE_INDEX_KEY]: [...kept, runId],
           [IDENTITY_KEY]: durableIdentity ?? identity,
         });
         await transaction.delete(`${RUN_ADMISSION_FENCE_PREFIX}${runId}`);
@@ -1097,7 +1149,10 @@ export class BotDurableAuthority<Snapshot> {
       fences.includes(command.runId) ||
       (await this.ctx.storage.get(fenceKey))
     ) {
-      throw new Error(`run "${command.runId}" admission was fenced`);
+      throw new BotTurnRefusedError(
+        "fenced",
+        `run "${command.runId}" admission was fenced`,
+      );
     }
     const settings = await this.hooks.resolveAdmissionSnapshot(command);
     // Materialized before the transaction; the pin itself is read inside it.
@@ -1109,20 +1164,30 @@ export class BotDurableAuthority<Snapshot> {
         if (
           existing.commandFingerprint !== botTurnCommandFingerprintV1(command)
         ) {
-          throw new Error(
+          throw new BotTurnRefusedError(
+            "duplicate",
             `Turn idempotency key "${command.runId}" was reused for a different command`,
           );
         }
         if (existing.status === "completed") {
-          throw new Error(`run "${command.runId}" already completed`);
+          throw new BotTurnRefusedError(
+            "duplicate",
+            `run "${command.runId}" already completed`,
+          );
         }
-        throw new Error(`run "${command.runId}" already exists`);
+        throw new BotTurnRefusedError(
+          "duplicate",
+          `run "${command.runId}" already exists`,
+        );
       }
       const fences = storedRunAdmissionFences(
         await transaction.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
       );
       if (fences.includes(command.runId) || (await transaction.get(fenceKey))) {
-        throw new Error(`run "${command.runId}" admission was fenced`);
+        throw new BotTurnRefusedError(
+          "fenced",
+          `run "${command.runId}" admission was fenced`,
+        );
       }
       const identity = await transaction.get<BotIdentity>(IDENTITY_KEY);
       if (
@@ -1135,9 +1200,25 @@ export class BotDurableAuthority<Snapshot> {
       const supersede = activeRunId
         ? await this.planSupersede(transaction, command, activeRunId)
         : undefined;
-      const latestEvents = (
+      const storedEvents = (
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
       ).map(decodeSessionEvent);
+      // A Turn that died between `turn/start` and `turn/end` — an event the
+      // encoder refused, a durable write that failed — left the log open, and
+      // every later Turn failed validation with "turn N started while turn
+      // N-1 is open". Nothing owned that repair, because the run that would
+      // have closed it is already terminal, so admission does: with nothing
+      // executing, an open Turn is one nobody is going to finish.
+      const repairs = activeRunId
+        ? []
+        : repairOrphanedOpenTurnV1(command.sessionId, storedEvents);
+      const latestEvents = [...storedEvents, ...repairs];
+      if (repairs.length > 0) {
+        await transaction.put(
+          LATEST_EVENTS_KEY,
+          structuredClone(latestEvents.map(decodeSessionEvent)),
+        );
+      }
       const admittedSettings = await this.hooks.admittedSnapshot(
         transaction,
         settings,
@@ -1225,21 +1306,23 @@ export class BotDurableAuthority<Snapshot> {
     // no run when the person pressed send — supersedes exactly as a named one
     // does; only an absent field is "no intent", and that is still refused.
     if (lane !== "user" || !command.supersedes) {
-      throw new Error("bot already has an active run");
+      throw new BotTurnRefusedError("busy", "bot already has an active run");
     }
     const active = this.codec.optional(
       await transaction.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
     );
-    if (!active) throw new Error("bot already has an active run");
+    if (!active)
+      throw new BotTurnRefusedError("busy", "bot already has an active run");
     if (active.status === "reconciliation-required") {
       // An uncertain external effect is never abandoned to admit something
       // else: the outcome has to be retrieved before this object runs again.
-      throw new Error(
+      throw new BotTurnRefusedError(
+        "reconciliation-required",
         `run "${activeRunId}" requires reconciliation before another Turn can be admitted`,
       );
     }
     if (active.status !== "running") {
-      throw new Error("bot already has an active run");
+      throw new BotTurnRefusedError("busy", "bot already has an active run");
     }
     const pendingRunId = await transaction.get<string>(PENDING_RUN_KEY);
     // A Turn that has not dispatched a model request has no durable work to
@@ -1564,6 +1647,22 @@ export class BotDurableAuthority<Snapshot> {
         } satisfies StoredRunV1<Snapshot>);
         await this.refreshRecoveryAlarm(transaction);
         return { kind: "resume" as const, run, latest, settings };
+      }
+      if (runWasDiscardedV1(run)) {
+        // Recovery of a Turn Stop or supersede already discarded settles it on
+        // that intent rather than parking it: nothing is owed the answer.
+        await failStoredRun(
+          this.codec,
+          transaction,
+          this.terminalKeys(run.runId),
+          run.runId,
+          latest.slice(0, run.previousEventCount),
+          [...run.events, ...plan.repairs],
+          "Execution outcome requires reconciliation before it can resume",
+          this.supersededPackageRecords(),
+        );
+        await this.refreshRecoveryAlarm(transaction);
+        return undefined;
       }
       await transaction.put({
         [key]: {

@@ -106,9 +106,20 @@ describe("the classifier table", () => {
     });
   });
 
-  test("a call naming a registered machine is audited against that machine", () => {
+  test("a Computer tool is audited against the Computer, whatever it claims", () => {
+    // `machineId` is model-supplied. Deriving the target from it on every tool
+    // let a Bot run a command on the Computer and have the durable audit row
+    // say it ran on the User's laptop — the one field the row exists to be
+    // trusted on.
     expect(
       auditKindForToolV1("computer_exec", {
+        command: "ls",
+        machineId: "994dc2ee-1",
+      }),
+    ).toEqual({ kind: "shell", target: "computer" });
+    // The machine's own verbs still name the machine they reached.
+    expect(
+      auditKindForToolV1("machine_exec", {
         command: "ls",
         machineId: "994dc2ee-1",
       }),
@@ -116,8 +127,34 @@ describe("the classifier table", () => {
     // A malformed machine id is the Bot's own Computer, not a target the row
     // would be lying about.
     expect(
-      auditKindForToolV1("computer_exec", { command: "ls", machineId: "../x" }),
+      auditKindForToolV1("machine_exec", { command: "ls", machineId: "../x" }),
     ).toEqual({ kind: "shell", target: "computer" });
+  });
+
+  test("a namespaced dynamic tool is classified on the tool it resolves to", () => {
+    // `package_author` was dead: it is a namespaced dynamic tool, so the
+    // journalled name is `call_dynamic_tool` and no row was ever produced —
+    // the same hole hid every Composio and publisher call.
+    expect(
+      auditKindForToolV1("call_dynamic_tool", {
+        namespace: "frockbot",
+        toolName: "package_author",
+        input: { packageId: "acme" },
+      }),
+      // `package_author` writes the Workspace, not the Computer.
+    ).toEqual({ kind: "file", target: "workspace" });
+    // A wrapper that names nothing resolvable stays the wrapper, and the
+    // wrapper is not an audited effect.
+    expect(auditKindForToolV1("call_dynamic_tool", {})).toBeUndefined();
+  });
+
+  test("an MCP tool whose own name contains __ still names its server", () => {
+    // The slug capture was greedy: `mcp__gh__list__files` reported server
+    // `gh__list`, a target no Connection can resolve to a host.
+    expect(auditKindForToolV1("mcp__gh__list__files", {})).toEqual({
+      kind: "mcp",
+      target: "remote:gh",
+    });
   });
 
   test("is pure: the same call always classifies the same way", () => {

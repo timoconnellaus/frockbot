@@ -155,7 +155,7 @@ function mountHostedProvider(options: { stateChannel?: boolean } = {}) {
           phase,
           message:
             phase === "idle"
-              ? "Persistent Computer available"
+              ? "Ready to start"
               : phase === "updating"
                 ? "Updating the Computer runtime"
                 : "Computer ready",

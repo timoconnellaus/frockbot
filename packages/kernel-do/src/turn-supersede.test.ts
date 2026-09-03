@@ -13,6 +13,10 @@ import {
 } from "./authority.ts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
 import {
+  BotTurnReconciliationRequiredError,
+  BotTurnRecoveryRequiredError,
+} from "./turn-errors.ts";
+import {
   createStoredRunCodecV1,
   storedRunLaneV1,
   type StoredRunV1,
@@ -108,7 +112,23 @@ function deferred<T>(): Deferred<T> {
  */
 function createAuthority(
   storage: MemoryStorage,
-  options: { dispatch?(runId: string): boolean } = {},
+  options: {
+    dispatch?(runId: string): boolean;
+    /**
+     * Ends the named Turn the way the Agent loop ends one whose model stream
+     * was aborted mid-flight: a journaled `model/request` with no durable
+     * provider outcome, and a reconciliation demand.
+     */
+    uncertain?(runId: string): boolean;
+    /**
+     * Parks the named Turn when it is released: the provider call it had
+     * dispatched by then has no durable outcome, and nothing but an explicit
+     * reconciliation can settle it.
+     */
+    parkOnRelease?(runId: string): boolean;
+    /** Fails the recovery of an evicted Turn, leaving it active and owed. */
+    failRecovery?(runId: string): boolean;
+  } = {},
 ): Probe {
   const observed: BotTurnExecutionInput<undefined>[] = [];
   const interrupts: { runId: string; reason: string }[] = [];
@@ -138,6 +158,9 @@ function createAuthority(
     executeTurn: async (input) => {
       observed.push(input);
       const runId = input.command.runId;
+      if (input.resume && options.failRecovery?.(runId)) {
+        throw new BotTurnRecoveryRequiredError([]);
+      }
       const turn = observed.length;
       const handle = handleFor(runId);
       let seq = input.previousEvents.length;
@@ -166,7 +189,22 @@ function createAuthority(
           text: input.command.text,
         } as never,
       );
-      if (options.dispatch?.(runId) ?? true) {
+      const uncertain = options.uncertain?.(runId) ?? false;
+      if (uncertain) {
+        await persist({
+          type: "model/request",
+          turn,
+          step: 1,
+          request: {
+            requestId: `request-${runId}`,
+            provider: "foundation",
+            model: "foundation-model",
+            system: "system",
+            messages: [{ role: "user", content: input.command.text }],
+            tools: [],
+          },
+        } as never);
+      } else if (options.dispatch?.(runId) ?? true) {
         await persist(
           {
             type: "model/request",
@@ -193,6 +231,43 @@ function createAuthority(
       }
       handle.started.resolve();
       const outcome = await handle.settled.promise;
+      if (outcome.interrupted === undefined && options.parkOnRelease?.(runId)) {
+        const reason = `Model request "request-${runId}" has no durable provider outcome`;
+        await persist(
+          {
+            type: "model/request",
+            turn,
+            step: 1,
+            request: {
+              requestId: `request-${runId}`,
+              provider: "foundation",
+              model: "foundation-model",
+              system: "system",
+              messages: [{ role: "user", content: input.command.text }],
+              tools: [],
+            },
+          } as never,
+          {
+            type: "model/reconciliation-required",
+            turn,
+            step: 1,
+            requestId: `request-${runId}`,
+            reason,
+          } as never,
+        );
+        throw new BotTurnReconciliationRequiredError(reason, appended);
+      }
+      if (outcome.interrupted !== undefined && uncertain) {
+        const reason = `Model response outcome is uncertain after cancellation: ${outcome.interrupted}`;
+        await persist({
+          type: "model/reconciliation-required",
+          turn,
+          step: 1,
+          requestId: `request-${runId}`,
+          reason,
+        } as never);
+        throw new BotTurnReconciliationRequiredError(reason, appended);
+      }
       if (outcome.interrupted !== undefined) {
         await persist({
           type: "turn/end",
@@ -574,5 +649,181 @@ describe("eviction between the two Turns", () => {
     // A second recovery pass starts nothing: the queue is empty.
     await restarted.authority.recoverActiveRun();
     expect(restarted.observed).toHaveLength(1);
+  });
+});
+
+describe("a durable log left inside a Turn", () => {
+  test("is repaired at admission instead of refusing every later Turn", async () => {
+    const storage = new MemoryStorage();
+    // Exactly what a Turn that threw between `turn/start` and `turn/end`
+    // leaves behind: an open Turn, and no run to close it.
+    storage.values.set("latest-events", [
+      {
+        type: "session/created",
+        createdAt: "2026-09-03T00:00:00.000Z",
+        seq: 0,
+        timestamp: "2026-09-03T00:00:00.000Z",
+      },
+      {
+        type: "turn/start",
+        turn: 1,
+        seq: 1,
+        timestamp: "2026-09-03T00:00:01.000Z",
+      },
+    ]);
+    const probe = createAuthority(storage);
+
+    const run = probe.authority.run(command("run-1", "hello"));
+    await probe.handle("run-1").started;
+    probe.handle("run-1").finish();
+    await run;
+
+    const events = storage.values.get("latest-events") as Array<{
+      type: string;
+      turn?: number;
+    }>;
+    // The orphaned Turn is closed, so the new one starts.
+    expect(events[2]).toMatchObject({
+      type: "turn/end",
+      turn: 1,
+      outcome: "interrupted",
+    });
+    expect(storedRun(storage, "run-1").status).toBe("completed");
+  });
+});
+
+describe("a failing recovery of an older Turn", () => {
+  test("does not swallow the message the User just sent", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    // Evicted mid-Turn: run-1 stays active and durable, and the object that
+    // comes back recovers it — badly.
+    const restarted = createAuthority(storage, {
+      failRecovery: (runId) => runId === "run-1",
+    });
+    const second = restarted.authority
+      .run(
+        command("run-2", "second", {
+          lane: "user",
+          supersedes: { runId: "run-1" },
+        }),
+      )
+      .catch(() => undefined);
+    await admitted();
+
+    // The new message is durable regardless of what happened to the old Turn.
+    // Before this, the recovery's own error threw out of `run()` before
+    // admission was ever attempted and the message was simply gone.
+    expect(storedRun(storage, "run-2").runId).toBe("run-2");
+    expect(storedRun(storage, "run-2").input).toBe("second");
+    probe.handle("run-1").finish();
+    await first.catch(() => undefined);
+    restarted.handle("run-2").finish();
+    await second;
+  });
+});
+
+describe("the run admission fence index", () => {
+  test("ages the oldest entry out rather than refusing the operation", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+    for (let index = 0; index < 300; index += 1) {
+      await probe.authority.fenceRunAdmission(identity, `fence-${index}`);
+    }
+    const fences = storage.values.get("run-admission-fences") as string[];
+    expect(fences.length).toBeLessThanOrEqual(256);
+    // The newest fence is the one that still matters; the oldest aged out.
+    expect(fences.at(-1)).toBe("fence-299");
+    expect(fences).not.toContain("fence-0");
+  });
+});
+
+describe("a Turn queued behind a parked run", () => {
+  test("is refused rather than answered with an empty completion", async () => {
+    const storage = new MemoryStorage();
+    // The first Turn has not dispatched when the second arrives, so it is left
+    // to finish and the second queues behind it. It then parks on a provider
+    // outcome only a User can retrieve.
+    const probe = createAuthority(storage, {
+      dispatch: () => false,
+      parkOnRelease: (runId) => runId === "run-1",
+    });
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    const second = probe.authority.run(
+      command("run-2", "second", {
+        lane: "user",
+        supersedes: { runId: "run-1" },
+      }),
+    );
+    await admitted();
+    probe.handle("run-1").finish();
+    await first.catch(() => undefined);
+
+    await expect(second).rejects.toThrow(
+      /is queued: the active run requires reconciliation/,
+    );
+    // And it is still owed a Turn: durable, queued, and started by the
+    // reconciliation's own settlement or by the recovery alarm.
+    const queued = storedRun(storage, "run-2");
+    expect(queued.status).toBe("running");
+    expect(queued.phase).toBe("queued");
+    expect(storage.values.get("pending-run")).toBe("run-2");
+  });
+});
+
+describe("an interrupt while the model is streaming", () => {
+  test("a superseded Turn settles superseded rather than parking the Bot", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage, { uncertain: () => true });
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    const second = probe.authority.run(
+      command("run-2", "second", {
+        lane: "user",
+        supersedes: { runId: "run-1" },
+      }),
+    );
+    await first.catch(() => undefined);
+    probe.handle("run-2").finish();
+    const result = await second;
+
+    // The provider outcome of a Turn nobody is waiting for is worthless: the
+    // intent the User expressed is what settles it.
+    const superseded = storedRun(storage, "run-1");
+    expect(superseded.status).toBe("superseded");
+    expect(superseded.supersededBy).toBe("run-2");
+    expect(storage.values.get("active-run")).toBeUndefined();
+    expect(result.text).toBe("done: second");
+  });
+
+  test("a stopped Turn settles cancelled and the next message is admitted", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage, { uncertain: () => true });
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    // What an authenticated Stop writes before it signals the Agent.
+    const stopped = storedRun(storage, "run-1");
+    storage.values.set("run:run-1", {
+      ...stopped,
+      stopRequestedAt: "2026-09-03T00:00:05.000Z",
+    });
+    probe.handle("run-1").interrupt("stopped by an authenticated Stop command");
+    await first.catch(() => undefined);
+
+    expect(storedRun(storage, "run-1").status).toBe("cancelled");
+    expect(storage.values.get("active-run")).toBeUndefined();
+
+    // And the Bot takes the next message straight away, with no
+    // reconciliation standing between the User and their Bot.
+    const next = probe.authority.run(command("run-2", "second"));
+    await probe.handle("run-2").started;
+    probe.handle("run-2").finish();
+    expect((await next).text).toBe("done: second");
   });
 });

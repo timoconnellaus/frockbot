@@ -60,14 +60,29 @@ onMounted(() => {
   void web.value.loadPluginCatalog();
 });
 
-/** What a Package offers, in the words its manifest uses. */
+/** Plain nouns for the manifest's capability kinds. */
+const CAPABILITY_NOUNS: Record<string, string> = {
+  tool: "Tools",
+  model: "Models",
+  memory: "Memory",
+  notification: "Notifications",
+  computer: "Computer",
+  ui: "Pages",
+  storage: "Storage",
+};
+
+function capabilityNoun(kind: string): string {
+  return CAPABILITY_NOUNS[kind] ?? kind;
+}
+
+/** What a plugin offers, in plain words. */
 function capabilitySummary(item: PluginCatalogItem): string {
   const kinds = [...new Set(item.capabilities.map((entry) => entry.kind))];
-  // A Package can be worth turning on without contributing a capability of its
-  // own — Custom models is exactly that — so saying "no capabilities" tells the
-  // User the one Package they must enable does nothing.
+  // A plugin can be worth turning on without contributing a capability of its
+  // own — Custom models is exactly that — so saying "no features" tells the
+  // User the one plugin they must enable does nothing.
   if (kinds.length === 0) return "Adds settings";
-  return kinds.join(", ");
+  return kinds.map(capabilityNoun).join(", ");
 }
 
 function installed(packageId: string): boolean {
@@ -176,7 +191,7 @@ async function install(item: PluginCatalogItem): Promise<void> {
     setRowError(
       item.packageId,
       inPlainNames(
-        error instanceof Error ? error.message : "Could not add the Package",
+        error instanceof Error ? error.message : "Couldn't add that plugin.",
       ),
     );
   } finally {
@@ -195,7 +210,7 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
       inPlainNames(
         error instanceof Error
           ? error.message
-          : "Could not change the Package state",
+          : "Couldn't turn that plugin on or off.",
       ),
     );
   } finally {
@@ -222,17 +237,17 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
     </label>
     <UiAnchor
       anchor="user-packages"
-      label="Packages"
+      label="Plugins"
       :href="packagesLink"
       class="plugin-anchor"
     >
       <p class="plugin-intro">
-        Turn Packages on and off for your Bots. Set one up where it belongs:
+        Turn plugins on and off for your Bots. Set one up where it belongs:
         model providers in Models, accounts in Connectors.
       </p>
       <div class="plugin-catalog-link">
         <UiButton type="button" @click="openPackageCatalog">
-          Browse the Package Catalog
+          Browse all plugins
         </UiButton>
       </div>
     </UiAnchor>
@@ -294,11 +309,14 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
       </article>
     </div>
 
-    <p v-if="userPackages.length === 0" class="plugin-empty">
-      This application ships no Packages.
+    <p
+      v-if="userPackages.length === 0 && !web.settingsError"
+      class="plugin-empty"
+    >
+      This deployment ships no plugins.
     </p>
     <p v-else-if="filteredCatalog.length === 0" class="plugin-empty">
-      No Package matches that search.
+      No plugin matches that search.
     </p>
   </div>
 </template>

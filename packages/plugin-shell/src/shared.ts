@@ -101,6 +101,12 @@ export interface WebChatMessage {
    * reached, not a state the User has to understand.
    */
   pending?: boolean;
+  /**
+   * A line under the bubble saying why the Turn ends where it does — it was
+   * stopped, or a later message took its place. The text above it is what the
+   * Bot had already said, which it keeps (ADR 0024).
+   */
+  notice?: string;
   tools: WebToolActivity[];
   /** The typed payloads this Turn sent to the user, oldest first. */
   sends: WebSendPayload[];

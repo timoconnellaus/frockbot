@@ -89,11 +89,54 @@ const MACHINE_SHELL_TOOL = "machine_exec";
  */
 const MACHINE_MESSAGES_PREFIX = "machine_messages_";
 
-const MCP_TOOL = /^mcp__([a-zA-Z0-9_]{1,64})__(.{1,96})$/;
+// The slug capture is LAZY. Greedy, `mcp__gh__list__files` reported server
+// `gh__list` — a target that names no Connection, so `resolveAuditTargetV1`
+// could never resolve it to a host and the row filtered under a server nobody
+// has. The slug is the first segment; everything after the second `__` is the
+// remote tool's own name, `__` included.
+const MCP_TOOL = /^mcp__([a-zA-Z0-9_]{1,64}?)__(.{1,96})$/;
 const MACHINE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The wrapper every namespaced Package tool is journalled under. */
+const DYNAMIC_TOOL = "call_dynamic_tool";
+
+/**
+ * The tool a call actually made.
+ *
+ * `package_author` was dead code here: it is a namespaced dynamic tool, so the
+ * journalled `tool/call` name is `call_dynamic_tool` and no row was ever
+ * produced for it — the same hole hid every Composio and publisher call. The
+ * wrapper's own input names the tool, exactly as the provider's presented name
+ * does, so the classifier reads it off the call and stays pure.
+ */
+export function resolveDynamicToolNameV1(name: string, input: unknown): string {
+  if (name !== DYNAMIC_TOOL || !isObject(input)) return name;
+  const { namespace, toolName } = input;
+  if (typeof namespace !== "string" || typeof toolName !== "string") {
+    return name;
+  }
+  return namespace === "frockbot" ? toolName : `${namespace}/${toolName}`;
+}
+
+/** The arguments the wrapped tool was actually given. */
+export function dynamicToolInputV1(input: unknown): unknown {
+  if (!isObject(input)) return input;
+  return Object.hasOwn(input, "input") ? input.input : input;
+}
+
+/** Whether a tool reaches the User's registered machine rather than the Computer. */
+function isMachineToolV1(name: string): boolean {
+  return (
+    name === MACHINE_SHELL_TOOL ||
+    name.startsWith(MACHINE_MESSAGES_PREFIX) ||
+    name === "machine_read" ||
+    name === "machine_copy_to_computer" ||
+    name === "machine_copy_from_computer"
+  );
 }
 
 /**
@@ -126,7 +169,17 @@ export function auditKindForToolV1(
   name: string,
   input: unknown,
 ): AuditClassificationV1 | undefined {
-  const onComputer = machineTarget(input) ?? AUDIT_TARGET_COMPUTER_V1;
+  // Only a tool that actually reaches a registered machine may be targeted at
+  // one. The target used to come off `machineId` for every tool, and
+  // `machineId` is model-supplied: a Bot could run a command on the Computer
+  // and have the audit row say it ran on the User's laptop. A Computer tool is
+  // audited against the Computer, whatever its arguments claim.
+  const resolved = resolveDynamicToolNameV1(name, input);
+  const onMachine = isMachineToolV1(resolved)
+    ? (machineTarget(input) ?? AUDIT_TARGET_COMPUTER_V1)
+    : AUDIT_TARGET_COMPUTER_V1;
+  const onComputer = onMachine;
+  name = resolved;
   if (name === "computer_exec") {
     // A background command outlives the Turn that launched it and is acted on
     // afterwards by the three `computer_process_*` tools, so it is a process

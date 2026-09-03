@@ -207,7 +207,7 @@ test("a sandboxed Package page works at desktop and phone widths", async ({
   await panel.getByText("Advanced", { exact: true }).click();
   const settingsFrame = panel.locator(".package-iframe-frame");
   await expect(settingsFrame.getByText("Sydney Weather")).toBeVisible();
-  await expect(settingsFrame.getByText("Bot-authored Package")).toBeVisible();
+  await expect(settingsFrame.getByText("Built by this Bot")).toBeVisible();
   const iframe = settingsFrame.locator("iframe");
   await expect(iframe).toHaveAttribute("sandbox", "allow-scripts");
   await expect(iframe).toHaveAttribute("credentialless", "");

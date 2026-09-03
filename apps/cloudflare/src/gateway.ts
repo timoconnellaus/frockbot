@@ -158,7 +158,7 @@ function signupClosedResponse(request: Request, url: URL): Response {
   <main>
     <p>FrockBot</p>
     <h1>${SIGNUPS_CLOSED_MESSAGE}</h1>
-    <p>If you already have access, ask the deployment owner to check your sign-in email.</p>
+    <p>If you already have access, ask whoever invited you to check your sign-in email.</p>
     <a href="/sign-out">Sign out</a>
   </main>
 </body>
@@ -859,7 +859,7 @@ export function createGateway(dependencies: GatewayDependencies) {
     return persisted;
   };
 
-  return async (request: Request): Promise<Response> => {
+  const handle = async (request: Request): Promise<Response> => {
     let url: URL;
     try {
       url = new URL(request.url);
@@ -909,5 +909,25 @@ export function createGateway(dependencies: GatewayDependencies) {
       return route(request, url);
     }
     return withClientOrigin(await route(request, url), origin);
+  };
+
+  /*
+   * The gateway's error boundary.
+   *
+   * Every answer this Worker gives is JSON with a readable `error`, including
+   * the ones nobody planned: an unavailable binding, an artifact that will not
+   * load, a Contribution route that rejects. Without it workerd answers
+   * `Internal Server Error` as plain text and the browser reports a JSON parse
+   * failure, which tells the User nothing about what actually broke.
+   */
+  return async (request: Request): Promise<Response> => {
+    try {
+      return await handle(request);
+    } catch (error) {
+      return jsonError(
+        500,
+        error instanceof Error ? error.message : "gateway request failed",
+      );
+    }
   };
 }

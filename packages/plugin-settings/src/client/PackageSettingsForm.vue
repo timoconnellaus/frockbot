@@ -54,9 +54,7 @@ async function save(): Promise<void> {
     await web.value.savePackageSettings(props.item.packageId, values);
   } catch (error) {
     web.value.settingsError =
-      error instanceof Error
-        ? error.message
-        : "Could not save the Package settings";
+      error instanceof Error ? error.message : "Couldn't save those settings.";
   }
 }
 </script>
@@ -73,7 +71,7 @@ async function save(): Promise<void> {
         v-if="settingFieldKind(definition.schema) === 'enum'"
         v-model="draft[definition.id]"
       >
-        <option value="">Package default</option>
+        <option value="">Default</option>
         <option
           v-for="choice in definition.schema.enum ?? []"
           :key="String(choice)"
