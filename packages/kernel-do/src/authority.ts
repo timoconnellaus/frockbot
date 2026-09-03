@@ -150,6 +150,22 @@ export const SUPERSEDED_TURN_REASON_V1 = "superseded by a new user message";
 /** How many times a queued Turn retries the object before giving up. */
 const MAX_QUEUED_RUN_START_ATTEMPTS = 8;
 
+/**
+ * True when this object has already durably decided to throw the Turn away.
+ *
+ * Reconciliation exists to retrieve an external outcome the Turn still needs.
+ * A Turn a Stop or a supersede has already discarded needs nothing: its
+ * provider outcome cannot change what it settles as, and parking it would keep
+ * the active-run marker — and so refuse every later message — over an answer
+ * nobody is waiting for. The intent the User expressed wins, and the run
+ * settles `cancelled` or `superseded` with everything it had already said.
+ */
+function runWasDiscardedV1(
+  run: { stopRequestedAt?: string; supersededAt?: string } | undefined,
+): boolean {
+  return Boolean(run?.stopRequestedAt || run?.supersededAt);
+}
+
 export interface BotDurableAuthorityOptions<Snapshot> {
   state: DurableObjectState;
   codec: StoredRunCodecV1<Snapshot>;
@@ -480,8 +496,9 @@ export class BotDurableAuthority<Snapshot> {
       }
       const modelState = latestModelRequestJournalState(events);
       if (
-        error instanceof BotTurnReconciliationRequiredError ||
-        modelState.status === "unresolved"
+        (error instanceof BotTurnReconciliationRequiredError ||
+          modelState.status === "unresolved") &&
+        !runWasDiscardedV1(durableRun)
       ) {
         await this.requireRunReconciliation(
           command.runId,
@@ -612,8 +629,9 @@ export class BotDurableAuthority<Snapshot> {
       }
       const modelState = latestModelRequestJournalState(events);
       if (
-        error instanceof BotTurnReconciliationRequiredError ||
-        modelState.status === "unresolved"
+        (error instanceof BotTurnReconciliationRequiredError ||
+          modelState.status === "unresolved") &&
+        !runWasDiscardedV1(durableRun)
       ) {
         await this.requireRunReconciliation(
           run.runId,
@@ -1399,6 +1417,22 @@ export class BotDurableAuthority<Snapshot> {
         } satisfies StoredRunV1<Snapshot>);
         await this.refreshRecoveryAlarm(transaction);
         return { kind: "resume" as const, run, latest, settings };
+      }
+      if (runWasDiscardedV1(run)) {
+        // Recovery of a Turn Stop or supersede already discarded settles it on
+        // that intent rather than parking it: nothing is owed the answer.
+        await failStoredRun(
+          this.codec,
+          transaction,
+          this.terminalKeys(run.runId),
+          run.runId,
+          latest.slice(0, run.previousEventCount),
+          [...run.events, ...plan.repairs],
+          "Execution outcome requires reconciliation before it can resume",
+          this.supersededPackageRecords(),
+        );
+        await this.refreshRecoveryAlarm(transaction);
+        return undefined;
       }
       await transaction.put({
         [key]: {
