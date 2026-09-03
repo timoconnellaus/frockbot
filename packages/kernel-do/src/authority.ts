@@ -1055,7 +1055,24 @@ export class BotDurableAuthority<Snapshot> {
       // N-1 is open". Nothing owned that repair, because the run that would
       // have closed it is already terminal, so admission does: with nothing
       // executing, an open Turn is one nobody is going to finish.
-      const repairs = activeRunId
+      //
+      // The pointer alone is not the test. A Bot can hold an `active-run` id
+      // whose record is already terminal — a settlement that landed while the
+      // pointer clear did not, a supersede whose Turn ended between the two
+      // writes — and gating the repair on the pointer left exactly those Bots
+      // wedged. What matters is whether anything is still entitled to write
+      // that Turn's end: a `running` record is, and so is a
+      // `reconciliation-required` one, whose Turn is held open on purpose
+      // until its outcome is retrieved. Nothing else is.
+      const activeRun = activeRunId
+        ? this.codec.optional(
+            await transaction.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
+          )
+        : undefined;
+      const stillOwned =
+        activeRun?.status === "running" ||
+        activeRun?.status === "reconciliation-required";
+      const repairs = stillOwned
         ? []
         : repairOrphanedOpenTurnV1(command.sessionId, storedEvents);
       const latestEvents = [...storedEvents, ...repairs];

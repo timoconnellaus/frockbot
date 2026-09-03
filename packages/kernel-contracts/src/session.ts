@@ -424,10 +424,16 @@ export class Session {
         });
       }
     }
+    // An unresolved model request holds the step open — but only while the run
+    // might still resume and let that outcome land. Closing the turn means it
+    // never will, and a `turn/end` over an open step is itself invalid: it
+    // produced "turn 1 ended while step 1 is open" and left the log as unusable
+    // as the open turn it was meant to repair.
     if (
       openStep &&
-      unresolvedModelRequests.size === 0 &&
-      (closeTurn || !openStepHasAssistant)
+      (closeTurn
+        ? true
+        : unresolvedModelRequests.size === 0 && !openStepHasAssistant)
     ) {
       repairs.push({ type: "step/end", ...openStep, outcome: "interrupted" });
     }

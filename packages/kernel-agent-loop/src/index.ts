@@ -703,6 +703,12 @@ class LoopAgent implements Agent {
       }
     } finally {
       this.#disarmTurnDeadline();
+      // A Turn owed a reconciliation writes no `turn/end`: its model request
+      // has no durable outcome, and a `turn/end` would claim to know how it
+      // ended. That is right for as long as the run might still resume — and
+      // the moment it will not, the Turn is closed by whoever settles it, in
+      // `kernel-do`'s `settledEventsV1`. Closing it here instead would either
+      // lie about an outcome or make the run unresumable (ADR 0028).
       if (!reconciliationRequired) {
         if (openStep !== undefined && turnOutcome === "cancelled") {
           await this.#settleCancelledStep(openTurn, openStep);
@@ -879,6 +885,12 @@ class LoopAgent implements Agent {
       }
     } finally {
       this.#disarmTurnDeadline();
+      // A Turn owed a reconciliation writes no `turn/end`: its model request
+      // has no durable outcome, and a `turn/end` would claim to know how it
+      // ended. That is right for as long as the run might still resume — and
+      // the moment it will not, the Turn is closed by whoever settles it, in
+      // `kernel-do`'s `settledEventsV1`. Closing it here instead would either
+      // lie about an outcome or make the run unresumable (ADR 0028).
       if (!reconciliationRequired) {
         if (openStep !== undefined && turnOutcome === "cancelled") {
           await this.#settleCancelledStep(turn, openStep);
