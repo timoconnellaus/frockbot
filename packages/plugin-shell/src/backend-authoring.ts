@@ -278,12 +278,25 @@ export function createPackageAuthoringHost(
    * Re-authoring may keep or rename tools owned by that same Package, so its
    * currently stored declarations are subtracted from the mounted catalog;
    * every first-party tool and every other authored Package remains reserved.
+   *
+   * The comparison is on bare names. Since ADR 0021 the mounted catalog
+   * reports a progressively disclosed tool as `namespace/name`, while a Package
+   * declares bare names, so comparing the two directly matches nothing and the
+   * guard silently stops refusing anything. Stripping the namespace keeps the
+   * rule this guard has always enforced — a Bot-authored tool name may not
+   * shadow one already registered — rather than quietly relaxing it as a side
+   * effect of a disclosure change.
    */
   async function collidingToolName(
     packageId: string,
     declaredNames: readonly string[],
   ): Promise<string | undefined> {
-    const registered = new Set(options.currentToolNames?.() ?? []);
+    const registered = new Set(
+      (options.currentToolNames?.() ?? []).map((name) => {
+        const separator = name.indexOf("/");
+        return separator < 0 ? name : name.slice(separator + 1);
+      }),
+    );
     const mounted =
       options.mountedGeneration?.() ??
       (await options.composition.lastKnownGood());

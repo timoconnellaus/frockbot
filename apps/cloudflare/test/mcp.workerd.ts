@@ -10,6 +10,7 @@ import type { ConnectionView } from "@frockbot/configuration-core";
 import { createConfiguredMcpRuntimeContribution } from "@frockbot/plugin-mcp/agent";
 import { ToolRegistry } from "@frockbot/plugin-tools";
 import { Context } from "cordis";
+import { META_TOOL_NAMES_V1, metaOnlyToolNamesV1 } from "./dynamic-tools.ts";
 import {
   MCP_ENDPOINT,
   MCP_HANDSHAKE_COUNT_ENDPOINT,
@@ -73,8 +74,12 @@ describe("the MCP runtime Contribution in workerd", () => {
       expect(mounted).toBe(true);
 
       const schemas = root.tools.schemas({ turnType: "chat" });
+      // An MCP tool is native — it carries no namespace — so it is still
+      // offered by name, now beside the two meta-tools every registry
+      // contributes (ADR 0021).
       expect(schemas.map((schema) => schema.name)).toEqual([
         "mcp__example__echo",
+        ...META_TOOL_NAMES_V1,
       ]);
       // The server's own JSON Schema reaches the model unchanged.
       expect(schemas[0]!.inputSchema).toEqual({
@@ -132,7 +137,10 @@ describe("the MCP runtime Contribution in workerd", () => {
     );
     try {
       expect(mounted).toBe(false);
-      expect(root.tools.schemas({ turnType: "chat" })).toEqual([]);
+      // No MCP tool at all: what is left is exactly the meta-tools.
+      expect(
+        root.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
+      ).toEqual(metaOnlyToolNamesV1());
       expect(failures).toHaveLength(1);
     } finally {
       await root.fiber.dispose();
@@ -171,13 +179,13 @@ describe("the MCP runtime Contribution in workerd", () => {
           next.root.tools
             .schemas({ turnType: "chat" })
             .map((tool) => tool.name),
-        ).toEqual(["mcp__example__echo"]);
+        ).toEqual(["mcp__example__echo", ...META_TOOL_NAMES_V1]);
         // The Turn that was already running still has its tools.
         expect(
           inFlight.root.tools
             .schemas({ turnType: "chat" })
             .map((tool) => tool.name),
-        ).toEqual(["mcp__example__echo"]);
+        ).toEqual(["mcp__example__echo", ...META_TOOL_NAMES_V1]);
       } finally {
         await next.root.fiber.dispose();
       }

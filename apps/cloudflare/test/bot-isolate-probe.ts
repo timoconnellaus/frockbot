@@ -44,6 +44,14 @@ import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import type { Plugin } from "cordis";
 import type { BotCapabilities } from "../src/bot-capabilities.ts";
 import type { WorkerdBotState } from "./fly-compatibility-worker.ts";
+import { dynamicToolCallV1, twoTierStepV1 } from "./dynamic-tools.ts";
+
+/**
+ * The Package id this probe's isolate mounts under, which is therefore also
+ * the namespace its tools are disclosed in (ADR 0021). Non-first-party
+ * namespaces are external, so a call into one carries `mcpDetails.description`.
+ */
+export const PROBE_PACKAGE_ID = "bot-authored";
 
 export interface BotIsolateProbeEnv {
   BOT_PACKAGES: BotIsolateLoader;
@@ -203,23 +211,20 @@ function scriptedProviderPackage(
     id: "scripted",
     async *stream(request): AsyncGenerator<LlmStreamEvent> {
       requests.push(structuredClone(request));
-      const latest = request.messages.at(-1);
-      if (latest?.role === "tool") {
-        yield { type: "text-delta", text: `tool:${latest.content}` };
-        yield { type: "finish", reason: "completed" };
-        return;
-      }
       const user = request.messages.findLast(
         (message) => message.role === "user",
       );
-      yield {
-        type: "tool-call",
-        call: {
-          id: "call-1",
-          name: toolName,
-          input: { text: user?.role === "user" ? user.content : "" },
-        },
-      };
+      const step = twoTierStepV1(request, {
+        toolName,
+        input: { text: user?.role === "user" ? user.content : "" },
+        description: `The scripted model called ${toolName}.`,
+      });
+      if (step.kind === "answer") {
+        yield { type: "text-delta", text: `tool:${step.content}` };
+        yield { type: "finish", reason: "completed" };
+        return;
+      }
+      yield { type: "tool-call", call: step.call };
       yield { type: "finish", reason: "tool-calls" };
     },
   };
@@ -328,13 +333,13 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     const members: CompositionMemberV1[] = [
       ...base.members,
       {
-        packageId: "bot-authored",
+        packageId: PROBE_PACKAGE_ID,
         specifier: "@bot/authored",
         version: "0.0.1",
         manifestHash: await sha256Hex(canonicalJson(PROBE_PACKAGE_MANIFEST)),
         provenance: {
           kind: "bot" as const,
-          packageId: "bot-authored",
+          packageId: PROBE_PACKAGE_ID,
           version: "0.0.1",
           botId: "probe",
           sessionId: "user-1:probe",
@@ -466,22 +471,34 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     memory?: boolean;
     workspace?: boolean;
     generationCreatedAt?: string;
+    /** Sends the call without the metadata an external namespace demands. */
+    omitDescription?: boolean;
   }): Promise<{ content: string; isError: boolean }> {
     const { composition, generation } = await this.mount(input);
     try {
       await composition.verify(new AbortController().signal);
-      const preparation = await composition.root.tools.prepare(
-        { id: "call-1", name: input.tool, input: input.toolInput ?? {} },
-        {
-          botId: input.botId,
-          agentId: input.botId,
-          sessionId: `${input.userId}:${input.botId}`,
-          compositionGenerationId: generation.generationId,
-          turnType: "chat" as const,
-          effectId: "tool:1:1:0",
-          signal: new AbortController().signal,
-        },
-      );
+      // A Bot isolate's tools are namespaced by its immutable Package id and
+      // the namespace is external (ADR 0021), so the only way in is
+      // `call_dynamic_tool` carrying that namespace and call metadata. The
+      // tests still name the bare tool; the addressing lives here, once.
+      const call = dynamicToolCallV1("call-1", {
+        namespace: PROBE_PACKAGE_ID,
+        toolName: input.tool,
+        input: input.toolInput ?? {},
+        ...(input.omitDescription
+          ? {}
+          : { description: `The probe called ${input.tool}.` }),
+      });
+      const preparation = await composition.root.tools.prepare(call, {
+        botId: input.botId,
+        agentId: input.botId,
+        sessionId: `${input.userId}:${input.botId}`,
+        compositionGenerationId: generation.generationId,
+        turnType: "chat" as const,
+        effectId: "tool:1:1:0",
+        toolCall: call,
+        signal: new AbortController().signal,
+      });
       if (preparation.kind !== "ready") return preparation.result;
       return await composition.root.tools.executePrepared(preparation, {
         botId: input.botId,

@@ -75,6 +75,7 @@ import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
 import type { Plugin } from "cordis";
 import type { BotCapabilities } from "../src/bot-capabilities.ts";
 import { createCountingBundlerBinding } from "./package-bundler-fake.ts";
+import { twoTierStepV1 } from "./dynamic-tools.ts";
 
 export interface AuthoringProbeEnv {
   BOT_PACKAGES: BotIsolateLoader;
@@ -87,7 +88,12 @@ interface ProbeExports {
   BotCapabilities(options: { props: BotCapabilitiesPropsV1 }): BotCapabilities;
 }
 
-/** One scripted Turn: the provider calls `tool` once, then reports the result. */
+/**
+ * One scripted Turn: the provider discovers `tool`, calls it through
+ * `call_dynamic_tool`, then reports the result. Two round-trips, because
+ * that is what ADR 0021 costs a real model — nothing here is reachable by
+ * bare name.
+ */
 export interface AuthoringProbeTurn {
   runId: string;
   userId: string;
@@ -107,19 +113,19 @@ function scriptedProviderPackage(
   const provider: LlmProvider = {
     id: "scripted",
     async *stream(request): AsyncGenerator<LlmStreamEvent> {
-      const latest = request.messages.at(-1);
-      if (latest?.role === "tool") {
+      const step = twoTierStepV1(request, {
+        toolName: tool,
+        input: input ?? {},
+      });
+      if (step.kind === "answer") {
         yield {
           type: "text-delta",
-          text: `${latest.isError ? "error" : "ok"}:${latest.content}`,
+          text: `${step.isError ? "error" : "ok"}:${step.content}`,
         };
         yield { type: "finish", reason: "completed" };
         return;
       }
-      yield {
-        type: "tool-call",
-        call: { id: "call-1", name: tool, input: input ?? {} },
-      };
+      yield { type: "tool-call", call: step.call };
       yield { type: "finish", reason: "tool-calls" };
     },
   };
