@@ -61,8 +61,10 @@ export class LlmRegistry extends Service implements ModelInvocation {
       };
     }
     if (!provider.reconciliation) {
+      // A provider that declares no retrieval will never grow one mid-run, so
+      // parking the run on it would wedge the Bot permanently. Settle instead.
       return {
-        status: "unavailable",
+        status: "not-retrievable",
         reason: `LLM provider "${request.provider}" does not support provider-bound retrieval`,
       };
     }

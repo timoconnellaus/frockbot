@@ -66,7 +66,8 @@ interface ModelResponse {
 
 type ModelReconciliation =
   | { status: "recovered"; response: ModelResponse }
-  | { status: "unavailable"; reason: string };
+  | { status: "unavailable"; reason: string }
+  | { status: "not-retrievable"; reason: string };
 
 class ModelEffectReconciliationRequiredError extends Error {
   constructor(
@@ -384,6 +385,23 @@ class LoopAgent implements Agent {
           latestStep,
           signal,
         );
+        if (reconciliation.status === "not-retrievable") {
+          // No later attempt can retrieve this effect, so the run settles now.
+          // The chunks already journaled stay in the session, so whatever the
+          // model produced before the interruption is still shown.
+          await this.#notifyModelOutcome(
+            unresolvedRequest.requestId,
+            "not-started",
+          );
+          turnOutcome = "model-error";
+          turnReason = turnEndReason(reconciliation.reason);
+          this.#ctx.emit(
+            "agent/error",
+            this,
+            new Error(reconciliation.reason),
+          );
+          return;
+        }
         if (reconciliation.status === "unavailable") {
           const existing = this.session.events.findLast(
             (event) =>
@@ -978,7 +996,7 @@ class LoopAgent implements Agent {
     signal: AbortSignal,
   ): Promise<ModelReconciliation> {
     const reconciliation = await this.#ctx.llm.reconcile(request, signal);
-    if (reconciliation.status === "unavailable") return reconciliation;
+    if (reconciliation.status !== "recovered") return reconciliation;
     const durablePrefix = this.session.events.flatMap((event) =>
       event.type === "assistant/chunk" &&
       event.turn === turn &&

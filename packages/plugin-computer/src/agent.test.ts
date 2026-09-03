@@ -277,11 +277,10 @@ describe("computer agent contribution", () => {
       }),
     );
 
-    expect(
-      harness.root.tools
-        .registeredNames()
-        .filter((name) => name.startsWith("computer_")),
-    ).toEqual([]);
+    const registered = harness.root.tools.registeredNames?.() ?? [];
+    expect(registered.filter((name) => name.startsWith("computer_"))).toEqual(
+      [],
+    );
     const prompt = await harness.root.systemPrompt.assemble({
       sessionId: "session-1",
       provider: "fixture",

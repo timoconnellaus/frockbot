@@ -1,6 +1,7 @@
 import {
   LlmEffectNotStartedError,
   type LlmProvider,
+  type LlmReconciliationCapability,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import {
@@ -32,6 +33,20 @@ export interface FlockAiRuntimeConfig {
 
 class FlockAiProvider implements LlmProvider {
   readonly id = FLOCK_AI_PROVIDER_TYPE;
+
+  /**
+   * The Gateway keeps no addressable copy of a completion, so an interrupted
+   * stream can never be read back. Saying so is what lets the run settle as a
+   * failure with its partial text intact; staying silent parks it on a
+   * retrieval that would never arrive.
+   */
+  readonly reconciliation: LlmReconciliationCapability = {
+    retrieve: async () => ({
+      status: "not-retrievable",
+      reason:
+        "Flock AI keeps no durable copy of an interrupted response, so it cannot be recovered",
+    }),
+  };
 
   constructor(private readonly config: FlockAiRuntimeConfig) {}
 
