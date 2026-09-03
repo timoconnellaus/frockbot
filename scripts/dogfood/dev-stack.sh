@@ -3,7 +3,7 @@
 # AI through the Flock AI Gateway, and the real Computer host service binding.
 #
 #   scripts/dogfood/dev-stack.sh [start]   build, seed, serve, wait, report
-#   scripts/dogfood/dev-stack.sh stop      kill wrangler / workerd / vite
+#   scripts/dogfood/dev-stack.sh stop      stop this stack's wrangler / workerd / vite
 #   scripts/dogfood/dev-stack.sh status    reprint the sign-in and health notes
 #
 # `start` is idempotent: it stops a previous stack first.
@@ -33,20 +33,55 @@ die() {
 
 # ------------------------------------------------------------------ stop
 
+# Every process descended from `$1`, deepest first, including `$1` itself.
+#
+# `wrangler dev` is a Node parent supervising workerd, reached through a `bunx`
+# shim: killing one alone leaves another holding the port, and the next
+# `wrangler dev` then silently picks 8788 instead of failing. Walking the tree
+# from the pid this script recorded is how the whole thing goes without
+# touching anyone else's.
+process_tree() {
+  children="$(pgrep -P "$1" 2>/dev/null || true)"
+  for child in $children; do
+    process_tree "$child"
+  done
+  printf '%s\n' "$1"
+}
+
 stop_stack() {
   say "stopping any running stack"
-  # `wrangler dev` is a Node parent supervising workerd. Killing one alone
-  # leaves the other holding the port, and the next `wrangler dev` then
-  # silently picks 8788 instead of failing.
-  pkill -9 -f 'wrangler/wrangler-dist/cli.js' 2>/dev/null || true
-  pkill -9 -f workerd 2>/dev/null || true
-  pkill -9 -f 'vite.*--host 127.0.0.1' 2>/dev/null || true
+  # Only this stack's own processes. A pattern kill (`pkill -f workerd`) reaches
+  # every workerd on the machine, and the Playwright end-to-end harness runs its
+  # own `wrangler dev`: a `dogfood:dev` start or stop while a suite is in flight
+  # used to SIGKILL the harness's runtime mid-test, which surfaces as a 500 on
+  # the next request and ERR_CONNECTION_REFUSED on every one after it.
+  for pid_file in "$state_dir/wrangler.pid" "$state_dir/vite.pid"; do
+    [ -f "$pid_file" ] || continue
+    recorded="$(cat "$pid_file" 2>/dev/null || true)"
+    case "$recorded" in
+      "" | *[!0-9]*) continue ;;
+    esac
+    kill -0 "$recorded" 2>/dev/null || continue
+    for pid in $(process_tree "$recorded"); do
+      kill -9 "$pid" 2>/dev/null || true
+    done
+  done
+  # Backstops for a lost pid file. Both are matched on this stack's own command
+  # line — `--env development` on this port — so the end-to-end harness's
+  # `wrangler dev --env e2e` on its own ephemeral port is never a match.
+  for stale in $(pgrep -f "wrangler-dist/cli.js dev --env development --ip 127.0.0.1 --port $worker_port" 2>/dev/null || true); do
+    for pid in $(process_tree "$stale"); do
+      kill -9 "$pid" 2>/dev/null || true
+    done
+  done
+  # And the holders of this stack's own two ports, with their descendants.
   for port in "$worker_port" "$client_port"; do
-    holders="$(lsof -ti "tcp:${port}" 2>/dev/null || true)"
-    if [ -n "$holders" ]; then
-      # shellcheck disable=SC2086
-      kill -9 $holders 2>/dev/null || true
-    fi
+    holders="$(lsof -ti "tcp:${port}" -sTCP:LISTEN 2>/dev/null || true)"
+    for holder in $holders; do
+      for pid in $(process_tree "$holder"); do
+        kill -9 "$pid" 2>/dev/null || true
+      done
+    done
   done
   rm -f "$state_dir/wrangler.pid" "$state_dir/vite.pid"
   sleep 1
