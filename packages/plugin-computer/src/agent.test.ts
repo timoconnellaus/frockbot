@@ -256,7 +256,7 @@ describe("computer agent contribution", () => {
     await expect(
       execute(harness, "computer_exec", { command: "pwd" }),
     ).resolves.toEqual({
-      content: "The user is controlling this Computer; do not retry this Turn",
+      content: "held by human:session-1; do not retry this Turn",
       isError: true,
     });
     await harness.dispose();

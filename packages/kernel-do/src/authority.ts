@@ -828,9 +828,12 @@ export class BotDurableAuthority<Snapshot> {
    * with no surviving runs is still a conversation the User had.
    */
   async listConversations(
-    identity: BotIdentity,
+    identity?: BotIdentity,
   ): Promise<ConversationRecordV1[]> {
-    const base = botConversationBaseSessionIdV1(identity);
+    const known =
+      identity ?? (await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY));
+    if (!known) return [];
+    const base = botConversationBaseSessionIdV1(known);
     const current = await this.readConversation();
     const ended = (
       (await this.ctx.storage.get<unknown[]>(CONVERSATION_INDEX_KEY)) ?? []
@@ -852,6 +855,22 @@ export class BotDurableAuthority<Snapshot> {
       },
       ...ended,
     ].sort((left, right) => right.ordinal - left.ordinal);
+  }
+
+  /**
+   * The Session id this Bot's chat Turns are recording right now, or
+   * `undefined` before the object has admitted anything and learned its
+   * identity. A reader that has to say which Turns are "this conversation"
+   * asks here rather than reconstructing the id.
+   */
+  async readConversationSessionId(): Promise<string | undefined> {
+    const identity = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+    if (!identity) return undefined;
+    const conversation = await this.readConversation();
+    return conversationSessionIdV1(
+      botConversationBaseSessionIdV1(identity),
+      conversation.ordinal,
+    );
   }
 
   /**

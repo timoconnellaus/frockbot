@@ -302,7 +302,7 @@ function failure(error: unknown): { content: string; isError: true } {
       const holder = error.message.trim();
       return {
         content: holder
-          ? `The Computer is held by ${holder}; do not retry this Turn`
+          ? `${holder}; do not retry this Turn`
           : "The user is controlling this Computer; do not retry this Turn",
         isError: true,
       };

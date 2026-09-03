@@ -335,6 +335,8 @@ export function createComputerClientPlugin(
 
     async function closeViewer(): Promise<void> {
       if (!machine.expanded) return;
+      // A host with no Computer never had a viewer session to close.
+      const hadComputer = machine.phase !== "unconfigured";
       if (controlRequest) {
         try {
           await controlRequest;
@@ -359,6 +361,9 @@ export function createComputerClientPlugin(
       // than execute, so a refused capture never projects a failure onto a
       // Computer the User has already stopped watching.
       apply({ type: "viewer-collapsed" });
+      // A viewer that never existed has nothing to close, and the capture the
+      // command files is of a session that was never opened.
+      if (!hadComputer) return;
       void (async () => {
         try {
           await post("closeViewer");

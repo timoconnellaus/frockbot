@@ -5355,6 +5355,15 @@ export class ShellBotBackendContribution {
   ): Promise<ClientRunListV1> {
     const query = decodeClientRunListQueryV1(input);
     await this.authority.recoverActiveRun();
+    // The transcript is one conversation, not every Turn the Bot has ever
+    // run. Absent means the conversation the Bot is on; naming an earlier one
+    // reads it exactly as it was left. A Bot whose object has not learned its
+    // identity yet has no conversation to filter by and shows what it has.
+    const conversationId =
+      query.conversationId ??
+      (await this.authority.readConversationSessionId());
+    const inConversation = (run: { sessionId: string }) =>
+      conversationId === undefined || run.sessionId === conversationId;
     const activeRunId = query.before
       ? undefined
       : await this.authority.readActiveRunId();
@@ -5369,7 +5378,7 @@ export class ShellBotBackendContribution {
       // An automation firing occupies the object like any other run, and is
       // still not part of the conversation: the visible transcript never
       // shows one, running or settled.
-      if (active && isVisibleRunV1(active))
+      if (active && isVisibleRunV1(active) && inConversation(active))
         selected.set(active.runId, { run: projectClientRunV1(active) });
     }
     const available = candidates.slice(0, CLIENT_RUN_PAGE_LIMIT);
@@ -5381,7 +5390,8 @@ export class ShellBotBackendContribution {
         continue;
       }
       const stored = await this.authority.readStoredRun(candidate.runId);
-      if (!stored || !isVisibleRunV1(stored)) continue;
+      if (!stored || !isVisibleRunV1(stored) || !inConversation(stored))
+        continue;
       const projected = projectClientRunV1(stored);
       const tentative = [
         ...selected.values(),
