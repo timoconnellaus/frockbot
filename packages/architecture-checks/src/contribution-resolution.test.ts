@@ -45,8 +45,16 @@ function resolutionModules(): string[] {
 
 describe("Contribution resolution is manifest-driven", () => {
   test("no application or Bot Durable Object module switches on a Package specifier", () => {
+    const files = resolutionModules();
+    // The check is only worth anything if it is reading the modules that
+    // actually resolve Contributions.
+    expect(files).toContain("apps/cloudflare/src/bot-state.ts");
+    expect(files).toContain("applications/foundation/src/runtime.ts");
+    expect(files).toContain("applications/foundation/src/user.ts");
+    expect(files).toContain("applications/foundation/src/client.ts");
+    expect(files).not.toContain("applications/foundation/src/contributions.ts");
     const offenders: string[] = [];
-    for (const file of resolutionModules()) {
+    for (const file of files) {
       const source = read(file);
       for (const [index, line] of source.split("\n").entries()) {
         const at = `${file}:${index + 1}`;
