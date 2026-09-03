@@ -6,6 +6,7 @@ import {
 } from "./scheduler.js";
 import { decodeRoutineScheduleStateV1, type RoutineFireV1 } from "./firing.js";
 import { RoutineStore } from "./store.js";
+import { RoutineInboxStore } from "./inbox-store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
 import {
   routineFireKeyV1,
@@ -704,5 +705,56 @@ describe("a burst of missed occurrences", () => {
     expect(fired).toHaveLength(1);
     expect(fired[0]?.missedCount).toBe(4);
     expect(fired[0]?.cue).toContain("4 scheduled occurrences elapsed");
+  });
+});
+
+describe("a failed firing", () => {
+  test("writes a completion-inbox entry the person can see", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+
+    time.set("2026-01-01T00:01:00.000Z");
+    await drain(scheduler, {
+      status: "failed",
+      summary: "turn 10 started while turn 9 is open",
+    });
+
+    // Before this, a failed firing produced only a `failed` run-log row: the
+    // header badge stayed at its old count through six consecutive failures
+    // and the only trace was behind Run log → expand a row.
+    const inbox = new RoutineInboxStore(storage, { now: time.now });
+    const entries = await inbox.list();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      routineId: "brief",
+      acknowledged: false,
+    });
+    expect(entries[0]?.text).toContain("Morning brief");
+    expect(entries[0]?.text).toContain("turn 10 started while turn 9 is open");
+    // A failure is addressed to the person, not handed to the Bot's next
+    // conversational Turn: no pending wake.
+    expect(await inbox.pending()).toEqual([]);
+  });
+
+  test("records one entry however many times the settle is retried", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+    time.set("2026-01-01T00:01:00.000Z");
+    await drain(scheduler, { status: "failed", summary: "flaked" });
+    time.set("2026-01-01T02:00:00.000Z");
+    await drain(scheduler, { status: "failed", summary: "flaked" });
+
+    const entries = await new RoutineInboxStore(storage, {
+      now: time.now,
+    }).list();
+    expect(new Set(entries.map((entry) => entry.entryId)).size).toBe(
+      entries.length,
+    );
   });
 });

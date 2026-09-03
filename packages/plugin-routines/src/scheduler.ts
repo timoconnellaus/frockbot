@@ -35,6 +35,7 @@ import {
   type RoutineFireV1,
   type RoutineScheduleStateV1,
 } from "./firing.js";
+import { routineTerminalRecordsV1 } from "./inbox-store.js";
 import {
   decodeRoutineRecordV1,
   type RoutineRecordV1,
@@ -737,6 +738,60 @@ export class RoutineScheduler {
     } satisfies RoutineScheduleStateV1);
   }
 
+  /**
+   * The name a person knows this Routine by, for anything addressed to them.
+   * Falls back to the id when the record is gone or unreadable — a message
+   * about a Routine is worth more than nothing, even under a broken record.
+   */
+  async #routineName(
+    transaction: RoutineStorageWritesV1,
+    routineId: string,
+  ): Promise<string> {
+    const stored = await transaction.get<unknown>(routineKeyV1(routineId));
+    if (stored === undefined) return routineId;
+    try {
+      return decodeRoutineRecordV1(stored).name;
+    } catch {
+      return routineId;
+    }
+  }
+
+  /**
+   * What a person is told about a firing that did not work.
+   *
+   * A completed firing has always written a completion-inbox entry; a failed
+   * one wrote nothing at all — no entry, no badge, no notification — so six
+   * consecutive failures left the header count untouched and the only trace
+   * was behind Bot settings → Routines → Run log → expand a row. "A Routine
+   * that stops working tells you." The entry is written in the transaction
+   * that settles the firing, so there is no window where a firing has failed
+   * and its outcome is nowhere, and it is idempotent on the run id.
+   */
+  async #recordFailureInbox(
+    transaction: RoutineStorageWritesV1,
+    fire: RoutineFireV1,
+    outcome: RoutineFireOutcomeV1,
+    now: string,
+  ): Promise<void> {
+    const name = await this.#routineName(transaction, fire.routineId);
+    const verb = outcome.status === "cancelled" ? "was stopped" : "did not run";
+    const records = await routineTerminalRecordsV1({
+      runId: fire.fireId,
+      routineId: fire.routineId,
+      routineName: name,
+      responseText:
+        outcome.summary === undefined || outcome.summary.trim().length === 0
+          ? `"${name}" ${verb}.`
+          : `"${name}" ${verb}: ${outcome.summary}`,
+      now,
+      read: (key) => transaction.get(key),
+    });
+    if (!records) return;
+    for (const [key, value] of Object.entries(records.records)) {
+      await transaction.put(key, value);
+    }
+  }
+
   async #settleFiring(
     fire: RoutineFireV1,
     outcome: RoutineFireOutcomeV1,
@@ -746,6 +801,9 @@ export class RoutineScheduler {
     await this.#storage.transaction(async (transaction) => {
       await transaction.delete(routineFireKeyV1(fire.routineId));
       await this.#recordOutcomeOnClock(transaction, fire, outcome, at);
+      if (outcome.status !== "ok") {
+        await this.#recordFailureInbox(transaction, fire, outcome, finishedAt);
+      }
       const startedAt = fire.mintedAt;
       await appendRoutineRunEntryV1(transaction, {
         schemaVersion: 1,

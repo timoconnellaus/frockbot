@@ -328,7 +328,11 @@ import {
   type PendingBotInputV1,
   type RoutineInboxEntryV1,
 } from "@frockbot/plugin-routines/inbox";
-import type { RoutineScheduler } from "@frockbot/plugin-routines/scheduler";
+import type {
+  RoutineFireOutcomeV1,
+  RoutineScheduler,
+} from "@frockbot/plugin-routines/scheduler";
+import type { RoutineFireV1 } from "@frockbot/plugin-routines/firing";
 import {
   RoutineNotFoundError,
   type RoutineStore,
@@ -3025,19 +3029,59 @@ export class ShellBotBackendContribution {
       return;
     }
     await this.routineScheduler.settle(async (fire) => {
-      try {
-        await this.authority.run(
-          routineTurnCommandV1(identity, fire, new Date().toISOString()),
-        );
-      } catch (error) {
-        return routineFireOutcomeV1(
-          await this.authority.readStoredRun(fire.fireId),
-          error,
-        );
-      }
+      const outcome = await this.runOneFiring(identity, fire);
+      await this.notifyFailedFiring(identity, fire, outcome);
+      return outcome;
+    });
+  }
+
+  private async runOneFiring(
+    identity: BotIdentity,
+    fire: RoutineFireV1,
+  ): Promise<RoutineFireOutcomeV1> {
+    try {
+      await this.authority.run(
+        routineTurnCommandV1(identity, fire, new Date().toISOString()),
+      );
+    } catch (error) {
       return routineFireOutcomeV1(
         await this.authority.readStoredRun(fire.fireId),
+        error,
       );
+    }
+    return routineFireOutcomeV1(
+      await this.authority.readStoredRun(fire.fireId),
+    );
+  }
+
+  /**
+   * Tell the person that a firing did not work.
+   *
+   * The scheduler has already written the durable completion-inbox entry in
+   * the transaction that settled the firing; this is the delivery half — the
+   * same seam a hand-off uses, so a Routine that breaks reaches the same place
+   * a Routine that finishes does instead of only a `failed` row nobody opens.
+   * `notifications.enabled` is honoured: it is the mute on updates, and a
+   * broken Routine is an update, not a decision the Bot is waiting on.
+   */
+  private async notifyFailedFiring(
+    identity: BotIdentity,
+    fire: RoutineFireV1,
+    outcome: RoutineFireOutcomeV1,
+  ): Promise<void> {
+    if (outcome.status === "ok") return;
+    const settings = await this.getSettings(identity);
+    if (!settings.notifications.enabled) return;
+    await this.authority.recordNotification({
+      // The same id shape the completion path uses, so one firing is one
+      // intent however many times the alarm retries it.
+      notificationId: `routine-failed:${fire.fireId}`,
+      runId: fire.fireId,
+      createdAt: new Date().toISOString(),
+      title: `${settings.profile.name} could not run a Routine`,
+      body: (
+        outcome.summary ?? "The firing ended without saying why."
+      ).slice(0, 240),
     });
   }
   // -------------------------------------------------------------------------
