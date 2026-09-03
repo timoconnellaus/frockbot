@@ -123,8 +123,13 @@ export interface ClientDynamicToolCallInputV1 {
 export type ClientRunOutcomeV1 =
   | { type: "completed"; text: string }
   | { type: "failed"; message: string }
-  | { type: "cancelled"; message: string }
-  | { type: "superseded"; message: string };
+  /**
+   * A Turn a Stop or a later message ended keeps what it had already said:
+   * `text` is that partial answer, and `message` is the line saying why it
+   * ends where it does (ADR 0024).
+   */
+  | { type: "cancelled"; message: string; text?: string }
+  | { type: "superseded"; message: string; text?: string };
 
 export interface ClientRunRecoveryV1 {
   action: "resume";
@@ -565,6 +570,33 @@ function visibleEvents(
   return projection;
 }
 
+/**
+ * What an interrupted Turn had already said, read back out of its journal.
+ *
+ * The kernel records a Turn's answer as it streams, so a Turn stopped or
+ * superseded mid-sentence still holds every word it sent. It never reached a
+ * `responseText`, because it never completed — but the partial answer is a
+ * fact about what the person watched arrive, not a claim that the Turn
+ * succeeded, and the thread keeps it instead of replacing it with a notice.
+ */
+function interruptedOutcomeTextV1(run: StoredRun): { text?: string } {
+  let requestId: string | undefined;
+  let text = run.responseText ?? "";
+  for (const event of run.events) {
+    if (event.type === "assistant/chunk") {
+      if (event.requestId !== requestId) {
+        requestId = event.requestId;
+        text = "";
+      }
+      text += event.text;
+    } else if (event.type === "assistant/message") {
+      requestId = event.requestId;
+      text = event.text;
+    }
+  }
+  return text ? { text: truncateWireString(text, MAX_OUTCOME_BYTES) } : {};
+}
+
 function runStatus(run: StoredRun): ClientRunStatusV1 {
   return requireStoredRunV1(run).status;
 }
@@ -589,11 +621,13 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
           ? ({
               type: "cancelled",
               message: CANCELLED_RUN_MESSAGE,
+              ...interruptedOutcomeTextV1(run),
             } satisfies ClientRunOutcomeV1)
           : status === "superseded"
             ? ({
                 type: "superseded",
                 message: SUPERSEDED_RUN_MESSAGE,
+                ...interruptedOutcomeTextV1(run),
               } satisfies ClientRunOutcomeV1)
             : undefined;
   const recovery =
@@ -1004,20 +1038,32 @@ function decodeOutcome(
     };
   }
   if (outcome.type === "cancelled" && runStatus === "cancelled") {
-    exactKeys(outcome, ["type", "message"], "run.outcome");
+    exactKeys(outcome, ["type", "message", "text"], "run.outcome");
     return {
       type: "cancelled",
       message: wireString(outcome, "message", MAX_FAILURE_BYTES, "run.outcome"),
+      ...decodeInterruptedTextV1(outcome),
     };
   }
   if (outcome.type === "superseded" && runStatus === "superseded") {
-    exactKeys(outcome, ["type", "message"], "run.outcome");
+    exactKeys(outcome, ["type", "message", "text"], "run.outcome");
     return {
       type: "superseded",
       message: wireString(outcome, "message", MAX_FAILURE_BYTES, "run.outcome"),
+      ...decodeInterruptedTextV1(outcome),
     };
   }
   throw new Error("run.outcome does not match run.status");
+}
+
+/** The partial answer an interrupted Turn kept, when it said anything. */
+function decodeInterruptedTextV1(outcome: Record<string, unknown>): {
+  text?: string;
+} {
+  if (outcome.text === undefined) return {};
+  return {
+    text: wireString(outcome, "text", MAX_OUTCOME_BYTES, "run.outcome"),
+  };
 }
 
 function decodeRecovery(
@@ -1114,8 +1160,12 @@ function decodeRun(value: unknown): ClientRun {
     ...(run.queued === true ? { queued: true as const } : {}),
     ...(outcome?.type === "completed" ? { responseText: outcome.text } : {}),
     ...(outcome?.type === "failed" ? { failure: outcome.message } : {}),
-    ...(outcome?.type === "cancelled" ? { failure: outcome.message } : {}),
-    ...(outcome?.type === "superseded" ? { failure: outcome.message } : {}),
+    ...(outcome?.type === "cancelled" || outcome?.type === "superseded"
+      ? {
+          failure: outcome.message,
+          ...(outcome.text ? { responseText: outcome.text } : {}),
+        }
+      : {}),
     ...(recovery ? { failure: recovery.message, recovery } : {}),
   };
 }

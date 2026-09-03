@@ -1357,6 +1357,54 @@ describe("dispatched subagents in the run projection", () => {
     expect(() => decodeClientRunPageV1(tampered)).toThrow();
   });
 
+  test("an interrupted Turn keeps the text it had already streamed", () => {
+    const streamed: SessionEvent[] = [
+      event({
+        type: "assistant/chunk",
+        seq: 0,
+        timestamp,
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: "The three things to know are",
+      }),
+      event({
+        type: "assistant/chunk",
+        seq: 1,
+        timestamp,
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: " first, that",
+      }),
+    ];
+
+    for (const status of ["cancelled", "superseded"] as const) {
+      const projected = projectClientRunV1({
+        ...storedRun(streamed, status),
+        ...(status === "superseded"
+          ? {
+              supersededAt: "2026-08-28T00:00:05.000Z",
+              supersededBy: "run-next",
+            }
+          : {}),
+      });
+      expect(projected.outcome).toMatchObject({
+        type: status,
+        text: "The three things to know are first, that",
+      });
+      // And it survives the wire: the client reads it as the Turn's text, with
+      // the notice kept separately as the line that says why it stops there.
+      const decoded = decodeClientRunPageV1(
+        createClientRunListV1([projected], { truncated: false }),
+      ).runs[0];
+      expect(decoded?.responseText).toBe(
+        "The three things to know are first, that",
+      );
+      expect(decoded?.failure).toBeDefined();
+    }
+  });
+
   test("refuses a chip whose background flag is not a boolean", () => {
     const page = createClientRunListV1(
       [projectClientRunV1(storedRun([dispatched]))],
