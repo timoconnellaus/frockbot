@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "id": "package-catalog",
-  "displayName": "Package Catalog",
+  "displayName": "Plugin catalog",
   "version": "0.0.1",
   "compatibility": {
     "frockbot": ">=0.0.1"

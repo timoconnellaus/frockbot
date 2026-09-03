@@ -110,7 +110,7 @@ async function save(): Promise<void> {
         v-if="fieldKind(definition.schema) === 'enum'"
         v-model="draft[definition.id]"
       >
-        <option value="">Package default</option>
+        <option value="">Default</option>
         <option
           v-for="choice in definition.schema.enum ?? []"
           :key="String(choice)"

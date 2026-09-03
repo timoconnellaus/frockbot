@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "id": "package-publisher",
-  "displayName": "Package Publisher",
+  "displayName": "Plugin publisher",
   "version": "0.0.1",
   "compatibility": { "frockbot": ">=0.0.1" },
   "dependencies": {

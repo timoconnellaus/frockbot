@@ -702,10 +702,12 @@ describe("generic per-Turn model resolution", () => {
           acceptedAt: "2026-09-02T00:01:00.000Z",
           text: "must fail",
         }),
-      ).rejects.toThrow("not installed and enabled");
+      ).rejects.toThrow("Turn this model's plugin back on in Plugins");
       expect(await bot.storage.get(`run:${runId}`)).toMatchObject({
         status: "failed",
-        failure: expect.stringContaining("not installed and enabled"),
+        failure: expect.stringContaining(
+          "Turn this model's plugin back on in Plugins",
+        ),
       });
     }
 
@@ -722,10 +724,10 @@ describe("generic per-Turn model resolution", () => {
           acceptedAt: "2026-09-02T00:02:00.000Z",
           text: "must fail",
         }),
-      ).rejects.toThrow("is revoked");
+      ).rejects.toThrow("needs reconnecting");
       expect(await bot.storage.get(`run:${runId}`)).toMatchObject({
         status: "failed",
-        failure: expect.stringContaining("is revoked"),
+        failure: expect.stringContaining("needs reconnecting"),
       });
     }
   });

@@ -70,7 +70,7 @@ async function save(): Promise<void> {
         <span class="profile-face" aria-hidden="true" />
         <div>
           <strong>Your profile</strong>
-          <p>This identity is shared across your Bots.</p>
+          <p>How your Bots refer to you.</p>
         </div>
       </div>
       <UiField label="Name">
@@ -82,13 +82,13 @@ async function save(): Promise<void> {
     </UiAnchor>
     <UiAnchor
       anchor="user-package-settings"
-      label="Package settings"
+      label="Plugin settings"
       :href="packageSettingsLink"
       class="settings-row"
     >
       <p class="field-hint">
-        Settings of the Packages you have enabled. Model providers are
-        configured in Models and accounts in Connectors.
+        Settings for the plugins you've turned on. Model providers are set up in
+        Models, and accounts in Connectors.
       </p>
       <PackageSettingsSection />
       <UiButton type="button" @click="surfaces.open('plugins')">

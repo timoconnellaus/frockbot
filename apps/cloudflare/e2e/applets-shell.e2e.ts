@@ -264,7 +264,7 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   const canvas = page.getByRole("region", { name: "Applet Todo" });
   await expect(canvas).toBeVisible();
   await expect(canvas.getByText("Todo", { exact: true })).toBeVisible();
-  await expect(canvas.getByText("No published version yet")).toBeVisible();
+  await expect(canvas.getByText("Not published yet")).toBeVisible();
   await expect(canvas.getByText("Check passed: no diagnostics")).toBeVisible();
   // The code view opens on the most recently changed file.
   await expect(canvas.getByText("export default function App()")).toBeVisible();
@@ -275,7 +275,7 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   // the page is fed the Applets state over bridge v2.
   await entry.click();
   const surface = page.getByRole("region", { name: "Applets" });
-  await expect(surface.getByText("Bot-authored Package")).toBeVisible();
+  await expect(surface.getByText("Built by this Bot")).toBeVisible();
   const listFrame = surface.locator("iframe").contentFrame();
   await expect(listFrame.getByText("applets:Todo")).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -286,10 +286,10 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   stubs.publish();
   await listFrame.getByRole("button", { name: "Open Todo" }).click();
   await surface.page().keyboard.press("Escape");
-  // The header names the live generation in words and keeps the exact id as
-  // the tooltip.
+  // The header names the live generation in words. The exact id is not on the
+  // page at all — it is an internal identifier, and the Applet the frame loads
+  // is what proves the right generation went live.
   await expect(canvas.getByText(/^Live/)).toBeVisible();
-  await expect(canvas.getByTitle("generation-2")).toBeVisible();
   const appFrame = canvas.locator(".applet-canvas-app iframe").contentFrame();
   await expect(appFrame.getByText("live:generation-2")).toBeVisible();
 

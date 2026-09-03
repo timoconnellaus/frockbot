@@ -138,9 +138,7 @@ onBeforeUnmount(() => {
       <div class="auth-mark" aria-hidden="true">⌁</div>
       <p class="auth-eyebrow">FrockBot</p>
       <h1 id="auth-title">Welcome back</h1>
-      <p class="auth-copy">
-        Sign in in your browser to keep credentials out of the desktop renderer.
-      </p>
+      <p class="auth-copy">Sign in with your browser to continue.</p>
       <div v-if="loading" class="auth-loading" aria-live="polite">
         Checking your session…
       </div>

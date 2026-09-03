@@ -450,7 +450,7 @@ export class BotState extends DurableObject<BotStateEnv> {
             computer: {
               storage: this.stateChannel.computerStorage,
               workspace: this.backendEnv.WORKSPACE_FILES,
-              providerLabel: "Fly Sprites",
+              providerLabel: "Computer",
               configured: computerConfigured,
               openComputer: (userId, botId, effectId) => {
                 const identity = { userId };

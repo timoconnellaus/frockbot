@@ -32,7 +32,7 @@ test("a new User creates a first Bot and finds it in the directory", async ({
   // model is unavailable.
   const workspace = page.locator("main.workspace");
   await expect(workspace.getByText("Barebones")).toHaveCount(0);
-  await expect(workspace.getByText("Model unavailable")).toHaveCount(0);
+  await expect(workspace.getByText("No model available")).toHaveCount(0);
   await expect(workspace.locator("textarea")).toHaveCount(0);
 
   await createBot(page, "Shepherd");

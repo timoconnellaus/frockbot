@@ -69,11 +69,7 @@ async function plan(): Promise<void> {
       /></span>
       <span class="import__intro">
         <strong>Import a Bot template</strong>
-        <small>
-          Paste a template link to see exactly what it would create before
-          anything happens. Importing never brings across Memory, credentials,
-          or Connections.
-        </small>
+        <small> Paste a template link to see what it would create. </small>
       </span>
     </header>
 
@@ -150,8 +146,8 @@ async function plan(): Promise<void> {
         <h4>Missing from your catalog</h4>
         <ul>
           <li v-for="entry in missing" :key="entry.catalogId">
-            {{ entry.displayName }} — not in the Catalog generation you are
-            pinned to, so it will be skipped.
+            {{ entry.displayName }} — not available in your catalog, so it will
+            be skipped.
           </li>
         </ul>
       </section>

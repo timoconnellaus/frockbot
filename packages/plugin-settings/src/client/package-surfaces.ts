@@ -97,6 +97,6 @@ export function configurationHomeLabel(
 ): string | undefined {
   if (home === "models") return "Models";
   if (home === "connections") return "Connectors";
-  if (home === "user-settings") return "Application settings";
+  if (home === "user-settings") return "Settings";
   return undefined;
 }

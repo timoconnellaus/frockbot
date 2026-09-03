@@ -78,8 +78,8 @@ onMounted(load);
 <template>
   <section class="admin-surface" aria-label="Deployment policy">
     <p class="admin-surface__explanation">
-      Control whether people without an existing FrockBot User can sign in.
-      Existing Users and admins are always admitted.
+      Control who can sign in. People who already have accounts, and admins,
+      always can.
     </p>
 
     <p v-if="loading" class="admin-surface__status" aria-live="polite">
@@ -90,7 +90,7 @@ onMounted(load);
       <label class="admin-surface__toggle">
         <span>
           <strong>Accept new signups</strong>
-          <small>Let new Users enter this deployment.</small>
+          <small>Let new people sign up.</small>
         </span>
         <input
           type="checkbox"

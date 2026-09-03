@@ -35,7 +35,7 @@ const packages = computed(() =>
     </article>
   </div>
   <p v-else class="package-settings-empty">
-    No enabled Package has settings of its own.
+    None of your plugins have settings.
   </p>
 </template>
 

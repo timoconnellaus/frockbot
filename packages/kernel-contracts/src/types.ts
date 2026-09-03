@@ -170,7 +170,12 @@ export function turnEndReason(value: unknown): string | undefined {
   return bounded.length > 0 ? bounded : undefined;
 }
 
-/** The failure text a User sees for a Turn that did not complete. */
+/**
+ * The failure text recorded against a Turn that did not complete. It names the
+ * outcome and the provider's own reason, which the debug surface and the API
+ * both need. It is a diagnostic, not copy: the client never renders it into the
+ * conversation — see `runFailureCopyV1` in the shell's client.
+ */
 export function turnFailureMessage(
   outcome: TurnOutcome,
   reason?: string,
