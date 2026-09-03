@@ -52,6 +52,66 @@ export type ClientRunStatusV1 =
 const CANCELLED_RUN_MESSAGE = "Stopped by an authenticated Stop command.";
 const SUPERSEDED_RUN_MESSAGE = "Interrupted by your next message.";
 
+/**
+ * Why the Bot declined to admit a Turn. A refusal is an ordinary answer — the
+ * Bot is busy with a Turn this command did not ask to replace, is holding an
+ * effect only a User can settle, or the command was fenced or already used —
+ * so the client shows the reason and keeps the person's text rather than
+ * treating it as a failure of the send.
+ */
+export type ClientTurnRefusalReasonV1 =
+  | "busy"
+  | "reconciliation-required"
+  | "fenced"
+  | "duplicate";
+
+/** The versioned body a refused Turn answers with, decoded by the client. */
+export interface ClientTurnRefusalV1 {
+  schemaVersion: 1;
+  status: "refused";
+  reason: ClientTurnRefusalReasonV1;
+  error: string;
+}
+
+const TURN_REFUSAL_REASONS_V1: readonly ClientTurnRefusalReasonV1[] = [
+  "busy",
+  "reconciliation-required",
+  "fenced",
+  "duplicate",
+];
+
+/** The refusal a response body carries, or `undefined` when it carries none. */
+export function decodeClientTurnRefusalV1(
+  value: unknown,
+): ClientTurnRefusalV1 | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const body = value as Record<string, unknown>;
+  if (body.schemaVersion !== 1 || body.status !== "refused") return undefined;
+  if (typeof body.error !== "string") return undefined;
+  const reason = TURN_REFUSAL_REASONS_V1.find(
+    (candidate) => candidate === body.reason,
+  );
+  if (!reason) return undefined;
+  return {
+    schemaVersion: 1,
+    status: "refused",
+    reason,
+    error: wireString(body, "error", MAX_FAILURE_BYTES, "turn refusal"),
+  };
+}
+
+/**
+ * A refusal, as an error, because that is how a transport reports a non-2xx.
+ * The reason survives on the error so the client can tell "the Bot said no"
+ * from "the send may or may not have happened".
+ */
+export class ClientTurnRefusedErrorV1 extends Error {
+  constructor(readonly refusal: ClientTurnRefusalV1) {
+    super(refusal.error);
+    this.name = "ClientTurnRefusedErrorV1";
+  }
+}
+
 export type ClientRunEventV1 =
   | {
       type: "run/events-truncated";

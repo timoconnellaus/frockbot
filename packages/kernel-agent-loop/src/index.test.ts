@@ -2971,6 +2971,47 @@ describe("AgentLoop", () => {
     expect(end && Object.hasOwn(end, "reason")).toBe(false);
   });
 
+  test("reaching the step limit is reported as stopping, not as a model error", async () => {
+    const provider: LlmProvider = {
+      id: "never-stops",
+      async *stream() {
+        yield {
+          type: "tool-call",
+          call: { id: `call-${crypto.randomUUID()}`, name: "loop_tool", input: {} },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+      },
+    };
+    const errors: unknown[] = [];
+    const root = await mountRuntime(provider, {
+      name: "loop_tool",
+      description: "Never ends the Turn.",
+      inputSchema: { type: "object" },
+      execute: () => Promise.resolve({ content: "again", isError: false }),
+    });
+    root.on("agent/error", (_agent, error) => {
+      errors.push(error);
+    });
+    const handle = await root.agents.create({
+      ...allowEffectOptions,
+      botId: "step-limit-bot",
+      sessionId: "step-limit",
+      provider: "never-stops",
+      model: "test-model",
+    });
+
+    handle.agent.send("keep going");
+    await handle.agent.whenIdle();
+
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "interrupted",
+      reason: "stopped after 4 steps",
+    });
+    // Nothing about the model failed, so nothing is reported as if it had.
+    expect(errors).toEqual([]);
+  });
+
   test("a Turn whose first flush fails ends once instead of spinning", async () => {
     let streams = 0;
     const provider: LlmProvider = {

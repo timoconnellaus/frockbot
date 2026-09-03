@@ -88,6 +88,21 @@ class ToolEffectReconciliationRequiredError extends Error {
   }
 }
 
+/**
+ * The Turn used every step it was allowed.
+ *
+ * Not a model error: nothing failed, and everything the Turn did in those
+ * steps is durable. It is reported as what it is — a Turn that stopped after
+ * so many steps — so the person is told the Bot ran out of room rather than
+ * that their model broke.
+ */
+class StepLimitReachedError extends Error {
+  constructor(readonly steps: number) {
+    super(`stopped after ${steps} steps`);
+    this.name = "StepLimitReachedError";
+  }
+}
+
 /** Durable Stop won the final effect-admission transaction. */
 class EffectAdmissionFencedError extends Error {
   constructor(readonly effectId: string) {
@@ -592,7 +607,7 @@ class LoopAgent implements Agent {
           }
         }
       }
-      throw new Error(`agent exceeded ${this.#maxSteps} steps`);
+      throw new StepLimitReachedError(this.#maxSteps);
     } catch (error) {
       if (
         error instanceof ModelEffectReconciliationRequiredError ||
@@ -608,6 +623,10 @@ class LoopAgent implements Agent {
       ) {
         turnOutcome = "cancelled";
         turnReason = this.#cancelDetail;
+      } else if (error instanceof StepLimitReachedError) {
+        // The Turn ran out of room, which is not a failure of the model.
+        turnOutcome = "interrupted";
+        turnReason = turnEndReason(error.message);
       } else {
         turnOutcome = "model-error";
         turnReason = turnEndReason(modelFailureMessage(error));
@@ -755,7 +774,7 @@ class LoopAgent implements Agent {
         }
         inputs = [];
       }
-      throw new Error(`agent exceeded ${this.#maxSteps} steps`);
+      throw new StepLimitReachedError(this.#maxSteps);
     } catch (error) {
       if (
         error instanceof ModelEffectReconciliationRequiredError ||
@@ -771,6 +790,10 @@ class LoopAgent implements Agent {
       ) {
         turnOutcome = "cancelled";
         turnReason = this.#cancelDetail;
+      } else if (error instanceof StepLimitReachedError) {
+        // The Turn ran out of room, which is not a failure of the model.
+        turnOutcome = "interrupted";
+        turnReason = turnEndReason(error.message);
       } else {
         turnOutcome = "model-error";
         turnReason = turnEndReason(modelFailureMessage(error));

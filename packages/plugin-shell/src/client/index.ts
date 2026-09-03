@@ -53,7 +53,10 @@ import {
 import { MCP_OAUTH_CONNECTION_TYPE_ID } from "@frockbot/plugin-mcp/agent";
 import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
-import { decodeClientTurnV1 } from "../run-protocol.js";
+import {
+  ClientTurnRefusedErrorV1,
+  decodeClientTurnV1,
+} from "../run-protocol.js";
 import {
   decodeApprovalDecisionReceiptV1,
   decodeApprovalListViewV1,
@@ -2378,6 +2381,15 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.activeBotId !== botId
         )
           return { accepted: true, runId: pendingRunId };
+        // A refusal is a normal answer, not an uncertain send: the Bot
+        // declined and said why. Show that, drop the optimistic bubbles, and
+        // let the composer give the person their text back — fencing a run
+        // that was never admitted only threw the reason away.
+        if (error instanceof ClientTurnRefusedErrorV1) {
+          removeMessages(web.value.messages, pendingRunId);
+          web.value.error = error.refusal.error;
+          return { accepted: false, error: error.refusal.error };
+        }
         const aborted =
           error instanceof DOMException && error.name === "AbortError";
         replaceMessage(web.value.messages, pendingRunId, {
@@ -2640,6 +2652,13 @@ function replaceMessage(
     (message) => message.runId === runId && message.role === "assistant",
   );
   if (index >= 0) messages[index] = replacement;
+}
+
+/** Takes back both optimistic lines of a send the Bot never admitted. */
+function removeMessages(messages: WebChatMessage[], runId: string): void {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.runId === runId) messages.splice(index, 1);
+  }
 }
 
 export default shellClientPlugin;

@@ -31,8 +31,11 @@ import {
   type ClientRunLookupQueryV1,
   type ClientRunStopCommandV1,
   type ClientTurnCommandV1,
+  type ClientTurnRefusalReasonV1,
+  type ClientTurnRefusalV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import { decodeApprovalDecisionCommandV1 } from "@frockbot/plugin-shell/approvals";
+import { botTurnRefusalCodeV1 } from "@frockbot/kernel-do";
 import type { UserApplicationEnv } from "./contracts.js";
 
 const MAX_INPUT_LENGTH = 32_000;
@@ -167,27 +170,22 @@ const TURN_ADMISSION_REFUSALS_V1: readonly {
   { match: /already (exists|completed)/i, reason: "duplicate" },
 ];
 
-export type ClientTurnRefusalReasonV1 =
-  "busy" | "reconciliation-required" | "fenced" | "duplicate";
-
-/** The versioned body a refused Turn answers with, decoded by the client. */
-export interface ClientTurnRefusalV1 {
-  schemaVersion: 1;
-  status: "refused";
-  reason: ClientTurnRefusalReasonV1;
-  error: string;
-}
+export type { ClientTurnRefusalReasonV1, ClientTurnRefusalV1 };
 
 function turnRefusal(error: unknown): ClientTurnRefusalV1 | undefined {
   const message = error instanceof Error ? error.message : "";
-  const matched = TURN_ADMISSION_REFUSALS_V1.find((candidate) =>
-    candidate.match.test(message),
-  );
-  if (!matched) return undefined;
+  // The typed refusal first: the authority names its own reason, and the name
+  // is what survives the Durable Object RPC. The prose match stays as a
+  // fallback for refusals a Package still raises as plain errors.
+  const reason =
+    botTurnRefusalCodeV1(error) ??
+    TURN_ADMISSION_REFUSALS_V1.find((candidate) => candidate.match.test(message))
+      ?.reason;
+  if (!reason) return undefined;
   return {
     schemaVersion: 1,
     status: "refused",
-    reason: matched.reason,
+    reason,
     error: message,
   };
 }

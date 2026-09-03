@@ -39,6 +39,7 @@ import {
 import {
   BotTurnReconciliationRequiredError,
   BotTurnRecoveryRequiredError,
+  BotTurnRefusedError,
 } from "./turn-errors.js";
 import {
   ACTIVE_RUN_KEY,
@@ -278,7 +279,8 @@ export class BotDurableAuthority<Snapshot> {
             // an empty completion made the browser render the person's new
             // message as answered with silence; the durable queue entry stays,
             // and the refusal says why nothing has happened yet.
-            throw new Error(
+            throw new BotTurnRefusedError(
+              "reconciliation-required",
               `run "${command.runId}" is queued: the active run requires reconciliation before another Turn can be admitted`,
             );
           }
@@ -688,7 +690,8 @@ export class BotDurableAuthority<Snapshot> {
     );
     if (!run) return undefined;
     if (run.commandFingerprint !== botTurnCommandFingerprintV1(command)) {
-      throw new Error(
+      throw new BotTurnRefusedError(
+        "duplicate",
         `Turn idempotency key "${runId}" was reused for a different command`,
       );
     }
@@ -703,7 +706,8 @@ export class BotDurableAuthority<Snapshot> {
       };
     }
     if (run.status !== "completed") {
-      throw new Error(
+      throw new BotTurnRefusedError(
+        "duplicate",
         `run "${runId}" already exists with status ${run.status}`,
       );
     }
@@ -731,7 +735,8 @@ export class BotDurableAuthority<Snapshot> {
       run &&
       run.commandFingerprint !== botTurnCommandFingerprintV1(command)
     ) {
-      throw new Error(
+      throw new BotTurnRefusedError(
+        "duplicate",
         `Turn idempotency key "${command.runId}" was reused for a different command`,
       );
     }
@@ -968,7 +973,10 @@ export class BotDurableAuthority<Snapshot> {
       fences.includes(command.runId) ||
       (await this.ctx.storage.get(fenceKey))
     ) {
-      throw new Error(`run "${command.runId}" admission was fenced`);
+      throw new BotTurnRefusedError(
+        "fenced",
+        `run "${command.runId}" admission was fenced`,
+      );
     }
     const settings = await this.hooks.resolveAdmissionSnapshot(command);
     // Materialized before the transaction; the pin itself is read inside it.
@@ -980,20 +988,30 @@ export class BotDurableAuthority<Snapshot> {
         if (
           existing.commandFingerprint !== botTurnCommandFingerprintV1(command)
         ) {
-          throw new Error(
+          throw new BotTurnRefusedError(
+            "duplicate",
             `Turn idempotency key "${command.runId}" was reused for a different command`,
           );
         }
         if (existing.status === "completed") {
-          throw new Error(`run "${command.runId}" already completed`);
+          throw new BotTurnRefusedError(
+            "duplicate",
+            `run "${command.runId}" already completed`,
+          );
         }
-        throw new Error(`run "${command.runId}" already exists`);
+        throw new BotTurnRefusedError(
+          "duplicate",
+          `run "${command.runId}" already exists`,
+        );
       }
       const fences = storedRunAdmissionFences(
         await transaction.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
       );
       if (fences.includes(command.runId) || (await transaction.get(fenceKey))) {
-        throw new Error(`run "${command.runId}" admission was fenced`);
+        throw new BotTurnRefusedError(
+        "fenced",
+        `run "${command.runId}" admission was fenced`,
+      );
       }
       const identity = await transaction.get<BotIdentity>(IDENTITY_KEY);
       if (
@@ -1096,21 +1114,22 @@ export class BotDurableAuthority<Snapshot> {
     // no run when the person pressed send — supersedes exactly as a named one
     // does; only an absent field is "no intent", and that is still refused.
     if (lane !== "user" || !command.supersedes) {
-      throw new Error("bot already has an active run");
+      throw new BotTurnRefusedError("busy", "bot already has an active run");
     }
     const active = this.codec.optional(
       await transaction.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
     );
-    if (!active) throw new Error("bot already has an active run");
+    if (!active) throw new BotTurnRefusedError("busy", "bot already has an active run");
     if (active.status === "reconciliation-required") {
       // An uncertain external effect is never abandoned to admit something
       // else: the outcome has to be retrieved before this object runs again.
-      throw new Error(
+      throw new BotTurnRefusedError(
+        "reconciliation-required",
         `run "${activeRunId}" requires reconciliation before another Turn can be admitted`,
       );
     }
     if (active.status !== "running") {
-      throw new Error("bot already has an active run");
+      throw new BotTurnRefusedError("busy", "bot already has an active run");
     }
     const pendingRunId = await transaction.get<string>(PENDING_RUN_KEY);
     // A Turn that has not dispatched a model request has no durable work to
