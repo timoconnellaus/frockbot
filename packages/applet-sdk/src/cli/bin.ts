@@ -1,6 +1,10 @@
-#!/usr/bin/env bun
 /**
  * `applet` — the four commands a Bot runs on the Computer.
+ *
+ * `scripts/build-cli.ts` bundles `./main.ts` (which calls `run` below) into
+ * `dist/cli.mjs`, and that file is the package's `bin`: the Computer image has
+ * Node and no Bun, and these sources are TypeScript resolving siblings through
+ * `.js` specifiers, which plain Node cannot load.
  *
  *   applet new <name> [--dir <parent>]
  *   applet check [dir]
@@ -118,11 +122,7 @@ export async function run(argv: string[]): Promise<number> {
   }
 }
 
-if (import.meta.main) {
-  try {
-    process.exitCode = await run(process.argv.slice(2));
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  }
-}
+// No `import.meta.main` guard: this module is the command table, and
+// `./main.ts` is the entry point the published `dist/cli.mjs` bundles. Two
+// entry points would run every command twice under a Node that implements
+// `import.meta.main`, which is exactly what happened before this comment.

@@ -179,8 +179,8 @@
       "version": "0.0.1",
       "grants": ["applets:manage", "workspace:write"],
       "artifact": {
-        "contentHash": "e2787b45d8d82c25abade8230cd4521b9d8834148a2feec6f65f9d436471227a",
-        "size": 17094,
+        "contentHash": "65b6e1e12c526f68c20c78f45ba5d05b149a83f7f18bdff6bc5795e638eac68e",
+        "size": 19146,
         "mediaType": "application/javascript",
         "bundlerVersion": "frockbot-applets-esbuild@0.28.2"
       }

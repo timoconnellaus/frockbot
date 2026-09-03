@@ -251,6 +251,16 @@ export function isolateModelEventStreamV1(
  * identity. User, Bot, the resolved model binding, and the pinned Composition
  * generation complete the digest. Package id is deliberately absent: two
  * Packages of one Bot receive the same authority projection.
+ *
+ * `runId` is here because `CAPABILITIES` is one of those bindings and it is
+ * scoped to one Turn: the stub carries that Turn's run, session, and turn id,
+ * and the Bot Durable Object refuses a capability call whose scope is not the
+ * Turn it is currently running. The loader hands back the *cached* worker for a
+ * repeated id, env and all, so leaving the Turn out of the digest gave a second
+ * Turn on one Composition generation an isolate holding the first Turn's stub —
+ * every `ctx.memory`, `ctx.workspace`, and `ctx.applets` call in it answered
+ * "the Package is not running in this Bot's active Composition". The digest is
+ * a statement about what is bound; a per-Turn binding belongs in it.
  */
 export async function isolateBindingDigestV1(input: {
   userId: string;
@@ -261,6 +271,8 @@ export async function isolateBindingDigestV1(input: {
   >[];
   model?: IsolateModelBindingV1;
   compositionGenerationId: string;
+  /** The Turn whose `CAPABILITIES` stub this isolate's env carries. */
+  runId?: string;
 }): Promise<string> {
   const connections = [...input.connections]
     .map(({ connectionId, generation }) => ({ connectionId, generation }))
@@ -270,6 +282,7 @@ export async function isolateBindingDigestV1(input: {
       userId: input.userId,
       botId: input.botId,
       compositionGenerationId: input.compositionGenerationId,
+      runId: input.runId ?? null,
       connections,
       model: input.model ?? null,
     }),

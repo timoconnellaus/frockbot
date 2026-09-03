@@ -76,11 +76,22 @@ async function prettyJson(value: unknown): Promise<string> {
 }
 
 async function templateModule(): Promise<string> {
-  const files: Array<{ path: string; text: string }> = [];
+  const files: Array<{ path: string; base64: string }> = [];
   for (const path of TEMPLATE_FILES) {
+    const text = await Bun.file(at(`${TEMPLATE_DIRECTORY}${path}`)).text();
+    // Base64, not the source text.
+    //
+    // `findUnresolvedSpecifier` in the Package bundler scans the whole module
+    // for `from "…"` and refuses the bundle if it finds a specifier it cannot
+    // resolve. The template *is* Applet source, so it contains
+    // `from "@frockbot/applet-sdk/server"` — inside a string literal, but the
+    // bundler is deliberately a text scan and deliberately fail-closed, and
+    // weakening it to let this Package through would weaken it for every
+    // Bot-authored Package. Encoding the payload is the honest way past a rule
+    // that is right.
     files.push({
       path,
-      text: await Bun.file(at(`${TEMPLATE_DIRECTORY}${path}`)).text(),
+      base64: Buffer.from(text, "utf8").toString("base64"),
     });
   }
   return await prettyTypeScript(
@@ -93,9 +104,13 @@ async function templateModule(): Promise<string> {
       "// in the artifact rather than beside it. Editing",
       "// `packages/applet-sdk/template/` and rerunning the build is the only way",
       "// to change what a new Applet starts as.",
+      "//",
+      "// The bodies are base64 because the Package bundler refuses a module",
+      "// whose text contains an import specifier it cannot resolve, and Applet",
+      "// source contains several. `package.ts` decodes them.",
       "export const APPLET_TEMPLATE_FILES_V1: ReadonlyArray<{",
       "  path: string;",
-      "  text: string;",
+      "  base64: string;",
       `}> = ${JSON.stringify(files, null, 2)};`,
       "",
     ].join("\n"),

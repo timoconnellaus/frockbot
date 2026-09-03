@@ -16,6 +16,7 @@
     "@frockbot/kernel-composition": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/kernel-do": "workspace:*",
+    "@frockbot/plugin-applets": "workspace:*",
     "@frockbot/plugin-authoring": "workspace:*",
     "@frockbot/plugin-computer": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",

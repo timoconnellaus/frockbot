@@ -6,14 +6,45 @@
  * mapped here, once, and the same map feeds the type checker and the bundler.
  */
 
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 
+/**
+ * Found by walking up to this package's own `package.json`, not by counting
+ * directories.
+ *
+ * The same module runs from two depths: `src/cli/paths.ts` under Bun, and the
+ * bundled `dist/cli.mjs` under Node on the Computer, which has no Bun. A fixed
+ * `../../` is right for one and silently wrong for the other — it would resolve
+ * the SDK's entries to a directory that does not exist and every Applet import
+ * would fail to type-check with no explanation.
+ */
+function findSdkRoot(): string {
+  let directory = dirname(fileURLToPath(import.meta.url));
+  for (let depth = 0; depth < 6; depth += 1) {
+    try {
+      const manifest = JSON.parse(
+        readFileSync(join(directory, "package.json"), "utf8"),
+      ) as { name?: unknown };
+      if (manifest.name === "@frockbot/applet-sdk") return `${directory}/`;
+    } catch {
+      // Not this directory; keep walking.
+    }
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  throw new Error(
+    "the Applets SDK cannot find its own package root; reinstall @frockbot/applet-sdk",
+  );
+}
+
 /** The installed `@frockbot/applet-sdk` directory. */
-export const SDK_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+export const SDK_ROOT = findSdkRoot();
 
 export const SDK_ENTRIES = {
   "@frockbot/applet-sdk/server": join(SDK_ROOT, "src/server/index.ts"),

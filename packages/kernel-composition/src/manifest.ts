@@ -1766,6 +1766,10 @@ function decodeV5(value: Record<string, unknown>): FrockBotManifest {
   const base = decodeV2(value);
   const tools = decodeManifestTools(value.tools);
   const hooks = decodeManifestHooks(value.hooks);
+  // Declared roots are v3 onward, so a v5 manifest carries them too. Dropping
+  // them here would silently unmount the durable root a v5 Package declares —
+  // for the Applets Package, the directory its source lives in.
+  const roots = decodeManifestRoots(value.roots);
   const botIsolate = base.contributions.runtime?.host === "bot-isolate";
   if (botIsolate !== (tools !== undefined)) {
     throw new Error(
@@ -1782,6 +1786,7 @@ function decodeV5(value: Record<string, unknown>): FrockBotManifest {
     configuration: decodeConfiguration(value.configuration, true),
     ...(tools ? { tools } : {}),
     ...(hooks ? { hooks } : {}),
+    ...(roots ? { roots } : {}),
   };
 }
 

@@ -1765,6 +1765,7 @@ export class ShellBotBackendContribution {
       bindingDigest: await isolateBindingDigestV1({
         userId: identity.userId,
         botId: identity.botId,
+        runId: turn.runId,
         connections: authority.connections,
         ...(authority.model ? { model: authority.model } : {}),
         compositionGenerationId: turn.generationId,

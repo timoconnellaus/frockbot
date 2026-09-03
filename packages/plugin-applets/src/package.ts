@@ -187,6 +187,22 @@ function sourceDirectory(appletId: string): string {
   return `${COMPUTER_ROOT}/${appletId}`;
 }
 
+/**
+ * The template's bytes, from the base64 the build embedded.
+ *
+ * Not a nicety: the Package bundler refuses a module whose text carries an
+ * import specifier it cannot resolve, and Applet source carries several, so
+ * the scaffold travels encoded and is decoded here.
+ */
+function decodeTemplate(base64: string): string {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 /** The scaffold, with the template's two placeholders filled in. */
 function scaffold(
   appletId: string,
@@ -201,7 +217,7 @@ function scaffold(
       .slice(0, 32) || "applet";
   return APPLET_TEMPLATE_FILES_V1.map((file) => ({
     path: `${appletId}/${file.path}`,
-    text: file.text
+    text: decodeTemplate(file.base64)
       .split("__APPLET_ID__")
       .join(slug)
       .split("__APPLET_NAME__")

@@ -14,15 +14,18 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "applet": "./src/cli/bin.ts"
+    "applet": "./dist/cli.mjs"
   },
   "files": [
+    "dist",
     "src",
     "types",
     "template",
     "README.md"
   ],
   "scripts": {
+    "build": "bun scripts/build-cli.ts",
+    "prepublishOnly": "bun scripts/build-cli.ts",
     "test": "bun test test spike",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
