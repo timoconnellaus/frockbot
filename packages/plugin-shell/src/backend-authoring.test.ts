@@ -18,6 +18,8 @@ import {
   authorshipUndoIntentKey,
   authorshipUndoOutcomeKey,
   AUTHORSHIP_FAILURE_PREFIX,
+  classifyAuthoringEffectV1,
+  type AuthoringEffectOutcomeV1,
   type AuthoredArtifactRecordV1,
   type AuthoredManifestRecordV1,
   type AuthoringFailureRecordV1,
@@ -234,9 +236,13 @@ describe("a Bot authoring a Package", () => {
     quota?: (request: unknown) => unknown;
     runId?: string;
     currentToolNames?: readonly string[];
+    bundleTimeoutMs?: number;
   }) {
     let ids = 0;
     return createPackageAuthoringHost({
+      ...(options.bundleTimeoutMs === undefined
+        ? {}
+        : { bundleTimeoutMs: options.bundleTimeoutMs }),
       storage,
       composition,
       bundler: options.bundler as never,
@@ -910,5 +916,71 @@ describe("a Bot authoring a Package", () => {
         authoring: expect.objectContaining({ phase: "compose" }),
       }),
     );
+  });
+
+  test("a bundler outage leaves the effect retryable, not poisoned", async () => {
+    // F11: the "could not be reached" refusal returned without writing any
+    // outcome, so `classifyAuthoringEffectV1` called that effectId `unknown`
+    // forever — "it will not be bundled again". Since the effectId is
+    // run + Package + source hash, retrying the identical source in the same
+    // run could never succeed.
+    const effectId = "author-0123456789abcdef";
+    const offline = {
+      calls: 0,
+      bundle() {
+        offline.calls += 1;
+        return Promise.reject(
+          new Error('Worker "frockbot-cloudflare-bundler" not found'),
+        );
+      },
+    };
+    const refusal = await host({ bundler: offline as never }).author(
+      requestFor(),
+    );
+    expect(refusal.status).toBe("refused");
+
+    const outcome = storage.values.get(
+      authorshipArtifactKey(effectId),
+    ) as AuthoringEffectOutcomeV1;
+    expect(outcome).toMatchObject({ status: "unreachable", effectId });
+    expect(
+      classifyAuthoringEffectV1({
+        intent: storage.values.get(authorshipIntentKey(effectId)) as never,
+        outcome,
+      }),
+    ).toEqual({ kind: "fresh" });
+
+    // And the identical source, in the same run, now goes through.
+    const recovered = await host({
+      bundler: countingBundler((id) => bundledResult(id)),
+    }).author(requestFor());
+    expect(recovered.status).toBe("authored");
+  });
+
+  test("a bundler that never answers is refused at the deadline", async () => {
+    // F10: `bundle()` was awaited with no deadline and no AbortSignal, and the
+    // bundler runs esbuild-wasm inline — a hang there hung this tool call and
+    // the Turn around it, indefinitely.
+    const hanging = {
+      calls: 0,
+      bundle() {
+        hanging.calls += 1;
+        return new Promise<never>(() => {});
+      },
+    };
+    const outcome = await host({
+      bundler: hanging as never,
+      bundleTimeoutMs: 10,
+    }).author(requestFor());
+
+    expect(outcome).toMatchObject({ status: "refused" });
+    if (outcome.status !== "refused") return;
+    expect(outcome.reason).toContain(
+      "the Package bundler could not be reached: the Package bundler did not answer within 10ms",
+    );
+    // Nothing ran, so the effect stays retryable rather than poisoned (F11).
+    expect(
+      storage.values.get(authorshipArtifactKey("author-0123456789abcdef")),
+    ).toMatchObject({ status: "unreachable" });
   });
 });

@@ -117,6 +117,31 @@ function readTool<T>(input: {
   };
 }
 
+/**
+ * Close an open `package/catalog-change-intent` with the failure that ended
+ * it. A failure to record the failure must not hide the original one, so this
+ * never throws.
+ */
+async function appendEffectFailure(
+  session: Session,
+  position: PackageCatalogTurnPositionV1,
+  effectId: string,
+  reason: string,
+): Promise<void> {
+  try {
+    session.append({
+      type: "package/effect-failed",
+      ...position,
+      effectId,
+      effect: "catalog-change",
+      reason,
+    });
+    await session.flush();
+  } catch {
+    // Deliberately swallowed.
+  }
+}
+
 function outcomeText(outcome: PackageCatalogChangeOutcomeV1): string {
   if (outcome.status === "refused") {
     return `Package ${outcome.action} was refused: ${outcome.reason} Nothing was activated.`;
@@ -200,13 +225,27 @@ function createChangeTool(input: {
             }),
       });
       await session.flush();
-      const outcome = await input.host.change({
-        effectId,
-        sessionId: context.sessionId,
-        position,
-        change,
-      });
+      // Every `package/catalog-change-intent` closes with an outcome or with
+      // the failure that ended it — a refusal and an unmodelled throw alike
+      // used to leave the intent unpaired in the session log (finding F12).
+      let outcome: PackageCatalogChangeOutcomeV1;
+      try {
+        outcome = await input.host.change({
+          effectId,
+          sessionId: context.sessionId,
+          position,
+          change,
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        await appendEffectFailure(session, position, effectId, reason);
+        return {
+          content: `${input.name} failed: ${reason} Nothing was installed or removed.`,
+          isError: true,
+        };
+      }
       if (outcome.status === "refused") {
+        await appendEffectFailure(session, position, effectId, outcome.reason);
         return { content: outcomeText(outcome), isError: true };
       }
       session.append({

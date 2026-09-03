@@ -18,6 +18,7 @@ import {
   MCP_GOOD_API_KEY,
   TOOL_CALL_TRIGGER,
 } from "../harness/miniflare.ts";
+import { dynamicToolInputV1 } from "../dynamic-tools.ts";
 import {
   asUser,
   expectOkJson,
@@ -118,12 +119,20 @@ describe("exporting a Bot as a shareable template", () => {
     const connectionId = await addKeyedMcpConnection(userId);
 
     // THE BOT PACKS ITSELF. `bot_export_template` is a chat-turn tool that
-    // reaches the User's own staging command and nothing wider.
+    // reaches the User's own staging command and nothing wider. It lives in
+    // the `frockbot` namespace so progressive disclosure can surface it
+    // (ADR 0023), so a model reaches it through `call_dynamic_tool` — the same
+    // envelope every other namespaced tool takes.
     const exported = (await expectOkJson(
       await postAsUser(userId, `/api/bots/${botId}/turns`, {
         schemaVersion: 1,
         commandId: "template-export-1",
-        text: `${TOOL_CALL_TRIGGER}bot_export_template:{}`,
+        text: `${TOOL_CALL_TRIGGER}call_dynamic_tool:${JSON.stringify(
+          dynamicToolInputV1({
+            namespace: "frockbot",
+            toolName: "bot_export_template",
+          }),
+        )}`,
       }),
     )) as {
       events: Array<{
