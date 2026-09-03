@@ -2,7 +2,7 @@
 
 ## Status
 
-Design accepted 2026-09-03 with [ADR 0021](../adr/0021-applets-as-instance-packages.md) and the matching `AGENTS.md` amendment. Implementation runs as parallel lanes on one branch (`worktree-applets`) and lands as one pull request.
+Design accepted 2026-09-03 with [ADR 0022](../adr/0022-applets-as-instance-packages.md) and the matching `AGENTS.md` amendment. Implementation runs as parallel lanes on one branch (`worktree-applets`) and lands as one pull request.
 
 ## Decisions (accepted in conversation, 2026-09-03)
 
@@ -16,20 +16,20 @@ Design accepted 2026-09-03 with [ADR 0021](../adr/0021-applets-as-instance-packa
 - **D8** React + TanStack DB inside the SDK, schema-first tables. Optimistic updates are per-mutation with rollback on rejection. Real-time by default over a hibernatable WebSocket.
 - **D9** Design tokens are the contract; a small **precompiled** component kit on those tokens ships in the SDK, versioned once, never copied into an Applet. A template and a custom linter keep Applets aligned.
 - **D10** One focused Applet per Session.
-- **D11** Delete now. Quotas, export, public access, and sharing deferred (see ADR 0021 Consequences).
+- **D11** Delete now. Quotas, export, public access, and sharing deferred (see ADR 0022 Consequences).
 - **D12** The three workerd unknowns are spiked with tests before the build depends on them: (a) facet mount from a kernel DO through `getDurableObjectClass`, (b) WebSocket from a credentialless sandboxed iframe with a viewer token, (c) Miniflare embedded in a Node CLI running an Applet class as a SQLite DO with function service bindings.
 
 ## Where we are
 
-| Seam | Today | Needed |
-| --- | --- | --- |
-| Manifest | `contributions.client` is one iframe page in `frockbot.bot-settings-sections` or `frockbot.tool-result:<tool>` (`packages/kernel-composition/src/manifest.ts:49-71`) | multi-page iframe client, declarative entries, `contributions.instance` |
-| Iframe host | `PackageIframeHost.vue`, bridge v1 (`init`, `state`, `callTool`, `resize`) (`packages/kernel-contracts/src/iframe-ui.ts`) | bridge v2 adds `applets` state feed and viewer tokens; new slots `frockbot.right-panel`, `frockbot.surface:<id>`; entries |
-| Resolution | static `if/else` over specifier in `applications/foundation/src/runtime.ts:688+`, `user.ts:272-578`, `client.ts:19-40`, `apps/cloudflare/src/bot-state.ts:313+` | manifest-driven: first-party artifact-backed members load like Bot-authored ones |
-| Isolate host | `packages/kernel-composition/src/isolate-host.ts` mounts `BOT_PACKAGES` isolates; `CAPABILITIES` via `ctx.exports` loopback | `APPLETS` loader binding; `AppletState` DO; `ctx.applets` capability in the isolate context catalog |
-| Durable roots | `package-declared` roots, `plugin-image` pattern (`packages/plugin-image/src/root.ts`) | `applets` root for `@frockbot/plugin-applets`, scope user, read-write |
-| Computer | Node on the base image, Playwright Chromium installed in the `browser` phase (`packages/computer-host-runtime/src/runtime.ts:1479`) | `applets` provisioning phase: install `@frockbot/applet-sdk` + pinned `miniflare`/`workerd` under the runtime root |
-| Session state | Package-prefixed keys in the Bot DO (`shell:unread`) | `applets:focused` per Session, RPC pair, route, `FrockBotWebData` field |
+| Seam          | Today                                                                                                                                                                | Needed                                                                                                                    |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Manifest      | `contributions.client` is one iframe page in `frockbot.bot-settings-sections` or `frockbot.tool-result:<tool>` (`packages/kernel-composition/src/manifest.ts:49-71`) | multi-page iframe client, declarative entries, `contributions.instance`                                                   |
+| Iframe host   | `PackageIframeHost.vue`, bridge v1 (`init`, `state`, `callTool`, `resize`) (`packages/kernel-contracts/src/iframe-ui.ts`)                                            | bridge v2 adds `applets` state feed and viewer tokens; new slots `frockbot.right-panel`, `frockbot.surface:<id>`; entries |
+| Resolution    | static `if/else` over specifier in `applications/foundation/src/runtime.ts:688+`, `user.ts:272-578`, `client.ts:19-40`, `apps/cloudflare/src/bot-state.ts:313+`      | manifest-driven: first-party artifact-backed members load like Bot-authored ones                                          |
+| Isolate host  | `packages/kernel-composition/src/isolate-host.ts` mounts `BOT_PACKAGES` isolates; `CAPABILITIES` via `ctx.exports` loopback                                          | `APPLETS` loader binding; `AppletState` DO; `ctx.applets` capability in the isolate context catalog                       |
+| Durable roots | `package-declared` roots, `plugin-image` pattern (`packages/plugin-image/src/root.ts`)                                                                               | `applets` root for `@frockbot/plugin-applets`, scope user, read-write                                                     |
+| Computer      | Node on the base image, Playwright Chromium installed in the `browser` phase (`packages/computer-host-runtime/src/runtime.ts:1479`)                                  | `applets` provisioning phase: install `@frockbot/applet-sdk` + pinned `miniflare`/`workerd` under the runtime root        |
+| Session state | Package-prefixed keys in the Bot DO (`shell:unread`)                                                                                                                 | `applets:focused` per Session, RPC pair, route, `FrockBotWebData` field                                                   |
 
 ## Vocabulary
 
@@ -43,28 +43,28 @@ Manifest `schemaVersion: 5`. Migration of v2–v4 records at the decoder as the 
 
 ```ts
 export interface ClientIframePageV1 {
-  id: string;                       // /^[a-z][a-z0-9-]{0,31}$/
+  id: string; // /^[a-z][a-z0-9-]{0,31}$/
   artifact: ClientIframeArtifactV1; // unchanged
-  mounts: ClientMount[];            // allowed slots below
+  mounts: ClientMount[]; // allowed slots below
 }
 export interface ClientEntryV1 {
   id: string;
-  slot: "frockbot.sidebar-actions";        // the only entry slot in this slice
+  slot: "frockbot.sidebar-actions"; // the only entry slot in this slice
   order?: number;
-  label: string;                            // ≤ 32 chars
-  icon: string;                             // a UiIcon name from client-ui
+  label: string; // ≤ 32 chars
+  icon: string; // a UiIcon name from client-ui
   opens: { kind: "surface"; page: string }; // page id; renders as overlay surface
 }
 export interface ClientIframeContribution {
   kind: "iframe";
-  pages: ClientIframePageV1[];              // 1..8
-  entries?: ClientEntryV1[];                // 0..4
+  pages: ClientIframePageV1[]; // 1..8
+  entries?: ClientEntryV1[]; // 0..4
 }
 export interface InstanceContributionV1 {
   contract: 1;
-  server: ArtifactRefV1;                    // ESM module exporting `Applet`
-  ui: ClientIframeArtifactV1;               // one HTML page
-  tools: ManifestToolDeclaration[];         // what the instance exposes to Bots
+  server: ArtifactRefV1; // ESM module exporting `Applet`
+  ui: ClientIframeArtifactV1; // one HTML page
+  tools: ManifestToolDeclaration[]; // what the instance exposes to Bots
 }
 // FrockBotManifest gains `contributions.instance?: InstanceContributionV1`.
 ```
@@ -78,25 +78,35 @@ The existing single-page shape (`artifact` + `mounts` at the top level) migrates
 **Records (`packages/kernel-do/src/applets.ts`)**
 
 ```ts
-export interface AppletDirectoryEntryV1 {          // User DO, key `applets:entry:<appletId>`
+export interface AppletDirectoryEntryV1 {
+  // User DO, key `applets:entry:<appletId>`
   schemaVersion: 1;
-  appletId: string;                                // `<publicUserId>.<random>` (ADR 0015 shape)
+  appletId: string; // `<publicUserId>.<random>` (ADR 0015 shape)
   displayName: string;
-  currentGenerationId?: string;                    // absent until first publish
-  tools: ManifestToolDeclaration[];                // copy of the current generation's declarations
-  provenance: { kind: "bot"; botId: string; sessionId: string; turnId: string } | { kind: "user" };
+  currentGenerationId?: string; // absent until first publish
+  tools: ManifestToolDeclaration[]; // copy of the current generation's declarations
+  provenance:
+    | { kind: "bot"; botId: string; sessionId: string; turnId: string }
+    | { kind: "user" };
   createdAt: string;
   status: "draft" | "published" | "deleted";
 }
-export interface AppletGenerationV1 {              // AppletState DO, key `applet:generation:<generationId>`
+export interface AppletGenerationV1 {
+  // AppletState DO, key `applet:generation:<generationId>`
   schemaVersion: 1;
-  generationId: string;                            // sortable, monotonic per Applet
+  generationId: string; // sortable, monotonic per Applet
   parentGenerationId?: string;
-  server: ArtifactRefV1; ui: ClientIframeArtifactV1;
+  server: ArtifactRefV1;
+  ui: ClientIframeArtifactV1;
   tools: ManifestToolDeclaration[];
   contract: 1;
   origin: "publish" | "revert";
-  provenance: { botId: string; sessionId: string; turnId: string; runId: string };
+  provenance: {
+    botId: string;
+    sessionId: string;
+    turnId: string;
+    runId: string;
+  };
   createdAt: string;
   status: "pending" | "active" | "superseded" | "failed";
 }
@@ -110,7 +120,7 @@ export interface AppletGenerationV1 {              // AppletState DO, key `apple
 - `invokeTool(name, input, caller)`: forwards to the facet's `invokeTool`, bounded by the isolate limits.
 - `connect(viewerTokenClaims, request)`: forwards a WebSocket upgrade to the facet's `fetch`. The facet uses the hibernation API.
 - `delete()`: `ctx.facets.delete("applet")`, `deleteAll()` of its own records.
-- Loader id: `sha256(contract + serverHash + bindingDigest)`; binding digest = `isolateBindingDigestV1` inputs for the *User* (no Bot), since the instance is account-wide.
+- Loader id: `sha256(contract + serverHash + bindingDigest)`; binding digest = `isolateBindingDigestV1` inputs for the _User_ (no Bot), since the instance is account-wide.
 
 **User DO**: `applets:entry:*` directory plus `listApplets`, `createApplet`, `deleteApplet`, `recordAppletGeneration`. Deleting marks the entry `deleted`, calls `AppletState.delete()`, and bumps a `applets:directory-revision` so every Bot's next Composition resolution drops the tools.
 
@@ -118,8 +128,11 @@ export interface AppletGenerationV1 {              // AppletState DO, key `apple
 
 ```ts
 export interface CompositionAppletMemberV1 {
-  kind: "applet"; appletId: string; generationId: string;
-  tools: ManifestToolDeclaration[]; provenance: PackageProvenanceV1;
+  kind: "applet";
+  appletId: string;
+  generationId: string;
+  tools: ManifestToolDeclaration[];
+  provenance: PackageProvenanceV1;
 }
 ```
 
@@ -132,12 +145,17 @@ Added to `BotCapabilities` (`apps/cloudflare/src/bot-capabilities.ts`) and the g
 ```ts
 interface AppletsCapabilityV1 {
   list(): Promise<AppletSummaryV1[]>;
-  create(input: { displayName: string }): Promise<AppletSummaryV1>;         // creates the entry + scaffolds the root from the template
-  publish(input: { appletId: string }): Promise<AppletPublishResultV1>;     // reads `applets/<id>/dist/{server.js,ui.html,manifest.json}` from the durable root
-  revert(input: { appletId: string; generationId: string }): Promise<AppletPublishResultV1>;
+  create(input: { displayName: string }): Promise<AppletSummaryV1>; // creates the entry + scaffolds the root from the template
+  publish(input: { appletId: string }): Promise<AppletPublishResultV1>; // reads `applets/<id>/dist/{server.js,ui.html,manifest.json}` from the durable root
+  revert(input: {
+    appletId: string;
+    generationId: string;
+  }): Promise<AppletPublishResultV1>;
   delete(input: { appletId: string }): Promise<void>;
-  focus(input: { appletId: string | null }): Promise<void>;                // per Session
-  generations(input: { appletId: string }): Promise<AppletGenerationSummaryV1[]>;
+  focus(input: { appletId: string | null }): Promise<void>; // per Session
+  generations(input: {
+    appletId: string;
+  }): Promise<AppletGenerationSummaryV1[]>;
 }
 ```
 
@@ -187,13 +205,21 @@ import { Applet, table, t } from "@frockbot/applet-sdk/server";
 
 export class TodoApplet extends Applet {
   tables = {
-    todos: table({ id: t.id(), title: t.text(), done: t.boolean().default(false), createdAt: t.timestamp() }),
+    todos: table({
+      id: t.id(),
+      title: t.text(),
+      done: t.boolean().default(false),
+      createdAt: t.timestamp(),
+    }),
   };
   tools = {
-    add_todo: this.tool({ description: "Add a todo", input: { title: t.text() } }, async ({ title }) => {
-      await this.db.todos.insert({ title });
-      return `Added "${title}"`;
-    }),
+    add_todo: this.tool(
+      { description: "Add a todo", input: { title: t.text() } },
+      async ({ title }) => {
+        await this.db.todos.insert({ title });
+        return `Added "${title}"`;
+      },
+    ),
   };
 }
 ```
@@ -202,13 +228,35 @@ Client shape:
 
 ```tsx
 import { createApplet } from "@frockbot/applet-sdk/client";
-import { Button, Checkbox, Input, List, ListItem, Stack } from "@frockbot/applet-sdk/kit";
+import {
+  Button,
+  Checkbox,
+  Input,
+  List,
+  ListItem,
+  Stack,
+} from "@frockbot/applet-sdk/kit";
 import type { TodoApplet } from "./server";
 
-const applet = createApplet<TodoApplet>();          // connects on mount, real-time by default
+const applet = createApplet<TodoApplet>(); // connects on mount, real-time by default
 export default function App() {
-  const { data: todos } = applet.useLiveQuery((q) => q.from({ t: applet.tables.todos }).orderBy(({ t }) => t.createdAt));
-  return <Stack>… <Checkbox checked={todo.done} onChange={(done) => applet.tables.todos.update(todo.id, (d) => { d.done = done; })} /> …</Stack>;
+  const { data: todos } = applet.useLiveQuery((q) =>
+    q.from({ t: applet.tables.todos }).orderBy(({ t }) => t.createdAt),
+  );
+  return (
+    <Stack>
+      …{" "}
+      <Checkbox
+        checked={todo.done}
+        onChange={(done) =>
+          applet.tables.todos.update(todo.id, (d) => {
+            d.done = done;
+          })
+        }
+      />{" "}
+      …
+    </Stack>
+  );
 }
 ```
 
@@ -236,18 +284,18 @@ Bot-shaped, no in-process code:
 
 Each lane is one subagent on this branch, in its own worktree off `worktree-applets`, merged back by the integrator. Lane order respects dependencies; lanes marked ∥ run concurrently.
 
-| Lane | Scope | Depends on | Proof |
-| --- | --- | --- | --- |
-| **S1** spike | facet mount through `getDurableObjectClass` from a kernel DO in workerd; abort/remount over same storage; `facets.delete` | — | `apps/cloudflare/test/applet-facet.spike.ts` green; findings appended to `docs/research/spike-applet-facets.md` |
-| **S2** spike ∥ | Miniflare embedded in a Node script running a SQLite DO class with function service bindings and a WebSocket | — | `packages/applet-sdk/spike/miniflare.spike.test.ts` green |
-| **K1** manifest ∥ | v5 manifest, pages/entries/instance, migration, single slot predicate, `package_author` accepts pages + entries | — | kernel-composition + kernel-contracts + plugin-authoring tests |
-| **K2** resolution ∥ | manifest-driven resolution replacing the four switches | — | full suite green with no test edits; architecture check "no switch over Package identity" |
-| **K3** applet authority | `AppletState` DO, User directory, composition `applet` members, `ctx.applets`, viewer tokens + socket route, delete | S1, K1 | workerd tests: publish/mount/health, remount keeps storage, revert, failure keeps prior facet, delete, tool routing, token scope |
-| **U1** shell ∥ | entries, right-panel iframe slot, surfaces from pages, focused Applet state, bridge v2, CSP, phone chip | K1 | plugin-shell tests, e2e at desktop + 390px |
-| **C1** computer ∥ | `applets` root, provisioning phase, `applet` shim, pull-before-publish seam | — | computer-host-runtime tests; provisioning document renders |
-| **SDK** ∥ | `packages/applet-sdk` per §8 incl. kit, lint, template, CLI, dev runner | S2 | unit tests: DDL from tables, sync protocol round-trip, optimistic rollback, lint rules, `applet build` output shape |
-| **P1** package | `packages/plugin-applets` per §9 + build script + foundation member + Skill | K1, K3, SDK | pressure test: the Package authored via `package_author` in workerd mounts and lists/creates/publishes identically |
-| **E2E** | Bot creates a todo Applet from the template, publishes, canvas shows it, a second browser sees a real-time insert, `add_todo` tool works, delete removes it | all | `apps/cloudflare/e2e/applets.e2e.ts` |
+| Lane                    | Scope                                                                                                                                                       | Depends on  | Proof                                                                                                                            |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **S1** spike            | facet mount through `getDurableObjectClass` from a kernel DO in workerd; abort/remount over same storage; `facets.delete`                                   | —           | `apps/cloudflare/test/applet-facet.spike.ts` green; findings appended to `docs/research/spike-applet-facets.md`                  |
+| **S2** spike ∥          | Miniflare embedded in a Node script running a SQLite DO class with function service bindings and a WebSocket                                                | —           | `packages/applet-sdk/spike/miniflare.spike.test.ts` green                                                                        |
+| **K1** manifest ∥       | v5 manifest, pages/entries/instance, migration, single slot predicate, `package_author` accepts pages + entries                                             | —           | kernel-composition + kernel-contracts + plugin-authoring tests                                                                   |
+| **K2** resolution ∥     | manifest-driven resolution replacing the four switches                                                                                                      | —           | full suite green with no test edits; architecture check "no switch over Package identity"                                        |
+| **K3** applet authority | `AppletState` DO, User directory, composition `applet` members, `ctx.applets`, viewer tokens + socket route, delete                                         | S1, K1      | workerd tests: publish/mount/health, remount keeps storage, revert, failure keeps prior facet, delete, tool routing, token scope |
+| **U1** shell ∥          | entries, right-panel iframe slot, surfaces from pages, focused Applet state, bridge v2, CSP, phone chip                                                     | K1          | plugin-shell tests, e2e at desktop + 390px                                                                                       |
+| **C1** computer ∥       | `applets` root, provisioning phase, `applet` shim, pull-before-publish seam                                                                                 | —           | computer-host-runtime tests; provisioning document renders                                                                       |
+| **SDK** ∥               | `packages/applet-sdk` per §8 incl. kit, lint, template, CLI, dev runner                                                                                     | S2          | unit tests: DDL from tables, sync protocol round-trip, optimistic rollback, lint rules, `applet build` output shape              |
+| **P1** package          | `packages/plugin-applets` per §9 + build script + foundation member + Skill                                                                                 | K1, K3, SDK | pressure test: the Package authored via `package_author` in workerd mounts and lists/creates/publishes identically               |
+| **E2E**                 | Bot creates a todo Applet from the template, publishes, canvas shows it, a second browser sees a real-time insert, `add_todo` tool works, delete removes it | all         | `apps/cloudflare/e2e/applets.e2e.ts`                                                                                             |
 
 ## Out of scope (recorded so they are not mistaken for oversights)
 
