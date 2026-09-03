@@ -61,6 +61,31 @@ export function latestModelRequestJournalState(
   return state;
 }
 
+/**
+ * Why an unresolved Model request parked its run, in the operator's words
+ * where the Agent recorded them.
+ *
+ * The request id alone names *which* call is unsettled but not what went
+ * wrong, and the Agent's own reason is journaled on
+ * `model/reconciliation-required` — an event the chat projection drops. Read
+ * back here it reaches the banner the person is actually looking at.
+ */
+export function unresolvedModelRequestFailure(
+  events: readonly SessionEvent[],
+  request: Extract<SessionEvent, { type: "model/request" }>,
+): string {
+  const requestId = request.request.requestId;
+  const summary = `Model request "${requestId}" has no durable provider outcome`;
+  const journaled = events.findLast(
+    (event) =>
+      event.type === "model/reconciliation-required" &&
+      event.requestId === requestId,
+  );
+  return journaled?.type === "model/reconciliation-required"
+    ? `${summary}: ${journaled.reason}`
+    : summary;
+}
+
 export function planBotRunRecovery<Snapshot>(
   run: StoredRunV1<Snapshot>,
   latest: readonly SessionEvent[],

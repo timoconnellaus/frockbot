@@ -192,6 +192,40 @@ describe("Flock AI runtime Contribution", () => {
     await root.fiber.dispose();
   });
 
+  test("reports a rejected gateway call as a definitive no-effect", async () => {
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await root.plugin(
+      createFlockAiRuntimePlugin(
+        runtimeConfig(() =>
+          Promise.reject(
+            new Error("AI Gateway rejected the request (429): slow down"),
+          ),
+        ),
+      ),
+    );
+
+    let failure: unknown;
+    try {
+      for await (const event of root.llm.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        void event;
+      }
+    } catch (error) {
+      failure = error;
+    }
+
+    // Uncertain here would park the run on a reconciliation this Package
+    // cannot perform, wedging the Bot on a transient gateway error.
+    expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+    expect((failure as Error).message).toBe(
+      "AI Gateway rejected the request (429): slow down",
+    );
+    await root.fiber.dispose();
+  });
+
   test("cancels the gateway response stream when the Turn is aborted", async () => {
     let cancelled = false;
     const root = new Context();
