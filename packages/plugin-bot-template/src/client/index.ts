@@ -20,6 +20,7 @@ import {
 import BotTemplateImportSection from "./BotTemplateImportSection.vue";
 import BotTemplateSection from "./BotTemplateSection.vue";
 import { botTemplateStateKey, type BotTemplateClientState } from "./state.js";
+import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
 
 const SHARES_PATH = "/api/bot-templates";
 const IMPORTS_PATH = "/api/bot-template-imports";
@@ -208,3 +209,13 @@ export const botTemplateClientPlugin: ClientPlugin = (ctx) => {
 };
 
 export default botTemplateClientPlugin;
+
+/**
+ * The manifest's `client` entry, resolved by specifier. The application looks
+ * this descriptor up in its Contribution table; it never branches on which
+ * Package it belongs to.
+ */
+export const clientContribution = defineClientContribution<ClientPlugin>({
+  specifier: "@frockbot/plugin-bot-template/client",
+  plugin: botTemplateClientPlugin,
+});

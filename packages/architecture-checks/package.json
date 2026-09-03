@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@frockbot/application-foundation": "workspace:*",
     "@frockbot/computer-core": "workspace:*",
     "@frockbot/connection-core": "workspace:*",
     "@frockbot/kernel-agent-loop": "workspace:*",

@@ -406,6 +406,7 @@ import {
   type BotUnreadReceiptV1,
   type BotUnreadViewV1,
 } from "./unread.js";
+import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 export const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
@@ -5450,3 +5451,26 @@ export function createShellBotBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(createShellBotBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: the conversation surface and the Bot's Composition, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface ShellBotApplicationHostV1 {
+  shell: ShellBotBackendHost;
+}
+
+/**
+ * The manifest's `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineBotBackendContribution<
+  ShellBotApplicationHostV1,
+  ShellBotBackendContribution
+>({
+  specifier: "@frockbot/plugin-shell/backend",
+  create: (host, lifecycle) =>
+    createShellBotBackendPlugin(host.shell, lifecycle),
+});

@@ -80,6 +80,7 @@ import { modelRuntimeLabel } from "./model-presentation.js";
 import { showClientNotificationV1 } from "./notify.js";
 import "@frockbot/client-core/fonts.css";
 import "./styles.css";
+import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
 
 function toolsFrom(events: ClientTurnEvent[]): WebToolActivity[] {
   const tools = new Map<string, WebToolActivity>();
@@ -2259,3 +2260,13 @@ function replaceMessage(
 }
 
 export default shellClientPlugin;
+
+/**
+ * The manifest's `client` entry, resolved by specifier. The application looks
+ * this descriptor up in its Contribution table; it never branches on which
+ * Package it belongs to.
+ */
+export const clientContribution = defineClientContribution<ClientPlugin>({
+  specifier: "@frockbot/plugin-shell/client",
+  plugin: shellClientPlugin,
+});

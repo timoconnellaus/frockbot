@@ -18,7 +18,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/client-core": "workspace:*"
+    "@frockbot/client-core": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

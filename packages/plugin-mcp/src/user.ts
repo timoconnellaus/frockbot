@@ -92,6 +92,7 @@ import {
   type McpServerStateV1,
   type McpServerStatusViewV1,
 } from "./records.js";
+import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 /**
  * The global `fetch`, bound. A bare reference to it throws "Illegal
@@ -2029,3 +2030,25 @@ export function createMcpUserBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(createMcpUserBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: the User's MCP server records and lifecycle commands, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface McpUserApplicationHostV1 {
+  mcp: McpUserBackendHost;
+}
+
+/**
+ * The manifest's `user` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const userContribution = defineUserBackendContribution<
+  McpUserApplicationHostV1,
+  McpUserBackendContribution
+>({
+  specifier: "@frockbot/plugin-mcp/user",
+  create: (host, lifecycle) => createMcpUserBackendPlugin(host.mcp, lifecycle),
+});

@@ -7,6 +7,7 @@ import {
   type PackageRevisionHistoryV1,
   type RollbackPackageCommandV1,
 } from "./shared.js";
+import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
 export interface PackagePublisherGatewayHost {
   read(userId: string): Promise<PackageRevisionHistoryV1>;
@@ -123,3 +124,16 @@ export namespace createPackagePublisherBackendContribution {
       lifecycle.mount(createPackagePublisherBackendContribution(host));
   }
 }
+
+/**
+ * The manifest's gateway `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineGatewayContribution<
+  PackagePublisherGatewayHost,
+  PackagePublisherBackendRouteContribution
+>({
+  specifier: "@frockbot/plugin-package-publisher/backend",
+  create: createPackagePublisherBackendContribution.plugin,
+});

@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@frockbot/connection-core": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {

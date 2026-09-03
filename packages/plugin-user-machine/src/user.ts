@@ -77,6 +77,7 @@ import {
   type MachineDispatchOutcomeV1,
   type MachineStorageV1,
 } from "./store.js";
+import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 export interface MachineUserBackendHost {
   /** The User Durable Object's own storage. */
@@ -440,3 +441,26 @@ export function createMachineUserBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(new MachineUserBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: the User's registered machines, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface MachineUserApplicationHostV1 {
+  machines: MachineUserBackendHost;
+}
+
+/**
+ * The manifest's `user` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const userContribution = defineUserBackendContribution<
+  MachineUserApplicationHostV1,
+  MachineUserBackendContribution
+>({
+  specifier: "@frockbot/plugin-user-machine/user",
+  create: (host, lifecycle) =>
+    createMachineUserBackendPlugin(host.machines, lifecycle),
+});
