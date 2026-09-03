@@ -746,6 +746,58 @@ describe("User settings backend Contribution", () => {
         },
       }),
     ).resolves.toMatchObject({ status: "applied", revision: 4 });
+
+    // The mirror of the rule above. Disabling the dependency used to succeed
+    // and leave the account in exactly the state the enable path refuses:
+    // `custom-models=disabled provider-ollama-cloud=installed`.
+    const refusedDisable = await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "disable-custom-models-too-soon",
+        expectedRevision: 4,
+        packageId: "custom-models",
+        enabled: false,
+      },
+    });
+    expect(refusedDisable).toMatchObject({
+      status: "rejected",
+      revision: 4,
+      failure: expect.stringContaining("provider-ollama-cloud"),
+    });
+    const after = await settings.read("user-1");
+    expect(after.packages[0]?.state).toBe("installed");
+    expect(after.packages[1]?.state).toBe("installed");
+
+    // Disabling the dependent first, then the dependency, is allowed.
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "disable-ollama",
+        expectedRevision: 4,
+        packageId: "provider-ollama-cloud",
+        enabled: false,
+      },
+    });
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-enabled",
+          commandId: "disable-custom-models",
+          expectedRevision: 5,
+          packageId: "custom-models",
+          enabled: false,
+        },
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
   });
 
   test("applies the platform model through the backend Contribution", async () => {

@@ -113,6 +113,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
     showArchived: false,
     showHidden: false,
     loading: false,
+    loaded: false,
     draftName: "",
     draftSheep: randomSheepRecipeV1(),
     bindShell(value) {
@@ -133,6 +134,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         if (generation !== loadGeneration) return;
         authenticatedUserId = userId;
         state.value.directory = directory;
+        state.value.loaded = true;
         state.value.lifecycles = Object.fromEntries(
           lifecycleDirectory.lifecycles.map((item) => [
             item.botId,
@@ -479,9 +481,12 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         }
         clearPendingCreate(userId);
         replacePreferredBot(command.botId);
-        state.value.overlay = undefined;
+        // The list first, the dialog last. Tearing the dialog down before the
+        // reload landed showed the User the first-run empty state — "No Bots
+        // yet. Add your first sheep." — for the Bot they had just added.
         await state.value.load();
         await state.value.select(command.botId);
+        state.value.overlay = undefined;
       } catch (error) {
         if (isDefinitiveFlockFailure(error) && authenticatedUserId)
           clearPendingCreate(authenticatedUserId);
