@@ -76,6 +76,7 @@ import {
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateNotificationRequestV1,
   decodeIsolateScheduleRequestV1,
+  decodeIsolateAppletsRequestV1,
   decodeIsolateToolRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
@@ -161,6 +162,7 @@ import {
 import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
+  rpcAppletIdOrNull,
   rpcBotId,
   rpcDecoded,
   rpcIdentifier,
@@ -799,6 +801,33 @@ export class BotState extends DurableObject<BotStateEnv> {
   async isolateSchedule(input: unknown) {
     return (await this.contribution()).isolateSchedule(
       decodeIsolateCallRpcV1(input, decodeIsolateScheduleRequestV1) as never,
+    );
+  }
+
+  async isolateApplets(input: unknown) {
+    return (await this.contribution()).isolateApplets(
+      decodeIsolateCallRpcV1(input, decodeIsolateAppletsRequestV1) as never,
+    );
+  }
+
+  /** The Session's focused Applet (plan §6). One per Session by decision D10. */
+  async readFocusedApplet(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    return (await this.contribution()).readFocusedApplet(identity);
+  }
+
+  async setFocusedApplet(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      appletId: rpcAppletIdOrNull,
+    });
+    return (await this.contribution()).setFocusedApplet(
+      {
+        userId: request.userId as string,
+        botId: request.botId as string,
+      },
+      request.appletId as string | null,
     );
   }
 

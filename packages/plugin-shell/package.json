@@ -14,6 +14,7 @@
     "./backend-contracts": "./src/backend-contracts.ts",
     "./backend-execution": "./src/backend-execution.ts",
     "./backend-image": "./src/backend-image.ts",
+    "./backend-applets": "./src/backend-applets.ts",
     "./backend-isolate": "./src/backend-isolate.ts",
     "./backend-memory": "./src/backend-memory.ts",
     "./backend-package-catalog": "./src/backend-package-catalog.ts",

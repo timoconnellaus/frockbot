@@ -119,9 +119,31 @@ import {
 import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
+  type ShellAppletMountOptions,
   type ShellIsolateMountOptions,
   type ShellMountedComposition,
 } from "./backend-composition.js";
+import {
+  createAppletCapabilityHostV1,
+  createAppletInstanceBindingV1,
+  appletRpcSnapshotV1 as rpcJsonSnapshotV1,
+  resolveAppletCompositionV1,
+  type AppletCapabilityHostV1,
+  type AppletInstanceNamespaceV1,
+  type AppletUserDirectoryV1,
+} from "./backend-applets.js";
+import {
+  APPLET_FOCUSED_KEY,
+  decodeFocusedAppletV1,
+  type FocusedAppletV1,
+} from "@frockbot/kernel-do";
+import {
+  decodeAppletProvenanceV1,
+  decodeAppletSummaryV1,
+  decodeAppletToolDeclarationV1,
+  decodeIsolateAppletsRequestV1,
+  type IsolateAppletsOutcomeV1,
+} from "@frockbot/kernel-contracts";
 import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
 import {
   activateCompositionV1,
@@ -489,6 +511,13 @@ export interface BotStateEnv {
   BOT_PACKAGES?: BotIsolateLoader;
   /** Immutable, content-addressed Package artifacts, read hash-verified. */
   APPLICATION_ARTIFACTS?: R2Bucket;
+  /**
+   * One Applet Durable Object per Applet instance (ADR 0022). Optional so a
+   * host without Applets still compiles; a Composition generation carrying an
+   * Applet member then fails verification, exactly as an isolate member does
+   * without a loader.
+   */
+  APPLET_STATES?: AppletInstanceNamespaceV1;
   /**
    * The remote Package Catalog bucket. Read here only to index the Skills that
    * arrived with the User's installed entries, at the generation each install
@@ -1037,6 +1066,12 @@ export class ShellBotBackendContribution {
   }
 
   async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
+    // Before admission, so the pin this Turn takes already carries whatever the
+    // User's Applet directory says now.
+    await this.resolveAppletComposition(
+      { userId: command.userId, botId: command.botId },
+      command,
+    );
     return projectClientTurnV1(await this.authority.run(command));
   }
 
@@ -1384,6 +1419,21 @@ export class ShellBotBackendContribution {
     // The isolate bindings follow the generation actually being mounted, so a
     // fail-closed fallback loads the last known good's members, not the
     // pinned generation's.
+    // Applet tools route to the Applet Durable Object, which forwards to the
+    // facet. The instance binding is minted once per Turn; the facet stub
+    // itself never leaves that object.
+    const appletInstances = this.env.APPLET_STATES
+      ? createAppletInstanceBindingV1(
+          this.env.APPLET_STATES,
+          input.identity.userId,
+        )
+      : undefined;
+    const appletRouting: ShellAppletMountOptions | undefined = appletInstances
+      ? {
+          invokeTool: (request) =>
+            appletInstances(request.appletId).invokeTool(request),
+        }
+      : undefined;
     const host: CompositionMountHost<ShellMountedComposition> = {
       mount: async (mounting, signal) => {
         const isolate = await this.isolateMountOptions(input.identity, {
@@ -1417,6 +1467,7 @@ export class ShellBotBackendContribution {
               effect,
             ),
           ...(isolate ? { isolate } : {}),
+          ...(appletRouting ? { applets: appletRouting } : {}),
         }).mount(mounting, signal);
         mountedRoot = mounted.root;
         mountedGeneration = mounted.generation;
@@ -2024,6 +2075,291 @@ export class ShellBotBackendContribution {
         },
       }),
     };
+  }
+
+  // --- Applets (ADR 0022) --------------------------------------------------
+
+  /**
+   * `ctx.applets` for one Bot, or `undefined` when this host cannot reach
+   * Applets at all — no instance namespace, no artifact bucket, or no
+   * Workspace. An absent capability is an `unavailable` outcome at the isolate
+   * boundary, never a thrown error inside Bot code.
+   */
+  private appletCapabilityHost(
+    identity: BotIdentity,
+  ): AppletCapabilityHostV1 | undefined {
+    const namespace = this.env.APPLET_STATES;
+    const artifacts = this.env.APPLICATION_ARTIFACTS;
+    const workspace = this.env.WORKSPACE_FILES;
+    if (!namespace || !artifacts || !workspace) return undefined;
+    const bucket = artifacts;
+    return createAppletCapabilityHostV1({
+      userId: identity.userId,
+      botId: identity.botId,
+      storage: {
+        get: (key) => this.ctx.storage.get(key),
+        put: (entries) => this.ctx.storage.put(entries),
+      },
+      directory: this.appletUserDirectory(identity),
+      instanceFor: createAppletInstanceBindingV1(namespace, identity.userId),
+      artifacts: {
+        putPackageArtifact: async (contentHash, module) => {
+          await bucket.put(`packages/${contentHash}.mjs`, module, {
+            httpMetadata: { contentType: "application/javascript" },
+          });
+        },
+        putPackageUiArtifact: async (contentHash, html) => {
+          await bucket.put(`packages/${contentHash}.html`, html, {
+            httpMetadata: { contentType: "text/html; charset=utf-8" },
+          });
+        },
+      },
+      workspace,
+      // SEAM (lane C1): `syncWorkspaceRootNowV1` on the Computer Package is not
+      // on this branch yet, so a publish reads the store as it stands. When it
+      // lands, pass it here and a publish forces a pull of `applets/source`
+      // first.
+      composition: {
+        current: () => this.authority.composition.current(),
+        lastKnownGood: () => this.authority.composition.lastKnownGood(),
+        propose: (generation, options) =>
+          this.authority.composition.propose(generation, options),
+      },
+    });
+  }
+
+  /** The User Durable Object's Applet directory, decoded on arrival. */
+  private appletUserDirectory(identity: BotIdentity): AppletUserDirectoryV1 {
+    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+    // SAFETY: this namespace is bound to UserConfiguration; generated Worker
+    // types do not expose its Applet directory RPC surface.
+    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      listApplets(input: unknown): Promise<unknown>;
+      readAppletCompositionInput(input: unknown): Promise<unknown>;
+      createApplet(input: unknown): Promise<unknown>;
+      recordAppletGeneration(input: unknown): Promise<unknown>;
+      deleteApplet(input: unknown): Promise<unknown>;
+    };
+    const userId = identity.userId;
+    return {
+      async list() {
+        const answer = rpcJsonSnapshotV1(
+          await rpc.listApplets({ schemaVersion: 1, userId }),
+        ) as { revision?: unknown; applets?: unknown };
+        return {
+          revision: Number(answer.revision ?? 0),
+          applets: Array.isArray(answer.applets)
+            ? answer.applets.map((applet) => decodeAppletSummaryV1(applet))
+            : [],
+        };
+      },
+      async compositionInput() {
+        const answer = rpcJsonSnapshotV1(
+          await rpc.readAppletCompositionInput({ schemaVersion: 1, userId }),
+        ) as { revision?: unknown; applets?: unknown };
+        return {
+          revision: Number(answer.revision ?? 0),
+          applets: (Array.isArray(answer.applets) ? answer.applets : []).map(
+            (applet) => {
+              const entry = applet as Record<string, unknown>;
+              return {
+                appletId: String(entry.appletId),
+                generationId: String(entry.generationId),
+                tools: (Array.isArray(entry.tools) ? entry.tools : []).map(
+                  (tool, index) =>
+                    decodeAppletToolDeclarationV1(
+                      tool,
+                      `Applet tool declaration[${index}]`,
+                    ),
+                ),
+                provenance: decodeAppletProvenanceV1(entry.provenance),
+              };
+            },
+          ),
+        };
+      },
+      async create(input) {
+        return decodeAppletSummaryV1(
+          rpcJsonSnapshotV1(
+            await rpc.createApplet({
+              schemaVersion: 1,
+              userId,
+              displayName: input.displayName,
+              provenance: input.provenance,
+            }),
+          ),
+        );
+      },
+      async recordGeneration(input) {
+        return decodeAppletSummaryV1(
+          rpcJsonSnapshotV1(
+            await rpc.recordAppletGeneration({
+              schemaVersion: 1,
+              userId,
+              appletId: input.appletId,
+              generationId: input.generationId,
+              tools: input.tools,
+            }),
+          ),
+        );
+      },
+      async delete(appletId) {
+        return decodeAppletSummaryV1(
+          rpcJsonSnapshotV1(
+            await rpc.deleteApplet({ schemaVersion: 1, userId, appletId }),
+          ),
+        );
+      },
+    };
+  }
+
+  /**
+   * The Applet capability at the isolate boundary. One RPC with an operation,
+   * because seven near-identical forwarders would say nothing seven times; the
+   * shapes are decoded here and the outcomes are declared, never thrown.
+   */
+  async isolateApplets(
+    input: IsolateCallScopeV1,
+  ): Promise<IsolateAppletsOutcomeV1> {
+    const active = this.activeIsolateTurn(input);
+    if (!active) {
+      return {
+        status: "unavailable",
+        reason: "the Package is not running in this Bot's active Composition",
+      };
+    }
+    const identity = { userId: input.userId, botId: input.botId };
+    const host = this.appletCapabilityHost(identity);
+    if (!host) {
+      return { status: "unavailable", reason: "Applets are unavailable" };
+    }
+    const request = decodeIsolateAppletsRequestV1(input.request);
+    const scope = {
+      sessionId: input.sessionId,
+      runId: input.runId,
+      turnId: input.turnId,
+      effectId: `applet:${input.turnId}:${request.op}:${
+        "appletId" in request ? request.appletId : "new"
+      }`,
+    };
+    try {
+      switch (request.op) {
+        case "list":
+          return { status: "available", value: await host.list() };
+        case "create":
+          return {
+            status: "available",
+            value: await host.create(
+              { displayName: request.displayName },
+              scope,
+            ),
+          };
+        case "publish":
+          return {
+            status: "available",
+            value: await host.publish({ appletId: request.appletId }, scope),
+          };
+        case "revert":
+          return {
+            status: "available",
+            value: await host.revert(
+              {
+                appletId: request.appletId,
+                generationId: request.generationId,
+              },
+              scope,
+            ),
+          };
+        case "delete":
+          return {
+            status: "available",
+            value: await host.delete({ appletId: request.appletId }),
+          };
+        case "focus":
+          return {
+            status: "available",
+            value: await host.focus({ appletId: request.appletId }),
+          };
+        case "generations":
+          return {
+            status: "available",
+            value: await host.generations({ appletId: request.appletId }),
+          };
+      }
+    } catch (error) {
+      return {
+        status: "unavailable",
+        reason:
+          error instanceof Error ? error.message : "the Applet call failed",
+      };
+    }
+  }
+
+  /** The Session's focused Applet, as the shell and its route read it. */
+  async readFocusedApplet(identity: BotIdentity): Promise<FocusedAppletV1> {
+    await this.validateIdentity(identity);
+    const stored = await this.ctx.storage.get<unknown>(APPLET_FOCUSED_KEY);
+    return stored === undefined
+      ? {
+          schemaVersion: 1,
+          appletId: null,
+          changedAt: new Date(0).toISOString(),
+        }
+      : decodeFocusedAppletV1(stored);
+  }
+
+  async setFocusedApplet(
+    identity: BotIdentity,
+    appletId: string | null,
+  ): Promise<FocusedAppletV1> {
+    await this.validateIdentity(identity);
+    const focused = decodeFocusedAppletV1({
+      schemaVersion: 1,
+      appletId,
+      changedAt: new Date().toISOString(),
+    });
+    await this.ctx.storage.put({ [APPLET_FOCUSED_KEY]: focused });
+    return focused;
+  }
+
+  /**
+   * Resolve the User's Applet directory into this Bot's next Composition
+   * generation, before a Turn is admitted.
+   *
+   * Outside the admission transaction on purpose: the pin is taken in one
+   * storage transaction, which cannot make a cross-object call. A publish or a
+   * delete therefore activates at the *next* admitted Turn, and an in-flight
+   * Turn keeps the set it pinned — which is exactly what ADR 0022 promises.
+   * A directory that cannot be read leaves the Bot on the generation it has;
+   * an Applet change is never a reason a Turn cannot start.
+   */
+  private async resolveAppletComposition(
+    identity: BotIdentity,
+    command: OwnedBotTurnCommand,
+  ): Promise<void> {
+    if (!this.env.APPLET_STATES) return;
+    try {
+      await resolveAppletCompositionV1({
+        directory: this.appletUserDirectory(identity),
+        composition: {
+          current: () => this.authority.composition.current(),
+          propose: (generation, options) =>
+            this.authority.composition.propose(generation, options),
+        },
+        storage: {
+          get: (key) => this.ctx.storage.get(key),
+          put: (entries) => this.ctx.storage.put(entries),
+        },
+        origin: {
+          kind: "bot-authored",
+          runId: command.runId,
+          sessionId: command.sessionId,
+          turnId: command.runId,
+        },
+      });
+    } catch {
+      // Visible through the Applet's own failure records; never a wedged Turn.
+    }
   }
 
   async isolateWorkspaceRead(

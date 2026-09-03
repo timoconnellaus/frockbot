@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { PACKAGE_UI_CSP, servePackageUiArtifact } from "./gateway.ts";
+import {
+  PACKAGE_UI_CSP,
+  packageUiCspV1,
+  servePackageUiArtifact,
+} from "./gateway.ts";
 
 describe("Package UI artifact route", () => {
   const hash = "a".repeat(64);
@@ -21,12 +25,27 @@ describe("Package UI artifact route", () => {
       artifacts,
     );
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-security-policy")).toBe(
-      PACKAGE_UI_CSP,
+    // The restrictive base, plus the one hole an Applet page needs: a socket
+    // back to its own account's gateway and nowhere else (ADR 0022 §4).
+    const csp = response.headers.get("content-security-policy") ?? "";
+    expect(csp.startsWith(PACKAGE_UI_CSP)).toBe(true);
+    expect(csp).toBe(packageUiCspV1(new URL(request.url)));
+    expect(csp).toContain(
+      "connect-src https://bot.frockbot.com wss://bot.frockbot.com",
     );
     expect(response.headers.get("cache-control")).toContain("immutable");
     expect(response.headers.has("set-cookie")).toBe(false);
     expect(await response.text()).toContain("Page");
+  });
+
+  test("the artifact CSP names only its own gateway origin", () => {
+    expect(
+      packageUiCspV1(new URL("https://ui.bot.example.com/packages/x.html")),
+    ).toContain("connect-src https://bot.example.com wss://bot.example.com");
+    // A host that is already the gateway (local development) maps to itself.
+    expect(
+      packageUiCspV1(new URL("http://ui.localhost:8787/packages/x.html")),
+    ).toContain("connect-src http://localhost:8787 ws://localhost:8787");
   });
 
   test("serves no application route on the artifact host", async () => {

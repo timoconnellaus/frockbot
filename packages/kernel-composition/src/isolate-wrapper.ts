@@ -200,6 +200,33 @@ const BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1 = {
         return capabilities.workspaceDelete(request);
       },
     }`,
+  applets: `{
+      list: function () {
+        return capabilities.applets({ op: "list" });
+      },
+      create: function (input) {
+        return capabilities.applets({ op: "create", displayName: input.displayName });
+      },
+      publish: function (input) {
+        return capabilities.applets({ op: "publish", appletId: input.appletId });
+      },
+      revert: function (input) {
+        return capabilities.applets({
+          op: "revert",
+          appletId: input.appletId,
+          generationId: input.generationId,
+        });
+      },
+      delete: function (input) {
+        return capabilities.applets({ op: "delete", appletId: input.appletId });
+      },
+      focus: function (input) {
+        return capabilities.applets({ op: "focus", appletId: input.appletId });
+      },
+      generations: function (input) {
+        return capabilities.applets({ op: "generations", appletId: input.appletId });
+      },
+    }`,
   connection:
     "function (connectionId) { return capabilities.connection(connectionId); }",
   notify: "function (request) { return capabilities.notify(request); }",
@@ -354,7 +381,7 @@ export default class extends WorkerEntrypoint {
 `;
 
 /** Bumped with any change to the wrapper text; folded into the loader id. */
-export const BOT_ISOLATE_WRAPPER_VERSION = "wrapper-v4";
+export const BOT_ISOLATE_WRAPPER_VERSION = "wrapper-v5";
 
 export const BOT_ISOLATE_MAIN_MODULE = "index.js";
 export const BOT_ISOLATE_PACKAGE_MODULE = "package.js";

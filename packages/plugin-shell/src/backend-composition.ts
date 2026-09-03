@@ -84,6 +84,23 @@ export interface ShellIsolateMountOptions {
   deadlineMs?: number;
 }
 
+/**
+ * How an Applet member's tools reach their instance.
+ *
+ * The Applet Durable Object forwards to the facet; a facet stub is not
+ * serializable and never leaves that object, so this is a call, never a stub
+ * (`docs/research/spike-applet-facets.md` §8). Absent when the Bot Durable
+ * Object has no Applet binding: an Applet member's tools are then simply not
+ * registered, exactly as an isolate member fails without a loader.
+ */
+export interface ShellAppletMountOptions {
+  invokeTool(request: {
+    appletId: string;
+    tool: string;
+    input: unknown;
+  }): Promise<{ status: "ok" | "error"; content: string }>;
+}
+
 export interface ShellCompositionMountOptions {
   botId: string;
   sessionId: string;
@@ -110,6 +127,8 @@ export interface ShellCompositionMountOptions {
   subagentRole?: string;
   /** Absent when the host cannot load isolates; isolate members then fail verify. */
   isolate?: ShellIsolateMountOptions;
+  /** Absent when the host cannot reach Applet instances. */
+  applets?: ShellAppletMountOptions;
 }
 
 export interface ShellCompositionHost extends CompositionHost {
@@ -226,7 +245,49 @@ export function createShellCompositionHost(
         }
       }
 
+      // Applet members. Their tools are ordinary tools in this Bot's catalog
+      // (ADR 0022 decision 4), pinned to this generation like every other
+      // member, and routed to the Applet Durable Object. An Applet contributes
+      // no module and no manifest, so there is nothing here to mount, load, or
+      // health-check: the instance's own health check ran when its generation
+      // was published, and its failure is recorded there.
+      const unregisterApplets: (() => void)[] = [];
+      for (const applet of generation.applets ?? []) {
+        if (!options.applets) {
+          failures.push({
+            phase: "resolve",
+            message: `Applet "${applet.appletId}" needs an Applet binding and this host has none`,
+          });
+          continue;
+        }
+        const routing = options.applets;
+        for (const tool of applet.tools) {
+          unregisterApplets.push(
+            runtime.root.tools.register({
+              name: tool.name,
+              // Provenance travels into the catalog the model reads, so a Bot
+              // can tell an Applet's tool from a Package's.
+              description: `${tool.description} (Applet "${applet.appletId}", generation ${applet.generationId})`,
+              inputSchema: tool.inputSchema,
+              idempotent: false,
+              execute: async (input) => {
+                const outcome = await routing.invokeTool({
+                  appletId: applet.appletId,
+                  tool: tool.name,
+                  input: input ?? null,
+                });
+                return {
+                  content: outcome.content,
+                  isError: outcome.status === "error",
+                };
+              },
+            }),
+          );
+        }
+      }
+
       const dispose = async () => {
+        for (const unregister of unregisterApplets.toReversed()) unregister();
         for (const contribution of active.toReversed()) {
           await contribution.dispose();
         }

@@ -11,6 +11,10 @@ import {
   isPublicIdentifier,
 } from "@frockbot/configuration-core";
 import { decodeDeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
+import {
+  AppletViewerTokenError,
+  verifyAppletViewerTokenV1,
+} from "@frockbot/kernel-do";
 import { isDeploymentAdminV1 } from "./admin-identities.js";
 import type {
   CatalogGatewayDocument,
@@ -31,6 +35,35 @@ const PUBLIC_ASSET_PATHS = new Set([
 const PACKAGE_UI_PATH = /^\/packages\/([0-9a-f]{64})\.html$/;
 export const PACKAGE_UI_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'";
+
+/**
+ * The gateway origin an artifact host belongs to: `ui.bot.example` serves the
+ * pages of `bot.example`.
+ *
+ * An Applet's page opens a WebSocket back to its own account's gateway and to
+ * nothing else, so the `connect-src` it is served with is derived here rather
+ * than widened to a wildcard. Every other Package page is unaffected: it simply
+ * gains a `connect-src` it does not use.
+ */
+export function packageUiGatewayOriginV1(url: URL): string {
+  const host = url.hostname.startsWith("ui.")
+    ? url.hostname.slice("ui.".length)
+    : url.hostname;
+  const port = url.port ? `:${url.port}` : "";
+  return `${url.protocol}//${host}${port}`;
+}
+
+/**
+ * The immutable page's CSP, with the one hole an Applet needs: its socket back
+ * to the `AppletState` object, on the gateway origin, over that scheme's
+ * WebSocket scheme. Still `default-src 'none'`; still no `frame-ancestors`
+ * relaxation and no `form-action`.
+ */
+export function packageUiCspV1(url: URL): string {
+  const origin = packageUiGatewayOriginV1(url);
+  const socket = origin.replace(/^http/, "ws");
+  return `${PACKAGE_UI_CSP}; connect-src ${origin} ${socket}`;
+}
 export const SIGNUPS_CLOSED_MESSAGE =
   "FrockBot isn't taking new signups right now.";
 
@@ -76,7 +109,7 @@ export async function servePackageUiArtifact(
   const headers = {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "public, max-age=31536000, immutable",
-    "content-security-policy": PACKAGE_UI_CSP,
+    "content-security-policy": packageUiCspV1(url),
     "cross-origin-resource-policy": "cross-origin",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
@@ -309,6 +342,60 @@ function withClientOrigin(response: Response, origin: string): Response {
   return shared;
 }
 
+const APPLET_SOCKET_PATH = /^\/api\/applets\/([^/]+)\/socket$/;
+
+/**
+ * `GET /api/applets/:appletId/socket?token=…`.
+ *
+ * Ahead of session authentication on purpose, and for the same reason the
+ * machine door is: an Applet's page runs in a cookieless sandboxed iframe and
+ * carries no session. The signed viewer token is the whole of the decision —
+ * it names the User, the Applet, and the generation, it was minted by this
+ * deployment, and it expires in fifteen minutes. A token that does not verify
+ * never reaches a Durable Object, so an anonymous caller cannot create one.
+ */
+async function routeAppletSocket(
+  request: Request,
+  url: URL,
+  dependencies: GatewayDependencies,
+): Promise<Response> {
+  if (request.method !== "GET") return jsonError(405, "method not allowed");
+  if (!dependencies.appletViewerSecret || !dependencies.appletStateFor) {
+    return jsonError(503, "Applet viewer sessions are not configured");
+  }
+  let appletId: string;
+  try {
+    appletId = decodeURIComponent(url.pathname.match(APPLET_SOCKET_PATH)![1]);
+  } catch {
+    return jsonError(400, "invalid applet id");
+  }
+  let claims;
+  try {
+    claims = await verifyAppletViewerTokenV1(
+      dependencies.appletViewerSecret,
+      url.searchParams.get("token"),
+    );
+  } catch (error) {
+    return jsonError(
+      error instanceof AppletViewerTokenError ? error.status : 401,
+      "Applet viewer token is invalid",
+    );
+  }
+  // The token is scoped to one Applet: a valid token for another Applet of the
+  // same User is not a token for this one.
+  if (claims.a !== appletId) {
+    return jsonError(401, "Applet viewer token is invalid");
+  }
+  const forwarded = new URL(url);
+  forwarded.searchParams.delete("token");
+  forwarded.searchParams.set("u", claims.u);
+  forwarded.searchParams.set("a", claims.a);
+  forwarded.searchParams.set("g", claims.g);
+  return dependencies
+    .appletStateFor(claims.u, claims.a)
+    .connectViewer(new Request(forwarded, request));
+}
+
 export function createGateway(dependencies: GatewayDependencies) {
   const compatibilityDate = dependencies.compatibilityDate ?? "2026-08-27";
   const debugRoute = createDebugRoute(dependencies.debug);
@@ -316,6 +403,9 @@ export function createGateway(dependencies: GatewayDependencies) {
   const route = async (request: Request, url: URL): Promise<Response> => {
     if (url.pathname.startsWith("/api/auth/")) {
       return dependencies.auth.handler(request);
+    }
+    if (APPLET_SOCKET_PATH.test(url.pathname)) {
+      return routeAppletSocket(request, url, dependencies);
     }
     if (url.pathname === "/sign-out") {
       return routeSignOut(request, url, dependencies);

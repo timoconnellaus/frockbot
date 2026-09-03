@@ -269,6 +269,124 @@ export function createUserApplication() {
       });
     }
 
+    // --- Applets (ADR 0022 §4) ---------------------------------------------
+    //
+    // Session-authenticated and User-scoped: the gateway has already proved who
+    // is asking, and an Applet belongs to the User rather than to a Bot. The
+    // token these mint is the only credential an Applet page ever holds, and it
+    // names one User, one Applet, and one generation for fifteen minutes.
+    if (url.pathname === "/api/applets") {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      try {
+        return Response.json(await env.BOT_STATE.listApplets());
+      } catch (error) {
+        return jsonError(
+          503,
+          error instanceof Error ? error.message : "Applets are unavailable",
+        );
+      }
+    }
+    const appletTokenMatch = url.pathname.match(
+      /^\/api\/applets\/([^/]+)\/token$/,
+    );
+    const appletUiMatch = url.pathname.match(/^\/api\/applets\/([^/]+)\/ui$/);
+    if (appletTokenMatch || appletUiMatch) {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      let appletId: string;
+      try {
+        appletId = decodeURIComponent((appletTokenMatch ?? appletUiMatch)![1]);
+      } catch {
+        return jsonError(400, "invalid applet id");
+      }
+      try {
+        if (appletUiMatch) {
+          const ui = await env.BOT_STATE.readAppletUi({
+            schemaVersion: 1,
+            appletId,
+          });
+          return Response.json({
+            schemaVersion: 1,
+            appletId: ui.appletId,
+            generationId: ui.generationId,
+            // The anonymous artifact origin, exactly as a Package page is
+            // served: the Applet's UI is immutable content addressed by hash.
+            uiUrl: `${packageUiArtifactOrigin(url)}/packages/${ui.contentHash}.html`,
+          });
+        }
+        const minted = await env.BOT_STATE.mintAppletViewerToken({
+          schemaVersion: 1,
+          appletId,
+        });
+        const socket = new URL(url.origin);
+        socket.protocol = url.protocol === "http:" ? "ws:" : "wss:";
+        socket.pathname = `/api/applets/${encodeURIComponent(appletId)}/socket`;
+        socket.searchParams.set("token", minted.token);
+        return Response.json({
+          token: minted.token,
+          expiresAt: minted.expiresAt,
+          socketUrl: socket.toString(),
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Applet is unavailable";
+        return jsonError(
+          message.includes("unavailable") || message.includes("no active")
+            ? 404
+            : 503,
+          message,
+        );
+      }
+    }
+    const appletFocusMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/applets\/focus$/,
+    );
+    if (appletFocusMatch) {
+      let focusBotId: string;
+      try {
+        focusBotId = decodeBotIdV1(decodeURIComponent(appletFocusMatch[1]));
+      } catch {
+        return jsonError(400, "invalid bot id");
+      }
+      const missing = await requireRegisteredBot(env, focusBotId);
+      if (missing) return missing;
+      try {
+        if (request.method === "GET") {
+          return Response.json(
+            await env.BOT_STATE.readFocusedApplet({
+              schemaVersion: 1,
+              botId: focusBotId,
+            }),
+          );
+        }
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+        const body = (await request.json()) as { appletId?: unknown };
+        if (
+          !body ||
+          typeof body !== "object" ||
+          Array.isArray(body) ||
+          Object.keys(body).length !== 1 ||
+          !("appletId" in body) ||
+          (body.appletId !== null && typeof body.appletId !== "string")
+        ) {
+          return jsonError(400, "focus command is invalid");
+        }
+        return Response.json(
+          await env.BOT_STATE.setFocusedApplet({
+            schemaVersion: 1,
+            botId: focusBotId,
+            appletId: body.appletId,
+          }),
+        );
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "Applet focus failed",
+        );
+      }
+    }
+
     const notificationMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/notifications$/,
     );

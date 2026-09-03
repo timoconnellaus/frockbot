@@ -265,6 +265,36 @@ export interface UserBotStateBinding {
     botId: string;
     path: unknown;
   }): Promise<ClientWorkspaceFileV1>;
+  /**
+   * The User's Applets, and the two short-lived projections an open Applet
+   * needs (ADR 0022 §4). Account-wide, so they take no Bot: they sit on this
+   * User-scoped binding because it is the only door the hosted application has
+   * to the User Durable Object.
+   */
+  listApplets(input?: { schemaVersion: 1 }): Promise<unknown>;
+  mintAppletViewerToken(input: {
+    schemaVersion: 1;
+    appletId: string;
+  }): Promise<{
+    token: string;
+    expiresAt: string;
+    appletId: string;
+    generationId: string;
+  }>;
+  readAppletUi(input: { schemaVersion: 1; appletId: string }): Promise<{
+    appletId: string;
+    generationId: string;
+    contentHash: string;
+  }>;
+  readFocusedApplet(input: {
+    schemaVersion: 1;
+    botId: string;
+  }): Promise<unknown>;
+  setFocusedApplet(input: {
+    schemaVersion: 1;
+    botId: string;
+    appletId: string | null;
+  }): Promise<unknown>;
   listNotifications(input: {
     schemaVersion: 1;
     botId: string;
@@ -748,6 +778,16 @@ export interface GatewayDependencies {
   botStateFor(userId: string): UserBotStateBinding;
   userConfigurationFor(userId: string): UserConfigurationBinding;
   botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
+  /**
+   * The Applet viewer door (ADR 0022 §4). Both absent in a deployment without
+   * Applets, and `/api/applets/:id/socket` then reports itself unconfigured
+   * rather than the Worker failing to construct.
+   */
+  appletViewerSecret?: string;
+  appletStateFor?(
+    userId: string,
+    appletId: string,
+  ): { connectViewer(request: Request): Promise<Response> };
   /** Absent when the deployment publishes no Catalog; `/catalog/v1/*` then 503s. */
   catalog?: CatalogGatewayStore;
   /** Absent, or with no token, when the deployment publishes no `/api/debug`. */

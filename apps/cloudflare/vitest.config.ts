@@ -28,6 +28,9 @@ export default defineConfig({
         compatibilityFlags: ["nodejs_compat"],
         workerLoaders: {
           BOT_PACKAGES: {},
+          // Applet server artifacts (ADR 0022), mounted as a facet of the
+          // AppletState Durable Object.
+          APPLETS: {},
         },
         // The shared Computer host (ADR 0004) as the Durable Object sees it:
         // a service binding, decoding the real v1 protocol.
@@ -56,6 +59,10 @@ export default defineConfig({
             className: "UserConfiguration",
             useSQLite: true,
           },
+          APPLET_STATES: {
+            className: "AppletState",
+            useSQLite: true,
+          },
           DEPLOYMENT_POLICY: {
             className: "DeploymentPolicy",
             useSQLite: true,
@@ -80,8 +87,13 @@ export default defineConfig({
           // mint the token a machine presents and forge one that must be
           // refused.
           MACHINE_TOKEN_SECRET: "workerd-machine-token-secret-0123456789ab",
-          // A leak canary: a Bot isolate must never see a host binding.
+          // A leak canary: a Bot isolate — and an Applet facet — must never see
+          // a host binding.
           SECRET_TOKEN: "host-only-secret",
+          // The Applet viewer door's signing secret (ADR 0022 §4). Fixed, so a
+          // test can mint the token a page presents and forge one that must be
+          // refused.
+          APPLET_VIEWER_SECRET: "workerd-applet-viewer-secret-0123456789ab",
         },
       },
     }),
