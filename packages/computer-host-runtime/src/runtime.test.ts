@@ -141,6 +141,91 @@ describe("layout", () => {
 });
 
 describe("runtime files", () => {
+  test("the minimal viewer applies takeover from a fragment change without reloading", () => {
+    const viewer = COMPUTER_RUNTIME_FILES.find((file) =>
+      file.path.endsWith("/viewer/index.html"),
+    );
+    if (!viewer) throw new Error("the FrockBot viewer page is not installed");
+    const source = /<script type="module">([\s\S]*?)<\/script>/.exec(
+      viewer.content,
+    )?.[1];
+    if (!source) throw new Error("the FrockBot viewer module is missing");
+
+    const listeners = new Map<string, () => void>();
+    const classes = new Set<string>();
+    const screen = {
+      classList: {
+        toggle(name: string, enabled: boolean) {
+          if (enabled) classes.add(name);
+          else classes.delete(name);
+        },
+      },
+      setAttribute() {},
+    };
+    const status = {
+      textContent: "",
+      dataset: {} as Record<string, string>,
+    };
+    const messages: unknown[] = [];
+    const windowDouble = {
+      location: {
+        href: "https://sprite.invalid/index.html#view_only=1&path=websockify%3Ftoken%3Dsecret&password=password",
+        hash: "#view_only=1&path=websockify%3Ftoken%3Dsecret&password=password",
+        protocol: "https:",
+        host: "sprite.invalid",
+      },
+      parent: { postMessage: (message: unknown) => messages.push(message) },
+      addEventListener: (name: string, listener: () => void) =>
+        listeners.set(name, listener),
+      setTimeout: () => 1,
+      clearTimeout() {},
+    };
+    const documentDouble = {
+      getElementById: (id: string) => (id === "screen" ? screen : status),
+    };
+    let instance:
+      | {
+          viewOnly: boolean;
+          showDotCursor: boolean;
+          addEventListener(name: string, listener: () => void): void;
+        }
+      | undefined;
+    class FakeRfb {
+      viewOnly = false;
+      showDotCursor = true;
+      readonly listeners = new Map<string, () => void>();
+
+      constructor() {
+        instance = this;
+      }
+
+      addEventListener(name: string, listener: () => void): void {
+        this.listeners.set(name, listener);
+      }
+    }
+    const executable = source.replace(/^\s*import RFB from [^;]+;\s*/m, "");
+    new Function("RFB", "window", "document", executable)(
+      FakeRfb,
+      windowDouble,
+      documentDouble,
+    );
+
+    expect(instance?.viewOnly).toBe(true);
+    expect(instance?.showDotCursor).toBe(false);
+    expect(classes.has("view-only")).toBe(true);
+
+    windowDouble.location.hash =
+      "#view_only=0&path=websockify%3Ftoken%3Dsecret&password=password";
+    windowDouble.location.href = `https://sprite.invalid/index.html${windowDouble.location.hash}`;
+    listeners.get("hashchange")?.();
+
+    expect(instance?.viewOnly).toBe(false);
+    expect(classes.has("view-only")).toBe(false);
+    expect(messages).not.toContainEqual(
+      expect.objectContaining({ password: expect.anything() }),
+    );
+  });
+
   test("every declared file is the one the provisioning script installs", () => {
     for (const file of COMPUTER_RUNTIME_FILES) {
       expect(provisionScript).toContain(

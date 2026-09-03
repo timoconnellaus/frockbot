@@ -191,6 +191,7 @@ button.computer-screen {
   border: 0;
   background: var(--frock-surface);
   pointer-events: none;
+  touch-action: none;
 }
 
 .computer-screen-expanded iframe {
@@ -227,6 +228,85 @@ button.computer-screen {
     linear-gradient(90deg, var(--frock-computer-grid) 1px, transparent 1px),
     var(--frock-surface-subtle);
   background-size: 18px 18px;
+}
+
+.computer-progress-track {
+  position: relative;
+  overflow: hidden;
+  width: min(320px, 70vw);
+  height: 4px;
+  margin: 18px 0 10px;
+  border-radius: 999px;
+  background: var(--frock-viewer-status-surface);
+}
+
+.computer-progress-track > span {
+  position: absolute;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--frock-computer-accent);
+  animation: computer-progress 1.25s ease-in-out infinite;
+}
+
+.computer-progress-meta {
+  display: flex;
+  width: min(320px, 70vw);
+  justify-content: space-between;
+  gap: 14px;
+  color: var(--frock-viewer-content-muted);
+  font-size: var(--frock-text-xs);
+}
+
+.computer-progress-steps {
+  display: grid;
+  width: min(320px, 70vw);
+  gap: 6px;
+  margin: 16px 0 0;
+  padding: 0;
+  color: var(--frock-viewer-content-muted);
+  font-size: var(--frock-text-sm);
+  list-style: none;
+  text-align: left;
+}
+
+.computer-progress-steps li {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+}
+
+.computer-progress-steps li > span {
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--frock-viewer-status-border);
+  border-radius: 999px;
+}
+
+.computer-progress-steps .step-active {
+  color: var(--frock-viewer-content-text);
+}
+
+.computer-progress-steps .step-active > span {
+  border-color: var(--frock-computer-accent);
+  background: var(--frock-computer-accent);
+  box-shadow: 0 0 0 3px var(--frock-computer-focus);
+}
+
+.computer-progress-steps .step-complete > span {
+  border-color: var(--frock-success);
+  background: var(--frock-success);
+}
+
+@keyframes computer-progress {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(350%);
+  }
 }
 
 .computer-mark {

@@ -8,6 +8,7 @@ import {
   computerBotPathKeyV1,
   ComputerError,
   decodeComputerDoctorReportV1,
+  type ComputerConnectionProgressV1,
   type ComputerControlLease,
   type ComputerHandle,
 } from "@frockbot/computer-core";
@@ -27,11 +28,13 @@ import {
   computerUpdateLabelV1,
   decodeComputerCommandReceiptV1,
   decodeComputerCommandV1,
+  decodeComputerProgressViewV1,
   type ComputerCommandReceiptV1,
   type ComputerCommandV1,
   type ComputerDoctorViewV1,
   type ComputerPhase,
   type ComputerProjectionV1,
+  type ComputerProgressViewV1,
   type ComputerScreenshotViewV1,
   type ComputerViewerSessionViewV1,
 } from "./protocol.js";
@@ -82,11 +85,15 @@ interface StoredViewerV1 {
   expiresAt: string;
 }
 
-interface StoredProviderAnswerV1 {
-  version: 1;
-  phase: "provisioning" | "updating" | "ready" | "disconnected" | "error";
+type StoredProviderPhase =
+  "provisioning" | "updating" | "ready" | "disconnected" | "error";
+
+interface StoredProviderAnswerV2 {
+  version: 2;
+  phase: StoredProviderPhase;
   message: string;
   recordedAt: string;
+  progress?: ComputerProgressViewV1;
 }
 
 interface StoredIntentV1 {
@@ -161,16 +168,26 @@ function decodeStoredViewer(value: unknown): StoredViewerV1 {
   };
 }
 
-function decodeStoredProvider(value: unknown): StoredProviderAnswerV1 {
+/** Migrates the released V1 shape at the storage read seam. */
+function decodeStoredProvider(value: unknown): StoredProviderAnswerV2 {
   const record = object(value, "Computer provider record");
-  exact(
-    record,
-    ["version", "phase", "message", "recordedAt"],
-    [],
-    "Computer provider record",
-  );
+  if (record.version === 1) {
+    exact(
+      record,
+      ["version", "phase", "message", "recordedAt"],
+      [],
+      "Computer provider record",
+    );
+  } else {
+    exact(
+      record,
+      ["version", "phase", "message", "recordedAt"],
+      ["progress"],
+      "Computer provider record",
+    );
+  }
   if (
-    record.version !== 1 ||
+    (record.version !== 1 && record.version !== 2) ||
     (record.phase !== "provisioning" &&
       record.phase !== "updating" &&
       record.phase !== "ready" &&
@@ -180,13 +197,67 @@ function decodeStoredProvider(value: unknown): StoredProviderAnswerV1 {
     throw new Error("Computer provider record is corrupt");
   }
   return {
-    version: 1,
+    version: 2,
     phase: record.phase,
     message: storedText(record.message, "Computer provider message"),
     recordedAt: storedTimestamp(
       record.recordedAt,
       "Computer provider recordedAt",
     ),
+    ...(record.version === 2 && record.progress !== undefined
+      ? { progress: decodeComputerProgressViewV1(record.progress) }
+      : {}),
+  };
+}
+
+const CONNECT_PROGRESS_STEPS = [
+  { id: "waking", label: "Waking the Computer" },
+  { id: "attaching", label: "Attaching the Bot" },
+  { id: "starting-desktop", label: "Starting the desktop" },
+  { id: "minting-viewer", label: "Minting the secure viewer" },
+  { id: "connecting", label: "Connecting to the desktop" },
+] as const;
+
+function projectedProgress(
+  progress: ComputerConnectionProgressV1,
+  startedAt: string,
+  updatedAt: string,
+): ComputerProgressViewV1 {
+  if (progress.kind === "update") {
+    return {
+      version: 1,
+      kind: "update",
+      startedAt,
+      updatedAt,
+      index: progress.index,
+      total: progress.total,
+      steps: [
+        {
+          version: 1,
+          id: progress.step,
+          label: progress.label,
+          status: "active",
+        },
+      ],
+    };
+  }
+  return {
+    version: 1,
+    kind: "connect",
+    startedAt,
+    updatedAt,
+    index: progress.index,
+    total: progress.total,
+    steps: CONNECT_PROGRESS_STEPS.map((step, index) => ({
+      version: 1,
+      ...step,
+      status:
+        index + 1 < progress.index
+          ? ("complete" as const)
+          : index + 1 === progress.index
+            ? ("active" as const)
+            : ("pending" as const),
+    })),
   };
 }
 
@@ -414,8 +485,33 @@ export class ComputerBotBackendContribution {
         this.#liveViewer = undefined;
         await this.host.storage.delete(COMPUTER_VIEWER_RECORD_KEY);
       }
+      const recorded = updating
+        ? await this.host.storage.get<unknown>(COMPUTER_PROVIDER_RECORD_KEY)
+        : undefined;
+      const previousProgress =
+        recorded === undefined
+          ? undefined
+          : decodeStoredProvider(recorded).progress;
+      const recordedAt = this.now().toISOString();
+      const updateLabel = computerUpdateLabelV1(failure) ?? failure;
+      const progress = updating
+        ? previousProgress?.kind === "update"
+          ? previousProgress
+          : projectedProgress(
+              {
+                version: 1,
+                kind: "update",
+                step: "updating",
+                label: updateLabel,
+                index: 1,
+                total: 1,
+              },
+              previousProgress?.startedAt ?? recordedAt,
+              recordedAt,
+            )
+        : undefined;
       await this.host.storage.put(COMPUTER_PROVIDER_RECORD_KEY, {
-        version: 1,
+        version: 2,
         phase:
           command.type === "refreshViewer"
             ? "disconnected"
@@ -426,10 +522,11 @@ export class ComputerBotBackendContribution {
           command.type === "refreshViewer"
             ? `Viewer disconnected: ${failure}`
             : updating
-              ? (computerUpdateLabelV1(failure) ?? failure)
+              ? updateLabel
               : failure,
-        recordedAt: this.now().toISOString(),
-      } satisfies StoredProviderAnswerV1);
+        recordedAt,
+        ...(updating && progress ? { progress } : {}),
+      } satisfies StoredProviderAnswerV2);
       return this.settle(command, admitted.fingerprint, "rejected", failure);
     }
   }
@@ -438,12 +535,26 @@ export class ComputerBotBackendContribution {
     userId: string,
     command: ComputerCommandV1,
   ): Promise<void> {
+    const startedAt = this.now().toISOString();
+    let progress = projectedProgress(
+      {
+        version: 1,
+        kind: "connect",
+        step: "waking",
+        label: "Waking the Computer",
+        index: 1,
+        total: CONNECT_PROGRESS_STEPS.length,
+      },
+      startedAt,
+      startedAt,
+    );
     await this.host.storage.put(COMPUTER_PROVIDER_RECORD_KEY, {
-      version: 1,
+      version: 2,
       phase: "provisioning",
       message: "Waking and preparing the Computer…",
-      recordedAt: this.now().toISOString(),
-    } satisfies StoredProviderAnswerV1);
+      recordedAt: startedAt,
+      progress,
+    } satisfies StoredProviderAnswerV2);
     const session = await this.withComputer(
       userId,
       command,
@@ -451,8 +562,22 @@ export class ComputerBotBackendContribution {
         if (!computer.presence) {
           throw new Error("The selected Computer does not support presence");
         }
+        const report = async (
+          next: ComputerConnectionProgressV1,
+        ): Promise<void> => {
+          const updatedAt = this.now().toISOString();
+          progress = projectedProgress(next, startedAt, updatedAt);
+          await this.host.storage.put(COMPUTER_PROVIDER_RECORD_KEY, {
+            version: 2,
+            phase: next.kind === "update" ? "updating" : "provisioning",
+            message: next.label,
+            recordedAt: updatedAt,
+            progress,
+          } satisfies StoredProviderAnswerV2);
+        };
         return computer.presence.connect({
           effectId: `computer:${command.commandId}:connect`,
+          onProgress: report,
         });
       },
     );
@@ -465,14 +590,30 @@ export class ComputerBotBackendContribution {
       expiresAt: session.expiresAt,
     } satisfies StoredViewerV1;
     const updateLabel = computerUpdateLabelV1(session.message);
+    const recordedAt = this.now().toISOString();
+    if (updateLabel && progress.kind !== "update") {
+      progress = projectedProgress(
+        {
+          version: 1,
+          kind: "update",
+          step: "updating",
+          label: updateLabel,
+          index: 1,
+          total: 1,
+        },
+        startedAt,
+        recordedAt,
+      );
+    }
     await this.host.storage.put({
       [COMPUTER_VIEWER_RECORD_KEY]: stored,
       [COMPUTER_PROVIDER_RECORD_KEY]: {
-        version: 1,
+        version: 2,
         phase: updateLabel ? "updating" : "ready",
         message: updateLabel ?? "Computer ready",
-        recordedAt: this.now().toISOString(),
-      } satisfies StoredProviderAnswerV1,
+        recordedAt,
+        ...(updateLabel && progress.kind === "update" ? { progress } : {}),
+      } satisfies StoredProviderAnswerV2,
     });
     this.#liveViewer = {
       id: session.id,
@@ -587,11 +728,11 @@ export class ComputerBotBackendContribution {
         expiresAt: renewed.expiresAt,
       } satisfies StoredViewerV1,
       [COMPUTER_PROVIDER_RECORD_KEY]: {
-        version: 1,
+        version: 2,
         phase: "ready",
         message: "Computer ready",
         recordedAt: this.now().toISOString(),
-      } satisfies StoredProviderAnswerV1,
+      } satisfies StoredProviderAnswerV2,
     });
     this.#liveViewer = {
       id: renewed.id,
@@ -800,6 +941,10 @@ export class ComputerBotBackendContribution {
       providerLabel: this.host.providerLabel,
       phase,
       message,
+      ...(provider?.progress &&
+      (phase === "provisioning" || phase === "updating")
+        ? { progress: provider.progress }
+        : {}),
       ...(viewerSession ? { viewerSession } : {}),
       ...(activeControl
         ? {

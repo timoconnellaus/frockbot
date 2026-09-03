@@ -1,6 +1,7 @@
 import type {
   ComputerDoctorViewV1,
   ComputerPhase,
+  ComputerProgressViewV1,
   ComputerProjectionV1,
   ComputerScreenshotViewV1,
 } from "../protocol.js";
@@ -10,6 +11,7 @@ export interface ComputerMachineState {
   botId: string;
   providerLabel: string;
   message: string;
+  progress?: ComputerProgressViewV1;
   viewerUrl?: string;
   expanded: boolean;
   takingControl: boolean;
@@ -45,6 +47,7 @@ export function initialComputerMachineState(): ComputerMachineState {
     botId: "unconfigured",
     providerLabel: "unconfigured",
     message: "No Computer provider is configured for this host",
+    progress: undefined,
     viewerUrl: undefined,
     expanded: false,
     takingControl: false,
@@ -70,6 +73,7 @@ export function transitionComputerState(
         botId: event.botId,
         providerLabel: event.providerLabel,
         message: event.message,
+        progress: undefined,
         viewerUrl: undefined,
         takingControl: false,
       };
@@ -79,6 +83,7 @@ export function transitionComputerState(
         ...state,
         phase: "provisioning",
         message: "Waking and preparing the Computer…",
+        progress: undefined,
         viewerUrl: undefined,
         takingControl: false,
       };
@@ -87,6 +92,7 @@ export function transitionComputerState(
         ...state,
         phase: "ready",
         message: "Computer ready",
+        progress: undefined,
         viewerUrl: event.viewerUrl,
         takingControl: false,
       };
@@ -95,6 +101,7 @@ export function transitionComputerState(
         ...state,
         phase: "updating",
         message: event.message,
+        progress: undefined,
         takingControl: false,
       };
     case "take-control-requested":
@@ -102,12 +109,14 @@ export function transitionComputerState(
         ...state,
         phase: "taking-control",
         message: "Pausing new agent computer actions…",
+        progress: undefined,
       };
     case "control-acquired":
       return {
         ...state,
         phase: "human-control",
         message: "You have control. Release when finished with private data.",
+        progress: undefined,
         takingControl: true,
       };
     case "control-released":
@@ -115,6 +124,7 @@ export function transitionComputerState(
         ...state,
         phase: "ready",
         message: "Computer ready",
+        progress: undefined,
         takingControl: false,
       };
     case "viewer-expanded":
@@ -126,6 +136,7 @@ export function transitionComputerState(
         ...state,
         phase: "disconnected",
         message: event.message,
+        progress: undefined,
         viewerUrl: undefined,
       };
     case "failed":
@@ -133,6 +144,7 @@ export function transitionComputerState(
         ...state,
         phase: "error",
         message: event.message,
+        progress: undefined,
         takingControl: event.takingControl ?? state.takingControl,
       };
     case "doctor-updated":
@@ -155,6 +167,7 @@ export function transitionComputerState(
         botId: projection.botId,
         providerLabel: projection.providerLabel,
         message: projection.message,
+        progress: projection.progress,
         viewerUrl:
           projection.phase === "disconnected"
             ? undefined

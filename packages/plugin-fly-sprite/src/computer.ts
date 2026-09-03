@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   ComputerError,
   decodeComputerDoctorReportV1,
+  type ComputerConnectionOptionsV1,
   type ComputerControlRequestV1,
   type ComputerDoctorReportV1,
   type ComputerOperationOptions,
@@ -329,7 +330,7 @@ export class FlySpriteAgentComputer {
     return this.computer.ensureAgent(this.layout, signal);
   }
 
-  connect(options?: ComputerOperationOptions): Promise<ComputerConnection> {
+  connect(options?: ComputerConnectionOptionsV1): Promise<ComputerConnection> {
     return this.computer.connectAgent(this.layout, options);
   }
 
@@ -581,7 +582,7 @@ export class FlySpriteComputer {
 
   connectAgent(
     layout: AgentLayout,
-    options?: ComputerOperationOptions,
+    options?: ComputerConnectionOptionsV1,
   ): Promise<ComputerConnection> {
     this.hostFor(layout);
     return this.openAgent(layout, options);
@@ -1208,7 +1209,7 @@ export class FlySpriteComputer {
    */
   private async openAgent(
     layout: AgentLayout,
-    options?: ComputerOperationOptions,
+    options?: ComputerConnectionOptionsV1,
   ): Promise<ComputerConnection> {
     const signal = options?.signal;
     const effectId = options?.effectId;
@@ -1238,6 +1239,39 @@ export class FlySpriteComputer {
     this.expectedSpriteName = opened.spriteName;
     this.generations.set(layout.key, opened.generation);
     if (opened.display) this.displays.set(layout.key, opened.display);
+    const updating =
+      opened.provisioning?.kind === "update" &&
+      opened.provisioning.status === "running";
+    if (updating && opened.provisioning) {
+      await options?.onProgress?.({
+        version: 1,
+        kind: "update",
+        step: opened.provisioning.phase,
+        label: opened.provisioning.label,
+        index: opened.provisioning.index,
+        total: opened.provisioning.total,
+      });
+    } else {
+      // `host.open` owns the wake, tenant attachment and declared desktop
+      // start. Keep the durable wake step active while that long call is in
+      // flight, then record both boundaries before moving to viewer minting.
+      await options?.onProgress?.({
+        version: 1,
+        kind: "connect",
+        step: "attaching",
+        label: "Attaching the Bot",
+        index: 2,
+        total: 5,
+      });
+      await options?.onProgress?.({
+        version: 1,
+        kind: "connect",
+        step: "starting-desktop",
+        label: "Starting the desktop",
+        index: 3,
+        total: 5,
+      });
+    }
     if (this.respectHumanControl) {
       await this.assertAgentControl(
         host,
@@ -1245,6 +1279,16 @@ export class FlySpriteComputer {
         signal,
         effectId ? `${effectId}:assert-control` : undefined,
       );
+    }
+    if (!updating) {
+      await options?.onProgress?.({
+        version: 1,
+        kind: "connect",
+        step: "minting-viewer",
+        label: "Minting the secure viewer",
+        index: 4,
+        total: 5,
+      });
     }
     const viewer = await host.viewer("open", {
       signal,
@@ -1257,6 +1301,16 @@ export class FlySpriteComputer {
         "The Computer host returned no viewer session",
         true,
       );
+    }
+    if (!updating) {
+      await options?.onProgress?.({
+        version: 1,
+        kind: "connect",
+        step: "connecting",
+        label: "Connecting to the desktop",
+        index: 5,
+        total: 5,
+      });
     }
     return {
       botId: layout.identity.id,

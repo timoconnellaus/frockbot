@@ -24,6 +24,7 @@ import {
 import "./styles.css";
 
 export const PROJECTION_POLL_INTERVAL_MS = 20_000;
+export const ACTIVE_PROJECTION_POLL_INTERVAL_MS = 1_500;
 export const VIEWER_REFRESH_INTERVAL_MS = 30_000;
 const CONTROL_REFRESH_INTERVAL_MS = 30_000;
 
@@ -90,6 +91,8 @@ export function createComputerClientPlugin(
     let controlHeartbeat: unknown;
     let viewerHeartbeat: unknown;
     let projectionPoll: unknown;
+    let projectionPollInterval: number | undefined;
+    let updateRejoin: unknown;
     let controlRequest: Promise<void> | undefined;
 
     const state = ref<ComputerState>({
@@ -108,6 +111,8 @@ export function createComputerClientPlugin(
       Object.assign(state.value, machine);
       syncControlHeartbeat();
       syncViewerHeartbeat();
+      syncProjectionPoll();
+      syncUpdateRejoin();
     }
 
     function stopControlHeartbeat(): void {
@@ -155,27 +160,67 @@ export function createComputerClientPlugin(
     function stopProjectionPoll(): void {
       if (projectionPoll !== undefined) runtime.clearInterval(projectionPoll);
       projectionPoll = undefined;
+      projectionPollInterval = undefined;
     }
 
     function syncProjectionPoll(): void {
+      if (!shell.value.activeBotId || !runtime.isVisible()) {
+        stopProjectionPoll();
+        return;
+      }
+      const interval =
+        machine.expanded &&
+        (machine.phase === "provisioning" ||
+          machine.phase === "updating" ||
+          machine.phase === "taking-control")
+          ? ACTIVE_PROJECTION_POLL_INTERVAL_MS
+          : PROJECTION_POLL_INTERVAL_MS;
+      if (projectionPoll !== undefined && projectionPollInterval === interval) {
+        return;
+      }
       stopProjectionPoll();
-      if (!shell.value.activeBotId || !runtime.isVisible()) return;
+      projectionPollInterval = interval;
       projectionPoll = runtime.setInterval(() => {
         const selectedBotId = shell.value.activeBotId;
         if (!selectedBotId || !runtime.isVisible()) return;
-        // The `updating` record is written when the host refused a connect
-        // mid-update; it only changes when someone connects again. While the
-        // User has the Computer open, rejoin the update each poll so the
-        // viewer arrives the moment the host finishes (P4).
-        if (machine.phase === "updating" && machine.expanded) {
-          void execute("connect").catch(() => {
-            // A refusal keeps the updating phase; the next poll asks again.
-          });
-          return;
-        }
+        // Projection reads are wake-free. Expanded operations read quickly so
+        // durable provider progress is visible without inventing client state.
         void load(selectedBotId).catch((error) =>
           apply({ type: "failed", message: errorMessage(error) }),
         );
+      }, interval);
+    }
+
+    function stopUpdateRejoin(): void {
+      if (updateRejoin !== undefined) runtime.clearInterval(updateRejoin);
+      updateRejoin = undefined;
+    }
+
+    function syncUpdateRejoin(): void {
+      if (
+        updateRejoin !== undefined ||
+        machine.phase !== "updating" ||
+        !machine.expanded ||
+        !shell.value.activeBotId ||
+        !runtime.isVisible()
+      ) {
+        if (
+          machine.phase !== "updating" ||
+          !machine.expanded ||
+          !shell.value.activeBotId ||
+          !runtime.isVisible()
+        ) {
+          stopUpdateRejoin();
+        }
+        return;
+      }
+      // An update only advances when a connect rejoins the host operation.
+      // Keep that effect cadence at 20s; only the durable reads accelerate.
+      updateRejoin = runtime.setInterval(() => {
+        if (!runtime.isVisible()) return;
+        void execute("connect").catch(() => {
+          // A refusal keeps the updating phase; the next interval rejoins.
+        });
       }, PROJECTION_POLL_INTERVAL_MS);
     }
 
@@ -320,6 +365,7 @@ export function createComputerClientPlugin(
       (selectedBotId) => {
         stopControlHeartbeat();
         stopViewerHeartbeat();
+        stopUpdateRejoin();
         machine = initialComputerMachineState();
         Object.assign(state.value, machine);
         syncProjectionPoll();
@@ -332,6 +378,7 @@ export function createComputerClientPlugin(
     );
     const stopVisibility = runtime.onVisibilityChange(() => {
       syncProjectionPoll();
+      syncUpdateRejoin();
       const selectedBotId = shell.value.activeBotId;
       if (!selectedBotId || !runtime.isVisible()) return;
       void load(selectedBotId).catch((error) =>
@@ -349,6 +396,7 @@ export function createComputerClientPlugin(
         stopControlHeartbeat();
         stopViewerHeartbeat();
         stopProjectionPoll();
+        stopUpdateRejoin();
       },
     ];
   };

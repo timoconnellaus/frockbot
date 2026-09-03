@@ -4,6 +4,27 @@
 
 landed. Steps 1–4 below each record their status.
 
+### Hosted viewer follow-up (2026-09-03)
+
+The Sprite runtime now installs a FrockBot-owned minimal viewer page beside
+symlinks to the distro noVNC `core/` and `vendor/` modules. Websockify serves that root; the
+page imports `core/rfb.js` directly, renders no stock noVNC controls, keeps
+cursor and pointer handling inert in view-only mode, and applies P2 takeover
+live from `hashchange` without replacing the VNC socket or moving its bearer
+material out of the fragment. It reports only connection state to the parent.
+The digest-tracked in-place update re-declares the named gateway after the new
+root is installed, so an already-running websockify process cannot keep serving
+its old root until another hibernation cycle.
+
+Opening progress is a versioned projection of Bot-Durable-Object state. The
+provider reports the boundaries it can observe (wake/attach, desktop start,
+viewer mint, connection, or the host's update phase), and the Bot authority
+persists the ordered steps and timestamps. While the overlay is expanded in a
+transitional phase, the visible client polls that wake-free projection every
+1.5 seconds; the existing update rejoin effect remains on its 20-second
+cadence. The placeholder renders those steps, an indeterminate bar, and
+elapsed time. These are implementation details of P1–P7, not new decisions.
+
 ## Why
 
 Parity rows 24, 25, 26 and 57d. The hosted Computer card exists

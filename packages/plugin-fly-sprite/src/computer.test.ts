@@ -227,6 +227,30 @@ describe("Fly Sprite computer", () => {
     expect(connected?.message).toBeUndefined();
   });
 
+  test("reports provider-neutral connection boundaries around the host calls", async () => {
+    const host = fakeHost();
+    const provider = new FlySpriteComputerProvider(attach(host));
+    const computer = await provider.open(
+      { userId: "owner" },
+      { botId: "general" },
+      { providerId: "fly-sprite", generation: 1 },
+    );
+    const progress: string[] = [];
+
+    await computer.presence?.connect({
+      onProgress: (step) => {
+        progress.push(step.step);
+      },
+    });
+
+    expect(progress).toEqual([
+      "attaching",
+      "starting-desktop",
+      "minting-viewer",
+      "connecting",
+    ]);
+  });
+
   test("an unconfigured Computer refuses rather than pretending", async () => {
     const computer = new FlySpriteComputer({ spriteName: "frockbot-test" });
     expect(computer.configured).toBe(false);
