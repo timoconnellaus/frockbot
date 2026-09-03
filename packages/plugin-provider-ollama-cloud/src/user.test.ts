@@ -11,6 +11,7 @@ import {
 } from "@frockbot/plugin-settings/user";
 import { OllamaCloudClient, type OllamaFetch } from "./client.js";
 import {
+  catalogRetryDelayMsV1,
   createOllamaCloudUserBackendContribution,
   type OllamaUserBackendHost,
 } from "./user.js";
@@ -175,6 +176,18 @@ async function fixture(
     },
   };
 }
+
+describe("catalog retry backoff", () => {
+  test("retries a failed refresh soon and backs off, capped at the interval", () => {
+    // A refresh that failed used to wait the full hour, so a thirty-second
+    // outage cost an hour of stale models.
+    expect(catalogRetryDelayMsV1(1)).toBe(60_000);
+    expect(catalogRetryDelayMsV1(2)).toBe(120_000);
+    expect(catalogRetryDelayMsV1(3)).toBe(240_000);
+    expect(catalogRetryDelayMsV1(20)).toBe(60 * 60 * 1_000);
+    expect(catalogRetryDelayMsV1(0)).toBe(60_000);
+  });
+});
 
 describe("Ollama Cloud User Contribution", () => {
   test("rejects malformed durable account, command, and pending records", async () => {
@@ -462,6 +475,45 @@ describe("Ollama Cloud User Contribution", () => {
     expect(
       await settings.getConnection("account-1", created.connectionId),
     ).toMatchObject({ displayName: "Recovered 2" });
+  });
+
+  test("abandons a Connection whose provider never answers", async () => {
+    // A provider that accepts the request and never responds: the connect
+    // command must not re-drive forever, and the Connection must not sit in
+    // `authorizing` where the User is shown nothing at all.
+    const { settings, ollama } = await fixture((_input, init) =>
+      Promise.reject(
+        init?.signal?.reason ?? new Error("provider never answered"),
+      ),
+    );
+    const created = await ollama.executeConnection("account-1", {
+      schemaVersion: 1,
+      type: "connection/create-api-key",
+      commandId: "connect-hang",
+      packageId: "provider-ollama-cloud",
+      connectionTypeId: "ollama-cloud-account",
+      label: "Hang",
+      apiKey: "valid-key",
+    });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await ollama.alarm().catch(() => undefined);
+    }
+
+    const connection = await settings.getConnection(
+      "account-1",
+      created.connectionId,
+    );
+    expect(connection).toMatchObject({
+      state: "failed",
+      failure: expect.any(String),
+    });
+    expect(connection?.authorization).toMatchObject({
+      credential: { configured: false },
+    });
+    await expect(
+      ollama.lookupConnectionCommand("account-1", "connect-hang"),
+    ).resolves.toMatchObject({ status: "failed" });
   });
 
   test("keeps the active generation when rotation validation fails", async () => {

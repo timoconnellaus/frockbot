@@ -9,7 +9,10 @@
 // Precedence here is the Memory precedence: own (`bot`) before `project`
 // before `user`, "the most specific wins", applied after scoring so a strong
 // shared hit still ranks above a weak own one within the same document.
-import type { MemoryScopeNameV1 } from "@frockbot/kernel-contracts";
+import {
+  remoteCallV1,
+  type MemoryScopeNameV1,
+} from "@frockbot/kernel-contracts";
 import {
   memoryVectorNamespaceV1,
   type MemoryIndexChunkV1,
@@ -89,19 +92,37 @@ export async function searchMemoryV1(
       const [vector] = await options.embed([query]);
       if (vector) {
         const namespaces = new Set(candidates.map(memoryVectorNamespaceV1));
-        const byHash = new Map(
-          candidates.map((chunk) => [chunk.hash, chunk] as const),
+        // Keyed on the document *and* the chunk hash. Keying on the chunk
+        // hash alone made two identical chunks in different documents collide,
+        // so one of the two locations was unreachable from a vector hit.
+        const byHash = new Map<string, MemoryIndexChunkV1>(
+          candidates.map((chunk) => [
+            `${chunk.documentKey} ${chunk.hash}`,
+            chunk,
+          ]),
         );
         for (const namespace of namespaces) {
-          const response = await options.vectorize.query(vector, {
-            topK: Math.min(options.maxResults * 3, 20),
-            namespace,
-            returnMetadata: "all",
-          });
+          const response = await remoteCallV1("the memory index", () =>
+            options.vectorize!.query(vector, {
+              topK: Math.min(options.maxResults * 3, 20),
+              namespace,
+              returnMetadata: "all",
+            }),
+          );
           for (const match of response.matches) {
             const hash = match.metadata?.hash;
+            // The document key is rebuilt from the metadata the upsert wrote,
+            // so a chunk is matched to the document it actually came from.
+            const scope = match.metadata?.scope;
+            const projectId = match.metadata?.projectId;
+            const path = match.metadata?.path;
             const chunk =
-              typeof hash === "string" ? byHash.get(hash) : undefined;
+              typeof hash === "string" &&
+              typeof scope === "string" &&
+              typeof projectId === "string" &&
+              typeof path === "string"
+                ? byHash.get(`${scope}:${projectId}:${path} ${hash}`)
+                : undefined;
             if (!chunk) continue;
             scored.set(
               chunk,

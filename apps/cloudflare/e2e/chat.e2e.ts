@@ -236,4 +236,9 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
   await expect(page.locator(".thread")).not.toContainText("model-error");
   await expect(page.locator(".thread")).not.toContainText("outcome");
   await expect(page.locator(".thread")).not.toContainText("401");
+
+  // The fake endpoint is shared by every spec in the run, so the refusal this
+  // test switched on is switched off again: leaving it on made every later
+  // spec's Turn fail with a 401 it never asked for.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });

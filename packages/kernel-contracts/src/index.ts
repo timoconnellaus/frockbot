@@ -7,6 +7,7 @@ export * from "./isolate-context-catalog.generated.js";
 export * from "./loop-events.js";
 export * from "./model-invocation.js";
 export * from "./prompt-assembly.js";
+export * from "./remote.js";
 export * from "./send-to-user.js";
 export * from "./session.js";
 export * from "./skills.js";

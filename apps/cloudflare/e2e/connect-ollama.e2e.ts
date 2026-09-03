@@ -71,7 +71,9 @@ test("a key the endpoint refuses for inference never reaches ready", async ({
   });
 
   const card = ollamaCard(page);
-  const failure = card.getByRole("alert");
+  // The Connection's own row carries the reason. The connect form stays open
+  // with its own alert, so the assertion names the row rather than the card.
+  const failure = card.locator(".provider-account").getByRole("alert");
   await expect(failure).toContainText(
     "Ollama Cloud rejected the key for inference",
   );

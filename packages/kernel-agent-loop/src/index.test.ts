@@ -1223,7 +1223,7 @@ describe("AgentLoop", () => {
     ).toBe(false);
   });
 
-  test("keeps an unretrievable provider effect open without repeating it", async () => {
+  test("settles a turn whose provider cannot retrieve the effect", async () => {
     let streams = 0;
     const provider: LlmProvider = {
       id: "unretrievable",
@@ -1281,26 +1281,24 @@ describe("AgentLoop", () => {
 
     handle.agent.resume();
     await handle.agent.whenIdle();
-    handle.agent.resume();
-    await handle.agent.whenIdle();
 
+    // A provider that declares no retrieval will never grow one, so the run
+    // settles as a model error rather than parking on a reconciliation that
+    // can never happen (and throwing out of the Durable Object).
     expect(streams).toBe(0);
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.events.some(
         (event) => event.type === "model/reconciliation-required",
       ),
-    ).toEqual([
-      expect.objectContaining({
-        requestId: "unretrievable-effect-1",
-        reason:
-          'LLM provider "unretrievable" does not support provider-bound retrieval',
-      }),
-    ]);
-    expect(
-      handle.agent.session.events.some(
-        (event) => event.type === "step/end" || event.type === "turn/end",
-      ),
     ).toBe(false);
+    const turnEnd = handle.agent.session.events.findLast(
+      (event) => event.type === "turn/end",
+    );
+    expect(turnEnd).toMatchObject({
+      outcome: "model-error",
+      reason:
+        'LLM provider "unretrievable" does not support provider-bound retrieval',
+    });
   });
 
   test("keeps an ambiguous dispatched effect open for provider reconciliation", async () => {
