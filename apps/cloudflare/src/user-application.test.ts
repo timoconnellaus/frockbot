@@ -5,7 +5,10 @@ import type {
   UserApplicationEnv,
   UserBotStateBinding,
 } from "./contracts.js";
-import { createUserApplication } from "./user-application.js";
+import {
+  createUserApplication,
+  HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1,
+} from "./user-application.js";
 import { BotTurnRefusedError } from "@frockbot/kernel-do";
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
@@ -99,6 +102,9 @@ describe("user application security headers", () => {
     const html = await response.text();
     expect(html).toContain('data-frockbot-auth-mode="development"');
     expect(html).toContain('data-frockbot-is-admin="true"');
+    for (const attribute of HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1) {
+      expect(html).toContain(`${attribute}="`);
+    }
 
     for (const mode of [undefined, "desktop", "development,better-auth"]) {
       const headers = mode ? { "x-frockbot-auth-session-v1": mode } : undefined;

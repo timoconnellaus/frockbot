@@ -42,6 +42,12 @@ import {
 } from "@frockbot/provider-openai-compatible";
 import { Context, type Fiber, type Plugin } from "cordis";
 
+/**
+ * Steps (model calls) one Turn may take before the loop gives up. Tool-heavy
+ * Turns routinely need dozens; the earlier cap of 8 cut real work short.
+ */
+const AGENT_LOOP_MAX_STEPS_V1 = 50;
+
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 
 export interface RuntimeModelConfig {
@@ -219,7 +225,7 @@ async function mountFoundationRuntimeServices(
     }
     await mounted(
       root.plugin(AgentLoop, {
-        maxSteps: 8,
+        maxSteps: AGENT_LOOP_MAX_STEPS_V1,
         composition: await bootstrapCompositionPin(application),
       }),
     );
@@ -530,7 +536,10 @@ export async function createFoundationRuntime(
   }
   const composition =
     options.composition ?? (await bootstrapCompositionPin(application));
-  await root.plugin(AgentLoop, { maxSteps: 8, composition });
+  await root.plugin(AgentLoop, {
+    maxSteps: AGENT_LOOP_MAX_STEPS_V1,
+    composition,
+  });
 
   const selection = options.modelSelection;
   if (selection) {

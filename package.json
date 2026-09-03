@@ -19,6 +19,8 @@
     "build:marketing": "bun run --filter @frockbot/marketing build",
     "build:mobile": "bun run build:webui && bun run --filter @frockbot/mobile build",
     "icons:generate": "./scripts/generate-app-icons.sh",
+    "dogfood:dev": "./scripts/dogfood/dev-stack.sh",
+    "dogfood:stop": "./scripts/dogfood/dev-stack.sh stop",
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
     "dev:cloudflare:electron": "bun run --filter @frockbot/cloudflare dev:electron",
     "dev": "bun run build:webui && bun run --filter @frockbot/desktop dev",

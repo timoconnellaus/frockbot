@@ -27,6 +27,13 @@ test("a new User creates a first Bot and finds it in the directory", async ({
   await expect(
     page.getByText("No Bots yet. Add your first sheep."),
   ).toBeVisible();
+  // And the window agrees with the directory: before the first Bot exists
+  // there is no invented Bot to be broken, and nothing claims the account's
+  // model is unavailable.
+  const workspace = page.locator("main.workspace");
+  await expect(workspace.getByText("Barebones")).toHaveCount(0);
+  await expect(workspace.getByText("Model unavailable")).toHaveCount(0);
+  await expect(workspace.locator("textarea")).toHaveCount(0);
 
   await createBot(page, "Shepherd");
 
