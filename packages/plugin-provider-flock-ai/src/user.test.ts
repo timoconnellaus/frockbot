@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type {
   ConnectionView,
+  OperationReceiptV1,
   UserConfigurationCommandV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
@@ -89,30 +90,43 @@ class FakeSettings {
   executeConfigurationCommand(
     _userId: string,
     command: UserConfigurationCommandV1,
-  ): Promise<unknown> {
+  ): Promise<OperationReceiptV1> {
     if (command.expectedRevision !== this.state.revision) {
       throw new Error("settings revision changed");
     }
     this.commands.push(structuredClone(command));
     if (command.type === "user/install-package") {
-      if (
-        !this.state.packages.some(
-          (installation) => installation.packageId === command.packageId,
-        )
-      ) {
+      const existing = this.state.packages.find(
+        (installation) => installation.packageId === command.packageId,
+      );
+      if (!existing) {
         this.state.packages.push({
           packageId: command.packageId,
           version: command.version,
           state: command.enabled === false ? "disabled" : "installed",
         });
-        this.state.revision += 1;
+      } else {
+        existing.version = command.version;
+        existing.state = command.enabled === false ? "disabled" : "installed";
+        delete existing.failure;
       }
-      return Promise.resolve(undefined);
+      this.state.revision += 1;
+      return Promise.resolve({
+        schemaVersion: 1,
+        commandId: command.commandId,
+        revision: this.state.revision,
+        status: "applied",
+      });
     }
     if (command.type === "user/set-platform-model") {
       this.state.platformModel = structuredClone(command.model);
       this.state.revision += 1;
-      return Promise.resolve(undefined);
+      return Promise.resolve({
+        schemaVersion: 1,
+        commandId: command.commandId,
+        revision: this.state.revision,
+        status: "applied",
+      });
     }
     throw new Error(`unexpected command ${command.type}`);
   }
@@ -164,6 +178,49 @@ class FakeSettings {
 
   setPlatformModel(connectionId: string, providerModelId: string): void {
     this.state.platformModel = { connectionId, providerModelId };
+    this.state.revision += 1;
+  }
+
+  removeFlockPackageAndPlatformModel(): void {
+    this.state.packages = this.state.packages.filter(
+      (candidate) => candidate.packageId !== FLOCK_AI_PACKAGE_ID,
+    );
+    delete this.state.platformModel;
+    this.state.revision += 1;
+  }
+
+  seedResolvablePlatformModel(): void {
+    this.state.packages.push({
+      packageId: "provider-another",
+      version: "0.0.1",
+      state: "installed",
+    });
+    this.state.connections.push({
+      connectionId: "another-connection",
+      packageId: "provider-another",
+      connectionTypeId: "another-account",
+      displayName: "Another provider",
+      state: "ready",
+      providerType: "another",
+      modelCatalog: {
+        schemaVersion: 1,
+        generation: "another-catalog-1",
+        state: "fresh",
+        models: [
+          {
+            providerModelId: "another-model",
+            displayName: "Another model",
+            capabilities: { tools: true, vision: false, reasoning: false },
+            source: "discovered",
+          },
+        ],
+      },
+      safeMetadata: {},
+    });
+    this.state.platformModel = {
+      connectionId: "another-connection",
+      providerModelId: "another-model",
+    };
     this.state.revision += 1;
   }
 
@@ -237,10 +294,27 @@ describe("Flock AI User Contribution", () => {
     ).toHaveLength(1);
   });
 
-  test("does not overwrite the platform model on later reads", async () => {
+  test("repairs a platform model that no longer resolves", async () => {
     const { settings } = fixture();
     await settings.readConfiguration("user-1");
     settings.setPlatformModel("another-connection", "another-model");
+
+    const second = await settings.readConfiguration("user-1");
+    expect(second.platformModel).toEqual({
+      connectionId: FLOCK_AI_CONNECTION_ID,
+      providerModelId: FLOCK_AI_DEFAULT_MODEL,
+    });
+    expect(
+      settings.commands.filter(
+        (command) => command.type === "user/set-platform-model",
+      ),
+    ).toHaveLength(2);
+  });
+
+  test("preserves a platform model that still resolves", async () => {
+    const { settings } = fixture();
+    await settings.readConfiguration("user-1");
+    settings.seedResolvablePlatformModel();
 
     const second = await settings.readConfiguration("user-1");
     expect(second.platformModel).toEqual({
@@ -252,6 +326,24 @@ describe("Flock AI User Contribution", () => {
         (command) => command.type === "user/set-platform-model",
       ),
     ).toHaveLength(1);
+  });
+
+  test("self-heals after the marker when the installation and model are removed", async () => {
+    const { settings } = fixture();
+    await settings.readConfiguration("user-1");
+    settings.removeFlockPackageAndPlatformModel();
+
+    const repaired = await settings.readConfiguration("user-1");
+    expect(repaired.packages).toContainEqual(
+      expect.objectContaining({
+        packageId: FLOCK_AI_PACKAGE_ID,
+        state: "installed",
+      }),
+    );
+    expect(repaired.platformModel).toEqual({
+      connectionId: FLOCK_AI_CONNECTION_ID,
+      providerModelId: FLOCK_AI_DEFAULT_MODEL,
+    });
   });
 
   test("does not touch Package settings already written by the User", async () => {

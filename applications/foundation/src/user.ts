@@ -68,6 +68,7 @@ import type { Plugin } from "cordis";
 import {
   type BackendContributionLifecycle,
   createFoundationBackendContributions,
+  isPlatformOwnedPackageV1,
 } from "./runtime.js";
 
 export interface FoundationConnectionUserBackendContribution {
@@ -300,6 +301,10 @@ export async function createFoundationUserBackendContributions(
               version: pkg.version,
               dependencies: pkg.manifest.dependencies,
               defaultEnablement: pkg.manifest.defaultEnablement,
+              platformOwned: isPlatformOwnedPackageV1(
+                pkg.manifest,
+                defaultPackageIds.has(pkg.id),
+              ),
               settings: pkg.manifest.configuration?.settings ?? [],
               installByDefault: defaultPackageIds.has(pkg.id),
             })),

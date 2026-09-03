@@ -37,16 +37,19 @@ const search = ref("");
 const busyPackageId = ref<string>();
 
 const installations = computed(() => web.value.userSettings?.packages ?? []);
+const userPackages = computed(() =>
+  web.value.pluginCatalog.filter((item) => !item.platformOwned),
+);
 const installedPluginCount = computed(
   () =>
-    web.value.pluginCatalog.filter((item) =>
+    userPackages.value.filter((item) =>
       isPackageInstalled(installations.value, item.packageId),
     ).length,
 );
 const filteredCatalog = computed(() => {
   const query = search.value.trim().toLocaleLowerCase();
-  if (!query) return web.value.pluginCatalog;
-  return web.value.pluginCatalog.filter(
+  if (!query) return userPackages.value;
+  return userPackages.value.filter(
     (item) =>
       item.displayName.toLocaleLowerCase().includes(query) ||
       item.packageId.toLocaleLowerCase().includes(query),
@@ -223,7 +226,7 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
     </div>
 
     <p
-      v-if="web.pluginCatalog.length === 0 && !web.settingsError"
+      v-if="userPackages.length === 0 && !web.settingsError"
       class="plugin-empty"
     >
       This application ships no Packages.

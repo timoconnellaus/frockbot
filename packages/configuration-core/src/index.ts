@@ -1871,6 +1871,8 @@ export interface StoredUserSettingsPackageV1 {
   packageId: string;
   version: string;
   dependencies?: Readonly<Record<string, string>>;
+  /** Platform infrastructure is repaired to one enabled first-party row. */
+  platformOwned?: boolean;
 }
 
 function migrateCatalogRelativeUserSettingsV1(
@@ -1910,6 +1912,64 @@ function migrateCatalogRelativeUserSettingsV1(
     changed ||= !retained;
     return retained;
   });
+
+  // Platform infrastructure is not a User preference. Repair it on every
+  // catalog-relative read, including records that already carry the latest
+  // one-shot bootstrap marker, and collapse any duplicate rows to one current
+  // first-party installation.
+  const platformPackages = new Map(
+    packages
+      .filter((pkg) => pkg.platformOwned)
+      .map((pkg) => [pkg.packageId, pkg]),
+  );
+  const repairedPlatformPackageIds = new Set<string>();
+  installations = installations.flatMap((storedInstallation) => {
+    const installation = storedPlainRecordV1(storedInstallation);
+    const packageId = installation
+      ? storedDataValueV1(installation, "packageId")
+      : undefined;
+    const platformPackage =
+      typeof packageId === "string"
+        ? platformPackages.get(packageId)
+        : undefined;
+    if (!installation || !platformPackage) return [storedInstallation];
+    if (repairedPlatformPackageIds.has(platformPackage.packageId)) {
+      changed = true;
+      return [];
+    }
+    repairedPlatformPackageIds.add(platformPackage.packageId);
+    const needsRepair =
+      storedDataValueV1(installation, "version") !== platformPackage.version ||
+      storedDataValueV1(installation, "state") !== "installed" ||
+      storedDataValueV1(installation, "provenance") !== "first-party" ||
+      storedDataValueV1(installation, "failure") !== undefined ||
+      Object.hasOwn(installation, "catalogId") ||
+      Object.hasOwn(installation, "catalogGeneration") ||
+      Object.hasOwn(installation, "contentHash");
+    if (!needsRepair) return [storedInstallation];
+    changed = true;
+    return [
+      cloneStoredRecordV1(
+        installation,
+        {
+          version: platformPackage.version,
+          state: "installed",
+          provenance: "first-party",
+        },
+        ["failure", "catalogId", "catalogGeneration", "contentHash"],
+      ),
+    ];
+  });
+  for (const platformPackage of platformPackages.values()) {
+    if (repairedPlatformPackageIds.has(platformPackage.packageId)) continue;
+    changed = true;
+    installations.push({
+      packageId: platformPackage.packageId,
+      version: platformPackage.version,
+      state: "installed",
+      provenance: "first-party",
+    });
+  }
 
   // Disable inconsistent installed dependents to the least-authority state.
   // Iterate to a fixed point so A -> B -> missing C leaves both A and B off.
