@@ -253,6 +253,8 @@ interface Env {
   ALLOWED_CLIENT_ORIGINS?: string;
   /** Authorizes `/api/debug/*`. Absent disables the surface entirely. */
   DEBUG_TOKEN?: string;
+  /** Set only by the end-to-end harness; opens the Workspace seed door. */
+  WORKSPACE_SEED_TOKEN?: string;
 }
 
 /**
@@ -288,6 +290,15 @@ interface UserScopedProps {
 }
 
 interface BotStateRpc extends BotConfigurationBinding {
+  writeUserWorkspaceFileV1(input: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    root: unknown;
+    path: string;
+    bytesBase64: string;
+    mediaType?: string;
+  }): Promise<unknown>;
   readComputerPresence(): Promise<unknown>;
   executeComputerPresenceCommand(command: ComputerCommandV1): Promise<unknown>;
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
@@ -355,6 +366,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   // SAFETY: Wrangler binds BOT_STATES to BotState; workers-types cannot infer its generated RPC surface.
   const rpc = env.BOT_STATES.get(id) as unknown as RpcBoundary<BotStateRpc>;
   return {
+    writeUserWorkspaceFileV1: (input) => rpc.writeUserWorkspaceFileV1(input),
     readComputerPresence: () =>
       rpc.readComputerPresence({ schemaVersion: 1, userId, botId }),
     executeComputerPresenceCommand: (command) =>
@@ -1942,6 +1954,20 @@ export default {
         : {}),
       backendContributions: [...mountedBackend.contributions],
       debug: debugSurface(env),
+      ...(env.WORKSPACE_SEED_TOKEN
+        ? {
+            workspaceSeed: {
+              token: env.WORKSPACE_SEED_TOKEN,
+              write: (userId, botId, request) =>
+                botStateStub(env, userId, botId).writeUserWorkspaceFileV1({
+                  schemaVersion: 1,
+                  userId,
+                  botId,
+                  ...request,
+                }),
+            },
+          }
+        : {}),
       allowedClientOrigins: allowedClientOrigins(env),
       allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
     });

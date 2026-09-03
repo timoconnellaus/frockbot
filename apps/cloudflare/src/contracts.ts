@@ -819,6 +819,26 @@ export interface GatewayDependencies {
   catalog?: CatalogGatewayStore;
   /** Absent, or with no token, when the deployment publishes no `/api/debug`. */
   debug?: DebugGatewaySurface;
+  /**
+   * The Workspace seed door, present only in an environment that sets
+   * `WORKSPACE_SEED_TOKEN`: an end-to-end run has no Computer, and this is how
+   * it lands the bytes `applet build` would have written, as the User, through
+   * the same store and generation record the sync uses. Production sets no
+   * token and the route does not exist.
+   */
+  workspaceSeed?: {
+    token: string;
+    write(
+      userId: string,
+      botId: string,
+      request: {
+        root: unknown;
+        path: string;
+        bytesBase64: string;
+        mediaType?: string;
+      },
+    ): Promise<unknown>;
+  };
   backendContributions?: readonly BackendRouteContribution[];
   /** Webview origins allowed to call `/api/*` cross-origin. */
   allowedClientOrigins?: string[];

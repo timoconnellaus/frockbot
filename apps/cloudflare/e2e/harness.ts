@@ -439,37 +439,59 @@ export function e2ePersistDirectory(port: number): string {
   return join(tmpdir(), `frockbot-e2e-${port}`);
 }
 
+/** The bearer token the Workspace seed door accepts in an end-to-end run. */
+export const E2E_WORKSPACE_SEED_TOKEN = "e2e-workspace-seed-token";
+
 /**
- * Put one object into the run's local Workspace bucket while the Worker is up.
+ * Land one file in one of the User's durable roots while the Worker is up.
  *
  * Production has exactly one writer of a durable root's bytes besides the
  * Package that owns it: the Computer's sync. An end-to-end run has no Computer,
  * so a spec that needs a file "the Computer wrote" — an Applet's `dist/` after
- * `applet build` — writes it the way the sync would land it in object storage,
- * at the same key. Nothing else is faked: the publish that reads it is real.
+ * `applet build` — writes it through the gateway's seed door, which the Bot
+ * Durable Object serves as a User write over the same store and generation
+ * record the sync uses. Nothing else is faked: the publish that reads it is
+ * real.
+ *
+ * Over HTTP rather than a second `wrangler r2 object put` against the running
+ * server's `--persist-to` directory: that second process shares the local
+ * store's files with the live one, and on Linux it took the dev server down.
  */
-export async function seedWorkspaceObject(
-  port: number,
-  key: string,
+export async function seedWorkspaceFile(
+  baseUrl: string,
+  userId: string,
+  botId: string,
+  root: unknown,
+  path: string,
   file: string,
-  contentType: string,
+  mediaType: string,
 ): Promise<void> {
-  await run("bunx", [
-    "wrangler",
-    "--env",
-    "e2e",
-    "r2",
-    "object",
-    "put",
-    `frockbot-memory-files-e2e/${key}`,
-    "--file",
-    file,
-    "--content-type",
-    contentType,
-    "--local",
-    "--persist-to",
-    e2ePersistDirectory(port),
-  ]);
+  const bytes = await readFile(file);
+  const response = await fetch(
+    `${baseUrl}/api/workspace-seed/${encodeURIComponent(userId)}/${encodeURIComponent(botId)}`,
+    {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${E2E_WORKSPACE_SEED_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        root,
+        path,
+        bytesBase64: Buffer.from(bytes).toString("base64"),
+        mediaType,
+      }),
+    },
+  );
+  const outcome = (await response.json()) as {
+    status?: string;
+    reason?: string;
+  };
+  if (!response.ok || outcome.status !== "written") {
+    throw new Error(
+      `seeding ${path} failed: ${response.status} ${outcome.reason ?? ""}`,
+    );
+  }
 }
 
 export interface HarnessOptions {
@@ -603,6 +625,10 @@ export async function startHarness(
         // transcript deliberately hides them — when it has to explain a state.
         "--var",
         `DEBUG_TOKEN:${E2E_DEBUG_TOKEN}`,
+        // The Workspace seed door: how a run with no Computer lands a file
+        // the Computer would have written. See `seedWorkspaceFile`.
+        "--var",
+        `WORKSPACE_SEED_TOKEN:${E2E_WORKSPACE_SEED_TOKEN}`,
         "--persist-to",
         persistDirectory,
         // As above: the per-request log is the flood, not the signal.

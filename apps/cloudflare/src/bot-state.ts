@@ -88,6 +88,7 @@ import {
   decodeIsolateWorkspacePathV1,
   decodeIsolateWorkspaceWriteRequestV1,
   decodeNormalizedModelRequestV1,
+  decodeWorkspaceRootV1,
 } from "@frockbot/kernel-contracts";
 import type {
   AppletBuildViewV1,
@@ -1200,6 +1201,39 @@ export class BotState extends DurableObject<BotStateEnv> {
    * instruction root — so an imported Skill is loadable on the Bot's first
    * Turn and its provenance records who put it there.
    */
+  /**
+   * A file written into one of the User's durable roots, as the User. The
+   * gateway's seed door calls this in an environment with no Computer; see
+   * `writeUserWorkspaceFile` on the Shell Contribution for why it is a User
+   * write and nothing wider.
+   */
+  async writeUserWorkspaceFileV1(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        botId: rpcBotId,
+        root: rpcDecoded(decodeWorkspaceRootV1),
+        path: rpcString(1_024),
+        bytesBase64: rpcString(8 * 1024 * 1024),
+      },
+      { mediaType: rpcString(128) },
+    );
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.writeUserWorkspaceFile(identity, {
+      root: request.root as WorkspaceRootV1,
+      path: request.path as string,
+      bytes: Uint8Array.from(atob(request.bytesBase64 as string), (character) =>
+        character.charCodeAt(0),
+      ),
+      ...(request.mediaType ? { mediaType: request.mediaType as string } : {}),
+    });
+  }
+
   async writeUserSkill(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

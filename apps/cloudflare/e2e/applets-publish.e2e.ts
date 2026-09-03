@@ -23,7 +23,7 @@ import {
   E2E_DEBUG_TOKEN,
   E2E_OLLAMA_GOOD_API_KEY,
   e2eToolCallPrompt,
-  seedWorkspaceObject,
+  seedWorkspaceFile,
 } from "./harness.ts";
 
 /**
@@ -79,30 +79,45 @@ async function buildTemplate(displayName: string): Promise<string> {
 }
 
 async function seedBuild(
-  port: number,
+  baseUrl: string,
   userId: string,
+  botId: string,
   appletId: string,
   dist: string,
 ): Promise<void> {
-  const root = `workspace/package-declared:${encodeURIComponent(userId)}:applets:source/${appletId}/dist`;
-  await seedWorkspaceObject(
-    port,
-    `${root}/server.js`,
-    join(dist, "server.js"),
-    "application/javascript",
-  );
-  await seedWorkspaceObject(
-    port,
-    `${root}/ui.html`,
-    join(dist, "ui.html"),
-    "text/html; charset=utf-8",
-  );
-  await seedWorkspaceObject(
-    port,
-    `${root}/manifest.json`,
-    join(dist, "manifest.json"),
-    "application/json",
-  );
+  const root = {
+    kind: "package-declared",
+    userId,
+    packageId: "applets",
+    rootId: "source",
+  };
+  for (const [file, mediaType] of [
+    ["server.js", "application/javascript"],
+    ["ui.html", "text/html; charset=utf-8"],
+    ["manifest.json", "application/json"],
+  ] as const) {
+    await seedWorkspaceFile(
+      baseUrl,
+      userId,
+      botId,
+      root,
+      `${appletId}/dist/${file}`,
+      join(dist, file),
+      mediaType,
+    );
+  }
+}
+
+/** The one Bot this spec provisioned, from the operator surface. */
+async function botIdFor(page: Page, userId: string): Promise<string> {
+  const bots = (await (
+    await page.request.get(`/api/debug/bots?userId=${userId}`, {
+      headers: { authorization: `Bearer ${E2E_DEBUG_TOKEN}` },
+    })
+  ).json()) as { bots?: Array<{ botId: string }> };
+  const botId = bots.bots?.[0]?.botId;
+  if (!botId) throw new Error("the User has no Bot");
+  return botId;
 }
 
 async function runTool(
@@ -203,7 +218,13 @@ test("a Bot publishes an Applet, it goes live in the canvas, and its tool reache
   // What `applet build` on the Computer would have written, landed where the
   // sync lands it.
   const appletId = await appletIdNamed(page, "Weekly Todos");
-  await seedBuild(port, userId, appletId, dist);
+  await seedBuild(
+    `http://127.0.0.1:${port}`,
+    userId,
+    await botIdFor(page, userId),
+    appletId,
+    dist,
+  );
 
   await runTool(page, "Publish it.", "applet_publish", { appletId });
 

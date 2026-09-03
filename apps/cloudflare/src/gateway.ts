@@ -444,6 +444,70 @@ async function routeAppletSocket(
     .fetch(new Request(forwarded, request));
 }
 
+const WORKSPACE_SEED_PATH = /^\/api\/workspace-seed\/([^/]+)\/([^/]+)$/;
+
+/**
+ * `PUT /api/workspace-seed/:userId/:botId`, bearer-authenticated by the seed
+ * token, present only where `WORKSPACE_SEED_TOKEN` is set. See
+ * `GatewayDependencies.workspaceSeed`.
+ */
+async function routeWorkspaceSeed(
+  request: Request,
+  url: URL,
+  dependencies: GatewayDependencies,
+): Promise<Response> {
+  const seed = dependencies.workspaceSeed;
+  if (!seed) return jsonError(404, "not found");
+  if (request.method !== "PUT") return jsonError(405, "method not allowed");
+  const header = request.headers.get("authorization") ?? "";
+  const presented = header.toLowerCase().startsWith("bearer ")
+    ? header.slice("bearer ".length).trim()
+    : "";
+  if (presented.length === 0 || presented !== seed.token) {
+    return jsonError(401, "seed token is invalid");
+  }
+  const match = url.pathname.match(WORKSPACE_SEED_PATH)!;
+  let body: {
+    root?: unknown;
+    path?: unknown;
+    bytesBase64?: unknown;
+    mediaType?: unknown;
+  };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return jsonError(400, "seed body is not JSON");
+  }
+  if (
+    typeof body.path !== "string" ||
+    typeof body.bytesBase64 !== "string" ||
+    (body.mediaType !== undefined && typeof body.mediaType !== "string")
+  ) {
+    return jsonError(400, "seed body is invalid");
+  }
+  try {
+    return Response.json(
+      await seed.write(
+        decodeURIComponent(match[1]!),
+        decodeURIComponent(match[2]!),
+        {
+          root: body.root,
+          path: body.path,
+          bytesBase64: body.bytesBase64,
+          ...(body.mediaType === undefined
+            ? {}
+            : { mediaType: body.mediaType }),
+        },
+      ),
+    );
+  } catch (error) {
+    return jsonError(
+      400,
+      error instanceof Error ? error.message : "seed write failed",
+    );
+  }
+}
+
 export function createGateway(dependencies: GatewayDependencies) {
   const compatibilityDate = dependencies.compatibilityDate ?? "2026-08-27";
   const debugRoute = createDebugRoute(dependencies.debug);
@@ -454,6 +518,9 @@ export function createGateway(dependencies: GatewayDependencies) {
     }
     if (APPLET_SOCKET_PATH.test(url.pathname)) {
       return routeAppletSocket(request, url, dependencies);
+    }
+    if (WORKSPACE_SEED_PATH.test(url.pathname)) {
+      return routeWorkspaceSeed(request, url, dependencies);
     }
     if (url.pathname === "/sign-out") {
       return routeSignOut(request, url, dependencies);
