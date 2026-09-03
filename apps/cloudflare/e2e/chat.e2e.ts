@@ -147,11 +147,6 @@ test("a Turn that is running when the page reloads still delivers its reply", as
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
-// The thread's shape, not its plumbing: a reply the Bot delivered is drawn
-// once, in a column beside the avatar, and a bubble is at least as wide as the
-// words in it. The regression this pins was every block of an assistant Turn
-// laying out side by side, which squeezed a one-word reply into a 17px column
-// that broke "pong" across two lines and drew it twice.
 // The reply is drawn as it is written, not only when the Turn settles. The
 // provider sends half the answer, waits, then sends the rest; the half the
 // person can read has to reach the thread while the Turn is still running.
@@ -211,6 +206,11 @@ test("a reply appears while the Bot is still writing it", async ({
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
+// The thread's shape, not its plumbing: a reply the Bot delivered is drawn
+// once, in a column beside the avatar, and a bubble is at least as wide as the
+// words in it. The regression this pins was every block of an assistant Turn
+// laying out side by side, which squeezed a one-word reply into a 17px column
+// that broke "pong" across two lines and drew it twice.
 test("a delivered reply is one bubble, wide enough for its own text", async ({
   page,
   userId,
