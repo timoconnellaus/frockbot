@@ -26,6 +26,18 @@ export function createFlockAiGatewayHostV1(
         headers: {},
         query: { ...body, model: gatewayModel },
       });
+      // A rejected request answers with a JSON error body rather than an SSE
+      // stream. Left unchecked it decodes as a stream that ends before its
+      // terminal marker, which the Agent reads as an *uncertain* outcome and
+      // parks the run on — so the status is what tells the two apart.
+      if (!response.ok) {
+        const detail = (await response.text().catch(() => "")).slice(0, 512);
+        throw new Error(
+          `AI Gateway rejected the request (${response.status})${
+            detail ? `: ${detail}` : ""
+          }`,
+        );
+      }
       if (!response.body) {
         throw new Error("AI Gateway did not return a response stream");
       }
