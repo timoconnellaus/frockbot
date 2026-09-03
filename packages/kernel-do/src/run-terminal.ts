@@ -1,5 +1,6 @@
 import {
   decodeSessionEvent,
+  Session,
   type SessionEvent,
 } from "@frockbot/kernel-contracts";
 import type {
@@ -7,6 +8,47 @@ import type {
   StoredRunCodecV1,
   StoredRunV1,
 } from "./run-records.js";
+
+/**
+ * The events a terminal settlement commits, with any Turn they were left
+ * inside closed.
+ *
+ * A Turn interrupted mid-answer unwinds without writing a `turn/end`: the
+ * outcome of its model request is unknown, and a `turn/end` would claim to know
+ * how it ended. That is right while the run might still resume — and wrong the
+ * moment it will not. Settling one and committing its events as they stand left
+ * an open turn in the durable session log, so `turn N started while turn N-1 is
+ * open` refused every later message on that Bot, forever, and printed itself
+ * verbatim into the person's next bubble.
+ *
+ * So closing the turn happens exactly here: at the one point where the run is
+ * certainly not resuming. `reconcileInterrupted` writes the same repair the
+ * recovery path already writes — every unresolved tool occurrence closed as
+ * `interrupted`, then `step/end` and `turn/end` — so the settled log is a
+ * complete account and the next Turn starts on a closed one.
+ *
+ * A log that is already closed produces no repairs, and one too malformed to
+ * reconcile is left exactly as it is: repairing that blindly would invent
+ * history.
+ */
+function settledEventsV1(
+  sessionId: string,
+  previous: readonly SessionEvent[],
+  events: readonly SessionEvent[],
+): { events: SessionEvent[]; latestEvents: SessionEvent[] } {
+  const decoded = events.map(decodeSessionEvent);
+  const latest = [...previous, ...decoded].map(decodeSessionEvent);
+  let repairs: SessionEvent[] = [];
+  try {
+    repairs = new Session(sessionId, () => {}, latest).reconcileInterrupted();
+  } catch {
+    repairs = [];
+  }
+  return {
+    events: [...decoded, ...repairs],
+    latestEvents: [...latest, ...repairs],
+  };
+}
 
 export interface RunTerminalStorage {
   get<T>(key: string): Promise<T | undefined>;
@@ -83,7 +125,8 @@ export async function supersedeStoredRun<Snapshot>(
   if (!run.supersededAt) {
     throw new Error(`run "${runId}" has no durable supersede intent`);
   }
-  const decodedEvents = events.map(decodeSessionEvent);
+  const settledEvents = settledEventsV1(run.sessionId, previous, events);
+  const decodedEvents = settledEvents.events;
   const { responseText: _text, failure: _failure, ...settled } = run;
   // A run superseded while still queued never started, never appended an
   // event, and never spoke: it settles as a record on its own and leaves both
@@ -105,9 +148,7 @@ export async function supersedeStoredRun<Snapshot>(
     ...(queued
       ? {}
       : {
-          [keys.latestEvents]: structuredClone(
-            [...previous, ...decodedEvents].map(decodeSessionEvent),
-          ),
+          [keys.latestEvents]: structuredClone(settledEvents.latestEvents),
         }),
   };
   if (packageRecords && !queued) {
@@ -226,8 +267,9 @@ export async function cancelStoredRun<Snapshot>(
   if (!run.stopRequestedAt) {
     throw new Error(`run "${runId}" has no durable stop intent`);
   }
-  const decodedEvents = events.map(decodeSessionEvent);
-  const latestEvents = [...previous, ...decodedEvents].map(decodeSessionEvent);
+  const settledEvents = settledEventsV1(run.sessionId, previous, events);
+  const decodedEvents = settledEvents.events;
+  const latestEvents = settledEvents.latestEvents;
   const { responseText: _text, failure: _failure, ...settled } = run;
   const cancelled = codec.require({
     ...settled,
@@ -278,8 +320,9 @@ export async function failStoredRun<Snapshot>(
       supersededRecords,
     );
   }
-  const decodedEvents = events.map(decodeSessionEvent);
-  const latestEvents = [...previous, ...decodedEvents].map(decodeSessionEvent);
+  const settledEvents = settledEventsV1(run.sessionId, previous, events);
+  const decodedEvents = settledEvents.events;
+  const latestEvents = settledEvents.latestEvents;
   const failed = codec.require({
     ...run,
     events: decodedEvents,

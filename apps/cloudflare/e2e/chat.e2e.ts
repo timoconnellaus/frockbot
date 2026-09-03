@@ -17,7 +17,11 @@ import {
   sendMessage,
   setFakeOllamaChatMode,
 } from "./fixtures.ts";
-import { E2E_ASSISTANT_REPLY, E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
+import {
+  E2E_ASSISTANT_REPLY,
+  E2E_OLLAMA_GOOD_API_KEY,
+  e2eToolCallPrompt,
+} from "./harness.ts";
 
 test("Turns stay ordered, render Markdown, and survive a reload", async ({
   page,
@@ -139,6 +143,55 @@ test("a Turn that is running when the page reloads still delivers its reply", as
   // The fake provider is one server for the whole worker, so a spec that
   // slowed it down puts it back before the next one runs.
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+});
+
+// The thread's shape, not its plumbing: a reply the Bot delivered is drawn
+// once, in a column beside the avatar, and a bubble is at least as wide as the
+// words in it. The regression this pins was every block of an assistant Turn
+// laying out side by side, which squeezed a one-word reply into a 17px column
+// that broke "pong" across two lines and drew it twice.
+test("a delivered reply is one bubble, wide enough for its own text", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Ponger",
+  });
+  await page.setViewportSize({ width: 1351, height: 831 });
+
+  await sendMessage(
+    page,
+    `ping\n${e2eToolCallPrompt("send_to_user", {
+      payload: { type: "text", text: "pong" },
+    })}`,
+  );
+
+  const reply = assistantMessages(page).last();
+  // One reply, whichever way the Turn produced it: the delivered send is the
+  // Bot's voice and the model's own text is not drawn beside it (issue 153).
+  const bubbles = reply.locator(".message-bubble, .send-text");
+  await expect(bubbles).toHaveCount(1, { timeout: 120_000 });
+  await expect(bubbles.first()).toHaveText("pong");
+
+  // The bubble is wider than the word it holds, so the text is on one line.
+  const fits = await bubbles.first().evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const text = range.getBoundingClientRect();
+    return { box: element.getBoundingClientRect().width, text: text.width };
+  });
+  expect(fits.box).toBeGreaterThanOrEqual(fits.text);
+  expect(fits.text).toBeGreaterThan(10);
+
+  // The chip says what the tool was in words, and a Turn that finished says so.
+  const chip = reply.locator(".tool-chip");
+  await expect(chip).toHaveCount(1);
+  await expect(chip.locator(".tool-chip-name")).toHaveText("Send to user");
+  await expect(chip).not.toHaveClass(/tool-chip-failed/);
 });
 
 test("a provider that stops accepting the key ends the Turn with a reason", async ({

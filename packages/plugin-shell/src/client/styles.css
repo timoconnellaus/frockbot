@@ -313,11 +313,25 @@
   font-size: var(--frock-text-xs);
 }
 
-/* An assistant Turn is its avatar and, once there is text, its bubble. */
+/*
+ * An assistant Turn is its avatar and, beside it, one column holding
+ * everything the Turn produced. The row has exactly two children: bubbles,
+ * notices, sends and chips stack inside the column, so a one-word reply is a
+ * bubble the width of its word rather than a sliver of a shared row.
+ */
 .message-assistant {
   flex-direction: row;
   align-items: flex-start;
   gap: 8px;
+}
+
+.message-column {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
 
 .bot-avatar {

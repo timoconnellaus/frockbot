@@ -56,6 +56,7 @@ import {
   rpcJsonSnapshotV1,
   rpcString,
 } from "./durable-rpc.js";
+import { loggedEntryV1 } from "./entry-boundary.js";
 
 /** The two capabilities an Applet facet holds. Nothing else is in `env`. */
 export const APPLET_CAPABILITY_NAMES_V1 = [
@@ -717,6 +718,10 @@ export class AppletState extends DurableObject<AppletStateEnv> {
    * read from durable key/value, so this works after an eviction.
    */
   async alarm(): Promise<void> {
+    await loggedEntryV1("Applet alarm", () => this.#alarm());
+  }
+
+  async #alarm(): Promise<void> {
     const resident = this.#residentMountInput();
     if (!resident) return;
     try {

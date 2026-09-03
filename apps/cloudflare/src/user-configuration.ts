@@ -118,6 +118,7 @@ import {
   rpcJsonSnapshotV1,
   rpcObject,
 } from "./durable-rpc.js";
+import { loggedEntryV1 } from "./entry-boundary.js";
 
 /** The durable key holding this User's Project catalogue. */
 const MEMORY_PROJECTS_KEY = "memory:projects";
@@ -1071,6 +1072,12 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
    * one of them silently displacing the others' schedule.
    */
   async alarm() {
+    // An alarm has no caller: a throw here is an uncaught exception in the
+    // object, and the next firing is the recovery.
+    await loggedEntryV1("User configuration alarm", () => this.#alarm());
+  }
+
+  async #alarm() {
     const contributions = await this.contributions();
     await contributions.credentials.expireLeases();
     for (const contribution of contributions.connections.values()) {

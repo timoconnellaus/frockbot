@@ -277,6 +277,17 @@ function turnRefusalCopyV1(reason: ClientTurnRefusalReasonV1): string {
   return "That message didn't go through. Try sending it again.";
 }
 
+/**
+ * The Bot's voice is its sends. When a Turn delivered anything to the User the
+ * model's own assistant text is scratch space and the thread does not draw it
+ * (issue 153): drawing both is how a one-word reply arrived twice, once as the
+ * model's text and once as the bubble that was actually delivered.
+ */
+function visibleAssistantText(run: ClientRun, fallback = ""): string {
+  if (sendsFrom(run.events).length > 0) return "";
+  return run.responseText ?? fallback;
+}
+
 function isTerminalRun(run: ClientRun): boolean {
   return (
     run.status === "completed" ||
@@ -297,7 +308,7 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.responseText ?? "",
+      text: visibleAssistantText(run),
       status: "streaming",
       // A Turn that has not started shows nothing of its own: the greyed user
       // message is the whole of what the thread says about it.
@@ -314,7 +325,7 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.responseText ?? "",
+      text: visibleAssistantText(run),
       notice: "Interrupted by your next message.",
       status: "aborted",
       tools: toolsFrom(run.events),
@@ -334,7 +345,7 @@ function assistantMessage(
        * "1c7dd68e-…" has no durable provider outcome`, in a bubble styled
        * exactly like the Bot speaking.
        */
-      text: run.responseText ?? "",
+      text: visibleAssistantText(run),
       notice: "This reply stopped partway. Try again to continue it.",
       status: "reconciliation-required",
       tools: toolsFrom(run.events),
@@ -347,9 +358,30 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.responseText ?? "",
+      text: visibleAssistantText(run),
       notice: "You stopped this.",
       status: "aborted",
+      tools: toolsFrom(run.events),
+      sends: sendsFrom(run.events),
+      tasks: tasksFrom(run.events),
+    };
+  }
+  // A Turn that broke after it had started talking keeps what it said, with
+  // the reason underneath it — the treatment a stopped Turn already gets, for
+  // the same reason: the words arrived and the person read them (ADR 0028).
+  // A Turn that broke before saying anything is still just the reason.
+  if (run.status === "failed" && run.responseText) {
+    return {
+      id: `${run.runId}:assistant`,
+      runId: run.runId,
+      role: "assistant",
+      text: run.responseText,
+      // The same sentence the reply-less failure gets. The durable failure
+      // text is a provider's, not the product's — `Bot turn ended with
+      // outcome model-error`, a status code, once a run UUID — and under a
+      // bubble it reads as part of what the Bot was saying.
+      notice: "This Bot couldn't finish its reply. Try again.",
+      status: "error",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
       tasks: tasksFrom(run.events),
@@ -361,8 +393,10 @@ function assistantMessage(
     role: "assistant",
     text:
       run.status === "failed"
-        ? (run.responseText ?? "")
-        : (run.responseText ?? notification?.body ?? ""),
+        ? visibleAssistantText(run)
+        : visibleAssistantText(run, notification?.body ?? ""),
+    // Why the Turn ends there, under whatever it had already said — never as
+    // the bubble's own text, which reads as the Bot saying it.
     ...(run.status === "failed"
       ? { notice: "This Bot couldn't finish its reply. Try again." }
       : {}),
@@ -457,8 +491,12 @@ export function projectDurableRuns(
     activeRun = activeRunView(run) ?? activeRun;
     if (run.status === "running" || run.status === "reconciliation-required") {
       busyRunId = run.runId;
-      if (!run.queued) runningRunId = run.runId;
     }
+    // Stop belongs to a Turn that is executing. A Turn parked on a
+    // reconciliation is busy but not running: there is nothing to stop, and
+    // offering it left a Stop button standing for good — across reloads,
+    // because the state it was keyed off never became terminal.
+    if (run.status === "running" && !run.queued) runningRunId = run.runId;
     if (notification && isTerminalRun(run)) {
       projected.add(notification.notificationId);
     }
@@ -476,7 +514,13 @@ export function projectDurableRuns(
     state.activeRunId = undefined;
   }
   if (runningRunId) state.runningRunId = runningRunId;
-  else if (state.runningRunId && terminalRunIds.has(state.runningRunId)) {
+  else if (
+    state.runningRunId &&
+    runs.some((run) => run.runId === state.runningRunId)
+  ) {
+    // The channel is carrying this run and it is not executing, whatever it
+    // settled as. A run the list does not carry yet is the one this tab just
+    // submitted, which keeps its Stop.
     state.runningRunId = undefined;
   }
   if (activeRun) state.activeRun = activeRun;
@@ -2424,7 +2468,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           id: `${result.runId}:assistant`,
           runId: result.runId,
           role: "assistant",
-          text: result.text,
+          // The same rule the durable projection follows: a Turn that
+          // delivered something speaks through its sends, not through the
+          // model's own text (issue 153).
+          text: sendsFrom(result.events).length > 0 ? "" : result.text,
           at: optimisticAt,
           status: "completed",
           tools: toolsFrom(result.events),
