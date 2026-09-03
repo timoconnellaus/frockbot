@@ -102,6 +102,12 @@ describe("Computer viewer", () => {
     expect(template).toContain(':src="viewerSrc"');
     expect(template).toContain('@load="handleFrameLoad"');
     expect(template).toContain('role="progressbar"');
+    expect(template).toContain(':aria-valuenow="progressValueNow"');
+    expect(template).toContain('aria-live="polite"');
+    expect(overlaySource).toContain(
+      "Setting up your computer for the first time",
+    );
+    expect(overlaySource).toContain("This usually takes 2-3 minutes");
     expect(template).toContain('@click="actions.requestTakeControl"');
     expect(template).toContain('role="alertdialog"');
     expect(template).toContain(
@@ -109,14 +115,18 @@ describe("Computer viewer", () => {
     );
   });
 
-  test("the card shows the update phase label", () => {
+  test("the card shows accessible cold-setup and update progress", () => {
     const parsed = parse(cardSource, { filename: "ComputerCard.vue" });
     expect(parsed.errors).toEqual([]);
     const template = parsed.descriptor.template?.content ?? "";
 
-    expect(template).toContain("state.phase === 'updating'");
-    expect(template).toContain("Updating computer…");
-    expect(template).toContain("{{ state.message }}");
+    expect(cardSource).toContain("Setting up your computer for the first time");
+    expect(cardSource).toContain("This usually takes 2-3 minutes");
+    expect(cardSource).toContain("Updating your computer");
+    expect(template).toContain('role="progressbar"');
+    expect(template).toContain(':aria-valuenow="progressValueNow"');
+    expect(template).toContain('aria-live="polite"');
+    expect(template).toContain("{{ progressPhaseLabel }}");
   });
 
   test("the card keys its durable capture only by content hash", () => {

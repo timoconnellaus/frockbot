@@ -129,8 +129,27 @@ button.computer-screen {
   background-size: 18px 18px;
 }
 
+.computer-setup-expectation,
+.computer-progress-phase {
+  display: block;
+  max-width: 320px;
+  color: var(--frock-viewer-content-muted);
+  font-size: var(--frock-text-sm);
+  line-height: var(--frock-leading-normal);
+}
+
+.computer-setup-expectation {
+  margin: 6px 0 0;
+}
+
+.computer-progress-phase {
+  margin: 9px 0 0;
+  color: var(--frock-viewer-content-text);
+}
+
 .computer-progress-track {
   position: relative;
+  display: block;
   overflow: hidden;
   width: min(320px, 70vw);
   height: 4px;
@@ -141,11 +160,43 @@ button.computer-screen {
 
 .computer-progress-track > span {
   position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
   width: 42%;
   height: 100%;
   border-radius: inherit;
   background: var(--frock-computer-accent);
   animation: computer-progress 1.25s ease-in-out infinite;
+}
+
+.computer-progress-track.is-determinate > span {
+  animation: none;
+  transition: width 1s linear;
+}
+
+.computer-progress-track.is-css-timed > span {
+  width: 100%;
+  transform: scaleX(var(--computer-progress-from));
+  transform-origin: left;
+  animation: computer-progress-determinate var(--computer-progress-duration)
+    linear forwards;
+  transition: none;
+}
+
+.computer-progress-track-compact {
+  width: min(210px, 80%);
+  height: 3px;
+  margin: 11px 0 0;
+}
+
+.computer-screen-thumbnail .computer-setup-expectation,
+.computer-screen-thumbnail .computer-progress-phase {
+  max-width: 230px;
+  font-size: var(--frock-text-xs);
+}
+
+.computer-screen-thumbnail .computer-progress-phase {
+  margin-top: 6px;
 }
 
 .computer-progress-meta {
@@ -205,6 +256,30 @@ button.computer-screen {
 
   to {
     transform: translateX(350%);
+  }
+}
+
+@keyframes computer-progress-determinate {
+  from {
+    transform: scaleX(var(--computer-progress-from));
+  }
+
+  to {
+    transform: scaleX(var(--computer-progress-to));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .computer-progress-track > span {
+    animation: none;
+  }
+
+  .computer-progress-track.is-determinate > span {
+    transition: none;
+  }
+
+  .computer-progress-track.is-css-timed > span {
+    transform: scaleX(var(--computer-progress-from));
   }
 }
 
