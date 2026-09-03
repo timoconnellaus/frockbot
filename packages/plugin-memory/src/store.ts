@@ -40,7 +40,9 @@ import {
 import {
   memoryFileKindV1,
   memoryFilePathV1,
+  memoryLogPathV1,
   memoryShardOfV1,
+  MEMORY_MAX_LOG_PARTS_V1,
   type MemoryOwnerV1,
   type MemoryTierV1,
 } from "./roots.js";
@@ -50,6 +52,46 @@ import { refuseMemorySecretV1 } from "./secrets.js";
 export const MEMORY_MAX_LIST_PAGES = 8;
 /** Most Memory files read to render one tier. */
 export const MEMORY_MAX_FILES_PER_TIER = 64;
+
+/**
+ * How much longer than a fact a retraction of it may be: the `[forgotten] `
+ * prefix, and the marker the retracted text may already carry.
+ */
+const MEMORY_RETRACTION_HEADROOM = 32;
+
+/**
+ * The files of one tier that a bounded read keeps, in path order.
+ *
+ * One function, used by the injected block and by the search index, because
+ * they used to choose differently: the block kept the newest files by
+ * recorded generation and the index kept the first in listing order. Past the
+ * cap that meant injection covered recent Memory while `memory_search`
+ * covered ancient Memory, and nothing recorded that they disagreed.
+ *
+ * The newest are kept, by `writtenAt` with the generation id breaking a tie —
+ * both recorded by the write that produced the file — and the survivors are
+ * returned in path order, which is the order the tier merge relies on.
+ */
+export function selectNewestMemoryFilesV1<
+  T extends {
+    path: { path: string };
+    generation: { writtenAt: string; generationId: string };
+  },
+>(files: readonly T[], limit = MEMORY_MAX_FILES_PER_TIER): T[] {
+  const newest = [...files]
+    .sort(
+      (left, right) =>
+        left.generation.writtenAt.localeCompare(right.generation.writtenAt) ||
+        left.generation.generationId.localeCompare(
+          right.generation.generationId,
+        ),
+    )
+    .slice(-limit);
+  const kept = new Set(newest.map((file) => file.path.path));
+  return files
+    .filter((file) => kept.has(file.path.path))
+    .sort((left, right) => left.path.path.localeCompare(right.path.path));
+}
 /** The longest fact this Package will record. */
 export const MEMORY_MAX_FACT_LENGTH = 2_000;
 /** The largest Memory file this Package will rewrite. */
@@ -73,7 +115,12 @@ export interface MemoryTierReadV1 {
   profile: SourcedMemoryFactV1[];
   recent: SourcedMemoryFactV1[];
   sources: MemorySourceV1[];
-  /** Log facts held on disk beyond what `recent` carries, before any cap. */
+  /**
+   * How many log facts the tier read resolved. It equals `recent.length`:
+   * `read` applies no cap of its own, so there is nothing "beyond" it — the
+   * caps live in the renderer. The field was documented as the surplus and
+   * assigned the total, which is a difference nothing could act on.
+   */
   logTotal: number;
   /** Set when the tier could not be read in full; rendered as an omission. */
   unavailable?: string;
@@ -222,26 +269,22 @@ export class MemoryStore {
       .sort((left, right) =>
         left.entry.path.path.localeCompare(right.entry.path.path),
       );
-    // The bound keeps the *newest* files, by recorded generation: what Memory
-    // is for is injecting recent facts, so a tier past the bound loses its
-    // oldest months rather than its newest. `writtenAt` orders them and the
-    // generation id breaks a tie, because both are recorded by the write that
-    // produced the file. The kept files are then restored to path order, which
-    // is the order the merge below relies on.
-    const newest = [...classifiedFiles]
-      .sort((left, right) => {
-        const a = left.entry.generation;
-        const b = right.entry.generation;
-        return (
-          a.writtenAt.localeCompare(b.writtenAt) ||
-          a.generationId.localeCompare(b.generationId)
-        );
-      })
-      .slice(-MEMORY_MAX_FILES_PER_TIER);
-    const kept = new Set(newest.map(({ entry }) => entry.path.path));
-    const files = classifiedFiles.filter(({ entry }) =>
-      kept.has(entry.path.path),
+    // The bound keeps the *newest* files: what Memory is for is injecting
+    // recent facts, so a tier past the bound loses its oldest months rather
+    // than its newest. The selection is shared with the search index, so the
+    // injected block and `memory_search` cover the same files.
+    const selected = selectNewestMemoryFilesV1(
+      classifiedFiles.map(({ entry, classified }) => ({
+        path: entry.path,
+        generation: entry.generation,
+        entry,
+        classified,
+      })),
     );
+    const files = selected.map(({ entry, classified }) => ({
+      entry,
+      classified,
+    }));
     if (classifiedFiles.length > files.length) {
       const dropped = classifiedFiles.length - files.length;
       omissions.push(
@@ -250,14 +293,21 @@ export class MemoryStore {
     }
     if (omissions.length > 0) result.omitted = omissions.join("; ");
 
+    // Every unreadable file is named, not just the last one. Assigning
+    // `result.unavailable` per file overwrote the reason each time, so a tier
+    // where three files failed reported one reason and was injected as if it
+    // were whole.
+    const unreadable: string[] = [];
     for (const { entry, classified } of files) {
       if (entry.generation.size > MEMORY_MAX_FILE_BYTES) {
-        result.unavailable = `a Memory file exceeds ${MEMORY_MAX_FILE_BYTES} bytes`;
+        unreadable.push(
+          `"${entry.path.path}" exceeds ${MEMORY_MAX_FILE_BYTES} bytes`,
+        );
         continue;
       }
       const read = await this.#files.read(entry.path);
       if (read.status !== "ok") {
-        result.unavailable = read.reason;
+        unreadable.push(`"${entry.path.path}": ${read.reason}`);
         continue;
       }
       result.sources.push({
@@ -277,6 +327,10 @@ export class MemoryStore {
       }));
       if (classified.kind === "profile") profile.push(...sourced);
       else log.push(...sourced);
+    }
+
+    if (unreadable.length > 0) {
+      result.unavailable = `${unreadable.length} Memory file(s) could not be read: ${unreadable.join("; ")}`;
     }
 
     // Retractions cross files inside a tier: a `[forgotten]` line in the log
@@ -307,9 +361,19 @@ export class MemoryStore {
     fact: string;
     writer: WorkspaceWriterV1;
     at?: Date;
+    /** Set only by `forget`: a retraction of a fact already on disk. */
+    retraction?: true;
   }): Promise<MemoryWriteOutcomeV1> {
     const text = request.fact.trim();
-    if (!text || text.length > MEMORY_MAX_FACT_LENGTH) {
+    // The cap bounds what a Bot may *record*. A retraction is a fact the
+    // Package writes about a fact that is already on disk, so measuring the
+    // retraction against the same cap made a fact longer than
+    // `MEMORY_MAX_FACT_LENGTH` minus the prefix impossible to forget — the
+    // one operation that shrinks Memory refused because Memory was too big.
+    const cap = request.retraction
+      ? MEMORY_MAX_FACT_LENGTH + MEMORY_RETRACTION_HEADROOM
+      : MEMORY_MAX_FACT_LENGTH;
+    if (!text || text.length > cap) {
       return {
         status: "refused",
         reason: `a fact must be between 1 and ${MEMORY_MAX_FACT_LENGTH} characters`,
@@ -318,12 +382,8 @@ export class MemoryStore {
     const secret = refuseMemorySecretV1(text);
     if (secret) return { status: "refused", reason: secret.reason };
     const at = request.at ?? this.#clock();
-    const path = memoryFilePathV1(
-      request.root,
-      this.owner.botId,
-      request.tier,
-      at,
-    );
+    const path = await this.tierWritePath(request.root, request.tier, at);
+    if ("status" in path) return path;
     const refusal = this.refuseForeignShard(path, request.writer);
     if (refusal) return refusal;
     const line: MemoryFactV1 = { date: memoryDayV1(at), text };
@@ -334,6 +394,47 @@ export class MemoryStore {
       }
       return [...facts, line];
     });
+  }
+
+  /**
+   * The file this tier's next fact goes in, rolling the log over when the
+   * current file is full.
+   *
+   * A log file that grew past the per-file cap used to take its whole tier
+   * down with it: the read skips an oversized file, so the tier vanished from
+   * injection, and `forget` answered `unavailable` for it, so no tool could
+   * trim it back. Rolling to `log/YYYY-MM.NN.md` keeps every fact, keeps
+   * every file readable, and needs no migration — the existing month file is
+   * part 0 and stays exactly where it is.
+   *
+   * The profile tier does not roll: it is a bounded, curated file, and one
+   * that reached the cap is a real refusal the User should see.
+   */
+  private async tierWritePath(
+    root: WorkspaceMemoryRootV1,
+    tier: MemoryTierV1,
+    at: Date,
+  ): Promise<WorkspacePathV1 | MemoryWriteOutcomeV1> {
+    const path = memoryFilePathV1(root, this.owner.botId, tier, at);
+    if (tier === "profile") return path;
+    for (let part = 0; part <= MEMORY_MAX_LOG_PARTS_V1; part += 1) {
+      const candidate = memoryLogPathV1(root, this.owner.botId, at, part);
+      const head = await this.#files.stat(candidate);
+      if (head.status === "not-found") return candidate;
+      if (head.status !== "ok")
+        return { status: head.status, reason: head.reason };
+      // Room for at least one more fact of the maximum size, so a write never
+      // pushes a file past the cap and strands it.
+      if (
+        head.entry.generation.size + MEMORY_MAX_FACT_LENGTH <
+        MEMORY_MAX_FILE_BYTES
+      )
+        return candidate;
+    }
+    return {
+      status: "refused",
+      reason: `this month's Memory log already has ${MEMORY_MAX_LOG_PARTS_V1} files`,
+    };
   }
 
   /**
@@ -389,33 +490,36 @@ export class MemoryStore {
     const mine = [...tier.profile, ...tier.recent].filter(
       (fact) => fact.botId === this.owner.botId && matches(fact.text),
     );
+    // Both halves always run. Removing my own line and returning left another
+    // Bot's copy of the same fact being injected forever, under a tool result
+    // that said "Forgotten. The line is gone from …" — so a shared fact two
+    // Bots had recorded came back on the very next Turn.
+    const ownWrites: MemoryFileChangeV1[] = [];
+    let ownLast: MemoryWriteOutcomeV1 | undefined;
     if (mine.length > 0) {
-      // The Bot owns every file the fact sits in, so removing the line is both
-      // permitted and the honest record: nothing else recorded it.
-      let last: MemoryWriteOutcomeV1 | undefined;
-      // Each rewritten file is recorded as it lands, so a failure part-way
-      // through still answers with the generations that already exist on disk.
-      const written: MemoryFileChangeV1[] = [];
+      // Removing the line from my own shard is permitted and is the honest
+      // record for the copies I wrote. Each rewritten file is recorded as it
+      // lands, so a failure part-way through still answers with the
+      // generations that already exist on disk.
       for (const source of tier.sources) {
         if (source.botId !== this.owner.botId) continue;
         const path: WorkspacePathV1 = { root: request.root, path: source.path };
         const refusal = this.refuseForeignShard(path, request.writer);
-        if (refusal) return { ...refusal, written };
+        if (refusal) return { ...refusal, written: ownWrites };
         const outcome = await this.rewrite(path, request.writer, (facts) => {
           const kept = facts.filter((fact) => !matches(fact.text));
           return kept.length === facts.length ? "unchanged" : kept;
         });
-        if (outcome.status !== "ok") return { ...outcome, written };
+        if (outcome.status !== "ok") return { ...outcome, written: ownWrites };
         if (!outcome.duplicate) {
-          last = outcome;
-          written.push({
+          ownLast = outcome;
+          ownWrites.push({
             path: outcome.path,
             generationId: outcome.generationId,
             contentHash: outcome.contentHash,
           });
         }
       }
-      if (last) return { ...last, written };
     }
 
     const elsewhere = [
@@ -427,13 +531,16 @@ export class MemoryStore {
       ),
     ];
     if (elsewhere.length === 0) {
+      // Nothing else holds it. My own removal, if there was one, is the whole
+      // answer.
+      if (ownLast) return { ...ownLast, written: ownWrites };
       return {
         status: "refused",
         reason: `no fact matching "${text}" is recorded in this tier`,
       };
     }
-    const written: MemoryFileChangeV1[] = [];
-    let last: MemoryWriteOutcomeV1 | undefined;
+    const written: MemoryFileChangeV1[] = [...ownWrites];
+    let last: MemoryWriteOutcomeV1 | undefined = ownLast;
     for (const recorded of elsewhere) {
       const retraction = await this.write({
         root: request.root,
@@ -441,6 +548,7 @@ export class MemoryStore {
         fact: memoryRetractionTextV1(recorded),
         writer: request.writer,
         at,
+        retraction: true,
       });
       if (retraction.status !== "ok") return { ...retraction, written };
       last = retraction;
@@ -549,6 +657,21 @@ export class MemoryStore {
     writer: WorkspaceWriterV1,
     current: WorkspaceGenerationV1 | undefined,
   ): Promise<MemoryWriteOutcomeV1> {
+    // The cap is checked here rather than only in `writeFile`, because this is
+    // the path every fact takes. A commit that sailed past it left a file the
+    // read then skipped, taking the whole tier out of injection with no tool
+    // able to trim it. A `forget` shrinking an already-oversized file is the
+    // one thing that must still get through: refusing it would make the
+    // condition unrecoverable.
+    if (
+      bytes.byteLength > MEMORY_MAX_FILE_BYTES &&
+      bytes.byteLength >= (current?.size ?? 0)
+    ) {
+      return {
+        status: "refused",
+        reason: `this Memory file would exceed ${MEMORY_MAX_FILE_BYTES} bytes`,
+      };
+    }
     const outcome = await this.#files.write({
       path,
       bytes,

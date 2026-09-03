@@ -199,6 +199,65 @@ describe("the Memory writer", () => {
   });
 });
 
+describe("a month's log rolls over instead of killing its tier", () => {
+  test("keeps writing, keeps reading, and every fact survives", async () => {
+    const { files, store } = storeFor("bot-1");
+    const root = botMemoryRootV1(OWNER);
+    const writer = writerFor("bot-1");
+    // Facts big enough that a few hundred fill one 256 KB file.
+    const filler = "y".repeat(1_900);
+
+    for (let index = 0; index < 200; index += 1) {
+      const outcome = await store.write({
+        root,
+        tier: "log",
+        fact: `${index} ${filler}`,
+        writer,
+      });
+      // The write that used to push the file past the cap and strand the
+      // whole tier now lands in the next part instead.
+      expect(outcome.status).toBe("ok");
+    }
+
+    const listing = await files.list({ root });
+    expect(listing.status).toBe("ok");
+    if (listing.status !== "ok") return;
+    const logs = listing.entries
+      .map((entry) => entry.path.path)
+      .filter((path) => path.startsWith("log/"))
+      .sort();
+    // It rolled: the month has more than one file, named so it still sorts
+    // inside its own month.
+    expect(logs.length).toBeGreaterThan(1);
+    // The first file keeps its existing name and the parts sort after it, so
+    // the tier merge's "newest month last" still holds inside the month.
+    expect(logs[0]).toBe("log/2026-08.md");
+    expect(logs[1]).toBe("log/2026-08.p01.md");
+    // No file is past the cap, so the read skips nothing…
+    for (const entry of listing.entries) {
+      expect(entry.generation.size).toBeLessThanOrEqual(256 * 1024);
+    }
+    // …and the tier is whole rather than `unavailable`.
+    const tier = await store.read(root);
+    expect(tier.unavailable).toBeUndefined();
+    expect(tier.recent.length).toBeGreaterThan(0);
+  });
+
+  test("refuses a single write that cannot fit in any file", async () => {
+    const { store } = storeFor("bot-1");
+    const root = botMemoryRootV1(OWNER);
+    // The profile tier is curated and does not roll: an oversized commit is a
+    // refusal the User can see, never a file the reader has to skip.
+    const outcome = await store.write({
+      root,
+      tier: "profile",
+      fact: "z".repeat(2_001),
+      writer: writerFor("bot-1"),
+    });
+    expect(outcome.status).toBe("refused");
+  });
+});
+
 describe("forgetting", () => {
   test("removes a fact this Bot recorded from its own shard", async () => {
     const { store } = storeFor("bot-1");
@@ -249,6 +308,50 @@ describe("forgetting", () => {
       theirs.status === "ok" ? new TextDecoder().decode(theirs.file.bytes) : "",
     ).toContain("Tim teaches on Tuesdays.");
     // But the merged tier no longer carries it: newest wins.
+    expect((await one.store.read(root)).profile).toEqual([]);
+    expect((await two.store.read(root)).profile).toEqual([]);
+  });
+
+  test("retracts a shared fact that this Bot's own shard also holds", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const root = userMemoryRootV1(OWNER);
+    const one = storeFor("bot-1", files);
+    const two = storeFor("bot-2", files);
+    // Both Bots learned the same thing. Mine is a plain fact and theirs is
+    // marked as a note, so the merge keeps both — this is the case where my
+    // own shard *and* another's hold it.
+    await one.store.write({
+      root,
+      tier: "profile",
+      fact: "Tim teaches on Tuesdays.",
+      writer: writerFor("bot-1"),
+    });
+    await two.store.write({
+      root,
+      tier: "profile",
+      fact: "[note] Tim teaches on Tuesdays.",
+      writer: writerFor("bot-2"),
+    });
+    expect((await one.store.read(root)).profile).toHaveLength(2);
+
+    const forgotten = await one.store.forget({
+      root,
+      fact: "Tim teaches on Tuesdays.",
+      writer: writerFor("bot-1"),
+    });
+
+    // Removing my own line used to return here, leaving the other Bot's copy
+    // injected forever under a result that said it was forgotten.
+    expect(forgotten).toMatchObject({ status: "ok", retracted: true });
+    const mine = await files.read({
+      root,
+      path: "by-agent/bot-1/profile.md",
+    });
+    expect(
+      mine.status === "ok" ? new TextDecoder().decode(mine.file.bytes) : "",
+    ).not.toContain("Tim teaches on Tuesdays.");
+    // The other Bot's shard is never edited, and the merged tier is clean for
+    // both readers.
     expect((await one.store.read(root)).profile).toEqual([]);
     expect((await two.store.read(root)).profile).toEqual([]);
   });

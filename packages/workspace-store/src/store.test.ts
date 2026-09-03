@@ -680,11 +680,14 @@ describe("an unrecorded file is still overwritable by the writer that read it", 
     // The `record` that follows a `put` fails once: the bytes land, and the
     // only place their generation exists is beside them in the object store.
     const record = generations.record;
-    let failed = false;
+    let attempts = 0;
     generations.record = (entry) => {
-      if (failed) return record(entry);
-      failed = true;
-      return Promise.reject(new Error("the ledger is unreachable"));
+      attempts += 1;
+      // Both attempts fail: the retry is not what is under test here.
+      if (attempts <= 2) {
+        return Promise.reject(new Error("the ledger is unreachable"));
+      }
+      return record(entry);
     };
 
     const first = await files.write({
@@ -693,7 +696,12 @@ describe("an unrecorded file is still overwritable by the writer that read it", 
       writer: user,
       expectedGenerationId: null,
     });
-    expect(first.status).toBe("unavailable");
+    // The bytes are durable, so the write is `ok`. Reporting a failure here
+    // told the model nothing was written while object storage held it, and
+    // the write then turned up in the next injection anyway.
+    expect(first).toMatchObject({ status: "ok", ledgerPending: true });
+    // It is tried twice before it is called pending.
+    expect(attempts).toBe(2);
     expect(await generations.current(INSTRUCTIONS, "notes.md")).toBeUndefined();
 
     // The file reads back with the generation its writer minted…

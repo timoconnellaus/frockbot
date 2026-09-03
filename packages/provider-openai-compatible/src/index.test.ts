@@ -224,7 +224,7 @@ describe("OpenAICompatibleProvider", () => {
     expect(cancelled).toBe(true);
   });
 
-  test("reports retrieval unavailable without another provider request", async () => {
+  test("reports retrieval as not retrievable without another provider request", async () => {
     let requests = 0;
     const provider = new OpenAICompatibleProvider({
       baseUrl: "https://models.example/v1",
@@ -243,7 +243,7 @@ describe("OpenAICompatibleProvider", () => {
     );
 
     expect(outcome).toEqual({
-      status: "unavailable",
+      status: "not-retrievable",
       reason:
         'LLM provider "openai-compatible" does not support provider-bound retrieval',
     });

@@ -27,9 +27,11 @@ describe("the classifier table", () => {
       "computer",
     ],
     ["computer_process_poll", { processId: "p1" }, "process", "computer"],
-    ["memory_write", { text: "a fact" }, "file", "computer"],
-    ["skill_write", { path: "a.md" }, "file", "computer"],
-    ["package_author", { packageId: "x" }, "file", "computer"],
+    // Memory and Skills are the Workspace, not the Computer: they are
+    // written while it is hibernated and by Bots that have none.
+    ["memory_write", { text: "a fact" }, "file", "workspace"],
+    ["skill_write", { path: "a.md" }, "file", "workspace"],
+    ["package_author", { packageId: "x" }, "file", "workspace"],
     ["mcp__example__echo", { message: "hi" }, "mcp", "remote:example"],
     ["mcp__beeper__send_message", {}, "mcp", "remote:beeper"],
     // Read-only and product tools perform no audited effect at all. An audit
@@ -139,7 +141,8 @@ describe("the classifier table", () => {
         toolName: "package_author",
         input: { packageId: "acme" },
       }),
-    ).toEqual({ kind: "file", target: "computer" });
+      // `package_author` writes the Workspace, not the Computer.
+    ).toEqual({ kind: "file", target: "workspace" });
     // A wrapper that names nothing resolvable stays the wrapper, and the
     // wrapper is not an audited effect.
     expect(auditKindForToolV1("call_dynamic_tool", {})).toBeUndefined();

@@ -78,6 +78,58 @@ function scoped(events: SessionEvent[]): LlmMessage[] {
   });
 }
 
+function scopedWithBudget(events: SessionEvent[], budget: number) {
+  return turnScopedMessagesV1({
+    events,
+    messages: derive(events),
+    pointer: automationParentPointerV1,
+    sessionId: "bot:scout",
+    budget,
+  });
+}
+
+describe("one request carries a bounded amount of history", () => {
+  test("keeps the current Turn whole and drops the oldest, with a notice", () => {
+    const events = log([
+      ...turn(1, "chat", "the oldest thing", "first reply"),
+      ...turn(2, "chat", "the middle thing", "second reply"),
+      ...turn(3, "chat", "the newest thing", ""),
+    ]);
+    // Room for the current Turn and one older one, not for all three.
+    const messages = scopedWithBudget(events, 200);
+
+    const contents = messages.map((message) => message.content);
+    expect(contents).toContain("the newest thing");
+    expect(contents.join(" ")).not.toContain("the oldest thing");
+    expect(contents[0]).toContain("not included here");
+    expect(contents[0]).toContain("1 Turn");
+  });
+
+  test("carries everything when it fits, and says nothing about omission", () => {
+    const events = log([
+      ...turn(1, "chat", "morning", "hello"),
+      ...turn(2, "chat", "anything new?", ""),
+    ]);
+
+    expect(
+      scopedWithBudget(events, 100_000).map((message) => message.content),
+    ).toEqual(["morning", "hello", "anything new?", ""]);
+  });
+
+  test("keeps the current Turn even when it alone exceeds the budget", () => {
+    const events = log([
+      ...turn(1, "chat", "old", "older"),
+      ...turn(2, "chat", "x".repeat(500), ""),
+    ]);
+    const messages = scopedWithBudget(events, 50);
+
+    // A Turn is never split: dropping the user message and keeping the reply
+    // would be a malformed request, so the current Turn survives whole.
+    expect(messages.at(-2)!.content).toBe("x".repeat(500));
+    expect(messages[0]!.content).toContain("not included here");
+  });
+});
+
 describe("turn-scoped prompt history", () => {
   test("a chat Turn sees only the Turns admitted as chat", () => {
     const events = log([

@@ -91,12 +91,28 @@ export function memoryProjectIdOfRootV1(root: WorkspaceMemoryRootV1): string {
   return root.kind === "project-memory" ? root.projectId : "";
 }
 
-/** `log/YYYY-MM.md`, the monthly file a dated fact is appended to. */
-export function memoryLogRelativeV1(at: Date): string {
+/**
+ * `log/YYYY-MM.md`, the monthly file a dated fact is appended to, or
+ * `log/YYYY-MM.NN.md` once that month has rolled over.
+ *
+ * A month rolls over when its file reaches the per-file byte cap. Without
+ * that, a busy month's file grew past the cap and then the *whole tier*
+ * vanished from injection — the read skips an oversized file and `forget`
+ * answers `unavailable` for the tier, so no tool could trim it back.
+ */
+export function memoryLogRelativeV1(at: Date, part = 0): string {
   const year = at.getUTCFullYear().toString().padStart(4, "0");
   const month = (at.getUTCMonth() + 1).toString().padStart(2, "0");
-  return `${MEMORY_LOG_DIRECTORY}/${year}-${month}.md`;
+  // `p` and not a bare number: the tier merge relies on path order, and
+  // `2026-08.01.md` sorts *before* `2026-08.md` while `2026-08.p01.md` sorts
+  // after it. The first file of a month keeps its existing name, so nothing
+  // already written moves.
+  const suffix = part > 0 ? `.p${part.toString().padStart(2, "0")}` : "";
+  return `${MEMORY_LOG_DIRECTORY}/${year}-${month}${suffix}.md`;
 }
+
+/** How many rollover parts one month may have before a write is refused. */
+export const MEMORY_MAX_LOG_PARTS_V1 = 99;
 
 /** The relative path, inside a shard, one tier writes to. */
 export function memoryTierRelativeV1(tier: MemoryTierV1, at: Date): string {
@@ -115,6 +131,16 @@ export function memoryFilePathV1(
   at: Date,
 ): WorkspacePathV1 {
   return memoryShardPathV1(root, botId, memoryTierRelativeV1(tier, at));
+}
+
+/** One month's log file, or one of its rollover parts, in a Bot's shard. */
+export function memoryLogPathV1(
+  root: WorkspaceMemoryRootV1,
+  botId: string,
+  at: Date,
+  part: number,
+): WorkspacePathV1 {
+  return memoryShardPathV1(root, botId, memoryLogRelativeV1(at, part));
 }
 
 /** The prefix a Bot's own files sit under; `""` for the Bot Memory root. */
@@ -153,6 +179,11 @@ export function memoryFileKindV1(
     shard = root.botId;
   }
   if (tail === MEMORY_PROFILE_FILE) return { kind: "profile", shard };
-  if (/^log\/\d{4}-\d{2}\.md$/.test(tail)) return { kind: "log", shard };
+  // `log/YYYY-MM.md` and its rollover parts `log/YYYY-MM.NN.md`. Both sort
+  // after the month they belong to and before the next one, which is the
+  // order the tier merge relies on.
+  if (/^log\/\d{4}-\d{2}(\.p\d{2})?\.md$/.test(tail)) {
+    return { kind: "log", shard };
+  }
   return undefined;
 }
