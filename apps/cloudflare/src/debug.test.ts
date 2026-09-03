@@ -130,6 +130,29 @@ describe("debug route", () => {
     });
   });
 
+  // A limit outside the accepted range is the caller's mistake. It used to
+  // reach the Bot's decoder and come back as a 500 carrying a stack trace of
+  // the build.
+  test("refuses an out-of-range limit with a 400 and no stack", async () => {
+    const target = surface();
+    const route = createDebugRoute(target);
+    for (const limit of ["60", "0", "-1", "abc", "1.5"]) {
+      const request = get(
+        `/api/debug/bots/primary?userId=user-1&limit=${limit}`,
+        authorized,
+      );
+
+      const response = await route(request, new URL(request.url));
+
+      expect(response?.status).toBe(400);
+      const body = (await response?.json()) as Record<string, unknown>;
+      expect(body.error).toBe("limit must be a whole number between 1 and 20");
+      expect(body.stack).toBeUndefined();
+    }
+    // The Bot was never asked; a malformed request is refused at the edge.
+    expect(target.snapshots).toEqual([]);
+  });
+
   test("reports a failed read to the operator rather than swallowing it", async () => {
     const route = createDebugRoute(
       surface({

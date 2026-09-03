@@ -1,4 +1,7 @@
-import type { BotDebugQueryV1 } from "@frockbot/plugin-shell/debug-protocol";
+import {
+  BOT_DEBUG_RUN_LIMIT_V1,
+  type BotDebugQueryV1,
+} from "@frockbot/plugin-shell/debug-protocol";
 import { decodeBotIdV1 } from "@frockbot/configuration-core";
 
 /**
@@ -54,12 +57,29 @@ function presentedToken(request: Request): string | undefined {
   return request.headers.get("x-frockbot-debug-token")?.trim() ?? undefined;
 }
 
+/**
+ * A caller's mistake, not the server's. Thrown where the request is parsed and
+ * caught at the route boundary, so a bad query string answers 400 with a
+ * sentence instead of 500 with a stack trace of the build.
+ */
+class DebugRequestError extends Error {}
+
 function debugQuery(url: URL): BotDebugQueryV1 {
   const query: BotDebugQueryV1 = { schemaVersion: 1 };
   const limit = url.searchParams.get("limit");
   if (limit !== null) {
     const parsed = Number(limit);
-    if (!Number.isSafeInteger(parsed)) throw new Error("limit is invalid");
+    // The same bounds the Bot enforces on decode, checked here so the caller
+    // is told the accepted range rather than shown an invariant.
+    if (
+      !Number.isSafeInteger(parsed) ||
+      parsed < 1 ||
+      parsed > BOT_DEBUG_RUN_LIMIT_V1
+    ) {
+      throw new DebugRequestError(
+        `limit must be a whole number between 1 and ${BOT_DEBUG_RUN_LIMIT_V1}`,
+      );
+    }
     query.limit = parsed;
   }
   const before = url.searchParams.get("before");
@@ -132,6 +152,12 @@ export function createDebugRoute(
         : debugQuery(url);
       return Response.json(await surface.snapshot(userId, botId, query));
     } catch (error) {
+      // A malformed request is the caller's mistake. It answers 400 with the
+      // sentence and no stack — a stack here would say nothing about the Bot
+      // and everything about the build's file layout.
+      if (error instanceof DebugRequestError) {
+        return jsonError(400, error.message);
+      }
       // The operator is the audience: the message is the finding, and a stack
       // that reached here is more useful than a generic 500.
       return Response.json(
