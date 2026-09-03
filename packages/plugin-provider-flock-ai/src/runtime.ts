@@ -19,6 +19,8 @@ export type OpenAICompatibleChatCompletionBodyV1 = Record<string, unknown>;
 export type FlockAiChatCompletionV1 = (
   gatewayModel: string,
   body: OpenAICompatibleChatCompletionBodyV1,
+  /** Cancels the gateway request; the host bounds it with its own deadline. */
+  signal?: AbortSignal,
 ) => Promise<ReadableStream<Uint8Array>>;
 
 export interface FlockAiRuntimeConfig {
@@ -57,7 +59,11 @@ class FlockAiProvider implements LlmProvider {
     // error.
     let responseBody: ReadableStream<Uint8Array>;
     try {
-      responseBody = await this.config.runChatCompletion(gatewayModel, body);
+      responseBody = await this.config.runChatCompletion(
+        gatewayModel,
+        body,
+        signal,
+      );
     } catch (error) {
       signal.throwIfAborted();
       throw new LlmEffectNotStartedError(

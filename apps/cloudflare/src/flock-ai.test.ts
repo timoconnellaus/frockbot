@@ -192,3 +192,36 @@ describe("Flock AI Gateway host, binding transport", () => {
     );
   });
 });
+
+describe("Flock AI gateway deadline", () => {
+  test("a gateway that never answers fails the request", async () => {
+    const ai = {
+      gateway() {
+        return { run: () => new Promise<Response>(() => {}) };
+      },
+    } as unknown as Pick<Ai, "gateway">;
+    const host = createFlockAiGatewayHostV1(ai, { timeoutMs: 20 });
+
+    await expect(
+      host.runChatCompletion("dynamic/auto", { messages: [] }),
+    ).rejects.toThrow("AI Gateway did not respond within 20ms");
+  });
+
+  test("a compat transport that never answers fails the request", async () => {
+    const host = createFlockAiGatewayHostV1(unusedBinding(), {
+      accountId: ACCOUNT_ID,
+      token: TOKEN,
+      timeoutMs: 20,
+      fetch: ((_input: unknown, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(init.signal?.reason ?? new Error("aborted")),
+          );
+        })) as typeof fetch,
+    });
+
+    await expect(
+      host.runChatCompletion("dynamic/auto", { messages: [] }),
+    ).rejects.toThrow("AI Gateway did not respond within 20ms");
+  });
+});

@@ -32,7 +32,17 @@ export interface OpenAICompatibleConfig {
    * model id decides through {@link modelAcceptsImagesV1}.
    */
   acceptsImages?: boolean;
+  /**
+   * Deadline for the model request's response headers. The stream that follows
+   * is bounded separately, per read, by {@link SSE_IDLE_READ_TIMEOUT_MS}.
+   */
+  firstByteTimeoutMs?: number;
+  /** Per-read deadline once the stream is open. */
+  idleReadTimeoutMs?: number;
 }
+
+/** Deadline for a model request's response headers. */
+export const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 60_000;
 
 interface ToolAccumulator {
   index: number;
@@ -174,6 +184,40 @@ export function requestToWire(
 
 const MAX_SSE_EVENT_CHARACTERS = 1_048_576;
 const MAX_SSE_RESPONSE_BYTES = 16_777_216;
+/**
+ * A provider that opens a stream and then stalls holds the Turn open until the
+ * caller aborts, which for an unattended run is never. Each individual read is
+ * bounded instead, so a silent stream fails as a stream rather than hanging.
+ */
+export const SSE_IDLE_READ_TIMEOUT_MS = 120_000;
+
+class SseIdleTimeoutError extends Error {
+  constructor(idleMs: number) {
+    super(`Model response stream stalled for ${idleMs}ms`);
+    this.name = "SseIdleTimeoutError";
+  }
+}
+
+/** Resolve to the read, or reject once the idle deadline passes. */
+async function readWithin<T>(
+  read: Promise<T>,
+  idleMs: number,
+): Promise<Awaited<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new SseIdleTimeoutError(idleMs)),
+          idleMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 async function rejectOversizedSse(
   reader: ReadableStreamDefaultReader<Uint8Array>,
@@ -185,6 +229,7 @@ async function rejectOversizedSse(
 async function* readSseData(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
+  idleMs: number = SSE_IDLE_READ_TIMEOUT_MS,
 ): AsyncIterable<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -197,7 +242,16 @@ async function* readSseData(
   try {
     signal.throwIfAborted();
     while (true) {
-      const { done, value } = await reader.read();
+      let done: boolean;
+      let value: Uint8Array | undefined;
+      try {
+        ({ done, value } = await readWithin(reader.read(), idleMs));
+      } catch (error) {
+        if (error instanceof SseIdleTimeoutError) {
+          await reader.cancel(error.message).catch(() => undefined);
+        }
+        throw error;
+      }
       signal.throwIfAborted();
       responseBytes += value?.byteLength ?? 0;
       if (responseBytes > MAX_SSE_RESPONSE_BYTES) {
@@ -276,12 +330,13 @@ function parseToolInput(value: string): JsonValue {
 export async function* streamOpenAICompatibleBody(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
+  idleMs: number = SSE_IDLE_READ_TIMEOUT_MS,
 ): AsyncIterable<LlmStreamEvent> {
   const tools = new Map<number, ToolAccumulator>();
   let finishReason: string | undefined;
   let terminal = false;
   let sawChoice = false;
-  for await (const data of readSseData(body, signal)) {
+  for await (const data of readSseData(body, signal, idleMs)) {
     if (data === "[DONE]") {
       terminal = true;
       break;
@@ -363,18 +418,42 @@ export class OpenAICompatibleProvider implements LlmProvider {
     };
     if (this.config.apiKey)
       headers.authorization = `Bearer ${this.config.apiKey}`;
-    const response = await fetcher(`${this.config.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(
-        requestToWire(request, {
-          ...(this.config.acceptsImages === undefined
-            ? {}
-            : { acceptsImages: this.config.acceptsImages }),
-        }),
-      ),
-      signal,
-    });
+    // The deadline covers the headers only, and is cleared the moment they
+    // arrive: aborting the shared signal later would tear down a stream that is
+    // legitimately still producing tokens.
+    const firstByteMs =
+      this.config.firstByteTimeoutMs ?? DEFAULT_FIRST_BYTE_TIMEOUT_MS;
+    const headersController = new AbortController();
+    const requestSignal = AbortSignal.any([signal, headersController.signal]);
+    const headersTimer = setTimeout(() => {
+      headersController.abort(
+        new Error(`Model request did not respond within ${firstByteMs}ms`),
+      );
+    }, firstByteMs);
+    let response: Response;
+    try {
+      response = await fetcher(`${this.config.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(
+          requestToWire(request, {
+            ...(this.config.acceptsImages === undefined
+              ? {}
+              : { acceptsImages: this.config.acceptsImages }),
+          }),
+        ),
+        signal: requestSignal,
+      });
+    } catch (error) {
+      if (headersController.signal.aborted && !signal.aborted) {
+        throw new Error(
+          `Model request did not respond within ${firstByteMs}ms`,
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(headersTimer);
+    }
     if (!response.ok) {
       await response.body?.cancel();
       throw new OpenAICompatibleHttpError(response.status);
@@ -382,7 +461,11 @@ export class OpenAICompatibleProvider implements LlmProvider {
     if (!response.body)
       throw new Error("Model response did not include a stream");
 
-    yield* streamOpenAICompatibleBody(response.body, signal);
+    yield* streamOpenAICompatibleBody(
+      response.body,
+      signal,
+      this.config.idleReadTimeoutMs ?? SSE_IDLE_READ_TIMEOUT_MS,
+    );
   }
 }
 

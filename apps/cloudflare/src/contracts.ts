@@ -84,6 +84,7 @@ import type {
   RollbackPackageCommandV1,
 } from "@frockbot/plugin-package-publisher/shared";
 import type {
+  ClientConversationListV1,
   ClientRunLookupQueryV1,
   ClientRunLookupV1,
   ClientRunListQueryV1,
@@ -237,6 +238,14 @@ export interface UserBotStateBinding {
     botId: string;
     query: ClientRunListQueryV1;
   }): Promise<ClientRunListV1>;
+  listConversations(input: {
+    schemaVersion: 1;
+    botId: string;
+  }): Promise<ClientConversationListV1>;
+  startConversation(input: {
+    schemaVersion: 1;
+    botId: string;
+  }): Promise<ClientConversationListV1>;
   lookupRun(input: {
     schemaVersion: 1;
     botId: string;

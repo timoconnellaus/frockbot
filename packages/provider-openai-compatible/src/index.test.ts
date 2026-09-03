@@ -359,3 +359,58 @@ describe("tool result attachments", () => {
     expect((withheld.messages as unknown[]).length).toBe(1);
   });
 });
+
+describe("provider network deadlines", () => {
+  test("a stream that opens and then stalls fails instead of hanging", async () => {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://provider.test/v1",
+      idleReadTimeoutMs: 20,
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode(
+                  'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n',
+                ),
+              );
+              // and then never another byte, and never a close
+            },
+          }),
+        ),
+    });
+
+    const events = provider.stream(request, new AbortController().signal);
+    await expect(
+      (async () => {
+        for await (const _event of events) {
+          // drain until the idle deadline fires
+        }
+      })(),
+    ).rejects.toThrow("Model response stream stalled for 20ms");
+  });
+
+  test("a provider that never returns headers fails on the first-byte deadline", async () => {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://provider.test/v1",
+      firstByteTimeoutMs: 20,
+      fetch: (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(init.signal?.reason ?? new Error("aborted")),
+          );
+        }),
+    });
+
+    await expect(
+      (async () => {
+        for await (const _event of provider.stream(
+          request,
+          new AbortController().signal,
+        )) {
+          // never reached
+        }
+      })(),
+    ).rejects.toThrow("Model request did not respond within 20ms");
+  });
+});

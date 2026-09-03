@@ -170,7 +170,6 @@ describe("Computer Bot Durable Object Contribution", () => {
     expect(COMPUTER_UNCONFIGURED_MESSAGE_V1).not.toContain("SPRITES_TOKEN");
   });
 
-
   test("records provider progress durably and projects its ordered steps", async () => {
     const storage = new MemoryStorage();
     let contribution: ReturnType<typeof createComputerBotBackendContribution>;
@@ -765,8 +764,7 @@ describe("Computer Bot Durable Object Contribution", () => {
                 expiresAt: "2026-09-02T00:01:30.000Z",
               }),
             renew: (lease) => Promise.resolve({ id: lease.id, expiresAt: "" }),
-            release: () =>
-              Promise.reject(new Error("Sprite is unreachable")),
+            release: () => Promise.reject(new Error("Sprite is unreachable")),
           }),
         ),
     };

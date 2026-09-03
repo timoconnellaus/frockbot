@@ -68,6 +68,76 @@ export interface TurnScopedMessagesInputV1 {
   /** The parent-transcript pointer, used only on a non-chat Turn. */
   pointer(input: { sessionId: string; chatTurns: number }): string;
   sessionId: string;
+  /**
+   * How many characters of history one request may carry. The current Turn is
+   * always whole; older Turns fill what is left. Absent means the default.
+   */
+  budget?: number;
+}
+
+/**
+ * How much conversation one model request carries.
+ *
+ * A number in characters, not tokens: this is a Package policy bound whose job
+ * is to stop a request growing without limit, and it does not need to agree
+ * with any provider's tokenizer to do that. Roughly 150k characters is well
+ * inside every model FrockBot resolves today while being far more history than
+ * any conversation needs.
+ */
+export const CHAT_HISTORY_BUDGET_CHARS_V1 = 150_000;
+
+/**
+ * The line that stands where the dropped Turns were.
+ *
+ * It is said plainly, because a model that cannot see the beginning of a
+ * conversation and is not told so will confidently answer as though it had.
+ */
+export function omittedHistoryNoticeV1(turns: number): string {
+  return `Earlier in this conversation there ${turns === 1 ? "was 1 Turn" : `were ${turns} Turns`} that are not included here. They are not summarised: if you need something from them, say so or search your memory rather than guessing.`;
+}
+
+function messageChars(message: LlmMessage): number {
+  return JSON.stringify(message).length;
+}
+
+/**
+ * Narrows history to a character budget, oldest Turns first.
+ *
+ * Eviction is by whole Turn on purpose. A tool result whose call has been
+ * dropped is a malformed request to every provider, and a Turn is the
+ * smallest unit that always holds both.
+ */
+function budgetedMessagesV1(
+  messages: readonly LlmMessage[],
+  turns: readonly number[],
+  current: number,
+  budget: number,
+): LlmMessage[] {
+  const total = messages.reduce((sum, message) => sum + messageChars(message), 0);
+  if (total <= budget) return [...messages];
+  const spendByTurn = new Map<number, number>();
+  for (const [index, message] of messages.entries()) {
+    const turn = turns[index]!;
+    spendByTurn.set(turn, (spendByTurn.get(turn) ?? 0) + messageChars(message));
+  }
+  const ordered = [...spendByTurn.keys()].sort((left, right) => right - left);
+  const kept = new Set<number>([current]);
+  let spent = spendByTurn.get(current) ?? 0;
+  for (const turn of ordered) {
+    if (turn === current) continue;
+    const cost = spendByTurn.get(turn) ?? 0;
+    if (spent + cost > budget) break;
+    kept.add(turn);
+    spent += cost;
+  }
+  const dropped = ordered.filter((turn) => !kept.has(turn)).length;
+  const narrowed = messages.filter((_, index) => kept.has(turns[index]!));
+  return dropped === 0
+    ? narrowed
+    : [
+        { role: "user", content: omittedHistoryNoticeV1(dropped) },
+        ...narrowed,
+      ];
 }
 
 /**
@@ -92,7 +162,15 @@ export function turnScopedMessagesV1(
   const current = currentTurnV1(input.events);
   const chatTurn = (turn: number) => (types.get(turn) ?? "chat") === "chat";
   if (chatTurn(current)) {
-    return input.messages.filter((_, index) => chatTurn(turns[index]!));
+    const conversation = input.messages.filter((_, index) =>
+      chatTurn(turns[index]!),
+    );
+    return budgetedMessagesV1(
+      conversation,
+      turns.filter((turn) => chatTurn(turn)),
+      current,
+      input.budget ?? CHAT_HISTORY_BUDGET_CHARS_V1,
+    );
   }
   const own = input.messages.filter((_, index) => turns[index] === current);
   const chatTurns = new Set(
