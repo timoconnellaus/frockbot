@@ -56,6 +56,15 @@ export const MEMORY_USER_CAPS_V1: MemoryRenderCapsV1 = {
   factClamp: 500,
 };
 
+/**
+ * The whole injected Memory block's ceiling, over and above the per-tier caps.
+ *
+ * The per-tier caps bound each section but not their sum, so a Bot in three
+ * Projects injected the sum of every cap on every Turn. This is the one number
+ * that bounds what Memory costs a request, whatever a Bot has joined.
+ */
+export const MEMORY_INJECTION_BUDGET_V1 = 12_000;
+
 /** profileLimit 25 / recentLimit 10, char budgets 2500 / 1500. */
 export const MEMORY_PROJECT_CAPS_V1: MemoryRenderCapsV1 = {
   profileLimit: 25,
@@ -124,7 +133,12 @@ export interface MemoryInjectionInputV1 {
 export interface InjectedMemoryFactV1 {
   scope: MemoryScopeNameV1;
   projectId: string;
-  tier: "profile" | "log";
+  /**
+   * The tier the fact was written as, not the file it happens to sit in. A
+   * note lives in the log file; recording it as `log` left a reader of the
+   * durable event unable to tell the two apart.
+   */
+  tier: "profile" | "log" | "note";
   via: string;
   learnedAt: string;
   text: string;
@@ -205,7 +219,12 @@ function injected(
   return facts.map((fact) => ({
     scope,
     projectId,
-    tier,
+    // A note lives in the log file, and the event used to say `log` while the
+    // write that produced it said `note` — so a reader of the durable record
+    // could not tell the two tiers apart, and the only sign was a `[note] `
+    // prefix inside the text. The marker on the recorded text is what the
+    // tier was; the file it sits in is not.
+    tier: parseMemoryMarkerV1(fact.text).marker === "note" ? "note" : tier,
     via: withVia ? fact.via : "",
     learnedAt: fact.date,
     text: fact.text,
@@ -474,5 +493,28 @@ export function renderMemoryInjectionV1(
     });
   }
 
-  return { text: blocks.join("\n\n"), facts, omissions, faded };
+  // A global bound over the per-tier ones. Each tier is capped on its own, so
+  // a Bot in three Projects could inject the sum of every cap — about 26 000
+  // characters — on every Turn, growing with membership rather than with
+  // anything the User did. The block is assembled most-general first and the
+  // Bot's own memory last, so the trim drops from the front: the most
+  // specific tier, which wins on conflict anyway, is the one kept.
+  const text = blocks.join("\n\n");
+  if (text.length <= MEMORY_INJECTION_BUDGET_V1) {
+    return { text, facts, omissions, faded };
+  }
+  const kept: string[] = [];
+  let spent = 0;
+  for (const block of blocks.toReversed()) {
+    if (spent + block.length > MEMORY_INJECTION_BUDGET_V1) break;
+    kept.unshift(block);
+    spent += block.length;
+  }
+  omissions.push({
+    scope: "user",
+    reason: `the injected Memory block exceeded ${MEMORY_INJECTION_BUDGET_V1} characters; ${
+      blocks.length - kept.length
+    } of ${blocks.length} section(s), least specific first, were not injected`,
+  });
+  return { text: kept.join("\n\n"), facts, omissions, faded };
 }

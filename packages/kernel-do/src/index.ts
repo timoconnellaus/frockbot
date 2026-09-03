@@ -1,6 +1,7 @@
 export * from "./authority.js";
 export * from "./applets.js";
 export * from "./composition-failures.js";
+export * from "./conversations.js";
 export * from "./composition-store.js";
 export * from "./run-records.js";
 export * from "./run-recovery.js";

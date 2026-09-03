@@ -403,6 +403,7 @@ import {
   projectClientAnnouncementsV1,
   projectClientTurnV1,
   type ClientRunLookupV1,
+  type ClientConversationListV1,
   type ClientRunListV1,
   type ClientRunStopReceiptV1,
   type ClientRunV1,
@@ -5443,6 +5444,15 @@ export class ShellBotBackendContribution {
   ): Promise<ClientRunListV1> {
     const query = decodeClientRunListQueryV1(input);
     await this.authority.recoverActiveRun();
+    // The transcript is one conversation, not every Turn the Bot has ever
+    // run. Absent means the conversation the Bot is on; naming an earlier one
+    // reads it exactly as it was left. A Bot whose object has not learned its
+    // identity yet has no conversation to filter by and shows what it has.
+    const conversationId =
+      query.conversationId ??
+      (await this.authority.readConversationSessionId());
+    const inConversation = (run: { sessionId: string }) =>
+      conversationId === undefined || run.sessionId === conversationId;
     const activeRunId = query.before
       ? undefined
       : await this.authority.readActiveRunId();
@@ -5457,7 +5467,7 @@ export class ShellBotBackendContribution {
       // An automation firing occupies the object like any other run, and is
       // still not part of the conversation: the visible transcript never
       // shows one, running or settled.
-      if (active && isVisibleRunV1(active))
+      if (active && isVisibleRunV1(active) && inConversation(active))
         selected.set(active.runId, {
           run: projectClientRunOrDegradedV1(active),
         });
@@ -5471,7 +5481,8 @@ export class ShellBotBackendContribution {
         continue;
       }
       const stored = await this.authority.readStoredRun(candidate.runId);
-      if (!stored || !isVisibleRunV1(stored)) continue;
+      if (!stored || !isVisibleRunV1(stored) || !inConversation(stored))
+        continue;
       const projected = projectClientRunOrDegradedV1(stored);
       const tentative = [
         ...selected.values(),
@@ -5527,6 +5538,36 @@ export class ShellBotBackendContribution {
     }
     return page;
   }
+  /** The conversations this Bot has had, newest first. */
+  async listConversations(): Promise<ClientConversationListV1> {
+    return {
+      schemaVersion: 1,
+      conversations: (await this.authority.listConversations()).map(
+        (conversation) => ({
+          schemaVersion: 1 as const,
+          conversationId: conversation.sessionId,
+          ordinal: conversation.ordinal,
+          startedAt: conversation.startedAt,
+          ...(conversation.endedAt ? { endedAt: conversation.endedAt } : {}),
+        }),
+      ),
+    };
+  }
+
+  /**
+   * Puts this conversation down and starts the next one.
+   *
+   * Memory is untouched: it is not conversation history, and the point of a
+   * new conversation is to prove that it is not.
+   */
+  async startConversation(
+    identity: BotIdentity,
+  ): Promise<ClientConversationListV1> {
+    await this.validateIdentity(identity);
+    await this.authority.startConversation(identity);
+    return this.listConversations();
+  }
+
   async lookupRun(input: unknown): Promise<ClientRunLookupV1> {
     const query = decodeClientRunLookupQueryV1(input);
     return projectClientRunLookupV1(await this.authority.readRun(query.runId));

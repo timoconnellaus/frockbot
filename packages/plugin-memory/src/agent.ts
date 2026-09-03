@@ -32,8 +32,8 @@ import type {} from "@frockbot/kernel-agent-loop/agent";
 import type { Plugin } from "cordis";
 import { createMemoryEmbedder } from "./embeddings.js";
 import {
-  listAllMemoryDocumentsV1,
-  type MemoryDocumentV1,
+  readAllMemoryDocumentsV1,
+  type MemoryDocumentListingV1,
 } from "./documents.js";
 import {
   buildMemoryIndexV1,
@@ -46,6 +46,7 @@ import {
   parseProjectDocumentV1,
   projectDocumentPathV1,
   renderProjectDocumentV1,
+  type MemoryProjectsOutcomeV1,
   type MemoryProjectsV1,
 } from "./projects.js";
 export type {
@@ -166,6 +167,15 @@ export class MemoryProjection {
   };
   #index: MemoryIndexV1 = emptyMemoryIndexV1();
   #turn: number | undefined;
+  /** This Turn's one Project-membership read, shared by injection and index. */
+  #roots:
+    | Promise<{
+        own: WorkspaceMemoryRootV1;
+        user: WorkspaceMemoryRootV1;
+        projects: MemoryProjectV1[];
+        unavailable?: string;
+      }>
+    | undefined;
 
   constructor(host: MemoryRuntimeHostV1) {
     this.#host = host;
@@ -198,6 +208,21 @@ export class MemoryProjection {
     projects: MemoryProjectV1[];
     unavailable?: string;
   }> {
+    // One membership read per Turn, shared by the injection and the index.
+    // Two calls meant two cross-Durable-Object round trips, and worse: if the
+    // second failed, `roots()` answered "no Projects" and the index silently
+    // omitted every Project document the injection had just included, with
+    // nothing recording that they disagreed.
+    this.#roots ??= this.readRoots();
+    return this.#roots;
+  }
+
+  private async readRoots(): Promise<{
+    own: WorkspaceMemoryRootV1;
+    user: WorkspaceMemoryRootV1;
+    projects: MemoryProjectV1[];
+    unavailable?: string;
+  }> {
     const owner = this.#host.owner;
     const roots = {
       own: botMemoryRootV1(owner),
@@ -221,6 +246,8 @@ export class MemoryProjection {
   async refresh(turn: number, session: Session): Promise<MemoryInjectionV1> {
     const store = this.#host.store;
     const owner = this.#host.owner;
+    // A new Turn reads membership again; within one Turn the read is shared.
+    this.#roots = undefined;
     const { own, user, projects, unavailable } = await this.roots();
     const ownTier = await store.read(own);
     const userTier = await store.read(user);
@@ -295,10 +322,31 @@ export class MemoryProjection {
     return this.#injection;
   }
 
-  /** Rebuilds the derived index incrementally from the current files. */
-  async reindex(): Promise<{ documentsChanged: number; chunksTotal: number }> {
-    const documents = await this.documents();
-    const update = await updateMemoryIndexV1(this.#index, documents);
+  /**
+   * Rebuilds the derived index incrementally from the current files.
+   *
+   * A listing that could not be read whole updates nothing. The indexer reads
+   * an absent document as a deleted one, so applying a short listing turned a
+   * transient object-storage blip into a permanent, silent deletion of that
+   * document's chunks — `memory_search` simply found less, with no event and
+   * no omission to say why. Keeping the previous index costs at worst one
+   * stale chunk until the next Turn.
+   */
+  async reindex(): Promise<{
+    documentsChanged: number;
+    chunksTotal: number;
+    /** True when the files could not be read whole and nothing was applied. */
+    deferred?: true;
+  }> {
+    const listing = await this.documents();
+    if (!listing.complete) {
+      return {
+        documentsChanged: 0,
+        chunksTotal: this.#index.chunks.length,
+        deferred: true,
+      };
+    }
+    const update = await updateMemoryIndexV1(this.#index, listing.documents);
     this.#index = update.index;
     await this.embed();
     return {
@@ -307,16 +355,26 @@ export class MemoryProjection {
     };
   }
 
-  /** Throws the derived index away and builds it again from the files. */
-  async rebuild(): Promise<{ chunksTotal: number }> {
-    this.#index = await buildMemoryIndexV1(await this.documents());
+  /**
+   * Throws the derived index away and builds it again from the files.
+   *
+   * An explicit rebuild on a partial listing is refused rather than half
+   * done: "rebuild the index" that quietly drops what it could not read is
+   * worse than a rebuild that says it could not run.
+   */
+  async rebuild(): Promise<{ chunksTotal: number; deferred?: true }> {
+    const listing = await this.documents();
+    if (!listing.complete) {
+      return { chunksTotal: this.#index.chunks.length, deferred: true };
+    }
+    this.#index = await buildMemoryIndexV1(listing.documents);
     await this.embed();
     return { chunksTotal: this.#index.chunks.length };
   }
 
-  private async documents(): Promise<MemoryDocumentV1[]> {
+  private async documents(): Promise<MemoryDocumentListingV1> {
     const { own, user, projects } = await this.roots();
-    return listAllMemoryDocumentsV1(this.#host.store.reads, [
+    return readAllMemoryDocumentsV1(this.#host.store.reads, [
       own,
       user,
       ...projects.map((project) =>
@@ -342,6 +400,9 @@ export class MemoryProjection {
     this.#injection = { text: "", facts: [], omissions: [], faded: [] };
     this.#index = emptyMemoryIndexV1();
     this.#turn = undefined;
+    // Membership is exactly the thing a `project_*` tool just changed, so the
+    // memoized read goes with the rest of the projection.
+    this.#roots = undefined;
   }
 }
 
@@ -607,9 +668,13 @@ export function createMemoryWriteTool(
       await session.flush();
       await projection.reindex();
       return {
+        // What the model paraphrases to the user. A path, a generation id
+        // and "it reaches your prompt on your next Turn" are this Package's
+        // mechanics, and we watched a Bot read them straight back to someone
+        // who had only said where they lived.
         content: outcome.duplicate
-          ? `That fact was already recorded in ${decoded.scope} memory; nothing changed.`
-          : `Recorded in ${decoded.scope} memory (${decoded.tier}) at ${outcome.path} as generation ${outcome.generationId}. It reaches your prompt on your next Turn.`,
+          ? `Already remembered; nothing changed.`
+          : `Remembered.`,
         isError: false,
       };
     },
@@ -678,8 +743,14 @@ export function createMemoryForgetTool(
         action: "forget",
         scope: decoded.scope,
         projectId: decoded.project ?? "",
-        tier: "log",
-        path: `${decoded.scope}/forget`,
+        // A forget is not a tier and has no path until it has run: it may
+        // rewrite the profile file, one or more log files, or write a
+        // retraction. Naming `log` and `<scope>/forget` here made the intent
+        // disagree with its own outcome — a forget of a profile fact recorded
+        // `tier: "log", path: "bot/forget"` and then `path: "profile.md"`.
+        // `pending` says plainly that the files are not known yet.
+        tier: "pending",
+        path: "",
         contentHash,
       });
       await session.flush();
@@ -732,8 +803,8 @@ export function createMemoryForgetTool(
       await projection.reindex();
       return {
         content: outcome.retracted
-          ? `That fact was recorded by another Bot, so it was not edited. A retraction is now in your own shard and newest wins, so it stops being injected on your next Turn.`
-          : `Forgotten. The line is gone from ${outcome.path}.`,
+          ? `Forgotten. Another of your Bots had recorded it too, and it will stop coming up for them as well.`
+          : `Forgotten.`,
         isError: false,
       };
     },
@@ -1003,17 +1074,46 @@ export function createProjectTools(
         }
       }
 
-      const outcome =
-        action === "create"
-          ? await host.projects.create({
-              projectId: decoded.project,
-              name: decoded.name || decoded.project,
-              description: decoded.description ?? "",
-            })
-          : action === "join"
-            ? await host.projects.join(decoded.project)
-            : await host.projects.leave(decoded.project);
+      // The descriptor above is already durable in object storage. If the
+      // membership authority now refuses or throws, the file is real, the
+      // membership is unchanged, and — before this — nothing was recorded at
+      // all, so the durable log said no Project change happened while a
+      // descriptor for it sat in R2. Whatever the answer, it is recorded.
+      let outcome: MemoryProjectsOutcomeV1;
+      try {
+        outcome =
+          action === "create"
+            ? await host.projects.create({
+                projectId: decoded.project,
+                name: decoded.name || decoded.project,
+                description: decoded.description ?? "",
+              })
+            : action === "join"
+              ? await host.projects.join(decoded.project)
+              : await host.projects.leave(decoded.project);
+      } catch (error) {
+        outcome = {
+          status: "refused",
+          reason:
+            error instanceof Error
+              ? error.message
+              : "the Project membership authority is unavailable",
+        };
+      }
       if (outcome.status !== "ok") {
+        session.append({
+          type: "memory/project-changed",
+          ...position,
+          effectId,
+          action,
+          projectId: decoded.project,
+          // Membership did not change, and the event says so by carrying the
+          // membership as it stands rather than the one that was asked for.
+          projects: (await host.projects.joined().catch(() => [])).map(
+            (project) => project.projectId,
+          ),
+        });
+        await session.flush();
         return refusal(`${name} was refused: ${outcome.reason}`);
       }
       session.append({
@@ -1030,7 +1130,7 @@ export function createProjectTools(
         content: `Projects you have joined: ${
           outcome.joined.map((project) => project.projectId).join(", ") ||
           "none"
-        }. Project memory changes reach your prompt on your next Turn.`,
+        }.`,
         isError: false,
       };
     },
@@ -1118,7 +1218,31 @@ export function createMemoryRuntimePlugin(
         // own prompt on the next Turn, which is what makes the injected block
         // and the `memory/injected` record describe the same thing.
         if (step === 1 || projection.loadedTurn() !== turn) {
-          await projection.refresh(turn, agent.session);
+          try {
+            await projection.refresh(turn, agent.session);
+          } catch (error) {
+            // Memory is remote, and a remote read that throws used to fail
+            // the whole Turn as `model-error`. A Turn with no Memory is a
+            // worse Turn; a Turn that does not happen is no Turn at all. The
+            // gap is recorded so it is visible in durable state rather than
+            // being a silent change in the Bot's behaviour.
+            agent.session.append({
+              type: "memory/injected",
+              turn,
+              sources: [],
+              facts: [],
+              omissions: [
+                {
+                  scope: "bot",
+                  reason:
+                    error instanceof Error
+                      ? error.message
+                      : "Memory could not be read for this Turn",
+                },
+              ],
+            });
+            await agent.session.flush();
+          }
         }
         return next();
       }),

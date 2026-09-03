@@ -78,7 +78,10 @@ function capabilityNoun(kind: string): string {
 /** What a plugin offers, in plain words. */
 function capabilitySummary(item: PluginCatalogItem): string {
   const kinds = [...new Set(item.capabilities.map((entry) => entry.kind))];
-  if (kinds.length === 0) return "No features yet";
+  // A plugin can be worth turning on without contributing a capability of its
+  // own — Custom models is exactly that — so saying "no features" tells the
+  // User the one plugin they must enable does nothing.
+  if (kinds.length === 0) return "Adds settings";
   return kinds.map(capabilityNoun).join(", ");
 }
 
@@ -126,13 +129,71 @@ function openPackageCatalog(): void {
   surfaces.open("package-catalog");
 }
 
+/**
+ * Refusals live on the row that was clicked, not in one panel-wide slot.
+ *
+ * The grid scrolls, so a message rendered above the list is off-screen for
+ * every row past the fold: the User sees the row unchanged and no explanation
+ * anywhere.
+ */
+const rowErrors = ref<Record<string, string>>({});
+
+function rowError(packageId: string): string | undefined {
+  return rowErrors.value[packageId];
+}
+
+function setRowError(packageId: string, message: string): void {
+  rowErrors.value = { ...rowErrors.value, [packageId]: message };
+}
+
+function clearRowError(packageId: string): void {
+  const { [packageId]: _cleared, ...rest } = rowErrors.value;
+  rowErrors.value = rest;
+}
+
+/**
+ * Say what a Package is called, not what its id is.
+ *
+ * The backend refuses in terms of ids because that is what it holds; the
+ * surface knows the display names, so it substitutes them before the User
+ * reads the message.
+ */
+function inPlainNames(message: string): string {
+  const dependency = message.match(
+    /^Package "([^"]+)" requires Package "([^"]+)" to be installed and enabled/,
+  );
+  if (dependency) {
+    return `${displayName(dependency[1]!)} needs ${displayName(
+      dependency[2]!,
+    )} turned on first.`;
+  }
+  return message.replace(/"([a-z0-9][a-z0-9-]*)"/g, (quoted, packageId) =>
+    displayName(packageId) === packageId
+      ? quoted
+      : `"${displayName(packageId)}"`,
+  );
+}
+
+function displayName(packageId: string): string {
+  return (
+    web.value.pluginCatalog.find(
+      (candidate) => candidate.packageId === packageId,
+    )?.displayName ?? packageId
+  );
+}
+
 async function install(item: PluginCatalogItem): Promise<void> {
   busyPackageId.value = item.packageId;
+  clearRowError(item.packageId);
   try {
     await web.value.installPackage(item.packageId, item.version);
   } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Couldn't add that plugin.";
+    setRowError(
+      item.packageId,
+      inPlainNames(
+        error instanceof Error ? error.message : "Couldn't add that plugin.",
+      ),
+    );
   } finally {
     busyPackageId.value = undefined;
   }
@@ -140,13 +201,18 @@ async function install(item: PluginCatalogItem): Promise<void> {
 
 async function setEnabled(packageId: string, next: boolean): Promise<void> {
   busyPackageId.value = packageId;
+  clearRowError(packageId);
   try {
     await web.value.setPackageEnabled(packageId, next);
   } catch (error) {
-    web.value.settingsError =
-      error instanceof Error
-        ? error.message
-        : "Couldn't turn that plugin on or off.";
+    setRowError(
+      packageId,
+      inPlainNames(
+        error instanceof Error
+          ? error.message
+          : "Couldn't turn that plugin on or off.",
+      ),
+    );
   } finally {
     busyPackageId.value = undefined;
   }
@@ -161,14 +227,6 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
       </span>
       {{ installedPluginCount }} installed
     </div>
-    <!--
-      A refused command is the answer to the click that caused it, so it is
-      shown above the list where the click happened, not below a long grid
-      where it scrolls out of view.
-    -->
-    <p v-if="web.settingsError" class="settings-error" role="alert">
-      {{ web.settingsError }}
-    </p>
     <label class="plugin-search">
       <UiIcon name="search" />
       <input
@@ -242,6 +300,9 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
             </UiButton>
           </span>
         </div>
+        <p v-if="rowError(item.packageId)" class="plugin-failure" role="alert">
+          {{ rowError(item.packageId) }}
+        </p>
         <p v-if="failure(item.packageId)" class="plugin-failure" role="alert">
           {{ failure(item.packageId) }}
         </p>
