@@ -74,6 +74,7 @@ function mountHostedProvider(options: { stateChannel?: boolean } = {}) {
   let hostUpdating = false;
   let controlHeld = false;
   let renewFails = false;
+  let releaseFails = false;
   let heldClose: { release: () => void; pending: Promise<void> } | undefined;
   let state: { value: ComputerState } | undefined;
   const slots: ClientSlotRegistration[] = [];
@@ -118,7 +119,7 @@ function mountHostedProvider(options: { stateChannel?: boolean } = {}) {
             phase = "human-control";
             controlHeld = true;
           }
-          if (command.type === "releaseControl") {
+          if (command.type === "releaseControl" && !releaseFails) {
             controlHeld = false;
             if (phase !== "disconnected") phase = "ready";
           }
@@ -130,12 +131,16 @@ function mountHostedProvider(options: { stateChannel?: boolean } = {}) {
             commandId: command.commandId,
             type: command.type,
             status:
-              command.type === "refreshViewer" && renewFails
+              (command.type === "refreshViewer" && renewFails) ||
+              (command.type === "releaseControl" && releaseFails)
                 ? "rejected"
                 : "applied",
             completedAt: "2026-09-02T00:00:00.000Z",
             ...(command.type === "refreshViewer" && renewFails
               ? { failure: "viewer session expired" }
+              : {}),
+            ...(command.type === "releaseControl" && releaseFails
+              ? { failure: "Sprite is unreachable" }
               : {}),
           };
           if (command.type === "closeViewer" && heldClose) {
@@ -226,6 +231,9 @@ function mountHostedProvider(options: { stateChannel?: boolean } = {}) {
     failRenewal() {
       renewFails = true;
     },
+    failRelease() {
+      releaseFails = true;
+    },
     setUpdating() {
       phase = "updating";
       hostUpdating = true;
@@ -282,6 +290,35 @@ describe("hosted Computer provider", () => {
     expect(mounted.state).toMatchObject({ phase: "ready", expanded: true });
     expect(postedTypes(mounted.calls)).toEqual(["connect"]);
     expect(mounted.runtime.count(ACTIVE_PROJECTION_POLL_INTERVAL_MS)).toBe(0);
+    mounted.dispose();
+  });
+
+  test("a failed release stops the heartbeat and still closes the viewer", async () => {
+    const mounted = mountHostedProvider();
+    await flush();
+    await mounted.state.openViewer();
+    await mounted.state.takeControl();
+    expect(mounted.state.phase).toBe("human-control");
+
+    mounted.failRelease();
+    await expect(mounted.state.releaseControl()).rejects.toThrow(
+      "Sprite is unreachable",
+    );
+
+    // The projection here keeps reporting the lease — the worst case, a host
+    // that cannot drop it. The client must still stop renewing: a takeover
+    // whose release failed is one the User can never cancel otherwise.
+    const before = postedTypes(mounted.calls).length;
+    mounted.runtime.tick(VIEWER_REFRESH_INTERVAL_MS);
+    await flush();
+    expect(postedTypes(mounted.calls).slice(before)).not.toContain(
+      "refreshControl",
+    );
+
+    // And the full-screen viewer is closable, rather than trapping the User.
+    await mounted.state.closeViewer();
+    await flush();
+    expect(mounted.state.expanded).toBe(false);
     mounted.dispose();
   });
 

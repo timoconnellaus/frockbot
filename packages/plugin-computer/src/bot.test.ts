@@ -747,6 +747,67 @@ describe("Computer Bot Durable Object Contribution", () => {
     expect(storage.values.has(COMPUTER_CONTROL_RECORD_KEY)).toBe(false);
   });
 
+  test("a release the Computer refuses still drops the durable lease", async () => {
+    const storage = new MemoryStorage();
+    const now = new Date("2026-09-02T00:00:00.000Z");
+    const host = {
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      now: () => now,
+      newId: () => "owner-1",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            acquire: (ownerId) =>
+              Promise.resolve({
+                id: ownerId,
+                expiresAt: "2026-09-02T00:01:30.000Z",
+              }),
+            renew: (lease) => Promise.resolve({ id: lease.id, expiresAt: "" }),
+            release: () =>
+              Promise.reject(new Error("Sprite is unreachable")),
+          }),
+        ),
+    };
+    const contribution = createComputerBotBackendContribution(host);
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("takeControl", "take-1"),
+    );
+    expect(storage.values.has(COMPUTER_CONTROL_RECORD_KEY)).toBe(true);
+
+    const receipt = await contribution.execute(
+      "user-1",
+      "scout",
+      command("releaseControl", "release-1"),
+    );
+
+    // The failure reaches the User rather than being swallowed...
+    expect(receipt).toMatchObject({
+      status: "rejected",
+      failure: "Sprite is unreachable",
+    });
+    // ...and the User-wide fence is gone, so no heartbeat can renew it and no
+    // other Bot of this User is locked out of the Computer forever.
+    expect(storage.values.has(COMPUTER_CONTROL_RECORD_KEY)).toBe(false);
+    const projection = await contribution.read("user-1", "scout");
+    expect(projection.controlLease).toBeUndefined();
+    expect(projection.phase).toBe("error");
+    // A heartbeat that arrives after the failed release has nothing to renew.
+    await expect(
+      contribution.execute(
+        "user-1",
+        "scout",
+        command("refreshControl", "refresh-1"),
+      ),
+    ).resolves.toMatchObject({
+      status: "rejected",
+      failure: "No control lease is active",
+    });
+  });
+
   test("reclaims a stale lease under a new durable owner", async () => {
     const storage = new MemoryStorage();
     let now = new Date("2026-09-02T00:00:00.000Z");
