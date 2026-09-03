@@ -13,7 +13,6 @@ import {
 } from "../protocol.js";
 import { computerKey, type ComputerState } from "../shared.js";
 import ComputerCard from "./ComputerCard.vue";
-import ComputerStrip from "./ComputerStrip.vue";
 import ComputerViewerOverlay from "./ComputerViewerOverlay.vue";
 import {
   initialComputerMachineState,
@@ -69,11 +68,6 @@ export function createComputerClientPlugin(
         slot: "frockbot.computer",
         order: 10,
         component: ComputerCard,
-      }),
-      ctx.slot({
-        slot: "frockbot.sidebar-computer",
-        order: 10,
-        component: ComputerStrip,
       }),
       ctx.slot({
         slot: "frockbot.overlays",

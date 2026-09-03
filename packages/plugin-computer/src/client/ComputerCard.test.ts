@@ -118,4 +118,14 @@ describe("Computer viewer", () => {
     expect(template).toContain("Updating computer…");
     expect(template).toContain("{{ state.message }}");
   });
+
+  test("the card keys its durable capture only by content hash", () => {
+    const parsed = parse(cardSource, { filename: "ComputerCard.vue" });
+    expect(parsed.errors).toEqual([]);
+    const template = parsed.descriptor.template?.content ?? "";
+
+    expect(template).toContain(':key="screenshot.contentHash"');
+    expect(template).toContain(':src="screenshot.url"');
+    expect(template).not.toContain("viewerUrl");
+  });
 });

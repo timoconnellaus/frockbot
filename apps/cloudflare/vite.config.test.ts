@@ -9,6 +9,10 @@ describe("Cloudflare client development proxy", () => {
 
     expect(html).toContain('data-frockbot-user-id="development"');
     expect(html).toContain('data-frockbot-auth-mode="development"');
+    // The Worker-served document projects this too (`src/user-application.ts`).
+    // Without it the client's admin projection throws before the app mounts,
+    // so the Vite origin must carry the same attribute.
+    expect(html).toContain('data-frockbot-is-admin="true"');
   });
 
   test("routes hosted API and manifest requests through the Worker", () => {

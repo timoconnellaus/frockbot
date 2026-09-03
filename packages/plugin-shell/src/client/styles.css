@@ -104,12 +104,6 @@
   scrollbar-width: thin;
 }
 
-.sidebar-computer {
-  flex: 0 0 auto;
-  padding: 8px 2px 10px;
-  border-top: 1px solid var(--frock-border);
-}
-
 .sidebar-bottom {
   display: grid;
   gap: 2px;

@@ -228,14 +228,13 @@ function postedTypes(
 }
 
 describe("hosted Computer provider", () => {
-  test("mounts the card and strip without connecting the Computer", async () => {
+  test("mounts the card and overlay without connecting the Computer", async () => {
     const mounted = mountHostedProvider();
     await flush();
 
     expect(mounted.state.phase).toBe("idle");
     expect(mounted.slots.map((slot) => slot.slot)).toEqual([
       "frockbot.computer",
-      "frockbot.sidebar-computer",
       "frockbot.overlays",
     ]);
     expect(postedTypes(mounted.calls)).toEqual([]);
@@ -266,7 +265,7 @@ describe("hosted Computer provider", () => {
     mounted.dispose();
   });
 
-  test("an updating strip click rejoins the update and lands on ready when it finishes", async () => {
+  test("an updating card click rejoins the update and lands on ready when it finishes", async () => {
     const mounted = mountHostedProvider();
     await flush();
     mounted.setUpdating();
@@ -277,7 +276,7 @@ describe("hosted Computer provider", () => {
       message: "Updating the Computer runtime",
       expanded: false,
     });
-    // A collapsed strip never asks the host anything while it updates.
+    // A collapsed viewer never asks the host anything while it updates.
     expect(postedTypes(mounted.calls)).toEqual([]);
 
     // Opening rejoins: the host still reports the update, so the phase holds
@@ -428,10 +427,6 @@ test("the hosted provider stays absent when only the local RPC transport exists"
   const dispose = createComputerClientPlugin(new FakeRuntime())(context);
 
   expect(provides).toBe(0);
-  expect(slots).toEqual([
-    "frockbot.computer",
-    "frockbot.sidebar-computer",
-    "frockbot.overlays",
-  ]);
+  expect(slots).toEqual(["frockbot.computer", "frockbot.overlays"]);
   if (typeof dispose === "function") dispose();
 });
