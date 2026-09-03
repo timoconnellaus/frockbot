@@ -51,7 +51,12 @@ function shellAssignment(name: string): string | undefined {
 }
 
 /** The pid files the stop path must scope every kill to. */
-const PID_FILES = ["wrangler.pid", "vite.pid"];
+const PID_FILES = ["wrangler.pid", "vite.pid", "bundler.pid"];
+
+const bundlerEntry = readFileSync(
+  join(repoRoot, "apps", "cloudflare-bundler", "src", "index.ts"),
+  "utf8",
+);
 
 describe("the dogfood dev stack", () => {
   const development = wrangler.env.development!;
@@ -76,6 +81,36 @@ describe("the dogfood dev stack", () => {
         /frockbot-(package-catalog|application-artifacts)/.test(line),
       );
     expect(literals).toEqual([]);
+  });
+
+  test("starts the Package bundler Worker beside the app", () => {
+    // F5b: `PACKAGE_BUNDLER` is a service binding, and a service binding
+    // resolves only to a Worker published by the dev service registry — one
+    // running under its own `wrangler dev`. Without this process every
+    // `package_author` call is refused with `Worker
+    // "frockbot-cloudflare-bundler" not found`.
+    const bundler = (development.services ?? []).find(
+      (service) => service.binding === "PACKAGE_BUNDLER",
+    );
+    expect(bundler?.service).toBe("frockbot-cloudflare-bundler");
+    expect(script).toContain("apps/cloudflare-bundler");
+    expect(script).toContain("start_bundler");
+    // Its own directory, so `bunx` resolves that app's wrangler rather than
+    // the repository root's older hoisted one, and no `--env`: the bundler
+    // declares none, and one would register a name nothing binds.
+    const session = /start_bundler\(\) \{[\s\S]*?\n\}/.exec(script)?.[0] ?? "";
+    expect(session).toContain('cd "$bundler_root"');
+    expect(session).not.toContain("--env");
+  });
+
+  test("keeps the bundler Worker's entry module free of non-handler exports", () => {
+    // workerd reads every named export of `main` as an entrypoint, so
+    // `export const BUNDLER_VERSION` there made the runtime refuse to start:
+    // "Incorrect type for map entry 'BUNDLER_VERSION'". That is why the
+    // bundler had never been run under `wrangler dev` at all.
+    const named = [...bundlerEntry.matchAll(/^export (?!default\b)(\w+)/gm)];
+    expect(named.map((match) => match[0])).toEqual([]);
+    expect(bundlerEntry).toContain("export default class PackageBundler");
   });
 
   test("stops only the processes it started", () => {

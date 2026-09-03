@@ -15,8 +15,17 @@ main_checkout="${FROCKBOT_MAIN_CHECKOUT:-$HOME/repos/grokbot-headless}"
 
 worker_port="${FROCKBOT_DEV_WORKER_PORT:-8787}"
 client_port="${FROCKBOT_DEV_CLIENT_PORT:-5173}"
+# The Package bundler Worker. It serves no browser traffic; the port exists
+# because a `wrangler dev` session needs one, and because it is how the dev
+# service registry publishes the Worker that `PACKAGE_BUNDLER` resolves to.
+bundler_port="${FROCKBOT_DEV_BUNDLER_PORT:-8788}"
 worker_url="http://127.0.0.1:${worker_port}"
 client_url="http://127.0.0.1:${client_port}"
+bundler_url="http://127.0.0.1:${bundler_port}"
+# Run from the bundler's own directory: `bunx wrangler` at the repository root
+# resolves the hoisted 4.93 rather than this app's `latest`, and 4.93's workerd
+# is older than the bundler's compatibility date, so it refuses to start.
+bundler_root="$repo_root/apps/cloudflare-bundler"
 
 # The R2 bucket names bound by the `development` environment in
 # `apps/cloudflare/wrangler.jsonc`. `wrangler r2 object put` addresses a bucket
@@ -35,6 +44,7 @@ log_dir="${log_dir:-$state_dir/logs}"
 mkdir -p "$log_dir" "$state_dir"
 worker_log="$log_dir/wrangler.log"
 client_log="$log_dir/vite.log"
+bundler_log="$log_dir/bundler.log"
 
 say() { printf '\033[1;36m[dogfood]\033[0m %s\n' "$*"; }
 die() {
@@ -66,7 +76,8 @@ stop_stack() {
   # own `wrangler dev`: a `dogfood:dev` start or stop while a suite is in flight
   # used to SIGKILL the harness's runtime mid-test, which surfaces as a 500 on
   # the next request and ERR_CONNECTION_REFUSED on every one after it.
-  for pid_file in "$state_dir/wrangler.pid" "$state_dir/vite.pid"; do
+  for pid_file in "$state_dir/wrangler.pid" "$state_dir/vite.pid" \
+    "$state_dir/bundler.pid"; do
     [ -f "$pid_file" ] || continue
     recorded="$(cat "$pid_file" 2>/dev/null || true)"
     case "$recorded" in
@@ -80,13 +91,17 @@ stop_stack() {
   # Backstops for a lost pid file. Both are matched on this stack's own command
   # line — `--env development` on this port — so the end-to-end harness's
   # `wrangler dev --env e2e` on its own ephemeral port is never a match.
-  for stale in $(pgrep -f "wrangler-dist/cli.js dev --env development --ip 127.0.0.1 --port $worker_port" 2>/dev/null || true); do
-    for pid in $(process_tree "$stale"); do
-      kill -9 "$pid" 2>/dev/null || true
+  for pattern in \
+    "wrangler-dist/cli.js dev --env development --ip 127.0.0.1 --port $worker_port" \
+    "wrangler-dist/cli.js dev --ip 127.0.0.1 --port $bundler_port"; do
+    for stale in $(pgrep -f "$pattern" 2>/dev/null || true); do
+      for pid in $(process_tree "$stale"); do
+        kill -9 "$pid" 2>/dev/null || true
+      done
     done
   done
-  # And the holders of this stack's own two ports, with their descendants.
-  for port in "$worker_port" "$client_port"; do
+  # And the holders of this stack's own three ports, with their descendants.
+  for port in "$worker_port" "$client_port" "$bundler_port"; do
     holders="$(lsof -ti "tcp:${port}" -sTCP:LISTEN 2>/dev/null || true)"
     for holder in $holders; do
       for pid in $(process_tree "$holder"); do
@@ -94,7 +109,7 @@ stop_stack() {
       done
     done
   done
-  rm -f "$state_dir/wrangler.pid" "$state_dir/vite.pid"
+  rm -f "$state_dir/wrangler.pid" "$state_dir/vite.pid" "$state_dir/bundler.pid"
   sleep 1
 }
 
@@ -191,6 +206,47 @@ build_and_seed() {
     "$source_dir/catalog/current"
 }
 
+# ------------------------------------------------------ the bundler Worker
+
+wait_for_bundler() {
+  deadline=$((SECONDS + 120))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    # Any answer means the runtime is up and registered. The entrypoint's
+    # `fetch` shim refuses this empty body with a `failed` result, which is a
+    # 200 — a connection is the signal, not the status.
+    curl -sf -o /dev/null -m 5 -X POST -H 'content-type: application/json' \
+      -d '{}' "$bundler_url/" && return 0
+    sleep 1
+  done
+  die "timed out waiting for the Package bundler on $bundler_url - see $bundler_log"
+}
+
+# `PACKAGE_BUNDLER` is a service binding, and a service binding resolves only
+# through the dev service registry: the Worker it names must be running under
+# its own `wrangler dev` on this machine. That is exactly what the end-to-end
+# harness does for the Flock AI fake (`apps/cloudflare/e2e/harness.ts`), and
+# without it `package_author` writes its intent, cannot reach the bundler, and
+# refuses — journey 4 is unrunnable on the documented local target.
+#
+# `frockbot-cloudflare-bundler` is the service name in the `development`
+# environment and the name the registry publishes, so `apps/cloudflare-bundler`
+# runs on its own `wrangler.jsonc` unchanged and *without* `--env`: it declares
+# no environments, and `--env development` would both warn and register the
+# Worker as `frockbot-cloudflare-bundler-development`, which nothing binds.
+start_bundler() {
+  say "starting the Package bundler on :$bundler_port (log: $bundler_log)"
+  (
+    cd "$bundler_root"
+    nohup bunx wrangler dev \
+      --ip 127.0.0.1 \
+      --port "$bundler_port" \
+      --local \
+      >"$bundler_log" 2>&1 &
+    echo $! >"$state_dir/bundler.pid"
+  )
+  wait_for_bundler
+}
+
 # ------------------------------------------------------------------ start
 
 start_stack() {
@@ -216,12 +272,13 @@ start_stack() {
       "export CLOUDFLARE_API_TOKEN=... (Workers AI + AI Gateway read) first." >&2
   fi
 
-  # `PACKAGE_BUNDLER` and `COMPUTER_HOST` are service bindings, and a service
-  # binding only resolves to a Worker in the *same* `wrangler dev` session.
-  # Neither joins this one, so both read `[not connected]` — the same state
-  # `bun run dev:cloudflare` has. See docs/dogfood/dev-stack.md for what a
-  # live Computer would additionally need; it is blocked on a secret, not on
-  # this script.
+  # `COMPUTER_HOST` is a service binding with no local Worker to resolve to, so
+  # it reads `[not connected]`. See docs/dogfood/dev-stack.md for what a live
+  # Computer would additionally need; it is blocked on a secret, not on this
+  # script. `PACKAGE_BUNDLER` used to be in the same state, which meant
+  # `package_author` could never succeed locally — every authoring attempt was
+  # refused with `Worker "frockbot-cloudflare-bundler" not found` (finding
+  # F5b). It now has a Worker of its own; see `start_bundler`.
   if ! grep -q '^COMPUTER_HOST_TOKEN=' "$cloudflare_root/.dev.vars"; then
     printf '\033[1;33m[dogfood]\033[0m %s\n' \
       "note: no COMPUTER_HOST_TOKEN in apps/cloudflare/.dev.vars, so the Computer" >&2
@@ -230,6 +287,7 @@ start_stack() {
   fi
 
   build_and_seed
+  start_bundler
 
   say "starting wrangler dev on :$worker_port (log: $worker_log)"
   (
@@ -265,6 +323,8 @@ status_stack() {
     "$(cat "$state_dir/wrangler.pid" 2>/dev/null || echo '?')"
   printf '  Client UI   %s   (pid %s)\n' "$client_url" \
     "$(cat "$state_dir/vite.pid" 2>/dev/null || echo '?')"
+  printf '  Bundler     %s   (pid %s)\n' "$bundler_url" \
+    "$(cat "$state_dir/bundler.pid" 2>/dev/null || echo '?')"
   printf '  Logs        %s\n' "$log_dir"
   printf '  Model       %s\n' "${model_note:-unknown - run start to find out}"
   echo

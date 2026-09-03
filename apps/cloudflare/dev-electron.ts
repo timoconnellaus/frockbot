@@ -198,6 +198,26 @@ try {
       `ALLOWED_CLIENT_ORIGINS:${androidTarget.rendererUrl}`,
     );
   }
+  // `PACKAGE_BUNDLER` is a service binding: it resolves only to a Worker
+  // running under its own `wrangler dev` on this machine, published through
+  // the dev service registry. Without this process `package_author` records
+  // its intent and is then refused with `Worker
+  // "frockbot-cloudflare-bundler" not found` (finding F5b). No `--env`: the
+  // bundler declares none, and one would register it under a name nothing
+  // binds.
+  spawn(
+    [
+      "bunx",
+      "wrangler",
+      "dev",
+      "--ip",
+      "127.0.0.1",
+      "--port",
+      process.env.FROCKBOT_DEV_BUNDLER_PORT ?? "8788",
+      "--local",
+    ],
+    resolve(repositoryRoot, "apps/cloudflare-bundler"),
+  );
   const worker = spawn(workerCommand, cloudflareRoot);
   const renderer = spawn(
     ["bunx", "vite", "--host", "127.0.0.1"],
