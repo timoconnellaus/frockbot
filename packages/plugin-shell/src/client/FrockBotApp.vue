@@ -267,9 +267,31 @@ const macDesktop =
   typeof navigator !== "undefined" &&
   /Electron/u.test(navigator.userAgent) &&
   /Mac/u.test(navigator.platform);
-const botName = computed(
-  () => state.value.botSettings?.profile.name ?? "Barebones",
-);
+// The Bot's own name, or nothing: an account with no Bot, and a Bot whose
+// settings have not arrived yet, must never be given a made-up name.
+const botName = computed(() => state.value.botSettings?.profile.name ?? "");
+const hasBot = computed(() => Boolean(state.value.activeBotId));
+/**
+ * The greeting, the composer placeholder and the not-ready line all read off
+ * the same two facts: whether a Bot is open, and what the model resolver said.
+ * `state.modelLabel` already carries the resolver's own repairable failure
+ * sentence when the binding failed, so the surface repeats it rather than
+ * inventing "Model unavailable" of its own.
+ */
+const threadHeading = computed(() => {
+  if (!hasBot.value) return "No Bots yet.";
+  if (!botName.value) return state.value.modelReady ? "Ready." : "Not ready.";
+  return state.value.modelReady
+    ? `${botName.value} is ready.`
+    : `${botName.value} isn't ready.`;
+});
+const threadHint = computed(() => {
+  if (!hasBot.value) return "Add your first sheep to start a conversation.";
+  if (state.value.modelReady) {
+    return "Start with a conversation. Cordis plugins can add the rest.";
+  }
+  return state.value.modelLabel;
+});
 /** A Turn is executing. The composer stays open; only Stop depends on this. */
 const isRunning = computed(() => Boolean(state.value.runningRunId));
 const isConnecting = computed(() => state.value.connection !== "ready");
@@ -278,6 +300,11 @@ const isConnecting = computed(() => state.value.connection !== "ready");
  * running Turn. So the only things that close the composer are the ones that
  * would make any message impossible.
  */
+const composerPlaceholder = computed(() => {
+  if (isConnecting.value) return "Connecting…";
+  if (!state.value.modelReady) return state.value.modelLabel;
+  return botName.value ? `Message ${botName.value}` : "Message";
+});
 const canSend = computed(
   () =>
     state.value.connection === "ready" &&
@@ -804,7 +831,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           <span class="bot-identity"
             ><k-slot name="frockbot.bot-identity"
           /></span>
-          <div class="workspace-title">
+          <div v-if="hasBot" class="workspace-title">
             <strong>{{ botName }}</strong>
             <small>{{ state.modelLabel }}</small>
           </div>
@@ -819,20 +846,8 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         >
           <div v-if="messages.length === 0" class="empty-thread">
             <div class="empty-mark"><UiIcon name="sparkle" size="lg" /></div>
-            <h1>
-              {{
-                state.modelReady
-                  ? `${botName} is ready.`
-                  : `${botName} isn't ready.`
-              }}
-            </h1>
-            <p>
-              {{
-                state.modelReady
-                  ? "Start with a conversation. Cordis plugins can add the rest."
-                  : "Check this Bot's model Connection."
-              }}
-            </p>
+            <h1>{{ threadHeading }}</h1>
+            <p>{{ threadHint }}</p>
           </div>
           <article
             v-for="message in messages"
@@ -1028,7 +1043,12 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           </div>
         </Transition>
 
+        <!--
+          No Bot, no composer. A disabled input under a made-up Bot name reads
+          as a broken Bot; the first-run pane above points at making one.
+        -->
         <form
+          v-if="hasBot"
           class="composer"
           :class="{ 'composer-busy': isRunning }"
           @submit.prevent="sendMessage"
@@ -1091,13 +1111,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               ref="composerInput"
               v-model="draft"
               aria-label="Message"
-              :placeholder="
-                isConnecting
-                  ? 'Connecting…'
-                  : !state.modelReady
-                    ? 'Model unavailable'
-                    : `Message ${botName}`
-              "
+              :placeholder="composerPlaceholder"
               :disabled="isConnecting || !state.modelReady"
               rows="1"
               role="combobox"

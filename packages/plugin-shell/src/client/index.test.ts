@@ -826,6 +826,84 @@ describe("Bot selection", () => {
     },
   );
 
+  /**
+   * The composer placeholder and the not-ready line in `FrockBotApp.vue` are
+   * `state.modelLabel`, so a genuinely broken binding has to reach that label
+   * as the resolver's own repairable sentence rather than a flat "Model
+   * unavailable" the User cannot act on.
+   */
+  test("labels a Bot whose model Connection is disabled with the resolver's failure", async () => {
+    let provided: Ref<FrockBotWebData> | undefined;
+    const bot = initializeBotSettingsV1("broken-model-bot");
+    const user: UserSettingsViewV1 = {
+      schemaVersion: 1,
+      revision: 1,
+      profile: { name: "User" },
+      packages: [
+        { packageId: "model-provider", version: "0.0.1", state: "installed" },
+      ],
+      connections: [
+        {
+          connectionId: "model-connection",
+          packageId: "model-provider",
+          connectionTypeId: "model-account",
+          displayName: "Work",
+          state: "disabled",
+          providerType: "model-provider",
+          safeMetadata: {},
+        },
+      ],
+      platformModel: {
+        connectionId: "model-connection",
+        providerModelId: "model-id",
+      },
+    };
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: (query) =>
+          Promise.resolve(query.type === "user/get" ? user : bot),
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = bot.botId;
+    provided.value.pluginCatalog = [
+      {
+        packageId: "model-provider",
+        displayName: "Model provider",
+        version: "0.0.1",
+        capabilities: [
+          { id: "models", kind: "model", connectionTypes: ["model-account"] },
+        ],
+        connectionTypes: [
+          {
+            id: "model-account",
+            displayName: "Model account",
+            allowMultiple: false,
+            authorizationKind: "api-key",
+            capabilities: ["models"],
+          },
+        ],
+        settings: [],
+      },
+    ];
+
+    await provided.value.loadBotSettings();
+
+    expect(provided.value.modelReady).toBe(false);
+    expect(provided.value.modelLabel).toBe(
+      'Connection "model-connection" is disabled; enable or reconnect it',
+    );
+  });
+
   test("saves Bot-scoped Package settings through the generic command", async () => {
     type PackageSettingsWebData = FrockBotWebData & {
       saveBotPackageSettings(

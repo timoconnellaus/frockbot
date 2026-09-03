@@ -18,3 +18,4 @@ blob-report/
 
 # Agent worktrees
 .claude/worktrees/
+.dogfood/
