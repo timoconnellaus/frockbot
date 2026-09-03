@@ -3,6 +3,7 @@ import { useRpc } from "@cordisjs/client";
 import { UiIcon } from "@frockbot/client-ui";
 import { computed, inject, ref } from "vue";
 import { computerKey, type ComputerState } from "../shared.ts";
+import { COMPUTER_COLD_PROVISION_EXPECTATION } from "../protocol.ts";
 import {
   computerProgressElapsedMs,
   computerProgressFrame,
@@ -32,7 +33,7 @@ const openingHeading = computed(() => {
 });
 const setupExpectation = computed(() =>
   progressRunKind.value === "cold-provision"
-    ? "This usually takes 2-3 minutes"
+    ? COMPUTER_COLD_PROVISION_EXPECTATION
     : undefined,
 );
 const progressPhaseLabel = computed(

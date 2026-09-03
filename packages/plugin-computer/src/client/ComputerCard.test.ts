@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { parse } from "@vue/compiler-sfc";
 import type { ComputerState } from "../shared.js";
+import { COMPUTER_COLD_PROVISION_EXPECTATION } from "../protocol.js";
 import {
   createComputerViewerActions,
   decodeComputerViewerFrameMessageV1,
@@ -121,7 +122,10 @@ describe("Computer viewer", () => {
     const template = parsed.descriptor.template?.content ?? "";
 
     expect(cardSource).toContain("Setting up your computer for the first time");
-    expect(cardSource).toContain("This usually takes 2-3 minutes");
+    expect(COMPUTER_COLD_PROVISION_EXPECTATION).toBe(
+      "This usually takes 2-3 minutes",
+    );
+    expect(cardSource).toContain("COMPUTER_COLD_PROVISION_EXPECTATION");
     expect(cardSource).toContain("Updating your computer");
     expect(template).toContain('role="progressbar"');
     expect(template).toContain(':aria-valuenow="progressValueNow"');
