@@ -60,7 +60,8 @@ function decodeStoredEvent(value: unknown): StoredChannelEventV1 {
     Array.isArray(value) ||
     Object.keys(value).length !== 3 ||
     (value as StoredChannelEventV1).schemaVersion !== 1 ||
-    (value as StoredChannelEventV1).topic !== "computer"
+    ((value as StoredChannelEventV1).topic !== "computer" &&
+      (value as StoredChannelEventV1).topic !== "runs")
   ) {
     throw new Error("Bot-state channel event is corrupt");
   }
@@ -186,10 +187,40 @@ class ChannelComputerStorage implements ComputerBotStorage {
   }
 }
 
+/**
+ * The durable keys that hold what a browser draws as the conversation: the
+ * run records themselves, their index, and the two pointers that say which
+ * Turn is executing and which is waiting. A write to any of them means the
+ * transcript moved.
+ */
+const RUN_STATE_KEY_PREFIXES = ["run:", "run-index:"] as const;
+const RUN_STATE_KEYS = ["active-run", "pending-run"] as const;
+
+function namesRunState(key: string): boolean {
+  return (
+    RUN_STATE_KEYS.some((named) => named === key) ||
+    RUN_STATE_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))
+  );
+}
+
+function writtenKeys(keyOrEntries: unknown): readonly string[] {
+  if (typeof keyOrEntries === "string") return [keyOrEntries];
+  if (Array.isArray(keyOrEntries)) {
+    return keyOrEntries.filter((key): key is string => typeof key === "string");
+  }
+  if (keyOrEntries && typeof keyOrEntries === "object") {
+    return Object.keys(keyOrEntries as Record<string, unknown>);
+  }
+  return [];
+}
+
 export class BotStateChannel {
   readonly computerStorage: ComputerBotStorage;
   private alarmRefresher:
     ((transaction: DurableObjectTransaction) => Promise<void>) | undefined;
+  /** The in-flight `runs` notice, and whether another write arrived behind it. */
+  private runsNotice: Promise<void> | undefined;
+  private runsPending = false;
 
   constructor(private readonly state: DurableObjectState) {
     this.computerStorage = new ChannelComputerStorage(this, state.storage);
@@ -207,6 +238,105 @@ export class BotStateChannel {
     refresh: (transaction: DurableObjectTransaction) => Promise<void>,
   ): void {
     this.alarmRefresher = refresh;
+  }
+
+  /**
+   * This object's storage, seen through the channel: any committed write to a
+   * run record appends a `runs` invalidation and pushes it to attached
+   * observers. The frame is advisory — a client that receives one re-reads
+   * `GET /api/bots/:bot/turns` — so the notice is deliberately outside the
+   * caller's transaction: it must never be able to fail an authoritative
+   * write, and a notice for a rolled-back write costs one redundant read.
+   *
+   * The authority is handed this in place of the raw Durable Object state, so
+   * the kernel stays unaware that anybody is watching.
+   */
+  observeRuns(state: DurableObjectState): DurableObjectState {
+    const channel = this;
+    const source = state.storage;
+    const observe = (keys: readonly string[]): void => {
+      if (keys.some(namesRunState)) channel.noticeRuns();
+    };
+    const wrapTransaction = (
+      transaction: DurableObjectTransaction,
+    ): DurableObjectTransaction =>
+      new Proxy(transaction, {
+        get(target, property) {
+          if (property === "put" || property === "delete") {
+            return (...args: unknown[]) => {
+              observe(writtenKeys(args[0]));
+              return (target[property] as (...input: unknown[]) => unknown)(
+                ...args,
+              );
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as DurableObjectTransaction;
+    const storage = new Proxy(source, {
+      get(target, property) {
+        if (property === "put" || property === "delete") {
+          return (...args: unknown[]) => {
+            const keys = writtenKeys(args[0]);
+            const result = (
+              target[property] as (...input: unknown[]) => unknown
+            )(...args);
+            return result instanceof Promise
+              ? result.then((value) => {
+                  observe(keys);
+                  return value;
+                })
+              : result;
+          };
+        }
+        if (property === "transaction") {
+          return <T>(
+            callback: (transaction: DurableObjectTransaction) => Promise<T>,
+          ) =>
+            target.transaction((transaction) =>
+              callback(wrapTransaction(transaction)),
+            );
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as DurableObjectStorage;
+    return new Proxy(state, {
+      get(target, property) {
+        if (property === "storage") return storage;
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as DurableObjectState;
+  }
+
+  /**
+   * Append and broadcast one `runs` invalidation, coalescing the burst a
+   * single Turn produces: a Turn writes its run record on admission, on every
+   * session flush and on settlement, and an observer only ever needs to know
+   * that it should read again.
+   */
+  private noticeRuns(): void {
+    this.runsPending = true;
+    if (this.runsNotice) return;
+    this.runsNotice = (async () => {
+      while (this.runsPending) {
+        this.runsPending = false;
+        let event: StoredChannelEventV1 | undefined;
+        await this.state.storage.transaction(async (transaction) => {
+          event = await this.append(transaction, "runs");
+        });
+        this.broadcast(event);
+      }
+    })()
+      .catch(() => {
+        // An observer notice is never authority. A dropped one costs the
+        // client its next poll, and the durable write it described stands.
+      })
+      .finally(() => {
+        this.runsNotice = undefined;
+      });
   }
 
   /** The configured callback belongs to the kernel; Packages contribute only deadlines. */

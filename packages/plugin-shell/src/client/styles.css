@@ -423,6 +423,56 @@
 }
 
 /*
+ * Tool calls. Quieter than anything the Bot said: the User is watching work
+ * happen, not reading a message, so a chip carries the name and its state and
+ * opens in place to what the tool returned.
+ */
+
+.message-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(640px, 84%);
+}
+
+.tool-chip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--frock-text-muted);
+  text-align: left;
+  cursor: pointer;
+  background: var(--frock-surface);
+  border: 1px solid var(--frock-border);
+  border-radius: 10px;
+}
+
+.tool-chip-name {
+  color: var(--frock-text);
+  font-weight: 600;
+}
+
+.tool-chip-status {
+  flex: 1 1 auto;
+  font-size: var(--frock-text-xs);
+}
+
+.tool-chip-failed .tool-chip-status {
+  color: var(--frock-danger-text);
+}
+
+.tool-chip-result {
+  flex: 1 0 100%;
+  max-height: 12em;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/*
  * Dispatched subagents. A chip is deliberately quiet — a subagent is work the
  * Bot delegated, not something it said — and opens in place to the summary the
  * child handed back. The child's own transcript is never here.
