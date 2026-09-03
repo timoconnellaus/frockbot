@@ -215,25 +215,43 @@ test("the shell is usable on a phone", async ({
   // A bubble may be narrower than the thread, never wider than the window.
   await expectWithinViewport(page, ".message-user .message-bubble", "a bubble");
 
-  // The right panel is the third column a phone has no room for. It opens over
-  // the conversation, full width, and closes again.
-  await page.getByRole("button", { name: "Show side panel" }).click();
-  await shot(page, "06-right-panel");
+  /*
+   * Bot settings, from the conversation, in one tap.
+   *
+   * This is the finding that made the phone unusable rather than cramped: the
+   * gear lived in the right panel's header, the right panel is a closed drawer
+   * at this width, and so Name, Label, Description, Routines, the audit log
+   * and template import had no route at all on a phone. The one control that
+   * did survive into the header collapsed a panel that was already collapsed.
+   * So: the gear is reachable with nothing else open, and that control is not
+   * here to be pressed instead.
+   */
+  await expect(
+    page.getByRole("button", { name: "Bot settings" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /side panel/u }),
+    "the collapse control is still on the phone header",
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Bot settings" }).click();
+  await expect(page.getByRole("region", { name: "Settings" })).toBeVisible();
+  await shot(page, "06-bot-settings-panel");
+  await expectNoHorizontalOverflow(page);
+  await expectWithinViewport(page, ".panel-surface-view", "the panel surface");
+  // Named, so the User can tell whose settings these are.
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Pocket");
+
+  // The panel the surface took the place of is where its own back control
+  // leads: the third column, full width over the conversation.
+  await page.getByRole("button", { name: "Back to Bot panel" }).click();
+  await shot(page, "07-right-panel");
   await expectNoHorizontalOverflow(page);
   await expectWithinViewport(page, ".right-panel", "the right panel");
 
-  // And closes again, giving the conversation the whole window back.
-  await page.getByRole("button", { name: "Hide side panel" }).click();
+  // And Escape gives the conversation the whole window back.
+  await page.keyboard.press("Escape");
   await expect(page.locator(".right-panel")).toBeHidden();
-
-  // Settings is reached from the panel's own header and takes the panel's
-  // place, so on a phone it is the whole window rather than a 360px column.
-  await page.getByRole("button", { name: "Show side panel" }).click();
-  await page.getByRole("button", { name: "Bot settings" }).click();
-  await expect(page.getByRole("region", { name: "Settings" })).toBeVisible();
-  await shot(page, "07-bot-settings-panel");
-  await expectNoHorizontalOverflow(page);
-  await expectWithinViewport(page, ".panel-surface-view", "the panel surface");
 });
 
 /** Open the navigation drawer and prove it arrived. */

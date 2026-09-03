@@ -111,8 +111,20 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
 
   await sendMessage(page, "will not work");
 
-  await expect(page.locator(".message-assistant").last()).toContainText(
-    "Bot turn ended with outcome model-error",
+  /*
+   * A failed Turn is a system notice, not the Bot speaking.
+   *
+   * The thread used to render the durable failure verbatim in an assistant
+   * bubble — `Bot turn ended with outcome model-error`, a provider status
+   * code, and on one occasion a run UUID and the words "no durable provider
+   * outcome" — styled exactly like something the Bot had said. The reason is
+   * still on the run for `/api/debug` and the console; what the User is shown
+   * is one line, in the product's own words.
+   */
+  await expect(page.locator(".message-system-line").last()).toHaveText(
+    "This reply didn't finish. Try sending your message again.",
   );
-  await expect(page.locator(".message-assistant").last()).toContainText("401");
+  await expect(page.locator(".thread")).not.toContainText("model-error");
+  await expect(page.locator(".thread")).not.toContainText("outcome");
+  await expect(page.locator(".thread")).not.toContainText("401");
 });

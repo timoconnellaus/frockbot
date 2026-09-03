@@ -48,11 +48,17 @@ onBeforeUnmount(() => restoreFocus?.focus());
     the pointer the dismissal every other overlay in the product has.
   -->
   <Transition name="ui-scrim">
+    <!--
+      A pointer shortcut, not a second control: the panel's own Close button
+      and Escape are the announced ways out, so this one stays out of the
+      accessibility tree rather than becoming a duplicate "Close panel".
+    -->
     <button
       v-if="open"
       type="button"
       class="ui-sidebar-overlay__scrim"
-      aria-label="Close panel"
+      tabindex="-1"
+      aria-hidden="true"
       @click="emit('close')"
     />
   </Transition>
