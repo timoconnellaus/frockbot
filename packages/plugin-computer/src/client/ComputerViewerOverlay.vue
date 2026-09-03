@@ -10,6 +10,7 @@ import {
   ref,
   watch,
 } from "vue";
+import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computerKey, type ComputerState } from "../shared.ts";
 import { dialogFocusWrapTarget } from "./dialog-focus.ts";
 import { computerProgressFrame, computerProgressRunKind } from "./progress.ts";
@@ -23,6 +24,12 @@ import {
 const computer = inject(computerKey) ?? useRpc<ComputerState>();
 const state = computed(() => computer.value);
 const busy = ref(false);
+// The Bot as its User named it. A raw slug and an infrastructure vendor are
+// architecture, not identity, and the viewer header is the User's screen.
+const shell = inject(frockBotWebDataKey, undefined);
+const botName = computed(
+  () => shell?.value.botSettings?.profile.name ?? "Computer",
+);
 const confirming = ref(false);
 const confirmDialog = ref<HTMLElement>();
 const viewerFrame = ref<HTMLIFrameElement>();
@@ -277,7 +284,7 @@ onBeforeUnmount(() => {
     <header class="computer-overlay-toolbar">
       <div class="computer-overlay-identity">
         <strong>Computer</strong>
-        <small>{{ state.botId }} · {{ state.providerLabel }}</small>
+        <small>{{ botName }}</small>
       </div>
       <div class="computer-overlay-actions">
         <span class="computer-status" :class="`status-${state.phase}`">

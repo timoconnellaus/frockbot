@@ -122,6 +122,15 @@ describe("Computer viewer", () => {
     const template = parsed.descriptor.template?.content ?? "";
 
     expect(cardSource).toContain("Setting up your computer for the first time");
+    // An unconfigured card is not a button — clicking it opened a full-screen
+    // modal that repeated the sentence already on the card — and no card
+    // renders until a Bot exists to have a Computer.
+    expect(cardSource).toContain(':disabled="busy || unconfigured"');
+    expect(cardSource).toContain('<section v-if="hasBot"');
+    // The viewer header names the Bot, not its slug and not the Computer
+    // vendor: both are architecture leaking onto the User's screen.
+    expect(overlaySource).toContain("{{ botName }}");
+    expect(overlaySource).not.toContain("state.providerLabel");
     expect(COMPUTER_COLD_PROVISION_EXPECTATION).toBe(
       "This usually takes 2-3 minutes",
     );

@@ -256,7 +256,7 @@ describe("computer agent contribution", () => {
     await expect(
       execute(harness, "computer_exec", { command: "pwd" }),
     ).resolves.toEqual({
-      content: "The user is controlling this Computer; do not retry this Turn",
+      content: "held by human:session-1; do not retry this Turn",
       isError: true,
     });
     await harness.dispose();
@@ -277,11 +277,10 @@ describe("computer agent contribution", () => {
       }),
     );
 
-    expect(
-      harness.root.tools
-        .registeredNames()
-        .filter((name) => name.startsWith("computer_")),
-    ).toEqual([]);
+    const registered = harness.root.tools.registeredNames?.() ?? [];
+    expect(registered.filter((name) => name.startsWith("computer_"))).toEqual(
+      [],
+    );
     const prompt = await harness.root.systemPrompt.assemble({
       sessionId: "session-1",
       provider: "fixture",
