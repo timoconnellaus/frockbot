@@ -179,8 +179,9 @@ function turnRefusal(error: unknown): ClientTurnRefusalV1 | undefined {
   // fallback for refusals a Package still raises as plain errors.
   const reason =
     botTurnRefusalCodeV1(error) ??
-    TURN_ADMISSION_REFUSALS_V1.find((candidate) => candidate.match.test(message))
-      ?.reason;
+    TURN_ADMISSION_REFUSALS_V1.find((candidate) =>
+      candidate.match.test(message),
+    )?.reason;
   if (!reason) return undefined;
   return {
     schemaVersion: 1,
