@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 amends: 0019-account-wide-enablement
 ---
 
