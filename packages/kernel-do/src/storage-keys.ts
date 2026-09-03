@@ -135,3 +135,18 @@ export function storedRunAdmissionFences(input: unknown): string[] {
 export function workspaceSyncEffectKey(effectId: string): string {
   return `${WORKSPACE_SYNC_EFFECT_PREFIX}${effectId}`;
 }
+
+/**
+ * The conversation the Bot's chat Session is currently on.
+ *
+ * One Bot has one conversational Session at a time. Starting a new
+ * conversation ends the current one and begins the next: the durable event log
+ * the next Turn derives its request from is empty again, while every Turn the
+ * earlier conversations recorded stays durable and readable under its own
+ * Session id.
+ */
+export const CONVERSATION_KEY = "conversation";
+/** The conversations this Bot has already ended, newest last. */
+export const CONVERSATION_INDEX_KEY = "conversation-index";
+/** How many ended conversations stay listable. Older ones drop off the list. */
+export const MAX_LISTED_CONVERSATIONS = 64;
