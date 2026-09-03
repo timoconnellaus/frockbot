@@ -1,4 +1,5 @@
 import type { SkillRefV1 } from "@frockbot/kernel-contracts";
+import type { BotStateTopicV1 } from "@frockbot/protocol";
 import {
   decodeRevokeConnectionResultV1,
   decodeStartConnectionResultV1,
@@ -189,6 +190,13 @@ export interface AgentTransport {
     method?: "GET" | "POST",
     body?: string,
   ): Promise<unknown>;
+  watchBotState?(
+    botId: string,
+    observer: {
+      invalidate(topic: BotStateTopicV1 | undefined): Promise<void>;
+      status(status: "connecting" | "open" | "fallback" | "hidden"): void;
+    },
+  ): () => void;
   openExternalAuthorization?(
     url: string,
     nativeReturnNonce?: string,

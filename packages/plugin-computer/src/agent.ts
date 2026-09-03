@@ -71,8 +71,12 @@ import {
 import {
   COMPUTER_DOCTOR_ROOT_ID,
   COMPUTER_SCREENSHOTS_ROOT_ID,
-  COMPUTER_SCREENSHOT_RETENTION,
 } from "./roots.js";
+import {
+  fileComputerScreenshotV1,
+  type ComputerProjectionFileInvalidationV1,
+  type ComputerProjectionFileKindV1,
+} from "./capture.js";
 import {
   COMPUTER_CONTROL_RECORD_KEY,
   decodeStoredComputerControlV1,
@@ -86,6 +90,10 @@ export {
 } from "./roots.js";
 
 export type { ComputerProcessStorageV1 };
+export type {
+  ComputerProjectionFileInvalidationV1,
+  ComputerProjectionFileKindV1,
+} from "./capture.js";
 
 /**
  * The Session and Turn a durable Workspace write records as its writer.
@@ -122,6 +130,8 @@ export interface ComputerAgentPluginConfig {
     get<T>(key: string): Promise<T | undefined>;
     now?(): Date;
   };
+  /** Drops resident projection caches after this Turn's Workspace sync. */
+  projectionFiles?: ComputerProjectionFileInvalidationV1;
 }
 
 export const HUMAN_CONTROL_PROMPT_LINE =
@@ -502,46 +512,6 @@ class ComputerTurnSync {
   }
 }
 
-/**
- * Keeps the newest {@link COMPUTER_SCREENSHOT_RETENTION} captures for one Bot.
- *
- * A screenshot of a logged-in page is User-scoped content that outlives its
- * Turn, so the root is bounded rather than allowed to grow for the life of the
- * Computer. Pruning is a best effort: a capture that was recorded is never
- * failed because an older one could not be removed.
- */
-async function prune(
-  workspace: NonNullable<ComputerHandle["workspace"]>,
-  root: WorkspaceRootV1,
-  botKey: string,
-  writer: WorkspaceWriterV1,
-): Promise<void> {
-  const listed = await workspace.list({
-    root,
-    prefix: botKey,
-    limit: COMPUTER_SCREENSHOT_RETENTION * 4,
-  });
-  if (listed.status !== "ok") return;
-  // Ordered by when each capture was written, not by its path: a path names
-  // the Turn and the ordinal within it, and neither sorts chronologically
-  // across Turns. The generation is the record of when, so it decides.
-  const sorted = [...listed.entries].sort((left, right) => {
-    const order = left.generation.writtenAt.localeCompare(
-      right.generation.writtenAt,
-    );
-    return order !== 0 ? order : left.path.path.localeCompare(right.path.path);
-  });
-  const excess = sorted.length - COMPUTER_SCREENSHOT_RETENTION;
-  for (let index = 0; index < excess; index += 1) {
-    const entry = sorted[index]!;
-    await workspace.delete({
-      path: entry.path,
-      writer,
-      expectedGenerationId: entry.generation.generationId,
-    });
-  }
-}
-
 async function useComputer<T>(
   computer: ComputerHandle,
   run: (computer: ComputerHandle) => Promise<T>,
@@ -575,6 +545,16 @@ export function createComputerAgentPlugin(
     // Agent loop knows it; a tool context does not, so it is caught where the
     // loop already announces it.
     let currentTurn = 1;
+    const projectionWrites = new Set<ComputerProjectionFileKindV1>();
+    const noteProjectionWrite = (kind: ComputerProjectionFileKindV1): void => {
+      projectionWrites.add(kind);
+    };
+    const invalidateProjectionWrites = (botId: string): void => {
+      for (const kind of projectionWrites) {
+        config.projectionFiles?.invalidate(botId, kind);
+      }
+      projectionWrites.clear();
+    };
     const turnOf = (_context: ToolExecutionContext): number => currentTurn;
     const attach = async (botId: string, signal: AbortSignal) => {
       if (!ctx.computers.assignment(identity)) {
@@ -1042,12 +1022,6 @@ export function createComputerAgentPlugin(
           return await useComputer(
             await open(context.botId, context.sessionId, context.signal),
             async (computer) => {
-              if (!computer.screenshot) {
-                throw new ComputerError(
-                  "capability-unavailable",
-                  "The selected Computer does not support screenshots",
-                );
-              }
               const workspace = computer.workspace;
               if (!workspace) {
                 throw new ComputerError(
@@ -1055,10 +1029,6 @@ export function createComputerAgentPlugin(
                   "The selected Computer exposes no Workspace to file a screenshot in",
                 );
               }
-              const captured = await computer.screenshot.capture({
-                signal: context.signal,
-                effectId: context.effectId,
-              });
               const root: WorkspaceRootV1 = {
                 kind: "package-declared",
                 userId,
@@ -1078,27 +1048,23 @@ export function createComputerAgentPlugin(
                 turnId: writer.turnId,
                 runId: writer.runId,
               };
-              const written = await workspace.write({
+              const filed = await fileComputerScreenshotV1({
+                computer,
+                workspace,
                 path,
-                bytes: captured.bytes,
                 writer: botWriter,
-                expectedGenerationId: null,
-                mediaType: captured.mediaType,
+                botKey,
+                signal: context.signal,
+                effectId: context.effectId,
               });
-              if (written.status !== "ok") {
-                return {
-                  content: `The screenshot could not be filed: ${written.status}: ${written.reason}`,
-                  isError: true,
-                };
-              }
-              await prune(workspace, root, botKey, botWriter);
-              const dimensions = pngDimensionsV1(captured.bytes);
+              noteProjectionWrite("screenshots");
+              const dimensions = pngDimensionsV1(filed.captured.bytes);
               const attachment: ToolAttachmentV1 = {
                 kind: "image",
-                mediaType: captured.mediaType,
+                mediaType: filed.captured.mediaType,
                 workspacePath: path,
-                contentHash: written.generation.contentHash,
-                bytes: written.generation.size,
+                contentHash: filed.generation.contentHash,
+                bytes: filed.generation.size,
               };
               // The bytes are offered to the resident Session so this Turn's
               // next model request can show them. They are never recorded:
@@ -1108,7 +1074,7 @@ export function createComputerAgentPlugin(
                 .get(context.sessionId)
                 ?.offerAttachmentBytes(
                   attachment.contentHash,
-                  base64Of(captured.bytes),
+                  base64Of(filed.captured.bytes),
                 );
               return {
                 content: JSON.stringify({
@@ -1117,8 +1083,8 @@ export function createComputerAgentPlugin(
                   contentHash: attachment.contentHash,
                   bytes: attachment.bytes,
                   ...(dimensions ?? {}),
-                  display: captured.display,
-                  capturedAt: captured.capturedAt,
+                  display: filed.captured.display,
+                  capturedAt: filed.captured.capturedAt,
                 }),
                 isError: false,
                 attachments: [attachment],
@@ -1170,7 +1136,9 @@ export function createComputerAgentPlugin(
             : null,
         mediaType: "application/json",
       });
-      return written.status === "ok" ? path : undefined;
+      if (written.status !== "ok") return undefined;
+      noteProjectionWrite("doctor");
+      return path;
     };
 
     /**
@@ -1457,6 +1425,7 @@ export function createComputerAgentPlugin(
       // A Turn's first step is where the Turn's sync state begins; a Turn that
       // never touches the Computer never syncs and never wakes one.
       ctx.on("agent/pre-step", async (agent, _inputs, turn, _step, next) => {
+        if (turn !== currentTurn) projectionWrites.clear();
         currentTurn = turn;
         turnSync.beginTurn(turn);
         if (controlPrompt?.loadedTurn() !== turn) {
@@ -1474,13 +1443,48 @@ export function createComputerAgentPlugin(
           computer = await attach(agent.botId, new AbortController().signal);
         } catch (error) {
           await turnSync.unavailable(agent.session.id, error);
+          invalidateProjectionWrites(agent.botId);
           return;
         }
         try {
+          if (writer && computer.workspace) {
+            const root: WorkspaceRootV1 = {
+              kind: "package-declared",
+              userId,
+              packageId: "computer",
+              rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
+            };
+            const botKey = computerBotPathKeyV1(agent.botId);
+            captureSequence += 1;
+            try {
+              await fileComputerScreenshotV1({
+                computer,
+                workspace: computer.workspace,
+                path: {
+                  root,
+                  path: `${botKey}/${writer.turnId}-${captureSequence}.png`,
+                },
+                writer: {
+                  kind: "bot",
+                  botId: agent.botId,
+                  sessionId: writer.sessionId,
+                  turnId: writer.turnId,
+                  runId: writer.runId,
+                },
+                botKey,
+                effectId: `computer:${writer.runId}:turn-end-screenshot`,
+              });
+              noteProjectionWrite("screenshots");
+            } catch {
+              // Opportunistic capture never changes the Turn outcome. The
+              // provider's human-control refusal is deliberately preserved.
+            }
+          }
           await turnSync.afterTurn(computer, agent.session.id);
         } catch (error) {
           await turnSync.unavailable(agent.session.id, error);
         } finally {
+          invalidateProjectionWrites(agent.botId);
           await computer.close();
         }
       }),

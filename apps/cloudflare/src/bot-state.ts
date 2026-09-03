@@ -1,5 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 import {
+  BotStateChannel,
+  BOT_STATE_CHANNEL_INTERNAL_PATH,
+} from "./bot-state-channel.js";
+import {
   compileFoundationApplication,
   createFoundationHostedRuntimePackages,
   createFoundationRuntimeApplication,
@@ -283,6 +287,8 @@ export class BotState extends DurableObject<BotStateEnv> {
    */
   protected readonly workspaceGenerations: DurableWorkspaceGenerations =
     new DurableWorkspaceGenerations({ state: this.ctx });
+  /** Durable invalidation log plus hibernatable observer transport. */
+  private readonly stateChannel = new BotStateChannel(this.ctx);
   private mounted:
     | Promise<{
         shell: ShellBotBackendContribution;
@@ -382,6 +388,29 @@ export class BotState extends DurableObject<BotStateEnv> {
               // Package supplies only its configuration and Composition
               // hooks.
               createAuthority: (options) => new BotDurableAuthority(options),
+              // The Computer Contribution's projection cache and its share of
+              // the authority's one durable alarm, reached through the table
+              // once it has mounted.
+              invalidateComputerProjectionFile: (userId, botId, kind) =>
+                mountedContributions
+                  .get(computerBotContribution)
+                  ?.invalidateProjectionFile(userId, botId, kind),
+              scheduledDeadlines: (transaction) =>
+                mountedContributions
+                  .get(computerBotContribution)
+                  ?.scheduledDeadlines(transaction) ?? Promise.resolve([]),
+              scheduledWorkInFlight: () =>
+                mountedContributions
+                  .get(computerBotContribution)
+                  ?.scheduledWorkInFlight() ?? false,
+              deferScheduledWork: (transaction) =>
+                mountedContributions
+                  .get(computerBotContribution)
+                  ?.deferScheduledWork(transaction) ?? Promise.resolve(),
+              settleScheduledWork: () =>
+                mountedContributions
+                  .get(computerBotContribution)
+                  ?.settleScheduledWork() ?? Promise.resolve(),
               // An archived Bot admits no configuration command; the Flock
               // Contribution owns that durable lifecycle state.
               assertLifecycleActive: (storage, botId) => {
@@ -409,7 +438,7 @@ export class BotState extends DurableObject<BotStateEnv> {
                 requireShell().archiveEligible(storage),
             },
             computer: {
-              storage: this.ctx.storage,
+              storage: this.stateChannel.computerStorage,
               workspace: this.backendEnv.WORKSPACE_FILES,
               providerLabel: "Fly Sprites",
               configured: computerConfigured,
@@ -447,6 +476,10 @@ export class BotState extends DurableObject<BotStateEnv> {
             "Foundation requires Shell, Flock and Computer Bot backend Contributions",
           );
         }
+        const alarmOwner = shell;
+        this.stateChannel.setAlarmRefresher((transaction) =>
+          alarmOwner.refreshScheduledWork(transaction),
+        );
         return {
           shell,
           flock,
@@ -1756,5 +1789,37 @@ export class BotState extends DurableObject<BotStateEnv> {
     // entries a settlement could not deliver leave on the next firing rather
     // than waiting for the Bot to be spoken to again.
     await this.drainAuditOutbox();
+  }
+
+  /** Internal fetch surface reached only after the gateway authenticates ownership. */
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname !== BOT_STATE_CHANNEL_INTERNAL_PATH) {
+      return new Response("Not found", { status: 404 });
+    }
+    const userId = request.headers.get("x-frockbot-user-id");
+    const botId = request.headers.get("x-frockbot-bot-id");
+    if (!userId || !botId) {
+      return Response.json(
+        { error: "authenticated Bot identity required" },
+        { status: 401 },
+      );
+    }
+    const identity = { userId, botId };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return this.stateChannel.upgrade(request, identity);
+  }
+
+  webSocketMessage(socket: WebSocket, _message: string | ArrayBuffer): void {
+    this.stateChannel.message(socket);
+  }
+
+  webSocketClose(socket: WebSocket, code: number, reason: string): void {
+    this.stateChannel.close(socket, code, reason);
+  }
+
+  webSocketError(socket: WebSocket, _error: unknown): void {
+    this.stateChannel.error(socket);
   }
 }

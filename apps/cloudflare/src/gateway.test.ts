@@ -53,6 +53,7 @@ import type {
   CatalogGatewayStore,
   ConnectionBinding,
   GatewayAuth,
+  GatewayDependencies,
   LoadedWorker,
   UserBotStateBinding,
   UserConfigurationBinding,
@@ -1003,6 +1004,7 @@ function createTestGateway(
     policy?: DeploymentPolicyV1;
     adminEmails?: string;
   },
+  openBotStateChannel?: NonNullable<GatewayDependencies["openBotStateChannel"]>,
 ) {
   const loader = new DirectWorkerLoader();
   const states = new Map<string, MemoryBotState>();
@@ -1037,6 +1039,7 @@ function createTestGateway(
       configurationRoutes.push(`bot:${userId}:${botId}`);
       return configurationFor(userId);
     },
+    ...(openBotStateChannel ? { openBotStateChannel } : {}),
     backendContributions: [
       createFlockBackendContribution({
         listBots: (userId) => configurationFor(userId).listBots(),
@@ -2312,6 +2315,140 @@ const rejectingAuth: GatewayAuth = {
   handler: () => Promise.reject(new Error("auth handler was invoked")),
   getSession: () => Promise.reject(new Error("session was resolved")),
 };
+
+describe("Bot-state WebSocket gateway", () => {
+  const channelPath = "/api/bots/scout/state-channel?version=1";
+
+  test("refuses an unauthenticated upgrade before it reaches a Bot", async () => {
+    let opened = false;
+    const { gateway } = createTestGateway(
+      undefined,
+      unauthenticatedAuth,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      () => {
+        opened = true;
+        return Promise.resolve(Response.json({ opened: true }));
+      },
+    );
+    const response = await gateway(
+      new Request(`https://frockbot.test${channelPath}`, {
+        headers: { upgrade: "websocket" },
+      }),
+    );
+    expect(response.status).toBe(401);
+    expect(opened).toBe(false);
+  });
+
+  test("maps a cross-User ownership refusal to the same Bot 404", async () => {
+    const { gateway } = createTestGateway(
+      undefined,
+      undefined,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      (userId, botId) => {
+        expect(userId).toBe("mallory");
+        expect(botId).toBe("scout");
+        return Promise.reject(
+          Object.assign(new Error("foreign Bot"), {
+            name: "ComputerBotNotFoundError",
+          }),
+        );
+      },
+    );
+    const response = await gateway(
+      request(channelPath, "mallory", {
+        headers: { upgrade: "websocket" },
+      }),
+    );
+    expect(response.status).toBe(404);
+    expect((await response.json()) as unknown).toEqual({
+      error: "Bot not found",
+    });
+  });
+
+  test("forwards the authenticated development identity and admin projection", async () => {
+    let context: unknown;
+    const { gateway } = createTestGateway(
+      undefined,
+      undefined,
+      true,
+      ["capacitor://localhost"],
+      undefined,
+      { adminEmails: "" },
+      (userId, botId, _request, forwarded) => {
+        context = { userId, botId, ...forwarded };
+        return Promise.resolve(Response.json({ opened: true }));
+      },
+    );
+    const response = await gateway(
+      request(channelPath, "alice", { headers: { upgrade: "websocket" } }),
+    );
+    expect(response.status).toBe(200);
+    expect(context).toEqual({
+      userId: "alice",
+      botId: "scout",
+      isAdmin: true,
+      authMode: "development",
+    });
+  });
+
+  test("rejects a WebSocket Origin outside ALLOWED_CLIENT_ORIGINS", async () => {
+    let opened = false;
+    const { gateway } = createTestGateway(
+      undefined,
+      undefined,
+      true,
+      ["capacitor://localhost"],
+      undefined,
+      undefined,
+      () => {
+        opened = true;
+        return Promise.resolve(Response.json({ opened: true }));
+      },
+    );
+    const response = await gateway(
+      request(channelPath, "alice", {
+        headers: {
+          upgrade: "websocket",
+          origin: "https://attacker.example",
+        },
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect(opened).toBe(false);
+  });
+
+  test("allows the configured Electron and mobile WebView origins", async () => {
+    const origins = ["frockbot://localhost", "capacitor://localhost"];
+    const opened: string[] = [];
+    const { gateway } = createTestGateway(
+      undefined,
+      undefined,
+      true,
+      origins,
+      undefined,
+      undefined,
+      (_userId, _botId, request) => {
+        opened.push(request.headers.get("origin") ?? "");
+        return Promise.resolve(Response.json({ opened: true }));
+      },
+    );
+    for (const origin of origins) {
+      const response = await gateway(
+        request(channelPath, "alice", {
+          headers: { upgrade: "websocket", origin },
+        }),
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(opened).toEqual(origins);
+  });
+});
 
 const bearerAuth: GatewayAuth = {
   handler: () =>

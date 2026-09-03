@@ -135,6 +135,7 @@
         "@frockbot/plugin-subagents": "workspace:*",
         "@frockbot/plugin-tools": "workspace:*",
         "@frockbot/plugin-user-machine": "workspace:*",
+        "@frockbot/protocol": "workspace:*",
         "@frockbot/template-core": "workspace:*",
         "@frockbot/workspace-store": "workspace:*",
         "better-auth": "1.7.2",

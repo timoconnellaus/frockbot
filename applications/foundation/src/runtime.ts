@@ -733,6 +733,10 @@ export function createFoundationHostedRuntimePackages(
     computerControlRecords?: NonNullable<
       ComputerAgentPluginConfig["controlRecords"]
     >;
+    /** Resident projection caches invalidated after a known Computer write. */
+    computerProjectionFiles?: NonNullable<
+      ComputerAgentPluginConfig["projectionFiles"]
+    >;
     /** The `computerUse` task owner whose User-wide lease this child holds. */
     computerAgentControlOwnerId?: string;
     /**
@@ -886,6 +890,9 @@ export function createFoundationHostedRuntimePackages(
           : {}),
         ...(host.computerControlRecords
           ? { controlRecords: host.computerControlRecords }
+          : {}),
+        ...(host.computerProjectionFiles
+          ? { projectionFiles: host.computerProjectionFiles }
           : {}),
       }),
     ),

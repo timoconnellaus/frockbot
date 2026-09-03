@@ -342,6 +342,31 @@ function allowedClientOrigin(
   return origin;
 }
 
+/**
+ * Whether `presented` is the anonymous artifact origin that serves this
+ * gateway's Package pages: `ui.<host>` in a deployment, and `ui.localhost` for
+ * a gateway on either spelling of the loopback in development.
+ */
+export function isPackageUiArtifactOriginFor(
+  presented: string,
+  gateway: URL,
+): boolean {
+  let origin: URL;
+  try {
+    origin = new URL(presented);
+  } catch {
+    return false;
+  }
+  if (origin.protocol !== gateway.protocol || origin.port !== gateway.port) {
+    return false;
+  }
+  const loopback =
+    gateway.hostname === "localhost" || gateway.hostname === "127.0.0.1";
+  return loopback
+    ? origin.hostname === "ui.localhost"
+    : origin.hostname === `ui.${gateway.hostname}`;
+}
+
 function preflightResponse(origin: string): Response {
   return new Response(null, {
     status: 204,
@@ -501,6 +526,49 @@ export function createGateway(dependencies: GatewayDependencies) {
     }
     if (request.method === "GET" && url.pathname === "/api/identity") {
       return Response.json({ schemaVersion: 1, userId, isAdmin });
+    }
+
+    const stateChannelMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/state-channel$/,
+    );
+    if (stateChannelMatch) {
+      if (request.method !== "GET") {
+        return jsonError(405, "method not allowed");
+      }
+      const encodedBotId = stateChannelMatch[1];
+      if (!encodedBotId) return jsonError(400, "invalid Bot id");
+      let botId: string;
+      try {
+        botId = decodeBotPathSegment(encodedBotId);
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid Bot id",
+        );
+      }
+      if (!dependencies.openBotStateChannel) {
+        return jsonError(503, "Bot-state channel is unavailable");
+      }
+      try {
+        return await dependencies.openBotStateChannel(userId, botId, request, {
+          isAdmin,
+          authMode,
+        });
+      } catch (error) {
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "name" in error &&
+          (error.name === "BotNotFoundError" ||
+            error.name === "ComputerBotNotFoundError")
+        ) {
+          return jsonError(404, "Bot not found");
+        }
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "Bot-state channel failed",
+        );
+      }
     }
 
     if (
@@ -743,17 +811,36 @@ export function createGateway(dependencies: GatewayDependencies) {
     );
     const isApiPath = url.pathname.startsWith("/api/");
     const presentedOrigin = request.headers.get("origin");
+    // The Applet viewer socket is the one `/api/*` upgrade that does not come
+    // from the app. Its page runs in a sandboxed iframe with no
+    // `allow-same-origin`, so the browser sends the literal `Origin: null` — an
+    // opaque origin — and a page on the artifact host itself would send
+    // `ui.<this host>`. Either is admitted here and nothing else: the page is
+    // cookieless, so this guard protects nothing on that path, and the signed
+    // token in the URL is the whole of the decision (ADR 0022 §4).
+    const appletSocketFromArtifactOrigin =
+      APPLET_SOCKET_PATH.test(url.pathname) &&
+      presentedOrigin !== null &&
+      (presentedOrigin === "null" ||
+        isPackageUiArtifactOriginFor(presentedOrigin, url));
     if (
       isApiPath &&
       presentedOrigin &&
       !origin &&
-      request.method !== "GET" &&
+      !appletSocketFromArtifactOrigin &&
+      (request.method !== "GET" ||
+        request.headers.get("upgrade")?.toLowerCase() === "websocket") &&
       request.method !== "HEAD"
     ) {
       return jsonError(403, "request origin is not allowed");
     }
     if (!origin || !isApiPath) return route(request, url);
     if (request.method === "OPTIONS") return preflightResponse(origin);
+    // The 101 response carries the WebSocket endpoint and cannot be cloned as
+    // an ordinary CORS response. Origin admission above is the browser guard.
+    if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+      return route(request, url);
+    }
     return withClientOrigin(await route(request, url), origin);
   };
 }

@@ -12,6 +12,7 @@ import {
 } from "vue";
 import { computerKey, type ComputerState } from "../shared.ts";
 import { dialogFocusWrapTarget } from "./dialog-focus.ts";
+import { computerProgressFrame, computerProgressRunKind } from "./progress.ts";
 import {
   createComputerViewerActions,
   decodeComputerViewerFrameMessageV1,
@@ -55,6 +56,24 @@ const opening = computed(
   () =>
     state.value.phase === "provisioning" || state.value.phase === "updating",
 );
+const progressRunKind = computed(() => computerProgressRunKind(state.value));
+const openingHeading = computed(() => {
+  switch (progressRunKind.value) {
+    case "cold-provision":
+      return "Setting up your computer for the first time";
+    case "resumed-provision":
+      return "Resuming computer setup";
+    case "update":
+      return "Updating your computer";
+    case "warm-wake":
+      return "Preparing computer…";
+  }
+});
+const setupExpectation = computed(() =>
+  progressRunKind.value === "cold-provision"
+    ? "This usually takes 2-3 minutes"
+    : undefined,
+);
 const progressSteps = computed(
   () =>
     state.value.progress?.steps ?? [
@@ -66,9 +85,39 @@ const progressSteps = computed(
       },
     ],
 );
+const progressPhaseLabel = computed(
+  () =>
+    state.value.progress?.provisioning?.label ??
+    state.value.progress?.steps.find((step) => step.status === "active")
+      ?.label ??
+    state.value.message,
+);
+const progressFrame = computed(() =>
+  computerProgressFrame({
+    projection: state.value,
+    elapsedMs: elapsedSeconds.value * 1_000,
+  }),
+);
+const progressValueNow = computed(() => {
+  const fraction = progressFrame.value.fraction;
+  return fraction === undefined ? undefined : Math.round(fraction * 100);
+});
+const progressFillStyle = computed(() => {
+  const fraction = progressFrame.value.fraction;
+  return fraction === undefined ? undefined : { width: `${fraction * 100}%` };
+});
+const progressAriaLabel = computed(
+  () => `${openingHeading.value}: ${progressPhaseLabel.value}`,
+);
 const progressPosition = computed(() => {
   const progress = state.value.progress;
-  return progress ? `Step ${progress.index} of ${progress.total}` : undefined;
+  if (!progress) return undefined;
+  const provisioning = progress.provisioning;
+  return provisioning
+    ? provisioning.index === 0
+      ? "Starting setup"
+      : `Phase ${provisioning.index} of ${provisioning.total}`
+    : `Step ${progress.index} of ${progress.total}`;
 });
 const statusLabel = computed(() => {
   if (hasViewer.value && frameState.value !== "connected") {
@@ -282,19 +331,27 @@ onBeforeUnmount(() => {
             >Computer not configured</strong
           >
           <template v-else-if="opening">
-            <strong>
-              {{
-                state.phase === "updating"
-                  ? "Updating computer…"
-                  : "Preparing computer…"
-              }}
-            </strong>
+            <strong>{{ openingHeading }}</strong>
+            <p v-if="setupExpectation" class="computer-setup-expectation">
+              {{ setupExpectation }}
+            </p>
+            <p
+              class="computer-progress-phase"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {{ progressPhaseLabel }}
+            </p>
             <div
               class="computer-progress-track"
+              :class="{ 'is-determinate': progressValueNow !== undefined }"
               role="progressbar"
-              :aria-label="state.message"
+              :aria-label="progressAriaLabel"
+              :aria-valuemin="progressValueNow === undefined ? undefined : 0"
+              :aria-valuemax="progressValueNow === undefined ? undefined : 100"
+              :aria-valuenow="progressValueNow"
             >
-              <span />
+              <span :style="progressFillStyle" />
             </div>
             <div class="computer-progress-meta">
               <span v-if="progressPosition">{{ progressPosition }}</span>

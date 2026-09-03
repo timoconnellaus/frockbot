@@ -1,4 +1,5 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { BOT_STATE_CHANNEL_INTERNAL_PATH } from "./bot-state-channel.js";
 import {
   decodeMachineResultDeliveryV1,
   type MachineResultDeliveryV1,
@@ -76,7 +77,7 @@ import {
   decodeRoutineRunListViewV1,
 } from "@frockbot/plugin-routines/shared";
 import {
-  decodeComputerCommandReceiptV1,
+  decodeComputerCommandResponse,
   decodeComputerProjectionV1,
   type ComputerCommandV1,
 } from "@frockbot/plugin-computer/protocol";
@@ -443,6 +444,17 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     readFocusedApplet: (input) => rpc.readFocusedApplet(input),
     setFocusedApplet: (input) => rpc.setFocusedApplet(input),
   };
+}
+
+function botStateObject(
+  env: Env,
+  userId: string,
+  botId: string,
+): DurableObjectStub {
+  const id = env.BOT_STATES.idFromName(
+    `${userId}:${decodeBotIdV1(botId, "bot id")}`,
+  );
+  return env.BOT_STATES.get(id);
 }
 
 function rpcJsonSnapshot<T>(value: T): T {
@@ -1284,6 +1296,33 @@ async function ownedComputerBotState(
   return botStateStub(env, userId, botId);
 }
 
+async function openOwnedBotStateChannel(
+  env: Env,
+  userId: string,
+  botId: string,
+  request: Request,
+  context: { isAdmin: boolean; authMode: string },
+): Promise<Response> {
+  // Prove directory membership before naming the object, exactly like every
+  // Computer read and command route.
+  await ownedComputerBotState(env, userId, botId);
+  const incoming = new URL(request.url);
+  const internal = new URL(
+    `${BOT_STATE_CHANNEL_INTERNAL_PATH}${incoming.search}`,
+    "https://bot-state.internal",
+  );
+  const headers = new Headers(request.headers);
+  headers.delete("x-frockbot-user-id");
+  headers.delete("x-frockbot-bot-id");
+  headers.set("x-frockbot-user-id", userId);
+  headers.set("x-frockbot-bot-id", botId);
+  headers.set("x-frockbot-auth-session-v1", context.authMode);
+  headers.set("x-frockbot-is-admin-v1", String(context.isAdmin));
+  return botStateObject(env, userId, botId).fetch(
+    new Request(internal, { method: "GET", headers }),
+  );
+}
+
 /**
  * One published template, for the unauthenticated `GET /templates/v1/:shareId`.
  *
@@ -1459,7 +1498,7 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
         botId: string,
         command: ComputerCommandV1,
       ) =>
-        decodeComputerCommandReceiptV1(
+        decodeComputerCommandResponse(
           rpcJsonSnapshot(
             await (
               await ownedComputerBotState(env, userId, botId)
@@ -1896,6 +1935,8 @@ export default {
         env.APPLET_STATES.get(
           env.APPLET_STATES.idFromName(appletStateNameV1(userId, appletId)),
         ),
+      openBotStateChannel: (userId, botId, request, context) =>
+        openOwnedBotStateChannel(env, userId, botId, request, context),
       ...(env.PACKAGE_CATALOG
         ? { catalog: new R2PackageCatalog(env.PACKAGE_CATALOG) }
         : {}),

@@ -254,6 +254,16 @@ export interface ComputerOperationOptions {
   effectId?: string;
 }
 
+/** Provider-neutral detail for provisioning nested under a connection step. */
+export interface ComputerProvisioningProgressV1 {
+  version: 1;
+  kind: "provision" | "update";
+  label: string;
+  index: number;
+  total: number;
+  resumed: boolean;
+}
+
 /** One provider-neutral boundary crossed while opening a live viewer. */
 export interface ComputerConnectionProgressV1 {
   version: 1;
@@ -262,6 +272,8 @@ export interface ComputerConnectionProgressV1 {
   label: string;
   index: number;
   total: number;
+  /** A host provisioning phase advancing within the stable outer step. */
+  provisioning?: ComputerProvisioningProgressV1;
 }
 
 export interface ComputerConnectionOptionsV1 extends ComputerOperationOptions {

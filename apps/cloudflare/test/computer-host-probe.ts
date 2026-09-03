@@ -175,6 +175,9 @@ export class ComputerHostClientProbe extends DurableObject<ProbeEnv> {
     try {
       const result = await this.client(userId, botId).open({
         effectId: input.effectId,
+        // Presence always supplies this observer. Keeping it here proves that
+        // a service binding preserves the streamed open body in workerd.
+        onProgress: () => undefined,
       });
       return { ok: true, spriteName: result.spriteName };
     } catch (error) {

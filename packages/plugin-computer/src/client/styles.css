@@ -2,107 +2,6 @@
   margin: 0;
 }
 
-.computer-strip {
-  display: grid;
-  width: 100%;
-  grid-template-columns: 72px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  padding: 6px;
-  border: 0;
-  border-radius: var(--frock-radius-control);
-  color: var(--frock-text);
-  background: transparent;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color var(--frock-motion-fast);
-}
-
-.computer-strip:hover:not(:disabled),
-.computer-strip:focus-visible {
-  background: var(--frock-fill-hover);
-  outline: none;
-}
-
-.computer-strip:disabled {
-  cursor: default;
-}
-
-.computer-strip-capture {
-  position: relative;
-  display: block;
-  overflow: hidden;
-  aspect-ratio: 16 / 10;
-  border: 1px solid var(--frock-border);
-  border-radius: 7px;
-  background: var(--frock-surface-subtle);
-  box-shadow: inset 0 0 0 1px var(--frock-computer-inset);
-}
-
-.computer-strip-capture img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.computer-strip-placeholder {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: var(--frock-computer-accent-text);
-  background:
-    linear-gradient(var(--frock-computer-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--frock-computer-grid) 1px, transparent 1px),
-    var(--frock-surface-subtle);
-  background-size: 12px 12px;
-}
-
-.computer-strip-phase {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 7px;
-  color: var(--frock-text-muted);
-  font-size: var(--frock-text-xs);
-  text-transform: capitalize;
-}
-
-.computer-strip-phase > :last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.computer-strip-dot {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: var(--frock-text-disabled);
-  box-shadow: 0 0 0 2px var(--frock-computer-inset);
-}
-
-.computer-strip-dot.phase-ready {
-  background: var(--frock-success);
-}
-
-.computer-strip-dot.phase-human-control,
-.computer-strip-dot.phase-taking-control {
-  background: var(--frock-computer-accent);
-}
-
-.computer-strip-dot.phase-updating {
-  background: var(--frock-warning);
-}
-
-.computer-strip-dot.phase-error,
-.computer-strip-dot.phase-disconnected {
-  background: var(--frock-danger-strong);
-}
-
 .computer-status {
   flex: 0 0 auto;
   padding: 3px 7px;
@@ -230,8 +129,27 @@ button.computer-screen {
   background-size: 18px 18px;
 }
 
+.computer-setup-expectation,
+.computer-progress-phase {
+  display: block;
+  max-width: 320px;
+  color: var(--frock-viewer-content-muted);
+  font-size: var(--frock-text-sm);
+  line-height: var(--frock-leading-normal);
+}
+
+.computer-setup-expectation {
+  margin: 6px 0 0;
+}
+
+.computer-progress-phase {
+  margin: 9px 0 0;
+  color: var(--frock-viewer-content-text);
+}
+
 .computer-progress-track {
   position: relative;
+  display: block;
   overflow: hidden;
   width: min(320px, 70vw);
   height: 4px;
@@ -242,11 +160,43 @@ button.computer-screen {
 
 .computer-progress-track > span {
   position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
   width: 42%;
   height: 100%;
   border-radius: inherit;
   background: var(--frock-computer-accent);
   animation: computer-progress 1.25s ease-in-out infinite;
+}
+
+.computer-progress-track.is-determinate > span {
+  animation: none;
+  transition: width 1s linear;
+}
+
+.computer-progress-track.is-css-timed > span {
+  width: 100%;
+  transform: scaleX(var(--computer-progress-from));
+  transform-origin: left;
+  animation: computer-progress-determinate var(--computer-progress-duration)
+    linear forwards;
+  transition: none;
+}
+
+.computer-progress-track-compact {
+  width: min(210px, 80%);
+  height: 3px;
+  margin: 11px 0 0;
+}
+
+.computer-screen-thumbnail .computer-setup-expectation,
+.computer-screen-thumbnail .computer-progress-phase {
+  max-width: 230px;
+  font-size: var(--frock-text-xs);
+}
+
+.computer-screen-thumbnail .computer-progress-phase {
+  margin-top: 6px;
 }
 
 .computer-progress-meta {
@@ -306,6 +256,30 @@ button.computer-screen {
 
   to {
     transform: translateX(350%);
+  }
+}
+
+@keyframes computer-progress-determinate {
+  from {
+    transform: scaleX(var(--computer-progress-from));
+  }
+
+  to {
+    transform: scaleX(var(--computer-progress-to));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .computer-progress-track > span {
+    animation: none;
+  }
+
+  .computer-progress-track.is-determinate > span {
+    transition: none;
+  }
+
+  .computer-progress-track.is-css-timed > span {
+    transform: scaleX(var(--computer-progress-from));
   }
 }
 

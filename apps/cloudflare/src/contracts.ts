@@ -808,6 +808,13 @@ export interface GatewayDependencies {
     userId: string,
     appletId: string,
   ): { fetch(request: Request): Promise<Response> };
+  /** Authenticated observer transport into the Bot Durable Object. */
+  openBotStateChannel?(
+    userId: string,
+    botId: string,
+    request: Request,
+    context: { isAdmin: boolean; authMode: string },
+  ): Promise<Response>;
   /** Absent when the deployment publishes no Catalog; `/catalog/v1/*` then 503s. */
   catalog?: CatalogGatewayStore;
   /** Absent, or with no token, when the deployment publishes no `/api/debug`. */

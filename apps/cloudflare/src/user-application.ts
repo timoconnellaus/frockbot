@@ -122,6 +122,7 @@ function packageUiArtifactOrigin(requestUrl: URL): string {
 function withSecurityHeaders(
   response: Response,
   artifactOrigin: string,
+  applicationUrl: URL,
 ): Response {
   const secured = new Response(response.body, response);
   secured.headers.set("x-content-type-options", "nosniff");
@@ -133,7 +134,7 @@ function withSecurityHeaders(
     // projections and neither becomes an authority in the hosted client. An
     // Applet's own UI is another page on the same artifact origin, nested by
     // the Applets canvas page, so the origin already named here covers it.
-    `default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-src ${artifactOrigin} https://*.sprites.app; frame-ancestors 'none'; base-uri 'none'`,
+    `default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self' ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${artifactOrigin} https://*.sprites.app; frame-ancestors 'none'; base-uri 'none'`,
   );
   return secured;
 }
@@ -206,6 +207,7 @@ export function createUserApplication() {
           },
         ),
         packageUiArtifactOrigin(url),
+        url,
       );
     }
     if (request.method === "GET" && url.pathname === "/app.js") {
@@ -217,6 +219,7 @@ export function createUserApplication() {
           },
         }),
         packageUiArtifactOrigin(url),
+        url,
       );
     }
     if (request.method === "GET" && url.pathname === "/app.css") {
@@ -228,6 +231,7 @@ export function createUserApplication() {
           },
         }),
         packageUiArtifactOrigin(url),
+        url,
       );
     }
     if (request.method === "GET" && url.pathname === "/favicon.ico") {
@@ -241,6 +245,7 @@ export function createUserApplication() {
           },
         }),
         packageUiArtifactOrigin(url),
+        url,
       );
     }
     if (request.method === "GET" && url.pathname === "/app-manifest") {

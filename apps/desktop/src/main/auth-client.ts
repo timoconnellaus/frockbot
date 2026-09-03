@@ -3,7 +3,7 @@ import { storage } from "@better-auth/electron/storage";
 import { DesktopAuthCapability } from "@frockbot/plugin-auth/desktop";
 import { createAuthClient } from "better-auth/client";
 import type { Context } from "cordis";
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, shell, type Session } from "electron";
 import {
   decodeDesktopAuthCallbackToken,
   decodeDesktopAuthRequest,
@@ -85,6 +85,7 @@ export interface PreparedElectronDesktopAuthRuntime {
   useDevelopmentIdentity: boolean;
   authClient: ElectronAuthClient;
   getWindow(): BrowserWindow | null;
+  prepareRendererSession(session: Session): Promise<void>;
 }
 
 export function prepareElectronDesktopAuthRuntime(): PreparedElectronDesktopAuthRuntime {
@@ -93,6 +94,37 @@ export function prepareElectronDesktopAuthRuntime(): PreparedElectronDesktopAuth
     process.env.FROCKBOT_AUTH_BASE_URL,
   );
   const authClient = createElectronAuthClient(authBaseUrl);
+  const rendererCookieNames = new Set<string>();
+  const prepareRendererSession = async (electronSession: Session) => {
+    for (const name of rendererCookieNames) {
+      await electronSession.cookies.remove(applicationUrl, name);
+    }
+    rendererCookieNames.clear();
+    const cookies = new Map<string, string>();
+    if (isLoopbackOrigin(authBaseUrl) && isLoopbackOrigin(applicationUrl)) {
+      cookies.set("frockbot_dev_user", "development");
+    } else {
+      for (const part of authClient.getCookie().split(";")) {
+        const separator = part.indexOf("=");
+        if (separator <= 0) continue;
+        const name = part.slice(0, separator).trim();
+        const value = part.slice(separator + 1).trim();
+        if (name && value) cookies.set(name, value);
+      }
+    }
+    const secure = new URL(applicationUrl).protocol === "https:";
+    for (const [name, value] of cookies) {
+      await electronSession.cookies.set({
+        url: applicationUrl,
+        name,
+        value,
+        httpOnly: true,
+        secure,
+        sameSite: "lax",
+      });
+      rendererCookieNames.add(name);
+    }
+  };
   setupDisposableAuthMain(authClient, app.isReady(), () => null);
   return {
     applicationUrl,
@@ -101,6 +133,7 @@ export function prepareElectronDesktopAuthRuntime(): PreparedElectronDesktopAuth
       isLoopbackOrigin(authBaseUrl) && isLoopbackOrigin(applicationUrl),
     authClient,
     getWindow: () => BrowserWindow.getAllWindows()[0] ?? null,
+    prepareRendererSession,
   };
 }
 
@@ -163,12 +196,17 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
                     "Authentication did not return a user",
                 );
               }
+              const window = getWindow();
+              if (window) {
+                await this.runtime.prepareRendererSession(
+                  window.webContents.session,
+                );
+              }
               sendAuthEvent({
                 schemaVersion: 1,
                 type: "auth/authenticated",
                 user: desktopAuthUser(session.data.user),
               });
-              const window = getWindow();
               window?.show();
               window?.focus();
             }
@@ -285,6 +323,10 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
       }
       const result = await authClient.signOut();
       if (result.error) throw new Error(result.error.message);
+      const window = getWindow();
+      if (window) {
+        await this.runtime.prepareRendererSession(window.webContents.session);
+      }
       sendAuthEvent({
         schemaVersion: 1,
         type: "auth/user-updated",

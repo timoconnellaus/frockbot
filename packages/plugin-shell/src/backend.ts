@@ -604,6 +604,16 @@ export interface ShellBotBackendHost {
    * store as a second place to look. See `createR2PackageArtifactStore`.
    */
   bundledPackageArtifacts?: ReadonlyMap<string, string>;
+  invalidateComputerProjectionFile?(
+    userId: string,
+    botId: string,
+    kind: "screenshots" | "doctor",
+  ): void;
+  /** Package deadlines composed into the Bot authority's one durable alarm. */
+  scheduledDeadlines?(transaction: DurableObjectTransaction): Promise<number[]>;
+  scheduledWorkInFlight?(): boolean;
+  deferScheduledWork?(transaction: DurableObjectTransaction): Promise<void>;
+  settleScheduledWork?(): Promise<void>;
 }
 
 /** The narrow storage seam the Bot's announcement log is written through. */
@@ -700,6 +710,11 @@ export class ShellBotBackendContribution {
    */
   private readonly tasks: TaskStore;
   private readonly subagentBinding: SubagentDurableBindingV1 | undefined;
+  private readonly invalidateComputerProjectionFile?: ShellBotBackendHost["invalidateComputerProjectionFile"];
+  private readonly hostScheduledDeadlines?: ShellBotBackendHost["scheduledDeadlines"];
+  private readonly hostScheduledWorkInFlight?: ShellBotBackendHost["scheduledWorkInFlight"];
+  private readonly hostDeferScheduledWork?: ShellBotBackendHost["deferScheduledWork"];
+  private readonly hostSettleScheduledWork?: ShellBotBackendHost["settleScheduledWork"];
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
@@ -709,6 +724,12 @@ export class ShellBotBackendContribution {
     this.bundledPackageArtifacts = host.bundledPackageArtifacts;
     this.lifecycleAdmission = host.assertLifecycleActive;
     this.outboundFetch = host.outboundFetch;
+    this.invalidateComputerProjectionFile =
+      host.invalidateComputerProjectionFile;
+    this.hostScheduledDeadlines = host.scheduledDeadlines;
+    this.hostScheduledWorkInFlight = host.scheduledWorkInFlight;
+    this.hostDeferScheduledWork = host.deferScheduledWork;
+    this.hostSettleScheduledWork = host.settleScheduledWork;
     const routines = createBotRoutines(
       host.state.storage,
       createBotRoutineHookMinter(
@@ -742,7 +763,8 @@ export class ShellBotBackendContribution {
         terminalRecords: (input) => this.terminalPackageRecords(input),
         scheduledDeadlines: (transaction) =>
           this.scheduledDeadlines(transaction),
-        scheduledWorkInFlight: () => false,
+        scheduledWorkInFlight: () =>
+          this.hostScheduledWorkInFlight?.() ?? false,
         deferScheduledWork: (transaction) =>
           this.deferScheduledWork(transaction),
         settleScheduledWork: () => this.settleScheduledWork(),
@@ -2824,6 +2846,9 @@ export class ShellBotBackendContribution {
       // reconciles a child that never reported, and the child runs the Turn it
       // was handed on its next alarm rather than on a floating promise.
       ...(await this.subagentDeadlines(transaction)),
+      ...(this.hostScheduledDeadlines
+        ? await this.hostScheduledDeadlines(transaction)
+        : []),
     ];
   }
 
@@ -2867,6 +2892,7 @@ export class ShellBotBackendContribution {
     // A Routine's deadline is a debt, so the scheduler holds it rather than
     // moving it while other durable work remains in flight.
     await this.routineScheduler.defer(transaction);
+    await this.hostDeferScheduledWork?.(transaction);
   }
 
   private async settleScheduledWork(): Promise<void> {
@@ -2875,6 +2901,7 @@ export class ShellBotBackendContribution {
     await this.reconcileOverdueTasks();
     await this.expireDueApprovals();
     await this.replayPendingWakeNotifications();
+    await this.hostSettleScheduledWork?.();
     // The alarm that woke this object has been consumed. Re-arm on whatever is
     // owed next, or a Routine that fired once would never fire again.
     await this.ctx.storage.transaction((transaction) =>
@@ -4291,6 +4318,21 @@ export class ShellBotBackendContribution {
               // Prompt assembly reads the Bot DO's Step 1 lease record
               // directly; passing storage wakes no Computer.
               computerControlRecords: this.ctx.storage,
+              ...(this.invalidateComputerProjectionFile
+                ? {
+                    computerProjectionFiles: {
+                      invalidate: (
+                        botId: string,
+                        kind: "screenshots" | "doctor",
+                      ) =>
+                        this.invalidateComputerProjectionFile?.(
+                          identity.userId,
+                          botId,
+                          kind,
+                        ),
+                    },
+                  }
+                : {}),
               // A computerUse child is the holder of the User-wide lease its
               // parent acquired. Its guarded commands must name that same
               // durable task owner or the shared fence would refuse itself.
@@ -4514,6 +4556,13 @@ export class ShellBotBackendContribution {
 
   async validateIdentity(identity: BotIdentity): Promise<void> {
     return this.authority.validateIdentity(identity);
+  }
+
+  /** Recompute the Bot authority's one alarm inside a Package write transaction. */
+  async refreshScheduledWork(
+    transaction: DurableObjectTransaction,
+  ): Promise<void> {
+    await this.authority.refreshRecoveryAlarm(transaction);
   }
 
   async listNotifications(): Promise<BotNotificationIntent[]> {

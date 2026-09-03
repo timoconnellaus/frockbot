@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   PACKAGE_UI_CSP,
+  isPackageUiArtifactOriginFor,
   packageUiCspV1,
   servePackageUiArtifact,
 } from "./gateway.ts";
@@ -64,5 +65,30 @@ describe("Package UI artifact route", () => {
       (await servePackageUiArtifact(request, new URL(request.url), artifacts))
         .status,
     ).toBe(404);
+  });
+});
+
+describe("the Applet socket's origin admission", () => {
+  test("admits only this gateway's own artifact origin", () => {
+    const gateway = new URL("https://bot.frockbot.com/api/applets/x/socket");
+    expect(
+      isPackageUiArtifactOriginFor("https://ui.bot.frockbot.com", gateway),
+    ).toBe(true);
+    expect(
+      isPackageUiArtifactOriginFor("https://ui.other.example", gateway),
+    ).toBe(false);
+    expect(
+      isPackageUiArtifactOriginFor("http://ui.bot.frockbot.com", gateway),
+    ).toBe(false);
+    // Development: the app on either loopback spelling, the pages on
+    // `ui.localhost`, both on the same port.
+    const local = new URL("http://127.0.0.1:8787/api/applets/x/socket");
+    expect(
+      isPackageUiArtifactOriginFor("http://ui.localhost:8787", local),
+    ).toBe(true);
+    expect(
+      isPackageUiArtifactOriginFor("http://ui.localhost:9999", local),
+    ).toBe(false);
+    expect(isPackageUiArtifactOriginFor("not a url", local)).toBe(false);
   });
 });
