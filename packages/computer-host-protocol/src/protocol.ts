@@ -21,7 +21,7 @@ export const COMPUTER_HOST_PROTOCOL_VERSION = 1;
 /** Header carrying the shared secret between the two Workers and the container. */
 export const COMPUTER_HOST_TOKEN_HEADER = "x-frockbot-host-token";
 
-/** NDJSON media type used by a streaming exec response. */
+/** NDJSON media type used by a streaming Computer host response. */
 export const COMPUTER_HOST_STREAM_MEDIA_TYPE = "application/x-ndjson";
 
 /**
@@ -104,6 +104,11 @@ export interface ComputerHostEnvelopeV1 {
 
 export interface ComputerHostOpenOperationV1 {
   kind: "open";
+  /**
+   * True for provisioning frames followed by one terminal result, false or
+   * absent for one buffered answer. Absence is the pre-streaming V1 shape.
+   */
+  stream?: boolean;
 }
 
 export interface ComputerHostExecOperationV1 {
@@ -382,6 +387,16 @@ export interface ComputerHostProblemV1 {
   retryable: boolean;
 }
 
+export type ComputerHostOpenFrameV1 =
+  | { type: "progress"; progress: ComputerHostProvisioningV1 }
+  | { type: "result"; result: ComputerHostOpenResultV1 }
+  | {
+      type: "error";
+      code: ComputerHostErrorCodeV1;
+      message: string;
+      retryable: boolean;
+    };
+
 export type ComputerHostExecFrameV1 =
   | { type: "stdout"; dataBase64: string }
   | { type: "stderr"; dataBase64: string }
@@ -606,6 +621,12 @@ function decodeOperation(
 ): ComputerHostOperationV1 {
   switch (kind) {
     case "open":
+      return {
+        kind,
+        ...(value.stream === undefined
+          ? {}
+          : { stream: boolean(value.stream, "Computer open stream") }),
+      };
     case "cancel":
       return { kind };
     case "exec":
@@ -723,7 +744,7 @@ function decodeOperation(
 
 const OPERATION_FIELDS: Record<ComputerHostOperationKindV1, readonly string[]> =
   {
-    open: [],
+    open: ["stream"],
     exec: [
       "script",
       "cwd",
@@ -1187,7 +1208,64 @@ export function decodeComputerHostCancelResultV1(
   };
 }
 
-// --- exec frames -----------------------------------------------------------
+// --- stream frames ---------------------------------------------------------
+
+/** One open-stream NDJSON line, newline included. */
+export function encodeComputerHostOpenFrameV1(
+  frame: ComputerHostOpenFrameV1,
+): string {
+  return `${JSON.stringify(frame)}\n`;
+}
+
+export function decodeComputerHostOpenFrameV1(
+  line: string,
+): ComputerHostOpenFrameV1 {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    fail("Computer open frame is not JSON");
+  }
+  const value = object(parsed, "Computer open frame");
+  if (value.type === "progress") {
+    exactly(value, ["type", "progress"], "Computer open frame");
+    return {
+      type: "progress",
+      progress: decodeComputerHostProvisioningV1(
+        value.progress,
+        "Computer open frame",
+      ),
+    };
+  }
+  if (value.type === "result") {
+    exactly(value, ["type", "result"], "Computer open frame");
+    return {
+      type: "result",
+      result: decodeComputerHostOpenResultV1(value.result),
+    };
+  }
+  if (value.type === "error") {
+    exactly(
+      value,
+      ["type", "code", "message", "retryable"],
+      "Computer open frame",
+    );
+    if (!ERROR_CODES.includes(value.code as ComputerHostErrorCodeV1)) {
+      fail("Computer open frame code is invalid");
+    }
+    return {
+      type: "error",
+      code: value.code as ComputerHostErrorCodeV1,
+      message: boundedString(
+        value.message,
+        COMPUTER_HOST_LIMITS.message,
+        "Computer open frame message",
+      ),
+      retryable: boolean(value.retryable, "Computer open frame retryable"),
+    };
+  }
+  return fail("Computer open frame type is invalid");
+}
 
 /** One NDJSON line, newline included. */
 export function encodeComputerHostExecFrameV1(
@@ -1267,31 +1345,48 @@ export function decodeComputerHostExecFrameV1(
  * transport may split or coalesce anywhere, so a frame boundary is the newline
  * this decoder finds and never the chunk the transport delivered.
  */
-export class ComputerHostExecFrameReaderV1 {
+class ComputerHostFrameReaderV1<Frame> {
   private buffer = "";
   private readonly decoder = new TextDecoder();
+  private readonly decodeFrame: (line: string) => Frame;
+
+  constructor(decodeFrame: (line: string) => Frame) {
+    this.decodeFrame = decodeFrame;
+  }
 
   /** Frames completed by this chunk, in order. */
-  push(chunk: Uint8Array | string): ComputerHostExecFrameV1[] {
+  push(chunk: Uint8Array | string): Frame[] {
     this.buffer +=
       typeof chunk === "string"
         ? chunk
         : this.decoder.decode(chunk, { stream: true });
-    const frames: ComputerHostExecFrameV1[] = [];
+    const frames: Frame[] = [];
     let newline = this.buffer.indexOf("\n");
     while (newline >= 0) {
       const line = this.buffer.slice(0, newline).trim();
       this.buffer = this.buffer.slice(newline + 1);
-      if (line) frames.push(decodeComputerHostExecFrameV1(line));
+      if (line) frames.push(this.decodeFrame(line));
       newline = this.buffer.indexOf("\n");
     }
     return frames;
   }
 
   /** The trailing frame of a stream that ended without its final newline. */
-  end(): ComputerHostExecFrameV1[] {
+  end(): Frame[] {
     const line = this.buffer.trim();
     this.buffer = "";
-    return line ? [decodeComputerHostExecFrameV1(line)] : [];
+    return line ? [this.decodeFrame(line)] : [];
+  }
+}
+
+export class ComputerHostOpenFrameReaderV1 extends ComputerHostFrameReaderV1<ComputerHostOpenFrameV1> {
+  constructor() {
+    super(decodeComputerHostOpenFrameV1);
+  }
+}
+
+export class ComputerHostExecFrameReaderV1 extends ComputerHostFrameReaderV1<ComputerHostExecFrameV1> {
+  constructor() {
+    super(decodeComputerHostExecFrameV1);
   }
 }

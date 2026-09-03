@@ -1,9 +1,9 @@
-// The sidebar Computer strip and minimal hosted viewer (P1–P4). The browser
+// The right-panel Computer card and minimal hosted viewer (P1–P4). The browser
 // routes stand in for the unavailable Computer host and Sprite origin while
 // the shell, client state machine, confirmation, iframe sandbox and fragment
 // takeover path remain the production implementation.
 import type { Page } from "@playwright/test";
-import { test, expect, provisionThroughUi, revealSidebar } from "./fixtures.ts";
+import { test, expect, provisionThroughUi } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 
 const viewerUrl =
@@ -94,7 +94,7 @@ async function installFakeComputer(page: Page): Promise<void> {
   );
 }
 
-test("the sidebar strip shows the Computer and expands on first click", async ({
+test("the right-panel card shows the Computer and expands on first click", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -108,15 +108,17 @@ test("the sidebar strip shows the Computer and expands on first click", async ({
     botName: "Watched",
   });
 
-  const strip = page.getByRole("button", { name: /^Open Computer/ });
-  await expect(strip).toBeVisible();
-  await expect(strip).toHaveAttribute("aria-label", /ready/);
+  const panel = page.getByRole("region", { name: "Bot panel" });
+  const card = panel.getByRole("button", {
+    name: "Open computer in full window",
+  });
+  await expect(card).toBeVisible();
   await page.screenshot({
     path: "e2e/test-results/computer-presence-desktop.png",
   });
 
   // The first click only expands a view-only frame.
-  await strip.click();
+  await card.click();
   const overlay = page.locator(".computer-overlay");
   await expect(overlay.first()).toBeVisible();
   const frame = page.frameLocator('iframe[title="Computer"]');
@@ -152,7 +154,7 @@ test("the sidebar strip shows the Computer and expands on first click", async ({
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
-test("the sidebar strip fits the mobile shell", async ({
+test("the right-panel Computer card fits the mobile shell", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -165,15 +167,18 @@ test("the sidebar strip fits the mobile shell", async ({
     botName: "Pocket",
   });
   await page.setViewportSize({ width: 390, height: 844 });
-  // The shell re-lays out after the resize; reveal only once the mobile menu
-  // exists, or the desktop sidebar that is still on screen collapses under us.
+  // The shell re-lays out after the resize; open the right-panel drawer only
+  // once its mobile toggle exists.
   await expect(
     page.getByRole("button", { name: "Show navigation" }),
   ).toBeVisible();
-  await revealSidebar(page);
-  const strip = page.getByRole("button", { name: /^Open Computer/ });
-  await expect(strip).toBeVisible();
-  await strip.click();
+  await page.getByRole("button", { name: "Show side panel" }).click();
+  const panel = page.getByRole("region", { name: "Bot panel" });
+  const card = panel.getByRole("button", {
+    name: "Open computer in full window",
+  });
+  await expect(card).toBeVisible();
+  await card.click();
   await expect(page.locator(".computer-overlay")).toBeVisible();
   await page.getByRole("button", { name: "Take control" }).click();
   await page

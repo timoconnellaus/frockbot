@@ -41,13 +41,13 @@ minutes of looking can lose the display to another Bot.
 
 ## Resolved decisions (owner, 2026-09-02)
 
-- **P1 Sidebar shows durable screenshots, not a live socket.** The sidebar
-  strip renders the newest capture from the Bot's durable screenshots root,
-  addressed by Workspace read URL, so opening the sidebar wakes nothing and
+- **P1 Right panel shows durable screenshots, not a live socket.** The Computer
+  card renders the newest capture from the Bot's durable screenshots root,
+  addressed by Workspace read URL, so rendering the panel wakes nothing and
   holds nothing awake. Change detection is by `contentHash`. A live noVNC
   session exists only while the viewer is expanded.
 - **P2 First click expands, second click takes over, with a confirm.** Clicking
-  the strip opens the full-window viewer **view-only** (noVNC `view_only`), so
+  the card opens the full-window viewer **view-only** (noVNC `view_only`), so
   a stray click never reaches the Bot's browser. Take control is a second,
   explicit action behind a confirm dialog that says the Bot is fenced from this
   desktop until release. Escape or closing the viewer releases control; the
@@ -56,7 +56,7 @@ minutes of looking can lose the display to another Bot.
   tenant's `last-seen` on the Computer, so the slot reclaim never takes a
   display a human is looking at. A dropped viewer socket is a `disconnected`
   phase with a reconnect action, never a frozen frame on `ready`.
-- **P4 Wake on open.** Clicking the strip when the Computer is asleep wakes it
+- **P4 Wake on open.** Clicking the card when the Computer is asleep wakes it
   (the `connect` → `ensure` path). AGENTS.md § Computer and Workspace is
   amended in this PR to say so: "The Computer wakes only when a Bot uses it or
   its User explicitly opens it".
@@ -108,20 +108,18 @@ machine against a fake transport, and one `apps/cloudflare/test/*.workerd.ts`
 proving a viewer session and a control lease end-to-end against the Computer
 host fake.
 
-## Step 2 — the sidebar strip, view-only expand, confirm-to-control
+## Step 2 — the right-panel card, view-only expand, confirm-to-control
 
 **Status:** landed.
 
 **Goal.** P1–P4.
 
-**Owns.** A `frockbot.sidebar-computer` (or the nearest existing sidebar slot;
-check `packages/plugin-shell` for what the shell exposes and add one if none
-fits) mount in `@frockbot/plugin-computer`'s client Contribution; `ComputerCard`
-grows the `disconnected` phase; the viewer session refreshes
-`last-seen` (Computer host `viewer open` touches it, and the hosted client
-renews the session on an interval while expanded).
+**Owns.** The `frockbot.computer` mount in `@frockbot/plugin-computer`'s client
+Contribution; `ComputerCard` includes the `disconnected` phase; the viewer
+session refreshes `last-seen` (Computer host `viewer open` touches it, and the
+hosted client renews the session on an interval while expanded).
 
-**Tests.** Strip renders the newest durable capture and re-renders only on a
+**Tests.** The card renders the newest durable capture and re-renders only on a
 new `contentHash`; expand opens view-only; take control requires the confirm;
 Escape releases; a dead socket flips to `disconnected`; `last-seen` is
 touched by `viewer open` and by renewal (container test); the slot reclaim
@@ -184,4 +182,4 @@ checks; `AGENTS.md` (P4).
   event, a log, or the URL bar.
 - **`last-seen` from a viewer keeps the slot but not the Sprite.** Sprites pause
   on their own idle rule; a paused Sprite drops the socket, which is exactly
-  the `disconnected` phase. Do not add a keepalive for the sidebar strip.
+  the `disconnected` phase. Do not add a keepalive for the collapsed card.

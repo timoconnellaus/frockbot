@@ -122,7 +122,7 @@ describe("Computer client state machine", () => {
     });
   });
 
-  test("an idle strip click expands before its connect request", () => {
+  test("an idle card click expands before its connect request", () => {
     const idle = {
       ...initialComputerMachineState(),
       phase: "idle" as const,
