@@ -6,7 +6,7 @@
 // completion becomes visible is here — a count of what has not been read, and a
 // drawer that reads it. Acknowledging is a command, never a side effect of
 // opening the drawer, so a glance does not clear the badge.
-import { UiButton, UiIcon } from "@frockbot/client-ui";
+import { formatRelativeMomentV1, UiButton, UiIcon } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computed, inject, ref, watch } from "vue";
 import { routinesStateKey } from "./state.js";
@@ -38,9 +38,26 @@ function toggle(): void {
   if (open.value && botId.value) void routines.value.loadInbox(botId.value);
 }
 
+/** What is unread and on screen right now — never "everything unread". */
+const unreadOnScreen = computed(() =>
+  routines.value.inbox
+    .filter((entry) => !entry.acknowledged)
+    .map((entry) => entry.entryId),
+);
+
 function acknowledge(entryIds: string[]): void {
-  if (!botId.value) return;
+  if (!botId.value || entryIds.length === 0) return;
   void routines.value.acknowledgeInbox(botId.value, entryIds);
+}
+
+/**
+ * "Mark all read" means the entries the reader can see, not every unread entry
+ * the object holds. An empty list acknowledges everything, including a firing
+ * that landed a second ago and has never been rendered — with a `@every 1m`
+ * Routine that is a completion silently marked read and never read.
+ */
+function markAllRead(): void {
+  acknowledge(unreadOnScreen.value);
 }
 </script>
 
@@ -61,10 +78,10 @@ function acknowledge(entryIds: string[]): void {
       <header class="routine-inbox__header">
         <h2>Routine completions</h2>
         <UiButton
-          v-if="count > 0"
+          v-if="unreadOnScreen.length > 0"
           variant="ghost"
           :disabled="routines.busy"
-          @click="acknowledge([])"
+          @click="markAllRead()"
           >Mark all read</UiButton
         >
       </header>
@@ -81,7 +98,9 @@ function acknowledge(entryIds: string[]): void {
           <p class="routine-inbox__attribution">{{ entry.attribution }}</p>
           <p class="routine-inbox__text">{{ entry.text }}</p>
           <footer class="routine-inbox__meta">
-            <span>{{ entry.createdAt }}</span>
+            <time :datetime="entry.createdAt">{{
+              formatRelativeMomentV1(entry.createdAt)
+            }}</time>
             <UiButton
               v-if="!entry.acknowledged"
               variant="ghost"

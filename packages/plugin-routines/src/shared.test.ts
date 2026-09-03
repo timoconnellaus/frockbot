@@ -97,10 +97,14 @@ describe("RoutineViewV1", () => {
     });
     if (receipt.status !== "applied") throw new Error("unreachable");
     const view = receipt.routine;
-    // The Bot writer's Session and Turn stay in the durable record.
-    expect(view.createdBy).toEqual({ kind: "bot", botId: "scout" });
-    expect(JSON.stringify(view)).not.toContain("tim:scout");
-    expect(JSON.stringify(view)).not.toContain("turn-1");
+    // The Bot writer's Session and Turn travel with it: they are provenance,
+    // not key material, and the journey asks the record to name the Turn.
+    expect(view.createdBy).toEqual({
+      kind: "bot",
+      botId: "scout",
+      sessionId: "tim:scout",
+      turnId: "turn-1",
+    });
     expect(decodeRoutineViewV1(JSON.parse(JSON.stringify(view)))).toEqual(view);
     expect(
       decodeRoutineCommandReceiptV1(JSON.parse(JSON.stringify(receipt))),

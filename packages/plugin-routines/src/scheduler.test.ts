@@ -10,6 +10,7 @@ import { RoutineInboxStore } from "./inbox-store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
 import {
   routineFireKeyV1,
+  routineKeyV1,
   routineScheduleKeyV1,
   ROUTINE_FAILURE_PAUSE_AFTER,
   ROUTINE_FIRE_LEASE_MS,
@@ -575,7 +576,7 @@ describe("an abandoned firing", () => {
   });
 
   test("releases a lock nothing can decode", async () => {
-    const { storage, scheduler, store, create } = harness({
+    const { storage, time, scheduler, store, create } = harness({
       start: "2026-01-01T08:59:00.000Z",
       schedule: "0 9 * * *",
     });
@@ -786,5 +787,102 @@ describe("an undecodable Routine record", () => {
     );
     // And the healthy Routine still fires.
     expect(await drain(scheduler)).toHaveLength(1);
+  });
+});
+
+describe("a Routine deleted while it was firing", () => {
+  /**
+   * Delete sweeps the record, the clock, the lock, anything queued and the
+   * whole run log. A firing already in flight settled afterwards and wrote a
+   * run entry back under the swept key and an inbox entry naming a Routine
+   * that no longer exists — an orphan the user cannot open, delete, or
+   * explain.
+   */
+  test("leaves no run entry and no inbox entry behind", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER);
+    time.set("2026-01-01T09:00:00.000Z");
+
+    const inbox = new RoutineInboxStore(storage);
+    await scheduler.settle(async () => {
+      // The user deletes it from the panel while the Turn is still running.
+      await store.execute(
+        {
+          schemaVersion: 1,
+          type: "routine/delete",
+          commandId: "cmd-delete",
+          botId: "scout",
+          routineId: "brief",
+        },
+        USER,
+      );
+      return { status: "failed", summary: "the model refused" };
+    });
+
+    expect(
+      storage.keys().filter((key) => key.startsWith(ROUTINE_RUN_PREFIX)),
+    ).toEqual([]);
+    expect(await inbox.list()).toEqual([]);
+    expect(await storage.get(routineFireKeyV1("brief"))).toBeUndefined();
+    expect(await storage.get(routineScheduleKeyV1("brief"))).toBeUndefined();
+    expect(await scheduler.deadlines(storage)).toEqual([]);
+  });
+
+  test("a firing whose Routine still exists settles as it always did", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER);
+    time.set("2026-01-01T09:00:00.000Z");
+    const inbox = new RoutineInboxStore(storage);
+    await drain(scheduler, { status: "failed", summary: "the model refused" });
+    expect(
+      storage.keys().filter((key) => key.startsWith(ROUTINE_RUN_PREFIX)),
+    ).not.toEqual([]);
+    expect(await inbox.list()).toHaveLength(1);
+  });
+});
+
+describe("a stored schedule with no occurrence left", () => {
+  /**
+   * The write path refuses these now, but a record written before it did — or
+   * by an older deploy — is still in storage. The claim used to fall back to
+   * `now + ROUTINE_MISSED_GRACE_MS` when the schedule named no next run, so
+   * the Routine fired a real model Turn every five minutes for ever, with
+   * nothing on screen and no bound on the spend.
+   */
+  test("turns itself off and says why, instead of firing every five minutes", async () => {
+    const { storage, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER);
+    // February the 30th, straight into storage, past the write-time guard.
+    const stored = (await storage.get(routineKeyV1("brief"))) as Record<
+      string,
+      unknown
+    >;
+    await storage.put(routineKeyV1("brief"), {
+      ...stored,
+      schedule: "0 0 30 2 *",
+    });
+    await storage.delete(routineScheduleKeyV1("brief"));
+
+    expect(await drain(scheduler)).toEqual([]);
+
+    const listed = await store.list("scout");
+    expect(listed.routines[0]!.enabled).toBe(false);
+    const runs = await store.listRuns("scout", "brief");
+    expect(runs.entries[0]!.status).toBe("skipped");
+    expect(runs.entries[0]!.summary).toContain("never comes around again");
+    // And the alarm no longer has anything to arm on for it.
+    expect(await scheduler.deadlines(storage)).toEqual([]);
+
+    // Draining again does not fire it either: it is off and its clock is gone.
+    expect(await drain(scheduler)).toEqual([]);
   });
 });

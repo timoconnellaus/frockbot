@@ -194,9 +194,10 @@ export class FakeAuditSql implements AuditSqlV1 {
         (left, right) => -order(left, right),
       );
       if (!sql.includes("LIMIT")) return answer(descending);
-      const limit = Number(bindings[bindings.length - 2]);
-      const offset = Number(bindings[bindings.length - 1]);
-      return answer(descending.slice(offset, offset + limit));
+      // Paging is a key range now, not an offset: the limit is the last
+      // binding and the page starts wherever the cursor predicate left off.
+      const limit = Number(bindings[bindings.length - 1]);
+      return answer(descending.slice(0, limit));
     }
     throw new Error(`FakeAuditSql does not recognise: ${sql}`);
   }
@@ -208,12 +209,33 @@ export class FakeAuditSql implements AuditSqlV1 {
     if (where.startsWith("at <")) {
       return this.rowsIn(table).filter((row) => row.at < String(values[0]));
     }
+    // The keyset page predicate is always the last clause, and it is the one
+    // clause that is not `column = ?`.
+    const keysetAt = where.indexOf("(at < ?");
+    const columnWhere =
+      keysetAt < 0 ? where : where.slice(0, keysetAt).replace(/ AND $/u, "");
     const predicates: Array<(row: FakeRow) => boolean> = [];
-    for (const clause of where.split(" AND ").filter(Boolean)) {
+    for (const clause of columnWhere.split(" AND ").filter(Boolean)) {
       const column = clause.split(" ")[0] as keyof FakeRow;
       if (!COLUMNS.includes(column as (typeof COLUMNS)[number])) continue;
       const expected = String(values.shift());
       predicates.push((row) => String(row[column]) === expected);
+    }
+    if (keysetAt >= 0) {
+      const at = String(values[0]);
+      const botId = String(values[2]);
+      const runId = String(values[5]);
+      const occurrenceId = String(values[9]);
+      predicates.push(
+        (row) =>
+          row.at < at ||
+          (row.at === at && row.bot_id > botId) ||
+          (row.at === at && row.bot_id === botId && row.run_id > runId) ||
+          (row.at === at &&
+            row.bot_id === botId &&
+            row.run_id === runId &&
+            row.occurrence_id > occurrenceId),
+      );
     }
     return this.rowsIn(table).filter((row) =>
       predicates.every((predicate) => predicate(row)),

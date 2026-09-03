@@ -8,7 +8,12 @@
 // reconciliation rule forbids. The same goes for truncation — a table trimmed
 // to its retention bound says so above the rows rather than quietly answering
 // with fewer.
-import { UiAnchor, UiButton, UiIcon } from "@frockbot/client-ui";
+import {
+  formatMomentV1,
+  UiAnchor,
+  UiButton,
+  UiIcon,
+} from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { computed, inject, watch } from "vue";
@@ -62,9 +67,14 @@ function target(entry: AuditEntryV1): string {
   return entry.target.slice("remote:".length);
 }
 
+/**
+ * The moment, in the reader's own zone and in the house order. It used to be a
+ * bare `toLocaleString()`, which for an Australian reader rendered a US
+ * month-first date — the one column beside it that a person reads to orient
+ * themselves.
+ */
 function when(entry: AuditEntryV1): string {
-  const parsed = Date.parse(entry.at);
-  return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : entry.at;
+  return formatMomentV1(entry.at);
 }
 </script>
 
@@ -164,16 +174,18 @@ function when(entry: AuditEntryV1): string {
         :key="`${entry.runId}:${entry.occurrenceId}`"
         class="audit-row"
       >
-        <span class="audit-row__time">{{ when(entry) }}</span>
+        <time class="audit-row__time" :datetime="entry.at">{{
+          when(entry)
+        }}</time>
         <span class="audit-row__kind" :data-kind="entry.kind">{{
           entry.kind
         }}</span>
         <span class="audit-row__target">{{ target(entry) }}</span>
-        <span class="audit-row__preview" :title="entry.toolName">{{
-          entry.preview
-        }}</span>
         <span class="audit-row__outcome" :data-outcome="entry.outcome">{{
           entry.outcome
+        }}</span>
+        <span class="audit-row__preview" :title="entry.toolName">{{
+          entry.preview
         }}</span>
       </li>
     </ol>
@@ -306,8 +318,11 @@ function when(entry: AuditEntryV1): string {
 .audit-row {
   display: grid;
   align-items: baseline;
-  gap: 8px;
-  grid-template-columns: auto auto auto 1fr auto;
+  gap: 4px 8px;
+  /* Time, kind, target, outcome across the top; what happened on its own line
+     underneath, where it has the whole row to say it. */
+  grid-template-areas: "time kind target outcome" "preview preview preview preview";
+  grid-template-columns: auto auto 1fr auto;
   border: 1px solid var(--frock-border);
   border-radius: var(--frock-radius-card);
   padding: 6px 10px;
@@ -315,9 +330,45 @@ function when(entry: AuditEntryV1): string {
   font-size: var(--frock-text-sm);
 }
 
+.audit-row__time {
+  grid-area: time;
+}
+
+.audit-row__kind {
+  grid-area: kind;
+}
+
+.audit-row__target {
+  grid-area: target;
+}
+
+.audit-row__outcome {
+  grid-area: outcome;
+}
+
+.audit-row__preview {
+  grid-area: preview;
+}
+
+/* On a phone the target is the first thing to go: it is the same for every row
+   of a session, while the tool name is the only part that says what happened
+   and used to be clipped to a single character. */
+@media (max-width: 520px) {
+  .audit-row {
+    grid-template-areas: "time kind outcome" "preview preview preview";
+    grid-template-columns: 1fr auto auto;
+  }
+
+  .audit-row__target {
+    display: none;
+  }
+}
+
 .audit-row__time,
 .audit-row__target {
+  overflow: hidden;
   color: var(--frock-text-muted);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

@@ -21,6 +21,7 @@
 // trigger kind, and minting is D3's.
 import {
   isRoutineTimezoneV1,
+  nextRoutineRunV1,
   normalizeRoutineScheduleV1,
   RoutineScheduleError,
 } from "./cron.js";
@@ -161,9 +162,17 @@ export interface RoutineStoreOptionsV1 {
 }
 
 function writerView(writer: RoutineWriterV1): RoutineWriterViewV1 {
+  // The Session and Turn travel with the Bot writer. A Routine a Bot wrote is
+  // provenance, and provenance that cannot name the Turn it came from is only
+  // half a record: "the Bot wrote this" is not answerable to "which Turn?".
   return writer.kind === "user"
     ? { kind: "user" }
-    : { kind: "bot", botId: writer.botId };
+    : {
+        kind: "bot",
+        botId: writer.botId,
+        sessionId: writer.sessionId,
+        turnId: writer.turnId,
+      };
 }
 
 /**
@@ -774,13 +783,28 @@ export class RoutineStore {
       );
     }
     if (decoded.schedule !== undefined) {
+      let normalized;
       try {
-        normalizeRoutineScheduleV1(decoded.schedule, decoded.timezone);
+        normalized = normalizeRoutineScheduleV1(
+          decoded.schedule,
+          decoded.timezone,
+        );
       } catch (error) {
         throw new RoutineDecodeError(
           error instanceof RoutineScheduleError
             ? error.message
             : `Routine schedule is invalid: ${String(error)}`,
+        );
+      }
+      // A syntactically valid expression can still name a moment that never
+      // arrives — `0 0 30 2 *` is February the 30th. It used to be accepted,
+      // and then the clock fell back to "five minutes from now" on every claim,
+      // so the Routine burned a whole model Turn every five minutes for ever.
+      // A schedule that never comes around is not a schedule.
+      const now = this.#now();
+      if (nextRoutineRunV1(normalized, now, now) === undefined) {
+        throw new RoutineDecodeError(
+          `schedule "${decoded.schedule}" never comes around again in ${decoded.timezone}`,
         );
       }
     }

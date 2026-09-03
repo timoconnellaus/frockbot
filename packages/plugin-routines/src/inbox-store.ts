@@ -205,6 +205,33 @@ export interface StoredPendingInputV1 {
   input: PendingBotInputV1;
 }
 
+/**
+ * The inputs one drain carries, under the pending-input bound.
+ *
+ * The bound exists so a burst cannot hand a single Turn an unbounded prompt,
+ * and it used to be a flat `slice(-16)` over everything queued. But the four
+ * input kinds are not interchangeable. A dropped `wake` still has an inbox
+ * entry, so the user can read it and nothing is lost; an `approval`, a
+ * `machine-result` or a `superseded-turn` writes no entry anywhere, so
+ * dropping one silently loses a decision the user made or a result a machine
+ * produced. Those are kept whole and the cap falls on the wakes alone — the
+ * only kind that can be dropped and still be read.
+ */
+export function retainedPendingInputsV1(
+  inputs: readonly PendingBotInputV1[],
+): PendingBotInputV1[] {
+  if (inputs.length <= ROUTINE_PENDING_INPUT_LIMIT) return [...inputs];
+  const durable = inputs.filter((input) => input.kind !== "wake");
+  const budget = ROUTINE_PENDING_INPUT_LIMIT - durable.length;
+  if (budget <= 0) return durable;
+  const keptWakes = new Set(
+    inputs.filter((input) => input.kind === "wake").slice(-budget),
+  );
+  return inputs.filter(
+    (input) => input.kind !== "wake" || keptWakes.has(input),
+  );
+}
+
 export class RoutineInboxStore {
   readonly #storage: RoutineStorageV1;
   readonly #now: () => Date;
@@ -362,7 +389,7 @@ export class RoutineInboxStore {
       // active run, so no firing can settle while it runs and no wake can
       // arrive behind this read; an empty receipt would be a record of nothing.
       if (inputs.length === 0) return [];
-      const retained = inputs.slice(-ROUTINE_PENDING_INPUT_LIMIT);
+      const retained = retainedPendingInputsV1(inputs);
       await transaction.put(receiptKey, {
         schemaVersion: 1,
         runId,
@@ -374,15 +401,40 @@ export class RoutineInboxStore {
     });
   }
 
-  /** Trim the inbox to its retention bound, oldest first. */
+  /** Trim the inbox to its retention bound, acknowledged entries first. */
   async #trimInbox(): Promise<void> {
     const stored = await this.#storage.list<unknown>({
       prefix: ROUTINE_INBOX_PREFIX,
     });
-    const keys = [...stored.keys()].sort();
-    if (keys.length <= ROUTINE_INBOX_LIMIT) return;
-    for (const key of keys.slice(ROUTINE_INBOX_LIMIT)) {
+    // Inbox keys are descending, so ascending key order is newest first and
+    // the oldest entry is the last of them.
+    const entries = [...stored.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .reverse();
+    let excess = entries.length - ROUTINE_INBOX_LIMIT;
+    if (excess <= 0) return;
+    // Read entries go first, oldest read before newest, and only then unread
+    // ones. Trimming purely by age used to drop a completion the reader had
+    // never seen while a dozen they had already acknowledged sat beside it —
+    // the inbox is the only place a firing ever speaks, so what has not been
+    // read is the last thing to lose.
+    const acknowledged: string[] = [];
+    const unread: string[] = [];
+    for (const [key, value] of entries) {
+      let read = false;
+      try {
+        read = decodeRoutineInboxEntryV1(value).acknowledged;
+      } catch {
+        // An entry nothing can decode says nothing to anyone; it is the first
+        // thing worth reclaiming space from.
+        read = true;
+      }
+      (read ? acknowledged : unread).push(key);
+    }
+    for (const key of [...acknowledged, ...unread]) {
+      if (excess <= 0) return;
       await this.#storage.delete(key);
+      excess -= 1;
     }
   }
 
