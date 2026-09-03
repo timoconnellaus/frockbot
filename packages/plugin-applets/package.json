@@ -1,0 +1,30 @@
+{
+  "name": "@frockbot/plugin-applets",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./root": "./src/root.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/kernel-contracts": "workspace:*",
+    "@frockbot/template-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "typescript": "^7.0.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "packages/plugin-applets"
+  }
+}

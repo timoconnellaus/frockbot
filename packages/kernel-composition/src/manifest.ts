@@ -162,6 +162,27 @@ export interface CapabilityDefinition {
   admission?: { turnTypes: TurnTypeV1[]; subagentRoles?: string[] };
 }
 
+/**
+ * One durable Workspace root a Package declares for itself.
+ *
+ * "Durable roots, declared by the Computer Package's Workspace layout and by
+ * Package manifests, survive hibernation, cold start, host migration, and
+ * image rebuild." The Computer half of that sentence has always been real —
+ * `FLY_WORKSPACE_LAYOUT` carries the `package-declared` mount template — but
+ * the manifest half had nowhere to be written, so no Package-declared root
+ * ever reached the durable-root sync. This is that half.
+ *
+ * `scope` is `user` and only `user`: `WorkspaceRootV1` names a
+ * `package-declared` root by User and Package with no Bot in it, and Package
+ * availability is a User-level fact (ADR 0019). A Bot-scoped Package root
+ * would be a root the kernel's own root type cannot address.
+ */
+export interface ManifestDeclaredRootV1 {
+  /** The `rootId`, in the kernel's `package-declared` root-id shape. */
+  id: string;
+  scope: "user";
+}
+
 export interface PackageConfiguration {
   settings: PackageSettingDefinition[];
   connectionTypes: ConnectionTypeDefinition[];
@@ -189,6 +210,8 @@ export interface FrockBotManifest {
   tools?: ManifestToolDeclaration[];
   /** Bot-isolate waterfalls the immutable artifact declares it exports. */
   hooks?: BotIsolateHookEventNameV1[];
+  /** The durable Workspace roots this Package declares. Manifest v3 onward. */
+  roots?: ManifestDeclaredRootV1[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -289,6 +312,45 @@ function decodeManifestHooks(
     throw new Error("manifest hooks contains duplicates");
   }
   return hooks;
+}
+
+/**
+ * The `package-declared` root-id shape, kept identical to the kernel's own
+ * `ROOT_ID` in `kernel-contracts/src/workspace.ts`.
+ *
+ * Restated rather than imported because `kernel-composition` decodes a
+ * manifest without depending on the Workspace contracts; the round-trip test
+ * beside this decoder is what keeps the two from drifting.
+ */
+const MANIFEST_ROOT_ID = /^[a-z][a-z0-9-]{0,127}$/;
+
+function decodeManifestRoots(
+  value: unknown,
+): ManifestDeclaredRootV1[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 8) {
+    throw new Error("manifest roots must be a non-empty bounded array");
+  }
+  const roots = value.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`manifest roots[${index}] must be an object`);
+    }
+    exactFields(entry, ["id", "scope"], `manifest roots[${index}]`);
+    const id = requiredString(entry, "id");
+    if (!MANIFEST_ROOT_ID.test(id)) {
+      throw new Error(`manifest roots[${index}] id is invalid`);
+    }
+    // User and only User: a `package-declared` root names no Bot, so a
+    // Bot-scoped one would be a root the kernel cannot address.
+    if (entry.scope !== "user") {
+      throw new Error(`manifest roots[${index}] scope must be "user"`);
+    }
+    return { id, scope: "user" as const };
+  });
+  if (new Set(roots.map((root) => root.id)).size !== roots.length) {
+    throw new Error("manifest roots contains duplicate ids");
+  }
+  return roots;
 }
 
 function requiredString(record: Record<string, unknown>, key: string): string {
@@ -1404,6 +1466,7 @@ function decodeV3(value: Record<string, unknown>): FrockBotManifest {
   const base = decodeV2(value);
   const tools = decodeManifestTools(value.tools);
   const hooks = decodeManifestHooks(value.hooks);
+  const roots = decodeManifestRoots(value.roots);
   const botIsolate = base.contributions.runtime?.host === "bot-isolate";
   if (botIsolate !== (tools !== undefined)) {
     throw new Error(
@@ -1420,6 +1483,7 @@ function decodeV3(value: Record<string, unknown>): FrockBotManifest {
     configuration: decodeConfiguration(value.configuration, false),
     ...(tools ? { tools } : {}),
     ...(hooks ? { hooks } : {}),
+    ...(roots ? { roots } : {}),
   };
 }
 
@@ -1428,6 +1492,7 @@ function decodeV4(value: Record<string, unknown>): FrockBotManifest {
   const base = decodeV2(value);
   const tools = decodeManifestTools(value.tools);
   const hooks = decodeManifestHooks(value.hooks);
+  const roots = decodeManifestRoots(value.roots);
   const botIsolate = base.contributions.runtime?.host === "bot-isolate";
   if (botIsolate !== (tools !== undefined)) {
     throw new Error(
@@ -1444,6 +1509,7 @@ function decodeV4(value: Record<string, unknown>): FrockBotManifest {
     configuration: decodeConfiguration(value.configuration, true),
     ...(tools ? { tools } : {}),
     ...(hooks ? { hooks } : {}),
+    ...(roots ? { roots } : {}),
   };
 }
 
@@ -1512,6 +1578,7 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
         ...(isV3OrLater(value) ? ["configuration"] : []),
         ...(isV3OrLater(value) ? ["tools"] : []),
         ...(isV3OrLater(value) ? ["hooks"] : []),
+        ...(isV3OrLater(value) ? ["roots"] : []),
       ],
       "manifest",
     );

@@ -10,6 +10,7 @@ import {
   type WorkspaceRootV1,
   type WorkspaceWriterV1,
 } from "@frockbot/kernel-contracts";
+import { workspaceMountPathV1 } from "@frockbot/computer-core";
 import { createObjectWorkspaceFilesV1 } from "@frockbot/workspace-store";
 import {
   createInMemoryObjectBucketV1,
@@ -321,6 +322,28 @@ describe("Fly Workspace layout", () => {
         "user",
       ],
     });
+  });
+
+  // ADR 0022 decision 7: Applet source lives at `applets/<appletId>/` under a
+  // `package-declared` root of the Applets Package. The ids are
+  // `APPLETS_PACKAGE_ID_V1` and `APPLETS_SOURCE_ROOT_ID_V1` in
+  // `@frockbot/plugin-applets/root`, written out here rather than imported so
+  // this provider Package keeps knowing nothing about Applets.
+  test("mounts the Applets source root with no layout change of its own", () => {
+    expect(
+      workspaceMountPathV1(FLY_WORKSPACE_LAYOUT, {
+        kind: "package-declared",
+        userId: USER,
+        packageId: "applets",
+        rootId: "source",
+      }),
+    ).toBe("/home/box/agent-data/user-packages/applets/source");
+    // Read-write, unlike Memory: writing source with a shell is the point.
+    expect(
+      FLY_WORKSPACE_LAYOUT.roots.find(
+        (root) => root.kind === "package-declared",
+      )?.access,
+    ).toBe("read-write");
   });
 });
 

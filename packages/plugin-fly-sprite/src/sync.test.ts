@@ -264,6 +264,17 @@ const MOUNTS = {
   userSkills: "/home/box/agent-data/workflows",
   botMemory: `/home/box/agent-data/agents/${computerBotKey(BOT)}/memory`,
   userMemory: "/home/box/agent-data/user-memory",
+  // ADR 0022 decision 7's Applet source root, resolved from the layout's one
+  // `package-declared` template. Nothing about Applets is in this Package.
+  appletSource: "/home/box/agent-data/user-packages/applets/source",
+};
+
+/** The Applets Package's declared source root, as the host would supply it. */
+const APPLET_SOURCE_PACKAGE_ROOT = { packageId: "applets", rootId: "source" };
+const appletSourceRoot: WorkspaceRootV1 = {
+  kind: "package-declared",
+  userId: USER,
+  ...APPLET_SOURCE_PACKAGE_ROOT,
 };
 
 interface Harness {
@@ -280,6 +291,8 @@ interface Harness {
 function harness(
   options: {
     store?: (files: WorkspaceFilesV1) => WorkspaceFilesV1;
+    /** The `package-declared` roots a host says this User's Packages declare. */
+    packageRoots?: readonly { packageId: string; rootId: string }[];
   } = {},
 ): Harness {
   const bucket = createInMemoryObjectBucketV1();
@@ -302,6 +315,7 @@ function harness(
   const roots = declaredWorkspaceRootsV1(FLY_WORKSPACE_LAYOUT, {
     userId: USER,
     botIds: [BOT],
+    ...(options.packageRoots ? { packageRoots: options.packageRoots } : {}),
   });
   const agent = createFlySpriteSyncV1({
     computer,
@@ -613,6 +627,64 @@ describe("the durable-root sync, Computer to store", () => {
     expect(read.file.generation.generationId).toBe(generation.generationId);
     // The file the store still holds is restored on the Computer.
     expect(sprite.text(`${MOUNTS.skills}/notes.md`)).toBe("keep");
+  });
+});
+
+describe("the durable-root sync, Package-declared roots", () => {
+  // Constitution — Computer and Workspace: "durable roots, declared by the
+  // Computer Package's Workspace layout **and by Package manifests**". The
+  // layout half was always here; a `package-declared` root reaches the sync
+  // only when a host supplies the Packages that declared it, which is what
+  // `declaredPackageRootsV1` in `plugin-shell/src/backend-computer.ts` now
+  // does. Without that list the root below is simply not synchronized.
+  test("a root nobody declared is not synchronized at all", () => {
+    const { roots } = harness();
+    expect(roots.some((root) => root.kind === "package-declared")).toBe(false);
+  });
+
+  test("a declared root round-trips: store to Computer, and a shell write back", async () => {
+    // ADR 0022 decision 7: this is the root Applet source lives in, and both
+    // directions matter — the Bot edits source the store holds, and `applet
+    // build` writes `dist/` with a shell that a publish then reads from the
+    // store.
+    const { sprite, store, sync, roots } = harness({
+      packageRoots: [APPLET_SOURCE_PACKAGE_ROOT],
+    });
+    expect(roots).toContainEqual(appletSourceRoot);
+
+    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    await writeToStore(
+      store,
+      appletSourceRoot,
+      `${appletId}/server.ts`,
+      "export class TodoApplet {}",
+      BOT_WRITER,
+    );
+
+    await sync();
+
+    expect(sprite.text(`${MOUNTS.appletSource}/${appletId}/server.ts`)).toBe(
+      "export class TodoApplet {}",
+    );
+
+    // `applet build` is an ordinary shell write on the Computer.
+    sprite.shellWrite(
+      MOUNTS.appletSource,
+      `${appletId}/dist/server.js`,
+      "export class A{}",
+    );
+    const pushed = await sync();
+
+    const built = await store.read({
+      root: appletSourceRoot,
+      path: `${appletId}/dist/server.js`,
+    });
+    if (built.status !== "ok") throw new Error(built.reason);
+    expect(decoder.decode(built.file.bytes)).toBe("export class A{}");
+    // A shell wrote it, so nothing claims to know which Bot did: the artifact
+    // is data the publish reads, never provenance.
+    expect(built.file.generation.writer).toEqual({ kind: "unattributed" });
+    expect(pushed.failures).toEqual([]);
   });
 });
 
@@ -934,7 +1006,9 @@ describe("the durable-root sync on the Computer handle", () => {
     };
   }
 
-  function providerHarness() {
+  function providerHarness(
+    packageRoots?: readonly { packageId: string; rootId: string }[],
+  ) {
     const bucket = createInMemoryObjectBucketV1();
     const generations = createInMemoryWorkspaceGenerationsV1();
     const owner = { userId: USER };
@@ -966,6 +1040,7 @@ describe("the durable-root sync on the Computer handle", () => {
       },
       effects: effects.effects,
       generations,
+      ...(packageRoots ? { packageRoots } : {}),
     });
     const open = () =>
       provider.open(
@@ -1031,6 +1106,56 @@ describe("the durable-root sync on the Computer handle", () => {
         ),
       ).toBe(false);
     }
+  });
+
+  // The sync-now seam of ADR 0022 decision 7, provider side: an Applet publish
+  // needs the bytes `applet build` left on the Computer to be in the store
+  // before it reads them, and it needs that for one root, not the Workspace.
+  test("reconciles one declared root on demand and refuses a root it does not sync", async () => {
+    const { sprite, store, open } = providerHarness([
+      APPLET_SOURCE_PACKAGE_ROOT,
+    ]);
+    const handle = await open();
+    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    sprite.shellWrite(MOUNTS.skills, "unrelated.md", "not this root");
+    sprite.shellWrite(
+      MOUNTS.appletSource,
+      `${appletId}/dist/server.js`,
+      "export class A{}",
+    );
+
+    const summary = await handle.sync!.reconcileRoot!(
+      appletSourceRoot,
+      "publish",
+    );
+
+    expect(summary.status).toBe("ok");
+    expect(summary.pushed).toBe(1);
+    expect(
+      (
+        await store.read({
+          root: appletSourceRoot,
+          path: `${appletId}/dist/server.js`,
+        })
+      ).status,
+    ).toBe("ok");
+    // One root, not the Workspace: the instruction root's shell write is still
+    // waiting for the Turn's own `turn-end` push.
+    expect(
+      (await store.read({ root: skillsRoot, path: "unrelated.md" })).status,
+    ).toBe("not-found");
+
+    // A root no Package declared is refused rather than quietly reconciled.
+    const refused = await handle.sync!.reconcileRoot!(
+      {
+        kind: "package-declared",
+        userId: USER,
+        packageId: "image",
+        rootId: "generated",
+      },
+      "publish",
+    );
+    expect(refused.status).toBe("refused");
   });
 
   test("answers unavailable rather than throwing when the Sprite is paused", async () => {
