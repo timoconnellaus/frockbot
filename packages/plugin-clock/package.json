@@ -21,8 +21,8 @@
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
-    "@types/node": "26.2.0",
-    "typescript": "5.9.3"
+    "@types/node": "26.4.0",
+    "typescript": "7.0.2"
   },
   "publishConfig": {
     "access": "public"

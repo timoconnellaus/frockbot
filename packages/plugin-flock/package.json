@@ -33,16 +33,16 @@
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "cordis": "4.0.0-rc.8",
-    "vue": "3.5.41"
+    "vue": "3.5.42"
   },
   "devDependencies": {
     "@frockbot/plugin-testkit": "workspace:*",
     "@types/bun": "1.4.0",
     "@vitejs/plugin-vue": "6.0.8",
     "css-tree": "2.3.1",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vite": "8.2.2",
-    "vue-tsc": "3.3.10"
+    "vue-tsc": "3.3.11"
   },
   "publishConfig": {
     "access": "public"

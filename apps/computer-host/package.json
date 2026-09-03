@@ -39,9 +39,9 @@
     "@cloudflare/vitest-plugin": "^1.1.1",
     "@cloudflare/workers-types": "latest",
     "@types/bun": "1.4.0",
-    "@types/node": "26.2.0",
+    "@types/node": "26.4.0",
     "@types/ws": "8.18.1",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vitest": "^4.1.0",
     "wrangler": "latest"
   }

@@ -35,7 +35,7 @@
     "esbuild": "0.28.2",
     "eslint": "10.9.1",
     "miniflare": "5.20260828.0-alpha",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "typescript-eslint": "8.69.0"
   },
   "peerDependencies": {
@@ -43,9 +43,9 @@
   },
   "devDependencies": {
     "@types/bun": "1.4.0",
-    "@types/node": "26.2.0",
+    "@types/node": "26.4.0",
     "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.4",
+    "@types/react-dom": "19.2.5",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
