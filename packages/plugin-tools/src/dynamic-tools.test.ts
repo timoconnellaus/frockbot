@@ -273,7 +273,9 @@ describe("progressive tool disclosure", () => {
         })
       ).content,
     );
-    expect(single).toEqual(threadSchema);
+    // Plus the envelope the schema has to be wrapped in; see the dedicated
+    // test below.
+    expect(single).toMatchObject(threadSchema as Record<string, unknown>);
   });
 
   test("returns tool errors for invalid patterns and unknown lookups", async () => {
@@ -288,12 +290,18 @@ describe("progressive tool disclosure", () => {
     expect(
       await invoke(root, GET_DYNAMIC_TOOLS_NAME, { namespace: "missing" }),
     ).toEqual({ content: "Namespace not found", isError: true });
+    // A name that was not found says which names there are, so the model can
+    // correct a spelling in one step instead of re-reading the catalogue.
     expect(
       await invoke(root, GET_DYNAMIC_TOOLS_NAME, {
         namespace: "mail",
         toolName: "missing",
       }),
-    ).toEqual({ content: "Tool not found", isError: true });
+    ).toEqual({
+      content:
+        'Tool not found: "missing" in namespace "mail". Tools in this namespace: search',
+      isError: true,
+    });
     expect(
       await invoke(root, GET_DYNAMIC_TOOLS_NAME, { toolName: "search" }),
     ).toEqual({ content: "toolName requires namespace", isError: true });
@@ -302,13 +310,112 @@ describe("progressive tool disclosure", () => {
         namespace: "missing",
         toolName: "search",
       }),
-    ).toEqual({ content: "Namespace not found", isError: true });
+    ).toEqual({
+      content: 'Namespace not found: "missing". Available namespaces: mail',
+      isError: true,
+    });
     expect(
       await invoke(root, CALL_DYNAMIC_TOOL_NAME, {
         namespace: "mail",
         toolName: "missing",
       }),
-    ).toEqual({ content: "Tool not found", isError: true });
+    ).toEqual({
+      content:
+        'Tool not found: "missing" in namespace "mail". Tools in this namespace: search',
+      isError: true,
+    });
+  });
+
+  test("names the wrong field in a malformed call_dynamic_tool envelope", async () => {
+    // F3: every one of these answered with the single string "Invalid input
+    // for tool: call_dynamic_tool". The Bot re-read the schema twice, ran a
+    // deliberate plumbing test against `echo`, failed identically, and spent
+    // seven steps without authoring anything. These are the exact envelopes it
+    // sent (user `packages-2`, Bot `smith-b867c90c`, run events seq 18-52).
+    const root = await rootWithTools();
+    root.tools.register(dynamicTool("mail", "search"));
+
+    const recorded: Array<[unknown, string[]]> = [
+      // `{"args": "<json string>", "packageId": …}`
+      [
+        { args: '{"text":"plumbing test"}', packageId: "frockbot" },
+        [
+          '"namespace" is missing — you sent "packageId"; the field is "namespace"',
+          '"toolName" is missing; it must be a non-empty string',
+          'the tool\'s own input goes in "arguments" as an object, not in "args"',
+        ],
+      ],
+      // `{"args":"{\"text\":\"plumbing test\"}","name":"echo","namespace":"frockbot"}`
+      [
+        {
+          args: '{"text":"plumbing test"}',
+          name: "echo",
+          namespace: "frockbot",
+        },
+        [
+          '"toolName" is missing — you sent "name"; the field is "toolName"',
+          'the tool\'s own input goes in "arguments" as an object, not in "args"',
+        ],
+      ],
+      // The same mistake made with the right key: JSON text, not an object.
+      [
+        {
+          namespace: "mail",
+          toolName: "search",
+          arguments: '{"value":"x"}',
+        },
+        [
+          '"arguments" must be a JSON object, not a string — send the object itself, not JSON text',
+        ],
+      ],
+      [
+        "namespace=mail",
+        [
+          "call_dynamic_tool input is invalid: it must be an object, not a string",
+        ],
+      ],
+    ];
+
+    for (const [input, fragments] of recorded) {
+      const result = await invoke(root, CALL_DYNAMIC_TOOL_NAME, input);
+      expect(result.isError).toBe(true);
+      for (const fragment of fragments) {
+        expect(result.content).toContain(fragment);
+      }
+      // Always the worked envelope, so the next attempt has a shape to copy.
+      expect(result.content).toContain(
+        'Expected {"namespace":"<namespace>","toolName":"<tool>","arguments":',
+      );
+      expect(result.content).not.toBe(
+        "Invalid input for tool: call_dynamic_tool",
+      );
+    }
+  });
+
+  test("single-tool discovery echoes the envelope the schema goes inside", async () => {
+    // F3: `get_dynamic_tools({namespace, toolName})` returned the inner
+    // `inputSchema` and nothing else, and the model then sent that inner shape
+    // as the whole `call_dynamic_tool` input.
+    const root = await rootWithTools();
+    root.tools.register(dynamicTool("mail", "search"));
+    const single = JSON.parse(
+      (
+        await invoke(root, GET_DYNAMIC_TOOLS_NAME, {
+          namespace: "mail",
+          toolName: "search",
+        })
+      ).content,
+    ) as { namespace: string; callWith: unknown };
+
+    expect(single.namespace).toBe("mail");
+    expect(single.callWith).toEqual({
+      tool: CALL_DYNAMIC_TOOL_NAME,
+      input: {
+        namespace: "mail",
+        toolName: "search",
+        arguments: "<an object matching inputSchema>",
+      },
+    });
   });
 
   test("prepares and executes the inner call through every registry hook", async () => {

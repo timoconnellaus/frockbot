@@ -190,6 +190,20 @@ export type AuthoringEffectOutcomeV1 =
       effectId: string;
       failureId: string;
       reason: string;
+    }
+  /**
+   * The bundler was never reached — unreachable, or past its deadline before
+   * it answered. Nothing ran, so nothing is uncertain: the effect is as good
+   * as unstarted and an identical retry may proceed. Without this an outage
+   * poisoned that exact `effectId` (run + Package + source hash) for the rest
+   * of the run, so retrying the same source could never succeed (F11).
+   */
+  | {
+      schemaVersion: 1;
+      status: "unreachable";
+      effectId: string;
+      failureId: string;
+      reason: string;
     };
 
 export type AuthoringEffectClassificationV1 =
@@ -225,13 +239,16 @@ export function classifyAuthoringEffectV1(input: {
           "an authoring outcome is recorded for an effect with no recorded intent",
       };
     }
-    return input.outcome.status === "bundled"
-      ? { kind: "settled", outcome: input.outcome }
-      : {
-          kind: "failed",
-          failureId: input.outcome.failureId,
-          reason: input.outcome.reason,
-        };
+    if (input.outcome.status === "bundled") {
+      return { kind: "settled", outcome: input.outcome };
+    }
+    // Nothing ran, so the effect may run: `fresh`, not `unknown`.
+    if (input.outcome.status === "unreachable") return { kind: "fresh" };
+    return {
+      kind: "failed",
+      failureId: input.outcome.failureId,
+      reason: input.outcome.reason,
+    };
   }
   if (!input.intent) return { kind: "fresh" };
   return {

@@ -145,7 +145,13 @@ function requiredCatalogPin(user: UserSettingsViewV1): {
   indexHash: string;
 } {
   if (!user.catalogGeneration || !user.catalogIndexHash) {
-    throw new Error("this User has no pinned Package Catalog generation");
+    // A User is pinned on the first configuration read that finds a published
+    // Catalog, so an absent pin means the deployment has none to find. Say
+    // that, rather than an internal sentence about pinning the Bot then
+    // relays to the person who asked.
+    throw new Error(
+      "No Package Catalog is published for this deployment, so there is nothing to search or install",
+    );
   }
   return {
     generation: user.catalogGeneration,

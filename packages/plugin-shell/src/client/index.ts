@@ -340,6 +340,23 @@ function assistantMessage(
       tasks: tasksFrom(run.events),
     };
   }
+  // A Turn that broke after it had started talking keeps what it said, with
+  // the reason underneath it — the treatment a stopped Turn already gets, for
+  // the same reason: the words arrived and the person read them (ADR 0028).
+  // A Turn that broke before saying anything is still just the reason.
+  if (run.status === "failed" && run.responseText) {
+    return {
+      id: `${run.runId}:assistant`,
+      runId: run.runId,
+      role: "assistant",
+      text: run.responseText,
+      notice: run.failure ?? "Agent request failed.",
+      status: "error",
+      tools: toolsFrom(run.events),
+      sends: sendsFrom(run.events),
+      tasks: tasksFrom(run.events),
+    };
+  }
   return {
     id: `${run.runId}:assistant`,
     runId: run.runId,
@@ -1961,9 +1978,22 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         updateSettingsLoadError("package-catalog");
       } catch (error) {
         if (generation !== packageCatalogGeneration) return;
+        // The gateway answers 404 `catalog generation was not found` when the
+        // deployment has published no Catalog at all. That is a state, not a
+        // fault, and the raw server sentence means nothing to a person — so it
+        // is translated here and the surface renders it instead of the
+        // "nothing matched your search" empty state.
+        const raw =
+          error instanceof Error ? error.message : "Could not load the Catalog";
+        web.value.packageCatalog = [];
+        web.value.packageCatalogGeneration = undefined;
         updateSettingsLoadError(
           "package-catalog",
-          error instanceof Error ? error.message : "Could not load the Catalog",
+          /catalog generation was not found|Package Catalog is not configured/.test(
+            raw,
+          )
+            ? "No plugins are published for this deployment yet."
+            : `Plugins could not be loaded: ${raw}`,
         );
       }
     },

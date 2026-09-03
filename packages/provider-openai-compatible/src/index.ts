@@ -2,6 +2,9 @@ import {
   type LlmMessage,
   type LlmProvider,
   type LlmStreamEvent,
+  MODEL_REQUEST_DEADLINES_V1,
+  type ModelRequestDeadlinesV1,
+  ModelRequestDeadlineError,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
@@ -32,6 +35,82 @@ export interface OpenAICompatibleConfig {
    * model id decides through {@link modelAcceptsImagesV1}.
    */
   acceptsImages?: boolean;
+  /** Overrides {@link MODEL_REQUEST_DEADLINES_V1}. */
+  deadlines?: Partial<ModelRequestDeadlinesV1>;
+  /**
+   * Timer seam, so a deadline test does not have to wait two minutes for one.
+   * Defaults to `setTimeout`.
+   */
+  schedule?: (run: () => void, milliseconds: number) => () => void;
+}
+
+/**
+ * A request's clock, watching for silence.
+ *
+ * One controller, aborted with a {@link ModelRequestDeadlineError} when the
+ * provider says nothing for too long, and rearmed on every stream event. It
+ * chains the caller's signal so a Stop still cancels immediately, and it is
+ * always disarmed in a `finally`: a live timer in a Worker isolate holds the
+ * request open long after anyone is listening.
+ */
+class ModelRequestClockV1 {
+  readonly #controller = new AbortController();
+  readonly #deadlines: ModelRequestDeadlinesV1;
+  readonly #schedule: (run: () => void, milliseconds: number) => () => void;
+  #cancelTimer: (() => void) | undefined;
+  #disarmed = false;
+
+  constructor(
+    caller: AbortSignal,
+    deadlines: ModelRequestDeadlinesV1,
+    schedule: (run: () => void, milliseconds: number) => () => void,
+  ) {
+    this.#deadlines = deadlines;
+    this.#schedule = schedule;
+    if (caller.aborted) this.#controller.abort(caller.reason);
+    else {
+      caller.addEventListener(
+        "abort",
+        () => this.#controller.abort(caller.reason),
+        { once: true },
+      );
+    }
+    this.#arm("first-byte");
+  }
+
+  get signal(): AbortSignal {
+    return this.#controller.signal;
+  }
+
+  /** A stream event arrived: the clock restarts on the idle allowance. */
+  progressed(): void {
+    this.#arm("idle");
+  }
+
+  disarm(): void {
+    this.#disarmed = true;
+    this.#cancelTimer?.();
+    this.#cancelTimer = undefined;
+  }
+
+  #arm(phase: "first-byte" | "idle"): void {
+    if (this.#disarmed) return;
+    this.#cancelTimer?.();
+    const milliseconds =
+      phase === "first-byte"
+        ? this.#deadlines.firstByteMs
+        : this.#deadlines.idleMs;
+    this.#cancelTimer = this.#schedule(() => {
+      this.#controller.abort(
+        new ModelRequestDeadlineError(phase, milliseconds),
+      );
+    }, milliseconds);
+  }
+}
+
+function defaultScheduleV1(run: () => void, milliseconds: number): () => void {
+  const timer = setTimeout(run, milliseconds);
+  return () => clearTimeout(timer);
 }
 
 interface ToolAccumulator {
@@ -363,26 +442,59 @@ export class OpenAICompatibleProvider implements LlmProvider {
     };
     if (this.config.apiKey)
       headers.authorization = `Bearer ${this.config.apiKey}`;
-    const response = await fetcher(`${this.config.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(
-        requestToWire(request, {
-          ...(this.config.acceptsImages === undefined
-            ? {}
-            : { acceptsImages: this.config.acceptsImages }),
-        }),
-      ),
+    // Nothing here used to have a time bound: a provider that accepted the
+    // request and then went quiet held the Turn open for as long as the socket
+    // stayed up — seventeen minutes, in the incident this exists for, with
+    // nothing on the person's screen the whole time.
+    const clock = new ModelRequestClockV1(
       signal,
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new OpenAICompatibleHttpError(response.status);
-    }
-    if (!response.body)
-      throw new Error("Model response did not include a stream");
+      { ...MODEL_REQUEST_DEADLINES_V1, ...this.config.deadlines },
+      this.config.schedule ?? defaultScheduleV1,
+    );
+    try {
+      const response = await fetcher(
+        `${this.config.baseUrl}/chat/completions`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify(
+            requestToWire(request, {
+              ...(this.config.acceptsImages === undefined
+                ? {}
+                : { acceptsImages: this.config.acceptsImages }),
+            }),
+          ),
+          signal: clock.signal,
+        },
+      );
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new OpenAICompatibleHttpError(response.status);
+      }
+      if (!response.body)
+        throw new Error("Model response did not include a stream");
 
-    yield* streamOpenAICompatibleBody(response.body, signal);
+      for await (const event of streamOpenAICompatibleBody(
+        response.body,
+        clock.signal,
+      )) {
+        clock.progressed();
+        yield event;
+      }
+    } catch (error) {
+      // The abort reason is the real failure; `AbortError` is only how it
+      // reached us. Without this the Turn reports a cancellation nobody asked
+      // for instead of the deadline it actually hit.
+      if (
+        clock.signal.reason instanceof ModelRequestDeadlineError &&
+        !signal.aborted
+      ) {
+        throw clock.signal.reason;
+      }
+      throw error;
+    } finally {
+      clock.disarm();
+    }
   }
 }
 
