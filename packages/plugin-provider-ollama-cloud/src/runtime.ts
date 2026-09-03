@@ -1,6 +1,7 @@
 import {
   LlmEffectNotStartedError,
   type LlmProvider,
+  type LlmReconciliationCapability,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import { type Agent } from "@frockbot/kernel-agent-loop/agent";
@@ -143,6 +144,19 @@ class OllamaCloudProvider implements LlmProvider {
     }
   }
 
+  /**
+   * Ollama keeps no addressable copy of a completion, so an interrupted stream
+   * can never be read back. Saying so settles the run as a failure with its
+   * partial text intact instead of parking it forever.
+   */
+  readonly reconciliation: LlmReconciliationCapability = {
+    retrieve: async () => ({
+      status: "not-retrievable",
+      reason:
+        "Ollama keeps no durable copy of an interrupted response, so it cannot be recovered",
+    }),
+  };
+
   async *stream(request: NormalizedModelRequest, signal: AbortSignal) {
     await this.authorize(request);
     const authorization = this.authorized.get(request.requestId);
@@ -157,16 +171,24 @@ class OllamaCloudProvider implements LlmProvider {
       providerId: this.id,
       fetch: this.config.fetch,
     });
+    // Every failure raised before the first stream event happened before a
+    // provider effect existed, so it is definitive rather than uncertain. A 429
+    // or a 502 reported as a bare failure would park the run on a retrieval
+    // this Package cannot perform; reported as "not started" it fails cleanly
+    // and can be retried.
+    let started = false;
     try {
-      yield* provider.stream(request, signal);
-    } catch (error) {
-      if (
-        error instanceof OpenAICompatibleHttpError &&
-        (error.status === 401 || error.status === 403 || error.status === 404)
-      ) {
-        throw new LlmEffectNotStartedError(error.message);
+      for await (const event of provider.stream(request, signal)) {
+        started = true;
+        yield event;
       }
-      throw error;
+    } catch (error) {
+      if (started || signal.aborted) throw error;
+      throw new LlmEffectNotStartedError(
+        error instanceof OpenAICompatibleHttpError || error instanceof Error
+          ? error.message
+          : "Ollama Cloud request did not reach the provider",
+      );
     }
   }
 }

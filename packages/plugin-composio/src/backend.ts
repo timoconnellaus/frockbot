@@ -151,6 +151,29 @@ function coordinator(
   });
 }
 
+/**
+ * Answer a failed *browser* callback by returning the User to the app with the
+ * reason attached, not with a JSON body rendered as a page.
+ *
+ * The callback is a top-level navigation, so `{"error":"..."}` is what the User
+ * sees, on a URL with no way back into the app. A slow consent screen is enough
+ * to land here — the authorization state is only valid for ten minutes.
+ */
+export function callbackFailureResponse(
+  url: URL,
+  message: string,
+  target: "browser" | "desktop" = "browser",
+): Response {
+  if (target === "desktop") return jsonError(400, message);
+  const destination = new URL("/", url.origin);
+  destination.searchParams.set("connection", "composio-failed");
+  destination.searchParams.set("connection_reason", message.slice(0, 300));
+  return new Response(null, {
+    status: 303,
+    headers: { location: destination.toString() },
+  });
+}
+
 export function connectionCompletionResponse(
   url: URL,
   target: "browser" | "desktop",
@@ -194,17 +217,23 @@ export function createComposioBackendContribution(
       let callbackState: AuthorizationState | undefined;
       if (isCallback) {
         const encodedState = url.searchParams.get("state");
-        if (!encodedState)
-          return jsonError(400, "Composio callback state is required");
+        if (!encodedState) {
+          return callbackFailureResponse(
+            url,
+            "This connection link is missing its authorization state. Start the connection again.",
+          );
+        }
         try {
           callbackState = await decodeAuthorizationState(
             encodedState,
             config.authorizationStateSecret,
           );
         } catch (error) {
-          return jsonError(
-            400,
-            error instanceof Error ? error.message : "Connection failed",
+          return callbackFailureResponse(
+            url,
+            error instanceof Error
+              ? error.message
+              : "This connection link is no longer valid. Start the connection again.",
           );
         }
       }
@@ -332,14 +361,19 @@ export function createComposioBackendContribution(
             result.nativeReturnNonce,
           );
         } catch (error) {
-          return jsonError(
-            500,
+          return callbackFailureResponse(
+            url,
             error instanceof Error ? error.message : "Connection failed",
+            callbackState?.returnTarget === "desktop" ? "desktop" : "browser",
           );
         }
       }
       if (!connectionId || !connectedAccountId) {
-        return jsonError(400, "Composio callback is incomplete");
+        return callbackFailureResponse(
+          url,
+          "The provider did not return a connected account. Start the connection again.",
+          callbackState?.returnTarget === "desktop" ? "desktop" : "browser",
+        );
       }
       try {
         const result = await connections.complete(user, {
@@ -354,9 +388,10 @@ export function createComposioBackendContribution(
           result.nativeReturnNonce,
         );
       } catch (error) {
-        return jsonError(
-          400,
+        return callbackFailureResponse(
+          url,
           error instanceof Error ? error.message : "Connection failed",
+          callbackState?.returnTarget === "desktop" ? "desktop" : "browser",
         );
       }
     },

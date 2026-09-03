@@ -7,8 +7,17 @@ export interface FlockAiGatewayHostV1 {
   runChatCompletion(
     gatewayModel: string,
     body: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<ReadableStream<Uint8Array>>;
 }
+
+/**
+ * The Gateway request is bounded so a gateway that accepts the connection and
+ * then never answers fails the Turn instead of holding it open. The deadline
+ * covers reaching the gateway; the SSE body that follows is bounded per read by
+ * the OpenAI-compatible decoder.
+ */
+export const FLOCK_AI_GATEWAY_TIMEOUT_MS_V1 = 60_000;
 
 export interface FlockAiGatewayConfigV1 {
   gatewayId?: string;
@@ -22,6 +31,8 @@ export interface FlockAiGatewayConfigV1 {
   token?: string;
   /** Injectable for tests; defaults to the global `fetch`. */
   fetch?: typeof fetch;
+  /** Deadline for reaching the Gateway. */
+  timeoutMs?: number;
 }
 
 export function compatChatCompletionsUrlV1(
@@ -69,30 +80,63 @@ export function createFlockAiGatewayHostV1(
   // no Gateway credentials are configured, which is every local and CI
   // environment that binds a stand-in for `AI`.
   const useCompat = Boolean(accountId && token);
+  const timeoutMs = config.timeoutMs ?? FLOCK_AI_GATEWAY_TIMEOUT_MS_V1;
   const doFetch = config.fetch ?? fetch;
   return {
     autoRoute,
-    async runChatCompletion(gatewayModel, body) {
+    async runChatCompletion(gatewayModel, body, signal) {
+      const deadline = AbortSignal.timeout(timeoutMs);
+      const requestSignal = signal
+        ? AbortSignal.any([signal, deadline])
+        : deadline;
+      const timedOut = (error: unknown): never => {
+        if (deadline.aborted && !signal?.aborted) {
+          throw new Error(`AI Gateway did not respond within ${timeoutMs}ms`);
+        }
+        throw error;
+      };
       if (useCompat) {
-        const response = await doFetch(
-          compatChatCompletionsUrlV1(accountId!, gatewayId),
-          {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-              "cf-aig-authorization": `Bearer ${token!}`,
+        let response: Response;
+        try {
+          response = await doFetch(
+            compatChatCompletionsUrlV1(accountId!, gatewayId),
+            {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "cf-aig-authorization": `Bearer ${token!}`,
+              },
+              body: JSON.stringify({ ...body, model: gatewayModel }),
+              signal: requestSignal,
             },
-            body: JSON.stringify({ ...body, model: gatewayModel }),
-          },
-        );
+          );
+        } catch (error) {
+          return timedOut(error);
+        }
         return streamOrThrowV1(response);
       }
-      const response = await ai.gateway(gatewayId).run({
-        provider: "compat",
-        endpoint: "chat/completions",
-        headers: {},
-        query: { ...body, model: gatewayModel },
-      });
+      // The `AI` binding takes no signal, so the deadline is raced against the
+      // call rather than cancelling it.
+      let response: Response;
+      try {
+        response = await Promise.race([
+          ai.gateway(gatewayId).run({
+            provider: "compat",
+            endpoint: "chat/completions",
+            headers: {},
+            query: { ...body, model: gatewayModel },
+          }),
+          new Promise<never>((_resolve, reject) => {
+            requestSignal.addEventListener(
+              "abort",
+              () => reject(requestSignal.reason),
+              { once: true },
+            );
+          }),
+        ]);
+      } catch (error) {
+        return timedOut(error);
+      }
       return streamOrThrowV1(response);
     },
   };
