@@ -568,7 +568,11 @@ describe("Bot selection", () => {
     await Promise.all([botLoad, olderLoad]);
 
     expect(provided.value.userSettings?.profile.name).toBe("Newer");
-    expect(provided.value.settingsError).toBe("Bot settings unavailable");
+    // The surface says what failed and what it was for; the thrown text
+    // ("Bot settings unavailable") stays in the console.
+    expect(provided.value.settingsError).toBe(
+      "Couldn't load this Bot's settings.",
+    );
   });
 
   test("commits a catalog without overwriting newer User settings", async () => {
@@ -1213,14 +1217,20 @@ describe("detached Turn projection", () => {
       ],
     );
 
+    // The failure is a system notice, never a bubble that reads as the Bot
+    // saying the provider's own words.
     expect(messages).toMatchObject([
       { role: "user", status: "completed" },
+      { role: "assistant", text: "", status: "error" },
       {
-        role: "assistant",
-        text: "Provider reconciliation is required",
+        role: "system",
+        text: "This reply didn't finish. Try sending your message again.",
         status: "error",
       },
     ]);
+    expect(JSON.stringify(messages)).not.toContain(
+      "Provider reconciliation is required",
+    );
   });
 });
 
@@ -1559,16 +1569,27 @@ describe("active durable Turn projection", () => {
         },
       ],
     );
+    // One sentence of the product's own, and the raw provider text nowhere on
+    // screen — the banner, the bubble and the notice all read the same way
+    // whatever the provider called the failure.
     expect(reconciliation.activeRun).toEqual({
       runId: "run-reconciliation",
       status: "reconciliation-required",
-      message: "Provider result needs confirmation",
+      message: "Something went wrong part-way through the reply.",
       canResume: true,
     });
     expect(reconciliation.messages[1]).toMatchObject({
-      text: "Provider result needs confirmation",
+      role: "assistant",
+      text: "",
       status: "reconciliation-required",
     });
+    expect(reconciliation.messages[2]).toMatchObject({
+      role: "system",
+      text: "Something went wrong part-way through the reply.",
+    });
+    expect(JSON.stringify(reconciliation.messages)).not.toContain(
+      "Provider result needs confirmation",
+    );
   });
 
   test("keeps busy state until the durable run becomes terminal", () => {
@@ -1845,8 +1866,7 @@ describe("hosted Stop", () => {
     await provided.value.stopRun();
     expect(provided.value.activeRun).toMatchObject({
       status: "reconciliation-required",
-      message:
-        "Stop accepted; reconciling the provider outcome before cancelling.",
+      message: "Stopping…",
       canResume: false,
     });
 

@@ -38,6 +38,24 @@ onBeforeUnmount(() => restoreFocus?.focus());
 </script>
 
 <template>
+  <!--
+    The layer under the panel.
+
+    A surface with no scrim read as a rendering glitch: it covered the sidebar
+    and half the conversation, cut the composer's rounded pill clean in two,
+    and left the chat behind it fully lit, so nothing on screen said which of
+    the two was the live one. Dimming what the panel is over says it, and gives
+    the pointer the dismissal every other overlay in the product has.
+  -->
+  <Transition name="ui-scrim">
+    <button
+      v-if="open"
+      type="button"
+      class="ui-sidebar-overlay__scrim"
+      aria-label="Close panel"
+      @click="emit('close')"
+    />
+  </Transition>
   <Transition name="ui-surface">
     <aside
       v-if="open"
@@ -64,6 +82,16 @@ onBeforeUnmount(() => restoreFocus?.focus());
 </template>
 
 <style scoped>
+.ui-sidebar-overlay__scrim {
+  position: absolute;
+  z-index: var(--frock-layer-surface);
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--frock-overlay-tint);
+  cursor: pointer;
+}
+
 .ui-sidebar-overlay {
   position: absolute;
   z-index: var(--frock-layer-surface);
@@ -106,6 +134,16 @@ onBeforeUnmount(() => restoreFocus?.focus());
   overflow-y: auto;
   scrollbar-color: var(--frock-scrollbar) transparent;
   scrollbar-width: thin;
+}
+
+.ui-scrim-enter-active,
+.ui-scrim-leave-active {
+  transition: opacity var(--frock-motion-panel);
+}
+
+.ui-scrim-enter-from,
+.ui-scrim-leave-to {
+  opacity: 0;
 }
 
 .ui-surface-enter-active,

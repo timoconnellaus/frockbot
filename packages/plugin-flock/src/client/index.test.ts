@@ -281,7 +281,8 @@ describe("Flock client reconciliation", () => {
 
     await state.value.load();
 
-    expect(state.value.error).toBe("Directory changed");
+    // The sidebar says what failed, not what the deployment called it.
+    expect(state.value.error).toBe("Couldn't load your Bots.");
     expect(storage.has(pendingCreateKey("user-a"))).toBe(false);
   });
 

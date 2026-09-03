@@ -67,7 +67,13 @@ async function save(): Promise<void> {
     class="package-settings-form"
     @submit.prevent="save"
   >
-    <label v-for="definition in definitions" :key="definition.id">
+    <label
+      v-for="definition in definitions"
+      :key="definition.id"
+      :class="{
+        'field-toggle': settingFieldKind(definition.schema) === 'boolean',
+      }"
+    >
       <span>{{ settingLabel(definition) }}</span>
       <select
         v-if="settingFieldKind(definition.schema) === 'enum'"
@@ -140,6 +146,34 @@ async function save(): Promise<void> {
   background: var(--frock-surface-raised);
   color: var(--frock-text);
   font-size: var(--frock-text-base);
+}
+
+/*
+ * A checkbox reads beside its label, not under it. Sized and padded like a
+ * text field it drew as an empty box centred in the card with nothing next to
+ * it, and nothing on screen said what ticking it would do.
+ */
+.package-settings-form label.field-toggle {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.package-settings-form label.field-toggle span {
+  order: 2;
+  color: var(--frock-text);
+}
+
+.package-settings-form label.field-toggle input[type="checkbox"] {
+  order: 1;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+}
+
+.package-settings-form label.field-toggle .field-hint {
+  order: 3;
+  grid-column: 1 / -1;
 }
 
 .field-hint {
