@@ -11,6 +11,8 @@
 import {
   test,
   expect,
+  assistantMessages,
+  composerInput,
   provisionThroughUi,
   sendMessage,
   setFakeOllamaChatMode,
@@ -83,6 +85,60 @@ test("Turns stay ordered, render Markdown, and survive a reload", async ({
   await expect(renderedMarkdown.first()).toBeVisible();
   await expect.poll(turnOrder).toEqual(expectedOrder);
   await expect(sidebarRow).toContainText(E2E_ASSISTANT_REPLY);
+});
+
+test("a Turn that is running when the page reloads still delivers its reply", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Patient",
+  });
+
+  // The provider holds the completion open, so the Turn is genuinely running
+  // while the browser goes away.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "slow");
+
+  const prompt = "Take your time with this one";
+  const composer = composerInput(page);
+  await composer.fill(prompt);
+  await expect(composer).toHaveValue(prompt);
+  await page.getByRole("button", { name: "Send message" }).click();
+  // The composer clears only once the submission is accepted, so the Turn is
+  // durable from here.
+  await expect(composer).toHaveValue("", { timeout: 120_000 });
+
+  const thread = page.locator("main");
+  await expect(thread.getByText(prompt)).toBeVisible({ timeout: 120_000 });
+  // The tab that sent the message can stop it. Before the run state reached
+  // the client, this button never appeared for the sending tab at all.
+  await expect(page.getByRole("button", { name: /Stop/ })).toBeVisible({
+    timeout: 60_000,
+  });
+
+  // The reply to the POST is now gone: this browser has no copy of the Turn
+  // and nobody will re-send it.
+  await page.reload();
+
+  // The reloaded page finds the Turn still running and says so, then converges
+  // on the settled reply with no further action from anybody.
+  await expect(thread.getByText(prompt)).toBeVisible({ timeout: 120_000 });
+  // The rendered reply, not the Markdown the stub sent.
+  await expect(assistantMessages(page).last()).toContainText(
+    "Reply from the local Ollama stub.",
+    { timeout: 120_000 },
+  );
+  await expect(
+    assistantMessages(page).last().locator(".bot-avatar-live"),
+  ).toHaveCount(0, { timeout: 120_000 });
+
+  // The fake provider is one server for the whole worker, so a spec that
+  // slowed it down puts it back before the next one runs.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
 test("a provider that stops accepting the key ends the Turn with a reason", async ({

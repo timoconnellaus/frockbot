@@ -93,3 +93,91 @@ describe("Bot-state channel Computer storage", () => {
     );
   });
 });
+
+describe("Bot-state channel run observation", () => {
+  function observedChannel(): {
+    channel: BotStateChannel;
+    storage: MemoryStorage;
+    sent: string[];
+    observed: DurableObjectState;
+  } {
+    const storage = new MemoryStorage();
+    const sent: string[] = [];
+    const socket = {
+      deserializeAttachment: () => ({
+        schemaVersion: 1,
+        userId: "user-1",
+        botId: "scout",
+        lastSent: "0",
+      }),
+      serializeAttachment: () => undefined,
+      send: (frame: string) => sent.push(frame),
+      close: () => undefined,
+    };
+    const state = {
+      storage,
+      getWebSockets: () => [socket],
+    } as unknown as DurableObjectState;
+    const channel = new BotStateChannel(state);
+    return { channel, storage, sent, observed: channel.observeRuns(state) };
+  }
+
+  /** The notice is appended after the write, so it lands a task later. */
+  const settle = (): Promise<void> =>
+    new Promise<void>((resolve) => {
+      setTimeout(() => resolve(), 0);
+    });
+
+  test("a committed run write reaches an attached observer", async () => {
+    const { storage, sent, observed } = observedChannel();
+
+    await observed.storage.put("run:run-1", { status: "running" });
+    await settle();
+
+    expect(storage.values.get("run:run-1")).toEqual({ status: "running" });
+    expect(sent.map((frame) => JSON.parse(frame) as unknown)).toEqual([
+      { schemaVersion: 1, type: "state/event", cursor: "1", topic: "runs" },
+    ]);
+  });
+
+  test("a run write inside a transaction is observed too", async () => {
+    const { sent, observed } = observedChannel();
+
+    await observed.storage.transaction(async (transaction) => {
+      await transaction.put({ "active-run": "run-1" });
+    });
+    await settle();
+
+    expect(sent.map((frame) => JSON.parse(frame) as unknown)).toEqual([
+      { schemaVersion: 1, type: "state/event", cursor: "1", topic: "runs" },
+    ]);
+  });
+
+  test("writes that are not run state say nothing", async () => {
+    const { sent, observed } = observedChannel();
+
+    await observed.storage.put("identity", { botId: "scout" });
+    await observed.storage.transaction(async (transaction) => {
+      await transaction.put("latest-events", []);
+    });
+    await settle();
+
+    expect(sent).toEqual([]);
+  });
+
+  test("a burst of run writes is coalesced", async () => {
+    const { sent, observed } = observedChannel();
+
+    await Promise.all([
+      observed.storage.put("run:run-1", { status: "running" }),
+      observed.storage.put("run:run-1", { status: "running" }),
+      observed.storage.put("run:run-1", { status: "completed" }),
+    ]);
+    await settle();
+
+    // Fewer notices than writes, and never none: an observer only ever needs
+    // to know that it should read again.
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.length).toBeLessThan(3);
+  });
+});
