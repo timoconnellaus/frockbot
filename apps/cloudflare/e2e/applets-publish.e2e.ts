@@ -126,7 +126,18 @@ async function runTool(
   name: string,
   input: unknown = {},
 ): Promise<void> {
-  await sendMessage(page, `${text}\n${e2eToolCallPrompt(name, input)}`);
+  // The Applets member is isolate-loaded, so its tools are disclosed under
+  // the `applets` namespace (ADR 0023) and a model reaches them only
+  // through `call_dynamic_tool`; the scripted model does exactly that.
+  await sendMessage(
+    page,
+    `${text}\n${e2eToolCallPrompt("call_dynamic_tool", {
+      namespace: "applets",
+      toolName: name,
+      arguments: input,
+      mcpDetails: { description: `${name} for the User` },
+    })}`,
+  );
 }
 
 async function appletIdNamed(page: Page, displayName: string): Promise<string> {
@@ -255,11 +266,14 @@ test("a Bot publishes an Applet, it goes live in the canvas, and its tool reache
   const secondUi = appletUi(second);
   await expect(secondUi.getByText("Buy milk")).toBeVisible({ timeout: 60_000 });
 
-  // The Applet's tool is an ordinary Bot tool now. The Turn that published
-  // proposed the generation carrying it, and this next Turn runs on it.
-  await runTool(page, "Add a todo to call mum.", "add_todo", {
-    title: "Call mum",
-  });
+  // The Applet's tool is an ordinary Bot tool now, registered by its bare
+  // name in this Bot's catalog (not under a Package namespace), so the
+  // scripted model calls it directly. The Turn that published proposed the
+  // generation carrying it, and this next Turn runs on it.
+  await sendMessage(
+    page,
+    `Add a todo to call mum.\n${e2eToolCallPrompt("add_todo", { title: "Call mum" })}`,
+  );
   await expect(secondUi.getByText("Call mum")).toBeVisible({ timeout: 60_000 });
   await expect(ui.getByText("Call mum")).toBeVisible({ timeout: 60_000 });
   await shot(page, "canvas-live");
