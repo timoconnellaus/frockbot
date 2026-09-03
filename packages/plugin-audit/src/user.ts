@@ -115,17 +115,36 @@ export class AuditUserBackendContribution {
   /**
    * Idempotent on `(botId, runId, occurrenceId)`; a redelivered outbox page
    * inserts nothing the second time.
+   *
+   * ONE BAD ENTRY IS ONE BAD ENTRY. Decoding used to be `input.map(decode)`,
+   * so a single undecodable entry threw for the whole page. The throw was
+   * swallowed at the Bot's drain, the outbox was never drained again, and
+   * every later entry was dropped at the 512 bound — one malformed row cost
+   * the Bot its entire audit trail, silently. Entries are decoded one at a
+   * time now: the bad one is quarantined and counted, the rest are indexed,
+   * and the page is accepted so the outbox clears.
    */
-  async indexAuditEntries(input: unknown): Promise<{ indexed: number }> {
+  async indexAuditEntries(
+    input: unknown,
+  ): Promise<{ indexed: number; quarantined: number }> {
     if (!Array.isArray(input)) {
       throw new AuditDecodeError("audit entries must be an array");
     }
     if (input.length > AUDIT_MAX_ENTRY_PAGE_V1) {
       throw new AuditDecodeError("audit entries exceed their bound");
     }
-    const entries = input.map(decodeAuditEntryV1);
+    const entries: AuditEntryV1[] = [];
+    let quarantined = 0;
+    for (const candidate of input) {
+      try {
+        entries.push(decodeAuditEntryV1(candidate));
+      } catch {
+        quarantined += 1;
+      }
+    }
     return {
       indexed: this.store.insert(this.resolve(entries, await this.hosts())),
+      quarantined,
     };
   }
 

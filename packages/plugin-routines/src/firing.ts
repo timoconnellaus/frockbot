@@ -36,6 +36,14 @@ export interface RoutineScheduleStateV1 {
   dueAt: number;
   /** Epoch milliseconds before which the alarm must not settle this Routine. */
   deferredUntil?: number;
+  /**
+   * Firings that failed in a row, reset by the first that did not.
+   *
+   * It is on the clock rather than on the record because it is timing state:
+   * what it buys is the backoff `deferredUntil` carries, and the auto-pause it
+   * ends in.
+   */
+  consecutiveFailures?: number;
 }
 
 /** One firing, durable before the Turn it admits. The same-Routine lock. */
@@ -92,7 +100,7 @@ export function decodeRoutineScheduleStateV1(
   routineExactKeys(
     candidate,
     ["schemaVersion", "routineId", "anchor", "dueAt"],
-    ["deferredUntil"],
+    ["deferredUntil", "consecutiveFailures"],
     "Routine schedule state",
   );
   if (candidate.schemaVersion !== 1) {
@@ -114,6 +122,14 @@ export function decodeRoutineScheduleStateV1(
           deferredUntil: epoch(
             candidate.deferredUntil,
             "Routine schedule state deferredUntil",
+          ),
+        }),
+    ...(candidate.consecutiveFailures === undefined
+      ? {}
+      : {
+          consecutiveFailures: count(
+            candidate.consecutiveFailures,
+            "Routine schedule state consecutiveFailures",
           ),
         }),
   };

@@ -78,8 +78,25 @@ export const SECRET_SHAPES_V1: readonly SecretShapeV1[] = [
   {
     id: "credential-assignment",
     reason: "it assigns a value to a credential-shaped name",
+    // The keyword is NOT anchored on `\b`, because `_` is a word character:
+    // `\bsecret\b` does not match inside `AWS_SECRET_ACCESS_KEY`, so
+    // `AWS_SECRET_ACCESS_KEY=…`, `GITHUB_TOKEN=…` and `MYSQL_PASSWORD=…`
+    // landed verbatim in the durable audit preview — the exact shape a leased
+    // credential takes in a `computer_exec` command. The name is matched
+    // whole, keyword anywhere inside it.
     pattern:
-      /\b(api[_-]?key|secret|password|passwd|access[_-]?token|client[_-]?secret)\b\s*[:=]\s*\S{12,}/gi,
+      /(?<![A-Za-z0-9])[A-Za-z0-9_-]{0,64}(?:api[_-]?key|secret|password|passwd|token|credential|passphrase)[A-Za-z0-9_-]{0,64}\s*[:=]\s*\S{8,}/gi,
+  },
+  {
+    id: "url-credentials",
+    reason: "it contains credentials in a URL",
+    pattern: /\b[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/g,
+  },
+  {
+    id: "url-secret-parameter",
+    reason: "it contains a secret in a URL parameter",
+    pattern:
+      /[?&](?:token|code|sig|signature|key|api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|auth)=[^\s&#]{6,}/gi,
   },
 ];
 

@@ -65,10 +65,32 @@ function order(left: FakeRow, right: FakeRow): number {
 }
 
 export class FakeAuditSql implements AuditSqlV1 {
-  private rows: FakeRow[] = [];
+  /**
+   * One row list per table, because a rebuild fills a shadow table and swaps
+   * it in: a fake with a single list could not tell the two apart and would
+   * report the swap as working whatever the store did.
+   */
+  private tables = new Map<string, FakeRow[]>([["audit_entries", []]]);
   private meta = new Map<string, string>();
   /** Every statement the module issued, for tests that assert on shape. */
   readonly statements: string[] = [];
+
+  /** The table one statement names, defaulting to the live one. */
+  private static table(sql: string): string {
+    return (
+      /(?:FROM|INTO|TABLE(?: IF NOT EXISTS)?(?: IF EXISTS)?) (audit_entries(?:_rebuild)?)/.exec(
+        sql,
+      )?.[1] ?? "audit_entries"
+    );
+  }
+
+  private rowsIn(table: string): FakeRow[] {
+    const rows = this.tables.get(table);
+    if (rows) return rows;
+    const created: FakeRow[] = [];
+    this.tables.set(table, created);
+    return created;
+  }
 
   exec<Row extends Record<string, AuditSqlValueV1>>(
     query: string,
@@ -77,7 +99,23 @@ export class FakeAuditSql implements AuditSqlV1 {
     this.statements.push(query);
     const sql = query.replace(/\s+/g, " ").trim();
     const answer = (rows: unknown[]) => cursor(rows as Row[]);
+    const table = FakeAuditSql.table(sql);
 
+    const renamed = /^ALTER TABLE (\S+) RENAME TO (\S+)$/.exec(sql);
+    if (renamed) {
+      this.tables.set(renamed[2]!, this.rowsIn(renamed[1]!));
+      this.tables.delete(renamed[1]!);
+      return answer([]);
+    }
+    if (sql.startsWith("DROP TABLE")) {
+      this.tables.delete(table);
+      return answer([]);
+    }
+    if (sql.startsWith("CREATE TABLE")) {
+      if (!sql.includes("IF NOT EXISTS")) this.tables.set(table, []);
+      else this.rowsIn(table);
+      return answer([]);
+    }
     if (sql.startsWith("CREATE") || sql.startsWith("DROP")) return answer([]);
 
     if (sql.startsWith("SELECT value FROM audit_meta")) {
@@ -96,16 +134,16 @@ export class FakeAuditSql implements AuditSqlV1 {
       const row = Object.fromEntries(
         COLUMNS.map((column, index) => [column, bindings[index] ?? null]),
       ) as FakeRow;
-      this.rows.push(row);
+      this.rowsIn(table).push(row);
       return answer([]);
     }
     if (sql.startsWith("SELECT count(*) AS n FROM audit_entries")) {
-      return answer([{ n: this.filtered(sql, bindings).length }]);
+      return answer([{ n: this.filtered(table, sql, bindings).length }]);
     }
     if (sql.startsWith("SELECT bot_id, run_id, occurrence_id FROM")) {
       const limit = Number(bindings[0]);
       return answer(
-        [...this.rows]
+        [...this.rowsIn(table)]
           .sort(order)
           .slice(0, limit)
           .map((row) => ({
@@ -116,7 +154,10 @@ export class FakeAuditSql implements AuditSqlV1 {
       );
     }
     if (sql.startsWith("DELETE FROM audit_entries WHERE at <")) {
-      this.rows = this.rows.filter((row) => row.at >= String(bindings[0]));
+      this.tables.set(
+        table,
+        this.rowsIn(table).filter((row) => row.at >= String(bindings[0])),
+      );
       return answer([]);
     }
     if (
@@ -124,26 +165,32 @@ export class FakeAuditSql implements AuditSqlV1 {
         "DELETE FROM audit_entries WHERE bot_id = ? AND run_id = ? AND occurrence_id = ?",
       )
     ) {
-      this.rows = this.rows.filter(
-        (row) =>
-          !(
-            row.bot_id === bindings[0] &&
-            row.run_id === bindings[1] &&
-            row.occurrence_id === bindings[2]
-          ),
+      this.tables.set(
+        table,
+        this.rowsIn(table).filter(
+          (row) =>
+            !(
+              row.bot_id === bindings[0] &&
+              row.run_id === bindings[1] &&
+              row.occurrence_id === bindings[2]
+            ),
+        ),
       );
       return answer([]);
     }
     if (sql.startsWith("DELETE FROM audit_entries WHERE bot_id = ?")) {
-      this.rows = this.rows.filter((row) => row.bot_id !== bindings[0]);
+      this.tables.set(
+        table,
+        this.rowsIn(table).filter((row) => row.bot_id !== bindings[0]),
+      );
       return answer([]);
     }
     if (sql === "DELETE FROM audit_entries") {
-      this.rows = [];
+      this.tables.set(table, []);
       return answer([]);
     }
     if (sql.startsWith("SELECT * FROM audit_entries")) {
-      const descending = [...this.filtered(sql, bindings)].sort(
+      const descending = [...this.filtered(table, sql, bindings)].sort(
         (left, right) => -order(left, right),
       );
       if (!sql.includes("LIMIT")) return answer(descending);
@@ -155,11 +202,11 @@ export class FakeAuditSql implements AuditSqlV1 {
   }
 
   /** Applies the `WHERE bot_id/kind/target` clauses the store builds. */
-  private filtered(sql: string, bindings: unknown[]): FakeRow[] {
+  private filtered(table: string, sql: string, bindings: unknown[]): FakeRow[] {
     const values = [...bindings];
     const where = /WHERE (.+?)(?: ORDER BY| LIMIT|$)/.exec(sql)?.[1] ?? "";
     if (where.startsWith("at <")) {
-      return this.rows.filter((row) => row.at < String(values[0]));
+      return this.rowsIn(table).filter((row) => row.at < String(values[0]));
     }
     const predicates: Array<(row: FakeRow) => boolean> = [];
     for (const clause of where.split(" AND ").filter(Boolean)) {
@@ -168,7 +215,7 @@ export class FakeAuditSql implements AuditSqlV1 {
       const expected = String(values.shift());
       predicates.push((row) => String(row[column]) === expected);
     }
-    return this.rows.filter((row) =>
+    return this.rowsIn(table).filter((row) =>
       predicates.every((predicate) => predicate(row)),
     );
   }
