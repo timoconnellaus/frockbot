@@ -3323,11 +3323,38 @@ export class ShellBotBackendContribution {
     }
     if (admission.status === "replayed") {
       // The same tool call, reconciled or retried: the task it already
-      // dispatched is the answer, never a second child.
+      // dispatched is the answer, never a second child. A foreground call
+      // still waits for it — the caller asked for the result, and returning
+      // "dispatched" the instant a replay is recognised is what made a
+      // `background:false` Task look like it completed with no output.
+      const replayed = admission.record;
+      const settled =
+        replayed.outcome ??
+        (request.background
+          ? undefined
+          : await this.awaitBlockingTask(
+              identity,
+              taskAnchorIdV1(replayed.childSessionId),
+              replayed.taskId,
+            ));
+      if (settled) {
+        return {
+          status: "settled",
+          taskId: replayed.taskId,
+          model: replayed.model.slug,
+          taskStatus: settled.status,
+          ...(settled.summary === undefined
+            ? {}
+            : { summary: settled.summary }),
+          ...(settled.failure === undefined
+            ? {}
+            : { failure: settled.failure }),
+        };
+      }
       return {
         status: "dispatched",
-        taskId: admission.record.taskId,
-        model: admission.record.model.slug,
+        taskId: replayed.taskId,
+        model: replayed.model.slug,
       };
     }
     const reservation = await this.subagentSlots(identity).reserve({
@@ -3429,20 +3456,27 @@ export class ShellBotBackendContribution {
    * Durable Object already does inside a Turn, and the outbound probe is the
    * same call reconciliation makes.
    */
-  private async awaitBlockingTask(
+  protected async awaitBlockingTask(
     identity: BotIdentity,
     anchorTaskId: string,
     taskId: string,
   ): Promise<TaskOutcomeV1 | undefined> {
     const binding = this.subagentBinding;
     const deadline = Date.now() + TASK_BLOCKING_TIMEOUT_MS_V1;
+    // A read that fails once is transient storage contention, not an answer:
+    // abandoning the wait on the first one returned "still running" for a
+    // child that was about to settle, and taught the model to poll. Only a
+    // record that stays unreadable ends the wait early.
+    const readFailureLimit = 3;
+    let readFailures = 0;
     for (;;) {
       try {
         const record = await this.tasks.read(taskId);
+        readFailures = 0;
         if (record.outcome) return record.outcome;
       } catch {
-        // A record that cannot be read is not a reason to hold the Turn.
-        return undefined;
+        readFailures += 1;
+        if (readFailures >= readFailureLimit) return undefined;
       }
       if (binding) {
         try {

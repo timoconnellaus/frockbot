@@ -519,7 +519,11 @@ export function createTaskTool(
           "It runs as its own Turn and cannot see this conversation.",
           decoded.background
             ? DO_NOT_POLL
-            : `It is still running, id ${outcome.taskId}; it continues in the background and ${DO_NOT_POLL.charAt(0).toLowerCase()}${DO_NOT_POLL.slice(1)}`,
+            : // The wait ran out before the child settled. Say that, rather
+              // than something that reads like a call still worth checking:
+              // the previous wording sent the model into task_check and
+              // task_resume for a task it had already been told to leave.
+              `It did not finish inside the wait, id ${outcome.taskId}; it continues in the background and ${DO_NOT_POLL.charAt(0).toLowerCase()}${DO_NOT_POLL.slice(1)} Answer the User now with what you have, and say the work is still running.`,
         ].join(" "),
         isError: false,
       };

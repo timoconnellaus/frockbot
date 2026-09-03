@@ -155,8 +155,16 @@ export class MemoryStore {
     return this.#files;
   }
 
-  private via(botId: string): string {
-    return this.#names[botId] ?? botId;
+  /**
+   * The name to credit a shared fact to, or nothing.
+   *
+   * A Bot id is an internal handle, not a name: rendered into the prompt as
+   * `[via remy-9d15e086]` the model reads it as something to say out loud and
+   * tells the User a sibling's id. With no name to give, the fact is simply
+   * uncredited — the fact itself is what the User asked for.
+   */
+  private via(botId: string): string | undefined {
+    return this.#names[botId];
   }
 
   /**

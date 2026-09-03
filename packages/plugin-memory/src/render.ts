@@ -206,7 +206,7 @@ function injected(
     scope,
     projectId,
     tier,
-    via: withVia ? fact.via : "",
+    via: withVia ? (fact.via ?? "") : "",
     learnedAt: fact.date,
     text: fact.text,
   }));

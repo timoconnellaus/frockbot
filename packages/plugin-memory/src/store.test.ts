@@ -5,6 +5,7 @@ import type {
   WorkspaceFilesV1,
   WorkspaceWriterV1,
 } from "@frockbot/kernel-contracts";
+import { renderInjectedFactLineV1 } from "./facts.ts";
 import {
   botMemoryRootV1,
   projectMemoryRootV1,
@@ -126,6 +127,33 @@ describe("the Memory writer", () => {
       "General: Tim lives in Wollongong.",
       "School: Tim teaches on Tuesdays.",
     ]);
+  });
+
+  // A Bot id is a handle, not a name. Rendered as `[via remy-9d15e086]` the
+  // model reads it as a name and tells the User a sibling's id.
+  test("credits nobody rather than a Bot id when no name is known", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const nameless = new MemoryStore({
+      files,
+      owner: { userId: "user-1", botId: "bot-9" },
+      clock: () => AT,
+    });
+    const root = userMemoryRootV1(OWNER);
+    await nameless.write({
+      root,
+      tier: "profile",
+      fact: "Tim stops drinking coffee at 2pm.",
+      writer: writerFor("bot-9"),
+    });
+
+    const tier = await nameless.read(root);
+
+    expect(tier.profile).toHaveLength(1);
+    expect(tier.profile[0]?.via).toBeUndefined();
+    expect(tier.profile[0]?.botId).toBe("bot-9");
+    expect(renderInjectedFactLineV1(tier.profile[0]!, 200)).not.toContain(
+      "bot-9",
+    );
   });
 
   test("dedupes a fact that is already recorded, without writing", async () => {
