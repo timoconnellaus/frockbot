@@ -12,7 +12,10 @@ import {
   type OwnedBotTurnCommand,
 } from "./authority.ts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
-import { BotTurnReconciliationRequiredError } from "./turn-errors.ts";
+import {
+  BotTurnReconciliationRequiredError,
+  BotTurnRecoveryRequiredError,
+} from "./turn-errors.ts";
 import {
   createStoredRunCodecV1,
   storedRunLaneV1,
@@ -123,6 +126,8 @@ function createAuthority(
      * reconciliation can settle it.
      */
     parkOnRelease?(runId: string): boolean;
+    /** Fails the recovery of an evicted Turn, leaving it active and owed. */
+    failRecovery?(runId: string): boolean;
   } = {},
 ): Probe {
   const observed: BotTurnExecutionInput<undefined>[] = [];
@@ -153,6 +158,9 @@ function createAuthority(
     executeTurn: async (input) => {
       observed.push(input);
       const runId = input.command.runId;
+      if (input.resume && options.failRecovery?.(runId)) {
+        throw new BotTurnRecoveryRequiredError([]);
+      }
       const turn = observed.length;
       const handle = handleFor(runId);
       let seq = input.previousEvents.length;
@@ -641,6 +649,54 @@ describe("eviction between the two Turns", () => {
     // A second recovery pass starts nothing: the queue is empty.
     await restarted.authority.recoverActiveRun();
     expect(restarted.observed).toHaveLength(1);
+  });
+});
+
+describe("a failing recovery of an older Turn", () => {
+  test("does not swallow the message the User just sent", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    // Evicted mid-Turn: run-1 stays active and durable, and the object that
+    // comes back recovers it — badly.
+    const restarted = createAuthority(storage, {
+      failRecovery: (runId) => runId === "run-1",
+    });
+    const second = restarted.authority
+      .run(
+        command("run-2", "second", {
+          lane: "user",
+          supersedes: { runId: "run-1" },
+        }),
+      )
+      .catch(() => undefined);
+    await admitted();
+
+    // The new message is durable regardless of what happened to the old Turn.
+    // Before this, the recovery's own error threw out of `run()` before
+    // admission was ever attempted and the message was simply gone.
+    expect(storedRun(storage, "run-2").runId).toBe("run-2");
+    expect(storedRun(storage, "run-2").input).toBe("second");
+    probe.handle("run-1").finish();
+    await first.catch(() => undefined);
+    restarted.handle("run-2").finish();
+    await second;
+  });
+});
+
+describe("the run admission fence index", () => {
+  test("ages the oldest entry out rather than refusing the operation", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+    for (let index = 0; index < 300; index += 1) {
+      await probe.authority.fenceRunAdmission(identity, `fence-${index}`);
+    }
+    const fences = storage.values.get("run-admission-fences") as string[];
+    expect(fences.length).toBeLessThanOrEqual(256);
+    // The newest fence is the one that still matters; the oldest aged out.
+    expect(fences.at(-1)).toBe("fence-299");
+    expect(fences).not.toContain("fence-0");
   });
 });
 

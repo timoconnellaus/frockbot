@@ -209,7 +209,14 @@ export class BotDurableAuthority<Snapshot> {
 
   async run(command: OwnedBotTurnCommand): Promise<BotTurnCompletion> {
     await this.assertMatchingRunCommand(command);
-    await this.recoverActiveRun();
+    // Recovering whatever this object was left holding must never decide the
+    // fate of a new command. `recoverActiveRun` executes the *previous* Turn
+    // inline and rethrows, so a recovery that failed — an uncertain effect, a
+    // mount failure, a provider that was down — threw before the new message
+    // was ever admitted, and the person's message was simply lost. The old
+    // Turn is durable either way and the alarm retries it; admission now
+    // refuses or supersedes on its own terms.
+    await this.recoverActiveRun().catch(() => undefined);
     const replay = await this.settledRunResult(command);
     if (replay) return replay;
     const admission = await this.acceptRun(command);
@@ -256,8 +263,10 @@ export class BotDurableAuthority<Snapshot> {
         const promoted = await this.promoteQueuedRun(command.runId);
         if (promoted === "blocked") {
           // Another Turn holds the object. Recovery drives it to its own
-          // durable terminal or resumable state, and this one tries again.
-          await this.recoverActiveRun();
+          // durable terminal or resumable state, and this one tries again —
+          // including when that recovery fails, which is the other Turn's
+          // problem and not this one's.
+          await this.recoverActiveRun().catch(() => undefined);
           // Unless what holds the object is an uncertain effect. That is
           // settled by an explicit reconciliation the User asks for, on their
           // own clock, and retrying against it would only burn this caller's
@@ -808,7 +817,16 @@ export class BotDurableAuthority<Snapshot> {
         this.ctx.storage.get<BotIdentity>(IDENTITY_KEY),
       ]);
       const run = this.codec.optional(storedRun);
-      if (run?.status === "reconciliation-required" && identity) return;
+      if (run?.status === "reconciliation-required" && identity) {
+        // A parked run is not this alarm's to settle — only an explicit
+        // reconciliation settles it — but returning without rescheduling
+        // dropped the object's *other* deadlines with it: a Routine due while
+        // a Bot sat parked never fired, and nothing set the alarm again.
+        await this.ctx.storage.transaction((transaction) =>
+          this.refreshRecoveryAlarm(transaction),
+        );
+        return;
+      }
     }
     await this.recoverActiveRun();
   }
@@ -875,17 +893,15 @@ export class BotDurableAuthority<Snapshot> {
         const storedFences = storedRunAdmissionFences(
           await transaction.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
         );
-        if (
-          !storedFences.includes(runId) &&
-          storedFences.length >= MAX_RUN_ADMISSION_FENCES
-        ) {
-          throw new Error("Run admission fence capacity reached");
-        }
+        // A bounded FIFO, not a cliff. Nothing ever evicted an entry, so a Bot
+        // that had refused 256 sends over its life answered every later fence
+        // with a 500 and left the client retrying "Turn admission lookup
+        // failed" forever. A run id old enough to age out here can no longer
+        // be admitted by any live caller.
+        const kept = storedFences.filter((fenced) => fenced !== runId);
+        while (kept.length >= MAX_RUN_ADMISSION_FENCES) kept.shift();
         await transaction.put({
-          [RUN_ADMISSION_FENCE_INDEX_KEY]: [
-            ...storedFences.filter((fenced) => fenced !== runId),
-            runId,
-          ],
+          [RUN_ADMISSION_FENCE_INDEX_KEY]: [...kept, runId],
           [IDENTITY_KEY]: durableIdentity ?? identity,
         });
         await transaction.delete(`${RUN_ADMISSION_FENCE_PREFIX}${runId}`);
