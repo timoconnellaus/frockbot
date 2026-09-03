@@ -1491,9 +1491,9 @@ describe("dispatched subagents in the run projection", () => {
         text: "the answer",
       }),
     ];
-    expect(
-      projectClientRunV1(storedRun(streamed, "running")).partialText,
-    ).toBe("the answer");
+    expect(projectClientRunV1(storedRun(streamed, "running")).partialText).toBe(
+      "the answer",
+    );
   });
 
   test("a settled Turn carries its answer once, as an outcome", () => {
