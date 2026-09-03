@@ -13,9 +13,18 @@ import { test, expect, provisionThroughUi } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 import type { Locator, Page } from "@playwright/test";
 
-/** The Routines section inside the Bot settings panel. */
-function routines(page: Page): Locator {
-  return page.locator("section.routines");
+/**
+ * Open Bot settings and reveal the Routines section, which lives under
+ * Advanced — the same path `bot-settings.e2e.ts` walks.
+ */
+async function openRoutines(page: Page): Promise<Locator> {
+  await page.getByRole("button", { name: "Bot settings" }).click();
+  const panel = page.getByRole("region", { name: "Settings" });
+  await expect(panel).toBeVisible();
+  await panel.getByText("Advanced").click();
+  const section = page.locator("section.routines");
+  await expect(section).toBeVisible();
+  return section;
 }
 
 test("a refused schedule says why, next to the field that caused it", async ({
@@ -35,9 +44,7 @@ test("a refused schedule says why, next to the field that caused it", async ({
     apiBaseUrl: ollamaBaseUrl,
     botName: "Scheduler",
   });
-  await page.getByRole("button", { name: "Bot settings" }).click();
-  const section = routines(page);
-  await expect(section).toBeVisible();
+  const section = await openRoutines(page);
 
   await section.getByRole("button", { name: "New Routine" }).click();
   const form = section.locator(".routine-form");
@@ -55,14 +62,14 @@ test("a refused schedule says why, next to the field that caused it", async ({
 
   await form.getByLabel("Name", { exact: true }).fill("Blursday brief");
   await form.getByLabel("Prompt").fill("Summarise overnight email.");
-  await form.getByLabel("Schedule").fill("every Blursday");
+  await form.getByLabel(/^Schedule/u).fill("every Blursday");
   await form.getByRole("button", { name: "Save Routine" }).click();
 
   // The reason arrives inside the form, and it is the real one.
   const refusal = form.locator("#routine-schedule-error");
   await expect(refusal).toBeVisible();
   await expect(refusal).toContainText("five fields");
-  await expect(form.getByLabel("Schedule")).toHaveAttribute(
+  await expect(form.getByLabel(/^Schedule/u)).toHaveAttribute(
     "aria-invalid",
     "true",
   );
@@ -76,10 +83,10 @@ test("a refused schedule says why, next to the field that caused it", async ({
 
   // Nothing was stored, and the form is still open with the value to correct.
   await expect(section.locator(".routine-card")).toHaveCount(0);
-  await expect(form.getByLabel("Schedule")).toHaveValue("every Blursday");
+  await expect(form.getByLabel(/^Schedule/u)).toHaveValue("every Blursday");
 
   // Correcting it saves, and the refusal goes with it.
-  await form.getByLabel("Schedule").fill("0 9 * * *");
+  await form.getByLabel(/^Schedule/u).fill("0 9 * * *");
   await form.getByRole("button", { name: "Save Routine" }).click();
   await expect(section.locator(".routine-card")).toHaveCount(1);
   await expect(section.getByText("Blursday brief")).toBeVisible();
@@ -102,14 +109,13 @@ test("deleting a Routine asks first, and Cancel keeps it", async ({
     apiBaseUrl: ollamaBaseUrl,
     botName: "Keeper",
   });
-  await page.getByRole("button", { name: "Bot settings" }).click();
-  const section = routines(page);
+  const section = await openRoutines(page);
 
   await section.getByRole("button", { name: "New Routine" }).click();
   const form = section.locator(".routine-form");
   await form.getByLabel("Name", { exact: true }).fill("Morning brief");
   await form.getByLabel("Prompt").fill("Summarise overnight email.");
-  await form.getByLabel("Schedule").fill("0 9 * * *");
+  await form.getByLabel(/^Schedule/u).fill("0 9 * * *");
   await form.getByRole("button", { name: "Save Routine" }).click();
   const card = section.locator(".routine-card");
   await expect(card).toHaveCount(1);
