@@ -256,9 +256,39 @@ describe("computer agent contribution", () => {
     await expect(
       execute(harness, "computer_exec", { command: "pwd" }),
     ).resolves.toEqual({
-      content: "The user is controlling this Computer; do not retry this Turn",
+      content: "held by human:session-1; do not retry this Turn",
       isError: true,
     });
+    await harness.dispose();
+  });
+
+  test("an unconfigured deployment offers no Computer tool and no Computer prompt", async () => {
+    const harness = await createPluginHarness([
+      ComputerRegistry,
+      ToolRegistry,
+      SystemPromptRegistry,
+      SessionStore,
+    ]);
+    await harness.mount(
+      createComputerAgentPlugin({
+        userId: "user-1",
+        defaultProviderId: "fixture",
+        configured: false,
+      }),
+    );
+
+    const registered = harness.root.tools.registeredNames?.() ?? [];
+    expect(registered.filter((name) => name.startsWith("computer_"))).toEqual(
+      [],
+    );
+    const prompt = await harness.root.systemPrompt.assemble({
+      sessionId: "session-1",
+      provider: "fixture",
+      model: "fixture",
+      turnType: "chat",
+    });
+    expect(prompt.text).not.toContain("Persistent Computer");
+    expect(prompt.text).not.toContain("computer_exec");
     await harness.dispose();
   });
 

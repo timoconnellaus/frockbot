@@ -6,6 +6,7 @@
 // the URL is held in this Contribution instance until a read projects it.
 import {
   computerBotPathKeyV1,
+  COMPUTER_UNCONFIGURED_MESSAGE_V1,
   ComputerError,
   decodeComputerDoctorReportV1,
   type ComputerConnectionProgressV1,
@@ -413,6 +414,25 @@ function failureText(error: unknown): string {
   );
 }
 
+/**
+ * One stored record, or nothing when the codec refuses it.
+ *
+ * A projection degrades; it does not fail. Losing one record's contribution to
+ * the card is better than a Bot whose Computer surface throws forever because
+ * a single key holds a shape this version does not know.
+ */
+function decoded<T>(
+  value: unknown,
+  decode: (input: unknown) => T,
+): T | undefined {
+  if (value === undefined) return undefined;
+  try {
+    return decode(value);
+  } catch {
+    return undefined;
+  }
+}
+
 function isFresh(expiresAt: string, now: Date): boolean {
   return Date.parse(expiresAt) > now.getTime();
 }
@@ -684,6 +704,21 @@ export class ComputerBotBackendContribution {
       throw new ComputerProtocolDecodeError(
         "Computer command does not match Bot registration",
       );
+    }
+    // A host with no Computer rejects every command with the same reason,
+    // before admission. `connect` in particular must not answer `accepted`:
+    // admitting work that provably cannot be done leaves the User watching a
+    // projection that will never move, and there is nothing to reconcile
+    // later because nothing was ever started.
+    if (!this.host.configured) {
+      return {
+        version: 1,
+        commandId: command.commandId,
+        type: command.type,
+        status: "rejected",
+        completedAt: this.now().toISOString(),
+        failure: COMPUTER_UNCONFIGURED_MESSAGE_V1,
+      };
     }
     const admitted = await this.admit(userId, command);
     if ("replay" in admitted) return admitted.replay;
@@ -1081,17 +1116,31 @@ export class ComputerBotBackendContribution {
     );
     if (currentValue === undefined) return;
     const current = decodeStoredComputerControlV1(currentValue);
-    await this.withComputer(userId, command, async (computer) => {
-      if (!computer.control) {
-        throw new Error("The selected Computer does not support human control");
-      }
-      await computer.control.release(
-        { id: current.ownerId, expiresAt: current.expiresAt },
-        { scope: "desktop-gui", ownerId: current.ownerId },
-        { effectId: `computer:${command.commandId}:release-control` },
-      );
-    });
-    await this.host.storage.delete(COMPUTER_CONTROL_RECORD_KEY);
+    try {
+      await this.withComputer(userId, command, async (computer) => {
+        if (!computer.control) {
+          throw new Error(
+            "The selected Computer does not support human control",
+          );
+        }
+        await computer.control.release(
+          { id: current.ownerId, expiresAt: current.expiresAt },
+          { scope: "desktop-gui", ownerId: current.ownerId },
+          { effectId: `computer:${command.commandId}:release-control` },
+        );
+      });
+    } finally {
+      // The durable record goes whatever the provider answered. It is the
+      // User-wide `desktop-gui` fence: left behind by a release the Computer
+      // could not confirm, it is renewed by the client heartbeat forever, and
+      // every Bot of this User loses the Computer with no way back. The
+      // provider's own lease expires on its side; this one has no expiry a
+      // failing host can be trusted to reach. The failure still reaches the
+      // User — it rejects the receipt and records the `error` phase — but it
+      // never becomes a lease nobody can drop.
+      // Prior art: `releaseDesktopLease` in `@frockbot/plugin-subagents`.
+      await this.host.storage.delete(COMPUTER_CONTROL_RECORD_KEY);
+    }
   }
 
   /**
@@ -1279,16 +1328,15 @@ export class ComputerBotBackendContribution {
         this.screenshots(userId, botId),
         this.doctor(userId, botId),
       ]);
-    const viewer =
-      viewerValue === undefined ? undefined : decodeStoredViewer(viewerValue);
-    const control =
-      controlValue === undefined
-        ? undefined
-        : decodeStoredComputerControlV1(controlValue);
-    const provider =
-      providerValue === undefined
-        ? undefined
-        : decodeStoredProvider(providerValue);
+    // A record the codec refuses is treated as absent, the way `doctor()`
+    // above and `ComputerProcessStore.list` already do. These three decoders
+    // throw on any unexpected shape — a field a future version adds included —
+    // and this is the read behind the card, the overlay and the poll: one bad
+    // value made `GET /api/bots/:id/computer` throw for that Bot forever, with
+    // nothing in the product able to clear the key.
+    const viewer = decoded(viewerValue, decodeStoredViewer);
+    const control = decoded(controlValue, decodeStoredComputerControlV1);
+    const provider = decoded(providerValue, decodeStoredProvider);
     const liveViewer =
       viewer &&
       this.#liveViewer?.id === viewer.id &&
@@ -1303,7 +1351,7 @@ export class ComputerBotBackendContribution {
     let message: string;
     if (!this.host.configured) {
       phase = "unconfigured";
-      message = "No Computer provider is configured for this host";
+      message = COMPUTER_UNCONFIGURED_MESSAGE_V1;
     } else if (provider?.phase === "disconnected") {
       phase = "disconnected";
       message = provider.message;

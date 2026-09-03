@@ -45,6 +45,18 @@ export type ComputerErrorCode =
   | "aborted"
   | "provider-failure";
 
+/**
+ * What every seam says when this deployment has no Computer at all.
+ *
+ * One sentence, addressed to the person reading it. It names no environment
+ * variable and no settings screen: attaching a Computer is a deployment act,
+ * and nothing a User or a Bot can do inside the product changes it, so
+ * inventing a remedy here only sends the User looking for a control that does
+ * not exist.
+ */
+export const COMPUTER_UNCONFIGURED_MESSAGE_V1 =
+  "This FrockBot has no Computer. Nothing in the app can attach one.";
+
 export class ComputerError extends Error {
   constructor(
     readonly code: ComputerErrorCode,
