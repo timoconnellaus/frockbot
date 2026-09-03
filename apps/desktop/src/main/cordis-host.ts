@@ -5,7 +5,7 @@ import { resolveFoundationTrustedDesktopContribution } from "@frockbot/applicati
 import { compileFoundationApplicationDeclarations } from "@frockbot/application-foundation/runtime";
 import { DesktopCommandRegistry } from "@frockbot/desktop-core";
 import { type Context, Context as CordisContext, Service } from "cordis";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, type Session } from "electron";
 import {
   ElectronDesktopAuthCapability,
   prepareElectronDesktopAuthRuntime,
@@ -20,6 +20,7 @@ import {
 
 interface DesktopWindowConfig {
   baseUrl: string;
+  prepareSession?(session: Session): Promise<void>;
 }
 
 declare module "cordis" {
@@ -68,6 +69,7 @@ class DesktopWindowService extends Service {
         event.preventDefault();
       }
     });
+    await this.config.prepareSession?.(window.webContents.session);
     await window.loadURL(this.config.baseUrl);
     if (process.env.FROCKBOT_SMOKE_SCREENSHOT) void this.captureSmoke(window);
     return window;
@@ -209,7 +211,11 @@ export async function createCordisDesktopHost(): Promise<Context> {
           );
           return () => ipcMain.removeHandler(MACHINE_CHANNEL);
         });
-        await root.plugin(DesktopWindowService, { baseUrl: applicationUrl });
+        await root.plugin(DesktopWindowService, {
+          baseUrl: applicationUrl,
+          prepareSession: (session) =>
+            authRuntime.prepareRendererSession(session),
+        });
         return root;
       } catch (error) {
         await root.fiber.dispose();

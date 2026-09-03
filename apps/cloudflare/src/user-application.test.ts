@@ -107,6 +107,7 @@ describe("user application security headers", () => {
     expect(policy.get("font-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("img-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("style-src")).toEqual(["'self'"]);
+    expect(policy.get("connect-src")).toEqual(["'self'", "wss://app.example"]);
     // Package pages use the anonymous UI origin; the expanded Computer viewer
     // frames the Sprite's own noVNC page.
     expect(policy.get("frame-src")).toEqual([
@@ -114,6 +115,20 @@ describe("user application security headers", () => {
       "https://*.sprites.app",
     ]);
     expect(policy.get("frame-ancestors")).toEqual(["'none'"]);
+  });
+
+  test("permits the same-origin development WebSocket explicitly", async () => {
+    const response = await createUserApplication()(
+      new Request("http://localhost:8787/app.css"),
+      securityEnv,
+    );
+    const policy = parseContentSecurityPolicy(
+      response.headers.get("content-security-policy"),
+    );
+    expect(policy.get("connect-src")).toEqual([
+      "'self'",
+      "ws://localhost:8787",
+    ]);
   });
 
   test("serves the site icon the hosted shell links", async () => {

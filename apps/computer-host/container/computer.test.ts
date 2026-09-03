@@ -13,6 +13,7 @@ import { describe, expect, test } from "bun:test";
 import {
   COMPUTER_HOST_ROUTES,
   ComputerHostExecFrameReaderV1,
+  ComputerHostOpenFrameReaderV1,
   decodeComputerHostCancelResultV1,
   decodeComputerHostControlResultV1,
   decodeComputerHostExecResultV1,
@@ -23,6 +24,7 @@ import {
   decodeComputerHostProblemV1,
   decodeComputerHostServiceResultV1,
   type ComputerHostExecFrameV1,
+  type ComputerHostOpenFrameV1,
   type ComputerHostOperationV1,
   type ComputerHostRequestV1,
 } from "@frockbot/computer-host-protocol";
@@ -218,6 +220,23 @@ async function readFrames(
   return frames;
 }
 
+async function readOpenFrames(
+  response: Response,
+): Promise<ComputerHostOpenFrameV1[]> {
+  const reader = new ComputerHostOpenFrameReaderV1();
+  const frames: ComputerHostOpenFrameV1[] = [];
+  const body = response.body;
+  if (!body) return frames;
+  const stream = body.getReader();
+  for (;;) {
+    const { done, value } = await stream.read();
+    if (done) break;
+    frames.push(...reader.push(value));
+  }
+  frames.push(...reader.end());
+  return frames;
+}
+
 describe("Sprite naming", () => {
   test("derives one Sprite per User, from the User alone", () => {
     const host = hostWith(new FakeSpritesClient());
@@ -237,6 +256,38 @@ describe("Sprite naming", () => {
 });
 
 describe("open", () => {
+  test("streams provisioning phases and ends with the open result", async () => {
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      sprite.scripts = [
+        report("running", installing),
+        report("running", installing),
+        report("stopped", ready),
+      ];
+    };
+
+    const response = await host.handle(request({ kind: "open", stream: true }));
+    expect(response.headers.get("content-type")).toContain(
+      "application/x-ndjson",
+    );
+    const frames = await readOpenFrames(response);
+
+    expect(
+      frames
+        .filter((frame) => frame.type === "progress")
+        .map((frame) => frame.progress.label),
+    ).toEqual(["installing the desktop packages", "the Computer is ready"]);
+    expect(frames.at(-1)).toMatchObject({
+      type: "result",
+      result: {
+        effectId: "effect-1",
+        provisioning: { status: "complete", index: 5 },
+      },
+    });
+    expect(host.inFlightCount).toBe(0);
+  });
+
   test("provisions a new Computer and adopts it thereafter", async () => {
     const client = new FakeSpritesClient();
     const host = hostWith(client);
@@ -688,42 +739,57 @@ describe("open", () => {
     ).toHaveLength(1);
   });
 
-  test("a fresh human-control lease defers the update and records it", async () => {
+  test("a fresh human-control lease installs the update but defers the gateway", async () => {
     const { host, sprite } = provisioned();
     writeFile(sprite, PROVISION_DIGEST, "stale\n");
     const lease = `${RUNTIME_ROOT}/bots/another-tenant/human-control`;
     writeFile(sprite, lease, "viewer-1\n");
+    sprite.scripts = [
+      report("running", updatingRuntime, "update"),
+      report("stopped", updateReady, "update"),
+    ];
+    const declarations = sprite.serviceCreates.filter(
+      (name) => name === DESKTOP_SERVICE,
+    ).length;
 
     const response = await host.handle(request({ kind: "open" }));
 
+    // The update phases are file installs and run even under a human lease:
+    // deferring them is what left a Computer serving no viewer page.
     expect(response.status).toBe(200);
     expect(
       sprite.commands.some((command) =>
         command.stdin.includes(`${PROVISION_SCRIPT} update`),
       ),
-    ).toBe(false);
+    ).toBe(true);
+    // The gateway is the one disruptive step, so it waits for the lease.
+    expect(
+      sprite.serviceCreates.filter((name) => name === DESKTOP_SERVICE).length,
+    ).toBe(declarations);
     expect(
       JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
     ).toMatchObject({
       version: 1,
       generation: 4,
       update: {
-        status: "pending",
+        status: "started",
         digest: runtimeDocumentDigestV1(),
       },
     });
 
+    // Once the lease goes stale the next open reconciles the re-declaration
+    // and clears the durable intent, without installing anything again.
     sprite.files.get(lease)!.mtime = new Date("2026-08-30T23:58:00.000Z");
-    sprite.scripts = [
-      report("running", updatingRuntime, "update"),
-      report("stopped", updateReady, "update"),
-    ];
     const resumed = await host.handle(
       request({ kind: "open" }, { effectId: "open-after-lease" }),
     );
+    expect(resumed.status).toBe(200);
     expect(
-      decodeComputerHostOpenResultV1(await resumed.json()).provisioning,
-    ).toMatchObject({ kind: "update", status: "complete" });
+      sprite.serviceCreates.filter((name) => name === DESKTOP_SERVICE).length,
+    ).toBe(declarations + 1);
+    expect(
+      JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
+    ).toMatchObject({ version: 1, generation: 4 });
   });
 
   test("a second caller waits its bound then receives computer-updating with the current label", async () => {

@@ -7,19 +7,17 @@ import type { ClientPlugin } from "@frockbot/client-core";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { ref, watch } from "vue";
 import {
-  decodeComputerCommandReceiptV1,
+  decodeComputerCommandResponse,
   decodeComputerProjectionV1,
   type ComputerCommandTypeV1,
 } from "../protocol.js";
 import { computerKey, type ComputerState } from "../shared.js";
 import ComputerCard from "./ComputerCard.vue";
-import ComputerStrip from "./ComputerStrip.vue";
 import ComputerViewerOverlay from "./ComputerViewerOverlay.vue";
 import {
   initialComputerMachineState,
   transitionComputerState,
   type ComputerMachineEvent,
-  type ComputerMachineState,
 } from "./state-machine.js";
 import "./styles.css";
 
@@ -71,11 +69,6 @@ export function createComputerClientPlugin(
         component: ComputerCard,
       }),
       ctx.slot({
-        slot: "frockbot.sidebar-computer",
-        order: 10,
-        component: ComputerStrip,
-      }),
-      ctx.slot({
         slot: "frockbot.overlays",
         order: 20,
         component: ComputerViewerOverlay,
@@ -92,6 +85,11 @@ export function createComputerClientPlugin(
     let viewerHeartbeat: unknown;
     let projectionPoll: unknown;
     let projectionPollInterval: number | undefined;
+    let stateChannelStatus: "connecting" | "open" | "fallback" | "hidden" = ctx
+      .transport.watchBotState
+      ? "connecting"
+      : "fallback";
+    let stopStateChannel: (() => void) | undefined;
     let updateRejoin: unknown;
     let controlRequest: Promise<void> | undefined;
 
@@ -164,7 +162,11 @@ export function createComputerClientPlugin(
     }
 
     function syncProjectionPoll(): void {
-      if (!shell.value.activeBotId || !runtime.isVisible()) {
+      if (
+        stateChannelStatus !== "fallback" ||
+        !shell.value.activeBotId ||
+        !runtime.isVisible()
+      ) {
         stopProjectionPoll();
         return;
       }
@@ -189,6 +191,27 @@ export function createComputerClientPlugin(
           apply({ type: "failed", message: errorMessage(error) }),
         );
       }, interval);
+    }
+
+    function watchStateChannel(selectedBotId: string | undefined): void {
+      stopStateChannel?.();
+      stopStateChannel = undefined;
+      if (!selectedBotId || !ctx.transport.watchBotState) {
+        stateChannelStatus = selectedBotId ? "fallback" : "hidden";
+        syncProjectionPoll();
+        return;
+      }
+      stopStateChannel = ctx.transport.watchBotState(selectedBotId, {
+        async invalidate(topic) {
+          if (topic !== undefined && topic !== "computer") return;
+          if (shell.value.activeBotId !== selectedBotId) return;
+          await load(selectedBotId);
+        },
+        status(status) {
+          stateChannelStatus = status;
+          syncProjectionPoll();
+        },
+      });
     }
 
     function stopUpdateRejoin(): void {
@@ -245,7 +268,7 @@ export function createComputerClientPlugin(
 
     async function post(type: ComputerCommandTypeV1): Promise<void> {
       const selectedBotId = botId();
-      const receipt = decodeComputerCommandReceiptV1(
+      const receipt = decodeComputerCommandResponse(
         await request(
           `/api/bots/${encodeURIComponent(selectedBotId)}/computer/commands`,
           "POST",
@@ -296,7 +319,7 @@ export function createComputerClientPlugin(
       if (!wake) return;
       if (machine.phase === "updating") {
         await execute("connect").catch(() => {
-          // Still updating; the projection poll keeps rejoining.
+          // Still updating; the durable update-rejoin cadence continues.
         });
         return;
       }
@@ -314,7 +337,21 @@ export function createComputerClientPlugin(
         }
       }
       if (machine.takingControl) await releaseControl();
+      // Collapse first. The capture the backend files on close is
+      // opportunistic, and it crosses a service binding to take a screenshot
+      // on the Sprite; an overlay that stayed on screen waiting for that would
+      // be the stall this capture was added to make unnecessary. Post rather
+      // than execute, so a refused capture never projects a failure onto a
+      // Computer the User has already stopped watching.
       apply({ type: "viewer-collapsed" });
+      void (async () => {
+        try {
+          await post("closeViewer");
+          await load();
+        } catch {
+          // The durable projection remains the only truth about the Computer.
+        }
+      })();
     }
 
     function takeControl(): Promise<void> {
@@ -368,7 +405,7 @@ export function createComputerClientPlugin(
         stopUpdateRejoin();
         machine = initialComputerMachineState();
         Object.assign(state.value, machine);
-        syncProjectionPoll();
+        watchStateChannel(selectedBotId);
         if (!selectedBotId || !runtime.isVisible()) return;
         void load(selectedBotId).catch((error) =>
           apply({ type: "failed", message: errorMessage(error) }),
@@ -395,6 +432,7 @@ export function createComputerClientPlugin(
         stopVisibility();
         stopControlHeartbeat();
         stopViewerHeartbeat();
+        stopStateChannel?.();
         stopProjectionPoll();
         stopUpdateRejoin();
       },

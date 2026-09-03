@@ -61,6 +61,7 @@ import {
   COMPUTER_HOST_STREAM_MEDIA_TYPE,
   computerHostProblemV1,
   encodeComputerHostExecFrameV1,
+  encodeComputerHostOpenFrameV1,
   problem,
   type ComputerHostControlResultV1,
   type ComputerHostErrorCodeV1,
@@ -68,6 +69,7 @@ import {
   type ComputerHostExecResultV1,
   type ComputerHostFileEntryV1,
   type ComputerHostFileKindV1,
+  type ComputerHostOpenOperationV1,
   type ComputerHostOpenResultV1,
   type ComputerHostProvisioningV1,
   type ComputerHostRequestV1,
@@ -593,6 +595,10 @@ interface ComputerHostStateV1 {
   version: 1;
   generation: number;
   update?: {
+    // `pending` is no longer written: an update under a human-control lease
+    // now installs its files and records `started`, deferring only the
+    // gateway re-declaration. It stays decodable because Computers provisioned
+    // before that change still carry it, and their next open reconciles it.
     status: "pending" | "started";
     digest: string;
     recordedAt: string;
@@ -625,10 +631,9 @@ export interface ComputerHostOptions {
   /**
    * Told every time a provisioning run reaches a new phase.
    *
-   * `open` answers once, at the end, so a cold Computer is minutes of quiet
-   * from outside the container. This is how the container itself is not quiet:
-   * the process log names the phase while it is happening, which is what an
-   * operator needs when an install is slow rather than broken.
+   * A streamed `open` carries the same phases to its caller. This observer is
+   * still useful independently: the process log tells an operator whether an
+   * install is slow or broken even when no caller remains attached.
    */
   onProvisionProgress?: (
     spriteName: string,
@@ -735,11 +740,12 @@ export class ComputerHost {
     }
     const admitted = this.admit(request);
     if (!admitted.ok) return admitted.response;
-    // A streaming exec has not finished when it answers: its `Response` is an
-    // open stream. It therefore takes ownership of the release, or a cancel
-    // arriving mid-stream would find nothing to cancel.
+    // A streaming operation has not finished when it answers: its `Response`
+    // is an open stream. It therefore takes ownership of the release, or a
+    // cancel arriving mid-stream would find nothing to cancel.
     const streaming =
-      request.operation.kind === "exec" && request.operation.stream;
+      (request.operation.kind === "exec" && request.operation.stream) ||
+      (request.operation.kind === "open" && request.operation.stream === true);
     try {
       const response = await this.dispatch(request, signal, admitted.release);
       if (!streaming) admitted.release();
@@ -819,7 +825,7 @@ export class ComputerHost {
   ): Promise<Response> {
     switch (request.operation.kind) {
       case "open":
-        return this.open(request);
+        return this.open(request, request.operation, release);
       case "exec":
         return this.exec(request, request.operation, signal, release);
       case "file/read":
@@ -853,8 +859,81 @@ export class ComputerHost {
    * only a Sprite with no state file is provisioned again. That is
    * reconstruction, not retry — no effect is repeated.
    */
-  private async open(request: ComputerHostRequestV1): Promise<Response> {
-    const record = await this.computer(request.identity.userId, true);
+  private async open(
+    request: ComputerHostRequestV1,
+    operation: ComputerHostOpenOperationV1,
+    release: () => void,
+  ): Promise<Response> {
+    if (!operation.stream) {
+      return Response.json(await this.openResult(request));
+    }
+
+    const encoder = new TextEncoder();
+    const host = this;
+    let writable = true;
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const write = (
+          frame: Parameters<typeof encodeComputerHostOpenFrameV1>[0],
+        ): void => {
+          if (!writable) return;
+          try {
+            controller.enqueue(
+              encoder.encode(encodeComputerHostOpenFrameV1(frame)),
+            );
+          } catch {
+            // The caller detached. Progress is an observer, not authority;
+            // provisioning continues to its terminal state.
+            writable = false;
+          }
+        };
+        try {
+          const result = await host.openResult(request, (progress) => {
+            write({ type: "progress", progress });
+          });
+          write({ type: "result", result });
+        } catch (error) {
+          const failure =
+            error instanceof ComputerHostError
+              ? computerHostProblemV1(
+                  error.code,
+                  error.message,
+                  error.retryable,
+                )
+              : computerHostProblemV1(
+                  "provider-failure",
+                  errorText(error),
+                  true,
+                );
+          write({
+            type: "error",
+            code: failure.code,
+            message: failure.message,
+            retryable: failure.retryable,
+          });
+        } finally {
+          release();
+          if (writable) controller.close();
+        }
+      },
+      cancel() {
+        writable = false;
+      },
+    });
+    return new Response(body, {
+      headers: { "content-type": COMPUTER_HOST_STREAM_MEDIA_TYPE },
+    });
+  }
+
+  private async openResult(
+    request: ComputerHostRequestV1,
+    onProgress?: (progress: ComputerHostProvisioningV1) => void,
+  ): Promise<ComputerHostOpenResultV1> {
+    const record = await this.computer(
+      request.identity.userId,
+      true,
+      onProgress,
+    );
     const sprite = await this.spriteFor(record.spriteName);
     const botKey = computerBotKeyV1(request.tenant.botId, this.digest);
     const profile = Buffer.from(
@@ -931,7 +1010,7 @@ export class ComputerHost {
       generation: record.generation,
       ...(record.provisioning ? { provisioning: record.provisioning } : {}),
     };
-    return Response.json(result);
+    return result;
   }
 
   /**
@@ -991,18 +1070,22 @@ export class ComputerHost {
   private computer(
     userId: string,
     inspectRuntime = false,
+    onProgress?: (progress: ComputerHostProvisioningV1) => void,
   ): Promise<ComputerRecord> {
     const updating = this.updates.get(userId);
-    if (updating) return this.waitForUpdate(updating);
+    if (updating) {
+      onProgress?.(updating.progress);
+      return this.waitForUpdate(updating);
+    }
     const cached = this.computers.get(userId);
     if (cached) {
       return inspectRuntime
-        ? this.ensureRuntimeCurrent(userId, cached)
+        ? this.ensureRuntimeCurrent(userId, cached, undefined, onProgress)
         : Promise.resolve(cached);
     }
     let pending = this.openings.get(userId);
     if (!pending) {
-      pending = this.provision(userId)
+      pending = this.provision(userId, onProgress)
         .then((record) => {
           // The progress belongs to the run, not to the Computer: the call
           // that provisioned it reports the phases, and every later `open`
@@ -1022,12 +1105,20 @@ export class ComputerHost {
     }
     return inspectRuntime
       ? pending.then((record) =>
-          this.ensureRuntimeCurrent(userId, record, record.inspection),
+          this.ensureRuntimeCurrent(
+            userId,
+            record,
+            record.inspection,
+            onProgress,
+          ),
         )
       : pending;
   }
 
-  private async provision(userId: string): Promise<ComputerRecord> {
+  private async provision(
+    userId: string,
+    onProgress?: (progress: ComputerHostProvisioningV1) => void,
+  ): Promise<ComputerRecord> {
     const spriteName = this.spriteNameFor(userId);
     const sprite = await this.findOrCreate(spriteName);
     const inspection = await this.inspectAdoption(sprite);
@@ -1039,7 +1130,11 @@ export class ComputerHost {
       };
     }
 
-    const provisioning = await this.driveProvisioning(sprite);
+    const provisioning = await this.driveProvisioning(
+      sprite,
+      "provision",
+      onProgress,
+    );
     await this.declareGateway(sprite);
     await withTimeout(
       settleService(
@@ -1070,16 +1165,23 @@ export class ComputerHost {
     userId: string,
     record: ComputerRecord,
     inspected?: AdoptionInspection,
+    onProgress?: (progress: ComputerHostProvisioningV1) => void,
   ): Promise<ComputerRecord> {
     const active = this.updates.get(userId);
-    if (active) return this.waitForUpdate(active);
+    if (active) {
+      onProgress?.(active.progress);
+      return this.waitForUpdate(active);
+    }
     const sprite = await this.spriteFor(record.spriteName);
     const inspection = inspected ?? (await this.inspectAdoption(sprite));
     // Two opens may finish their read-only inspection together. The first
     // continuation records and owns the update; the second joins it instead
     // of starting another runner or waiting the full provisioning deadline.
     const concurrent = this.updates.get(userId);
-    if (concurrent) return this.waitForUpdate(concurrent);
+    if (concurrent) {
+      onProgress?.(concurrent.progress);
+      return this.waitForUpdate(concurrent);
+    }
     const digest = runtimeDocumentDigestV1();
     if (inspection.digest === digest) {
       if (inspection.state?.update) {
@@ -1098,19 +1200,6 @@ export class ComputerHost {
       return record;
     }
 
-    if (inspection.humanControlFresh) {
-      await this.writeHostState(sprite, {
-        version: 1,
-        generation: record.generation,
-        update: {
-          status: "pending",
-          digest,
-          recordedAt: new Date(this.now()).toISOString(),
-        },
-      });
-      return record;
-    }
-
     const progress: ComputerHostProvisioningV1 = {
       kind: "update",
       phase: UPDATE_STARTING_PHASE.name,
@@ -1121,11 +1210,15 @@ export class ComputerHost {
       resumed: false,
     };
     let held!: ActiveUpdate;
-    const promise = this.applyRuntimeUpdate(sprite, record, progress).finally(
-      () => {
-        if (this.updates.get(userId) === held) this.updates.delete(userId);
-      },
-    );
+    const promise = this.applyRuntimeUpdate(
+      sprite,
+      record,
+      progress,
+      onProgress,
+      inspection.humanControlFresh,
+    ).finally(() => {
+      if (this.updates.get(userId) === held) this.updates.delete(userId);
+    });
     held = { progress, promise };
     this.updates.set(userId, held);
     return inspection.state?.update?.status === "started"
@@ -1137,6 +1230,8 @@ export class ComputerHost {
     sprite: SpriteHandle,
     record: ComputerRecord,
     progress: ComputerHostProvisioningV1,
+    onProgress?: (progress: ComputerHostProvisioningV1) => void,
+    deferGateway = false,
   ): Promise<ComputerRecord> {
     const digest = runtimeDocumentDigestV1();
     // Durable intent precedes the launcher. Recovery sees `started`, compares
@@ -1150,9 +1245,23 @@ export class ComputerHost {
         recordedAt: new Date(this.now()).toISOString(),
       },
     });
-    const updated = await this.driveProvisioning(sprite, "update", (observed) =>
-      Object.assign(progress, observed),
+    const updated = await this.driveProvisioning(
+      sprite,
+      "update",
+      (observed) => {
+        Object.assign(progress, observed);
+        onProgress?.(observed);
+      },
     );
+    // A human is driving this desktop. `UPDATE_PHASES` disturbed nothing —
+    // they are idempotent file installs, and a running websockify serves the
+    // viewer page it just rewrote from the same `--web` directory on the next
+    // request. Re-declaring the gateway is the one step that would drop the
+    // live viewer out from under them, so leave `started` on the state file:
+    // the digest now matches, and the reconciliation above re-declares it on
+    // the first open after the lease goes stale. Deferring the whole update
+    // instead is what left a Computer serving no viewer page at all.
+    if (deferGateway) return { ...record, provisioning: updated };
     // A running websockify keeps the `--web` directory from its original
     // process. Re-declare the provider-owned service so the newly installed
     // digest-tracked viewer page is served by this very open (P3).

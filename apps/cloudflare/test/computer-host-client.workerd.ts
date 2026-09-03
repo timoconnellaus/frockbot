@@ -283,6 +283,7 @@ describe("the Durable Object's Computer host client", () => {
     });
     expect(opened.ok).toBe(true);
     expect(opened.spriteName).toMatch(/^frockbot-fake-/);
+    expect((await calls())[0]?.stream).toBe(true);
   });
 
   test("file bytes round-trip through the host, never through a shell", async () => {

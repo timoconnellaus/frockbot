@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ComputerProtocolDecodeError,
+  decodeComputerCommandResponse,
   decodeComputerProjectionV1,
   type ComputerProgressViewV1,
   type ComputerProjectionV1,
@@ -20,6 +21,14 @@ const projection: ComputerProjectionV1 & { progress: ComputerProgressViewV1 } =
       updatedAt: "2026-09-03T00:00:02.000Z",
       index: 2,
       total: 3,
+      provisioning: {
+        version: 1,
+        kind: "provision",
+        label: "installing the browser",
+        index: 4,
+        total: 5,
+        resumed: false,
+      },
       steps: [
         {
           version: 1,
@@ -51,6 +60,14 @@ describe("Computer projection progress", () => {
     );
   });
 
+  test("decodes the previous V1 progress shape without provisioning detail", () => {
+    const { provisioning: _provisioning, ...previous } = projection.progress;
+    expect(
+      decodeComputerProjectionV1({ ...projection, progress: previous })
+        .progress,
+    ).toEqual(previous);
+  });
+
   test("refuses malformed or extended progress at the client seam", () => {
     expect(() =>
       decodeComputerProjectionV1({
@@ -73,5 +90,25 @@ describe("Computer projection progress", () => {
         },
       }),
     ).toThrow(ComputerProtocolDecodeError);
+  });
+});
+
+describe("Computer command acceptance", () => {
+  test("keeps durable admission distinct from a terminal receipt", () => {
+    expect(
+      decodeComputerCommandResponse({
+        version: 2,
+        commandId: "connect-1",
+        type: "connect",
+        status: "accepted",
+        admittedAt: "2026-09-03T00:00:00.000Z",
+      }),
+    ).toEqual({
+      version: 2,
+      commandId: "connect-1",
+      type: "connect",
+      status: "accepted",
+      admittedAt: "2026-09-03T00:00:00.000Z",
+    });
   });
 });

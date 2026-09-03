@@ -1,10 +1,11 @@
 // The deployed Bot Durable Object Computer path against the real host wire.
 // Unit tests prove each record and transition; this proves that composition,
 // RPC, the provider-neutral adapter and the Computer-host binding meet.
-import { env } from "cloudflare:test";
+import { env, runDurableObjectAlarm } from "cloudflare:test";
 import { beforeAll, describe, expect, test } from "vitest";
 import {
   decodeComputerCommandReceiptV1,
+  decodeComputerCommandResponse,
   decodeComputerProjectionV1,
 } from "@frockbot/plugin-computer/protocol";
 import { provisionBot } from "./provision-bot.ts";
@@ -30,16 +31,26 @@ describe("hosted Computer presence", () => {
       `${identity.userId}:${identity.botId}`,
     );
 
+    const connectCommand = {
+      version: 1 as const,
+      commandId: `connect-${suffix}`,
+      botId: identity.botId,
+      type: "connect" as const,
+    };
+    const accepted = decodeComputerCommandResponse(
+      await computer.executeComputerPresenceCommand({
+        schemaVersion: 1,
+        ...identity,
+        command: connectCommand,
+      }),
+    );
+    expect(accepted.status).toBe("accepted");
+    expect(await runDurableObjectAlarm(computer)).toBe(true);
     const connected = decodeComputerCommandReceiptV1(
       await computer.executeComputerPresenceCommand({
         schemaVersion: 1,
         ...identity,
-        command: {
-          version: 1,
-          commandId: `connect-${suffix}`,
-          botId: identity.botId,
-          type: "connect",
-        },
+        command: connectCommand,
       }),
     );
     expect(connected.status).toBe("applied");

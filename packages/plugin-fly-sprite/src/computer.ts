@@ -40,6 +40,7 @@ import type {
   ComputerHostCallOptions,
   ComputerHostExecCommandV1,
   ComputerHostExecOutcomeV1,
+  ComputerHostOpenOptionsV1,
 } from "./host-client.js";
 
 // The Computer's on-Sprite layout, its provisioning script, and its declared
@@ -85,7 +86,7 @@ const TIMEOUTS = {
  * tenant means on a Computer.
  */
 export interface ComputerHostSurfaceV1 {
-  open(options?: ComputerHostCallOptions): Promise<ComputerHostOpenResultV1>;
+  open(options?: ComputerHostOpenOptionsV1): Promise<ComputerHostOpenResultV1>;
   exec(
     command: ComputerHostExecCommandV1,
     options?: ComputerHostCallOptions,
@@ -1214,12 +1215,49 @@ export class FlySpriteComputer {
     const signal = options?.signal;
     const effectId = options?.effectId;
     const host = this.hostFor(layout);
+    let lastIndex = 0;
+    let lastProvisioningIndex = -1;
+    const report = async (
+      progress: Parameters<
+        NonNullable<ComputerConnectionOptionsV1["onProgress"]>
+      >[0],
+    ): Promise<void> => {
+      if (progress.index < lastIndex) return;
+      if (
+        progress.provisioning &&
+        progress.provisioning.index < lastProvisioningIndex
+      ) {
+        return;
+      }
+      lastIndex = progress.index;
+      if (progress.provisioning) {
+        lastProvisioningIndex = progress.provisioning.index;
+      }
+      await options?.onProgress?.(progress);
+    };
     let opened: ComputerHostOpenResultV1;
     try {
       opened = await host.open({
         signal,
         timeoutMs: TIMEOUTS.open,
         ...(effectId ? { effectId: `${effectId}:open` } : {}),
+        onProgress: (progress) =>
+          report({
+            version: 1,
+            kind: "connect",
+            step: "waking",
+            label: "Waking the Computer",
+            index: 1,
+            total: 5,
+            provisioning: {
+              version: 1,
+              kind: progress.kind,
+              label: progress.label,
+              index: progress.index,
+              total: progress.total,
+              resumed: progress.resumed,
+            },
+          }),
       });
     } catch (error) {
       // Every display belonging to a tenant this Computer still has open is a
@@ -1243,7 +1281,7 @@ export class FlySpriteComputer {
       opened.provisioning?.kind === "update" &&
       opened.provisioning.status === "running";
     if (updating && opened.provisioning) {
-      await options?.onProgress?.({
+      await report({
         version: 1,
         kind: "update",
         step: opened.provisioning.phase,
@@ -1255,7 +1293,7 @@ export class FlySpriteComputer {
       // `host.open` owns the wake, tenant attachment and declared desktop
       // start. Keep the durable wake step active while that long call is in
       // flight, then record both boundaries before moving to viewer minting.
-      await options?.onProgress?.({
+      await report({
         version: 1,
         kind: "connect",
         step: "attaching",
@@ -1263,7 +1301,7 @@ export class FlySpriteComputer {
         index: 2,
         total: 5,
       });
-      await options?.onProgress?.({
+      await report({
         version: 1,
         kind: "connect",
         step: "starting-desktop",
@@ -1281,7 +1319,7 @@ export class FlySpriteComputer {
       );
     }
     if (!updating) {
-      await options?.onProgress?.({
+      await report({
         version: 1,
         kind: "connect",
         step: "minting-viewer",
@@ -1303,7 +1341,7 @@ export class FlySpriteComputer {
       );
     }
     if (!updating) {
-      await options?.onProgress?.({
+      await report({
         version: 1,
         kind: "connect",
         step: "connecting",

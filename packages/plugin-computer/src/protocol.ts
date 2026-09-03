@@ -9,6 +9,7 @@ export const COMPUTER_COMMAND_TYPES = [
   "releaseControl",
   "refreshControl",
   "refreshViewer",
+  "closeViewer",
   "runDoctor",
 ] as const;
 
@@ -70,6 +71,15 @@ export interface ComputerProgressStepViewV1 {
   status: ComputerProgressStepStatusV1;
 }
 
+export interface ComputerProvisioningProgressViewV1 {
+  version: 1;
+  kind: "provision" | "update";
+  label: string;
+  index: number;
+  total: number;
+  resumed: boolean;
+}
+
 /** Durable progress projected from the Bot authority; it contains no secrets. */
 export interface ComputerProgressViewV1 {
   version: 1;
@@ -78,6 +88,7 @@ export interface ComputerProgressViewV1 {
   updatedAt: string;
   index: number;
   total: number;
+  provisioning?: ComputerProvisioningProgressViewV1;
   steps: ComputerProgressStepViewV1[];
 }
 
@@ -135,6 +146,22 @@ export type ComputerCommandReceiptV1 =
       completedAt: string;
       failure: string;
     };
+
+/**
+ * A connect command has been durably admitted and scheduled. Version 2 is a
+ * distinct wire shape from the terminal version 1 receipt: it never claims
+ * that the Computer effect has completed.
+ */
+export interface ComputerCommandAcceptedV2 {
+  version: 2;
+  commandId: string;
+  type: "connect";
+  status: "accepted";
+  admittedAt: string;
+}
+
+export type ComputerCommandResponse =
+  ComputerCommandReceiptV1 | ComputerCommandAcceptedV2;
 
 export class ComputerProtocolDecodeError extends Error {
   override readonly name = "ComputerProtocolDecodeError";
@@ -238,6 +265,46 @@ function decodeProgressStepV1(value: unknown): ComputerProgressStepViewV1 {
   };
 }
 
+function decodeProvisioningProgressV1(
+  value: unknown,
+): ComputerProvisioningProgressViewV1 {
+  const candidate = record(value, "Computer provisioning progress");
+  exactKeys(
+    candidate,
+    ["version", "kind", "label", "index", "total", "resumed"],
+    [],
+    "Computer provisioning progress",
+  );
+  if (
+    candidate.version !== 1 ||
+    (candidate.kind !== "provision" && candidate.kind !== "update") ||
+    typeof candidate.resumed !== "boolean"
+  ) {
+    throw new ComputerProtocolDecodeError(
+      "Computer provisioning progress is invalid",
+    );
+  }
+  const total = boundedInteger(
+    candidate.total,
+    1,
+    1_000,
+    "Computer provisioning progress total",
+  );
+  return {
+    version: 1,
+    kind: candidate.kind,
+    label: text(candidate.label, "Computer provisioning progress label"),
+    index: boundedInteger(
+      candidate.index,
+      0,
+      total,
+      "Computer provisioning progress index",
+    ),
+    total,
+    resumed: candidate.resumed,
+  };
+}
+
 export function decodeComputerProgressViewV1(
   value: unknown,
 ): ComputerProgressViewV1 {
@@ -245,7 +312,7 @@ export function decodeComputerProgressViewV1(
   exactKeys(
     candidate,
     ["version", "kind", "startedAt", "updatedAt", "index", "total", "steps"],
-    [],
+    ["provisioning"],
     "Computer progress",
   );
   if (
@@ -282,6 +349,11 @@ export function decodeComputerProgressViewV1(
     updatedAt: timestamp(candidate.updatedAt, "Computer progress updatedAt"),
     index,
     total,
+    ...(candidate.provisioning === undefined
+      ? {}
+      : {
+          provisioning: decodeProvisioningProgressV1(candidate.provisioning),
+        }),
     steps,
   };
 }
@@ -505,6 +577,44 @@ export function decodeComputerCommandReceiptV1(
   throw new ComputerProtocolDecodeError(
     "Computer command receipt status is invalid",
   );
+}
+
+export function decodeComputerCommandResponse(
+  value: unknown,
+): ComputerCommandResponse {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>).version === 2
+  ) {
+    const candidate = record(value, "Computer command acceptance");
+    exactKeys(
+      candidate,
+      ["version", "commandId", "type", "status", "admittedAt"],
+      [],
+      "Computer command acceptance",
+    );
+    if (candidate.type !== "connect" || candidate.status !== "accepted") {
+      throw new ComputerProtocolDecodeError(
+        "Computer command acceptance is invalid",
+      );
+    }
+    return {
+      version: 2,
+      commandId: text(
+        candidate.commandId,
+        "Computer command acceptance commandId",
+      ),
+      type: "connect",
+      status: "accepted",
+      admittedAt: timestamp(
+        candidate.admittedAt,
+        "Computer command acceptance admittedAt",
+      ),
+    };
+  }
+  return decodeComputerCommandReceiptV1(value);
 }
 
 export function computerCommandFingerprintV1(

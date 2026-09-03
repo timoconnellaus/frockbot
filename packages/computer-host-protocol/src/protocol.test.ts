@@ -3,6 +3,7 @@ import {
   COMPUTER_HOST_LIMITS,
   COMPUTER_HOST_ROUTES,
   ComputerHostExecFrameReaderV1,
+  ComputerHostOpenFrameReaderV1,
   computerHostOperationKindV1,
   computerHostProblemV1,
   decodeBase64FieldV1,
@@ -17,15 +18,18 @@ import {
   decodeComputerHostFileWriteResultV1,
   decodeComputerHostHttpRequestV1,
   decodeComputerHostOpenResultV1,
+  decodeComputerHostOpenFrameV1,
   decodeComputerHostProblemV1,
   decodeComputerHostRequestV1,
   decodeComputerHostServiceResultV1,
   decodeComputerHostViewerResultV1,
   decodeComputerPathV1,
   encodeComputerHostExecFrameV1,
+  encodeComputerHostOpenFrameV1,
   encodeComputerHostRequestV1,
   problem,
   type ComputerHostOperationV1,
+  type ComputerHostOpenFrameV1,
 } from "./protocol.ts";
 
 const envelope = {
@@ -105,6 +109,29 @@ describe("envelope", () => {
         credentialRef: "a".repeat(COMPUTER_HOST_LIMITS.credentialRef + 1),
       }),
     ).toThrow(/exceeds 256 characters/);
+  });
+});
+
+describe("open", () => {
+  test("selects a stream without making it mandatory for earlier V1 callers", () => {
+    expect(
+      decodeComputerHostRequestV1(
+        "open",
+        request({ kind: "open", stream: true }),
+      ).operation,
+    ).toEqual({ kind: "open", stream: true });
+    expect(
+      decodeComputerHostRequestV1("open", request({ kind: "open" })).operation,
+    ).toEqual({ kind: "open" });
+  });
+
+  test("refuses a non-boolean stream flag", () => {
+    expect(() =>
+      decodeComputerHostRequestV1("open", {
+        ...request({ kind: "open" }),
+        stream: "yes",
+      }),
+    ).toThrow(/open stream must be a boolean/);
   });
 });
 
@@ -614,6 +641,69 @@ describe("problems", () => {
         retryable: false,
       }),
     ).toThrow(/code is invalid/);
+  });
+});
+
+describe("open frames", () => {
+  const progress = {
+    kind: "provision" as const,
+    phase: "packages",
+    label: "installing the desktop packages",
+    index: 2,
+    total: 5,
+    status: "running" as const,
+    resumed: false,
+  };
+  const result = {
+    version: 1 as const,
+    effectId: "effect-1",
+    spriteName: "frockbot-0123456789ab",
+    directory: "agent-data/agents/bot-1",
+    generation: 1,
+    provisioning: {
+      ...progress,
+      phase: "ready",
+      label: "the Computer is ready",
+      status: "complete" as const,
+      index: 5,
+    },
+  };
+
+  test("round-trips progress, result, and error frames", () => {
+    const frames: ComputerHostOpenFrameV1[] = [
+      { type: "progress", progress },
+      { type: "result", result },
+      {
+        type: "error",
+        code: "provider-unavailable",
+        message: "the container stopped",
+        retryable: true,
+      },
+    ];
+    for (const frame of frames) {
+      expect(
+        decodeComputerHostOpenFrameV1(
+          encodeComputerHostOpenFrameV1(frame).trimEnd(),
+        ),
+      ).toEqual(frame);
+    }
+  });
+
+  test("reassembles open frames across arbitrary chunk boundaries", () => {
+    const frames: ComputerHostOpenFrameV1[] = [
+      { type: "progress", progress },
+      { type: "result", result },
+    ];
+    const wire = frames.map(encodeComputerHostOpenFrameV1).join("");
+    for (const size of [1, 3, 17, wire.length]) {
+      const reader = new ComputerHostOpenFrameReaderV1();
+      const seen: ComputerHostOpenFrameV1[] = [];
+      for (let index = 0; index < wire.length; index += size) {
+        seen.push(...reader.push(wire.slice(index, index + size)));
+      }
+      seen.push(...reader.end());
+      expect(seen).toEqual(frames);
+    }
   });
 });
 

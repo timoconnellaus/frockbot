@@ -23,6 +23,10 @@ import {
   COMPUTER_SCREENSHOT_RETENTION,
 } from "./roots.js";
 import {
+  fileComputerScreenshotV1,
+  type ComputerProjectionFileKindV1,
+} from "./capture.js";
+import {
   ComputerProtocolDecodeError,
   computerCommandFingerprintV1,
   computerUpdateLabelV1,
@@ -30,6 +34,7 @@ import {
   decodeComputerCommandV1,
   decodeComputerProgressViewV1,
   type ComputerCommandReceiptV1,
+  type ComputerCommandResponse,
   type ComputerCommandV1,
   type ComputerDoctorViewV1,
   type ComputerPhase,
@@ -51,6 +56,16 @@ export const COMPUTER_VIEWER_RECORD_KEY = "computer:viewer:v1";
 export const COMPUTER_PROVIDER_RECORD_KEY = "computer:provider:v1";
 export const COMPUTER_INTENT_PREFIX = "computer:intent:v1:";
 export const COMPUTER_RECEIPT_PREFIX = "computer:receipt:v1:";
+export const COMPUTER_PENDING_CONNECT_KEY = "computer:pending-connect:v1";
+/** Keep a freshly armed alarm pending past the command's output gate. */
+export const COMPUTER_CONNECT_START_DELAY_MS = 1_000;
+export const COMPUTER_CONNECT_DEFERRAL_MS = 15_000;
+export const COMPUTER_CONNECT_WATCHDOG_MS = 60_000;
+/**
+ * Known writes invalidate immediately; thirty seconds only bounds how long an
+ * out-of-band Workspace/sync write can remain hidden.
+ */
+export const COMPUTER_PROJECTION_FILE_CACHE_TTL_MS = 30_000;
 
 export interface ComputerBotTransaction {
   get<T>(key: string): Promise<T | undefined>;
@@ -111,10 +126,23 @@ interface StoredReceiptV1 {
   receipt: ComputerCommandReceiptV1;
 }
 
+interface StoredPendingConnectV1 {
+  version: 1;
+  userId: string;
+  commandId: string;
+  admittedAt: string;
+  deferredUntil?: string;
+}
+
 interface LiveViewer {
   id: string;
   url: string;
   expiresAt: string;
+}
+
+interface ProjectionFileCacheEntry<T> {
+  expiresAt: number;
+  value: Promise<T>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -223,6 +251,9 @@ function projectedProgress(
   startedAt: string,
   updatedAt: string,
 ): ComputerProgressViewV1 {
+  const provisioning = progress.provisioning
+    ? { provisioning: { ...progress.provisioning } }
+    : {};
   if (progress.kind === "update") {
     return {
       version: 1,
@@ -231,6 +262,7 @@ function projectedProgress(
       updatedAt,
       index: progress.index,
       total: progress.total,
+      ...provisioning,
       steps: [
         {
           version: 1,
@@ -248,6 +280,7 @@ function projectedProgress(
     updatedAt,
     index: progress.index,
     total: progress.total,
+    ...provisioning,
     steps: CONNECT_PROGRESS_STEPS.map((step, index) => ({
       version: 1,
       ...step,
@@ -258,6 +291,28 @@ function projectedProgress(
             ? ("active" as const)
             : ("pending" as const),
     })),
+  };
+}
+
+function connectProjectionRecord(startedAt: string): StoredProviderAnswerV2 {
+  const progress = projectedProgress(
+    {
+      version: 1,
+      kind: "connect",
+      step: "waking",
+      label: "Waking the Computer",
+      index: 1,
+      total: CONNECT_PROGRESS_STEPS.length,
+    },
+    startedAt,
+    startedAt,
+  );
+  return {
+    version: 2,
+    phase: "provisioning",
+    message: "Waking and preparing the Computer…",
+    recordedAt: startedAt,
+    progress,
   };
 }
 
@@ -310,6 +365,46 @@ function decodeStoredReceipt(value: unknown): StoredReceiptV1 {
   };
 }
 
+function decodeStoredPendingConnect(value: unknown): StoredPendingConnectV1 {
+  const record = object(value, "Computer pending connect");
+  exact(
+    record,
+    ["version", "userId", "commandId", "admittedAt"],
+    ["deferredUntil"],
+    "Computer pending connect",
+  );
+  if (record.version !== 1) {
+    throw new Error("Computer pending connect is corrupt");
+  }
+  return {
+    version: 1,
+    userId: storedText(record.userId, "Computer pending connect userId"),
+    commandId: storedText(
+      record.commandId,
+      "Computer pending connect commandId",
+    ),
+    admittedAt: storedTimestamp(
+      record.admittedAt,
+      "Computer pending connect admittedAt",
+    ),
+    ...(record.deferredUntil === undefined
+      ? {}
+      : {
+          deferredUntil: storedTimestamp(
+            record.deferredUntil,
+            "Computer pending connect deferredUntil",
+          ),
+        }),
+  };
+}
+
+function pendingConnectDeadline(pending: StoredPendingConnectV1): number {
+  return Math.max(
+    Date.parse(pending.admittedAt),
+    pending.deferredUntil === undefined ? 0 : Date.parse(pending.deferredUntil),
+  );
+}
+
 function failureText(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(
     0,
@@ -323,6 +418,15 @@ function isFresh(expiresAt: string, now: Date): boolean {
 
 export class ComputerBotBackendContribution {
   #liveViewer?: LiveViewer;
+  #scheduledConnect?: Promise<void>;
+  readonly #screenshotsCache = new Map<
+    string,
+    ProjectionFileCacheEntry<ComputerScreenshotViewV1[]>
+  >();
+  readonly #doctorCache = new Map<
+    string,
+    ProjectionFileCacheEntry<ComputerDoctorViewV1 | undefined>
+  >();
 
   constructor(private readonly host: ComputerBotBackendHost) {}
 
@@ -334,7 +438,46 @@ export class ComputerBotBackendContribution {
     return this.host.newId?.() ?? crypto.randomUUID();
   }
 
+  private projectionKey(userId: string, botId: string): string {
+    return `${userId}\u0000${botId}`;
+  }
+
+  private cachedProjectionFile<T>(
+    cache: Map<string, ProjectionFileCacheEntry<T>>,
+    userId: string,
+    botId: string,
+    load: () => Promise<T>,
+  ): Promise<T> {
+    const key = this.projectionKey(userId, botId);
+    const now = this.now().getTime();
+    const cached = cache.get(key);
+    if (cached && cached.expiresAt > now) return cached.value;
+    const value = load();
+    const entry: ProjectionFileCacheEntry<T> = {
+      expiresAt: now + COMPUTER_PROJECTION_FILE_CACHE_TTL_MS,
+      value,
+    };
+    entry.value = value.catch((error) => {
+      if (cache.get(key) === entry) cache.delete(key);
+      throw error;
+    });
+    cache.set(key, entry);
+    return entry.value;
+  }
+
+  /** Drops only this Bot/User's resident performance cache after a known write. */
+  invalidateProjectionFile(
+    userId: string,
+    botId: string,
+    kind: ComputerProjectionFileKindV1,
+  ): void {
+    const key = this.projectionKey(userId, botId);
+    if (kind === "screenshots") this.#screenshotsCache.delete(key);
+    else this.#doctorCache.delete(key);
+  }
+
   private async admit(
+    userId: string,
     command: ComputerCommandV1,
   ): Promise<
     | { replay: ComputerCommandReceiptV1 }
@@ -363,6 +506,46 @@ export class ComputerBotBackendContribution {
             `command ID collision: ${command.commandId}`,
           );
         }
+        if (command.type === "connect") {
+          const pendingValue = await storage.get<unknown>(
+            COMPUTER_PENDING_CONNECT_KEY,
+          );
+          let pending: StoredPendingConnectV1;
+          if (pendingValue === undefined) {
+            // Migration from the held-request implementation: an admitted
+            // connect with no receipt is owed durable scheduled work.
+            pending = {
+              version: 1,
+              userId,
+              commandId: command.commandId,
+              admittedAt: intent.admittedAt,
+              deferredUntil: new Date(
+                this.now().getTime() + COMPUTER_CONNECT_START_DELAY_MS,
+              ).toISOString(),
+            };
+            await storage.put(COMPUTER_PENDING_CONNECT_KEY, pending);
+            await storage.put(
+              COMPUTER_PROVIDER_RECORD_KEY,
+              connectProjectionRecord(intent.admittedAt),
+            );
+          } else {
+            pending = decodeStoredPendingConnect(pendingValue);
+            if (pending.commandId !== command.commandId) {
+              throw new ComputerProtocolDecodeError(
+                "another Computer connect is already pending",
+              );
+            }
+            if (pendingConnectDeadline(pending) <= this.now().getTime()) {
+              pending = {
+                ...pending,
+                deferredUntil: new Date(
+                  this.now().getTime() + COMPUTER_CONNECT_START_DELAY_MS,
+                ).toISOString(),
+              };
+              await storage.put(COMPUTER_PENDING_CONNECT_KEY, pending);
+            }
+          }
+        }
         return { intent, fingerprint };
       }
       const admittedAt = this.now().toISOString();
@@ -378,6 +561,44 @@ export class ComputerBotBackendContribution {
       // The durable intent is committed by this transaction before the
       // provider-neutral Computer can be asked to perform an effect.
       await storage.put(intentKey, intent);
+      if (command.type === "connect") {
+        const pendingValue = await storage.get<unknown>(
+          COMPUTER_PENDING_CONNECT_KEY,
+        );
+        let pending: StoredPendingConnectV1;
+        if (pendingValue !== undefined) {
+          pending = decodeStoredPendingConnect(pendingValue);
+          if (pending.commandId !== command.commandId) {
+            throw new ComputerProtocolDecodeError(
+              "another Computer connect is already pending",
+            );
+          }
+          if (pendingConnectDeadline(pending) <= this.now().getTime()) {
+            pending = {
+              ...pending,
+              deferredUntil: new Date(
+                this.now().getTime() + COMPUTER_CONNECT_START_DELAY_MS,
+              ).toISOString(),
+            };
+            await storage.put(COMPUTER_PENDING_CONNECT_KEY, pending);
+          }
+        } else {
+          pending = {
+            version: 1,
+            userId,
+            commandId: command.commandId,
+            admittedAt,
+            deferredUntil: new Date(
+              this.now().getTime() + COMPUTER_CONNECT_START_DELAY_MS,
+            ).toISOString(),
+          };
+          await storage.put(COMPUTER_PENDING_CONNECT_KEY, pending);
+        }
+        await storage.put(
+          COMPUTER_PROVIDER_RECORD_KEY,
+          connectProjectionRecord(admittedAt),
+        );
+      }
       return { intent, fingerprint };
     });
   }
@@ -419,6 +640,18 @@ export class ComputerBotBackendContribution {
         fingerprint,
         receipt,
       } satisfies StoredReceiptV1);
+      if (command.type === "connect") {
+        const pendingValue = await storage.get<unknown>(
+          COMPUTER_PENDING_CONNECT_KEY,
+        );
+        if (
+          pendingValue !== undefined &&
+          decodeStoredPendingConnect(pendingValue).commandId ===
+            command.commandId
+        ) {
+          await storage.delete(COMPUTER_PENDING_CONNECT_KEY);
+        }
+      }
       return receipt;
     });
   }
@@ -444,15 +677,32 @@ export class ComputerBotBackendContribution {
     userId: string,
     botId: string,
     input: unknown,
-  ): Promise<ComputerCommandReceiptV1> {
+  ): Promise<ComputerCommandResponse> {
     const command = decodeComputerCommandV1(input);
     if (command.botId !== botId) {
       throw new ComputerProtocolDecodeError(
         "Computer command does not match Bot registration",
       );
     }
-    const admitted = await this.admit(command);
+    const admitted = await this.admit(userId, command);
     if ("replay" in admitted) return admitted.replay;
+    if (command.type === "connect") {
+      return {
+        version: 2,
+        commandId: command.commandId,
+        type: "connect",
+        status: "accepted",
+        admittedAt: admitted.intent.admittedAt,
+      };
+    }
+    return this.executeAdmitted(userId, command, admitted);
+  }
+
+  private async executeAdmitted(
+    userId: string,
+    command: ComputerCommandV1,
+    admitted: { intent: StoredIntentV1; fingerprint: string },
+  ): Promise<ComputerCommandReceiptV1> {
     try {
       switch (command.type) {
         case "connect":
@@ -466,6 +716,9 @@ export class ComputerBotBackendContribution {
           break;
         case "refreshViewer":
           await this.refreshViewer(userId, command);
+          break;
+        case "closeViewer":
+          await this.closeViewer(userId, command);
           break;
         case "releaseControl":
           await this.releaseControl(userId, command);
@@ -531,11 +784,94 @@ export class ComputerBotBackendContribution {
     }
   }
 
+  private async initializeConnectProjection(startedAt: string): Promise<void> {
+    await this.host.storage.put(
+      COMPUTER_PROVIDER_RECORD_KEY,
+      connectProjectionRecord(startedAt),
+    );
+  }
+
+  async scheduledDeadlines(storage: ComputerBotTransaction): Promise<number[]> {
+    const value = await storage.get<unknown>(COMPUTER_PENDING_CONNECT_KEY);
+    if (value === undefined) return [];
+    return [pendingConnectDeadline(decodeStoredPendingConnect(value))];
+  }
+
+  async deferScheduledWork(storage: ComputerBotTransaction): Promise<void> {
+    const value = await storage.get<unknown>(COMPUTER_PENDING_CONNECT_KEY);
+    if (value === undefined) return;
+    const pending = decodeStoredPendingConnect(value);
+    await storage.put(COMPUTER_PENDING_CONNECT_KEY, {
+      ...pending,
+      deferredUntil: new Date(
+        this.now().getTime() + COMPUTER_CONNECT_DEFERRAL_MS,
+      ).toISOString(),
+    } satisfies StoredPendingConnectV1);
+  }
+
+  scheduledWorkInFlight(): boolean {
+    return this.#scheduledConnect !== undefined;
+  }
+
+  async settleScheduledWork(): Promise<void> {
+    if (this.#scheduledConnect) return this.#scheduledConnect;
+    const activity = this.armScheduledConnectWatchdog()
+      .then(() => this.runScheduledConnect())
+      .finally(() => {
+        if (this.#scheduledConnect === activity)
+          this.#scheduledConnect = undefined;
+      });
+    this.#scheduledConnect = activity;
+    return activity;
+  }
+
+  private async armScheduledConnectWatchdog(): Promise<void> {
+    await this.host.storage.transaction(async (storage) => {
+      const value = await storage.get<unknown>(COMPUTER_PENDING_CONNECT_KEY);
+      if (value === undefined) return;
+      const pending = decodeStoredPendingConnect(value);
+      await storage.put(COMPUTER_PENDING_CONNECT_KEY, {
+        ...pending,
+        deferredUntil: new Date(
+          this.now().getTime() + COMPUTER_CONNECT_WATCHDOG_MS,
+        ).toISOString(),
+      } satisfies StoredPendingConnectV1);
+    });
+  }
+
+  private async runScheduledConnect(): Promise<void> {
+    const pendingValue = await this.host.storage.get<unknown>(
+      COMPUTER_PENDING_CONNECT_KEY,
+    );
+    if (pendingValue === undefined) return;
+    const pending = decodeStoredPendingConnect(pendingValue);
+    const intentValue = await this.host.storage.get<unknown>(
+      `${COMPUTER_INTENT_PREFIX}${pending.commandId}`,
+    );
+    if (intentValue === undefined) {
+      throw new Error("Computer pending connect has no durable intent");
+    }
+    const intent = decodeStoredIntent(intentValue);
+    if (intent.command.type !== "connect") {
+      throw new Error("Computer pending connect does not match its Bot");
+    }
+    await this.executeAdmitted(pending.userId, intent.command, {
+      intent,
+      fingerprint: intent.fingerprint,
+    });
+  }
+
   private async connect(
     userId: string,
     command: ComputerCommandV1,
   ): Promise<void> {
-    const startedAt = this.now().toISOString();
+    const intentValue = await this.host.storage.get<unknown>(
+      `${COMPUTER_INTENT_PREFIX}${command.commandId}`,
+    );
+    const startedAt =
+      intentValue === undefined
+        ? this.now().toISOString()
+        : decodeStoredIntent(intentValue).admittedAt;
     let progress = projectedProgress(
       {
         version: 1,
@@ -548,13 +884,7 @@ export class ComputerBotBackendContribution {
       startedAt,
       startedAt,
     );
-    await this.host.storage.put(COMPUTER_PROVIDER_RECORD_KEY, {
-      version: 2,
-      phase: "provisioning",
-      message: "Waking and preparing the Computer…",
-      recordedAt: startedAt,
-      progress,
-    } satisfies StoredProviderAnswerV2);
+    await this.initializeConnectProjection(startedAt);
     const session = await this.withComputer(
       userId,
       command,
@@ -763,6 +1093,54 @@ export class ComputerBotBackendContribution {
     await this.host.storage.delete(COMPUTER_CONTROL_RECORD_KEY);
   }
 
+  /**
+   * Files the frame the User just stopped watching without making close
+   * depend on a best-effort capture. A resident, fresh viewer is the proof
+   * that this command is attaching to an already-watched desktop rather than
+   * waking a hibernated Computer.
+   */
+  private async closeViewer(
+    userId: string,
+    command: ComputerCommandV1,
+  ): Promise<void> {
+    const viewerValue = await this.host.storage.get<unknown>(
+      COMPUTER_VIEWER_RECORD_KEY,
+    );
+    if (viewerValue === undefined || !this.host.workspace) return;
+    const viewer = decodeStoredViewer(viewerValue);
+    if (
+      this.#liveViewer?.id !== viewer.id ||
+      !isFresh(viewer.expiresAt, this.now())
+    ) {
+      return;
+    }
+    const controlValue = await this.host.storage.get<unknown>(
+      COMPUTER_CONTROL_RECORD_KEY,
+    );
+    if (controlValue !== undefined) {
+      const control = decodeStoredComputerControlV1(controlValue);
+      if (isStoredComputerControlFreshV1(control, this.now())) return;
+    }
+    try {
+      await this.withComputer(userId, command, async (computer) => {
+        const root = this.root(userId, COMPUTER_SCREENSHOTS_ROOT_ID);
+        const botKey = computerBotPathKeyV1(command.botId);
+        await fileComputerScreenshotV1({
+          computer,
+          workspace: this.host.workspace!,
+          path: { root, path: `${botKey}/user-${command.commandId}.png` },
+          writer: { kind: "user", userId },
+          botKey,
+          effectId: `computer:${command.commandId}:close-viewer-screenshot`,
+        });
+      });
+      this.invalidateProjectionFile(userId, command.botId, "screenshots");
+    } catch {
+      // Closing the viewer is never held open by an opportunistic capture.
+      // In particular, the provider's human-control refusal stays a refusal.
+    }
+  }
+
   private async runDoctor(
     userId: string,
     command: ComputerCommandV1,
@@ -800,6 +1178,7 @@ export class ComputerBotBackendContribution {
         `The doctor report could not be filed: ${written.reason}`,
       );
     }
+    this.invalidateProjectionFile(userId, command.botId, "doctor");
   }
 
   private root(userId: string, rootId: string): WorkspaceRootV1 {
@@ -812,6 +1191,18 @@ export class ComputerBotBackendContribution {
   }
 
   private async screenshots(
+    userId: string,
+    botId: string,
+  ): Promise<ComputerScreenshotViewV1[]> {
+    return this.cachedProjectionFile(
+      this.#screenshotsCache,
+      userId,
+      botId,
+      () => this.loadScreenshots(userId, botId),
+    );
+  }
+
+  private async loadScreenshots(
     userId: string,
     botId: string,
   ): Promise<ComputerScreenshotViewV1[]> {
@@ -842,6 +1233,15 @@ export class ComputerBotBackendContribution {
   }
 
   private async doctor(
+    userId: string,
+    botId: string,
+  ): Promise<ComputerDoctorViewV1 | undefined> {
+    return this.cachedProjectionFile(this.#doctorCache, userId, botId, () =>
+      this.loadDoctor(userId, botId),
+    );
+  }
+
+  private async loadDoctor(
     userId: string,
     botId: string,
   ): Promise<ComputerDoctorViewV1 | undefined> {

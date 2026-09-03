@@ -38,6 +38,8 @@ export class FakeWorkspace implements ComputerWorkspace {
     { bytes: Uint8Array; generation: WorkspaceGenerationV1 }
   >();
   readonly deleted: string[] = [];
+  readonly reads: WorkspacePathV1[] = [];
+  readonly lists: { root: WorkspaceRootV1; prefix?: string }[] = [];
   /**
    * Every write, in order, with the root it named.
    *
@@ -57,6 +59,7 @@ export class FakeWorkspace implements ComputerWorkspace {
   }
 
   read(path: WorkspacePathV1) {
+    this.reads.push(path);
     const held = this.files.get(this.key(path));
     return Promise.resolve(
       held
@@ -81,6 +84,7 @@ export class FakeWorkspace implements ComputerWorkspace {
   }
 
   list(request: { root: WorkspaceRootV1; prefix?: string }) {
+    this.lists.push(request);
     const entries: WorkspaceEntryV1[] = [...this.files.entries()]
       .filter(([path]) => !request.prefix || path.startsWith(request.prefix))
       .map(([path, held]) => ({

@@ -15,7 +15,6 @@
       "entry": "./client",
       "mounts": [
         { "slot": "frockbot.computer" },
-        { "slot": "frockbot.sidebar-computer" },
         { "slot": "frockbot.overlays" }
       ],
       "outlets": []
