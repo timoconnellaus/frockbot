@@ -82,10 +82,26 @@ jobs:
         run: xvfb-run --auto-servernum bun run proof:cordis
 
   e2e:
-    name: Browser end-to-end
-    needs: validate
+    name: Browser end-to-end (${{ matrix.shard }}/${{ strategy.job-total }})
+    # Deliberately not `needs: validate`. This job shares nothing with Validate
+    # — it installs its own dependencies and the harness builds the artifact
+    # itself — so gating it behind Validate only made a two-minute job wait
+    # nine minutes for an answer it never reads. The cost is that a push which
+    # fails typecheck still spends these runners; `deploy-staging` below is
+    # where the two are actually required to agree.
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    # The specs cannot overlap inside one run — they share a Worker and a fake
+    # provider whose chat mode a spec changes — so the parallelism is across
+    # runners, not workers. Each shard is a whole runner with its own harness:
+    # its own ports, its own `--persist-to` directory, its own artifact build.
+    # Playwright keeps a spec file whole within a shard, since `fullyParallel`
+    # is off and the file is therefore one indivisible group.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Check out repository
@@ -109,16 +125,92 @@ jobs:
         # built artifact. The harness builds the artifact, seeds it into the
         # local bucket and starts a fake Ollama server on loopback, so this
         # needs no Cloudflare credential and no provider key.
-        run: bun run --filter @frockbot/cloudflare test:e2e
+        working-directory: apps/cloudflare
+        run: >-
+          bun run test:e2e
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
-      - name: Upload Playwright report
+      - name: Upload shard report
+        # Unconditional, unlike the failure diagnostics below: the merged report
+        # is only whole if every shard contributed its blob, including the ones
+        # that passed.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-blob-report-${{ matrix.shard }}
+          path: apps/cloudflare/e2e/blob-report
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Playwright failure diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
+          name: playwright-test-results-${{ matrix.shard }}
+          path: apps/cloudflare/e2e/test-results
+          retention-days: 7
+
+  e2e-gate:
+    # The `main` ruleset requires a check by this exact name, and sharding the
+    # job renamed the four that do the work — a required check that no job
+    # reports blocks every pull request forever. This job keeps the name
+    # stable, so the shard count stays a one-line edit to `matrix.shard`
+    # rather than a change to the repository's protection rules.
+    name: Browser end-to-end
+    needs: e2e
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Require every shard to have passed
+        # A matrix result is `success` only when no leg failed, and `fail-fast`
+        # is off, so this reports on the whole suite rather than the first loss.
+        env:
+          SHARDS: ${{ needs.e2e.result }}
+        run: |
+          echo "Browser end-to-end shards: $SHARDS"
+          if [[ "$SHARDS" != "success" ]]; then exit 1; fi
+
+  e2e-report:
+    name: Browser end-to-end report
+    needs: e2e
+    # Only when a shard failed: a green run's report is never read, and the
+    # merge would cost a runner on every push for nothing.
+    if: ${{ failure() && needs.e2e.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download shard reports
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          path: apps/cloudflare/blob-reports
+          pattern: playwright-blob-report-*
+          merge-multiple: true
+
+      - name: Merge shard reports
+        working-directory: apps/cloudflare
+        run: bunx playwright merge-reports --reporter html blob-reports
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
           name: playwright-report
-          path: |
-            apps/cloudflare/e2e/playwright-report
-            apps/cloudflare/e2e/test-results
+          path: apps/cloudflare/playwright-report
           retention-days: 7
 
   deploy-staging:
