@@ -444,6 +444,144 @@ describe("Applet authority", () => {
   });
 });
 
+describe("Applet directory", () => {
+  function directoryFor(userId: string) {
+    return env.USER_CONFIGURATIONS.get(
+      env.USER_CONFIGURATIONS.idFromName(userId),
+    );
+  }
+
+  test("create mints an id in the share shape and lists it", async () => {
+    const userId = "user-directory-create";
+    const directory = directoryFor(userId);
+    const created = await directory.createApplet({
+      schemaVersion: 1,
+      userId,
+      displayName: "Todo",
+      provenance: {
+        kind: "bot",
+        botId: "bot-1",
+        sessionId: `${userId}:bot-1`,
+        turnId: "turn-1",
+      },
+    });
+    expect(created.appletId.startsWith(`${userId}.`)).toBe(true);
+    expect(created.status).toBe("draft");
+    expect(created.tools).toEqual([]);
+
+    const listed = await directory.listApplets({ schemaVersion: 1, userId });
+    expect(listed.applets.map((applet) => applet.appletId)).toEqual([
+      created.appletId,
+    ]);
+    // A draft has no generation, so it contributes no Composition member.
+    const composition = await directory.readAppletCompositionInput({
+      schemaVersion: 1,
+      userId,
+    });
+    expect(composition.applets).toEqual([]);
+    expect(composition.revision).toBe(listed.revision);
+  });
+
+  test("recording a generation publishes the entry and bumps the revision", async () => {
+    const userId = "user-directory-publish";
+    const directory = directoryFor(userId);
+    const created = await directory.createApplet({
+      schemaVersion: 1,
+      userId,
+      displayName: "Todo",
+      provenance: { kind: "user" },
+    });
+    const before = (await directory.listApplets({ schemaVersion: 1, userId }))
+      .revision;
+    const published = await directory.recordAppletGeneration({
+      schemaVersion: 1,
+      userId,
+      appletId: created.appletId,
+      generationId: "g1",
+      tools: [declaration("add_todo")],
+    });
+    expect(published).toMatchObject({
+      status: "published",
+      currentGenerationId: "g1",
+      tools: ["add_todo"],
+    });
+    const after = await directory.listApplets({ schemaVersion: 1, userId });
+    expect(after.revision).toBeGreaterThan(before);
+
+    const composition = await directory.readAppletCompositionInput({
+      schemaVersion: 1,
+      userId,
+    });
+    expect(composition.applets).toHaveLength(1);
+    expect(composition.applets[0]).toMatchObject({
+      appletId: created.appletId,
+      generationId: "g1",
+    });
+    expect(composition.applets[0]?.tools[0]?.name).toBe("add_todo");
+  });
+
+  test("delete drops the entry from the directory and from every resolution", async () => {
+    const userId = "user-directory-delete";
+    const directory = directoryFor(userId);
+    const created = await directory.createApplet({
+      schemaVersion: 1,
+      userId,
+      displayName: "Todo",
+      provenance: { kind: "user" },
+    });
+    await directory.recordAppletGeneration({
+      schemaVersion: 1,
+      userId,
+      appletId: created.appletId,
+      generationId: "g1",
+      tools: [declaration("add_todo")],
+    });
+    const before = (await directory.listApplets({ schemaVersion: 1, userId }))
+      .revision;
+
+    expect(
+      await directory.deleteApplet({
+        schemaVersion: 1,
+        userId,
+        appletId: created.appletId,
+      }),
+    ).toMatchObject({ status: "deleted", tools: [] });
+
+    const after = await directory.listApplets({ schemaVersion: 1, userId });
+    expect(after.applets).toEqual([]);
+    expect(after.revision).toBeGreaterThan(before);
+    expect(
+      (
+        await directory.readAppletCompositionInput({
+          schemaVersion: 1,
+          userId,
+        })
+      ).applets,
+    ).toEqual([]);
+  });
+
+  test("one User's directory is not another's", async () => {
+    const userId = "user-directory-scope";
+    const directory = directoryFor(userId);
+    await directory.createApplet({
+      schemaVersion: 1,
+      userId,
+      displayName: "Todo",
+      provenance: { kind: "user" },
+    });
+    let refusal: unknown;
+    try {
+      await directory.listApplets({
+        schemaVersion: 1,
+        userId: "user-somebody-else",
+      });
+    } catch (error) {
+      refusal = error;
+    }
+    expect(String(refusal)).toMatch(/different User/);
+  });
+});
+
 describe("Applet viewer tokens", () => {
   const secret = env.APPLET_VIEWER_SECRET;
 
