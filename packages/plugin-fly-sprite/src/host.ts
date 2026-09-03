@@ -46,11 +46,11 @@ class FlySpriteHostController {
     this.machine = transitionComputerState(initialComputerMachineState(), {
       type: "configured",
       botId: this.computer.botId,
-      providerLabel: "Fly Sprites",
+      providerLabel: "Computer",
       configured: computer.configured,
       message: computer.configured
-        ? "Persistent Fly Sprite computer"
-        : "Set SPRITES_TOKEN to attach a computer",
+        ? "Computer ready"
+        : "This deployment has no computer.",
     });
     const data: ComputerState = {
       ...this.machine,

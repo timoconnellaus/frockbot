@@ -101,8 +101,8 @@ async function copyLink(share: TemplateShareRecordV1): Promise<void> {
         <span class="templates__intro">
           <strong>Share this Bot</strong>
           <small>
-            Packs the profile, Bot-authored Skills, Routines, and required
-            Packages. Memory, credentials, Connections, and Computer files stay
+            Packs the profile, Skills, Routines, and the plugins it needs.
+            Memory, credentials, connected accounts and computer files stay
             private.
           </small>
         </span>
@@ -125,11 +125,11 @@ async function copyLink(share: TemplateShareRecordV1): Promise<void> {
       >
         Packed {{ templates.summary.skills }} Skill(s),
         {{ templates.summary.routines }} Routine(s),
-        {{ templates.summary.packages }} Package(s) and
+        {{ templates.summary.packages }} plugin(s) and
         {{ templates.summary.publicServers }} public MCP server(s).
         <template v-if="templates.summary.needsConnection > 0">
-          {{ templates.summary.needsConnection }} server(s) are left as a
-          placeholder the importer fills with their own Connection.
+          {{ templates.summary.needsConnection }} server(s) are left for whoever
+          imports this to connect themselves.
         </template>
         Memory, credentials, and Connections were not included.
       </p>

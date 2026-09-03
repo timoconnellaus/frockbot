@@ -90,7 +90,7 @@ export const userMachineClientPlugin: ClientPlugin = (ctx) => {
       await work();
       state.value.error = undefined;
     } catch (error) {
-      state.value.error = message(error, "The machine registry refused");
+      state.value.error = message(error, "Couldn't register that machine.");
     } finally {
       state.value.busy = false;
     }

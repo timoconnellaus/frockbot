@@ -317,7 +317,7 @@ describe("Fly Sprite computer", () => {
     const computer = new FlySpriteComputer({ spriteName: "frockbot-test" });
     expect(computer.configured).toBe(false);
     await expect(computer.bot("general").ensure()).rejects.toThrow(
-      "Set SPRITES_TOKEN",
+      "This deployment has no computer",
     );
   });
 

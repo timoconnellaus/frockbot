@@ -111,7 +111,7 @@ describe("Computer viewer", () => {
     expect(template).toContain('@click="actions.requestTakeControl"');
     expect(template).toContain('role="alertdialog"');
     expect(template).toContain(
-      "The Bot will be fenced from this desktop until you release control.",
+      "The Bot won't touch this desktop until you release control.",
     );
   });
 

@@ -24,7 +24,7 @@ export const packagePublisherClientPlugin: ClientPlugin = (ctx) => {
     busy: false,
     async load() {
       if (!ctx.transport.hostedRequest) {
-        state.value.error = "Package revisions are unavailable";
+        state.value.error = "Published versions aren't available right now.";
         return;
       }
       try {
@@ -34,12 +34,14 @@ export const packagePublisherClientPlugin: ClientPlugin = (ctx) => {
         state.value.error = undefined;
       } catch (error) {
         state.value.error =
-          error instanceof Error ? error.message : "Could not load revisions";
+          error instanceof Error
+            ? error.message
+            : "Couldn't load past versions.";
       }
     },
     async rollback(packageRevision: number) {
       if (!ctx.transport.hostedRequest || !state.value.history) {
-        throw new Error("Package revisions are unavailable");
+        throw new Error("Published versions aren't available right now.");
       }
       state.value.busy = true;
       try {

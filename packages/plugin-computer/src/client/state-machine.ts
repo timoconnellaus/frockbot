@@ -46,7 +46,7 @@ export function initialComputerMachineState(): ComputerMachineState {
     phase: "unconfigured",
     botId: "unconfigured",
     providerLabel: "unconfigured",
-    message: "No Computer provider is configured for this host",
+    message: "This deployment has no computer.",
     progress: undefined,
     viewerUrl: undefined,
     expanded: false,
@@ -108,7 +108,7 @@ export function transitionComputerState(
       return {
         ...state,
         phase: "taking-control",
-        message: "Pausing new agent computer actions…",
+        message: "Pausing the Bot…",
         progress: undefined,
       };
     case "control-acquired":

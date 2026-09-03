@@ -1210,7 +1210,7 @@ describe("client run protocol v1", () => {
     });
     expect(JSON.stringify(projected)).not.toContain(providerId);
   });
-  test("surfaces a failed Turn's reason as the client run failure", () => {
+  test("gives a failed Turn plain copy as the client run failure", () => {
     const events = [
       event({ type: "turn/start", seq: 0, timestamp, turn: 1 }),
       event({
@@ -1235,8 +1235,7 @@ describe("client run protocol v1", () => {
       state: "terminal",
       run: {
         status: "failed",
-        failure:
-          "Bot turn ended with outcome model-error: Ollama Cloud responded 401: invalid api key",
+        failure: "This Bot couldn't finish its reply. Try again.",
       },
     });
   });

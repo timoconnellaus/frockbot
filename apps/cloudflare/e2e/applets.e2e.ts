@@ -97,7 +97,8 @@ test("a Bot creates an Applet, the canvas shows its source, and the surface list
   // artifact origin and fed the Applets state over bridge v2.
   await entry.click();
   const surface = page.getByRole("region", { name: "Applets" });
-  await expect(surface.getByText("FrockBot Package")).toBeVisible();
+  // A first-party page carries no provenance line: there is nobody to credit.
+  await expect(surface.getByText("FrockBot Package")).toHaveCount(0);
   const listFrame = surface.locator("iframe").contentFrame();
   await expect(listFrame.getByText("Weekly Todos")).toBeVisible({
     timeout: 30_000,

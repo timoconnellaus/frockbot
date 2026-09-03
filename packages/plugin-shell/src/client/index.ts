@@ -240,10 +240,10 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
       runId: run.runId,
       status: run.status,
       message: run.stopRequestedAt
-        ? "Stop accepted; reconciling the provider outcome before cancelling."
+        ? "Stopping…"
         : (run.recovery?.message ??
           run.failure ??
-          "This Turn requires provider reconciliation before it can continue."),
+          "Something went wrong mid-reply. Try again to pick it up."),
       canResume: !run.stopRequestedAt && run.recovery?.action === "resume",
     };
   }
@@ -302,7 +302,7 @@ function assistantMessage(
       text:
         run.recovery?.message ??
         run.failure ??
-        "Provider reconciliation is required before this Turn can continue.",
+        "This reply stopped partway. Try again to continue it.",
       status: "reconciliation-required",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -314,7 +314,7 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.failure ?? "Stopped by an authenticated Stop command.",
+      text: run.failure ?? "You stopped this.",
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -695,7 +695,7 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
     !Array.isArray(value.packages) ||
     value.packages.length > 256
   ) {
-    throw new Error("Application manifest is invalid");
+    throw new Error("FrockBot couldn't load this deployment. Reload the page.");
   }
   return value.packages.flatMap((candidate) => {
     if (
@@ -728,7 +728,9 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
           kind === "mobile",
       )
     ) {
-      throw new Error("Application Package metadata is invalid");
+      throw new Error(
+        "FrockBot couldn't load this deployment. Reload the page.",
+      );
     }
     const decoded = decodeFrockBotManifest({
       // v4, so a Capability carrying an admission ceiling decodes here too.
@@ -910,7 +912,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     web.value.activeRun = {
       runId,
       status: "running",
-      message: "Confirming whether this Turn was admitted.",
+      message: "Checking whether your message went through…",
       canResume: false,
     };
     if (!ctx.transport.lookupRun || !ctx.transport.fenceRunAdmission) {
@@ -950,7 +952,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         reconciliationError = `${
           error instanceof Error
             ? error.message
-            : "Turn admission lookup failed"
+            : "Couldn't check on your message."
         } Retrying…`;
         web.value.settingsError = reconciliationError;
       }
@@ -982,7 +984,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         ) {
           return;
         }
-        if (!run) throw new Error("Stopped Turn is unavailable");
+        if (!run) throw new Error("Couldn't load that reply.");
         if (web.value.settingsError === observationError) {
           web.value.settingsError = undefined;
         }
@@ -992,7 +994,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       } catch (error) {
         if (signal.aborted) return;
         observationError = `${
-          error instanceof Error ? error.message : "Turn lookup failed"
+          error instanceof Error ? error.message : "Couldn't load that reply."
         } Retrying…`;
         web.value.settingsError = observationError;
       }
@@ -1180,7 +1182,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
 
   const web: Ref<ShellWebData> = ref({
     connection: "ready",
-    modelLabel: "Model unavailable",
+    modelLabel: "No model available — set one up in Models",
     modelReady: false,
     modelSource: "none",
     settingsAvailable: true,
@@ -1510,12 +1512,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       const botId = web.value.activeBotId;
       const catalog = web.value.packageUi;
       if (!post || !botId || !catalog || catalog.botId !== botId) {
-        throw new Error("Package UI is unavailable");
+        throw new Error("That plugin's page isn't available.");
       }
       if (!packageIframeToolAllowedV1(contribution, name)) {
-        throw new Error(
-          `Package "${contribution.packageId}" did not declare tool "${name}"`,
-        );
+        throw new Error(`That plugin isn't allowed to use ${name}.`);
       }
       const turn = decodeClientTurnV1(
         await post(
@@ -1974,7 +1974,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (!settings || !ctx.transport.executeConfiguration) {
         throw new Error("Plugins are unavailable");
       }
-      if (!generation) throw new Error("The Catalog generation is unknown");
+      if (!generation)
+        throw new Error("The catalog isn't loaded yet. Try again in a moment.");
       const receipt = await ctx.transport.executeConfiguration({
         schemaVersion: 1,
         type: "user/install-package",
@@ -2257,8 +2258,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       if (result.status !== "applied") {
         throw new Error(
           result.status === "reconciliation-required"
-            ? "Connection revocation requires reconciliation"
-            : "Connection revocation failed",
+            ? "Disconnecting didn't finish. Try again."
+            : "Couldn't disconnect that account.",
         );
       }
     },
@@ -2388,7 +2389,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           role: "assistant",
           text: aborted
             ? "Request stopped locally; checking whether it started."
-            : "Confirming whether this Turn was admitted.",
+            : "Checking whether your message went through…",
           at: optimisticAt,
           status: "interrupted",
           tools: [],
@@ -2417,14 +2418,18 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             id: `${pendingRunId}:assistant`,
             runId: pendingRunId,
             role: "assistant",
-            text: "Turn was not admitted.",
+            text: "Your message didn't go through. Try sending it again.",
             at: optimisticAt,
             status: "error",
             tools: [],
             sends: [],
           });
-          web.value.error = "Turn was not admitted";
-          return { accepted: false, error: "Turn was not admitted" };
+          web.value.error =
+            "Your message didn't go through. Try sending it again.";
+          return {
+            accepted: false,
+            error: "Your message didn't go through. Try sending it again.",
+          };
         }
         return { accepted: true, runId: pendingRunId };
       } finally {
@@ -2439,14 +2444,14 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     },
     async resumeRun(runId: string): Promise<void> {
       if (!ctx.transport.reconcileRun) {
-        web.value.settingsError = "Turn reconciliation is unavailable";
+        web.value.settingsError = "Can't retry this right now.";
         return;
       }
       if (web.value.activeRun?.runId !== runId) return;
       web.value.activeRun = {
         runId,
         status: "running",
-        message: "Reconciliation requested; checking progress.",
+        message: "Retrying…",
         canResume: false,
       };
       const botId = web.value.activeBotId;
@@ -2455,7 +2460,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         await ctx.transport.reconcileRun(botId, runId);
       } catch (error) {
         web.value.settingsError =
-          error instanceof Error ? error.message : "Reconciliation failed";
+          error instanceof Error ? error.message : "Couldn't retry that.";
       }
       try {
         await deliverNotifications(botId);
@@ -2463,7 +2468,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         web.value.settingsError =
           error instanceof Error
             ? error.message
-            : "Could not refresh the reconciled Turn";
+            : "Couldn't refresh this reply.";
       }
     },
     async stopRun(): Promise<void> {

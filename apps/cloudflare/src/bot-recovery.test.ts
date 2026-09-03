@@ -104,11 +104,11 @@ describe("Bot run recovery", () => {
 
     expect(planBotRunRecovery(run(events), events)).toEqual({
       kind: "fail",
-      failure: "Bot turn ended with outcome model-error",
+      failure: "This Bot couldn't finish its reply. Try again.",
     });
   });
 
-  test("names the provider reason a failed durable Turn recorded", () => {
+  test("keeps the provider reason off a failed durable Turn's copy", () => {
     const events = [
       {
         type: "turn/start" as const,
@@ -128,8 +128,7 @@ describe("Bot run recovery", () => {
 
     expect(planBotRunRecovery(run(events), events)).toEqual({
       kind: "fail",
-      failure:
-        "Bot turn ended with outcome model-error: Ollama Cloud responded 401: invalid api key",
+      failure: "This Bot couldn't finish its reply. Try again.",
     });
   });
 

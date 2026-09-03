@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
   "id": "shell",
-  "displayName": "FrockBot Shell",
+  "displayName": "FrockBot",
   "version": "0.0.1",
   "compatibility": {
     "frockbot": ">=0.0.1"

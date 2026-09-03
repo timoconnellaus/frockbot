@@ -262,7 +262,7 @@ export function createComputerClientPlugin(
         ),
       );
       if (projection.botId !== selectedBotId) {
-        throw new Error("Computer projection does not match the selected Bot");
+        throw new Error("This computer belongs to a different Bot.");
       }
       apply({ type: "projection-received", projection });
     }
@@ -380,7 +380,7 @@ export function createComputerClientPlugin(
       } catch (error) {
         apply({
           type: "failed",
-          message: `Human control lease was lost: ${errorMessage(error)}`,
+          message: `You lost control of this computer: ${errorMessage(error)}`,
           takingControl: false,
         });
       }

@@ -275,7 +275,7 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   // the page is fed the Applets state over bridge v2.
   await entry.click();
   const surface = page.getByRole("region", { name: "Applets" });
-  await expect(surface.getByText("Bot-authored Package")).toBeVisible();
+  await expect(surface.getByText("Built by this Bot")).toBeVisible();
   const listFrame = surface.locator("iframe").contentFrame();
   await expect(listFrame.getByText("applets:Todo")).toBeVisible();
   await expectNoHorizontalOverflow(page);

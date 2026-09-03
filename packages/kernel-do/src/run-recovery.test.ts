@@ -62,7 +62,9 @@ function unresolved(...events: UnstampedEvent[]): string {
 }
 
 describe("unresolvedModelRequestFailure", () => {
-  test("carries the Agent's journaled reason", () => {
+  const plain = "This reply stopped partway. Try again to continue it.";
+
+  test("gives the banner plain copy whatever the Agent journaled", () => {
     expect(
       unresolved(
         request,
@@ -71,36 +73,17 @@ describe("unresolvedModelRequestFailure", () => {
           "Model response outcome is uncertain: Model response stream ended before a terminal marker",
         ),
       ),
-    ).toBe(
-      'Model request "request-1" has no durable provider outcome: Model response outcome is uncertain: Model response stream ended before a terminal marker',
-    );
-  });
-
-  test("reads the last reason when the Turn was retried", () => {
-    expect(
-      unresolved(
-        request,
-        reconciliationRequired("request-1", "first attempt"),
-        reconciliationRequired("request-1", "second attempt"),
-      ),
-    ).toBe(
-      'Model request "request-1" has no durable provider outcome: second attempt',
-    );
-  });
-
-  test("ignores a reason journaled against another request", () => {
+    ).toBe(plain);
     expect(
       unresolved(
         request,
         reconciliationRequired("request-0", "an earlier call"),
       ),
-    ).toBe('Model request "request-1" has no durable provider outcome');
+    ).toBe(plain);
   });
 
   // A run wedged by isolate eviction never got as far as journaling a reason.
-  test("summarizes when the Agent journaled no reason", () => {
-    expect(unresolved(request)).toBe(
-      'Model request "request-1" has no durable provider outcome',
-    );
+  test("says the same when the Agent journaled no reason", () => {
+    expect(unresolved(request)).toBe(plain);
   });
 });

@@ -74,16 +74,11 @@ export function unresolvedModelRequestFailure(
   events: readonly SessionEvent[],
   request: Extract<SessionEvent, { type: "model/request" }>,
 ): string {
-  const requestId = request.request.requestId;
-  const summary = `Model request "${requestId}" has no durable provider outcome`;
-  const journaled = events.findLast(
-    (event) =>
-      event.type === "model/reconciliation-required" &&
-      event.requestId === requestId,
-  );
-  return journaled?.type === "model/reconciliation-required"
-    ? `${summary}: ${journaled.reason}`
-    : summary;
+  // The journaled reason names provider internals, so it stays on the run
+  // record for the debug surface; the banner gets a sentence about what to do.
+  void events;
+  void request;
+  return "This reply stopped partway. Try again to continue it.";
 }
 
 export function planBotRunRecovery<Snapshot>(
@@ -113,7 +108,7 @@ export function planBotRunRecovery<Snapshot>(
     if (terminalTurn.outcome !== "completed") {
       return {
         kind: "fail",
-        failure: turnFailureMessage(terminalTurn.outcome, terminalTurn.reason),
+        failure: turnFailureMessage(terminalTurn.outcome),
       };
     }
     return {

@@ -516,7 +516,7 @@ describe("Bot selection", () => {
     const requestCount = requests.length;
     await expect(
       provided.value.callPackageUiTool(contribution, "package_author", {}),
-    ).rejects.toThrow("did not declare");
+    ).rejects.toThrow("isn't allowed to use");
     expect(requests).toHaveLength(requestCount);
   });
 
@@ -648,7 +648,7 @@ describe("Bot selection", () => {
       },
       accountValues: undefined,
       platformModel: undefined,
-      expectedLabel: "Model name · Model provider · Bot override",
+      expectedLabel: "Model name · Model provider · this Bot only",
       expectedProjection: "bot",
       ready: true,
     },
@@ -683,7 +683,7 @@ describe("Bot selection", () => {
       botValues: {},
       accountValues: undefined,
       platformModel: undefined,
-      expectedLabel: "Model unavailable",
+      expectedLabel: "No model available — set one up in Models",
       expectedProjection: "none",
       ready: false,
     },
@@ -900,7 +900,7 @@ describe("Bot selection", () => {
 
     expect(provided.value.modelReady).toBe(false);
     expect(provided.value.modelLabel).toBe(
-      'Connection "model-connection" is disabled; enable or reconnect it',
+      "That account needs reconnecting before this Bot can reply.",
     );
   });
 
@@ -1845,8 +1845,7 @@ describe("hosted Stop", () => {
     await provided.value.stopRun();
     expect(provided.value.activeRun).toMatchObject({
       status: "reconciliation-required",
-      message:
-        "Stop accepted; reconciling the provider outcome before cancelling.",
+      message: "Stopping…",
       canResume: false,
     });
 
@@ -2506,7 +2505,7 @@ describe("Connection operation reconciliation", () => {
     ).rejects.toThrow("Connection state update failed");
     await expect(
       provided.value.disconnectConnection("connection-1"),
-    ).rejects.toThrow("Connection revocation failed");
+    ).rejects.toThrow("Couldn't disconnect that account.");
     expect(commands).toEqual([
       "connection/update-label",
       "connection/set-enabled",

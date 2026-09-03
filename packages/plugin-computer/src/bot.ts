@@ -1303,7 +1303,7 @@ export class ComputerBotBackendContribution {
     let message: string;
     if (!this.host.configured) {
       phase = "unconfigured";
-      message = "No Computer provider is configured for this host";
+      message = "This deployment has no computer.";
     } else if (provider?.phase === "disconnected") {
       phase = "disconnected";
       message = provider.message;

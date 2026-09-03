@@ -112,7 +112,6 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
   await sendMessage(page, "will not work");
 
   await expect(page.locator(".message-assistant").last()).toContainText(
-    "Bot turn ended with outcome model-error",
+    "This Bot couldn't finish its reply. Try again.",
   );
-  await expect(page.locator(".message-assistant").last()).toContainText("401");
 });

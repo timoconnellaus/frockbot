@@ -60,11 +60,26 @@ onMounted(() => {
   void web.value.loadPluginCatalog();
 });
 
-/** What a Package offers, in the words its manifest uses. */
+/** Plain nouns for the manifest's capability kinds. */
+const CAPABILITY_NOUNS: Record<string, string> = {
+  tool: "Tools",
+  model: "Models",
+  memory: "Memory",
+  notification: "Notifications",
+  computer: "Computer",
+  ui: "Pages",
+  storage: "Storage",
+};
+
+function capabilityNoun(kind: string): string {
+  return CAPABILITY_NOUNS[kind] ?? kind;
+}
+
+/** What a plugin offers, in plain words. */
 function capabilitySummary(item: PluginCatalogItem): string {
   const kinds = [...new Set(item.capabilities.map((entry) => entry.kind))];
-  if (kinds.length === 0) return "No Capabilities";
-  return kinds.join(", ");
+  if (kinds.length === 0) return "No features yet";
+  return kinds.map(capabilityNoun).join(", ");
 }
 
 function installed(packageId: string): boolean {
@@ -117,7 +132,7 @@ async function install(item: PluginCatalogItem): Promise<void> {
     await web.value.installPackage(item.packageId, item.version);
   } catch (error) {
     web.value.settingsError =
-      error instanceof Error ? error.message : "Could not add the Package";
+      error instanceof Error ? error.message : "Couldn't add that plugin.";
   } finally {
     busyPackageId.value = undefined;
   }
@@ -131,7 +146,7 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
     web.value.settingsError =
       error instanceof Error
         ? error.message
-        : "Could not change the Package state";
+        : "Couldn't turn that plugin on or off.";
   } finally {
     busyPackageId.value = undefined;
   }
@@ -164,17 +179,17 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
     </label>
     <UiAnchor
       anchor="user-packages"
-      label="Packages"
+      label="Plugins"
       :href="packagesLink"
       class="plugin-anchor"
     >
       <p class="plugin-intro">
-        Turn Packages on and off for your Bots. Set one up where it belongs:
+        Turn plugins on and off for your Bots. Set one up where it belongs:
         model providers in Models, accounts in Connectors.
       </p>
       <div class="plugin-catalog-link">
         <UiButton type="button" @click="openPackageCatalog">
-          Browse the Package Catalog
+          Browse all plugins
         </UiButton>
       </div>
     </UiAnchor>
@@ -237,10 +252,10 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
       v-if="userPackages.length === 0 && !web.settingsError"
       class="plugin-empty"
     >
-      This application ships no Packages.
+      This deployment ships no plugins.
     </p>
     <p v-else-if="filteredCatalog.length === 0" class="plugin-empty">
-      No Package matches that search.
+      No plugin matches that search.
     </p>
   </div>
 </template>

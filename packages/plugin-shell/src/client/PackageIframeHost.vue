@@ -34,6 +34,13 @@ const providedWeb = inject(frockBotWebDataKey);
 if (!providedWeb) throw new Error("Package iframe host data was not provided");
 const web = providedWeb;
 const frame = ref<HTMLIFrameElement>();
+/** Where a page came from, said plainly. First-party pages say nothing. */
+const provenanceLabel = computed(() => {
+  if (props.contribution.provenance === "Bot-authored")
+    return "Built by this Bot";
+  if (props.contribution.provenance === "User-installed") return "Added by you";
+  return undefined;
+});
 const height = ref(240);
 const failure = ref<string>();
 const lastStateWireByName = new Map<string, string>();
@@ -123,7 +130,9 @@ function post(message: PackageIframeHostMessageV2): void {
     postPackageIframeHostMessage(target, message, lastStateWireByName);
   } catch (error) {
     failure.value =
-      error instanceof Error ? error.message : "Package page state is invalid";
+      error instanceof Error
+        ? error.message
+        : "This page sent something FrockBot couldn't read.";
   }
 }
 
@@ -179,7 +188,7 @@ async function onMessage(event: MessageEvent): Promise<void> {
   }
   if (message.type === "focus") {
     if (!packageIframeFocusAllowedV2(props.contribution)) {
-      failure.value = "This Package cannot change the focused Applet.";
+      failure.value = "This plugin can't change which Applet is open.";
       return;
     }
     failure.value = undefined;
@@ -189,7 +198,7 @@ async function onMessage(event: MessageEvent): Promise<void> {
   if (message.type === "openExternal") {
     const origin = catalog.value?.artifactOrigin;
     if (!origin || !packageIframeExternalUrlAllowedV2(message.url, origin)) {
-      failure.value = "This Package page can only open its own pages.";
+      failure.value = "This plugin can only open its own pages.";
       return;
     }
     failure.value = undefined;
@@ -197,7 +206,7 @@ async function onMessage(event: MessageEvent): Promise<void> {
     return;
   }
   if (!packageIframeToolAllowedV1(props.contribution, message.name)) {
-    failure.value = `This Package did not declare ${message.name}.`;
+    failure.value = `This plugin isn't allowed to use ${message.name}.`;
     return;
   }
   failure.value = undefined;
@@ -232,12 +241,12 @@ onBeforeUnmount(() => window.removeEventListener("message", onMessage));
   <section class="package-iframe-frame" :class="`package-iframe-${layout}`">
     <header v-if="attribution" class="package-iframe-attribution">
       <strong>{{ contribution.displayName }}</strong>
-      <span>{{ contribution.provenance }} Package</span>
+      <span v-if="provenanceLabel">{{ provenanceLabel }}</span>
     </header>
     <!-- Load eagerly because lazy iframes defer the init/resize handshake until the browser decides the frame is near the viewport, which headless Chromium may never do. -->
     <iframe
       ref="frame"
-      :title="`${contribution.displayName} Package page`"
+      :title="contribution.displayName"
       :src="source"
       :style="layout === 'fill' ? undefined : { height: `${height}px` }"
       sandbox="allow-scripts"

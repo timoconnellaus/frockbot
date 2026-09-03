@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "id": "authoring",
-  "displayName": "Package Authoring",
+  "displayName": "Plugin authoring",
   "version": "0.0.1",
   "compatibility": {
     "frockbot": ">=0.0.1"

@@ -1181,7 +1181,7 @@ export class FlySpriteComputer {
     if (!this.host) {
       throw new ComputerError(
         "provider-unavailable",
-        "Set SPRITES_TOKEN to attach a Fly Sprite computer",
+        "This deployment has no computer, and one can't be added from inside the app.",
       );
     }
     let held = this.surfaces.get(layout.key);
