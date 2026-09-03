@@ -1483,7 +1483,11 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         const label = `session event.refusals[${index}]`;
         const entry = eventRecord(refusal, label);
         requireEventKeys(entry, ["path", "reason"], label);
-        eventString(entry.path, `${label}.path`);
+        // A refusal that names no path is still a refusal — the read was
+        // declined at the root, and the reason is the part that matters.
+        // Rejecting it here killed the Turn *after* the event was appended,
+        // which left the durable log open inside that Turn and wedged the Bot.
+        eventString(entry.path, `${label}.path`, true);
         eventString(entry.reason, `${label}.reason`);
       });
       break;

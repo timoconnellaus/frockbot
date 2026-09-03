@@ -333,7 +333,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     dispose(): Promise<void>;
   }> {
     if (!this.mounted) {
-      this.mounted = this.compileApplication().then(async (plan) => {
+      const pending = this.compileApplication().then(async (plan) => {
         const root = new Context();
         await root.plugin(ComputerRegistry);
         const computerConfigured = Boolean(
@@ -499,6 +499,16 @@ export class BotState extends DurableObject<BotStateEnv> {
             await root.fiber.dispose();
           },
         };
+      });
+      this.mounted = pending;
+      // A mount that failed is not a durable verdict. Memoizing the rejection
+      // made one transient failure — an artifact read, a User RPC, a member
+      // that would not resolve — final for the life of the object: every
+      // later call awaited the same rejected promise, the recovery alarm
+      // included, so nothing could heal it short of eviction. The next call
+      // retries instead, exactly as `immutable-application.ts` already does.
+      void pending.catch(() => {
+        if (this.mounted === pending) this.mounted = undefined;
       });
     }
     return this.mounted;

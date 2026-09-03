@@ -31,6 +31,8 @@ import {
   decodeClientRunLookupV1,
   decodeClientRunStopReceiptV1,
   decodeClientTurnV1,
+  decodeClientTurnRefusalV1,
+  ClientTurnRefusedErrorV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import { decodeClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 import type { SkillRefV1 } from "@frockbot/kernel-contracts";
@@ -188,6 +190,12 @@ const application = new ClientApplication({
     signal.throwIfAborted();
     const answer = await readApiBody(response);
     if (!response.ok) {
+      // A 409 is the Bot saying no, with a reason. Flattening it to a bare
+      // message sent the client down the uncertain-admission path, which
+      // fenced the run and reported "Turn was not admitted." over the top of
+      // whatever the Bot had actually said.
+      const refusal = decodeClientTurnRefusalV1(answer.value);
+      if (refusal) throw new ClientTurnRefusedErrorV1(refusal);
       throw apiFailure(response, answer, "Agent request failed");
     }
     if (answer.value === undefined) {

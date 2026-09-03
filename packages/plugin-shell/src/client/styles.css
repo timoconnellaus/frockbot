@@ -290,6 +290,17 @@
   text-align: center;
 }
 
+/*
+ * Why a Turn ends where it does — stopped, or replaced by a later message.
+ * Quiet, and under the answer rather than instead of it: the words the Bot
+ * already said are the Turn's content, and this is only its last line.
+ */
+.message-notice {
+  margin: 2px 0 0;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+}
+
 /* An assistant Turn is its avatar and, once there is text, its bubble. */
 .message-assistant {
   flex-direction: row;

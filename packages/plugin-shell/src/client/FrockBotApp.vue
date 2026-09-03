@@ -457,6 +457,7 @@ function isVisible(message: WebChatMessage): boolean {
   // visible act was dispatching a subagent.
   return (
     message.text.length > 0 ||
+    (message.notice?.length ?? 0) > 0 ||
     message.tools.some((tool) => iframeEntriesFor(tool).length > 0) ||
     message.sends.length > 0 ||
     (message.tasks?.length ?? 0) > 0 ||
@@ -885,6 +886,13 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               <div v-if="message.text" class="message-bubble">
                 <UiMarkdown :text="message.text" />
               </div>
+              <!--
+                Why the Turn ends where it does, under whatever it had already
+                said rather than in place of it.
+              -->
+              <p v-if="message.notice" class="message-notice">
+                {{ message.notice }}
+              </p>
               <template v-for="tool in message.tools" :key="tool.id">
                 <PackageIframeHost
                   v-for="entry in iframeEntriesFor(tool)"

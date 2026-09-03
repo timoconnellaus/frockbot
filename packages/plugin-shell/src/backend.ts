@@ -395,6 +395,7 @@ import {
   isVisibleRunV1,
   projectClientRunLookupV1,
   projectClientRunV1,
+  projectClientRunOrDegradedV1,
   projectClientAnnouncementsV1,
   projectClientTurnV1,
   type ClientRunLookupV1,
@@ -5373,7 +5374,9 @@ export class ShellBotBackendContribution {
       // still not part of the conversation: the visible transcript never
       // shows one, running or settled.
       if (active && isVisibleRunV1(active))
-        selected.set(active.runId, { run: projectClientRunV1(active) });
+        selected.set(active.runId, {
+          run: projectClientRunOrDegradedV1(active),
+        });
     }
     const available = candidates.slice(0, CLIENT_RUN_PAGE_LIMIT);
     let stoppedEarly = false;
@@ -5385,7 +5388,7 @@ export class ShellBotBackendContribution {
       }
       const stored = await this.authority.readStoredRun(candidate.runId);
       if (!stored || !isVisibleRunV1(stored)) continue;
-      const projected = projectClientRunV1(stored);
+      const projected = projectClientRunOrDegradedV1(stored);
       const tentative = [
         ...selected.values(),
         { cursor: candidate.cursor, run: projected },

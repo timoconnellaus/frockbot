@@ -88,6 +88,21 @@ class ToolEffectReconciliationRequiredError extends Error {
   }
 }
 
+/**
+ * The Turn used every step it was allowed.
+ *
+ * Not a model error: nothing failed, and everything the Turn did in those
+ * steps is durable. It is reported as what it is — a Turn that stopped after
+ * so many steps — so the person is told the Bot ran out of room rather than
+ * that their model broke.
+ */
+class StepLimitReachedError extends Error {
+  constructor(readonly steps: number) {
+    super(`stopped after ${steps} steps`);
+    this.name = "StepLimitReachedError";
+  }
+}
+
 /** Durable Stop won the final effect-admission transaction. */
 class EffectAdmissionFencedError extends Error {
   constructor(readonly effectId: string) {
@@ -272,11 +287,23 @@ class LoopAgent implements Agent {
     }
     this.#controller = new AbortController();
     this.#setStatus("running");
-    const activity = this.#drive(this.#controller.signal).finally(() => {
-      this.#controller = undefined;
-      if (!this.#disposeRequested) this.#setStatus("idle");
-      if (!this.#disposeRequested && this.#inbox.length > 0) this.#wake();
-    });
+    let failed = false;
+    const activity = this.#drive(this.#controller.signal)
+      .catch((error: unknown) => {
+        // A Turn that could not even journal its own start throws out of
+        // `#drive`. Re-waking on the inbox it left behind would append another
+        // `turn/start`, fail the same way, and spin — so the failure ends the
+        // waking and reaches whoever is awaiting this Turn.
+        failed = true;
+        throw error;
+      })
+      .finally(() => {
+        this.#controller = undefined;
+        if (!this.#disposeRequested) this.#setStatus("idle");
+        if (!this.#disposeRequested && !failed && this.#inbox.length > 0) {
+          this.#wake();
+        }
+      });
     this.#activity = activity;
   }
 
@@ -580,7 +607,7 @@ class LoopAgent implements Agent {
           }
         }
       }
-      throw new Error(`agent exceeded ${this.#maxSteps} steps`);
+      throw new StepLimitReachedError(this.#maxSteps);
     } catch (error) {
       if (
         error instanceof ModelEffectReconciliationRequiredError ||
@@ -596,6 +623,10 @@ class LoopAgent implements Agent {
       ) {
         turnOutcome = "cancelled";
         turnReason = this.#cancelDetail;
+      } else if (error instanceof StepLimitReachedError) {
+        // The Turn ran out of room, which is not a failure of the model.
+        turnOutcome = "interrupted";
+        turnReason = turnEndReason(error.message);
       } else {
         turnOutcome = "model-error";
         turnReason = turnEndReason(modelFailureMessage(error));
@@ -643,8 +674,11 @@ class LoopAgent implements Agent {
       { type: "turn/admission", turn, turnType: this.#turnType },
       { type: "input/admitted", messageId: input.messageId, turn },
     ]);
-    await this.session.flush();
+    // Claimed before the flush, not after: the input has been journaled as
+    // admitted, and leaving it in the inbox while the write settles meant a
+    // failed first flush handed it straight back to `#wake`.
     this.#inbox.shift();
+    await this.session.flush();
     this.#ctx.emit("agent/inbox/claimed", this, [input], turn);
 
     let openStep: number | undefined;
@@ -740,7 +774,7 @@ class LoopAgent implements Agent {
         }
         inputs = [];
       }
-      throw new Error(`agent exceeded ${this.#maxSteps} steps`);
+      throw new StepLimitReachedError(this.#maxSteps);
     } catch (error) {
       if (
         error instanceof ModelEffectReconciliationRequiredError ||
@@ -756,6 +790,10 @@ class LoopAgent implements Agent {
       ) {
         turnOutcome = "cancelled";
         turnReason = this.#cancelDetail;
+      } else if (error instanceof StepLimitReachedError) {
+        // The Turn ran out of room, which is not a failure of the model.
+        turnOutcome = "interrupted";
+        turnReason = turnEndReason(error.message);
       } else {
         turnOutcome = "model-error";
         turnReason = turnEndReason(modelFailureMessage(error));

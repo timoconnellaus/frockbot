@@ -53,7 +53,11 @@ import {
 import { MCP_OAUTH_CONNECTION_TYPE_ID } from "@frockbot/plugin-mcp/agent";
 import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
-import { decodeClientTurnV1 } from "../run-protocol.js";
+import {
+  ClientTurnRefusedErrorV1,
+  type ClientTurnRefusalReasonV1,
+  decodeClientTurnV1,
+} from "../run-protocol.js";
 import {
   decodeApprovalDecisionReceiptV1,
   decodeApprovalListViewV1,
@@ -242,10 +246,28 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
       message: run.stopRequestedAt
         ? "Stopping…"
         : "Something went wrong mid-reply. Try again to pick it up.",
-      canResume: !run.stopRequestedAt && run.recovery?.action === "resume",
+      // Offered whenever the run is parked, Stop included. Hiding it there
+      // hid it in exactly the case Stop creates: a Turn that was stopped
+      // while the model was mid-answer parks, and the person was left with a
+      // banner and no way to act on it.
+      canResume: run.recovery?.action === "resume",
     };
   }
   return undefined;
+}
+
+/**
+ * What a refused send tells the person. The refusal's own `error` names the
+ * durable invariant that declined it, which the debug surface needs and the
+ * composer does not, so the typed reason picks the sentence instead.
+ */
+function turnRefusalCopyV1(reason: ClientTurnRefusalReasonV1): string {
+  if (reason === "busy")
+    return "This Bot is still working on your last message.";
+  if (reason === "reconciliation-required")
+    return "This Bot's last reply stopped partway. Try again to continue it.";
+  if (reason === "duplicate") return "That message was already sent.";
+  return "That message didn't go through. Try sending it again.";
 }
 
 function isTerminalRun(run: ClientRun): boolean {
@@ -285,7 +307,8 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: "Interrupted by your next message.",
+      text: run.responseText ?? "",
+      notice: "Interrupted by your next message.",
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -309,7 +332,8 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: "You stopped this.",
+      text: run.responseText ?? "",
+      notice: "You stopped this.",
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -2382,15 +2406,23 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.activeBotId !== botId
         )
           return { accepted: true, runId: pendingRunId };
+        // A refusal is a normal answer, not an uncertain send: the Bot
+        // declined and said why. Show that, drop the optimistic bubbles, and
+        // let the composer give the person their text back — fencing a run
+        // that was never admitted only threw the reason away.
+        if (error instanceof ClientTurnRefusedErrorV1) {
+          removeMessages(web.value.messages, pendingRunId);
+          const refusal = turnRefusalCopyV1(error.refusal.reason);
+          web.value.error = refusal;
+          return { accepted: false, error: refusal };
+        }
         const aborted =
           error instanceof DOMException && error.name === "AbortError";
         replaceMessage(web.value.messages, pendingRunId, {
           id: `${pendingRunId}:assistant`,
           runId: pendingRunId,
           role: "assistant",
-          text: aborted
-            ? "Request stopped locally; checking whether it started."
-            : "Checking whether your message went through…",
+          text: "Checking whether your message went through…",
           at: optimisticAt,
           status: "interrupted",
           tools: [],
@@ -2723,6 +2755,13 @@ function replaceMessage(
     (message) => message.runId === runId && message.role === "assistant",
   );
   if (index >= 0) messages[index] = replacement;
+}
+
+/** Takes back both optimistic lines of a send the Bot never admitted. */
+function removeMessages(messages: WebChatMessage[], runId: string): void {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.runId === runId) messages.splice(index, 1);
+  }
 }
 
 export default shellClientPlugin;
