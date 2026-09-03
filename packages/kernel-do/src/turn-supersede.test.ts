@@ -117,6 +117,12 @@ function createAuthority(
      * provider outcome, and a reconciliation demand.
      */
     uncertain?(runId: string): boolean;
+    /**
+     * Parks the named Turn when it is released: the provider call it had
+     * dispatched by then has no durable outcome, and nothing but an explicit
+     * reconciliation can settle it.
+     */
+    parkOnRelease?(runId: string): boolean;
   } = {},
 ): Probe {
   const observed: BotTurnExecutionInput<undefined>[] = [];
@@ -217,6 +223,32 @@ function createAuthority(
       }
       handle.started.resolve();
       const outcome = await handle.settled.promise;
+      if (outcome.interrupted === undefined && options.parkOnRelease?.(runId)) {
+        const reason = `Model request "request-${runId}" has no durable provider outcome`;
+        await persist(
+          {
+            type: "model/request",
+            turn,
+            step: 1,
+            request: {
+              requestId: `request-${runId}`,
+              provider: "foundation",
+              model: "foundation-model",
+              system: "system",
+              messages: [{ role: "user", content: input.command.text }],
+              tools: [],
+            },
+          } as never,
+          {
+            type: "model/reconciliation-required",
+            turn,
+            step: 1,
+            requestId: `request-${runId}`,
+            reason,
+          } as never,
+        );
+        throw new BotTurnReconciliationRequiredError(reason, appended);
+      }
       if (outcome.interrupted !== undefined && uncertain) {
         const reason = `Model response outcome is uncertain after cancellation: ${outcome.interrupted}`;
         await persist({
@@ -609,6 +641,41 @@ describe("eviction between the two Turns", () => {
     // A second recovery pass starts nothing: the queue is empty.
     await restarted.authority.recoverActiveRun();
     expect(restarted.observed).toHaveLength(1);
+  });
+});
+
+describe("a Turn queued behind a parked run", () => {
+  test("is refused rather than answered with an empty completion", async () => {
+    const storage = new MemoryStorage();
+    // The first Turn has not dispatched when the second arrives, so it is left
+    // to finish and the second queues behind it. It then parks on a provider
+    // outcome only a User can retrieve.
+    const probe = createAuthority(storage, {
+      dispatch: () => false,
+      parkOnRelease: (runId) => runId === "run-1",
+    });
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    const second = probe.authority.run(
+      command("run-2", "second", {
+        lane: "user",
+        supersedes: { runId: "run-1" },
+      }),
+    );
+    await admitted();
+    probe.handle("run-1").finish();
+    await first.catch(() => undefined);
+
+    await expect(second).rejects.toThrow(
+      /is queued: the active run requires reconciliation/,
+    );
+    // And it is still owed a Turn: durable, queued, and started by the
+    // reconciliation's own settlement or by the recovery alarm.
+    const queued = storedRun(storage, "run-2");
+    expect(queued.status).toBe("running");
+    expect(queued.phase).toBe("queued");
+    expect(storage.values.get("pending-run")).toBe("run-2");
   });
 });
 

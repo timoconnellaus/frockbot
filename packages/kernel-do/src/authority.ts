@@ -265,11 +265,13 @@ export class BotDurableAuthority<Snapshot> {
           // run is durable: it stays queued, and the reconciliation's own
           // settlement — or the recovery alarm — starts it.
           if (await this.activeRunAwaitsReconciliation()) {
-            return {
-              runId: command.runId,
-              text: "",
-              events: [],
-            } satisfies BotTurnCompletion;
+            // A Turn that has not run is not a completed Turn. Answering with
+            // an empty completion made the browser render the person's new
+            // message as answered with silence; the durable queue entry stays,
+            // and the refusal says why nothing has happened yet.
+            throw new Error(
+              `run "${command.runId}" is queued: the active run requires reconciliation before another Turn can be admitted`,
+            );
           }
           continue;
         }
