@@ -324,3 +324,51 @@ describe("BotState Ollama execution", () => {
     }
   });
 });
+
+describe("BotState mount failures", () => {
+  test("a failed mount is retried rather than memoized until eviction", async () => {
+    const storage = new MemoryStorage();
+    let attempts = 0;
+    const compileApplication = (() => {
+      attempts += 1;
+      return attempts === 1
+        ? Promise.reject(new Error("transient mount failure"))
+        : compileWithoutIsolateMembers();
+    }) as typeof compileFoundationApplication;
+    const env = {
+      USER_CONFIGURATIONS: {
+        idFromName: () => "user-configuration-id",
+        get: () => ({
+          getBotRegistration: () =>
+            Promise.resolve({
+              schemaVersion: 1 as const,
+              botId: "primary",
+              registeredAt: "2026-08-30T00:00:00.000Z",
+              initialName: "Bot",
+              sheep: randomSheepRecipeV1(() => 0),
+            }),
+          listMemoryProjects: () => Promise.resolve([]),
+          currentWorkspaceGeneration: () => Promise.resolve(undefined),
+          listWorkspaceConflicts: () => Promise.resolve([]),
+        }),
+      },
+      MEMORY_FILES: memoryFiles(),
+      MEMORY_INDEX: memoryIndex(),
+    } as unknown as BotStateEnv;
+    const state = new BotState(
+      { storage } as unknown as DurableObjectState,
+      env,
+      { compileApplication },
+    );
+    const identity = { schemaVersion: 1, userId: "user-1", botId: "primary" };
+
+    await expect(state.readSheep(identity)).rejects.toThrow(
+      "transient mount failure",
+    );
+    // The object is not dead. Before this, every later call — the recovery
+    // alarm included — awaited the same rejected promise, so one transient
+    // failure inside the mount held the Bot until it was evicted.
+    await expect(state.readSheep(identity)).resolves.toBeDefined();
+    expect(attempts).toBe(2);
+  });
+});

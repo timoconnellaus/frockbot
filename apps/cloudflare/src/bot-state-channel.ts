@@ -195,12 +195,17 @@ export class BotStateChannel {
     this.computerStorage = new ChannelComputerStorage(this, state.storage);
   }
 
+  /**
+   * The kernel's own alarm refresher, set by whichever mount is current.
+   *
+   * A mount that failed is retried, and the retry brings a new refresher bound
+   * to the Contribution that actually mounted — so the last writer wins rather
+   * than the first. Refusing the second one turned a recovered mount into a
+   * different, permanent failure.
+   */
   setAlarmRefresher(
     refresh: (transaction: DurableObjectTransaction) => Promise<void>,
   ): void {
-    if (this.alarmRefresher) {
-      throw new Error("Bot-state channel alarm refresher is already set");
-    }
     this.alarmRefresher = refresh;
   }
 
