@@ -895,7 +895,7 @@ describe("a Bot authoring a Package", () => {
     expect(view.contextContract).toContain(
       "interface BotPackageExecutionContextV1",
     );
-    expect(view.contextContract).toContain("interface FrockBotIframeBridgeV1");
+    expect(view.contextContract).toContain("interface FrockBotIframeBridgeV2");
     expect(view.contextContract).toContain("window.frockbot=");
     expect(view.composition.members).toContainEqual(
       expect.objectContaining({

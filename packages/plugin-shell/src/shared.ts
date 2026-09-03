@@ -14,6 +14,9 @@ import type {
   CatalogIndexEntryV1,
 } from "@frockbot/catalog-core";
 import type {
+  AppletBuildViewV1,
+  AppletSourceViewV1,
+  AppletSummaryV1,
   PackageIframeCatalogV1,
   PackageIframeContributionViewV1,
   SendToUserPayloadV1,
@@ -194,6 +197,39 @@ export interface FrockBotWebData {
   /** Sandboxed pages in the selected Bot's active fail-closed Composition. */
   packageUi?: PackageIframeCatalogV1;
   /**
+   * The Applets this User owns. Account-wide, like every other Package-shaped
+   * capability: an Applet belongs to the User, and every Bot they own sees it.
+   */
+  applets: AppletSummaryV1[];
+  /**
+   * The Session's focused Applet id, as the Bot Durable Object recorded it.
+   * `null` is a value — the Session deliberately has no Applet in the canvas —
+   * and `undefined` means it has not been read yet.
+   */
+  focusedAppletId?: string | null;
+  /** The focused Applet joined with the list. Derived; never written to. */
+  readonly focusedApplet?: AppletSummaryV1;
+  /** Where the focused Applet's live UI is, and the credential to open it. */
+  appletViewer?: {
+    appletId: string;
+    token: string;
+    expiresAt: string;
+    socketUrl: string;
+    uiUrl: string;
+    generationId: string;
+  };
+  /** The focused Applet's source, for the canvas's building state. */
+  appletSource?: AppletSourceViewV1;
+  /** The outcome the Bot last recorded for `applet check` or `applet build`. */
+  appletBuild?: AppletBuildViewV1;
+  /**
+   * How the canvas's own read went. `loading` is the first read of a focused
+   * Applet, `failed` is a read the User can retry, and `ready` says the canvas
+   * has everything it needs to draw either of its states.
+   */
+  appletCanvas: "idle" | "loading" | "ready" | "failed";
+  appletCanvasError?: string;
+  /**
    * The User's MCP servers: state, tool count, last handshake, instructions,
    * failure, and the durable refusal ledger. Absent until it is loaded, and
    * absent for a deployment with no MCP route — the Plugins surface then
@@ -247,6 +283,22 @@ export interface FrockBotWebData {
   /** Refreshes {@link FrockBotWebData.tasks} for the active Bot. */
   loadTasks(): Promise<void>;
   loadPackageUi(): Promise<void>;
+  /** Refreshes {@link FrockBotWebData.applets} for the signed-in User. */
+  loadApplets(): Promise<void>;
+  /** Refreshes the Session's focused Applet for the active Bot. */
+  loadFocusedApplet(): Promise<void>;
+  /**
+   * Focuses one Applet for this Session, or clears the focus. The backend is
+   * the authority: what the canvas then shows is the focus that was recorded,
+   * never the one the click asked for.
+   */
+  setFocusedApplet(appletId: string | null): Promise<void>;
+  /**
+   * Re-reads what the canvas draws for the focused Applet: its source, the
+   * last recorded check or build outcome, and a viewer credential once a
+   * generation is active.
+   */
+  refreshAppletCanvas(): Promise<void>;
   callPackageUiTool(
     contribution: PackageIframeContributionViewV1,
     name: string,

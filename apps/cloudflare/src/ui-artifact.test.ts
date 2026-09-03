@@ -38,10 +38,17 @@ describe("Package UI artifact route", () => {
     expect(await response.text()).toContain("Page");
   });
 
-  test("the artifact CSP names only its own gateway origin", () => {
-    expect(
-      packageUiCspV1(new URL("https://ui.bot.example.com/packages/x.html")),
-    ).toContain("connect-src https://bot.example.com wss://bot.example.com");
+  test("names its own origin to nest and only its gateway to connect", () => {
+    const csp = packageUiCspV1(
+      new URL("https://ui.bot.example.com/packages/x.html"),
+    );
+    expect(csp).toContain(
+      "connect-src https://bot.example.com wss://bot.example.com",
+    );
+    // A canvas page nests the Applet's UI on the same anonymous origin.
+    expect(csp).toContain("frame-src https://ui.bot.example.com");
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).not.toContain("*");
     // A host that is already the gateway (local development) maps to itself.
     expect(
       packageUiCspV1(new URL("http://ui.localhost:8787/packages/x.html")),

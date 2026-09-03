@@ -54,15 +54,26 @@ export function packageUiGatewayOriginV1(url: URL): string {
 }
 
 /**
- * The immutable page's CSP, with the one hole an Applet needs: its socket back
- * to the `AppletState` object, on the gateway origin, over that scheme's
- * WebSocket scheme. Still `default-src 'none'`; still no `frame-ancestors`
- * relaxation and no `form-action`.
+ * What a Package page may do.
+ *
+ * Still `default-src 'none'`: a page loads nothing from anywhere, and its
+ * script and style are the inline ones in the artifact itself. Two openings,
+ * both named rather than wildcarded, and both derived from the request so a
+ * deployment on any hostname gets exactly its own:
+ *
+ * - `connect-src <gateway origin> <gateway ws origin>` lets an Applet's UI open
+ *   its viewer socket back to the `AppletState` object on the gateway, which
+ *   is the only endpoint it is given (ADR 0022 §4).
+ * - `frame-src <artifact origin>` lets a page nest another page on the same
+ *   anonymous origin — the Applets canvas page nesting the Applet's own UI.
+ *   The nested frame is served by this very route, with this very policy.
+ *
+ * No `frame-ancestors` relaxation and no `form-action`.
  */
 export function packageUiCspV1(url: URL): string {
   const origin = packageUiGatewayOriginV1(url);
   const socket = origin.replace(/^http/, "ws");
-  return `${PACKAGE_UI_CSP}; connect-src ${origin} ${socket}`;
+  return `${PACKAGE_UI_CSP}; connect-src ${origin} ${socket}; frame-src ${url.origin}`;
 }
 export const SIGNUPS_CLOSED_MESSAGE =
   "FrockBot isn't taking new signups right now.";

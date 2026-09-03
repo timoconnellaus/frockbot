@@ -9,6 +9,7 @@ import {
   isRpcIdentifier,
 } from "@frockbot/configuration-core";
 import {
+  APPLET_ID_V1,
   decodePackageIframeToolCommandV1,
   type PackageIframeCatalogV1,
 } from "@frockbot/kernel-contracts";
@@ -126,7 +127,9 @@ function withSecurityHeaders(
     "content-security-policy",
     // Package pages use the anonymous artifact origin. The expanded Computer
     // viewer frames the Sprite's own noVNC page (ADR 0004); both are optional
-    // projections and neither becomes an authority in the hosted client.
+    // projections and neither becomes an authority in the hosted client. An
+    // Applet's own UI is another page on the same artifact origin, nested by
+    // the Applets canvas page, so the origin already named here covers it.
     `default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-src ${artifactOrigin} https://*.sprites.app; frame-ancestors 'none'; base-uri 'none'`,
   );
   return secured;
@@ -524,6 +527,12 @@ export function createUserApplication() {
     const packageUiToolMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/package-ui\/tools$/,
     );
+    const appletSourceMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/applets\/([^/]+)\/source$/,
+    );
+    const appletBuildMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/applets\/([^/]+)\/build$/,
+    );
     const workspaceFileMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/workspace\/file$/,
     );
@@ -544,6 +553,8 @@ export function createUserApplication() {
       !skillsMatch &&
       !packageUiMatch &&
       !packageUiToolMatch &&
+      !appletSourceMatch &&
+      !appletBuildMatch &&
       !workspaceFileMatch &&
       !turnMatch &&
       !lookupMatch &&
@@ -559,6 +570,8 @@ export function createUserApplication() {
         skillsMatch ??
         packageUiMatch ??
         packageUiToolMatch ??
+        appletSourceMatch ??
+        appletBuildMatch ??
         workspaceFileMatch ??
         turnMatch ??
         lookupMatch ??
@@ -632,6 +645,45 @@ export function createUserApplication() {
         return jsonError(
           message.includes("did not declare") ? 403 : 409,
           message,
+        );
+      }
+    }
+
+    if (appletSourceMatch || appletBuildMatch) {
+      // The Applet canvas's two reads. Both answer from the Workspace store
+      // and the Bot Durable Object's own records, so a hibernated Computer
+      // stays hibernated: rendering what a Bot wrote never wakes the machine
+      // it wrote it on.
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      let appletId: string;
+      try {
+        appletId = decodeURIComponent(
+          (appletSourceMatch ?? appletBuildMatch)![2],
+        );
+      } catch {
+        return jsonError(400, "invalid applet id");
+      }
+      if (!APPLET_ID_V1.test(appletId)) {
+        return jsonError(400, "invalid applet id");
+      }
+      try {
+        return Response.json(
+          appletSourceMatch
+            ? await env.BOT_STATE.readAppletSourceV1({
+                schemaVersion: 1,
+                botId,
+                appletId,
+              })
+            : await env.BOT_STATE.readAppletBuildV1({
+                schemaVersion: 1,
+                botId,
+                appletId,
+              }),
+        );
+      } catch (error) {
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "Applet read failed",
         );
       }
     }

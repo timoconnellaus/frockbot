@@ -40,8 +40,7 @@ function settingsFor(packageId: string): Record<string, unknown> {
       :contribution="entry.contribution"
       :page="entry.page"
       :slot="slot"
-      state-name="settings"
-      :state-value="settingsFor(entry.contribution.packageId)"
+      :states="{ settings: settingsFor(entry.contribution.packageId) }"
     />
   </div>
 </template>
