@@ -2975,17 +2975,24 @@ export class ShellBotBackendContribution {
   }
 
   private async settleScheduledWork(): Promise<void> {
-    await this.settleRoutineFirings();
-    await this.runOwedSubagentTurns();
-    await this.reconcileOverdueTasks();
-    await this.expireDueApprovals();
-    await this.replayPendingWakeNotifications();
-    await this.hostSettleScheduledWork?.();
-    // The alarm that woke this object has been consumed. Re-arm on whatever is
-    // owed next, or a Routine that fired once would never fire again.
-    await this.ctx.storage.transaction((transaction) =>
-      this.authority.refreshRecoveryAlarm(transaction),
-    );
+    // The re-arm is in a `finally` because it is the object's only way back.
+    // The alarm that woke this object has already been consumed by the
+    // platform; a throw in any one settler used to skip the re-arm, and then
+    // nothing — no Routine, no approval expiry, no owed subagent Turn — ever
+    // woke this Bot again except by a caller's luck. One producer failing must
+    // cost that producer its pass, never the clock.
+    try {
+      await this.settleRoutineFirings();
+      await this.runOwedSubagentTurns();
+      await this.reconcileOverdueTasks();
+      await this.expireDueApprovals();
+      await this.replayPendingWakeNotifications();
+      await this.hostSettleScheduledWork?.();
+    } finally {
+      await this.ctx.storage.transaction((transaction) =>
+        this.authority.refreshRecoveryAlarm(transaction),
+      );
+    }
   }
 
   /**

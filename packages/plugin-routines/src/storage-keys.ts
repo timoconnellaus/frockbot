@@ -47,6 +47,26 @@ export const ROUTINE_MISSED_GRACE_MS = 5 * 60_000;
 export const ROUTINE_DEFERRAL_MS = 15_000;
 
 /**
+ * How long one firing may hold its Routine's lock before the alarm settles it
+ * for dead.
+ *
+ * The lock is `routine-fire:<id>`, written before the Turn and deleted when it
+ * settles. An isolate killed mid-firing leaves it behind, and without a lease
+ * that Routine is skipped for ever — and, because a locked Routine used to
+ * contribute no deadline, the object's alarm was deleted with it. The lease is
+ * what makes an abandoned firing a deadline rather than a silence.
+ */
+export const ROUTINE_FIRE_LEASE_MS = 10 * 60_000;
+
+/**
+ * How long one firing's Turn may run before the scheduler stops waiting on it.
+ *
+ * Strictly inside the lease, so the firing that timed out settles itself rather
+ * than waiting to be reaped.
+ */
+export const ROUTINE_FIRE_TIMEOUT_MS = 5 * 60_000;
+
+/**
  * Run entries are keyed by a descending sequence so a prefix listing returns
  * the newest first without reading the whole log.
  */

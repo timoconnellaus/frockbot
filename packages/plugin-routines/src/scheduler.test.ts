@@ -10,8 +10,11 @@ import { createMemoryRoutineStorageV1 } from "./testing.js";
 import {
   routineFireKeyV1,
   routineScheduleKeyV1,
+  ROUTINE_FIRE_LEASE_MS,
   ROUTINE_QUEUE_LIMIT,
+  ROUTINE_RUN_PREFIX,
 } from "./storage-keys.js";
+import { decodeRoutineRunEntryV1 } from "./records.js";
 import type { RoutineCommandV1 } from "./shared.js";
 
 const USER = { kind: "user" } as const;
@@ -30,10 +33,23 @@ function clock(start: string) {
   };
 }
 
-function harness(options: { start: string; schedule?: string }) {
+function harness(options: {
+  start: string;
+  schedule?: string;
+  fireTimeoutMs?: number;
+  fireLeaseMs?: number;
+}) {
   const storage = createMemoryRoutineStorageV1();
   const time = clock(options.start);
-  const scheduler = new RoutineScheduler(storage, { now: time.now });
+  const scheduler = new RoutineScheduler(storage, {
+    now: time.now,
+    ...(options.fireTimeoutMs === undefined
+      ? {}
+      : { fireTimeoutMs: options.fireTimeoutMs }),
+    ...(options.fireLeaseMs === undefined
+      ? {}
+      : { fireLeaseMs: options.fireLeaseMs }),
+  });
   const store = new RoutineStore(storage, {
     now: time.now,
     firings: scheduler,
@@ -478,5 +494,128 @@ describe("nextRuns", () => {
       (await store.list("scout", await scheduler.nextRuns())).routines[0]
         ?.nextRunAt,
     ).toBeUndefined();
+  });
+});
+
+describe("an abandoned firing", () => {
+  /** Every run-log entry stored, newest first. */
+  async function runLog(
+    storage: ReturnType<typeof createMemoryRoutineStorageV1>,
+  ) {
+    const stored = await storage.list<unknown>({ prefix: ROUTINE_RUN_PREFIX });
+    return [...stored.values()].map((value) => decodeRoutineRunEntryV1(value));
+  }
+
+  test("still contributes a deadline, so the object's alarm is not deleted under it", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER);
+
+    // The isolate is killed between `#writeClaim` and `#settleFiring`: the
+    // lock is durable and nothing will ever delete it.
+    time.set("2026-01-01T09:00:00.000Z");
+    await scheduler.settle(async () => {
+      throw new DOMException("CPU time limit", "Error");
+    });
+    // (that one settles) — now stage a genuinely orphaned lock.
+    await storage.put(routineFireKeyV1("brief"), {
+      schemaVersion: 1,
+      routineId: "brief",
+      fireId: "rf-brief-orphan",
+      trigger: "cron",
+      cue: "Routine fired.",
+      mintedAt: "2026-01-01T09:00:00.000Z",
+      entryId: "rf-brief-orphan-entry",
+    });
+
+    // Before the lease: the Routine is being dealt with, and the deadline the
+    // object arms on is when the lease runs out — never nothing, which is what
+    // let `deleteAlarm()` silence the Bot.
+    time.set("2026-01-01T09:01:00.000Z");
+    expect(await scheduler.deadlines(storage)).toEqual([
+      Date.parse("2026-01-01T09:00:00.000Z") + ROUTINE_FIRE_LEASE_MS,
+    ]);
+  });
+
+  test("is reaped once its lease expires, and the Routine fires again", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER);
+    await storage.put(routineFireKeyV1("brief"), {
+      schemaVersion: 1,
+      routineId: "brief",
+      fireId: "rf-brief-orphan",
+      trigger: "cron",
+      cue: "Routine fired.",
+      mintedAt: "2026-01-01T09:00:00.000Z",
+      entryId: "rf-brief-orphan-entry",
+    });
+
+    time.set(
+      new Date(
+        Date.parse("2026-01-01T09:00:00.000Z") + ROUTINE_FIRE_LEASE_MS + 1,
+      ).toISOString(),
+    );
+    const fired = await drain(scheduler);
+
+    // The lock is gone, the abandoned firing is `failed` in the log with a
+    // reason, and the next occurrence really ran.
+    expect(await storage.get(routineFireKeyV1("brief"))).toBeUndefined();
+    const log = await runLog(storage);
+    expect(
+      log.find((entry) => entry.fireId === "rf-brief-orphan"),
+    ).toMatchObject({ status: "failed" });
+    expect(fired).toHaveLength(1);
+  });
+
+  test("releases a lock nothing can decode", async () => {
+    const { storage, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER);
+    await storage.put(routineFireKeyV1("brief"), { schemaVersion: 99 });
+
+    await scheduler.reapExpiredFirings();
+
+    expect(await storage.get(routineFireKeyV1("brief"))).toBeUndefined();
+  });
+});
+
+describe("a firing that never comes back", () => {
+  test("is stopped at its timeout and settled as failed", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+      fireTimeoutMs: 5,
+    });
+    await store.execute(create, USER);
+
+    time.set("2026-01-01T09:00:00.000Z");
+    let aborted = false;
+    await scheduler.settle(
+      (_fire, signal) =>
+        new Promise((resolve) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            // Never resolves on its own: the timeout is the only thing that
+            // ends this firing.
+          });
+          void resolve;
+        }),
+    );
+
+    expect(aborted).toBe(true);
+    expect(await storage.get(routineFireKeyV1("brief"))).toBeUndefined();
+    const stored = await storage.list<unknown>({ prefix: ROUTINE_RUN_PREFIX });
+    const entries = [...stored.values()].map((value) =>
+      decodeRoutineRunEntryV1(value),
+    );
+    expect(entries[0]).toMatchObject({ status: "failed" });
+    expect(entries[0]?.summary).toContain("longer than");
   });
 });

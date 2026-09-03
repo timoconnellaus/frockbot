@@ -50,6 +50,9 @@ import {
 import {
   nextQueueSequenceV1,
   ROUTINE_DEFERRAL_MS,
+  ROUTINE_FIRE_LEASE_MS,
+  ROUTINE_FIRE_PREFIX,
+  ROUTINE_FIRE_TIMEOUT_MS,
   ROUTINE_LIMIT_PER_BOT,
   ROUTINE_MISSED_GRACE_MS,
   ROUTINE_PREFIX,
@@ -78,12 +81,34 @@ export interface RoutineFireOutcomeV1 {
  */
 export type RoutineFireExecutorV1 = (
   fire: RoutineFireV1,
+  signal: AbortSignal,
 ) => Promise<RoutineFireOutcomeV1>;
 
 export interface RoutineSchedulerOptionsV1 {
   now?(): Date;
   /** Injected so a test can watch the drain without a Durable Object. */
-  onSettled?(fire: RoutineFireV1, outcome: RoutineFireOutcomeV1): void;
+  onSettled?(
+    fire: RoutineFireV1,
+    outcome: RoutineFireOutcomeV1,
+  ): void | Promise<void>;
+  /** How long one firing's Turn may run. Overridden only by tests. */
+  fireTimeoutMs?: number;
+  /** How long an unsettled firing holds its lock. Overridden only by tests. */
+  fireLeaseMs?: number;
+}
+
+/**
+ * When an unsettled firing stops being "in flight" and starts being abandoned.
+ *
+ * Derived from `mintedAt`, which is already durable on the firing, so the lease
+ * needs no second record and survives the eviction it exists to survive.
+ */
+export function routineFireLeaseExpiryV1(
+  fire: RoutineFireV1,
+  leaseMs: number = ROUTINE_FIRE_LEASE_MS,
+): number {
+  const minted = Date.parse(fire.mintedAt);
+  return (Number.isFinite(minted) ? minted : 0) + leaseMs;
 }
 
 /** A firing waiting behind an unsettled one. */
@@ -156,7 +181,13 @@ export class RoutineScheduler {
   readonly #storage: RoutineStorageV1;
   readonly #now: () => Date;
   readonly #onSettled:
-    ((fire: RoutineFireV1, outcome: RoutineFireOutcomeV1) => void) | undefined;
+    | ((
+        fire: RoutineFireV1,
+        outcome: RoutineFireOutcomeV1,
+      ) => void | Promise<void>)
+    | undefined;
+  readonly #fireTimeoutMs: number;
+  readonly #fireLeaseMs: number;
 
   constructor(
     storage: RoutineStorageV1,
@@ -165,6 +196,8 @@ export class RoutineScheduler {
     this.#storage = storage;
     this.#now = options.now ?? (() => new Date());
     this.#onSettled = options.onSettled;
+    this.#fireTimeoutMs = options.fireTimeoutMs ?? ROUTINE_FIRE_TIMEOUT_MS;
+    this.#fireLeaseMs = options.fireLeaseMs ?? ROUTINE_FIRE_LEASE_MS;
   }
 
   /**
@@ -179,7 +212,16 @@ export class RoutineScheduler {
       const locked = await reads.get<unknown>(
         routineFireKeyV1(record.routineId),
       );
-      if (locked) continue;
+      if (locked) {
+        // A Routine with an unsettled firing is being dealt with — but only
+        // until its lease runs out. Skipping it outright is what let a firing
+        // killed mid-flight take the object's whole alarm down with it: the
+        // locked Routine contributed no deadline, so the kernel's
+        // `deleteAlarm()` ran and the Bot went silent for ever. The lease
+        // expiry is the deadline, and `settle` is what reaps it.
+        deadlines.push(this.#leaseExpiry(locked));
+        continue;
+      }
       deadlines.push(routineDeadlineV1(state));
     }
     for (const routineId of await this.#queuedRoutineIds(reads)) {
@@ -209,20 +251,100 @@ export class RoutineScheduler {
    * durable firing, run it, settle it, then look again.
    */
   async settle(execute: RoutineFireExecutorV1): Promise<void> {
+    await this.reapExpiredFirings();
     for (let drained = 0; drained < ROUTINE_SETTLE_BATCH; drained += 1) {
       const claimed = await this.#claim();
       if (!claimed) return;
-      let outcome: RoutineFireOutcomeV1;
-      try {
-        outcome = await execute(claimed.fire);
-      } catch (error) {
-        outcome = {
-          status: "failed",
-          summary: error instanceof Error ? error.message : String(error),
-        };
-      }
+      const outcome = await this.#execute(execute, claimed.fire);
       await this.#settleFiring(claimed.fire, outcome);
-      this.#onSettled?.(claimed.fire, outcome);
+      await this.#onSettled?.(claimed.fire, outcome);
+    }
+  }
+
+  /**
+   * Run one firing under a hard time bound.
+   *
+   * Nothing else bounds it: `maxSteps` bounds the loop and not the wall clock,
+   * and an automation run is not offered to the user's Stop. A firing that
+   * never comes back must still settle, or its lock outlives the isolate.
+   */
+  async #execute(
+    execute: RoutineFireExecutorV1,
+    fire: RoutineFireV1,
+  ): Promise<RoutineFireOutcomeV1> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expiry = new Promise<RoutineFireOutcomeV1>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        resolve({
+          status: "failed",
+          summary: `The Routine ran for longer than ${Math.round(
+            this.#fireTimeoutMs / 1000,
+          )} seconds and was stopped.`,
+        });
+      }, this.#fireTimeoutMs);
+    });
+    try {
+      return await Promise.race([
+        // `Promise.resolve().then` and not a bare call: an executor that throws
+        // synchronously must reach the same failed outcome as one that rejects,
+        // or the throw escapes `settle` with the fire lock still held.
+        Promise.resolve()
+          .then(() => execute(fire, controller.signal))
+          .catch(
+            (error: unknown): RoutineFireOutcomeV1 => ({
+              status: "failed",
+              summary: error instanceof Error ? error.message : String(error),
+            }),
+          ),
+        expiry,
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Settle for dead every firing whose lease has run out.
+   *
+   * The other half of the lease: `deadlines()` makes an abandoned firing wake
+   * the object, and this is what the object then does about it. An undecodable
+   * lock is released too — it names a firing nothing can run, and leaving it
+   * wedges the Routine exactly as an abandoned one does.
+   */
+  async reapExpiredFirings(): Promise<void> {
+    const now = this.#now().getTime();
+    const stored = await this.#storage.list<unknown>({
+      prefix: ROUTINE_FIRE_PREFIX,
+    });
+    for (const [key, value] of stored.entries()) {
+      let fire: RoutineFireV1;
+      try {
+        fire = decodeRoutineFireV1(value);
+      } catch {
+        await this.#storage.delete(key);
+        continue;
+      }
+      if (this.#leaseExpiry(value) > now) continue;
+      await this.#settleFiring(fire, {
+        status: "failed",
+        summary:
+          "The Routine stopped without reporting an outcome and its firing was settled as failed.",
+      });
+    }
+  }
+
+  #leaseExpiry(stored: unknown): number {
+    try {
+      return routineFireLeaseExpiryV1(
+        decodeRoutineFireV1(stored),
+        this.#fireLeaseMs,
+      );
+    } catch {
+      // An undecodable lock is already overdue: reaping it is the only way its
+      // Routine ever fires again.
+      return 0;
     }
   }
 
