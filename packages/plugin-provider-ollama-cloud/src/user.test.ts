@@ -11,6 +11,7 @@ import {
 } from "@frockbot/plugin-settings/user";
 import { OllamaCloudClient, type OllamaFetch } from "./client.js";
 import {
+  catalogRetryDelayMsV1,
   createOllamaCloudUserBackendContribution,
   type OllamaUserBackendHost,
 } from "./user.js";
@@ -175,6 +176,18 @@ async function fixture(
     },
   };
 }
+
+describe("catalog retry backoff", () => {
+  test("retries a failed refresh soon and backs off, capped at the interval", () => {
+    // A refresh that failed used to wait the full hour, so a thirty-second
+    // outage cost an hour of stale models.
+    expect(catalogRetryDelayMsV1(1)).toBe(60_000);
+    expect(catalogRetryDelayMsV1(2)).toBe(120_000);
+    expect(catalogRetryDelayMsV1(3)).toBe(240_000);
+    expect(catalogRetryDelayMsV1(20)).toBe(60 * 60 * 1_000);
+    expect(catalogRetryDelayMsV1(0)).toBe(60_000);
+  });
+});
 
 describe("Ollama Cloud User Contribution", () => {
   test("rejects malformed durable account, command, and pending records", async () => {

@@ -493,7 +493,8 @@ export interface SessionEventMap {
     facts: Array<{
       scope: MemoryScopeNameV1;
       projectId: string;
-      tier: "profile" | "log";
+      /** The tier it was written as; a note lives in the log file. */
+      tier: "profile" | "log" | "note";
       via: string;
       learnedAt: string;
       text: string;
@@ -527,7 +528,14 @@ export interface SessionEventMap {
     action: "write" | "forget";
     scope: MemoryScopeNameV1;
     projectId: string;
-    tier: "profile" | "log" | "note";
+    /**
+     * `pending` when the intent cannot name a tier yet. A forget may rewrite
+     * the profile file, one or more log files, or write a retraction, and
+     * which it is, is not known until it has run; the `memory/written` events
+     * that follow name the real tier and path.
+     */
+    tier: "profile" | "log" | "note" | "pending";
+    /** Empty when the intent cannot name a path yet, for the same reason. */
     path: string;
     contentHash: string;
   };
@@ -1637,8 +1645,8 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       memoryAction(event.action, "session event.action");
       memoryScope(event.scope, "session event.scope");
       eventString(event.projectId, "session event.projectId", true);
-      memoryTier(event.tier, "session event.tier");
-      eventString(event.path, "session event.path");
+      memoryIntentTier(event.tier, "session event.tier");
+      eventString(event.path, "session event.path", true);
       eventString(event.contentHash, "session event.contentHash");
       break;
     case "memory/written":

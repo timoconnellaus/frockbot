@@ -124,7 +124,12 @@ export interface MemoryInjectionInputV1 {
 export interface InjectedMemoryFactV1 {
   scope: MemoryScopeNameV1;
   projectId: string;
-  tier: "profile" | "log";
+  /**
+   * The tier the fact was written as, not the file it happens to sit in. A
+   * note lives in the log file; recording it as `log` left a reader of the
+   * durable event unable to tell the two apart.
+   */
+  tier: "profile" | "log" | "note";
   via: string;
   learnedAt: string;
   text: string;
@@ -205,7 +210,12 @@ function injected(
   return facts.map((fact) => ({
     scope,
     projectId,
-    tier,
+    // A note lives in the log file, and the event used to say `log` while the
+    // write that produced it said `note` — so a reader of the durable record
+    // could not tell the two tiers apart, and the only sign was a `[note] `
+    // prefix inside the text. The marker on the recorded text is what the
+    // tier was; the file it sits in is not.
+    tier: parseMemoryMarkerV1(fact.text).marker === "note" ? "note" : tier,
     via: withVia ? fact.via : "",
     learnedAt: fact.date,
     text: fact.text,

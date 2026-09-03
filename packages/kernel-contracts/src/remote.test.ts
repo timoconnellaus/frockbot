@@ -4,7 +4,7 @@ import {
   remoteCallV1,
   retryOnceV1,
   withDeadlineV1,
-} from "./remote.ts";
+} from "./remote.js";
 
 describe("a remote call is bounded", () => {
   test("a call that never answers is abandoned, not waited on", async () => {

@@ -55,6 +55,36 @@ const AUTOMATIC_REFRESH_RECEIPT_PREFIX = "ollama-refresh-receipt:";
 const MUTATION_SEQUENCE_PREFIX = "ollama-mutation-sequence:";
 const MODEL_RESOLUTION_PREFIX = "ollama-model-resolution:";
 const REFRESH_INTERVAL_MS = 60 * 60 * 1_000;
+/**
+ * How soon a catalog refresh that failed is tried again.
+ *
+ * A refresh that failed used to wait the full hour, so an endpoint that was
+ * down for thirty seconds stayed stale for an hour. The delay doubles per
+ * consecutive failure up to the ordinary interval, so a transient outage
+ * recovers quickly and a lasting one does not hammer the provider.
+ */
+const CATALOG_RETRY_BASE_MS = 60_000;
+const MAX_CATALOG_RETRY_ATTEMPTS = 8;
+const CATALOG_RETRY_PREFIX = "ollama-catalog-retry:";
+
+function catalogRetryKey(connectionId: string): string {
+  return `${CATALOG_RETRY_PREFIX}${connectionId}`;
+}
+
+/** Backoff for the nth consecutive catalog failure, capped at the interval. */
+export function catalogRetryDelayMsV1(attempt: number): number {
+  const bounded = Math.min(Math.max(attempt, 1), MAX_CATALOG_RETRY_ATTEMPTS);
+  return Math.min(
+    CATALOG_RETRY_BASE_MS * 2 ** (bounded - 1),
+    REFRESH_INTERVAL_MS,
+  );
+}
+
+function catalogRetryAttempt(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : 0;
+}
 const RECOVERY_DELAY_MS = 60_000;
 const MODEL_LEASE_MS = 30 * 60 * 1_000;
 const MAX_CONNECTION_MODELS = 100;
@@ -1576,6 +1606,7 @@ export class OllamaCloudUserBackendContribution {
             },
             storage,
           );
+          await storage.delete(catalogRetryKey(record.connectionId));
         } else if (appliesProjection) {
           const settings = await this.host.settings.readSnapshot(storage);
           const current = settings.connections.find(
@@ -1591,6 +1622,15 @@ export class OllamaCloudUserBackendContribution {
             current.state === "ready" &&
             current.modelCatalog
           ) {
+            const attempt =
+              catalogRetryAttempt(
+                await storage.get<unknown>(
+                  catalogRetryKey(record.connectionId),
+                ),
+              ) + 1;
+            await storage.put({
+              [catalogRetryKey(record.connectionId)]: attempt,
+            });
             await this.host.settings.replaceConnection(
               record.accountId,
               record.connectionId,
@@ -1601,7 +1641,7 @@ export class OllamaCloudUserBackendContribution {
                   ...current.modelCatalog,
                   state: "stale",
                   refreshAfter: new Date(
-                    this.now() + REFRESH_INTERVAL_MS,
+                    this.now() + catalogRetryDelayMsV1(attempt),
                   ).toISOString(),
                   failure:
                     outcomeFailure instanceof Error
