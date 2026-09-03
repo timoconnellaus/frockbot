@@ -112,13 +112,31 @@ describe("the CSS colour scan", () => {
     expect(diagnostic!.message).toContain("--frockbot-");
   });
 
-  it("reports rgb() and color-mix() too", () => {
+  it("reports rgb() and an untethered color-mix()", () => {
     expect(
       lintCssText(".a { background: rgba(0,0,0,.4); }", "a.css"),
     ).toHaveLength(1);
     expect(
       lintCssText(
         ".a { background: color-mix(in srgb, black, white); }",
+        "a.css",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("accepts a color-mix() over a token", () => {
+    expect(
+      lintCssText(
+        ".a { background: color-mix(in srgb, var(--frockbot-text) 40%, transparent); }",
+        "a.css",
+      ),
+    ).toEqual([]);
+  });
+
+  it("judges each declaration on the line separately", () => {
+    expect(
+      lintCssText(
+        ".a { background: var(--frockbot-surface, #ffffff); color: #ff0000; }",
         "a.css",
       ),
     ).toHaveLength(1);

@@ -100,9 +100,14 @@ const COLOR_PROPERTIES = new Set([
   "textShadow",
 ]);
 
-/** A literal is fine only as the fallback of a `--frockbot-*` token. */
-function isTokenFallback(text: string): boolean {
-  return /var\(\s*--frockbot-[a-z-]+\s*,/.test(text);
+/**
+ * A colour literal is fine only where the same value is anchored to a theme
+ * token: as a `var(--frockbot-x, #fallback)` fallback, or as an ingredient of a
+ * `color-mix()` over one. Anything else is a colour the User's theme cannot
+ * move.
+ */
+export function anchoredToToken(text: string): boolean {
+  return /var\(\s*--frockbot-[a-z-]+/.test(text);
 }
 
 export const noRawColors: AppletRule = {
@@ -116,7 +121,7 @@ export const noRawColors: AppletRule = {
   },
   create(context) {
     const flag = (node: AstNode, text: string) => {
-      if (isTokenFallback(text)) return;
+      if (anchoredToToken(text)) return;
       if (!FUNCTIONAL_COLOR.test(text)) return;
       context.report({
         node,
@@ -141,7 +146,7 @@ export const noRawColors: AppletRule = {
         if (value?.type !== "Literal" || typeof value.value !== "string")
           return;
         const text = value.value.trim().toLowerCase();
-        if (isTokenFallback(text) || !NAMED_COLORS.has(text)) return;
+        if (anchoredToToken(text) || !NAMED_COLORS.has(text)) return;
         context.report({
           node: value,
           message: `"${text}" is a raw colour; use a --frockbot-* theme token.`,

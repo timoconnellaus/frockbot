@@ -168,7 +168,7 @@ textarea.fb-control { min-height: 72px; resize: vertical; }
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: color-mix(in srgb, var(--fb-text) 40%, transparent);
+  background: color-mix(in srgb, var(--frockbot-text, #16181d) 45%, transparent);
   z-index: 10;
 }
 .fb-dialog {

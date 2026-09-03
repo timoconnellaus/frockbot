@@ -18,6 +18,7 @@ import {
   Textarea,
   Toolbar,
 } from "../src/kit/index.js";
+import { lintCssText } from "../src/lint/index.js";
 
 describe("the kit renders", () => {
   it("every component, with its semantic hooks intact", () => {
@@ -86,14 +87,8 @@ describe("the kit renders", () => {
 
 describe("the kit's stylesheet", () => {
   it("resolves every colour through a --frockbot-* token", () => {
-    const declarations = KIT_CSS.match(/[a-z-]+\s*:\s*[^;{}]+/g) ?? [];
-    const offenders = declarations.filter((declaration) => {
-      const value = declaration.split(":").slice(1).join(":");
-      if (!/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/.test(value)) return false;
-      // A literal is only allowed as the fallback inside a var() on a token.
-      return !/var\(--frockbot-[a-z-]+,/.test(value);
-    });
-    expect(offenders).toEqual([]);
+    // The kit is held to the rule it enforces on Applets, by the same scanner.
+    expect(lintCssText(KIT_CSS, "kit.css")).toEqual([]);
   });
 
   it("names exactly the nine tokens the host re-emits", () => {

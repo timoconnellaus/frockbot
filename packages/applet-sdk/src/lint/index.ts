@@ -13,7 +13,7 @@ import { join, relative, resolve } from "node:path";
 import { ESLint, type Linter, type Rule } from "eslint";
 import tseslint from "typescript-eslint";
 
-import { appletRules } from "./rules.js";
+import { anchoredToToken, appletRules } from "./rules.js";
 
 export * from "./rules.js";
 
@@ -73,9 +73,12 @@ export function lintCssText(text: string, file: string): AppletDiagnostic[] {
   lines.forEach((line, index) => {
     if (line.trimStart().startsWith("/*")) return;
     for (const match of line.matchAll(CSS_COLOR)) {
-      const before = line.slice(0, match.index);
-      // Allowed only as the fallback inside a --frockbot-* token reference.
-      if (/var\(\s*--frockbot-[a-z-]+\s*,[^)]*$/.test(before)) continue;
+      // Judge the declaration the literal sits in, the same unit the TSX rule
+      // judges: a literal is fine where its own value names a theme token.
+      const start = line.lastIndexOf(";", match.index) + 1;
+      const end = line.indexOf(";", match.index);
+      const declaration = line.slice(start, end === -1 ? undefined : end);
+      if (anchoredToToken(declaration)) continue;
       diagnostics.push({
         file,
         line: index + 1,
