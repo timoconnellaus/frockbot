@@ -167,6 +167,15 @@ export class MemoryProjection {
   };
   #index: MemoryIndexV1 = emptyMemoryIndexV1();
   #turn: number | undefined;
+  /** This Turn's one Project-membership read, shared by injection and index. */
+  #roots:
+    | Promise<{
+        own: WorkspaceMemoryRootV1;
+        user: WorkspaceMemoryRootV1;
+        projects: MemoryProjectV1[];
+        unavailable?: string;
+      }>
+    | undefined;
 
   constructor(host: MemoryRuntimeHostV1) {
     this.#host = host;
@@ -199,6 +208,21 @@ export class MemoryProjection {
     projects: MemoryProjectV1[];
     unavailable?: string;
   }> {
+    // One membership read per Turn, shared by the injection and the index.
+    // Two calls meant two cross-Durable-Object round trips, and worse: if the
+    // second failed, `roots()` answered "no Projects" and the index silently
+    // omitted every Project document the injection had just included, with
+    // nothing recording that they disagreed.
+    this.#roots ??= this.readRoots();
+    return this.#roots;
+  }
+
+  private async readRoots(): Promise<{
+    own: WorkspaceMemoryRootV1;
+    user: WorkspaceMemoryRootV1;
+    projects: MemoryProjectV1[];
+    unavailable?: string;
+  }> {
     const owner = this.#host.owner;
     const roots = {
       own: botMemoryRootV1(owner),
@@ -222,6 +246,8 @@ export class MemoryProjection {
   async refresh(turn: number, session: Session): Promise<MemoryInjectionV1> {
     const store = this.#host.store;
     const owner = this.#host.owner;
+    // A new Turn reads membership again; within one Turn the read is shared.
+    this.#roots = undefined;
     const { own, user, projects, unavailable } = await this.roots();
     const ownTier = await store.read(own);
     const userTier = await store.read(user);
@@ -374,6 +400,9 @@ export class MemoryProjection {
     this.#injection = { text: "", facts: [], omissions: [], faded: [] };
     this.#index = emptyMemoryIndexV1();
     this.#turn = undefined;
+    // Membership is exactly the thing a `project_*` tool just changed, so the
+    // memoized read goes with the rest of the projection.
+    this.#roots = undefined;
   }
 }
 
@@ -639,9 +668,13 @@ export function createMemoryWriteTool(
       await session.flush();
       await projection.reindex();
       return {
+        // What the model paraphrases to the user. A path, a generation id
+        // and "it reaches your prompt on your next Turn" are this Package's
+        // mechanics, and we watched a Bot read them straight back to someone
+        // who had only said where they lived.
         content: outcome.duplicate
-          ? `That fact was already recorded in ${decoded.scope} memory; nothing changed.`
-          : `Recorded in ${decoded.scope} memory (${decoded.tier}) at ${outcome.path} as generation ${outcome.generationId}. It reaches your prompt on your next Turn.`,
+          ? `Already remembered; nothing changed.`
+          : `Remembered.`,
         isError: false,
       };
     },
@@ -770,8 +803,8 @@ export function createMemoryForgetTool(
       await projection.reindex();
       return {
         content: outcome.retracted
-          ? `That fact was recorded by another Bot, so it was not edited. A retraction is now in your own shard and newest wins, so it stops being injected on your next Turn.`
-          : `Forgotten. The line is gone from ${outcome.path}.`,
+          ? `Forgotten. Another of your Bots had recorded it too, and it will stop coming up for them as well.`
+          : `Forgotten.`,
         isError: false,
       };
     },
@@ -1097,7 +1130,7 @@ export function createProjectTools(
         content: `Projects you have joined: ${
           outcome.joined.map((project) => project.projectId).join(", ") ||
           "none"
-        }. Project memory changes reach your prompt on your next Turn.`,
+        }.`,
         isError: false,
       };
     },

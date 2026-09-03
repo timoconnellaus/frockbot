@@ -92,8 +92,14 @@ export async function searchMemoryV1(
       const [vector] = await options.embed([query]);
       if (vector) {
         const namespaces = new Set(candidates.map(memoryVectorNamespaceV1));
-        const byHash = new Map(
-          candidates.map((chunk) => [chunk.hash, chunk] as const),
+        // Keyed on the document *and* the chunk hash. Keying on the chunk
+        // hash alone made two identical chunks in different documents collide,
+        // so one of the two locations was unreachable from a vector hit.
+        const byHash = new Map<string, MemoryIndexChunkV1>(
+          candidates.map((chunk) => [
+            `${chunk.documentKey} ${chunk.hash}`,
+            chunk,
+          ]),
         );
         for (const namespace of namespaces) {
           const response = await remoteCallV1("the memory index", () =>
@@ -105,8 +111,18 @@ export async function searchMemoryV1(
           );
           for (const match of response.matches) {
             const hash = match.metadata?.hash;
+            // The document key is rebuilt from the metadata the upsert wrote,
+            // so a chunk is matched to the document it actually came from.
+            const scope = match.metadata?.scope;
+            const projectId = match.metadata?.projectId;
+            const path = match.metadata?.path;
             const chunk =
-              typeof hash === "string" ? byHash.get(hash) : undefined;
+              typeof hash === "string" &&
+              typeof scope === "string" &&
+              typeof projectId === "string" &&
+              typeof path === "string"
+                ? byHash.get(`${scope}:${projectId}:${path} ${hash}`)
+                : undefined;
             if (!chunk) continue;
             scored.set(
               chunk,

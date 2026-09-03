@@ -88,6 +88,16 @@ export const AUDIT_OUTCOMES_V1: readonly AuditOutcomeV1[] = [
 
 /** The Bot's own Computer — the default target for every Computer effect. */
 export const AUDIT_TARGET_COMPUTER_V1 = "computer";
+/**
+ * The User's Workspace in object storage.
+ *
+ * Memory and Skills live here, not on the Computer, and they are written
+ * while it is hibernated — a Bot with no Computer configured at all still
+ * writes Memory. Rows for those writes said "This Computer", which named a
+ * machine that had nothing to do with the effect and, in the case we saw, did
+ * not exist.
+ */
+export const AUDIT_TARGET_WORKSPACE_V1 = "workspace";
 /** A registered machine of the User's, `machine:<id>` (parity register §2.16). */
 export const AUDIT_TARGET_MACHINE_PREFIX_V1 = "machine:";
 /** A remote MCP server, `remote:<host>`. */
@@ -269,6 +279,7 @@ export function decodeAuditOccurrenceIdV1(value: unknown): {
 /** Whether a string is one of the three target shapes this schema allows. */
 export function isAuditTargetV1(value: string): boolean {
   if (value === AUDIT_TARGET_COMPUTER_V1) return true;
+  if (value === AUDIT_TARGET_WORKSPACE_V1) return true;
   if (value.length > MAX_TARGET_LENGTH) return false;
   if (value.startsWith(AUDIT_TARGET_MACHINE_PREFIX_V1)) {
     return /^machine:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);

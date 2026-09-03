@@ -54,6 +54,12 @@ export const MEMORY_MAX_LIST_PAGES = 8;
 export const MEMORY_MAX_FILES_PER_TIER = 64;
 
 /**
+ * How much longer than a fact a retraction of it may be: the `[forgotten] `
+ * prefix, and the marker the retracted text may already carry.
+ */
+const MEMORY_RETRACTION_HEADROOM = 32;
+
+/**
  * The files of one tier that a bounded read keeps, in path order.
  *
  * One function, used by the injected block and by the search index, because
@@ -107,7 +113,12 @@ export interface MemoryTierReadV1 {
   profile: SourcedMemoryFactV1[];
   recent: SourcedMemoryFactV1[];
   sources: MemorySourceV1[];
-  /** Log facts held on disk beyond what `recent` carries, before any cap. */
+  /**
+   * How many log facts the tier read resolved. It equals `recent.length`:
+   * `read` applies no cap of its own, so there is nothing "beyond" it — the
+   * caps live in the renderer. The field was documented as the surplus and
+   * assigned the total, which is a difference nothing could act on.
+   */
   logTotal: number;
   /** Set when the tier could not be read in full; rendered as an omission. */
   unavailable?: string;
