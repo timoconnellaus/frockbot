@@ -5,10 +5,6 @@
 // then spent two more steps on `task_check` and `task_resume`. The wait must
 // hold until the child settles, and give up only when the record is really
 // unreadable.
-// The Shell's backend and the foundation application import each other. Naming
-// the application first lets it initialize before this module reaches for the
-// Shell's class, which is otherwise read inside its own initialization.
-import "@frockbot/application-foundation/contributions";
 import { describe, expect, test } from "bun:test";
 import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
 import type {
@@ -16,10 +12,7 @@ import type {
   TaskRecordV1,
 } from "@frockbot/plugin-subagents/records";
 import { taskKeyV1 } from "@frockbot/plugin-subagents/storage-keys";
-import {
-  ShellBotBackendContribution,
-  type ShellBotBackendHost,
-} from "./backend.js";
+import type { ShellBotBackendHost } from "./backend.js";
 
 const identity = { userId: "user-1", botId: "primary" };
 const TASK_ID = "task-1";
@@ -98,18 +91,40 @@ function host(storage: MemoryStorage): ShellBotBackendHost {
   };
 }
 
-/** Exposes the wait and removes its sleep, which is the whole point of it. */
-class Waiting extends ShellBotBackendContribution {
-  sleeps = 0;
+interface Waiting {
+  sleeps: number;
+  materializeSettings(
+    identity: { userId: string; botId: string },
+    profile: { name: string },
+  ): Promise<unknown>;
+  wait(taskId: string): Promise<TaskOutcomeV1 | undefined>;
+}
 
-  protected override sleep(): Promise<void> {
-    this.sleeps += 1;
-    return Promise.resolve();
-  }
+/**
+ * Exposes the wait and removes its sleep, which is the whole point of it.
+ *
+ * The class is reached through a dynamic import rather than a top-level one:
+ * the Shell's backend and the foundation application import each other, and a
+ * static import from a test module reads the class while it is still
+ * initializing.
+ */
+async function waiting(host: ShellBotBackendHost): Promise<Waiting> {
+  // The application first: it is the half of the cycle that has to finish
+  // initializing before the Shell's class is readable.
+  await import("@frockbot/application-foundation/contributions");
+  const { ShellBotBackendContribution } = await import("./backend.js");
+  return new (class extends ShellBotBackendContribution {
+    sleeps = 0;
 
-  wait(taskId: string): Promise<TaskOutcomeV1 | undefined> {
-    return this.awaitBlockingTask(identity, taskId, taskId);
-  }
+    protected override sleep(): Promise<void> {
+      this.sleeps += 1;
+      return Promise.resolve();
+    }
+
+    wait(taskId: string): Promise<TaskOutcomeV1 | undefined> {
+      return this.awaitBlockingTask(identity, taskId, taskId);
+    }
+  })(host) as unknown as Waiting;
 }
 
 function record(overrides: Partial<TaskRecordV1> = {}): TaskRecordV1 {
@@ -150,7 +165,7 @@ async function fixture(
   stored: TaskRecordV1,
 ): Promise<{ storage: MemoryStorage; contribution: Waiting }> {
   const storage = new MemoryStorage();
-  const contribution = new Waiting(host(storage));
+  const contribution = await waiting(host(storage));
   await contribution.materializeSettings(identity, { name: "Primary" });
   storage.values.set(taskKeyV1(stored.taskId), structuredClone(stored));
   return { storage, contribution };

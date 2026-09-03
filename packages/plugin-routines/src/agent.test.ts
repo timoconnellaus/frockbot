@@ -208,7 +208,11 @@ describe("a Routine the User created", () => {
       const tool = createRoutineManageTool({ ...seam, writer: WRITER });
 
       const result = await tool.execute(
-        { action, routineId: "theirs", ...(action === "update" ? { prompt: "Say pong." } : {}) },
+        {
+          action,
+          routineId: "theirs",
+          ...(action === "update" ? { prompt: "Say pong." } : {}),
+        },
         CONTEXT,
       );
 

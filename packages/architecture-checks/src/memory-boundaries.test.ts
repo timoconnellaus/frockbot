@@ -178,7 +178,12 @@ describe("Memory boundaries", () => {
     expect(system).toContain("User memory:");
     expect(system).toContain("Memory:");
     expect(system).toContain("Tim prefers blunt answers.");
-    expect(system).toContain("[via bot-1] The gym build starts in spring.");
+    expect(system).toContain("The gym build starts in spring.");
+    // A shared fact is credited by name or not at all. This deployment gave
+    // the store no Bot names, so the fact is uncredited — never tagged with a
+    // sibling's id, which the model reads as a name and says out loud.
+    expect(system).not.toContain("[via bot-1]");
+    expect(system).not.toContain("bot-1");
 
     // …and it is recorded in durable state, generations included.
     const injected = handle.agent.session.events.find(
