@@ -1,6 +1,6 @@
 import type { ClientPlugin } from "@frockbot/client-core";
 import type { FrockBotWebData } from "@frockbot/plugin-shell/shared";
-import { ref, type Ref } from "vue";
+import { ref, watch, type Ref } from "vue";
 import {
   decodeBotLifecycleDirectoryViewV1,
   decodeBotIdentityDirectoryViewV1,
@@ -91,6 +91,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
     throw new Error("Flock hosted transport is unavailable");
   const request = ctx.transport.hostedRequest.bind(ctx.transport);
   let shell: Ref<FrockBotWebData> | undefined;
+  /** Stops the watcher that keeps a renamed Bot's sidebar row in step. */
+  let stopNameWatch: (() => void) | undefined;
   let authenticatedUserId: string | undefined;
   let loadGeneration = 0;
   let selectionGeneration = 0;
@@ -118,6 +120,24 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
     draftSheep: randomSheepRecipeV1(),
     bindShell(value) {
       shell = value;
+      // A rename is saved on the Bot's own settings, and the sidebar reads a
+      // directory it loaded once — so the row kept the old name until the page
+      // was reloaded. The row follows the settings the Shell is already
+      // holding rather than waiting for a second read of the directory.
+      stopNameWatch?.();
+      stopNameWatch = watch(
+        () => value.value.botSettings?.profile.name,
+        (name) => {
+          const botId = value.value.botSettings?.botId;
+          if (!botId || !name) return;
+          const profile = state.value.profiles[botId];
+          if (!profile || profile.name === name) return;
+          state.value.profiles = {
+            ...state.value.profiles,
+            [botId]: { ...profile, name },
+          };
+        },
+      );
     },
     async load() {
       const generation = ++loadGeneration;
@@ -220,7 +240,11 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         const selected = preferredBot?.botId ?? activeBots[0]?.botId;
         if (preferred && !preferredBot) replacePreferredBot(selected);
         if (selected && shell) await state.value.select(selected);
-        else if (!selected) state.value.openCreate();
+        // Only a User with no Bots at all is asked to make one. Archiving your
+        // last Bot leaves you with an archived list to restore from, and a
+        // dialog opening over it puts its backdrop between you and Restore.
+        else if (!selected && state.value.directory.bots.length === 0)
+          state.value.openCreate();
       } catch (error) {
         state.value.error =
           error instanceof Error ? error.message : "Could not load your flock";
@@ -609,6 +633,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
 
   return [
     () => clearInterval(poll),
+    () => stopNameWatch?.(),
     ctx.provide(flockWebDataKey, state),
     ctx.slot({
       slot: "frockbot.sidebar-bots",

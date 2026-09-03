@@ -305,34 +305,46 @@ export function createFoundationMountedContributionsV1(): FoundationMountedContr
   };
 }
 
-const descriptors: readonly AnyBackendDescriptor[] = [
-  adminGatewayContribution,
-  auditGatewayContribution,
-  botTemplateGatewayContribution,
-  computerGatewayContribution,
-  flockGatewayContribution,
-  mcpGatewayContribution,
-  packagePublisherGatewayContribution,
-  routinesGatewayContribution,
-  searchGatewayContribution,
-  settingsGatewayContribution,
-  subagentsGatewayContribution,
-  machineGatewayContribution,
-  settingsUserContribution,
-  credentialsUserContribution,
-  ollamaCloudUserContribution,
-  flockAiUserContribution,
-  mcpUserContribution,
-  botTemplateUserContribution,
-  packagePublisherUserContribution,
-  machineUserContribution,
-  searchUserContribution,
-  auditUserContribution,
-  flockUserContribution,
-  shellBotContribution,
-  flockBotContribution,
-  computerBotContribution,
-] as AnyBackendDescriptor[];
+/**
+ * The descriptors, read on first use rather than at module evaluation.
+ *
+ * `plugin-shell/backend` imports this application's runtime, so the module
+ * graph has a cycle. Building the *map* lazily was not enough: this array read
+ * every imported binding while those modules were still initializing, and a
+ * process that happened to enter the cycle from the shell side got
+ * "Cannot access 'shellBotContribution' before initialization". Deferring the
+ * read to the first call makes the cycle unobservable from either direction.
+ */
+function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
+  return [
+    adminGatewayContribution,
+    auditGatewayContribution,
+    botTemplateGatewayContribution,
+    computerGatewayContribution,
+    flockGatewayContribution,
+    mcpGatewayContribution,
+    packagePublisherGatewayContribution,
+    routinesGatewayContribution,
+    searchGatewayContribution,
+    settingsGatewayContribution,
+    subagentsGatewayContribution,
+    machineGatewayContribution,
+    settingsUserContribution,
+    credentialsUserContribution,
+    ollamaCloudUserContribution,
+    flockAiUserContribution,
+    mcpUserContribution,
+    botTemplateUserContribution,
+    packagePublisherUserContribution,
+    machineUserContribution,
+    searchUserContribution,
+    auditUserContribution,
+    flockUserContribution,
+    shellBotContribution,
+    flockBotContribution,
+    computerBotContribution,
+  ] as AnyBackendDescriptor[];
+}
 
 let table: ReadonlyMap<string, AnyBackendDescriptor> | undefined;
 
@@ -352,7 +364,7 @@ export function foundationBackendContributions(): ReadonlyMap<
 > {
   if (!table) {
     const built = new Map<string, AnyBackendDescriptor>();
-    for (const descriptor of descriptors) {
+    for (const descriptor of backendDescriptorsV1()) {
       if (built.has(descriptor.specifier)) {
         throw new Error(
           `duplicate foundation Contribution descriptor: ${descriptor.specifier}`,
