@@ -485,7 +485,7 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
 .connection-busy {
   margin: 4px 0 0;
   color: var(--frock-text-muted, inherit);
-  font-size: 0.85em;
+  font-size: var(--frock-text-sm);
 }
 
 .provider-copy strong,
