@@ -297,9 +297,13 @@ function decodeBrowser(input: unknown): ComputerBrowserAction | undefined {
 function failure(error: unknown): { content: string; isError: true } {
   if (error instanceof ComputerError) {
     if (error.code === "human-control-active") {
+      // The holder is named, so a second Bot of the same User — and the User
+      // reading the transcript — can tell which session has the desktop.
+      const holder = error.message.trim();
       return {
-        content:
-          "The user is controlling this Computer; do not retry this Turn",
+        content: holder
+          ? `The Computer is held by ${holder}; do not retry this Turn`
+          : "The user is controlling this Computer; do not retry this Turn",
         isError: true,
       };
     }

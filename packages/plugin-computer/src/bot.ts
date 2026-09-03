@@ -414,6 +414,25 @@ function failureText(error: unknown): string {
   );
 }
 
+/**
+ * One stored record, or nothing when the codec refuses it.
+ *
+ * A projection degrades; it does not fail. Losing one record's contribution to
+ * the card is better than a Bot whose Computer surface throws forever because
+ * a single key holds a shape this version does not know.
+ */
+function decoded<T>(
+  value: unknown,
+  decode: (input: unknown) => T,
+): T | undefined {
+  if (value === undefined) return undefined;
+  try {
+    return decode(value);
+  } catch {
+    return undefined;
+  }
+}
+
 function isFresh(expiresAt: string, now: Date): boolean {
   return Date.parse(expiresAt) > now.getTime();
 }
@@ -1309,16 +1328,15 @@ export class ComputerBotBackendContribution {
         this.screenshots(userId, botId),
         this.doctor(userId, botId),
       ]);
-    const viewer =
-      viewerValue === undefined ? undefined : decodeStoredViewer(viewerValue);
-    const control =
-      controlValue === undefined
-        ? undefined
-        : decodeStoredComputerControlV1(controlValue);
-    const provider =
-      providerValue === undefined
-        ? undefined
-        : decodeStoredProvider(providerValue);
+    // A record the codec refuses is treated as absent, the way `doctor()`
+    // above and `ComputerProcessStore.list` already do. These three decoders
+    // throw on any unexpected shape — a field a future version adds included —
+    // and this is the read behind the card, the overlay and the poll: one bad
+    // value made `GET /api/bots/:id/computer` throw for that Bot forever, with
+    // nothing in the product able to clear the key.
+    const viewer = decoded(viewerValue, decodeStoredViewer);
+    const control = decoded(controlValue, decodeStoredComputerControlV1);
+    const provider = decoded(providerValue, decodeStoredProvider);
     const liveViewer =
       viewer &&
       this.#liveViewer?.id === viewer.id &&
