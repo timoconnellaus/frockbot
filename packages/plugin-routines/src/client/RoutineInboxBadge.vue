@@ -82,6 +82,10 @@ function acknowledge(entryIds: string[]): void {
           <p class="routine-inbox__text">{{ entry.text }}</p>
           <footer class="routine-inbox__meta">
             <span>{{ entry.createdAt }}</span>
+            <!-- One thing going wrong repeatedly is one entry and a count. -->
+            <span v-if="(entry.repeatCount ?? 1) > 1"
+              >Happened {{ entry.repeatCount }} times</span
+            >
             <UiButton
               v-if="!entry.acknowledged"
               variant="ghost"

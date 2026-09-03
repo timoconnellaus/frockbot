@@ -214,6 +214,7 @@ import {
 } from "./backend-routines.js";
 import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
 import {
+  routineFailureSentenceV1,
   subagentAttributionV1,
   ROUTINE_INBOX_TEXT_MAX,
   ROUTINE_WAKE_TITLE_MAX,
@@ -3080,10 +3081,10 @@ export class ShellBotBackendContribution {
       runId: fire.fireId,
       createdAt: new Date().toISOString(),
       title: `${settings.profile.name} could not run a Routine`,
-      body: (outcome.summary ?? "The firing ended without saying why.").slice(
-        0,
-        240,
-      ),
+      // The same sentence the inbox entry carries. A notification is the one
+      // surface a person reads without asking for it, so it is the last place
+      // a kernel invariant belongs.
+      body: routineFailureSentenceV1(outcome.summary).slice(0, 240),
     });
   }
   // -------------------------------------------------------------------------
