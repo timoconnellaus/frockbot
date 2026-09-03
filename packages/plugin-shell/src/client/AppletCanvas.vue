@@ -130,6 +130,26 @@ const loading = computed(
   () => canvasState.value === "loading" && !loadTimedOut.value,
 );
 
+/**
+ * A generation id is `<ISO time>:<hash prefix>`, which is exact and unreadable.
+ * The header says when it went live and keeps the short hash; the full id is
+ * the tooltip.
+ */
+function generationLabel(generationId: string): string {
+  const separator = generationId.lastIndexOf(":");
+  const stamp = separator > 0 ? generationId.slice(0, separator) : "";
+  const hash = separator > 0 ? generationId.slice(separator + 1) : generationId;
+  const at = new Date(stamp);
+  if (Number.isNaN(at.getTime())) return `Live · ${hash.slice(0, 7)}`;
+  const when = at.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `Live since ${when} · ${hash.slice(0, 7)}`;
+}
+
 function selectTab(next: "app" | "code"): void {
   userSelectedTab.value = next;
 }
@@ -179,7 +199,9 @@ async function clearFocus(): Promise<void> {
       /></span>
       <div class="applet-canvas-title">
         <strong>{{ applet?.displayName ?? "Applet" }}</strong>
-        <small v-if="viewer">{{ viewer.generationId }}</small>
+        <small v-if="viewer" :title="viewer.generationId">{{
+          generationLabel(viewer.generationId)
+        }}</small>
         <small v-else>No published version yet</small>
       </div>
       <div

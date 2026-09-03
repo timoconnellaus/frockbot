@@ -65,9 +65,16 @@ export const APPLET_DIST_FILES_V1 = [
   "dist/manifest.json",
 ] as const;
 
-/** Ceilings on what a publish will read and store. */
+/**
+ * Ceilings on what a publish will read and store.
+ *
+ * The UI bound is the Applet one, not the Package-page one: a Package page is
+ * hand-written inline HTML and 256 KB is generous, while an Applet's page is
+ * `applet build`'s single self-contained file carrying React, TanStack DB, and
+ * the kit — roughly half a megabyte before the Applet's own code.
+ */
 export const APPLET_MAX_SERVER_BYTES_V1 = 2 * 1024 * 1024;
-export const APPLET_MAX_UI_BYTES_V1 = 256 * 1024;
+export const APPLET_MAX_UI_BYTES_V1 = 4 * 1024 * 1024;
 export const APPLET_MAX_MANIFEST_BYTES_V1 = 64 * 1024;
 
 export interface AppletPublishIntentV1 {
@@ -281,10 +288,11 @@ export interface AppletCapabilityHostOptionsV1 {
    * sees what the Bot just wrote on the Computer rather than the last synced
    * copy.
    *
-   * SEAM (lane C1): the Computer Package's `syncWorkspaceRootNowV1` is not on
-   * this branch yet. Absent means the store is read as it stands — correct but
-   * possibly stale — and the Bot is told so in the failure when the files are
-   * missing, rather than the publish silently using old bytes.
+   * The Bot Durable Object supplies it over the Computer Package's
+   * `syncWorkspaceRootNowV1` when the User has a Computer. Absent means the
+   * store is read as it stands — correct but possibly stale — and the Bot is
+   * told so in the failure when the files are missing, rather than the publish
+   * silently using old bytes.
    */
   syncSourceRootNow?(): Promise<void>;
   composition: Pick<CompositionStore, "current" | "lastKnownGood" | "propose">;
@@ -763,6 +771,35 @@ export function createAppletCapabilityHostV1(
           ),
         );
       }
+      // Every Applet's tools share one Bot tool catalog, and the registry
+      // refuses a duplicate name at mount — which would fail the whole
+      // Composition closed for a name clash. So the clash is refused here, at
+      // publish, where the Bot can rename the tool and try again.
+      const others = (await options.directory.list()).applets.filter(
+        (applet) =>
+          applet.appletId !== input.appletId && applet.status !== "deleted",
+      );
+      const taken = new Map<string, string>();
+      for (const other of others) {
+        for (const name of other.tools) taken.set(name, other.displayName);
+      }
+      const clashes = manifest.tools
+        .filter((tool) => taken.has(tool.name))
+        .map(
+          (tool) =>
+            `"${tool.name}" is already a tool of "${taken.get(tool.name)}"`,
+        );
+      if (clashes.length > 0) {
+        return settle(
+          failed(
+            input.appletId,
+            "unbuilt",
+            "an Applet tool name is already taken by another Applet; rename it and run `applet build` again",
+            clashes,
+          ),
+        );
+      }
+
       const serverHash = await sha256Hex(server.text);
       const uiHash = await sha256Hex(ui.text);
       if (

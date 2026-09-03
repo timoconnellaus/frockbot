@@ -123,9 +123,9 @@ describe("Applet generation v1", () => {
     expect(() =>
       decodeAppletGenerationV1({
         ...generation,
-        ui: { ...ui, size: 256 * 1024 + 1 },
+        ui: { ...ui, size: 4 * 1024 * 1024 + 1 },
       }),
-    ).toThrow("256 KB quota");
+    ).toThrow("4 MB quota");
     expect(() =>
       decodeAppletGenerationV1({ ...generation, origin: "rollback" }),
     ).toThrow("origin is invalid");

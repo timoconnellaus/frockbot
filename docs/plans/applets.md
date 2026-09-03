@@ -2,7 +2,9 @@
 
 ## Status
 
-Design accepted 2026-09-03 with [ADR 0022](../adr/0022-applets-as-instance-packages.md) and the matching `AGENTS.md` amendment. Implementation runs as parallel lanes on one branch (`worktree-applets`) and lands as one pull request.
+Implemented 2026-09-03 on `worktree-applets`, one pull request. Design accepted the same day with [ADR 0022](../adr/0022-applets-as-instance-packages.md) and the matching `AGENTS.md` amendment. Every lane below landed; `docs/architecture.md` §Applets describes the shipped shape and `docs/architecture-checks.md` names the check behind each claim. The end-to-end proof is `apps/cloudflare/e2e/applets-publish.e2e.ts`: a Bot creates an Applet, the built template (produced by the published CLI under Node) is landed in the Workspace store where the Computer's sync would put it, the Bot publishes, the canvas slides the live Applet in, a second page sees a todo the first added, and the Applet's `add_todo` reaches the Bot as an ordinary tool. Screenshots from that run are under `docs/screenshots/applets/`.
+
+Integration findings worth knowing: the loader binding digest now includes the Turn (a cached isolate otherwise served a stale per-Turn `CAPABILITIES` stub on the second Turn); `decodeV5` had dropped a manifest's `roots`; the SDK's health reports tool names and a separate `describe()` carries the declarations with `inputSchema`, matching the kernel; the Applet UI bound is 4 MB, not the Package page's 256 KB; the bridge's `applets` state carries no source (64 KB message bound); the viewer socket enters `AppletState` through `fetch`, not an RPC method; the fake model in e2e reads only the last user message. Still open: `manifest.contributions.instance` is decoded but nothing mounts it (Applets are directory entries, not Package instances, in this slice); the Skill ships through `plugin-skills`'s managed set rather than a `skills` Contribution kind; `applets-shell.e2e.ts` keeps its route stubs because its assertions need a published Applet with a live viewer at load.
 
 ## Decisions (accepted in conversation, 2026-09-03)
 

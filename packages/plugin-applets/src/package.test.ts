@@ -144,11 +144,13 @@ describe("applet_create", () => {
 
     const answer = await execute("applet_create", { displayName: "Todo" }, ctx);
 
+    // `server.ts` last: the canvas opens on the newest file, and that is the
+    // one a Bot edits first.
     expect(recorded.writes.map((write) => write.path.path)).toEqual([
-      `${APPLET_ID}/applet.json`,
-      `${APPLET_ID}/server.ts`,
-      `${APPLET_ID}/ui.tsx`,
       `${APPLET_ID}/README.md`,
+      `${APPLET_ID}/applet.json`,
+      `${APPLET_ID}/ui.tsx`,
+      `${APPLET_ID}/server.ts`,
     ]);
     for (const write of recorded.writes) {
       expect(write.path.root).toEqual({
@@ -160,7 +162,10 @@ describe("applet_create", () => {
     }
     // The template's placeholders are filled in, so the scaffold reads as this
     // Applet rather than as the template.
-    const descriptor = new TextDecoder().decode(recorded.writes[0]!.bytes);
+    const descriptor = new TextDecoder().decode(
+      recorded.writes.find((write) => write.path.path.endsWith("/applet.json"))!
+        .bytes,
+    );
     expect(descriptor).toContain('"displayName": "Todo"');
     expect(descriptor).not.toContain("__APPLET_NAME__");
     expect(new TextDecoder().decode(recorded.writes[1]!.bytes)).not.toContain(

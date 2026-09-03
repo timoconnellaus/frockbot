@@ -25,7 +25,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createServer as createTcpServer } from "node:net";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -136,15 +136,16 @@ function scriptedToolCalls(
   const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
   const last = messages.at(-1) as { role?: unknown } | undefined;
   if (last?.role === "tool") return [];
-  // Every message, stringified: a provider may send the user turn as parts
-  // rather than a string, and the trigger only has to be found, not parsed.
-  const content = messages
-    .filter((message) => (message as { role?: unknown }).role === "user")
-    .map((message) => {
-      const value = (message as { content?: unknown }).content;
-      return typeof value === "string" ? value : JSON.stringify(value ?? "");
-    })
-    .join("\n");
+  // The *last* user message only, stringified: a provider may send the user
+  // turn as parts rather than a string, and the trigger only has to be found,
+  // not parsed. Earlier user messages travel with every later request, so
+  // reading them all would replay every Turn's tool call on every Turn after.
+  const lastUser = messages.findLast(
+    (message) => (message as { role?: unknown }).role === "user",
+  ) as { content?: unknown } | undefined;
+  const value = lastUser?.content;
+  const content =
+    typeof value === "string" ? value : JSON.stringify(value ?? "");
   const calls: Array<{ name: string; arguments: string }> = [];
   // A JSON-encoded message escapes the newline, so both separators end a
   // trigger line.
@@ -430,6 +431,47 @@ async function seedPackageCatalog(persistDirectory: string): Promise<void> {
   }
 }
 
+/** The bearer token `/api/debug/*` accepts in an end-to-end run. */
+export const E2E_DEBUG_TOKEN = "e2e-debug-token";
+
+/** The `--persist-to` directory of the run listening on `port`. */
+export function e2ePersistDirectory(port: number): string {
+  return join(tmpdir(), `frockbot-e2e-${port}`);
+}
+
+/**
+ * Put one object into the run's local Workspace bucket while the Worker is up.
+ *
+ * Production has exactly one writer of a durable root's bytes besides the
+ * Package that owns it: the Computer's sync. An end-to-end run has no Computer,
+ * so a spec that needs a file "the Computer wrote" — an Applet's `dist/` after
+ * `applet build` — writes it the way the sync would land it in object storage,
+ * at the same key. Nothing else is faked: the publish that reads it is real.
+ */
+export async function seedWorkspaceObject(
+  port: number,
+  key: string,
+  file: string,
+  contentType: string,
+): Promise<void> {
+  await run("bunx", [
+    "wrangler",
+    "--env",
+    "e2e",
+    "r2",
+    "object",
+    "put",
+    `frockbot-memory-files-e2e/${key}`,
+    "--file",
+    file,
+    "--content-type",
+    contentType,
+    "--local",
+    "--persist-to",
+    e2ePersistDirectory(port),
+  ]);
+}
+
 export interface HarnessOptions {
   /** The port `wrangler dev` listens on. */
   port: number;
@@ -454,7 +496,13 @@ export interface RunningHarness {
 export async function startHarness(
   options: HarnessOptions,
 ): Promise<RunningHarness> {
-  const persistDirectory = await mkdtemp(join(tmpdir(), "frockbot-e2e-"));
+  // Named by port rather than random, so a spec that must seed object storage
+  // while the Worker runs — an Applet's built `dist/`, which only a Computer
+  // writes in production — can find the same directory from
+  // `FROCKBOT_E2E_PORT` (see `e2ePersistDirectory`). Still fresh per run.
+  const persistDirectory = e2ePersistDirectory(options.port);
+  await rm(persistDirectory, { recursive: true, force: true });
+  await mkdir(persistDirectory, { recursive: true });
   let ollama: Awaited<ReturnType<typeof startFakeOllama>> | undefined;
   let flockAi: ChildProcess | undefined;
   let worker: ChildProcess | undefined;
@@ -548,6 +596,13 @@ export async function startHarness(
         // better-auth needs a secret to construct; no spec signs in with it.
         "--var",
         "BETTER_AUTH_SECRET:e2e",
+        // Applet viewer tokens are HMACs over this; any value works locally.
+        "--var",
+        "APPLET_VIEWER_SECRET:e2e-applet-viewer-secret",
+        // The operator surface, so a spec can read a Turn's tool results — the
+        // transcript deliberately hides them — when it has to explain a state.
+        "--var",
+        `DEBUG_TOKEN:${E2E_DEBUG_TOKEN}`,
         "--persist-to",
         persistDirectory,
         // As above: the per-request log is the flood, not the signal.

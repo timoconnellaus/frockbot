@@ -38,6 +38,10 @@ export default {
       return Response.json(await stub.health());
     }
 
+    if (url.pathname === "/describe") {
+      return Response.json(await stub.describe());
+    }
+
     if (url.pathname === "/tool" && request.method === "POST") {
       const body = await request.json();
       try {

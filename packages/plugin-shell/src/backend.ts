@@ -38,6 +38,9 @@ import {
 } from "@frockbot/kernel-composition";
 import { canonicalJson, sha256 } from "@frockbot/kernel-composition/compiler";
 import type { Plugin } from "cordis";
+import type { ComputerRegistry } from "@frockbot/computer-core";
+import { appletsSourceRootV1 } from "@frockbot/plugin-applets/root";
+import { syncWorkspaceRootNowV1 } from "@frockbot/plugin-computer/agent";
 import {
   ACTIVE_RUN_KEY,
   BotDurableAuthority,
@@ -2136,6 +2139,7 @@ export class ShellBotBackendContribution {
    */
   private appletCapabilityHost(
     identity: BotIdentity,
+    active?: NonNullable<ShellBotBackendContribution["activeTurn"]>,
   ): AppletCapabilityHostV1 | undefined {
     const namespace = this.env.APPLET_STATES;
     const artifacts = this.env.APPLICATION_ARTIFACTS;
@@ -2164,10 +2168,40 @@ export class ShellBotBackendContribution {
         },
       },
       workspace,
-      // SEAM (lane C1): `syncWorkspaceRootNowV1` on the Computer Package is not
-      // on this branch yet, so a publish reads the store as it stands. When it
-      // lands, pass it here and a publish forces a pull of `applets/source`
-      // first.
+      // A publish reads `dist/` from the store, and `applet build` wrote it on
+      // the Computer moments earlier in this very Turn — before the Turn's own
+      // `turn-end` push. So the one root is reconciled first, through the one
+      // sanctioned extra caller of the Computer's sync. It wakes nothing new: a
+      // User with no Computer assignment has no root to pull, and the Bot that
+      // just built on its Computer has it open already.
+      syncSourceRootNow: active
+        ? async () => {
+            const root = active.mounted.runtime.root as unknown as {
+              computers?: ComputerRegistry;
+              sessions: typeof active.mounted.runtime.root.sessions;
+            };
+            const computerIdentity = { userId: identity.userId };
+            if (!root.computers?.assignment(computerIdentity)) return;
+            const session = root.sessions.get(active.sessionId);
+            const started = session?.events.findLast(
+              (event) => event.type === "step/start",
+            );
+            const turn = started?.type === "step/start" ? started.turn : 0;
+            const computer = await root.computers.open(
+              computerIdentity,
+              { botId: identity.botId },
+              { signal: active.signal },
+            );
+            await syncWorkspaceRootNowV1({
+              computer,
+              sessions: root.sessions,
+              sessionId: active.sessionId,
+              turn,
+              root: appletsSourceRootV1(identity.userId),
+              signal: active.signal,
+            });
+          }
+        : undefined,
       composition: {
         current: () => this.authority.composition.current(),
         lastKnownGood: () => this.authority.composition.lastKnownGood(),
@@ -2278,7 +2312,7 @@ export class ShellBotBackendContribution {
       };
     }
     const identity = { userId: input.userId, botId: input.botId };
-    const host = this.appletCapabilityHost(identity);
+    const host = this.appletCapabilityHost(identity, active);
     if (!host) {
       return { status: "unavailable", reason: "Applets are unavailable" };
     }

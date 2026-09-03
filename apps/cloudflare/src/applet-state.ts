@@ -26,6 +26,7 @@ import {
   appletFailureKey,
   appletFailurePrefix,
   appletGenerationKey,
+  appletBindingDigestV1,
   appletLoaderIdV1,
   appletStateNameV1,
   APPLET_CONTRACT_V1,
@@ -311,12 +312,25 @@ export class AppletState extends DurableObject<AppletStateEnv> {
     }
   }
 
+  /**
+   * The digest of what this object hands its facet. Computed here and nowhere
+   * else: the object is the authority for the bindings in its facet's `env`,
+   * so a caller cannot name a digest for bindings it does not grant.
+   */
+  #bindingDigest(userId: string): Promise<string> {
+    return appletBindingDigestV1({
+      userId,
+      capabilities: APPLET_CAPABILITY_NAMES_V1,
+      contract: APPLET_CONTRACT_V1,
+    });
+  }
+
   async #mountInputFor(
     generation: AppletGenerationV1,
     userId: string,
     appletId: string,
-    bindingDigest: string,
   ): Promise<AppletMountInputV1> {
+    const bindingDigest = await this.#bindingDigest(userId);
     return decodeAppletMountInputV1({
       schemaVersion: 1,
       userId,
@@ -492,7 +506,6 @@ export class AppletState extends DurableObject<AppletStateEnv> {
       userId: rpcIdentifier,
       appletId: rpcString(129),
       generation: rpcDecodedValue,
-      bindingDigest: rpcString(64),
     });
     return this.#activateGeneration({
       userId: request.userId as string,
@@ -500,7 +513,6 @@ export class AppletState extends DurableObject<AppletStateEnv> {
       generation: decodeAppletGenerationV1(
         rpcJsonSnapshotV1(request.generation),
       ),
-      bindingDigest: request.bindingDigest as string,
       setLastKnownGood: true,
     });
   }
@@ -516,7 +528,6 @@ export class AppletState extends DurableObject<AppletStateEnv> {
       userId: rpcIdentifier,
       appletId: rpcString(129),
       generation: rpcDecodedValue,
-      bindingDigest: rpcString(64),
     });
     return this.#activateGeneration({
       userId: request.userId as string,
@@ -524,7 +535,6 @@ export class AppletState extends DurableObject<AppletStateEnv> {
       generation: decodeAppletGenerationV1(
         rpcJsonSnapshotV1(request.generation),
       ),
-      bindingDigest: request.bindingDigest as string,
       setLastKnownGood: false,
     });
   }
@@ -533,7 +543,6 @@ export class AppletState extends DurableObject<AppletStateEnv> {
     userId: string;
     appletId: string;
     generation: AppletGenerationV1;
-    bindingDigest: string;
     setLastKnownGood: boolean;
   }): Promise<AppletActivationV1> {
     this.#assertIdentity(input.userId, input.appletId);
@@ -546,7 +555,6 @@ export class AppletState extends DurableObject<AppletStateEnv> {
       input.generation,
       input.userId,
       input.appletId,
-      input.bindingDigest,
     );
     const previous = await this.#pointer(APPLET_CURRENT_KEY);
     const outcome = await this.#activate(
@@ -651,6 +659,20 @@ export class AppletState extends DurableObject<AppletStateEnv> {
    * the ordinary hibernation dance. The 101 response and its `webSocket` are
    * the one thing that travels back out through this object.
    */
+  /**
+   * The object's one HTTP door, and it exists for the socket alone. A 101
+   * response carrying a WebSocket travels only over `fetch`; an RPC method
+   * returning it does not survive the stub boundary. Everything else on this
+   * object is an RPC method.
+   */
+  override async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (/^\/api\/applets\/[^/]+\/socket$/.test(url.pathname)) {
+      return this.connectViewer(request);
+    }
+    return new Response("not found", { status: 404 });
+  }
+
   async connectViewer(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const userId = url.searchParams.get("u") ?? "";

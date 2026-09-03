@@ -800,10 +800,14 @@ export interface GatewayDependencies {
    * rather than the Worker failing to construct.
    */
   appletViewerSecret?: string;
+  /**
+   * The Applet object's HTTP door, for the viewer socket: a 101 response and
+   * its WebSocket only cross the stub boundary over `fetch`.
+   */
   appletStateFor?(
     userId: string,
     appletId: string,
-  ): { connectViewer(request: Request): Promise<Response> };
+  ): { fetch(request: Request): Promise<Response> };
   /** Absent when the deployment publishes no Catalog; `/catalog/v1/*` then 503s. */
   catalog?: CatalogGatewayStore;
   /** Absent, or with no token, when the deployment publishes no `/api/debug`. */

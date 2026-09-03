@@ -19,6 +19,7 @@
 export {
   Applet,
   type AppletDb,
+  type AppletDescriptionV1,
   type AppletHealthV1,
   type AppletTableApi,
   type AppletTool,

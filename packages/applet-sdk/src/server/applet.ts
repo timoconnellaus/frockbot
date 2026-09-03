@@ -38,16 +38,28 @@ import { AppletStore } from "./store.js";
 
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 
+/** One tool as the kernel's manifest declares it: `inputSchema` is JSON Schema. */
 export interface AppletToolDeclarationV1 {
   name: string;
   description: string;
-  input: JsonSchemaObject;
+  inputSchema: JsonSchemaObject;
 }
 
+/**
+ * What the kernel reads after a mount to admit the generation. `tools` is the
+ * list of names, compared to the published manifest's declarations; the
+ * declarations themselves come from `describe()` at build time.
+ */
 export interface AppletHealthV1 {
   contract: 1;
-  tools: AppletToolDeclarationV1[];
+  tools: string[];
   schemaRevision: number;
+}
+
+/** The build-time description `applet build` writes into `dist/manifest.json`. */
+export interface AppletDescriptionV1 {
+  contract: 1;
+  tools: AppletToolDeclarationV1[];
 }
 
 type ColumnValue<C> = C extends Column<infer V, boolean, boolean> ? V : never;
@@ -228,12 +240,20 @@ export abstract class Applet<
     await this.ready();
     return {
       contract: APPLET_CONTRACT_VERSION,
+      tools: Object.keys(this.tools),
+      schemaRevision: this.#revision,
+    };
+  }
+
+  /** The tool declarations, for `applet build` to write into the manifest. */
+  describe(): AppletDescriptionV1 {
+    return {
+      contract: APPLET_CONTRACT_VERSION,
       tools: Object.entries(this.tools).map(([name, tool]) => ({
         name,
         description: tool.description,
-        input: jsonSchemaFromColumns(tool.input),
+        inputSchema: jsonSchemaFromColumns(tool.input),
       })),
-      schemaRevision: this.#revision,
     };
   }
 

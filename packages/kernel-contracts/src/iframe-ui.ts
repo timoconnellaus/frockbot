@@ -1,7 +1,6 @@
 import {
   APPLET_ID_V1,
   type AppletBuildViewV1,
-  type AppletSourceViewV1,
   type AppletSummaryV1,
 } from "./applets.js";
 
@@ -94,7 +93,11 @@ export interface PackageIframeAppletsStateV2 {
     uiUrl: string;
     generationId: string;
   } | null;
-  source?: AppletSourceViewV1;
+  /**
+   * The last check or build outcome. The source itself is not on the feed:
+   * the shell renders the code view natively, and a source tree is far larger
+   * than the 64 KB a bridge message may carry.
+   */
   build?: AppletBuildViewV1;
 }
 
@@ -694,7 +697,6 @@ interface FrockBotAppletsState {
   focused: FrockBotAppletSummary | null;
   list: FrockBotAppletSummary[];
   viewer: { token: string; socketUrl: string; uiUrl: string; generationId: string } | null;
-  source?: { appletId: string; files: Array<{ path: string; text: string; generationId: string; changedAt?: string }>; truncated: boolean };
   build?: { status: "unknown" | "passed" | "failed"; command?: "check" | "build"; at?: string; summary?: string; diagnostics?: string[] };
 }
 interface FrockBotIframeBridgeV2 {

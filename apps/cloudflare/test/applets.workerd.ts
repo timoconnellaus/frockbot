@@ -97,6 +97,21 @@ export class Applet extends DurableObject {
     ].map((row) => row.title);
   }
 
+  // The viewer socket, as the SDK's base class answers it: a hibernatable
+  // WebSocket the kernel object forwarded through its own fetch door.
+  async fetch(request) {
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return new Response("Expected a WebSocket upgrade", { status: 426 });
+    }
+    const pair = new WebSocketPair();
+    this.ctx.acceptWebSocket(pair[1]);
+    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+
+  webSocketMessage(socket, message) {
+    socket.send(VERSION + ":echo:" + message);
+  }
+
   async onAlarm() {
     const count = ((await this.ctx.storage.get("alarm-count")) ?? 0) + 1;
     await this.ctx.storage.put("alarm-count", count);
@@ -170,7 +185,6 @@ async function publishGeneration(
     userId: OWNER,
     appletId: applet,
     generation,
-    bindingDigest: "d".repeat(64),
   });
   return { outcome, generation, serverHash, uiHash };
 }
@@ -649,5 +663,34 @@ describe("Applet viewer tokens", () => {
       ),
     );
     expect(wrong.status).toBe(403);
+  });
+
+  test("a socket forwarded on the object's fetch door reaches the facet and upgrades", async () => {
+    const applet = appletId("socket-open");
+    const { generation } = await publishGeneration(applet, {
+      version: "A",
+      tools: ["list_todos"],
+    });
+    const response = await stateFor(applet).fetch(
+      new Request(
+        `https://bot.example/api/applets/${applet}/socket?u=${OWNER}&a=${applet}&g=${encodeURIComponent(generation.generationId)}`,
+        { headers: { Upgrade: "websocket" } },
+      ),
+    );
+    expect(
+      response.status,
+      response.status === 101 ? "" : await response.text(),
+    ).toBe(101);
+    expect(response.webSocket).not.toBeNull();
+    const socket = response.webSocket!;
+    socket.accept();
+    const echoed = new Promise<string>((resolve) => {
+      socket.addEventListener("message", (event) =>
+        resolve(String(event.data)),
+      );
+    });
+    socket.send("ping");
+    expect(await echoed).toBe("A:echo:ping");
+    socket.close(1000, "done");
   });
 });

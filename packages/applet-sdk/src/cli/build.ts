@@ -22,7 +22,7 @@ import { join } from "node:path";
 
 import { build as esbuild } from "esbuild";
 
-import type { AppletHealthV1 } from "../server/applet.js";
+import type { AppletDescriptionV1 } from "../server/applet.js";
 import { readDescriptor, type AppletBuildManifestV1 } from "./manifest.js";
 import { bundlerNodePaths, SDK_ENTRIES } from "./paths.js";
 import { startAppletRuntime } from "./runtime.js";
@@ -100,21 +100,29 @@ function page(title: string, script: string): string {
 }
 
 /** Ask the built module what it declares, by running it. */
-export async function readHealth(
+export async function readDescription(
   serverCode: string,
   appletId: string,
-): Promise<AppletHealthV1> {
+): Promise<AppletDescriptionV1> {
   const runtime = await startAppletRuntime({
     serverCode,
     appletId,
     token: randomUUID(),
   });
   try {
-    const response = await runtime.fetch("/health");
-    if (!response.ok) {
-      throw new Error(`The Applet failed to mount: ${await response.text()}`);
+    // `health()` first: it is what the kernel calls, so a server that cannot
+    // mount fails here the way it would fail a publish.
+    const health = await runtime.fetch("/health");
+    if (!health.ok) {
+      throw new Error(`The Applet failed to mount: ${await health.text()}`);
     }
-    return (await response.json()) as AppletHealthV1;
+    const response = await runtime.fetch("/describe");
+    if (!response.ok) {
+      throw new Error(
+        `The Applet could not describe its tools: ${await response.text()}`,
+      );
+    }
+    return (await response.json()) as AppletDescriptionV1;
   } finally {
     await runtime.dispose();
   }
@@ -149,10 +157,10 @@ export async function buildApplet(
   });
   const html = page(descriptor.displayName, uiScript);
 
-  const health = await readHealth(serverCode, descriptor.id);
+  const description = await readDescription(serverCode, descriptor.id);
   const manifest: AppletBuildManifestV1 = {
     contract: 1,
-    tools: health.tools,
+    tools: description.tools,
     hashes: { server: sha256(serverCode), ui: sha256(html) },
   };
 

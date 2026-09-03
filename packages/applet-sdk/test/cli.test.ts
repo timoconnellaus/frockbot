@@ -112,7 +112,7 @@ describe("applet build", () => {
       "add_todo",
       "list_todos",
     ]);
-    expect(result.manifest.tools[0]!.input).toEqual({
+    expect(result.manifest.tools[0]!.inputSchema).toEqual({
       type: "object",
       properties: { title: { type: "string" } },
       required: ["title"],

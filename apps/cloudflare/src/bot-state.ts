@@ -1080,6 +1080,9 @@ export class BotState extends DurableObject<BotStateEnv> {
     for (const entry of listing.entries) {
       const relative = entry.path.path.slice(appletId.length + 1);
       if (!relative) continue;
+      // `dist/` is what `applet build` wrote, not what the Bot wrote: the
+      // canvas shows source, and the publish reads the build.
+      if (relative === "dist" || relative.startsWith("dist/")) continue;
       if (bytes + entry.generation.size > APPLET_SOURCE_MAX_BYTES_V1) {
         truncated = true;
         continue;

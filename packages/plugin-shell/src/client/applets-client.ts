@@ -121,10 +121,19 @@ export function mostRecentlyChangedFileV1(
   source: AppletSourceViewV1 | undefined,
 ): string | undefined {
   if (!source || source.files.length === 0) return undefined;
+  // A tie on time — a fresh scaffold, one sync — opens on the file a Bot edits
+  // first, not on the README the alphabet would pick.
+  const preferred = ["server.ts", "ui.tsx"];
   const ordered = source.files.toSorted((left, right) => {
     const leftAt = left.changedAt ?? "";
     const rightAt = right.changedAt ?? "";
-    return rightAt.localeCompare(leftAt) || left.path.localeCompare(right.path);
+    if (leftAt !== rightAt) return rightAt.localeCompare(leftAt);
+    const leftRank = preferred.indexOf(left.path);
+    const rightRank = preferred.indexOf(right.path);
+    const rank = (value: number) => (value < 0 ? preferred.length : value);
+    return (
+      rank(leftRank) - rank(rightRank) || left.path.localeCompare(right.path)
+    );
   });
   return ordered[0]?.path;
 }

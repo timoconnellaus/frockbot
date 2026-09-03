@@ -72,8 +72,18 @@ export function packageUiGatewayOriginV1(url: URL): string {
  */
 export function packageUiCspV1(url: URL): string {
   const origin = packageUiGatewayOriginV1(url);
-  const socket = origin.replace(/^http/, "ws");
-  return `${PACKAGE_UI_CSP}; connect-src ${origin} ${socket}; frame-src ${url.origin}`;
+  const origins = [origin];
+  // Local development serves the app on `localhost` or `127.0.0.1` and both
+  // map to the one `ui.localhost` artifact host, so a page there may connect
+  // to either spelling of the loopback gateway. A deployed host maps to
+  // exactly one origin.
+  if (new URL(origin).hostname === "localhost") {
+    origins.push(origin.replace("//localhost", "//127.0.0.1"));
+  }
+  const connect = origins
+    .flatMap((candidate) => [candidate, candidate.replace(/^http/, "ws")])
+    .join(" ");
+  return `${PACKAGE_UI_CSP}; connect-src ${connect}; frame-src ${url.origin}`;
 }
 export const SIGNUPS_CLOSED_MESSAGE =
   "FrockBot isn't taking new signups right now.";
@@ -402,9 +412,11 @@ async function routeAppletSocket(
   forwarded.searchParams.set("u", claims.u);
   forwarded.searchParams.set("a", claims.a);
   forwarded.searchParams.set("g", claims.g);
+  // `fetch`, not an RPC method: a 101 response with its WebSocket only
+  // crosses the stub boundary on the object's HTTP door.
   return dependencies
     .appletStateFor(claims.u, claims.a)
-    .connectViewer(new Request(forwarded, request));
+    .fetch(new Request(forwarded, request));
 }
 
 export function createGateway(dependencies: GatewayDependencies) {

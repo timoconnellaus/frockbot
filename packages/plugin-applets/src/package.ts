@@ -278,7 +278,7 @@ function publishText(result: AppletPublishResultV1, verb: string): string {
       .join(" ");
   }
   return [
-    `${verb} of ${result.appletId} failed: ${result.reason}`,
+    `${verb === "Published" ? "Publishing" : "Reverting"} ${result.appletId} failed: ${result.reason}`,
     ...result.diagnostics,
     "Nothing changed: the Applet is still on the generation it was on.",
   ].join("\n");

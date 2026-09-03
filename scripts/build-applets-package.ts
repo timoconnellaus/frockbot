@@ -35,7 +35,9 @@ const root = new URL("../", import.meta.url);
 const at = (path: string): URL => new URL(path, root);
 
 const TEMPLATE_DIRECTORY = "packages/applet-sdk/template/";
-const TEMPLATE_FILES = ["applet.json", "server.ts", "ui.tsx", "README.md"];
+// Written in this order by `applet_create`, so the newest file — the one the
+// canvas opens on — is `server.ts`, the file a Bot edits first.
+const TEMPLATE_FILES = ["README.md", "applet.json", "ui.tsx", "server.ts"];
 const PAGE_IDS = ["list", "canvas"] as const;
 
 const TEMPLATE_OUTPUT = "packages/plugin-applets/src/template.generated.ts";

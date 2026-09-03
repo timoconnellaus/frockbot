@@ -2477,6 +2477,46 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     { deep: true },
   );
 
+  /*
+   * The canvas follows the Turn.
+   *
+   * A Turn that creates, publishes, reverts, or deletes an Applet changes what
+   * the canvas should show, and the durable answer is only readable once the
+   * Turn has settled — so the moment `activeRunId` clears, the list and the
+   * focus are read back. While a Turn is running with an Applet focused, the
+   * source is re-read on a cadence so the code view shows files as the Bot
+   * writes them; the read is the Workspace store and wakes nothing.
+   */
+  const APPLET_SOURCE_FOLLOW_MS = 2_000;
+  let sourceFollow: ReturnType<typeof setInterval> | undefined;
+  const stopSourceFollow = (): void => {
+    if (sourceFollow !== undefined) clearInterval(sourceFollow);
+    sourceFollow = undefined;
+  };
+  const stopRunFollow = watch(
+    () => web.value.activeRunId,
+    (runId, previous) => {
+      stopSourceFollow();
+      if (!appletsAvailableV1(web.value.packageUi)) return;
+      if (runId) {
+        if (!web.value.focusedAppletId) return;
+        sourceFollow = setInterval(() => {
+          if (!web.value.focusedAppletId || !web.value.activeRunId) {
+            stopSourceFollow();
+            return;
+          }
+          void web.value.refreshAppletCanvas();
+        }, APPLET_SOURCE_FOLLOW_MS);
+        return;
+      }
+      if (!previous) return;
+      void (async () => {
+        await web.value.loadApplets();
+        await web.value.loadFocusedApplet();
+      })();
+    },
+  );
+
   return [
     ctx.provide(clientSurfaceRegistryKey, surfaces),
     // The shared client projection is updated by the contracts lane. This cast
@@ -2494,6 +2534,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     }),
     () => {
       stopEntrySync();
+      stopRunFollow();
+      stopSourceFollow();
       for (const dispose of entryDisposers.splice(0).toReversed()) dispose();
       activeRequest?.abort();
       admissionObserver?.abort();

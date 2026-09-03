@@ -41,11 +41,7 @@ export function focusedAppletSummaryV1(
 export function appletsBridgeStateV2(
   web: Pick<
     FrockBotWebData,
-    | "applets"
-    | "focusedAppletId"
-    | "appletViewer"
-    | "appletSource"
-    | "appletBuild"
+    "applets" | "focusedAppletId" | "appletViewer" | "appletBuild"
   >,
 ): PackageIframeAppletsStateV2 {
   const viewer = web.appletViewer;
@@ -61,7 +57,8 @@ export function appletsBridgeStateV2(
             generationId: viewer.generationId,
           }
         : null,
-    ...(web.appletSource === undefined ? {} : { source: web.appletSource }),
+    // The source stays out of the feed: the shell draws the code view itself,
+    // and a source tree would overflow the bridge's 64 KB message bound.
     ...(web.appletBuild === undefined ? {} : { build: web.appletBuild }),
   };
 }

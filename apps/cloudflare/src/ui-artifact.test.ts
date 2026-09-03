@@ -49,10 +49,13 @@ describe("Package UI artifact route", () => {
     expect(csp).toContain("frame-src https://ui.bot.example.com");
     expect(csp).toContain("default-src 'none'");
     expect(csp).not.toContain("*");
-    // A host that is already the gateway (local development) maps to itself.
+    // A host that is already the gateway (local development) maps to itself,
+    // under both spellings of the loopback the app may have been opened on.
     expect(
       packageUiCspV1(new URL("http://ui.localhost:8787/packages/x.html")),
-    ).toContain("connect-src http://localhost:8787 ws://localhost:8787");
+    ).toContain(
+      "connect-src http://localhost:8787 ws://localhost:8787 http://127.0.0.1:8787 ws://127.0.0.1:8787",
+    );
   });
 
   test("serves no application route on the artifact host", async () => {

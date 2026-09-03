@@ -356,6 +356,13 @@ function serverRef(input: unknown, label: string): AppletArtifactRefV1 {
   };
 }
 
+/**
+ * The most an Applet's UI page may be. An Applet page is `applet build`'s one
+ * self-contained file — React, TanStack DB, the kit, and the Applet's own code
+ * inlined — so it is bounded well above a hand-written Package page's 256 KB.
+ */
+export const APPLET_UI_MAX_BYTES_V1 = 4 * 1024 * 1024;
+
 function uiRef(input: unknown, label: string): AppletUiArtifactRefV1 {
   const value = record(input, label);
   exactKeys(
@@ -372,9 +379,9 @@ function uiRef(input: unknown, label: string): AppletUiArtifactRefV1 {
   if (
     !Number.isSafeInteger(value.size) ||
     (value.size as number) < 0 ||
-    (value.size as number) > 256 * 1024
+    (value.size as number) > APPLET_UI_MAX_BYTES_V1
   )
-    throw new Error(`${label}.size must be within the 256 KB quota`);
+    throw new Error(`${label}.size must be within the 4 MB quota`);
   if (value.mediaType !== "text/html")
     throw new Error(`${label}.mediaType is invalid`);
   return {
