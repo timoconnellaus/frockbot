@@ -35,7 +35,7 @@ import {
   latestModelRequestJournalState,
   planBotRunRecovery,
   type ProviderReconcilesV1,
-  repairOrphanedOpenTurnV1,
+  repairedSessionLogV1,
   unresolvedModelRequestFailure,
 } from "./run-recovery.js";
 import {
@@ -368,9 +368,15 @@ export class BotDurableAuthority<Snapshot> {
       if (await transaction.get<string>(ACTIVE_RUN_KEY)) {
         return "blocked" as const;
       }
-      const latestEvents = (
+      const storedEvents = (
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
       ).map(decodeSessionEvent);
+      // A queued Turn was admitted while another was executing, so admission
+      // could not repair the log: something was still entitled to close that
+      // Turn. Here the active-run marker is gone and nothing is, so the same
+      // repair applies before this Turn starts on it.
+      const repaired = repairedSessionLogV1(run.sessionId, storedEvents);
+      const latestEvents = repaired ?? storedEvents;
       const promoted = this.codec.require({
         ...run,
         phase: "admitted",
@@ -379,6 +385,13 @@ export class BotDurableAuthority<Snapshot> {
       await transaction.put({
         [key]: structuredClone(promoted),
         [ACTIVE_RUN_KEY]: runId,
+        ...(repaired
+          ? {
+              [LATEST_EVENTS_KEY]: structuredClone(
+                repaired.map(decodeSessionEvent),
+              ),
+            }
+          : {}),
       });
       await transaction.delete(PENDING_RUN_KEY);
       await this.refreshRecoveryAlarm(transaction);
@@ -1072,11 +1085,18 @@ export class BotDurableAuthority<Snapshot> {
       const stillOwned =
         activeRun?.status === "running" ||
         activeRun?.status === "reconciliation-required";
-      const repairs = stillOwned
-        ? []
-        : repairOrphanedOpenTurnV1(command.sessionId, storedEvents);
-      const latestEvents = [...storedEvents, ...repairs];
-      if (repairs.length > 0) {
+      //
+      // The repair rewrites the whole log rather than appending to it: by the
+      // time anyone notices, the abandoned Turn is usually no longer the last
+      // thing in the log. Each refused message journals its own `turn/start`
+      // before it assembles the request that discovers the breakage, and its
+      // `finally` writes the matching `turn/end`, so the log ends closed with
+      // the abandoned Turn still open behind it. Appending cannot close that.
+      const repaired = stillOwned
+        ? undefined
+        : repairedSessionLogV1(command.sessionId, storedEvents);
+      const latestEvents = repaired ?? storedEvents;
+      if (repaired) {
         await transaction.put(
           LATEST_EVENTS_KEY,
           structuredClone(latestEvents.map(decodeSessionEvent)),
