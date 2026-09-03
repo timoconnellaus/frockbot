@@ -182,6 +182,46 @@ export function planBotRunRecovery<Snapshot>(
   return { kind: "reconcile", repairs: session.reconcileForResume() };
 }
 
+/** True when the durable log ends inside a Turn nothing is going to finish. */
+export function hasOrphanedOpenTurnV1(
+  events: readonly SessionEvent[],
+): boolean {
+  let openTurn: number | undefined;
+  for (const event of events) {
+    if (event.type === "turn/start") openTurn = event.turn;
+    if (event.type === "turn/end" && event.turn === openTurn) {
+      openTurn = undefined;
+    }
+  }
+  return openTurn !== undefined;
+}
+
+/**
+ * Closes a Turn the log was left inside, so the next one can start.
+ *
+ * A Turn that threw between `turn/start` and `turn/end` — an event the
+ * encoder refused, a durable write that failed — leaves an open turn in the
+ * durable log, and the next Turn on that Bot fails validation with "turn N
+ * started while turn N-1 is open". Forever: nothing owned the repair, because
+ * the run that would have written the `turn/end` is already terminal. This is
+ * that repair, applied when no run is executing, so an interrupted Turn is
+ * recorded as interrupted rather than wedging the Bot.
+ *
+ * A log too malformed to reconcile is left exactly as it is: repairing it
+ * blindly would invent history.
+ */
+export function repairOrphanedOpenTurnV1(
+  sessionId: string,
+  latest: readonly SessionEvent[],
+): SessionEvent[] {
+  if (!hasOrphanedOpenTurnV1(latest)) return [];
+  try {
+    return new Session(sessionId, () => {}, latest).reconcileInterrupted();
+  } catch {
+    return [];
+  }
+}
+
 export function eventsForFailedRun(
   durableRun: { events: SessionEvent[] } | undefined,
   error: unknown,

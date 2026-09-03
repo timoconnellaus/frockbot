@@ -210,6 +210,8 @@ export class Session {
   #emit: (envelope: SessionEventEnvelope) => void;
   #persist?: PersistSessionEvents;
   #pendingPersistence: Promise<void> = Promise.resolve();
+  /** The first durable write that failed. Every later `flush` reports it. */
+  #persistFailure: Error | undefined;
   /**
    * Resolved attachment bytes, keyed by content hash, held only while this
    * Session is resident.
@@ -273,15 +275,27 @@ export class Session {
     for (const event of events) this.#emit({ sessionId: this.id, event });
     if (this.#persist && events.length > 0) {
       const durableEvents = structuredClone(events);
-      this.#pendingPersistence = this.#pendingPersistence.then(() =>
-        this.#persist?.(this.id, durableEvents),
-      );
+      // A chain that has already rejected must still attempt this write.
+      // Chaining with `then` alone skipped the callback for the life of the
+      // Session — no event was ever written again while the loop carried on
+      // in memory — and left the rejection unhandled between an append and
+      // the next flush. The failure is remembered instead, and `flush` throws
+      // it, so the Turn fails loudly exactly once.
+      const pending = this.#pendingPersistence
+        .catch(() => undefined)
+        .then(() => this.#persist?.(this.id, durableEvents));
+      this.#pendingPersistence = pending;
+      void pending.catch((error: unknown) => {
+        this.#persistFailure ??=
+          error instanceof Error ? error : new Error(String(error));
+      });
     }
     return events;
   }
 
-  flush(): Promise<void> {
-    return this.#pendingPersistence;
+  async flush(): Promise<void> {
+    await this.#pendingPersistence.catch(() => undefined);
+    if (this.#persistFailure) throw this.#persistFailure;
   }
 
   /**

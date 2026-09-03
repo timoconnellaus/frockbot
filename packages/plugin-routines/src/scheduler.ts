@@ -35,6 +35,7 @@ import {
   type RoutineFireV1,
   type RoutineScheduleStateV1,
 } from "./firing.js";
+import { routineTerminalRecordsV1 } from "./inbox-store.js";
 import {
   decodeRoutineRecordV1,
   type RoutineRecordV1,
@@ -50,6 +51,11 @@ import {
 import {
   nextQueueSequenceV1,
   ROUTINE_DEFERRAL_MS,
+  ROUTINE_FIRE_LEASE_MS,
+  ROUTINE_FIRE_PREFIX,
+  ROUTINE_FAILURE_BACKOFF_MS,
+  ROUTINE_FAILURE_PAUSE_AFTER,
+  ROUTINE_FIRE_TIMEOUT_MS,
   ROUTINE_LIMIT_PER_BOT,
   ROUTINE_MISSED_GRACE_MS,
   ROUTINE_PREFIX,
@@ -78,12 +84,34 @@ export interface RoutineFireOutcomeV1 {
  */
 export type RoutineFireExecutorV1 = (
   fire: RoutineFireV1,
+  signal: AbortSignal,
 ) => Promise<RoutineFireOutcomeV1>;
 
 export interface RoutineSchedulerOptionsV1 {
   now?(): Date;
   /** Injected so a test can watch the drain without a Durable Object. */
-  onSettled?(fire: RoutineFireV1, outcome: RoutineFireOutcomeV1): void;
+  onSettled?(
+    fire: RoutineFireV1,
+    outcome: RoutineFireOutcomeV1,
+  ): void | Promise<void>;
+  /** How long one firing's Turn may run. Overridden only by tests. */
+  fireTimeoutMs?: number;
+  /** How long an unsettled firing holds its lock. Overridden only by tests. */
+  fireLeaseMs?: number;
+}
+
+/**
+ * When an unsettled firing stops being "in flight" and starts being abandoned.
+ *
+ * Derived from `mintedAt`, which is already durable on the firing, so the lease
+ * needs no second record and survives the eviction it exists to survive.
+ */
+export function routineFireLeaseExpiryV1(
+  fire: RoutineFireV1,
+  leaseMs: number = ROUTINE_FIRE_LEASE_MS,
+): number {
+  const minted = Date.parse(fire.mintedAt);
+  return (Number.isFinite(minted) ? minted : 0) + leaseMs;
 }
 
 /** A firing waiting behind an unsettled one. */
@@ -156,7 +184,13 @@ export class RoutineScheduler {
   readonly #storage: RoutineStorageV1;
   readonly #now: () => Date;
   readonly #onSettled:
-    ((fire: RoutineFireV1, outcome: RoutineFireOutcomeV1) => void) | undefined;
+    | ((
+        fire: RoutineFireV1,
+        outcome: RoutineFireOutcomeV1,
+      ) => void | Promise<void>)
+    | undefined;
+  readonly #fireTimeoutMs: number;
+  readonly #fireLeaseMs: number;
 
   constructor(
     storage: RoutineStorageV1,
@@ -165,6 +199,8 @@ export class RoutineScheduler {
     this.#storage = storage;
     this.#now = options.now ?? (() => new Date());
     this.#onSettled = options.onSettled;
+    this.#fireTimeoutMs = options.fireTimeoutMs ?? ROUTINE_FIRE_TIMEOUT_MS;
+    this.#fireLeaseMs = options.fireLeaseMs ?? ROUTINE_FIRE_LEASE_MS;
   }
 
   /**
@@ -179,7 +215,23 @@ export class RoutineScheduler {
       const locked = await reads.get<unknown>(
         routineFireKeyV1(record.routineId),
       );
-      if (locked) continue;
+      if (locked) {
+        // A Routine with an unsettled firing is being dealt with — but only
+        // until its lease runs out. Skipping it outright is what let a firing
+        // killed mid-flight take the object's whole alarm down with it: the
+        // locked Routine contributed no deadline, so the kernel's
+        // `deleteAlarm()` ran and the Bot went silent for ever. The lease
+        // expiry is the deadline, and `settle` is what reaps it.
+        // The hold still applies, for the same reason it applies to a debt: an
+        // expired lease on a Routine whose Turn is executing right now would
+        // otherwise arm the alarm on a moment already past, over and over,
+        // which is a spin rather than a deadline. `defer()` moves the hold and
+        // never the lease, so the reaping still happens — just not on a loop.
+        deadlines.push(
+          Math.max(this.#leaseExpiry(locked), state.deferredUntil ?? 0),
+        );
+        continue;
+      }
       deadlines.push(routineDeadlineV1(state));
     }
     for (const routineId of await this.#queuedRoutineIds(reads)) {
@@ -209,20 +261,98 @@ export class RoutineScheduler {
    * durable firing, run it, settle it, then look again.
    */
   async settle(execute: RoutineFireExecutorV1): Promise<void> {
+    await this.reapExpiredFirings();
     for (let drained = 0; drained < ROUTINE_SETTLE_BATCH; drained += 1) {
       const claimed = await this.#claim();
       if (!claimed) return;
-      let outcome: RoutineFireOutcomeV1;
-      try {
-        outcome = await execute(claimed.fire);
-      } catch (error) {
-        outcome = {
-          status: "failed",
-          summary: error instanceof Error ? error.message : String(error),
-        };
-      }
+      const outcome = await this.#execute(execute, claimed.fire);
       await this.#settleFiring(claimed.fire, outcome);
-      this.#onSettled?.(claimed.fire, outcome);
+      await this.#onSettled?.(claimed.fire, outcome);
+    }
+  }
+
+  /**
+   * Run one firing under a hard time bound.
+   *
+   * Nothing else bounds it: `maxSteps` bounds the loop and not the wall clock,
+   * and an automation run is not offered to the user's Stop. A firing that
+   * never comes back must still settle, or its lock outlives the isolate.
+   */
+  async #execute(
+    execute: RoutineFireExecutorV1,
+    fire: RoutineFireV1,
+  ): Promise<RoutineFireOutcomeV1> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expiry = new Promise<RoutineFireOutcomeV1>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        resolve({
+          status: "failed",
+          summary: `The Routine ran for longer than ${Math.round(
+            this.#fireTimeoutMs / 1000,
+          )} seconds and was stopped.`,
+        });
+      }, this.#fireTimeoutMs);
+    });
+    try {
+      return await Promise.race([
+        // `Promise.resolve().then` and not a bare call: an executor that throws
+        // synchronously must reach the same failed outcome as one that rejects,
+        // or the throw escapes `settle` with the fire lock still held.
+        Promise.resolve()
+          .then(() => execute(fire, controller.signal))
+          .catch((error: unknown): RoutineFireOutcomeV1 => ({
+            status: "failed",
+            summary: error instanceof Error ? error.message : String(error),
+          })),
+        expiry,
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Settle for dead every firing whose lease has run out.
+   *
+   * The other half of the lease: `deadlines()` makes an abandoned firing wake
+   * the object, and this is what the object then does about it. An undecodable
+   * lock is released too — it names a firing nothing can run, and leaving it
+   * wedges the Routine exactly as an abandoned one does.
+   */
+  async reapExpiredFirings(): Promise<void> {
+    const now = this.#now().getTime();
+    const stored = await this.#storage.list<unknown>({
+      prefix: ROUTINE_FIRE_PREFIX,
+    });
+    for (const [key, value] of stored.entries()) {
+      let fire: RoutineFireV1;
+      try {
+        fire = decodeRoutineFireV1(value);
+      } catch {
+        await this.#storage.delete(key);
+        continue;
+      }
+      if (this.#leaseExpiry(value) > now) continue;
+      await this.#settleFiring(fire, {
+        status: "failed",
+        summary:
+          "The Routine stopped without reporting an outcome and its firing was settled as failed.",
+      });
+    }
+  }
+
+  #leaseExpiry(stored: unknown): number {
+    try {
+      return routineFireLeaseExpiryV1(
+        decodeRoutineFireV1(stored),
+        this.#fireLeaseMs,
+      );
+    } catch {
+      // An undecodable lock is already overdue: reaping it is the only way its
+      // Routine ever fires again.
+      return 0;
     }
   }
 
@@ -327,7 +457,18 @@ export class RoutineScheduler {
       state: RoutineScheduleStateV1;
     }> = [];
     for (const value of stored.values()) {
-      const record = decodeRoutineRecordV1(value);
+      let record: RoutineRecordV1;
+      try {
+        record = decodeRoutineRecordV1(value);
+      } catch {
+        // One record written by a newer deploy and read back after a rollback
+        // used to poison every alarm refresh and every Turn settlement of the
+        // whole object: `#clocks` is reached from `deadlines()` →
+        // `refreshRecoveryAlarm`, which runs inside `completeRun`, `failRun`
+        // and `acceptRun`. A record nothing can read is one Routine that does
+        // not fire, never a Bot that cannot settle a Turn.
+        continue;
+      }
       if (!record.enabled || record.schedule === undefined) continue;
       const normalized = normalizeRoutineScheduleV1(
         record.schedule,
@@ -416,7 +557,14 @@ export class RoutineScheduler {
       // record it would have run is gone, and a firing needs one.
       return undefined;
     }
-    const record = decodeRoutineRecordV1(stored);
+    let record: RoutineRecordV1;
+    try {
+      record = decodeRoutineRecordV1(stored);
+    } catch {
+      // The waiting firing named a record nothing can read. Dropping the
+      // request is the same answer as a deleted record: a firing needs one.
+      return undefined;
+    }
     const fire: RoutineFireV1 = {
       schemaVersion: 1,
       routineId,
@@ -448,10 +596,17 @@ export class RoutineScheduler {
       record.timezone,
     );
     const anchor = new Date(record.updatedAt);
-    const late = now.getTime() - state.dueAt > ROUTINE_MISSED_GRACE_MS;
-    const missedCount = late
-      ? missedRoutineRunsV1(normalized, new Date(state.dueAt), now, anchor)
-      : 1;
+    // Every occurrence that has already elapsed coalesces into this one firing,
+    // not only the ones past the grace window. A `@every 1m` Routine after a
+    // four-minute stall used to run four Turns back to back, because inside
+    // the grace each occurrence was claimed on its own and one drain takes
+    // eight: lateness is lateness, and the rule is that it coalesces.
+    const missedCount = missedRoutineRunsV1(
+      normalized,
+      new Date(state.dueAt),
+      now,
+      anchor,
+    );
     const fire: RoutineFireV1 = {
       schemaVersion: 1,
       routineId: record.routineId,
@@ -468,10 +623,11 @@ export class RoutineScheduler {
       ...(missedCount > 1 ? { missedCount } : {}),
       entryId: `${routineFireIdV1(record.routineId, String(state.dueAt))}-entry`,
     };
-    // Recompute forward from now when the firing was late, and from the
-    // occurrence itself when it was on time; either way the clock advances
-    // before the Turn runs, so a crash mid-Turn cannot re-owe this occurrence.
-    const from = late ? now : new Date(state.dueAt);
+    // Recompute forward from now when the firing covered more than its own
+    // occurrence, and from the occurrence itself when it was on time; either
+    // way the clock advances before the Turn runs, so a crash mid-Turn cannot
+    // re-owe this occurrence.
+    const from = missedCount > 1 ? now : new Date(state.dueAt);
     const next = nextRoutineRunV1(normalized, from, anchor);
     await transaction.put(routineScheduleKeyV1(record.routineId), {
       schemaVersion: 1,
@@ -480,6 +636,9 @@ export class RoutineScheduler {
       dueAt: (
         next ?? new Date(now.getTime() + ROUTINE_MISSED_GRACE_MS)
       ).getTime(),
+      ...(state.consecutiveFailures === undefined
+        ? {}
+        : { consecutiveFailures: state.consecutiveFailures }),
     } satisfies RoutineScheduleStateV1);
     if (missedCount > 1) {
       // One entry says what was slept through. It is `skipped`, not `ok`: the
@@ -524,13 +683,150 @@ export class RoutineScheduler {
     } satisfies RoutineRecordV1);
   }
 
+  /**
+   * What a settled firing does to its Routine's clock.
+   *
+   * A firing that failed will most likely fail again on the next occurrence,
+   * and each attempt is a whole model Turn. Consecutive failures back the
+   * Routine off, and past the threshold it pauses itself and says why — where
+   * before it re-armed identically and burned a Turn a minute for ever with
+   * nothing on screen to say so.
+   */
+  async #recordOutcomeOnClock(
+    transaction: RoutineStorageWritesV1,
+    fire: RoutineFireV1,
+    outcome: RoutineFireOutcomeV1,
+    now: Date,
+  ): Promise<void> {
+    const stored = await transaction.get<unknown>(
+      routineScheduleKeyV1(fire.routineId),
+    );
+    if (stored === undefined) return;
+    let state: RoutineScheduleStateV1;
+    try {
+      state = decodeRoutineScheduleStateV1(stored);
+    } catch {
+      return;
+    }
+    if (outcome.status === "ok") {
+      if (state.consecutiveFailures === undefined) return;
+      const { consecutiveFailures: _cleared, ...cleared } = state;
+      await transaction.put(routineScheduleKeyV1(fire.routineId), cleared);
+      return;
+    }
+    const failures = (state.consecutiveFailures ?? 0) + 1;
+    if (failures >= ROUTINE_FAILURE_PAUSE_AFTER) {
+      const record = await transaction.get<unknown>(
+        routineKeyV1(fire.routineId),
+      );
+      if (record !== undefined) {
+        let decoded: RoutineRecordV1 | undefined;
+        try {
+          decoded = decodeRoutineRecordV1(record);
+        } catch {
+          decoded = undefined;
+        }
+        if (decoded && decoded.enabled) {
+          await transaction.put(routineKeyV1(fire.routineId), {
+            ...decoded,
+            enabled: false,
+            updatedAt: now.toISOString(),
+          } satisfies RoutineRecordV1);
+          await appendRoutineRunEntryV1(transaction, {
+            schemaVersion: 1,
+            entryId: `${fire.entryId}-paused`,
+            routineId: fire.routineId,
+            runId: fire.fireId,
+            fireId: fire.fireId,
+            trigger: fire.trigger,
+            status: "skipped",
+            startedAt: now.toISOString(),
+            finishedAt: now.toISOString(),
+            summary: `This Routine failed ${failures} times in a row and has been turned off. Turn it back on once the cause is fixed.`,
+          } satisfies RoutineRunEntryV1);
+        }
+      }
+    }
+    const backoff =
+      ROUTINE_FAILURE_BACKOFF_MS[
+        Math.min(failures, ROUTINE_FAILURE_BACKOFF_MS.length) - 1
+      ] ?? 0;
+    await transaction.put(routineScheduleKeyV1(fire.routineId), {
+      ...state,
+      consecutiveFailures: failures,
+      deferredUntil: Math.max(
+        state.deferredUntil ?? 0,
+        now.getTime() + backoff,
+      ),
+    } satisfies RoutineScheduleStateV1);
+  }
+
+  /**
+   * The name a person knows this Routine by, for anything addressed to them.
+   * Falls back to the id when the record is gone or unreadable — a message
+   * about a Routine is worth more than nothing, even under a broken record.
+   */
+  async #routineName(
+    transaction: RoutineStorageWritesV1,
+    routineId: string,
+  ): Promise<string> {
+    const stored = await transaction.get<unknown>(routineKeyV1(routineId));
+    if (stored === undefined) return routineId;
+    try {
+      return decodeRoutineRecordV1(stored).name;
+    } catch {
+      return routineId;
+    }
+  }
+
+  /**
+   * What a person is told about a firing that did not work.
+   *
+   * A completed firing has always written a completion-inbox entry; a failed
+   * one wrote nothing at all — no entry, no badge, no notification — so six
+   * consecutive failures left the header count untouched and the only trace
+   * was behind Bot settings → Routines → Run log → expand a row. "A Routine
+   * that stops working tells you." The entry is written in the transaction
+   * that settles the firing, so there is no window where a firing has failed
+   * and its outcome is nowhere, and it is idempotent on the run id.
+   */
+  async #recordFailureInbox(
+    transaction: RoutineStorageWritesV1,
+    fire: RoutineFireV1,
+    outcome: RoutineFireOutcomeV1,
+    now: string,
+  ): Promise<void> {
+    const name = await this.#routineName(transaction, fire.routineId);
+    const verb = outcome.status === "cancelled" ? "was stopped" : "did not run";
+    const records = await routineTerminalRecordsV1({
+      runId: fire.fireId,
+      routineId: fire.routineId,
+      routineName: name,
+      responseText:
+        outcome.summary === undefined || outcome.summary.trim().length === 0
+          ? `"${name}" ${verb}.`
+          : `"${name}" ${verb}: ${outcome.summary}`,
+      now,
+      read: (key) => transaction.get(key),
+    });
+    if (!records) return;
+    for (const [key, value] of Object.entries(records.records)) {
+      await transaction.put(key, value);
+    }
+  }
+
   async #settleFiring(
     fire: RoutineFireV1,
     outcome: RoutineFireOutcomeV1,
   ): Promise<void> {
-    const finishedAt = this.#now().toISOString();
+    const at = this.#now();
+    const finishedAt = at.toISOString();
     await this.#storage.transaction(async (transaction) => {
       await transaction.delete(routineFireKeyV1(fire.routineId));
+      await this.#recordOutcomeOnClock(transaction, fire, outcome, at);
+      if (outcome.status !== "ok") {
+        await this.#recordFailureInbox(transaction, fire, outcome, finishedAt);
+      }
       const startedAt = fire.mintedAt;
       await appendRoutineRunEntryV1(transaction, {
         schemaVersion: 1,

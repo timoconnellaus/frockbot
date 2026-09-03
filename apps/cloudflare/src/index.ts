@@ -1916,78 +1916,93 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
-    // workers-types cannot infer the generated local RPC stubs.
-    const runtimeExports = ctx.exports as unknown as RuntimeExports;
-    const mountedBackend = await createGatewayBackendContributions(env);
-    const gateway = createGateway({
-      loader: env.USER_APPLICATIONS,
-      artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
-      uiArtifactHosts: (env.UI_ARTIFACT_HOSTS ?? "")
-        .split(",")
-        .map((host) => host.trim())
-        .filter(Boolean),
-      auth: gatewayAuth(env),
-      userExists: (userId) =>
-        userConfigurationStub(env, userId).isProvisioned({
-          schemaVersion: 1,
-          userId,
-        }),
-      readDeploymentPolicy: async () =>
-        decodeDeploymentPolicyV1(
-          rpcJsonSnapshot(
-            await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
-          ),
-        ),
-      ...(env.FROCKBOT_ADMIN_EMAILS
-        ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
-        : {}),
-      applicationHashFor: async (userId) =>
-        (await userConfigurationStub(env, userId).activeApplicationHash({
-          schemaVersion: 1,
-          userId,
-        })) ?? env.DEFAULT_APPLICATION_HASH,
-      botStateFor: (userId) =>
-        runtimeExports.UserBotState({ props: { userId } }),
-      userConfigurationFor: (userId): UserConfigurationBinding =>
-        userConfigurationStub(env, userId),
-      botConfigurationFor: (userId, botId): BotConfigurationBinding =>
-        botStateStub(env, userId, botId),
-      ...(env.APPLET_VIEWER_SECRET
-        ? { appletViewerSecret: env.APPLET_VIEWER_SECRET }
-        : {}),
-      appletStateFor: (userId, appletId) =>
-        env.APPLET_STATES.get(
-          env.APPLET_STATES.idFromName(appletStateNameV1(userId, appletId)),
-        ),
-      openBotStateChannel: (userId, botId, request, context) =>
-        openOwnedBotStateChannel(env, userId, botId, request, context),
-      ...(env.PACKAGE_CATALOG
-        ? { catalog: new R2PackageCatalog(env.PACKAGE_CATALOG) }
-        : {}),
-      backendContributions: [...mountedBackend.contributions],
-      debug: debugSurface(env),
-      ...(env.WORKSPACE_SEED_TOKEN
-        ? {
-            workspaceSeed: {
-              token: env.WORKSPACE_SEED_TOKEN,
-              write: (userId, botId, request) =>
-                botStateStub(env, userId, botId).writeUserWorkspaceFileV1({
-                  schemaVersion: 1,
-                  userId,
-                  botId,
-                  ...request,
-                }),
-            },
-          }
-        : {}),
-      allowedClientOrigins: allowedClientOrigins(env),
-      allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
-    });
+    let mountedBackend:
+      Awaited<ReturnType<typeof createGatewayBackendContributions>> | undefined;
     try {
+      // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
+      // workers-types cannot infer the generated local RPC stubs.
+      const runtimeExports = ctx.exports as unknown as RuntimeExports;
+      mountedBackend = await createGatewayBackendContributions(env);
+      const gateway = createGateway({
+        loader: env.USER_APPLICATIONS,
+        artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
+        uiArtifactHosts: (env.UI_ARTIFACT_HOSTS ?? "")
+          .split(",")
+          .map((host) => host.trim())
+          .filter(Boolean),
+        auth: gatewayAuth(env),
+        userExists: (userId) =>
+          userConfigurationStub(env, userId).isProvisioned({
+            schemaVersion: 1,
+            userId,
+          }),
+        readDeploymentPolicy: async () =>
+          decodeDeploymentPolicyV1(
+            rpcJsonSnapshot(
+              await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
+            ),
+          ),
+        ...(env.FROCKBOT_ADMIN_EMAILS
+          ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
+          : {}),
+        applicationHashFor: async (userId) =>
+          (await userConfigurationStub(env, userId).activeApplicationHash({
+            schemaVersion: 1,
+            userId,
+          })) ?? env.DEFAULT_APPLICATION_HASH,
+        botStateFor: (userId) =>
+          runtimeExports.UserBotState({ props: { userId } }),
+        userConfigurationFor: (userId): UserConfigurationBinding =>
+          userConfigurationStub(env, userId),
+        botConfigurationFor: (userId, botId): BotConfigurationBinding =>
+          botStateStub(env, userId, botId),
+        ...(env.APPLET_VIEWER_SECRET
+          ? { appletViewerSecret: env.APPLET_VIEWER_SECRET }
+          : {}),
+        appletStateFor: (userId, appletId) =>
+          env.APPLET_STATES.get(
+            env.APPLET_STATES.idFromName(appletStateNameV1(userId, appletId)),
+          ),
+        openBotStateChannel: (userId, botId, request, context) =>
+          openOwnedBotStateChannel(env, userId, botId, request, context),
+        ...(env.PACKAGE_CATALOG
+          ? { catalog: new R2PackageCatalog(env.PACKAGE_CATALOG) }
+          : {}),
+        backendContributions: [...mountedBackend.contributions],
+        debug: debugSurface(env),
+        ...(env.WORKSPACE_SEED_TOKEN
+          ? {
+              workspaceSeed: {
+                token: env.WORKSPACE_SEED_TOKEN,
+                write: (userId, botId, request) =>
+                  botStateStub(env, userId, botId).writeUserWorkspaceFileV1({
+                    schemaVersion: 1,
+                    userId,
+                    botId,
+                    ...request,
+                  }),
+              },
+            }
+          : {}),
+        allowedClientOrigins: allowedClientOrigins(env),
+        allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
+      });
       return await gateway(request);
+    } catch (error) {
+      // The outermost boundary. Building the gateway can fail before any route
+      // runs — an unavailable binding, a Contribution that will not mount — and
+      // workerd would answer that as plain text, which the client can only
+      // report as a JSON parse error. Every answer this Worker gives is JSON
+      // carrying a reason.
+      return Response.json(
+        {
+          error:
+            error instanceof Error ? error.message : "gateway request failed",
+        },
+        { status: 500 },
+      );
     } finally {
-      await mountedBackend.dispose();
+      await mountedBackend?.dispose();
     }
   },
 } satisfies ExportedHandler<Env>;

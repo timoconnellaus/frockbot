@@ -4,7 +4,11 @@ import type {
   ComputerControlLease,
   ComputerHandle,
 } from "@frockbot/computer-core";
-import { computerBotPathKeyV1, ComputerError } from "@frockbot/computer-core";
+import {
+  computerBotPathKeyV1,
+  COMPUTER_UNCONFIGURED_MESSAGE_V1,
+  ComputerError,
+} from "@frockbot/computer-core";
 import {
   COMPUTER_CONNECT_DEFERRAL_MS,
   COMPUTER_CONNECT_START_DELAY_MS,
@@ -127,6 +131,45 @@ function fakeHandle(options: {
 }
 
 describe("Computer Bot Durable Object Contribution", () => {
+  test("an unconfigured host rejects every command, connect included", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: false,
+      providerLabel: "Fake Computer",
+      openComputer: () => {
+        throw new Error("an unconfigured host must not reach a provider");
+      },
+    });
+
+    for (const type of [
+      "connect",
+      "takeControl",
+      "releaseControl",
+      "runDoctor",
+    ] as const) {
+      const receipt = await contribution.execute("user-1", "scout", {
+        version: 1,
+        commandId: `command-${type}`,
+        botId: "scout",
+        type,
+      });
+      expect(receipt).toMatchObject({
+        version: 1,
+        type,
+        status: "rejected",
+        failure: COMPUTER_UNCONFIGURED_MESSAGE_V1,
+      });
+    }
+    // Nothing was admitted, so the projection never claims work is under way.
+    expect(await contribution.read("user-1", "scout")).toMatchObject({
+      phase: "unconfigured",
+      message: COMPUTER_UNCONFIGURED_MESSAGE_V1,
+    });
+    // The refusal is written for the person reading it.
+    expect(COMPUTER_UNCONFIGURED_MESSAGE_V1).not.toContain("SPRITES_TOKEN");
+  });
+
   test("records provider progress durably and projects its ordered steps", async () => {
     const storage = new MemoryStorage();
     let contribution: ReturnType<typeof createComputerBotBackendContribution>;
@@ -701,6 +744,66 @@ describe("Computer Bot Durable Object Contribution", () => {
     expect(owners).toEqual(["human:owner-1"]);
     expect(scopes).toEqual(["desktop-gui", "desktop-gui", "desktop-gui"]);
     expect(storage.values.has(COMPUTER_CONTROL_RECORD_KEY)).toBe(false);
+  });
+
+  test("a release the Computer refuses still drops the durable lease", async () => {
+    const storage = new MemoryStorage();
+    const now = new Date("2026-09-02T00:00:00.000Z");
+    const host = {
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      now: () => now,
+      newId: () => "owner-1",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            acquire: (ownerId) =>
+              Promise.resolve({
+                id: ownerId,
+                expiresAt: "2026-09-02T00:01:30.000Z",
+              }),
+            renew: (lease) => Promise.resolve({ id: lease.id, expiresAt: "" }),
+            release: () => Promise.reject(new Error("Sprite is unreachable")),
+          }),
+        ),
+    };
+    const contribution = createComputerBotBackendContribution(host);
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("takeControl", "take-1"),
+    );
+    expect(storage.values.has(COMPUTER_CONTROL_RECORD_KEY)).toBe(true);
+
+    const receipt = await contribution.execute(
+      "user-1",
+      "scout",
+      command("releaseControl", "release-1"),
+    );
+
+    // The failure reaches the User rather than being swallowed...
+    expect(receipt).toMatchObject({
+      status: "rejected",
+      failure: "Sprite is unreachable",
+    });
+    // ...and the User-wide fence is gone, so no heartbeat can renew it and no
+    // other Bot of this User is locked out of the Computer forever.
+    expect(storage.values.has(COMPUTER_CONTROL_RECORD_KEY)).toBe(false);
+    const projection = await contribution.read("user-1", "scout");
+    expect(projection.controlLease).toBeUndefined();
+    expect(projection.phase).toBe("error");
+    // A heartbeat that arrives after the failed release has nothing to renew.
+    await expect(
+      contribution.execute(
+        "user-1",
+        "scout",
+        command("refreshControl", "refresh-1"),
+      ),
+    ).resolves.toMatchObject({
+      status: "rejected",
+      failure: "No control lease is active",
+    });
   });
 
   test("reclaims a stale lease under a new durable owner", async () => {

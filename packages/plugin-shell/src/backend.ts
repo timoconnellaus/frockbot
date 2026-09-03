@@ -328,7 +328,11 @@ import {
   type PendingBotInputV1,
   type RoutineInboxEntryV1,
 } from "@frockbot/plugin-routines/inbox";
-import type { RoutineScheduler } from "@frockbot/plugin-routines/scheduler";
+import type {
+  RoutineFireOutcomeV1,
+  RoutineScheduler,
+} from "@frockbot/plugin-routines/scheduler";
+import type { RoutineFireV1 } from "@frockbot/plugin-routines/firing";
 import {
   RoutineNotFoundError,
   type RoutineStore,
@@ -395,6 +399,7 @@ import {
   isVisibleRunV1,
   projectClientRunLookupV1,
   projectClientRunV1,
+  projectClientRunOrDegradedV1,
   projectClientAnnouncementsV1,
   projectClientTurnV1,
   type ClientRunLookupV1,
@@ -2975,17 +2980,24 @@ export class ShellBotBackendContribution {
   }
 
   private async settleScheduledWork(): Promise<void> {
-    await this.settleRoutineFirings();
-    await this.runOwedSubagentTurns();
-    await this.reconcileOverdueTasks();
-    await this.expireDueApprovals();
-    await this.replayPendingWakeNotifications();
-    await this.hostSettleScheduledWork?.();
-    // The alarm that woke this object has been consumed. Re-arm on whatever is
-    // owed next, or a Routine that fired once would never fire again.
-    await this.ctx.storage.transaction((transaction) =>
-      this.authority.refreshRecoveryAlarm(transaction),
-    );
+    // The re-arm is in a `finally` because it is the object's only way back.
+    // The alarm that woke this object has already been consumed by the
+    // platform; a throw in any one settler used to skip the re-arm, and then
+    // nothing — no Routine, no approval expiry, no owed subagent Turn — ever
+    // woke this Bot again except by a caller's luck. One producer failing must
+    // cost that producer its pass, never the clock.
+    try {
+      await this.settleRoutineFirings();
+      await this.runOwedSubagentTurns();
+      await this.reconcileOverdueTasks();
+      await this.expireDueApprovals();
+      await this.replayPendingWakeNotifications();
+      await this.hostSettleScheduledWork?.();
+    } finally {
+      await this.ctx.storage.transaction((transaction) =>
+        this.authority.refreshRecoveryAlarm(transaction),
+      );
+    }
   }
 
   /**
@@ -3005,21 +3017,73 @@ export class ShellBotBackendContribution {
     // here whenever the Turn is executing in this isolate, but a durable active
     // run outlives an eviction, and admitting a firing against one would burn
     // the occurrence on an error instead of holding the debt.
-    if (await this.authority.readActiveRunId()) return;
+    //
+    // Returning was not enough: the debt stayed past-due, so `deadlines()`
+    // re-armed on a moment already gone and the alarm spun straight back into
+    // this same bail-out — which is how a Routine racing a long chat Turn
+    // failed once a minute for ever. The hold is what turns the bail-out into
+    // a deferral: `dueAt` does not move, so the firing still lands.
+    if (await this.authority.readActiveRunId()) {
+      await this.ctx.storage.transaction((transaction) =>
+        this.routineScheduler.defer(transaction),
+      );
+      return;
+    }
     await this.routineScheduler.settle(async (fire) => {
-      try {
-        await this.authority.run(
-          routineTurnCommandV1(identity, fire, new Date().toISOString()),
-        );
-      } catch (error) {
-        return routineFireOutcomeV1(
-          await this.authority.readStoredRun(fire.fireId),
-          error,
-        );
-      }
+      const outcome = await this.runOneFiring(identity, fire);
+      await this.notifyFailedFiring(identity, fire, outcome);
+      return outcome;
+    });
+  }
+
+  private async runOneFiring(
+    identity: BotIdentity,
+    fire: RoutineFireV1,
+  ): Promise<RoutineFireOutcomeV1> {
+    try {
+      await this.authority.run(
+        routineTurnCommandV1(identity, fire, new Date().toISOString()),
+      );
+    } catch (error) {
       return routineFireOutcomeV1(
         await this.authority.readStoredRun(fire.fireId),
+        error,
       );
+    }
+    return routineFireOutcomeV1(
+      await this.authority.readStoredRun(fire.fireId),
+    );
+  }
+
+  /**
+   * Tell the person that a firing did not work.
+   *
+   * The scheduler has already written the durable completion-inbox entry in
+   * the transaction that settled the firing; this is the delivery half — the
+   * same seam a hand-off uses, so a Routine that breaks reaches the same place
+   * a Routine that finishes does instead of only a `failed` row nobody opens.
+   * `notifications.enabled` is honoured: it is the mute on updates, and a
+   * broken Routine is an update, not a decision the Bot is waiting on.
+   */
+  private async notifyFailedFiring(
+    identity: BotIdentity,
+    fire: RoutineFireV1,
+    outcome: RoutineFireOutcomeV1,
+  ): Promise<void> {
+    if (outcome.status === "ok") return;
+    const settings = await this.getSettings(identity);
+    if (!settings.notifications.enabled) return;
+    await this.authority.recordNotification({
+      // The same id shape the completion path uses, so one firing is one
+      // intent however many times the alarm retries it.
+      notificationId: `routine-failed:${fire.fireId}`,
+      runId: fire.fireId,
+      createdAt: new Date().toISOString(),
+      title: `${settings.profile.name} could not run a Routine`,
+      body: (outcome.summary ?? "The firing ended without saying why.").slice(
+        0,
+        240,
+      ),
     });
   }
   // -------------------------------------------------------------------------
@@ -5370,7 +5434,9 @@ export class ShellBotBackendContribution {
       // still not part of the conversation: the visible transcript never
       // shows one, running or settled.
       if (active && isVisibleRunV1(active))
-        selected.set(active.runId, { run: projectClientRunV1(active) });
+        selected.set(active.runId, {
+          run: projectClientRunOrDegradedV1(active),
+        });
     }
     const available = candidates.slice(0, CLIENT_RUN_PAGE_LIMIT);
     let stoppedEarly = false;
@@ -5382,7 +5448,7 @@ export class ShellBotBackendContribution {
       }
       const stored = await this.authority.readStoredRun(candidate.runId);
       if (!stored || !isVisibleRunV1(stored)) continue;
-      const projected = projectClientRunV1(stored);
+      const projected = projectClientRunOrDegradedV1(stored);
       const tentative = [
         ...selected.values(),
         { cursor: candidate.cursor, run: projected },

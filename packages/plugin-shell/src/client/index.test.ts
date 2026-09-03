@@ -1888,14 +1888,18 @@ describe("hosted Stop", () => {
       status: "reconciliation-required",
       message:
         "Stop accepted; reconciling the provider outcome before cancelling.",
-      canResume: false,
+      // A parked Turn is offered the resolve control, Stop included: hiding
+      // it there hid it in exactly the case Stop creates.
+      canResume: true,
     });
 
     await provided.value.stopRun();
     expect(provided.value.activeRun).toBeUndefined();
     expect(provided.value.activeRunId).toBeUndefined();
+    // The Turn keeps whatever it had already said; the notice is the line
+    // that says why it ends where it does.
     expect(provided.value.messages[1]).toMatchObject({
-      text: "Stopped by an authenticated Stop command.",
+      notice: "Stopped by an authenticated Stop command.",
       status: "aborted",
     });
 
@@ -1952,12 +1956,15 @@ describe("hosted Stop", () => {
 
     await provided.value.stopRun();
 
-    expect(lookups).toBe(1);
+    // Two, and deliberately: a client that finds itself holding an active run
+    // it did not start now observes it (a reload mid-Turn, a second tab), and
+    // Stop then observes the settlement it asked for.
+    expect(lookups).toBe(2);
     expect(provided.value.activeRun).toBeUndefined();
     expect(provided.value.activeRunId).toBeUndefined();
     expect(provided.value.messages.at(-1)).toMatchObject({
       runId: "run-1",
-      text: "Stopped by an authenticated Stop command.",
+      notice: "Stopped by an authenticated Stop command.",
       status: "aborted",
     });
   });
@@ -2938,7 +2945,7 @@ describe("a message sent while a Turn is running", () => {
     // The superseded Turn keeps the quiet treatment a stopped one gets.
     expect(state.messages[1]).toMatchObject({
       status: "aborted",
-      text: "Interrupted by your next message.",
+      notice: "Interrupted by your next message.",
     });
   });
 
