@@ -52,6 +52,63 @@ export type ClientRunStatusV1 =
 const CANCELLED_RUN_MESSAGE = "Stopped by an authenticated Stop command.";
 const SUPERSEDED_RUN_MESSAGE = "Interrupted by your next message.";
 
+/**
+ * Why the Bot declined to admit a Turn. A refusal is an ordinary answer — the
+ * Bot is busy with a Turn this command did not ask to replace, is holding an
+ * effect only a User can settle, or the command was fenced or already used —
+ * so the client shows the reason and keeps the person's text rather than
+ * treating it as a failure of the send.
+ */
+export type ClientTurnRefusalReasonV1 =
+  "busy" | "reconciliation-required" | "fenced" | "duplicate";
+
+/** The versioned body a refused Turn answers with, decoded by the client. */
+export interface ClientTurnRefusalV1 {
+  schemaVersion: 1;
+  status: "refused";
+  reason: ClientTurnRefusalReasonV1;
+  error: string;
+}
+
+const TURN_REFUSAL_REASONS_V1: readonly ClientTurnRefusalReasonV1[] = [
+  "busy",
+  "reconciliation-required",
+  "fenced",
+  "duplicate",
+];
+
+/** The refusal a response body carries, or `undefined` when it carries none. */
+export function decodeClientTurnRefusalV1(
+  value: unknown,
+): ClientTurnRefusalV1 | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const body = value as Record<string, unknown>;
+  if (body.schemaVersion !== 1 || body.status !== "refused") return undefined;
+  if (typeof body.error !== "string") return undefined;
+  const reason = TURN_REFUSAL_REASONS_V1.find(
+    (candidate) => candidate === body.reason,
+  );
+  if (!reason) return undefined;
+  return {
+    schemaVersion: 1,
+    status: "refused",
+    reason,
+    error: wireString(body, "error", MAX_FAILURE_BYTES, "turn refusal"),
+  };
+}
+
+/**
+ * A refusal, as an error, because that is how a transport reports a non-2xx.
+ * The reason survives on the error so the client can tell "the Bot said no"
+ * from "the send may or may not have happened".
+ */
+export class ClientTurnRefusedErrorV1 extends Error {
+  constructor(readonly refusal: ClientTurnRefusalV1) {
+    super(refusal.error);
+    this.name = "ClientTurnRefusedErrorV1";
+  }
+}
+
 export type ClientRunEventV1 =
   | {
       type: "run/events-truncated";
@@ -123,8 +180,13 @@ export interface ClientDynamicToolCallInputV1 {
 export type ClientRunOutcomeV1 =
   | { type: "completed"; text: string }
   | { type: "failed"; message: string }
-  | { type: "cancelled"; message: string }
-  | { type: "superseded"; message: string };
+  /**
+   * A Turn a Stop or a later message ended keeps what it had already said:
+   * `text` is that partial answer, and `message` is the line saying why it
+   * ends where it does (ADR 0024).
+   */
+  | { type: "cancelled"; message: string; text?: string }
+  | { type: "superseded"; message: string; text?: string };
 
 export interface ClientRunRecoveryV1 {
   action: "resume";
@@ -565,6 +627,33 @@ function visibleEvents(
   return projection;
 }
 
+/**
+ * What an interrupted Turn had already said, read back out of its journal.
+ *
+ * The kernel records a Turn's answer as it streams, so a Turn stopped or
+ * superseded mid-sentence still holds every word it sent. It never reached a
+ * `responseText`, because it never completed — but the partial answer is a
+ * fact about what the person watched arrive, not a claim that the Turn
+ * succeeded, and the thread keeps it instead of replacing it with a notice.
+ */
+function interruptedOutcomeTextV1(run: StoredRun): { text?: string } {
+  let requestId: string | undefined;
+  let text = run.responseText ?? "";
+  for (const event of run.events) {
+    if (event.type === "assistant/chunk") {
+      if (event.requestId !== requestId) {
+        requestId = event.requestId;
+        text = "";
+      }
+      text += event.text;
+    } else if (event.type === "assistant/message") {
+      requestId = event.requestId;
+      text = event.text;
+    }
+  }
+  return text ? { text: truncateWireString(text, MAX_OUTCOME_BYTES) } : {};
+}
+
 function runStatus(run: StoredRun): ClientRunStatusV1 {
   return requireStoredRunV1(run).status;
 }
@@ -589,11 +678,13 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
           ? ({
               type: "cancelled",
               message: CANCELLED_RUN_MESSAGE,
+              ...interruptedOutcomeTextV1(run),
             } satisfies ClientRunOutcomeV1)
           : status === "superseded"
             ? ({
                 type: "superseded",
                 message: SUPERSEDED_RUN_MESSAGE,
+                ...interruptedOutcomeTextV1(run),
               } satisfies ClientRunOutcomeV1)
             : undefined;
   const recovery =
@@ -693,6 +784,39 @@ export function projectClientTurnV1(result: BotTurnCompletion): ClientTurnV1 {
       ? { notification: projectNotificationV1(result.notification) }
       : {}),
   };
+}
+
+/**
+ * One stored run on the wire, degraded rather than thrown when the record
+ * cannot be read.
+ *
+ * A single unreadable run — an older shape, or one a bug wrote badly — used to
+ * fail the whole transcript: `GET /turns` answered 500 for every request after
+ * it, and the person's entire conversation disappeared behind one bad row. The
+ * transcript keeps its shape and says which Turn it could not read.
+ */
+export function projectClientRunOrDegradedV1(run: StoredRun): ClientRunV1 {
+  try {
+    return projectClientRunV1(run);
+  } catch {
+    const admittedAt =
+      typeof run.acceptedAt === "string" &&
+      Number.isFinite(Date.parse(run.acceptedAt))
+        ? run.acceptedAt
+        : new Date(0).toISOString();
+    return {
+      schemaVersion: 2,
+      runId: truncate(String(run.runId ?? "unknown"), MAX_RUN_ID_LENGTH),
+      admittedAt,
+      input: typeof run.input === "string" ? run.input : "",
+      status: "failed",
+      events: [],
+      outcome: {
+        type: "failed",
+        message: "This Turn's record could not be read.",
+      },
+    };
+  }
 }
 
 export function projectClientRunListV1(
@@ -1004,20 +1128,32 @@ function decodeOutcome(
     };
   }
   if (outcome.type === "cancelled" && runStatus === "cancelled") {
-    exactKeys(outcome, ["type", "message"], "run.outcome");
+    exactKeys(outcome, ["type", "message", "text"], "run.outcome");
     return {
       type: "cancelled",
       message: wireString(outcome, "message", MAX_FAILURE_BYTES, "run.outcome"),
+      ...decodeInterruptedTextV1(outcome),
     };
   }
   if (outcome.type === "superseded" && runStatus === "superseded") {
-    exactKeys(outcome, ["type", "message"], "run.outcome");
+    exactKeys(outcome, ["type", "message", "text"], "run.outcome");
     return {
       type: "superseded",
       message: wireString(outcome, "message", MAX_FAILURE_BYTES, "run.outcome"),
+      ...decodeInterruptedTextV1(outcome),
     };
   }
   throw new Error("run.outcome does not match run.status");
+}
+
+/** The partial answer an interrupted Turn kept, when it said anything. */
+function decodeInterruptedTextV1(outcome: Record<string, unknown>): {
+  text?: string;
+} {
+  if (outcome.text === undefined) return {};
+  return {
+    text: wireString(outcome, "text", MAX_OUTCOME_BYTES, "run.outcome"),
+  };
 }
 
 function decodeRecovery(
@@ -1114,8 +1250,12 @@ function decodeRun(value: unknown): ClientRun {
     ...(run.queued === true ? { queued: true as const } : {}),
     ...(outcome?.type === "completed" ? { responseText: outcome.text } : {}),
     ...(outcome?.type === "failed" ? { failure: outcome.message } : {}),
-    ...(outcome?.type === "cancelled" ? { failure: outcome.message } : {}),
-    ...(outcome?.type === "superseded" ? { failure: outcome.message } : {}),
+    ...(outcome?.type === "cancelled" || outcome?.type === "superseded"
+      ? {
+          failure: outcome.message,
+          ...(outcome.text ? { responseText: outcome.text } : {}),
+        }
+      : {}),
     ...(recovery ? { failure: recovery.message, recovery } : {}),
   };
 }
