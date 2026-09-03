@@ -14,6 +14,8 @@ import { computerKey, type ComputerState } from "../shared.ts";
 import { dialogFocusWrapTarget } from "./dialog-focus.ts";
 import {
   createComputerViewerActions,
+  decodeComputerViewerFrameMessageV1,
+  type ComputerViewerFrameStateV1,
   viewerUrlForControlV1,
 } from "./viewer.ts";
 
@@ -22,6 +24,13 @@ const state = computed(() => computer.value);
 const busy = ref(false);
 const confirming = ref(false);
 const confirmDialog = ref<HTMLElement>();
+const viewerFrame = ref<HTMLIFrameElement>();
+const frameState = ref<"loading" | ComputerViewerFrameStateV1>("loading");
+const frameMessage = ref("Loading viewer frame…");
+const elapsedSeconds = ref(0);
+let elapsedTimer: ReturnType<typeof setInterval> | undefined;
+let localProgressStartedAt = Date.now();
+let elapsedWasActive = false;
 let restoreFocus: HTMLElement | undefined;
 const focusable = 'button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const actions = createComputerViewerActions(
@@ -42,12 +51,72 @@ const viewerSrc = computed(() =>
     ? viewerUrlForControlV1(state.value.viewerUrl, isHuman.value)
     : undefined,
 );
+const opening = computed(
+  () =>
+    state.value.phase === "provisioning" || state.value.phase === "updating",
+);
+const progressSteps = computed(
+  () =>
+    state.value.progress?.steps ?? [
+      {
+        version: 1 as const,
+        id: state.value.phase,
+        label: state.value.message,
+        status: "active" as const,
+      },
+    ],
+);
+const progressPosition = computed(() => {
+  const progress = state.value.progress;
+  return progress ? `Step ${progress.index} of ${progress.total}` : undefined;
+});
 const statusLabel = computed(() => {
+  if (hasViewer.value && frameState.value !== "connected") {
+    return frameMessage.value;
+  }
   if (isHuman.value) return "Your control";
   if (state.value.phase === "ready") return "View only";
   if (state.value.phase === "updating") return state.value.message;
   return state.value.phase.replaceAll("-", " ");
 });
+
+function updateElapsed(): void {
+  const durableStart = state.value.progress?.startedAt;
+  const parsed = durableStart ? Date.parse(durableStart) : Number.NaN;
+  const startedAt = Number.isFinite(parsed) ? parsed : localProgressStartedAt;
+  elapsedSeconds.value = Math.max(
+    0,
+    Math.floor((Date.now() - startedAt) / 1_000),
+  );
+}
+
+function syncElapsed(): void {
+  if (elapsedTimer !== undefined) clearInterval(elapsedTimer);
+  elapsedTimer = undefined;
+  if (!state.value.expanded || !opening.value) {
+    elapsedSeconds.value = 0;
+    return;
+  }
+  updateElapsed();
+  elapsedTimer = setInterval(updateElapsed, 1_000);
+}
+
+function handleFrameLoad(): void {
+  if (frameState.value === "loading") {
+    frameState.value = "connecting";
+    frameMessage.value = "Connecting to desktop…";
+  }
+}
+
+function handleViewerMessage(event: MessageEvent): void {
+  if (event.source !== viewerFrame.value?.contentWindow) return;
+  const source = state.value.viewerUrl;
+  if (!source || event.origin !== new URL(source).origin) return;
+  const message = decodeComputerViewerFrameMessageV1(event.data);
+  if (!message) return;
+  frameState.value = message.state;
+  frameMessage.value = message.message;
+}
 
 async function invoke(action: () => Promise<void>): Promise<void> {
   if (busy.value) return;
@@ -115,10 +184,33 @@ watch(
     if (!expanded) confirming.value = false;
   },
 );
+watch(
+  () => state.value.viewerUrl,
+  () => {
+    frameState.value = "loading";
+    frameMessage.value = "Loading viewer frame…";
+  },
+);
+watch(
+  [() => state.value.expanded, opening, () => state.value.progress?.startedAt],
+  ([expanded, active]) => {
+    if (expanded && active && !elapsedWasActive) {
+      localProgressStartedAt = Date.now();
+    }
+    elapsedWasActive = Boolean(expanded && active);
+    syncElapsed();
+  },
+  { immediate: true },
+);
 
-onMounted(() => window.addEventListener("keydown", handleWindowKeydown));
+onMounted(() => {
+  window.addEventListener("keydown", handleWindowKeydown);
+  window.addEventListener("message", handleViewerMessage);
+});
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", handleWindowKeydown);
+  window.removeEventListener("message", handleViewerMessage);
+  if (elapsedTimer !== undefined) clearInterval(elapsedTimer);
   restoreFocus?.focus();
 });
 </script>
@@ -178,26 +270,52 @@ onBeforeUnmount(() => {
       <div class="computer-screen computer-screen-expanded">
         <iframe
           v-if="viewerSrc"
+          ref="viewerFrame"
           :src="viewerSrc"
           title="Computer"
           sandbox="allow-forms allow-pointer-lock allow-same-origin allow-scripts"
           referrerpolicy="no-referrer"
+          @load="handleFrameLoad"
         />
         <div v-else class="computer-placeholder">
           <strong v-if="state.phase === 'unconfigured'"
             >Computer not configured</strong
           >
-          <strong v-else-if="state.phase === 'provisioning'"
-            >Preparing computer…</strong
-          >
-          <strong v-else-if="state.phase === 'updating'"
-            >Updating computer…</strong
-          >
+          <template v-else-if="opening">
+            <strong>
+              {{
+                state.phase === "updating"
+                  ? "Updating computer…"
+                  : "Preparing computer…"
+              }}
+            </strong>
+            <div
+              class="computer-progress-track"
+              role="progressbar"
+              :aria-label="state.message"
+            >
+              <span />
+            </div>
+            <div class="computer-progress-meta">
+              <span v-if="progressPosition">{{ progressPosition }}</span>
+              <span>{{ elapsedSeconds }}s elapsed</span>
+            </div>
+            <ol class="computer-progress-steps">
+              <li
+                v-for="step in progressSteps"
+                :key="step.id"
+                :class="`step-${step.status}`"
+              >
+                <span aria-hidden="true" />
+                {{ step.label }}
+              </li>
+            </ol>
+          </template>
           <strong v-else-if="state.phase === 'disconnected'"
             >Viewer disconnected</strong
           >
           <strong v-else>Persistent Computer</strong>
-          <p>{{ state.message }}</p>
+          <p v-if="!opening">{{ state.message }}</p>
           <UiButton
             v-if="state.phase === 'idle' || state.phase === 'disconnected'"
             :disabled="busy"

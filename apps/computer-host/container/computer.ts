@@ -31,6 +31,7 @@ import {
   DESKTOP_GUI_LEASE_KEY,
   DESKTOP_LIVE_MARKER,
   DESKTOP_SERVICE,
+  DESKTOP_SLOT_PREFIX,
   DESKTOP_TENANT_SERVICE_PREFIX,
   desktopServiceNameV1,
   ENSURE_AGENT_SCRIPT,
@@ -52,6 +53,7 @@ import {
   UPDATE_STARTING_PHASE,
   updateLaunchScript,
   VNC_PORT_BASE,
+  VIEWER_PAGE,
   WORKSPACE_SYNC_SERVICE,
   WORKSPACES_ROOT,
 } from "@frockbot/computer-host-runtime";
@@ -172,6 +174,11 @@ export const COMPUTER_HOST_CONCURRENCY = {
   /** In-flight effects one User's Computer will hold at once. */
   perUser: 4,
 } as const;
+
+/** Machine-only prefixes in the one viewer-material exec response. */
+export const VIEWER_TOKEN_PREFIX = "__FROCKBOT_VIEWER_TOKEN__";
+export const VIEWER_PASSWORD_PREFIX = "__FROCKBOT_VIEWER_PASSWORD__";
+const VIEWER_MISSING_MARKER = "__FROCKBOT_VIEWER_MISSING__";
 
 export const COMPUTER_HOST_PHASE_TIMEOUTS = {
   /** The whole provisioning run, however many phases and restarts it takes. */
@@ -676,9 +683,9 @@ export class ComputerHost {
    * `client.baseURL` and `sprite.name`, so the second lookup returns what the
    * first did.
    *
-   * The one field that does move is the Sprite's own URL, and the viewer
-   * re-reads it deliberately rather than trusting a handle — which is why
-   * that call site still fetches.
+   * The handle also carries the Sprite's public URL. A malformed legacy
+   * handle without one is the viewer's only fallback lookup; the normal path
+   * does not fetch the same Sprite again.
    */
   private readonly spriteHandles = new Map<string, Promise<SpriteHandle>>();
 
@@ -873,6 +880,7 @@ export class ComputerHost {
         `set -eu`,
         `${ENSURE_AGENT_SCRIPT} ${shellQuote(botKey)} ${shellQuote(profile)}`,
         `SLOT=$(cat ${shellQuote(`${BOTS_ROOT}/${botKey}/slot`)} 2>/dev/null || true)`,
+        `printf '${DESKTOP_SLOT_PREFIX}%s\\n' "$SLOT"`,
         `if [ -n "$SLOT" ] && (exec 3<>/dev/tcp/127.0.0.1/$((${VNC_PORT_BASE} + SLOT))) 2>/dev/null; then`,
         `  echo ${DESKTOP_LIVE_MARKER}`,
         `fi`,
@@ -903,9 +911,15 @@ export class ComputerHost {
     // hundred of them, so a tenant that has not been given one — or a Computer
     // whose desktop stack is not up — is answered without a display rather
     // than refused: the exec and file surfaces do not need a screen.
+    const rawSlot = ensuredText
+      .split("\n")
+      .find((line) => line.startsWith(DESKTOP_SLOT_PREFIX))
+      ?.slice(DESKTOP_SLOT_PREFIX.length);
+    const slot = rawSlot && /^\d+$/.test(rawSlot) ? Number(rawSlot) : undefined;
     const display = await this.desktop(
       sprite,
       botKey,
+      slot !== undefined && Number.isSafeInteger(slot) ? slot : undefined,
       ensuredText.includes(DESKTOP_LIVE_MARKER),
     );
     const result: ComputerHostOpenResultV1 = {
@@ -946,10 +960,11 @@ export class ComputerHost {
   private async desktop(
     sprite: SpriteHandle,
     botKey: string,
+    slot: number | undefined,
     live: boolean,
   ): Promise<string | undefined> {
-    const display = await this.displayFor(sprite, botKey);
-    if (!display) return undefined;
+    if (slot === undefined) return undefined;
+    const display = `:${100 + slot}`;
     if (live) return display;
     try {
       await withTimeout(
@@ -970,23 +985,6 @@ export class ComputerHost {
       return undefined;
     }
     return display;
-  }
-
-  private async displayFor(
-    sprite: SpriteHandle,
-    botKey: string,
-  ): Promise<string | undefined> {
-    let slot: number;
-    try {
-      slot = Number(
-        (await this.readText(sprite, `${BOTS_ROOT}/${botKey}/slot`)).trim(),
-      );
-    } catch {
-      return undefined;
-    }
-    return Number.isSafeInteger(slot) && slot >= 0
-      ? `:${100 + slot}`
-      : undefined;
   }
 
   /** The User's Computer, provisioning it exactly once per container. */
@@ -1042,18 +1040,7 @@ export class ComputerHost {
     }
 
     const provisioning = await this.driveProvisioning(sprite);
-    await withTimeout(
-      settleService(
-        await sprite.createService(
-          DESKTOP_SERVICE,
-          { cmd: `${RUNTIME_ROOT}/start-gateway.sh`, httpPort: 6080 },
-          "30s",
-        ),
-        "Desktop gateway",
-      ),
-      "desktop gateway",
-      COMPUTER_HOST_PHASE_TIMEOUTS.service,
-    );
+    await this.declareGateway(sprite);
     await withTimeout(
       settleService(
         await sprite.createService(WORKSPACE_SYNC_SERVICE, {
@@ -1096,6 +1083,13 @@ export class ComputerHost {
     const digest = runtimeDocumentDigestV1();
     if (inspection.digest === digest) {
       if (inspection.state?.update) {
+        // The runtime document may have reached disk before this container
+        // observed the named gateway restart. Re-declaration is keyed by the
+        // service name, so it reconciles that last update effect before the
+        // durable intent is cleared (P3/P4).
+        if (inspection.state.update.status === "started") {
+          await this.declareGateway(sprite);
+        }
         await this.writeHostState(sprite, {
           version: 1,
           generation: record.generation,
@@ -1159,11 +1153,30 @@ export class ComputerHost {
     const updated = await this.driveProvisioning(sprite, "update", (observed) =>
       Object.assign(progress, observed),
     );
+    // A running websockify keeps the `--web` directory from its original
+    // process. Re-declare the provider-owned service so the newly installed
+    // digest-tracked viewer page is served by this very open (P3).
+    await this.declareGateway(sprite);
     await this.writeHostState(sprite, {
       version: 1,
       generation: record.generation,
     });
     return { ...record, provisioning: updated };
+  }
+
+  private async declareGateway(sprite: SpriteHandle): Promise<void> {
+    await withTimeout(
+      settleService(
+        await sprite.createService(
+          DESKTOP_SERVICE,
+          { cmd: `${RUNTIME_ROOT}/start-gateway.sh`, httpPort: 6080 },
+          "30s",
+        ),
+        "Desktop gateway",
+      ),
+      "desktop gateway",
+      COMPUTER_HOST_PHASE_TIMEOUTS.service,
+    );
   }
 
   private async waitForUpdate(active: ActiveUpdate): Promise<ComputerRecord> {
@@ -2005,11 +2018,64 @@ export class ComputerHost {
       return Response.json({ version: 1, effectId: request.effectId });
     }
 
-    const [token, password] = await Promise.all([
-      this.readText(sprite, `${BOTS_ROOT}/${botKey}/viewer-token`),
-      this.readText(sprite, `${BOTS_ROOT}/${botKey}/vnc-password`),
-    ]);
-    const sessionId = token.trim();
+    // The ensure exec that precedes a new viewer has already minted these
+    // files and touched last-seen. Renewals still need the touch, so reading
+    // both values and recording activity are one Sprite exec rather than two
+    // filesystem requests followed by another exec (P3).
+    const material = await this.run(
+      sprite,
+      [
+        `set -eu`,
+        `BOT=${shellQuote(`${BOTS_ROOT}/${botKey}`)}`,
+        `if [ ! -s "$BOT/viewer-token" ] || [ ! -s "$BOT/vnc-password" ]; then`,
+        `  echo ${VIEWER_MISSING_MARKER}`,
+        `  exit 69`,
+        `fi`,
+        `touch "$BOT/last-seen"`,
+        `printf '${VIEWER_TOKEN_PREFIX}%s\\n' "$(cat "$BOT/viewer-token")"`,
+        `printf '${VIEWER_PASSWORD_PREFIX}%s\\n' "$(cat "$BOT/vnc-password")"`,
+        "",
+      ].join("\n"),
+      `viewer ${operation.action}`,
+      COMPUTER_HOST_PHASE_TIMEOUTS.control,
+    );
+    const materialText = material.stdout.toString("utf8");
+    if (materialText.includes(VIEWER_MISSING_MARKER)) {
+      throw new ComputerHostError(
+        "not-found",
+        "The Computer viewer session is not available",
+        404,
+      );
+    }
+    if (material.exitCode !== 0) {
+      // Viewer stdout contains credentials. Never include it in an error that
+      // can cross the host seam or reach durable failure state (P4).
+      const detail = material.stderr.toString("utf8").trim().slice(0, 512);
+      throw new ComputerHostError(
+        "provider-failure",
+        detail
+          ? `Computer viewer session could not be minted: ${detail}`
+          : "Computer viewer session could not be minted",
+        502,
+        true,
+      );
+    }
+    const field = (prefix: string): string | undefined =>
+      materialText
+        .split("\n")
+        .find((line) => line.startsWith(prefix))
+        ?.slice(prefix.length)
+        .trim();
+    const sessionId = field(VIEWER_TOKEN_PREFIX);
+    const password = field(VIEWER_PASSWORD_PREFIX);
+    if (!sessionId || !password) {
+      throw new ComputerHostError(
+        "provider-failure",
+        "The Computer returned incomplete viewer session material",
+        502,
+        true,
+      );
+    }
     if (operation.action === "renew" && operation.sessionId !== sessionId) {
       throw new ComputerHostError(
         "not-found",
@@ -2017,17 +2083,10 @@ export class ComputerHost {
         404,
       );
     }
-    // Watching is Computer activity (P3). The reclaim scan already treats a
-    // fresh last-seen as live, so viewer open/renew updates the same registry
-    // fact instead of creating a second lease or another source of truth.
-    await this.run(
-      sprite,
-      `mkdir -p ${shellQuote(`${BOTS_ROOT}/${botKey}`)} && touch ${shellQuote(`${BOTS_ROOT}/${botKey}/last-seen`)}\n`,
-      `viewer ${operation.action}`,
-      COMPUTER_HOST_PHASE_TIMEOUTS.control,
-    );
+    // A Sprite handle already carries the public URL. Only a legacy/malformed
+    // handle with no URL pays another API lookup.
     const base =
-      (await this.client.getSprite(record.spriteName)).url ?? sprite.url;
+      sprite.url ?? (await this.client.getSprite(record.spriteName)).url;
     if (!base) {
       throw new ComputerHostError(
         "provider-unavailable",
@@ -2036,14 +2095,17 @@ export class ComputerHost {
         true,
       );
     }
-    const viewer = new URL("vnc.html", base.endsWith("/") ? base : `${base}/`);
+    const viewer = new URL(
+      VIEWER_PAGE.slice(VIEWER_PAGE.lastIndexOf("/") + 1),
+      base.endsWith("/") ? base : `${base}/`,
+    );
     viewer.hash = new URLSearchParams({
       autoconnect: "1",
       reconnect: "1",
       resize: "scale",
       view_only: "1",
       path: `websockify?token=${sessionId}`,
-      password: password.trim(),
+      password,
     }).toString();
     return Response.json({
       version: 1,

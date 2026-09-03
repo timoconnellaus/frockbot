@@ -2,6 +2,7 @@ import type { InjectionKey, Ref } from "vue";
 import type {
   ComputerDoctorViewV1,
   ComputerPhase,
+  ComputerProgressViewV1,
   ComputerScreenshotViewV1,
 } from "./protocol.js";
 
@@ -30,6 +31,7 @@ export interface ComputerState {
   botId: string;
   providerLabel: string;
   message: string;
+  progress?: ComputerProgressViewV1;
   viewerUrl?: string;
   /** Whether the one live viewer is open over the hosted shell. */
   expanded: boolean;

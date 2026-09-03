@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type {
+  ComputerConnectionOptionsV1,
   ComputerControlLease,
   ComputerHandle,
 } from "@frockbot/computer-core";
@@ -59,7 +60,7 @@ function command(
 }
 
 function fakeHandle(options: {
-  presence?(): Promise<{
+  presence?(options?: ComputerConnectionOptionsV1): Promise<{
     id: string;
     url: string;
     expiresAt: string;
@@ -100,6 +101,113 @@ function fakeHandle(options: {
 }
 
 describe("Computer Bot Durable Object Contribution", () => {
+  test("records provider progress durably and projects its ordered steps", async () => {
+    const storage = new MemoryStorage();
+    let contribution: ReturnType<typeof createComputerBotBackendContribution>;
+    contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            presence: async (options) => {
+              expect(await contribution.read("user-1", "scout")).toMatchObject({
+                phase: "provisioning",
+                progress: {
+                  kind: "connect",
+                  steps: [{ id: "waking", status: "active" }],
+                },
+              });
+              await options?.onProgress?.({
+                version: 1,
+                kind: "connect",
+                step: "starting-desktop",
+                label: "Starting the desktop",
+                index: 3,
+                total: 5,
+              });
+              expect(await contribution.read("user-1", "scout")).toMatchObject({
+                phase: "provisioning",
+                progress: {
+                  version: 1,
+                  kind: "connect",
+                  steps: [
+                    { id: "waking", status: "complete" },
+                    { id: "attaching", status: "complete" },
+                    { id: "starting-desktop", status: "active" },
+                    { id: "minting-viewer", status: "pending" },
+                    { id: "connecting", status: "pending" },
+                  ],
+                },
+              });
+              return {
+                id: "viewer-1",
+                url: "https://viewer.invalid/secret",
+                expiresAt: "2026-09-03T00:01:30.000Z",
+              };
+            },
+          }),
+        ),
+      now: () => new Date("2026-09-03T00:00:00.000Z"),
+    });
+
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-progress"),
+    );
+
+    expect(
+      (storage.values.get(COMPUTER_PROVIDER_RECORD_KEY) as { version: number })
+        .version,
+    ).toBe(2);
+    expect(
+      (await contribution.read("user-1", "scout")).progress,
+    ).toBeUndefined();
+  });
+
+  test("migrates a V1 provider record and writes V2 on the next change", async () => {
+    const storage = new MemoryStorage();
+    storage.values.set(COMPUTER_PROVIDER_RECORD_KEY, {
+      version: 1,
+      phase: "provisioning",
+      message: "An older durable wake",
+      recordedAt: "2026-09-02T23:59:00.000Z",
+    });
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            presence: () =>
+              Promise.resolve({
+                id: "viewer-1",
+                url: "https://viewer.invalid/secret",
+                expiresAt: "2026-09-03T00:01:30.000Z",
+              }),
+          }),
+        ),
+      now: () => new Date("2026-09-03T00:00:00.000Z"),
+    });
+
+    expect(await contribution.read("user-1", "scout")).toMatchObject({
+      phase: "provisioning",
+      message: "An older durable wake",
+    });
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-after-v1"),
+    );
+    expect(storage.values.get(COMPUTER_PROVIDER_RECORD_KEY)).toMatchObject({
+      version: 2,
+      phase: "ready",
+    });
+  });
+
   test("commits intent before it asks the provider and replays one receipt", async () => {
     const storage = new MemoryStorage();
     let calls = 0;
@@ -229,6 +337,7 @@ describe("Computer Bot Durable Object Contribution", () => {
       phase: "updating",
       message: "Updating the Computer runtime",
       viewerSession: { id: "viewer-1" },
+      progress: { kind: "update" },
     });
   });
 
@@ -264,6 +373,10 @@ describe("Computer Bot Durable Object Contribution", () => {
     expect(await contribution.read("user-1", "scout")).toMatchObject({
       phase: "updating",
       message: "Updating the Computer runtime",
+      progress: {
+        kind: "update",
+        steps: [{ label: "Updating the Computer runtime", status: "active" }],
+      },
     });
   });
 

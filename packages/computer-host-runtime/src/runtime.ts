@@ -29,6 +29,9 @@ export const HOME_ROOT = "/home/box";
 export const DATA_ROOT = `${HOME_ROOT}/agent-data`;
 export const RUNTIME_ROOT = `${HOME_ROOT}/.frockbot`;
 export const BOTS_ROOT = `${RUNTIME_ROOT}/bots`;
+/** FrockBot-owned noVNC shell; only noVNC's transport/core is linked into it. */
+export const VIEWER_ROOT = `${RUNTIME_ROOT}/viewer`;
+export const VIEWER_PAGE = `${VIEWER_ROOT}/index.html`;
 
 /**
  * The lease key a User-wide `desktop-gui` lease is held under.
@@ -206,6 +209,8 @@ export function desktopServiceNameV1(botKey: string): string {
  * running process.
  */
 export const DESKTOP_LIVE_MARKER = "__FROCKBOT_DESKTOP_LIVE__";
+/** Prefix carrying the slot the attach exec already read back to the host. */
+export const DESKTOP_SLOT_PREFIX = "__FROCKBOT_DESKTOP_SLOT__";
 
 /**
  * The one variable that separates a sanctioned GUI call from a shell-driven
@@ -650,12 +655,152 @@ while true; do
 done
 `;
 
+/**
+ * The hosted Computer viewer, without stock noVNC application chrome.
+ *
+ * The Sprite image's Ubuntu 25.10 package installs noVNC 1.6.0 under
+ * `/usr/share/novnc`. Its `ui.js`
+ * reads `view_only` while constructing RFB and only reapplies it from its own
+ * settings control; changing an iframe's fragment therefore left the existing
+ * connection view-only. This page owns the presentation, imports only RFB,
+ * and treats the fragment as live state so P2's second-click takeover keeps
+ * one socket and one secret-bearing URL.
+ */
+export const viewerPage = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>FrockBot Computer</title>
+    <style>
+      :root { color-scheme: dark; background: #0a0d12; }
+      * { box-sizing: border-box; }
+      html, body, #screen { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      body { background: #0a0d12; }
+      #screen, #screen * { touch-action: none; }
+      #screen.view-only { pointer-events: none; }
+      #screen.view-only, #screen.view-only * { cursor: none !important; }
+      #status {
+        position: fixed;
+        z-index: 2;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        color: #dce5f2;
+        background: #0a0d12;
+        font: 500 14px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-align: center;
+      }
+      #status[data-state="connected"] { display: none; }
+      #status[data-state="error"] { color: #ffb4b4; }
+    </style>
+  </head>
+  <body>
+    <div id="screen" class="view-only" aria-label="Computer desktop, view only"></div>
+    <div id="status" role="status" aria-live="polite">Connecting to desktop…</div>
+    <script type="module">
+      import RFB from "./core/rfb.js";
+
+      const screen = document.getElementById("screen");
+      const status = document.getElementById("status");
+      let rfb;
+      let reconnectTimer;
+
+      function parameters() {
+        return new URLSearchParams(window.location.hash.slice(1));
+      }
+
+      function enabled(name, fallback) {
+        const value = parameters().get(name);
+        if (value === null) return fallback;
+        return value === "1" || value === "true";
+      }
+
+      function publish(state, message) {
+        status.dataset.state = state;
+        status.textContent = message;
+        window.parent.postMessage(
+          { type: "frockbot-viewer", state: state, message: message },
+          "*",
+        );
+      }
+
+      function applyMode() {
+        const viewOnly = enabled("view_only", true);
+        screen.classList.toggle("view-only", viewOnly);
+        screen.setAttribute(
+          "aria-label",
+          viewOnly ? "Computer desktop, view only" : "Computer desktop, control enabled",
+        );
+        if (!rfb) return;
+        rfb.viewOnly = viewOnly;
+        rfb.showDotCursor = false;
+      }
+
+      function socketUrl(path) {
+        const url = new URL(path, window.location.href);
+        url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        url.hash = "";
+        return url.href;
+      }
+
+      function connect() {
+        window.clearTimeout(reconnectTimer);
+        publish("connecting", "Connecting to desktop…");
+        const config = parameters();
+        try {
+          rfb = new RFB(
+            screen,
+            socketUrl(config.get("path") || "websockify"),
+            {
+              credentials: { password: config.get("password") || "" },
+              shared: true,
+            },
+          );
+          rfb.scaleViewport = config.get("resize") === "scale";
+          rfb.resizeSession = config.get("resize") === "remote";
+          rfb.showDotCursor = false;
+          applyMode();
+          rfb.addEventListener("connect", () => {
+            publish("connected", "Desktop connected");
+          });
+          rfb.addEventListener("disconnect", (event) => {
+            rfb = undefined;
+            if (enabled("reconnect", true)) {
+              publish("reconnecting", "Reconnecting…");
+              reconnectTimer = window.setTimeout(connect, 1000);
+              return;
+            }
+            publish(
+              "error",
+              event.detail && event.detail.clean
+                ? "Desktop disconnected"
+                : "Desktop connection failed",
+            );
+          });
+          rfb.addEventListener("securityfailure", () => {
+            publish("error", "Desktop authentication failed");
+          });
+        } catch {
+          rfb = undefined;
+          publish("error", "Desktop connection failed");
+        }
+      }
+
+      window.addEventListener("hashchange", applyMode);
+      connect();
+    </script>
+  </body>
+</html>
+`;
+
 /** The port the noVNC gateway serves on, and the port box-doctor probes. */
 export const DESKTOP_GATEWAY_PORT = 6080;
 
 export const gatewayScript = `#!/usr/bin/env bash
 set -eu
-exec websockify --web=/usr/share/novnc --token-plugin TokenFile --token-source=${RUNTIME_ROOT}/tokens ${DESKTOP_GATEWAY_PORT}
+exec websockify --web=${VIEWER_ROOT} --token-plugin TokenFile --token-source=${RUNTIME_ROOT}/tokens ${DESKTOP_GATEWAY_PORT}
 `;
 
 /** Where box-doctor is installed, and the log a human reads it back from. */
@@ -1240,6 +1385,7 @@ export const COMPUTER_RUNTIME_FILES: readonly {
     content: gatewayScript,
     mode: 0o700,
   },
+  { path: VIEWER_PAGE, content: viewerPage, mode: 0o644 },
   {
     path: `${RUNTIME_ROOT}/watch-workspace.sh`,
     content: syncWatchScript,
@@ -1321,7 +1467,12 @@ fi`,
   {
     name: "runtime",
     label: "installing the Computer runtime",
-    body: installDeclaredFiles(COMPUTER_RUNTIME_FILES),
+    body: `mkdir -p ${VIEWER_ROOT}
+${installDeclaredFiles(COMPUTER_RUNTIME_FILES)}
+# noVNC's ES modules in core/ import one another and ../vendor/pako. The links
+# keep that package-owned graph intact while FrockBot owns every rendered element.
+ln -sfn /usr/share/novnc/core ${VIEWER_ROOT}/core
+ln -sfn /usr/share/novnc/vendor ${VIEWER_ROOT}/vendor`,
   },
   {
     name: "browser",

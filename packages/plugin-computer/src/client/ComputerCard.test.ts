@@ -4,6 +4,7 @@ import { parse } from "@vue/compiler-sfc";
 import type { ComputerState } from "../shared.js";
 import {
   createComputerViewerActions,
+  decodeComputerViewerFrameMessageV1,
   viewerUrlForControlV1,
 } from "./viewer.js";
 
@@ -35,6 +36,28 @@ describe("Computer viewer", () => {
     expect(new URLSearchParams(interactive.hash.slice(1)).get("path")).toBe(
       "websockify?token=secret",
     );
+  });
+
+  test("accepts only secret-free viewer status messages", () => {
+    expect(
+      decodeComputerViewerFrameMessageV1({
+        type: "frockbot-viewer",
+        state: "connected",
+        message: "Desktop connected",
+      }),
+    ).toEqual({
+      type: "frockbot-viewer",
+      state: "connected",
+      message: "Desktop connected",
+    });
+    expect(
+      decodeComputerViewerFrameMessageV1({
+        type: "frockbot-viewer",
+        state: "connected",
+        message: "Desktop connected",
+        password: "secret",
+      }),
+    ).toBeUndefined();
   });
 
   test("requires confirmation before taking control and Escape closes through shared state", async () => {
@@ -77,6 +100,8 @@ describe("Computer viewer", () => {
     const template = parsed.descriptor.template?.content ?? "";
 
     expect(template).toContain(':src="viewerSrc"');
+    expect(template).toContain('@load="handleFrameLoad"');
+    expect(template).toContain('role="progressbar"');
     expect(template).toContain('@click="actions.requestTakeControl"');
     expect(template).toContain('role="alertdialog"');
     expect(template).toContain(

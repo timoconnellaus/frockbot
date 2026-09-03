@@ -254,6 +254,25 @@ export interface ComputerOperationOptions {
   effectId?: string;
 }
 
+/** One provider-neutral boundary crossed while opening a live viewer. */
+export interface ComputerConnectionProgressV1 {
+  version: 1;
+  kind: "connect" | "update";
+  step: string;
+  label: string;
+  index: number;
+  total: number;
+}
+
+export interface ComputerConnectionOptionsV1 extends ComputerOperationOptions {
+  /**
+   * Reports boundaries the provider can observe while the caller's durable
+   * connect intent remains in flight. The authoritative caller persists each
+   * report; this callback is not itself durable state.
+   */
+  onProgress?(progress: ComputerConnectionProgressV1): void | Promise<void>;
+}
+
 /**
  * The Computer's Workspace surface.
  *
@@ -538,7 +557,9 @@ export interface ComputerViewer {
  * provider-specific viewer transport remains behind the Computer adapter.
  */
 export interface ComputerPresence {
-  connect(options?: ComputerOperationOptions): Promise<ComputerViewerSession>;
+  connect(
+    options?: ComputerConnectionOptionsV1,
+  ): Promise<ComputerViewerSession>;
 }
 
 export interface ComputerControlLease {

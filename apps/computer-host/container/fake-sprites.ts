@@ -14,6 +14,7 @@ import { PassThrough } from "node:stream";
 import {
   BOTS_ROOT,
   DESKTOP_LIVE_MARKER,
+  DESKTOP_SLOT_PREFIX,
   DESKTOP_TENANT_SERVICE_PREFIX,
   ENSURE_AGENT_SCRIPT,
   LEASE_MAX_AGE_SECONDS,
@@ -29,6 +30,7 @@ import type {
   SpriteStatsHandle,
   SpritesClientHandle,
 } from "./computer.ts";
+import { VIEWER_PASSWORD_PREFIX, VIEWER_TOKEN_PREFIX } from "./computer.ts";
 
 export class FakeApiError extends Error {
   readonly statusCode: number;
@@ -147,6 +149,8 @@ export class FakeSprite implements SpriteHandle {
   /** Lets a test refuse one service the way a real Sprite would. */
   onCreateService?: (name: string) => void;
   readonly commands: RecordedCommand[] = [];
+  /** Every direct filesystem read, so hot-path tests can hold round trips down. */
+  readonly fileReads: string[] = [];
   url?: string = "https://fake-sprite.invalid";
   urlSettings?: { auth: string };
   /** Queue of scripted commands; the last one repeats once exhausted. */
@@ -190,11 +194,39 @@ export class FakeSprite implements SpriteHandle {
     // The attach probe asks the box whether the tenant's VNC port answers. On
     // a real Computer the only thing that opens that port is the tenant's own
     // desktop service, so a running one is what the fake answers from.
-    if (stdin.includes(ENSURE_AGENT_SCRIPT) && this.desktopIsRunning()) {
+    if (stdin.includes(ENSURE_AGENT_SCRIPT)) {
+      const slot = [...this.files.entries()].find(
+        ([path]) => path.startsWith(`${BOTS_ROOT}/`) && path.endsWith("/slot"),
+      )?.[1].bytes;
       return {
         ...selected,
-        stdout: [...(selected.stdout ?? []), `${DESKTOP_LIVE_MARKER}\n`],
+        stdout: [
+          ...(selected.stdout ?? []),
+          `${DESKTOP_SLOT_PREFIX}${slot?.toString().trim() ?? ""}\n`,
+          ...(this.desktopIsRunning() ? [`${DESKTOP_LIVE_MARKER}\n`] : []),
+        ],
       };
+    }
+    if (
+      stdin.includes(VIEWER_TOKEN_PREFIX) &&
+      stdin.includes(VIEWER_PASSWORD_PREFIX)
+    ) {
+      const bot = /BOT='([^']+)'/.exec(stdin)?.[1];
+      const token = bot
+        ? this.files.get(`${bot}/viewer-token`)?.bytes.toString().trim()
+        : undefined;
+      const password = bot
+        ? this.files.get(`${bot}/vnc-password`)?.bytes.toString().trim()
+        : undefined;
+      return token && password
+        ? {
+            stdout: [
+              `${VIEWER_TOKEN_PREFIX}${token}\n`,
+              `${VIEWER_PASSWORD_PREFIX}${password}\n`,
+            ],
+            exitCode: 0,
+          }
+        : { stdout: ["__FROCKBOT_VIEWER_MISSING__\n"], exitCode: 69 };
     }
     if (
       (selected.stdout ?? []).some((chunk) =>
@@ -228,6 +260,7 @@ export class FakeSprite implements SpriteHandle {
     const sprite = this;
     return {
       async readFile(path: string): Promise<Buffer> {
+        sprite.fileReads.push(path);
         const file = sprite.files.get(path);
         if (!file) throw new FakeApiError(404, `no such file: ${path}`);
         return file.bytes;

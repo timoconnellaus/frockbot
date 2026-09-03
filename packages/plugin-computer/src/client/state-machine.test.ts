@@ -186,6 +186,39 @@ describe("Computer client state machine", () => {
     expect(changed.screenshots[0]).not.toBe(first);
   });
 
+  test("projects durable opening progress without inventing a client step", () => {
+    const progress = {
+      version: 1 as const,
+      kind: "connect" as const,
+      startedAt: "2026-09-03T00:00:00.000Z",
+      updatedAt: "2026-09-03T00:00:02.000Z",
+      index: 3,
+      total: 5,
+      steps: [
+        {
+          version: 1 as const,
+          id: "starting-desktop",
+          label: "Starting the desktop",
+          status: "active" as const,
+        },
+      ],
+    };
+    const state = transitionComputerState(initialComputerMachineState(), {
+      type: "projection-received",
+      projection: {
+        version: 1,
+        botId: "scout",
+        providerLabel: "Fake Computer",
+        phase: "provisioning",
+        message: "Starting the desktop",
+        progress,
+        screenshots: [],
+      },
+    });
+
+    expect(state.progress).toEqual(progress);
+  });
+
   test("reset explicitly clears viewer secrets from an existing projection", () => {
     const projected = {
       ...initialComputerMachineState(),

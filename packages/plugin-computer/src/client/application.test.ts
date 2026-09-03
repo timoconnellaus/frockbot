@@ -8,6 +8,7 @@ import { nextTick, ref } from "vue";
 import { computerKey, type ComputerState } from "../shared.js";
 import {
   createComputerClientPlugin,
+  ACTIVE_PROJECTION_POLL_INTERVAL_MS,
   PROJECTION_POLL_INTERVAL_MS,
   VIEWER_REFRESH_INTERVAL_MS,
   type ComputerClientRuntime,
@@ -125,6 +126,26 @@ function mountHostedProvider() {
               : phase === "updating"
                 ? "Updating the Computer runtime"
                 : "Computer ready",
+          ...(phase === "updating"
+            ? {
+                progress: {
+                  version: 1,
+                  kind: "update",
+                  startedAt: "2026-09-02T00:00:00.000Z",
+                  updatedAt: "2026-09-02T00:00:02.000Z",
+                  index: 1,
+                  total: 2,
+                  steps: [
+                    {
+                      version: 1,
+                      id: "runtime",
+                      label: "Updating the Computer runtime",
+                      status: "active",
+                    },
+                  ],
+                },
+              }
+            : {}),
           ...(phase === "idle" ||
           phase === "disconnected" ||
           phase === "updating"
@@ -222,6 +243,7 @@ describe("hosted Computer provider", () => {
     await mounted.state.openViewer();
     expect(mounted.state).toMatchObject({ phase: "ready", expanded: true });
     expect(postedTypes(mounted.calls)).toEqual(["connect"]);
+    expect(mounted.runtime.count(ACTIVE_PROJECTION_POLL_INTERVAL_MS)).toBe(0);
     mounted.dispose();
   });
 
@@ -267,9 +289,20 @@ describe("hosted Computer provider", () => {
       viewerUrl: undefined,
     });
     expect(postedTypes(mounted.calls)).toEqual(["connect"]);
+    expect(mounted.runtime.count(ACTIVE_PROJECTION_POLL_INTERVAL_MS)).toBe(1);
 
-    // Every poll while open asks again, so the durable `updating` record is
-    // not the last word once the host has finished.
+    const readsBeforeFastPoll = mounted.calls.filter(
+      ([, method]) => !method,
+    ).length;
+    mounted.runtime.tick(ACTIVE_PROJECTION_POLL_INTERVAL_MS);
+    await flush();
+    expect(postedTypes(mounted.calls)).toEqual(["connect"]);
+    expect(
+      mounted.calls.filter(([, method]) => !method).length,
+    ).toBeGreaterThan(readsBeforeFastPoll);
+
+    // Rejoin remains deliberately slower than the progress reads, so the
+    // durable `updating` record is not the last word once the host finishes.
     mounted.setReady();
     mounted.runtime.tick(PROJECTION_POLL_INTERVAL_MS);
     await flush();
@@ -279,6 +312,7 @@ describe("hosted Computer provider", () => {
       expanded: true,
       viewerUrl: "https://viewer.invalid/secret#view_only=1",
     });
+    expect(mounted.runtime.count(ACTIVE_PROJECTION_POLL_INTERVAL_MS)).toBe(0);
 
     // Once ready, polls go back to reading only.
     mounted.runtime.tick(PROJECTION_POLL_INTERVAL_MS);

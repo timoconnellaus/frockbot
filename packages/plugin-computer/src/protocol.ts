@@ -61,6 +61,26 @@ export interface ComputerDoctorViewV1 {
   checks: ComputerDoctorCheckViewV1[];
 }
 
+export type ComputerProgressStepStatusV1 = "pending" | "active" | "complete";
+
+export interface ComputerProgressStepViewV1 {
+  version: 1;
+  id: string;
+  label: string;
+  status: ComputerProgressStepStatusV1;
+}
+
+/** Durable progress projected from the Bot authority; it contains no secrets. */
+export interface ComputerProgressViewV1 {
+  version: 1;
+  kind: "connect" | "update";
+  startedAt: string;
+  updatedAt: string;
+  index: number;
+  total: number;
+  steps: ComputerProgressStepViewV1[];
+}
+
 export const COMPUTER_PHASES = [
   "unconfigured",
   "idle",
@@ -92,6 +112,7 @@ export interface ComputerProjectionV1 {
   providerLabel: string;
   phase: ComputerPhase;
   message: string;
+  progress?: ComputerProgressViewV1;
   viewerSession?: ComputerViewerSessionViewV1;
   controlLease?: ComputerControlLeaseViewV1;
   screenshots: ComputerScreenshotViewV1[];
@@ -174,6 +195,95 @@ function phase(value: unknown): ComputerPhase {
     throw new ComputerProtocolDecodeError("Computer phase is unknown");
   }
   return decoded;
+}
+
+function boundedInteger(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  label: string,
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    throw new ComputerProtocolDecodeError(`${label} is invalid`);
+  }
+  return value;
+}
+
+function decodeProgressStepV1(value: unknown): ComputerProgressStepViewV1 {
+  const candidate = record(value, "Computer progress step");
+  exactKeys(
+    candidate,
+    ["version", "id", "label", "status"],
+    [],
+    "Computer progress step",
+  );
+  if (
+    candidate.version !== 1 ||
+    (candidate.status !== "pending" &&
+      candidate.status !== "active" &&
+      candidate.status !== "complete")
+  ) {
+    throw new ComputerProtocolDecodeError("Computer progress step is invalid");
+  }
+  return {
+    version: 1,
+    id: text(candidate.id, "Computer progress step id"),
+    label: text(candidate.label, "Computer progress step label"),
+    status: candidate.status,
+  };
+}
+
+export function decodeComputerProgressViewV1(
+  value: unknown,
+): ComputerProgressViewV1 {
+  const candidate = record(value, "Computer progress");
+  exactKeys(
+    candidate,
+    ["version", "kind", "startedAt", "updatedAt", "index", "total", "steps"],
+    [],
+    "Computer progress",
+  );
+  if (
+    candidate.version !== 1 ||
+    (candidate.kind !== "connect" && candidate.kind !== "update") ||
+    !Array.isArray(candidate.steps) ||
+    candidate.steps.length === 0 ||
+    candidate.steps.length > 20
+  ) {
+    throw new ComputerProtocolDecodeError("Computer progress is invalid");
+  }
+  const total = boundedInteger(
+    candidate.total,
+    1,
+    1_000,
+    "Computer progress total",
+  );
+  const index = boundedInteger(
+    candidate.index,
+    0,
+    total,
+    "Computer progress index",
+  );
+  const steps = candidate.steps.map(decodeProgressStepV1);
+  if (steps.filter((step) => step.status === "active").length > 1) {
+    throw new ComputerProtocolDecodeError(
+      "Computer progress has multiple active steps",
+    );
+  }
+  return {
+    version: 1,
+    kind: candidate.kind,
+    startedAt: timestamp(candidate.startedAt, "Computer progress startedAt"),
+    updatedAt: timestamp(candidate.updatedAt, "Computer progress updatedAt"),
+    index,
+    total,
+    steps,
+  };
 }
 
 export function decodeComputerCommandV1(value: unknown): ComputerCommandV1 {
@@ -328,7 +438,7 @@ export function decodeComputerProjectionV1(
   exactKeys(
     candidate,
     ["version", "botId", "providerLabel", "phase", "message", "screenshots"],
-    ["viewerSession", "controlLease", "doctor"],
+    ["viewerSession", "controlLease", "doctor", "progress"],
     "Computer projection",
   );
   if (candidate.version !== 1 || !Array.isArray(candidate.screenshots)) {
@@ -343,6 +453,9 @@ export function decodeComputerProjectionV1(
     ),
     phase: phase(candidate.phase),
     message: text(candidate.message, "Computer projection message"),
+    ...(candidate.progress === undefined
+      ? {}
+      : { progress: decodeComputerProgressViewV1(candidate.progress) }),
     ...(candidate.viewerSession === undefined
       ? {}
       : { viewerSession: decodeViewerSessionV1(candidate.viewerSession) }),

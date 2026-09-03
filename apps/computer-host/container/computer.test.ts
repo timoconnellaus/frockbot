@@ -554,6 +554,20 @@ describe("open", () => {
     ).toBeUndefined();
   });
 
+  test("does not turn an absent slot marker value into display zero", async () => {
+    const { host, sprite } = provisioned();
+    sprite.files.delete(
+      `${BOTS_ROOT}/bot-1-${digest("bot-1").slice(0, 12)}/slot`,
+    );
+
+    const response = await host.handle(request({ kind: "open" }));
+
+    expect(
+      decodeComputerHostOpenResultV1(await response.json()).display,
+    ).toBeUndefined();
+    expect(sprite.serviceCreates).toHaveLength(0);
+  });
+
   test("adopts a Sprite it did not provision, so a restart repeats no effect", async () => {
     const { client, host } = provisioned();
     await host.handle(request({ kind: "open" }));
@@ -614,6 +628,40 @@ describe("open", () => {
     expect(stateAtLaunch).toMatchObject({
       update: { status: "started", digest: runtimeDocumentDigestV1() },
     });
+    expect(
+      JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
+    ).toEqual({ version: 1, generation: 4 });
+    expect(
+      sprite.serviceCreates.filter((name) => name === DESKTOP_SERVICE),
+    ).toHaveLength(1);
+    expect(sprite.serviceConfigs.get(DESKTOP_SERVICE)).toEqual({
+      cmd: `${RUNTIME_ROOT}/start-gateway.sh`,
+      httpPort: 6080,
+    });
+  });
+
+  test("reconciles the gateway before clearing a completed runtime-update intent", async () => {
+    const { host, sprite } = provisioned();
+    writeFile(
+      sprite,
+      COMPUTER_HOST_STATE_PATH,
+      JSON.stringify({
+        version: 1,
+        generation: 4,
+        update: {
+          status: "started",
+          digest: runtimeDocumentDigestV1(),
+          recordedAt: "2026-08-31T00:00:00.000Z",
+        },
+      }),
+    );
+
+    const response = await host.handle(request({ kind: "open" }));
+
+    expect(response.status).toBe(200);
+    expect(
+      sprite.serviceCreates.filter((name) => name === DESKTOP_SERVICE),
+    ).toHaveLength(1);
     expect(
       JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
     ).toEqual({ version: 1, generation: 4 });
@@ -1384,8 +1432,8 @@ describe("control", () => {
 });
 
 describe("viewer", () => {
-  test("builds a token-routed noVNC URL from on-Sprite material", async () => {
-    const { host, sprite } = provisioned();
+  test("builds the FrockBot viewer URL in one Sprite round trip", async () => {
+    const { client, host, sprite } = provisioned();
     const botKey = `bot-1-${digest("bot-1").slice(0, 12)}`;
     for (const [name, value] of [
       ["viewer-token", "opaque-token\n"],
@@ -1397,6 +1445,10 @@ describe("viewer", () => {
         mtime: new Date(),
       });
     }
+    await host.handle(request({ kind: "open" }));
+    const commandCount = sprite.commands.length;
+    const readCount = sprite.fileReads.length;
+    const lookupCount = client.lookups.length;
     const response = await host.handle(
       request({ kind: "viewer", action: "open" }),
     );
@@ -1404,12 +1456,16 @@ describe("viewer", () => {
       session?: { id: string; url: string };
     };
     expect(body.session?.id).toBe("opaque-token");
-    expect(body.session?.url).toContain("vnc.html");
+    expect(body.session?.url).toContain("/index.html");
     expect(body.session?.url).toContain("websockify%3Ftoken%3Dopaque-token");
     expect(body.session?.url).toContain("view_only=1");
     expect(sprite.commands.at(-1)?.stdin).toContain(
-      `touch '${BOTS_ROOT}/${botKey}/last-seen'`,
+      `BOT='${BOTS_ROOT}/${botKey}'`,
     );
+    expect(sprite.commands.at(-1)?.stdin).toContain('touch "$BOT/last-seen"');
+    expect(sprite.commands).toHaveLength(commandCount + 1);
+    expect(sprite.fileReads).toHaveLength(readCount);
+    expect(client.lookups).toHaveLength(lookupCount);
   });
 
   test("renewing a known viewer touches last-seen and returns the same session", async () => {
@@ -1437,8 +1493,9 @@ describe("viewer", () => {
     expect(body.session?.id).toBe("opaque-token");
     expect(body.session?.url).toContain("view_only=1");
     expect(sprite.commands.at(-1)?.stdin).toContain(
-      `touch '${BOTS_ROOT}/${botKey}/last-seen'`,
+      `BOT='${BOTS_ROOT}/${botKey}'`,
     );
+    expect(sprite.commands.at(-1)?.stdin).toContain('touch "$BOT/last-seen"');
   });
 
   test("revoking removes the token from the gateway's file", async () => {

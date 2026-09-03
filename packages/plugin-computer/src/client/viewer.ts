@@ -1,5 +1,48 @@
 import type { ComputerState } from "../shared.js";
 
+export const COMPUTER_VIEWER_FRAME_STATES = [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "error",
+] as const;
+
+export type ComputerViewerFrameStateV1 =
+  (typeof COMPUTER_VIEWER_FRAME_STATES)[number];
+
+export interface ComputerViewerFrameMessageV1 {
+  type: "frockbot-viewer";
+  state: ComputerViewerFrameStateV1;
+  message: string;
+}
+
+/** Decodes the secret-free status message emitted by the framed viewer. */
+export function decodeComputerViewerFrameMessageV1(
+  value: unknown,
+): ComputerViewerFrameMessageV1 | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    Object.keys(candidate).some(
+      (key) => key !== "type" && key !== "state" && key !== "message",
+    ) ||
+    candidate.type !== "frockbot-viewer" ||
+    !COMPUTER_VIEWER_FRAME_STATES.some((state) => state === candidate.state) ||
+    typeof candidate.message !== "string" ||
+    !candidate.message ||
+    candidate.message.length > 200
+  ) {
+    return undefined;
+  }
+  return {
+    type: "frockbot-viewer",
+    state: candidate.state as ComputerViewerFrameStateV1,
+    message: candidate.message,
+  };
+}
+
 /**
  * Changes only noVNC's client-visible input fence on one minted session.
  *
