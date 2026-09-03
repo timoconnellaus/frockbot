@@ -10,6 +10,7 @@
   "include": [
     "./**/*.ts",
     "../vitest.config.ts",
-    "../vitest.integration.config.ts"
+    "../vitest.integration.config.ts",
+    "../vitest.spike.config.ts"
   ]
 }
