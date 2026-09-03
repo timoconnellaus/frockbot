@@ -624,13 +624,17 @@ export class UserSettingsBackendContribution {
 
         // Marker v1 predates default-disabled model Packages and their
         // dependency closure. Seed that closure before the catalog-relative
-        // fixed point sees it, then validate the complete graph.
+        // fixed point sees it, then validate the complete graph. A later
+        // marker gets only the platform-owned repair on this read: retirement
+        // and dependency validation are one-shot migration steps, never a
+        // read-time rule.
         const rawMigrated =
           stored === undefined
             ? initialState()
             : migrateStoredUserSettingsV1(
                 stored,
                 markerVersion === 1 ? undefined : this.storedSettingsPackages,
+                "repair",
               );
         let settingsChanged = stored !== undefined && rawMigrated !== stored;
         let migrated = decodeUserSettingsViewV1(rawMigrated);

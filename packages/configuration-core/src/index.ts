@@ -1875,10 +1875,25 @@ export interface StoredUserSettingsPackageV1 {
   platformOwned?: boolean;
 }
 
+/**
+ * How much of the Catalog-relative pass a reader may apply.
+ *
+ * `migrate` is the one-shot marker upgrade: it retires installations absent
+ * from the Catalog, drops their orphaned Connections, disables dependents whose
+ * dependency is not enabled, and clears a platform binding that no longer
+ * resolves. `repair` runs on every read and touches only platform-owned rows,
+ * because a deployment that temporarily omits a Package must not erase current
+ * durable state, and a User disabling one Package must not silently disable
+ * another that merely declares it as a dependency.
+ */
+export type StoredUserSettingsMigrationScopeV1 = "migrate" | "repair";
+
 function migrateCatalogRelativeUserSettingsV1(
   settings: Record<string, unknown>,
   packages: readonly StoredUserSettingsPackageV1[],
+  scope: StoredUserSettingsMigrationScopeV1,
 ): Record<string, unknown> {
+  const migrate = scope === "migrate";
   const availableVersions = new Map(
     packages.map((pkg) => [`${pkg.packageId}\u0000${pkg.version}`, pkg]),
   );
@@ -1907,7 +1922,7 @@ function migrateCatalogRelativeUserSettingsV1(
     // A different immutable version remains a visible, repairable Catalog
     // mismatch. Only an id absent from the Catalog proves that the Package was
     // retired and that its row is now orphaned durable state.
-    const retained = availablePackageIds.has(packageId);
+    const retained = !migrate || availablePackageIds.has(packageId);
     if (!retained) retiredFirstPartyPackageIds.add(packageId);
     changed ||= !retained;
     return retained;
@@ -1973,7 +1988,7 @@ function migrateCatalogRelativeUserSettingsV1(
 
   // Disable inconsistent installed dependents to the least-authority state.
   // Iterate to a fixed point so A -> B -> missing C leaves both A and B off.
-  for (;;) {
+  while (migrate) {
     const enabledIds = new Set(
       installations.flatMap((storedInstallation) => {
         const installation = storedPlainRecordV1(storedInstallation);
@@ -2031,7 +2046,7 @@ function migrateCatalogRelativeUserSettingsV1(
   });
 
   let platformModel = storedDataValueV1(settings, "platformModel");
-  if (platformModel !== undefined) {
+  if (migrate && platformModel !== undefined) {
     let binding: ModelBindingV1 | undefined;
     try {
       binding = decodeModelBindingV1(platformModel);
@@ -2102,6 +2117,7 @@ function migrateCatalogRelativeUserSettingsV1(
 export function migrateStoredUserSettingsV1(
   stored: unknown,
   packages?: readonly StoredUserSettingsPackageV1[],
+  scope: StoredUserSettingsMigrationScopeV1 = "migrate",
 ): unknown {
   const settings = storedPlainRecordV1(stored);
   if (!settings || storedDataValueV1(settings, "schemaVersion") !== 1) {
@@ -2151,7 +2167,7 @@ export function migrateStoredUserSettingsV1(
       )
     : settings;
   return packages
-    ? migrateCatalogRelativeUserSettingsV1(migrated, packages)
+    ? migrateCatalogRelativeUserSettingsV1(migrated, packages, scope)
     : migrated;
 }
 

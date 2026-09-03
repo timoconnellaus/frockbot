@@ -163,6 +163,90 @@ describe("stored configuration migrations", () => {
     expect(stored.platformModel).toBeDefined();
   });
 
+  test("the read-time repair scope touches only platform-owned rows", () => {
+    // A User who disables Web keeps Ollama Cloud installed even though its
+    // manifest names Web as a dependency: repair is not migration, and a
+    // deployment that omits a Package must not retire durable rows either.
+    const stored = {
+      schemaVersion: 1,
+      revision: 40,
+      profile: { name: "Current User" },
+      packages: [
+        { packageId: "web", version: "0.0.1", state: "disabled" as const },
+        {
+          packageId: "provider",
+          version: "0.0.1",
+          state: "installed" as const,
+        },
+        {
+          packageId: "omitted-today",
+          version: "0.0.1",
+          state: "installed" as const,
+        },
+        { packageId: "shell", version: "0.0.1", state: "disabled" as const },
+      ],
+      connections: [
+        {
+          connectionId: "provider-connection",
+          packageId: "provider",
+          connectionTypeId: "provider-account",
+          displayName: "Provider",
+          state: "ready" as const,
+          safeMetadata: {},
+        },
+      ],
+      platformModel: {
+        connectionId: "gone-connection",
+        providerModelId: "gone-model",
+      },
+    };
+    const packages = [
+      { packageId: "web", version: "0.0.1" },
+      {
+        packageId: "provider",
+        version: "0.0.1",
+        dependencies: { web: ">=0.0.1" },
+      },
+      { packageId: "shell", version: "0.0.1", platformOwned: true },
+      { packageId: "ui-theme", version: "0.0.1", platformOwned: true },
+    ];
+
+    const repaired = decodeUserSettingsViewV1(
+      migrateStoredUserSettingsV1(stored, packages, "repair"),
+    );
+    expect(repaired.packages).toEqual([
+      { packageId: "web", version: "0.0.1", state: "disabled" },
+      { packageId: "provider", version: "0.0.1", state: "installed" },
+      { packageId: "omitted-today", version: "0.0.1", state: "installed" },
+      {
+        packageId: "shell",
+        version: "0.0.1",
+        state: "installed",
+        provenance: "first-party",
+      },
+      {
+        packageId: "ui-theme",
+        version: "0.0.1",
+        state: "installed",
+        provenance: "first-party",
+      },
+    ]);
+    // The platform model is the provider bootstrap's to re-seed, not the
+    // repair's to clear: clearing it on a read would race that bootstrap.
+    expect(repaired.platformModel).toEqual(stored.platformModel);
+
+    const migrated = decodeUserSettingsViewV1(
+      migrateStoredUserSettingsV1(stored, packages, "migrate"),
+    );
+    expect(migrated.packages.map((pkg) => [pkg.packageId, pkg.state])).toEqual([
+      ["web", "disabled"],
+      ["provider", "disabled"],
+      ["shell", "installed"],
+      ["ui-theme", "installed"],
+    ]);
+    expect(migrated.platformModel).toBeUndefined();
+  });
+
   test("keeps version mismatches and malformed platform bindings visible", () => {
     const versionMismatch = {
       schemaVersion: 1,
