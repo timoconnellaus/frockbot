@@ -37,6 +37,7 @@ import {
   decodeClientRunStopCommandV1,
   type ClientRunLookupQueryV1,
   type ClientRunLookupV1,
+  type ClientConversationListV1,
   type ClientRunListQueryV1,
   type ClientRunListV1,
   type ClientRunStopCommandV1,

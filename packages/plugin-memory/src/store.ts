@@ -82,7 +82,9 @@ export function selectNewestMemoryFilesV1<
     .sort(
       (left, right) =>
         left.generation.writtenAt.localeCompare(right.generation.writtenAt) ||
-        left.generation.generationId.localeCompare(right.generation.generationId),
+        left.generation.generationId.localeCompare(
+          right.generation.generationId,
+        ),
     )
     .slice(-limit);
   const kept = new Set(newest.map((file) => file.path.path));
@@ -411,7 +413,8 @@ export class MemoryStore {
       const candidate = memoryLogPathV1(root, this.owner.botId, at, part);
       const head = await this.#files.stat(candidate);
       if (head.status === "not-found") return candidate;
-      if (head.status !== "ok") return { status: head.status, reason: head.reason };
+      if (head.status !== "ok")
+        return { status: head.status, reason: head.reason };
       // Room for at least one more fact of the maximum size, so a write never
       // pushes a file past the cap and strands it.
       if (

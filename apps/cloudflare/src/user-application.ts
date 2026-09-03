@@ -944,7 +944,8 @@ export function createUserApplication() {
           );
         }
       }
-      if (request.method !== "POST") return jsonError(405, "method not allowed");
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
       try {
         return Response.json(
           await env.BOT_STATE.startConversation({ schemaVersion: 1, botId }),

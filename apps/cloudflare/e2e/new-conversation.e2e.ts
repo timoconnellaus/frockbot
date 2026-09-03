@@ -9,12 +9,7 @@
 // to the Bot Durable Object's durable conversation boundary: the transcript
 // shows the new conversation, the Turns of the old one are still on disk, and
 // the Bot keeps answering.
-import {
-  test,
-  expect,
-  provisionThroughUi,
-  sendMessage,
-} from "./fixtures.ts";
+import { test, expect, provisionThroughUi, sendMessage } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 
 test("a new conversation clears the transcript and the Bot keeps working", async ({

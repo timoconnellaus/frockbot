@@ -57,6 +57,10 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     readAppletBuildV1: () => Promise.resolve({ status: "unknown" as const }),
     run: ({ botId, command }) => state.run(botId, command),
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
+    listConversations: () =>
+      Promise.resolve({ schemaVersion: 1 as const, conversations: [] }),
+    startConversation: () =>
+      Promise.resolve({ schemaVersion: 1 as const, conversations: [] }),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
     fenceRunAdmission: ({ botId, query }) =>
       state.fenceRunAdmission(botId, query),

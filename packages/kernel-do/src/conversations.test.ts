@@ -22,7 +22,7 @@ const codec = createStoredRunCodecV1<undefined>({
 
 const IDENTITY = { userId: "user-1", botId: "primary" };
 
-function bootstrap(): CompositionGenerationV1 {
+function bootstrap(): Promise<CompositionGenerationV1> {
   return bootstrapGeneration(
     [
       {
@@ -106,9 +106,9 @@ describe("starting a new conversation", () => {
     const probe = createAuthority(storage);
 
     await probe.authority.run(command("run-1"));
-    expect(
-      (storage.values.get("latest-events") as SessionEvent[]).length,
-    ).toBe(1);
+    expect((storage.values.get("latest-events") as SessionEvent[]).length).toBe(
+      1,
+    );
 
     const started = await probe.authority.startConversation(IDENTITY);
     expect(started.ordinal).toBe(2);

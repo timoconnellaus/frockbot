@@ -419,6 +419,11 @@ export interface FrockBotWebData {
     values?: Record<string, JsonValue>,
   ): Promise<void>;
   uninstallPackage(packageId: string): Promise<void>;
+  /**
+   * Puts this conversation down and starts the next one. Memory is kept; only
+   * the history the next Turn carries is new (ADR 0027).
+   */
+  startConversation(): Promise<void>;
   startConnection(
     packageId: string,
     connectionTypeId: string,

@@ -1333,7 +1333,12 @@ export function decodeClientRunListQueryV1(
   const conversationId =
     query.conversationId === undefined
       ? undefined
-      : string(query, "conversationId", MAX_SESSION_ID_LENGTH, "run list query");
+      : string(
+          query,
+          "conversationId",
+          MAX_SESSION_ID_LENGTH,
+          "run list query",
+        );
   return {
     schemaVersion: 1,
     ...(before ? { before } : {}),

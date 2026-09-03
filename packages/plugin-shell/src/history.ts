@@ -113,7 +113,10 @@ function budgetedMessagesV1(
   current: number,
   budget: number,
 ): LlmMessage[] {
-  const total = messages.reduce((sum, message) => sum + messageChars(message), 0);
+  const total = messages.reduce(
+    (sum, message) => sum + messageChars(message),
+    0,
+  );
   if (total <= budget) return [...messages];
   const spendByTurn = new Map<number, number>();
   for (const [index, message] of messages.entries()) {
@@ -134,10 +137,7 @@ function budgetedMessagesV1(
   const narrowed = messages.filter((_, index) => kept.has(turns[index]!));
   return dropped === 0
     ? narrowed
-    : [
-        { role: "user", content: omittedHistoryNoticeV1(dropped) },
-        ...narrowed,
-      ];
+    : [{ role: "user", content: omittedHistoryNoticeV1(dropped) }, ...narrowed];
 }
 
 /**

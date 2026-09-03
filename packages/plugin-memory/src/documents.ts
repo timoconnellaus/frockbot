@@ -18,10 +18,7 @@ import {
   memoryProjectIdOfRootV1,
   memoryScopeOfRootV1,
 } from "./roots.js";
-import {
-  MEMORY_MAX_LIST_PAGES,
-  selectNewestMemoryFilesV1,
-} from "./store.js";
+import { MEMORY_MAX_LIST_PAGES, selectNewestMemoryFilesV1 } from "./store.js";
 
 /** One Memory file, addressed by its content and its generation. */
 export interface MemoryDocumentV1 {

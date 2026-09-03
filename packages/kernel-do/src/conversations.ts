@@ -99,10 +99,7 @@ export function decodeConversationRecordV1(
  * The first conversation is the bare id on purpose: every Session already
  * stored is conversation 1, so nothing has to be migrated for it to be one.
  */
-export function conversationSessionIdV1(
-  base: string,
-  ordinal: number,
-): string {
+export function conversationSessionIdV1(base: string, ordinal: number): string {
   return ordinal <= 1 ? base : `${base}#${ordinal}`;
 }
 

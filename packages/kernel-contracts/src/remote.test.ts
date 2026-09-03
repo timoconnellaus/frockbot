@@ -26,8 +26,9 @@ describe("a remote call is bounded", () => {
   });
 
   test("an answer inside the deadline is returned unchanged", async () => {
-    expect(await withDeadlineV1("the ledger", () => Promise.resolve(7), 1_000))
-      .toBe(7);
+    expect(
+      await withDeadlineV1("the ledger", () => Promise.resolve(7), 1_000),
+    ).toBe(7);
   });
 
   test("a transient failure is tried once more, and only once", async () => {

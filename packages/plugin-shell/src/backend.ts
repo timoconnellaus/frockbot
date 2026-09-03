@@ -398,6 +398,7 @@ import {
   projectClientAnnouncementsV1,
   projectClientTurnV1,
   type ClientRunLookupV1,
+  type ClientConversationListV1,
   type ClientRunListV1,
   type ClientRunStopReceiptV1,
   type ClientRunV1,
@@ -5447,6 +5448,36 @@ export class ShellBotBackendContribution {
     }
     return page;
   }
+  /** The conversations this Bot has had, newest first. */
+  async listConversations(): Promise<ClientConversationListV1> {
+    return {
+      schemaVersion: 1,
+      conversations: (await this.authority.listConversations()).map(
+        (conversation) => ({
+          schemaVersion: 1 as const,
+          conversationId: conversation.sessionId,
+          ordinal: conversation.ordinal,
+          startedAt: conversation.startedAt,
+          ...(conversation.endedAt ? { endedAt: conversation.endedAt } : {}),
+        }),
+      ),
+    };
+  }
+
+  /**
+   * Puts this conversation down and starts the next one.
+   *
+   * Memory is untouched: it is not conversation history, and the point of a
+   * new conversation is to prove that it is not.
+   */
+  async startConversation(
+    identity: BotIdentity,
+  ): Promise<ClientConversationListV1> {
+    await this.validateIdentity(identity);
+    await this.authority.startConversation(identity);
+    return this.listConversations();
+  }
+
   async lookupRun(input: unknown): Promise<ClientRunLookupV1> {
     const query = decodeClientRunLookupQueryV1(input);
     return projectClientRunLookupV1(await this.authority.readRun(query.runId));
