@@ -4572,13 +4572,13 @@ export class ShellBotBackendContribution {
     if (!effectiveModel) {
       throw new Error(
         effective.binding?.failure ??
-          "No model is configured; enable a model Package or restore the platform model",
+          "No model is set up yet. Choose one in Models.",
       );
     }
     const binding: ResolvedModelBindingV1 = effective.binding ?? {
       model: structuredClone(effectiveModel),
       state: "unavailable",
-      failure: "The resolved model Connection is unavailable",
+      failure: "This Bot's model isn't available. Pick one in Models.",
     };
     if (
       binding.state === "unavailable" ||
@@ -4587,7 +4587,8 @@ export class ShellBotBackendContribution {
       !binding.packageId
     ) {
       throw new Error(
-        binding.failure ?? "The resolved model Connection is unavailable",
+        binding.failure ??
+          "This Bot's model isn't available. Pick one in Models.",
       );
     }
     if (
@@ -4600,7 +4601,9 @@ export class ShellBotBackendContribution {
         admittedRequest.modelBinding.connectionGeneration !==
           binding.connection.generation)
     ) {
-      throw new Error("Admitted model binding is unavailable");
+      throw new Error(
+        "This Bot's model changed mid-reply. Send your message again.",
+      );
     }
     const bindingPackageId = binding.packageId;
     agentPackages.push(

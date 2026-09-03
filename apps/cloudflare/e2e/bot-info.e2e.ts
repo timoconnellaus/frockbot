@@ -123,7 +123,7 @@ test("settings and retired info-pane deep links resolve at their new homes", asy
     `/?bot=${encodeURIComponent(botId)}&settings=bot-settings#bot-info-members`,
   );
   await expect(settings.locator("#bot-info-members")).toBeVisible();
-  await expect(settings.getByText("Named by user")).toBeVisible();
+  await expect(settings.getByText("Named by you")).toBeVisible();
 
   await page.goto(
     `/?bot=${encodeURIComponent(botId)}&settings=bot-panel#bot-info-computer`,

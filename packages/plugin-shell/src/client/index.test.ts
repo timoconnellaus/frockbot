@@ -516,7 +516,7 @@ describe("Bot selection", () => {
     const requestCount = requests.length;
     await expect(
       provided.value.callPackageUiTool(contribution, "package_author", {}),
-    ).rejects.toThrow("did not declare");
+    ).rejects.toThrow("isn't allowed to use");
     expect(requests).toHaveLength(requestCount);
   });
 
@@ -601,14 +601,14 @@ describe("Bot selection", () => {
     expect(provided.value.packageCatalog).toEqual([]);
     expect(provided.value.packageCatalogGeneration).toBeUndefined();
     expect(provided.value.settingsError).toBe(
-      "No Package Catalog is published for this deployment yet.",
+      "No plugins are published for this deployment yet.",
     );
 
     // A genuine fault still reaches the operator, labelled as one.
     failure = new Error("R2 is down");
     await provided.value.loadPackageCatalog();
     expect(provided.value.settingsError).toBe(
-      "The Package Catalog could not be loaded: R2 is down",
+      "Plugins could not be loaded: R2 is down",
     );
   });
 
@@ -689,7 +689,7 @@ describe("Bot selection", () => {
       },
       accountValues: undefined,
       platformModel: undefined,
-      expectedLabel: "Model name · Model provider · Bot override",
+      expectedLabel: "Model name · Model provider · this Bot only",
       expectedProjection: "bot",
       ready: true,
     },
@@ -724,7 +724,7 @@ describe("Bot selection", () => {
       botValues: {},
       accountValues: undefined,
       platformModel: undefined,
-      expectedLabel: "Model unavailable",
+      expectedLabel: "No model available — set one up in Models",
       expectedProjection: "none",
       ready: false,
     },
@@ -941,7 +941,7 @@ describe("Bot selection", () => {
 
     expect(provided.value.modelReady).toBe(false);
     expect(provided.value.modelLabel).toBe(
-      'Connection "model-connection" is disabled; enable or reconnect it',
+      "That account needs reconnecting before this Bot can reply.",
     );
   });
 
@@ -1258,7 +1258,7 @@ describe("detached Turn projection", () => {
       { role: "user", status: "completed" },
       {
         role: "assistant",
-        text: "Provider reconciliation is required",
+        text: "This Bot couldn't finish its reply. Try again.",
         status: "error",
       },
     ]);
@@ -1603,11 +1603,11 @@ describe("active durable Turn projection", () => {
     expect(reconciliation.activeRun).toEqual({
       runId: "run-reconciliation",
       status: "reconciliation-required",
-      message: "Provider result needs confirmation",
+      message: "Something went wrong mid-reply. Try again to pick it up.",
       canResume: true,
     });
     expect(reconciliation.messages[1]).toMatchObject({
-      text: "Provider result needs confirmation",
+      text: "This reply stopped partway. Try again to continue it.",
       status: "reconciliation-required",
     });
   });
@@ -1886,8 +1886,7 @@ describe("hosted Stop", () => {
     await provided.value.stopRun();
     expect(provided.value.activeRun).toMatchObject({
       status: "reconciliation-required",
-      message:
-        "Stop accepted; reconciling the provider outcome before cancelling.",
+      message: "Stopping…",
       // A parked Turn is offered the resolve control, Stop included: hiding
       // it there hid it in exactly the case Stop creates.
       canResume: true,
@@ -1899,7 +1898,7 @@ describe("hosted Stop", () => {
     // The Turn keeps whatever it had already said; the notice is the line
     // that says why it ends where it does.
     expect(provided.value.messages[1]).toMatchObject({
-      notice: "Stopped by an authenticated Stop command.",
+      notice: "You stopped this.",
       status: "aborted",
     });
 
@@ -1964,7 +1963,7 @@ describe("hosted Stop", () => {
     expect(provided.value.activeRunId).toBeUndefined();
     expect(provided.value.messages.at(-1)).toMatchObject({
       runId: "run-1",
-      notice: "Stopped by an authenticated Stop command.",
+      notice: "You stopped this.",
       status: "aborted",
     });
   });
@@ -2554,7 +2553,7 @@ describe("Connection operation reconciliation", () => {
     ).rejects.toThrow("Connection state update failed");
     await expect(
       provided.value.disconnectConnection("connection-1"),
-    ).rejects.toThrow("Connection revocation failed");
+    ).rejects.toThrow("Couldn't disconnect that account.");
     expect(commands).toEqual([
       "connection/update-label",
       "connection/set-enabled",

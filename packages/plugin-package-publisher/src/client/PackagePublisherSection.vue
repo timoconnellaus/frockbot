@@ -14,8 +14,8 @@ const summary = computed(() => {
   const history = publisher.value.history;
   if (!history) return "Not published yet";
   const active = history.activePackageRevision;
-  if (active === undefined) return `${history.revisions.length} revisions`;
-  return `Revision ${active} · active`;
+  if (active === undefined) return `${history.revisions.length} versions`;
+  return `Version ${active} · in use`;
 });
 
 onMounted(() => publisher.value.load());
@@ -27,7 +27,7 @@ onMounted(() => publisher.value.load());
       ><UiIcon name="history"
     /></span>
     <span class="publisher-section__text">
-      <strong>Setup revisions</strong>
+      <strong>Published setup</strong>
       <small>{{ summary }}</small>
     </span>
     <UiButton type="button" @click="surfaces.open('package-publisher')">

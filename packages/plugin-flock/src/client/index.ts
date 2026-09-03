@@ -158,9 +158,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
             if (receipt) {
               clearPendingCreate(userId);
               if (receipt.status === "rejected")
-                throw new Error(
-                  receipt.failure ?? "Pending Bot creation was rejected",
-                );
+                throw new Error(receipt.failure ?? "Couldn't create the Bot.");
             }
             state.value.directory = decodeDirectoryViewV1(
               await request("/api/bots"),
@@ -360,9 +358,9 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           ),
         );
         if (receipt.status === "rejected")
-          throw new Error(receipt.failure ?? "Bot archive was rejected");
+          throw new Error(receipt.failure ?? "Couldn't archive this Bot.");
         if (receipt.status === "pending") {
-          state.value.error = "Bot archive is retrying in the backend.";
+          state.value.error = "Still archiving — this will finish shortly.";
           return;
         }
         state.value.overlay = undefined;
@@ -388,9 +386,9 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           ),
         );
         if (receipt.status === "rejected")
-          throw new Error(receipt.failure ?? "Bot restore was rejected");
+          throw new Error(receipt.failure ?? "Couldn't restore this Bot.");
         if (receipt.status === "pending") {
-          state.value.error = "Bot restore is retrying in the backend.";
+          state.value.error = "Still restoring — this will finish shortly.";
           return;
         }
         await state.value.load();
@@ -419,18 +417,16 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           clearPendingSheep(userId, botId);
           if (receipt.status === "rejected")
             reconciliationFailure =
-              receipt.failure ?? "Pending sheep update was rejected";
+              receipt.failure ?? "Couldn't save the sheep.";
         } catch (error) {
           if (!isDefinitiveFlockFailure(error)) {
             state.value.error =
-              "A previous sheep update could not be reconciled. Try again before editing.";
+              "Your last change to this sheep didn't save. Try again.";
             return;
           }
           clearPendingSheep(userId, botId);
           reconciliationFailure =
-            error instanceof Error
-              ? error.message
-              : "Pending sheep update was rejected";
+            error instanceof Error ? error.message : "Couldn't save the sheep.";
         }
         try {
           identity = decodeSheepIdentityViewV1(
@@ -441,7 +437,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           state.value.error =
             error instanceof Error
               ? error.message
-              : "Could not reconcile the previous sheep update";
+              : "Couldn't finish saving your last change.";
           return;
         }
       }
@@ -479,7 +475,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         );
         if (receipt.status === "rejected") {
           clearPendingCreate(userId);
-          throw new Error(receipt.failure ?? "Bot creation was rejected");
+          throw new Error(receipt.failure ?? "Couldn't create the Bot.");
         }
         clearPendingCreate(userId);
         replacePreferredBot(command.botId);
@@ -521,7 +517,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         );
         if (receipt.status === "rejected") {
           clearPendingSheep(userId, botId);
-          throw new Error(receipt.failure ?? "Sheep update was rejected");
+          throw new Error(receipt.failure ?? "Couldn't save the sheep.");
         }
         clearPendingSheep(userId, botId);
         state.value.identities[botId] = decodeSheepIdentityViewV1(

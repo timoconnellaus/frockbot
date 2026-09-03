@@ -31,7 +31,7 @@ function embeddedAuthMode(): "anonymous" | "better-auth" | "development" {
 function embeddedIsAdmin(): boolean {
   const value = document.body.dataset.frockbotIsAdmin;
   if (value !== "true" && value !== "false") {
-    throw new Error("Hosted admin projection is invalid");
+    throw new Error("Couldn't load admin settings.");
   }
   return value === "true";
 }

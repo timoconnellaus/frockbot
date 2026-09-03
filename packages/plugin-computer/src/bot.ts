@@ -1373,8 +1373,8 @@ export class ComputerBotBackendContribution {
     } else {
       phase = "idle";
       message = viewer
-        ? "Reconnect to mint a fresh viewer session"
-        : "Persistent Computer available";
+        ? "Reconnect to pick up where you left off"
+        : "Ready to start";
     }
     const viewerSession: ComputerViewerSessionViewV1 | undefined = liveViewer
       ? {

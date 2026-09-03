@@ -152,20 +152,17 @@ function isPackageInstalled(packageId: string): boolean {
 <template>
   <div class="package-catalog-surface">
     <p class="catalog-intro">
-      Browse published Packages. Installing one makes it available to every Bot
-      you own when the Package is enabled.
+      Browse published plugins. Installing one makes it available to every Bot
+      you own, once it's turned on.
     </p>
     <label class="catalog-search">
       <UiIcon name="search" />
       <input
         v-model="search"
-        placeholder="Search the Catalog"
-        aria-label="Search the Package Catalog"
+        placeholder="Search plugins"
+        aria-label="Search plugins"
       />
     </label>
-    <p v-if="web.packageCatalogGeneration" class="catalog-generation">
-      Generation {{ web.packageCatalogGeneration }}
-    </p>
     <div class="catalog-grid">
       <article
         v-for="entry in filteredCatalog"
@@ -211,7 +208,7 @@ function isPackageInstalled(packageId: string): boolean {
                 <p class="catalog-note">{{ openCatalogEntry.description }}</p>
                 <dl class="catalog-facts">
                   <div>
-                    <dt>Package</dt>
+                    <dt>Plugin</dt>
                     <dd>{{ openCatalogEntry.packageId }}</dd>
                   </div>
                   <div>
@@ -239,8 +236,8 @@ function isPackageInstalled(packageId: string): boolean {
               >
                 <p>
                   Uninstalling {{ entry.displayName }} removes it from every
-                  Bot. Connections and credentials are kept, and become usable
-                  again if you reinstall and enable the Package.
+                  Bot. Your connected accounts stay, so reinstalling picks up
+                  where you left off.
                 </p>
                 <div class="catalog-actions">
                   <UiButton @click="uninstallingPackageId = undefined">
@@ -330,13 +327,13 @@ function isPackageInstalled(packageId: string): boolean {
       v-if="web.packageCatalog.length === 0 && !web.settingsError"
       class="catalog-empty"
     >
-      The Catalog has nothing to offer yet.
+      No plugins are published yet.
     </p>
     <p
       v-else-if="filteredCatalog.length === 0 && !web.settingsError"
       class="catalog-empty"
     >
-      No Catalog entry matches that search.
+      No plugin matches that search.
     </p>
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}

@@ -148,13 +148,11 @@ async function open(): Promise<void> {
         </template>
         <template v-else>
           <UiIcon name="sparkle" size="lg" />
-          <strong v-if="state.phase === 'unconfigured'"
-            >Computer not configured</strong
-          >
+          <strong v-if="state.phase === 'unconfigured'">No computer</strong>
           <strong v-else-if="state.phase === 'disconnected'"
             >Viewer disconnected</strong
           >
-          <strong v-else>Persistent Computer</strong>
+          <strong v-else>Computer</strong>
           <span class="computer-placeholder-message">{{ state.message }}</span>
         </template>
       </span>

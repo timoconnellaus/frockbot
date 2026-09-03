@@ -147,7 +147,7 @@ function generationLabel(generationId: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
-  return `Live since ${when} · ${hash.slice(0, 7)}`;
+  return `Live since ${when}`;
 }
 
 function selectTab(next: "app" | "code"): void {
@@ -199,10 +199,8 @@ async function clearFocus(): Promise<void> {
       /></span>
       <div class="applet-canvas-title">
         <strong>{{ applet?.displayName ?? "Applet" }}</strong>
-        <small v-if="viewer" :title="viewer.generationId">{{
-          generationLabel(viewer.generationId)
-        }}</small>
-        <small v-else>No published version yet</small>
+        <small v-if="viewer">{{ generationLabel(viewer.generationId) }}</small>
+        <small v-else>Not published yet</small>
       </div>
       <div
         v-if="canShowApp"

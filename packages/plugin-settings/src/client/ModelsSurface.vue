@@ -32,8 +32,8 @@ onMounted(() => void web.value.loadPluginCatalog());
       class="models-anchor"
     />
     <p class="models-empty">
-      FrockBot chooses a model for you. Enable Custom models in Plugins to
-      choose an account model or a model for one Bot.
+      FrockBot picks a model for you. Turn on Custom models in Plugins to choose
+      your own.
     </p>
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}

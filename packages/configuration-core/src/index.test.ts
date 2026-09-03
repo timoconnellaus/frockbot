@@ -1174,12 +1174,12 @@ describe("Bot execution-plan authority", () => {
     };
     expect(
       modelBindingFailureV1({ model, user, packages: modelPackages }),
-    ).toContain('Package "provider-ollama-cloud" is not installed and enabled');
+    ).toContain("Turn this model's plugin back on in Plugins to use it.");
     expect(
       resolveBotModelBindingV1({ model, user, packages: modelPackages }),
     ).toMatchObject({
       state: "unavailable",
-      failure: expect.stringContaining("enable it"),
+      failure: expect.stringContaining("Turn this model's plugin back on"),
     });
 
     const revoked = {
@@ -1197,7 +1197,7 @@ describe("Bot execution-plan authority", () => {
         }),
       ).toMatchObject({
         state: "unavailable",
-        failure: expect.stringContaining("reconnect it"),
+        failure: expect.stringContaining("needs reconnecting"),
       });
     }
   });
@@ -1650,7 +1650,9 @@ describe("effective Bot model resolution", () => {
     expect(effective.source).toBe("bot");
     expect(effective.binding).toMatchObject({
       state: "unavailable",
-      failure: expect.stringContaining('"custom-models" and "other-models"'),
+      failure: expect.stringContaining(
+        "Two plugins are both set as your model",
+      ),
     });
     expect(effective.model).toBeUndefined();
   });

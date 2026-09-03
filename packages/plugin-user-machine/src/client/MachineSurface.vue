@@ -53,9 +53,9 @@ onMounted(() => machines.value.load());
     <header>
       <h2>Registered machines</h2>
       <p>
-        A registered machine runs the FrockBot desktop app and dials out to this
-        deployment. A Bot can read files and run commands on one only after you
-        approve each action, and only while the app is running.
+        A registered machine is a computer running the FrockBot desktop app. A
+        Bot can read files and run commands on it only while the app is open,
+        and only after you approve each action.
       </p>
     </header>
 
@@ -65,8 +65,8 @@ onMounted(() => machines.value.load());
           <span class="machines-pairing__text">
             <strong>This computer</strong>
             <small v-if="agent?.enrolled">
-              Paired as {{ agent.label }} · agent
-              {{ agent.running ? "running" : "stopped" }}
+              Paired as {{ agent.label }} ·
+              {{ agent.running ? "connected" : "not running" }}
             </small>
             <small v-else>Not paired yet</small>
           </span>
