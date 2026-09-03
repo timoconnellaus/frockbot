@@ -13,6 +13,7 @@ import { DurableCompositionStore } from "./composition-store.js";
 import { DurableCompositionFailureLog } from "./composition-failures.js";
 import {
   botTurnCommandFingerprintV1,
+  defaultRunLaneV1,
   storedRunAdmissionV1,
   storedRunSubagentRoleV1,
   storedRunTurnTypeV1,
@@ -25,6 +26,7 @@ import {
 import {
   completeStoredRun,
   type TerminalPackageRecords,
+  type SupersededPackageRecords,
   failStoredRun,
   requireStoredRunReconciliation,
 } from "./run-terminal.js";
@@ -39,6 +41,7 @@ import {
 } from "./turn-errors.js";
 import {
   ACTIVE_RUN_KEY,
+  PENDING_RUN_KEY,
   IDENTITY_KEY,
   LATEST_EVENTS_KEY,
   MAX_RUN_ADMISSION_FENCES,
@@ -121,7 +124,30 @@ export interface BotDurableAuthorityHooks<Snapshot> {
   deferScheduledWork(transaction: DurableObjectTransaction): Promise<void>;
   /** Settle Package deadlines when the alarm fires idle. */
   settleScheduledWork(): Promise<void>;
+  /**
+   * Advisory interrupt of the exact Turn named, after the durable intent that
+   * justifies it is already written. The reason is an opaque bounded string
+   * the kernel records and never reads; a Package that holds no resident Agent
+   * needs no implementation, because the durable effect fence stops the Turn
+   * either way.
+   */
+  interruptTurn?(runId: string, reason: string): void;
+  /**
+   * Package records written in the same transaction that settles a Turn as
+   * `superseded`. Same contract as `terminalRecords`: the kernel writes the
+   * returned keys without reading them.
+   */
+  supersededRecords?(input: {
+    run: StoredRunV1<Snapshot>;
+    read<T>(key: string): Promise<T | undefined>;
+  }): Promise<Record<string, unknown>>;
 }
+
+/** What a `turn/end` records when a later user message took a Turn's place. */
+export const SUPERSEDED_TURN_REASON_V1 = "superseded by a new user message";
+
+/** How many times a queued Turn retries the object before giving up. */
+const MAX_QUEUED_RUN_START_ATTEMPTS = 8;
 
 export interface BotDurableAuthorityOptions<Snapshot> {
   state: DurableObjectState;
@@ -138,6 +164,18 @@ export class BotDurableAuthority<Snapshot> {
   /** Why a generation failed to activate, and whether it is quarantined. */
   readonly compositionFailures: DurableCompositionFailureLog;
   private executingRunId: string | undefined;
+  /**
+   * The in-process settlement of the executing run. A supersede has to wait
+   * for the Turn it interrupted to reach its durable terminal state before the
+   * Turn that replaced it can start, and while this object is resident that
+   * settlement is a promise rather than an alarm.
+   */
+  private executingActivity: Promise<unknown> | undefined;
+  /**
+   * Queued runs a caller in this object is already waiting to start. Recovery
+   * leaves them alone, so a queued Turn is promoted by exactly one path.
+   */
+  private readonly queuedWaiters = new Set<string>();
 
   constructor(options: BotDurableAuthorityOptions<Snapshot>) {
     this.ctx = options.state;
@@ -155,15 +193,138 @@ export class BotDurableAuthority<Snapshot> {
   async run(command: OwnedBotTurnCommand): Promise<BotTurnCompletion> {
     await this.assertMatchingRunCommand(command);
     await this.recoverActiveRun();
-    const replay = await this.completedRunResult(command);
+    const replay = await this.settledRunResult(command);
     if (replay) return replay;
     const admission = await this.acceptRun(command);
+    if (admission.kind === "queued") {
+      // Durably admitted, waiting for the object. The interrupt is advisory
+      // and always follows the intent that is already written.
+      if (admission.interrupt) {
+        this.hooks.interruptTurn?.(
+          admission.interrupt.runId,
+          SUPERSEDED_TURN_REASON_V1,
+        );
+      }
+      return this.runQueuedRun(command);
+    }
     return this.executeAcceptedRun(
       command,
       admission.previous,
       admission.settings,
       admission.compositionGenerationId,
     );
+  }
+
+  /**
+   * Drives one durably queued Turn to its own terminal state.
+   *
+   * The Turn ahead of it settles first — it is either finishing on its own or
+   * has just been fenced by the supersede intent — and only then does this one
+   * become the active run. Eviction anywhere in here is safe: the queued run is
+   * durable, and the recovery alarm promotes it exactly as this does.
+   */
+  private async runQueuedRun(
+    command: OwnedBotTurnCommand,
+  ): Promise<BotTurnCompletion> {
+    this.queuedWaiters.add(command.runId);
+    try {
+      for (
+        let attempt = 0;
+        attempt < MAX_QUEUED_RUN_START_ATTEMPTS;
+        attempt++
+      ) {
+        await this.settleExecutingActivity();
+        const settled = await this.terminalRunResult(command.runId);
+        if (settled) return settled;
+        const promoted = await this.promoteQueuedRun(command.runId);
+        if (promoted === "blocked") {
+          // Another Turn holds the object. Recovery drives it to its own
+          // durable terminal or resumable state, and this one tries again.
+          await this.recoverActiveRun();
+          continue;
+        }
+        if (promoted === "not-queued") {
+          const terminal = await this.terminalRunResult(command.runId);
+          if (terminal) return terminal;
+          const current = await this.readRun(command.runId);
+          throw new Error(
+            `run "${command.runId}" left the queue with status ${
+              current?.status ?? "missing"
+            }`,
+          );
+        }
+        return this.executeAcceptedRun(
+          command,
+          promoted.previous,
+          promoted.settings,
+          promoted.compositionGenerationId,
+        );
+      }
+      throw new Error(`run "${command.runId}" could not start`);
+    } finally {
+      this.queuedWaiters.delete(command.runId);
+    }
+  }
+
+  /** Waits out whatever this object is currently running, failures included. */
+  private async settleExecutingActivity(): Promise<void> {
+    for (let guard = 0; guard < 64; guard += 1) {
+      const activity = this.executingActivity;
+      if (!activity) return;
+      await activity.catch(() => undefined);
+      if (this.executingActivity === activity) return;
+    }
+  }
+
+  /**
+   * Makes the durably queued run the active one, recomputing the history it
+   * starts from: the Turn it waited behind appended events, and the queued
+   * Turn's model request derives from everything that is durable now.
+   */
+  private async promoteQueuedRun(runId: string): Promise<
+    | "not-queued"
+    | "blocked"
+    | {
+        previous: SessionEvent[];
+        settings: Snapshot;
+        compositionGenerationId: string;
+      }
+  > {
+    const key = `${RUN_PREFIX}${runId}`;
+    return this.ctx.storage.transaction(async (transaction) => {
+      const pendingRunId = await transaction.get<string>(PENDING_RUN_KEY);
+      const run = this.codec.optional(await transaction.get<unknown>(key));
+      if (
+        pendingRunId !== runId ||
+        !run ||
+        run.status !== "running" ||
+        run.phase !== "queued"
+      ) {
+        return "not-queued" as const;
+      }
+      if (await transaction.get<string>(ACTIVE_RUN_KEY)) {
+        return "blocked" as const;
+      }
+      const latestEvents = (
+        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
+      ).map(decodeSessionEvent);
+      const promoted = this.codec.require({
+        ...run,
+        phase: "admitted",
+        previousEventCount: latestEvents.length,
+      } satisfies StoredRunV1<Snapshot>);
+      await transaction.put({
+        [key]: structuredClone(promoted),
+        [ACTIVE_RUN_KEY]: runId,
+      });
+      await transaction.delete(PENDING_RUN_KEY);
+      await this.refreshRecoveryAlarm(transaction);
+      return {
+        previous: latestEvents,
+        settings: promoted.configurationSnapshot,
+        compositionGenerationId: promoted.compositionGenerationId,
+      };
+    });
   }
 
   async reconcileRun(
@@ -235,6 +396,28 @@ export class BotDurableAuthority<Snapshot> {
     settings: Snapshot,
     compositionGenerationId: string,
   ): Promise<BotTurnCompletion> {
+    const activity = this.executeAdmittedRun(
+      command,
+      previous,
+      settings,
+      compositionGenerationId,
+    );
+    this.executingActivity = activity;
+    try {
+      return await activity;
+    } finally {
+      if (this.executingActivity === activity) {
+        this.executingActivity = undefined;
+      }
+    }
+  }
+
+  private async executeAdmittedRun(
+    command: OwnedBotTurnCommand,
+    previous: SessionEvent[],
+    settings: Snapshot,
+    compositionGenerationId: string,
+  ): Promise<BotTurnCompletion> {
     this.executingRunId = command.runId;
     try {
       await this.ctx.storage.transaction(async (transaction) => {
@@ -289,12 +472,61 @@ export class BotDurableAuthority<Snapshot> {
         throw new Error(message);
       }
       await this.failRun(command.runId, previous, events, message);
+      const settled = await this.supersededRunResult(command.runId);
+      if (settled) return settled;
       throw new Error(message);
     } finally {
       if (this.executingRunId === command.runId) {
         this.executingRunId = undefined;
       }
     }
+  }
+
+  /**
+   * The completion a Turn another user message replaced reports. It is not a
+   * failure: the Turn settled durably, keeping everything it had already sent,
+   * and its caller reads the rest of the conversation from durable state.
+   */
+  private async supersededRunResult(
+    runId: string,
+  ): Promise<BotTurnCompletion | undefined> {
+    const run = this.codec.optional(
+      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
+    );
+    if (run?.status !== "superseded") return undefined;
+    return { runId, text: "", events: structuredClone(run.events) };
+  }
+
+  /**
+   * The completion a run that has already settled reports, or `undefined`
+   * while it is still going. Unlike the replay check this asks no questions
+   * about the command that produced it: the caller is the run's own waiter.
+   */
+  private async terminalRunResult(
+    runId: string,
+  ): Promise<BotTurnCompletion | undefined> {
+    const run = this.codec.optional(
+      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
+    );
+    if (run?.status === "superseded") {
+      return { runId, text: "", events: structuredClone(run.events) };
+    }
+    if (run?.status !== "completed") return undefined;
+    return {
+      runId,
+      text: run.responseText ?? "",
+      events: structuredClone(run.events),
+      ...(await this.storedNotification(runId)),
+    };
+  }
+
+  private async storedNotification(
+    runId: string,
+  ): Promise<{ notification?: BotNotificationIntent }> {
+    const notification = await this.ctx.storage.get<BotNotificationIntent>(
+      `${NOTIFICATION_PREFIX}${runId}`,
+    );
+    return notification ? { notification } : {};
   }
 
   private async executeResumedRun(
@@ -372,6 +604,8 @@ export class BotDurableAuthority<Snapshot> {
         throw new Error(message);
       }
       await this.failRun(run.runId, previous, events, message);
+      const settled = await this.supersededRunResult(run.runId);
+      if (settled) return settled;
       throw new Error(message);
     } finally {
       if (this.executingRunId === run.runId) this.executingRunId = undefined;
@@ -394,7 +628,7 @@ export class BotDurableAuthority<Snapshot> {
     });
   }
 
-  private async completedRunResult(
+  private async settledRunResult(
     command: OwnedBotTurnCommand,
   ): Promise<BotTurnCompletion | undefined> {
     const { runId } = command;
@@ -406,6 +640,16 @@ export class BotDurableAuthority<Snapshot> {
       throw new Error(
         `Turn idempotency key "${runId}" was reused for a different command`,
       );
+    }
+    // A Turn another user message took the place of is an ordinary outcome,
+    // not a failure: it settled durably, said whatever it had already said,
+    // and the caller reads the rest from durable state.
+    if (run.status === "superseded") {
+      return {
+        runId,
+        text: "",
+        events: structuredClone(run.events),
+      };
     }
     if (run.status !== "completed") {
       throw new Error(
@@ -626,6 +870,13 @@ export class BotDurableAuthority<Snapshot> {
       (!activeRun || activeRun.status !== "reconciliation-required")
     ) {
       deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
+    } else if (
+      !activeRunId &&
+      (await transaction.get<string>(PENDING_RUN_KEY))
+    ) {
+      // A Turn admitted and waiting is work this object owes, so it keeps the
+      // recovery alarm even with nothing running.
+      deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
     }
     if (deadlines.length === 0) await transaction.deleteAlarm();
     else await transaction.setAlarm(Math.min(...deadlines));
@@ -642,11 +893,15 @@ export class BotDurableAuthority<Snapshot> {
     if (!existing) await this.ctx.storage.put(IDENTITY_KEY, identity);
   }
 
-  private async acceptRun(command: OwnedBotTurnCommand): Promise<{
-    previous: SessionEvent[];
-    settings: Snapshot;
-    compositionGenerationId: string;
-  }> {
+  private async acceptRun(command: OwnedBotTurnCommand): Promise<
+    | {
+        kind: "active";
+        previous: SessionEvent[];
+        settings: Snapshot;
+        compositionGenerationId: string;
+      }
+    | { kind: "queued"; interrupt?: { runId: string } }
+  > {
     const fenceKey = `${RUN_ADMISSION_FENCE_PREFIX}${command.runId}`;
     const fences = storedRunAdmissionFences(
       await this.ctx.storage.get<unknown>(RUN_ADMISSION_FENCE_INDEX_KEY),
@@ -689,9 +944,10 @@ export class BotDurableAuthority<Snapshot> {
       ) {
         throw new Error("Bot authority does not match its durable identity");
       }
-      if (await transaction.get(ACTIVE_RUN_KEY)) {
-        throw new Error("bot already has an active run");
-      }
+      const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
+      const supersede = activeRunId
+        ? await this.planSupersede(transaction, command, activeRunId)
+        : undefined;
       const latestEvents = (
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
       ).map(decodeSessionEvent);
@@ -709,7 +965,10 @@ export class BotDurableAuthority<Snapshot> {
         events: [],
         effectAdmissions: [],
         status: "running",
-        phase: "admitted",
+        // A queued Turn is admitted — durable, ordered, and owed a terminal
+        // state — but has not started. Its `previousEventCount` is recomputed
+        // when it is promoted, because the Turn ahead of it is still writing.
+        phase: activeRunId ? "queued" : "admitted",
         compositionGenerationId: pin.generationId,
         configurationSnapshot: structuredClone(admittedSettings),
         previousEventCount: latestEvents.length,
@@ -717,6 +976,7 @@ export class BotDurableAuthority<Snapshot> {
           command.turnType,
           command.origin,
           command.subagentRole,
+          command.lane,
         ),
         ...(command.directTool
           ? { directTool: structuredClone(command.directTool) }
@@ -725,19 +985,126 @@ export class BotDurableAuthority<Snapshot> {
       await transaction.put({
         [key]: admittedRun,
         [runIndexKey(command.acceptedAt, command.runId)]: command.runId,
-        [ACTIVE_RUN_KEY]: command.runId,
+        ...(activeRunId
+          ? { [PENDING_RUN_KEY]: command.runId }
+          : { [ACTIVE_RUN_KEY]: command.runId }),
         [IDENTITY_KEY]: identity ?? {
           userId: command.userId,
           botId: command.botId,
         },
       });
+      const interrupted = supersede ? await supersede(command.runId) : false;
       await this.refreshRecoveryAlarm(transaction);
+      if (activeRunId) {
+        return {
+          kind: "queued" as const,
+          // Only a Turn whose supersede intent was actually recorded is
+          // interrupted. One that had not dispatched a model request is left
+          // to finish, and the new message simply waits behind it.
+          ...(interrupted ? { interrupt: { runId: activeRunId } } : {}),
+        };
+      }
       return {
+        kind: "active" as const,
         previous: latestEvents,
         settings: admittedSettings,
         compositionGenerationId: pin.generationId,
       };
     });
+  }
+
+  /**
+   * Decides whether one new command may take the place of what is running.
+   *
+   * The rule is the lane's: a user-lane admission carrying explicit supersede
+   * intent replaces the active run and any run already waiting behind it; a
+   * background admission never supersedes and is refused exactly as a second
+   * command always was, so a Routine firing waits for its own next schedule
+   * rather than interrupting a person mid-sentence.
+   *
+   * Returns the writes the admission performs, which report whether the active
+   * Turn was actually interrupted. A Turn that has not dispatched a model
+   * request is left alone — there is nothing durable to lose — and the new
+   * message simply queues behind it.
+   */
+  private async planSupersede(
+    transaction: DurableObjectTransaction,
+    command: OwnedBotTurnCommand,
+    activeRunId: string,
+  ): Promise<((supersededBy: string) => Promise<boolean>) | undefined> {
+    const lane = command.lane ?? defaultRunLaneV1(command.turnType ?? "chat");
+    if (lane !== "user" || !command.supersedes) {
+      throw new Error("bot already has an active run");
+    }
+    const active = this.codec.optional(
+      await transaction.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
+    );
+    if (!active) throw new Error("bot already has an active run");
+    if (active.status === "reconciliation-required") {
+      // An uncertain external effect is never abandoned to admit something
+      // else: the outcome has to be retrieved before this object runs again.
+      throw new Error(
+        `run "${activeRunId}" requires reconciliation before another Turn can be admitted`,
+      );
+    }
+    if (active.status !== "running") {
+      throw new Error("bot already has an active run");
+    }
+    const pendingRunId = await transaction.get<string>(PENDING_RUN_KEY);
+    // A Turn that has not dispatched a model request has no durable work to
+    // lose, so it is left to finish and the new message queues behind it.
+    // GrokBot draws the same line, and for the same reason: nothing may be
+    // stranded before its first durable checkpoint.
+    const dispatched = active.events.some(
+      (event) => event.type === "model/request",
+    );
+    return async (supersededBy: string) => {
+      if (pendingRunId && pendingRunId !== supersededBy) {
+        await this.supersedeQueuedRun(transaction, pendingRunId, supersededBy);
+      }
+      if (!dispatched) return false;
+      if (active.supersededAt) return true;
+      await transaction.put(
+        `${RUN_PREFIX}${activeRunId}`,
+        structuredClone(
+          this.codec.require({
+            ...active,
+            supersededAt: new Date().toISOString(),
+            supersededBy,
+          } satisfies StoredRunV1<Snapshot>),
+        ),
+      );
+      return true;
+    };
+  }
+
+  /**
+   * Settles a Turn that was superseded before it ever started. It appended no
+   * event and spoke to nobody, so it settles as a record on its own.
+   */
+  private async supersedeQueuedRun(
+    transaction: DurableObjectTransaction,
+    runId: string,
+    supersededBy: string,
+  ): Promise<void> {
+    const key = `${RUN_PREFIX}${runId}`;
+    const queued = this.codec.optional(await transaction.get<unknown>(key));
+    if (!queued || queued.status !== "running" || queued.phase !== "queued") {
+      return;
+    }
+    const { responseText: _text, failure: _failure, ...settled } = queued;
+    await transaction.put(
+      key,
+      structuredClone(
+        this.codec.require({
+          ...settled,
+          status: "superseded",
+          phase: "admitted",
+          supersededAt: new Date().toISOString(),
+          supersededBy,
+        } satisfies StoredRunV1<Snapshot>),
+      ),
+    );
   }
 
   private async persistRunEvents(
@@ -791,6 +1158,14 @@ export class BotDurableAuthority<Snapshot> {
       });
   }
 
+  /** The Package's superseded-record hook, or `undefined` when it has none. */
+  private supersededPackageRecords():
+    SupersededPackageRecords<Snapshot> | undefined {
+    const hook = this.hooks.supersededRecords;
+    if (!hook) return undefined;
+    return (input) => hook.call(this.hooks, input);
+  }
+
   private terminalKeys(runId: string) {
     return {
       run: `${RUN_PREFIX}${runId}`,
@@ -815,6 +1190,7 @@ export class BotDurableAuthority<Snapshot> {
         previous,
         result,
         this.terminalPackageRecords(snapshot),
+        this.supersededPackageRecords(),
       );
       await this.refreshRecoveryAlarm(transaction);
     });
@@ -835,6 +1211,7 @@ export class BotDurableAuthority<Snapshot> {
         previous,
         events,
         failure,
+        this.supersededPackageRecords(),
       );
       await this.refreshRecoveryAlarm(transaction);
     });
@@ -860,9 +1237,60 @@ export class BotDurableAuthority<Snapshot> {
     });
   }
 
+  /**
+   * Starts the Turn that was waiting when the object last stopped.
+   *
+   * "Every admitted Turn reaches a durable terminal or resumable state" covers
+   * a Turn that was admitted and never started too: the object can be evicted
+   * between the Turn it superseded terminalizing and its own first step, and
+   * this is what picks it up. It runs exactly once — the promotion is a
+   * transaction, and a caller in this object already waiting for it is left to
+   * do the promoting itself.
+   */
+  private async recoverQueuedRun(): Promise<void> {
+    const pendingRunId = await this.ctx.storage.get<string>(PENDING_RUN_KEY);
+    if (!pendingRunId || this.queuedWaiters.has(pendingRunId)) return;
+    if (pendingRunId === this.executingRunId) return;
+    const durableIdentity =
+      await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+    const promoted = await this.promoteQueuedRun(pendingRunId);
+    if (typeof promoted === "string") return;
+    if (!durableIdentity) throw new Error("Bot identity is unavailable");
+    const run = await this.readRun(pendingRunId);
+    if (!run) throw new Error(`run "${pendingRunId}" was not accepted`);
+    await this.executeAcceptedRun(
+      this.recoveredCommand(durableIdentity, run),
+      promoted.previous,
+      promoted.settings,
+      promoted.compositionGenerationId,
+    );
+  }
+
+  /** The command a durable run record replays as after eviction. */
+  private recoveredCommand(
+    identity: BotIdentity,
+    run: StoredRunV1<Snapshot>,
+  ): OwnedBotTurnCommand {
+    return {
+      userId: identity.userId,
+      botId: identity.botId,
+      runId: run.runId,
+      sessionId: run.sessionId,
+      acceptedAt: run.acceptedAt,
+      text: run.input,
+      turnType: storedRunTurnTypeV1(run),
+      ...(storedRunSubagentRoleV1(run)
+        ? { subagentRole: storedRunSubagentRoleV1(run) }
+        : {}),
+      ...(run.admission?.origin ? { origin: run.admission.origin } : {}),
+      ...(run.directTool ? { directTool: run.directTool } : {}),
+    };
+  }
+
   async recoverActiveRun(): Promise<void> {
     const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
-    if (!activeRunId || activeRunId === this.executingRunId) return;
+    if (!activeRunId) return this.recoverQueuedRun();
+    if (activeRunId === this.executingRunId) return;
     const durableIdentity =
       await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
     const key = `${RUN_PREFIX}${activeRunId}`;
@@ -900,6 +1328,7 @@ export class BotDurableAuthority<Snapshot> {
           latest.slice(0, run.previousEventCount),
           completed,
           this.terminalPackageRecords(run.configurationSnapshot),
+          this.supersededPackageRecords(),
         );
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
@@ -913,6 +1342,7 @@ export class BotDurableAuthority<Snapshot> {
           latest.slice(0, run.previousEventCount),
           run.events,
           plan.failure,
+          this.supersededPackageRecords(),
         );
         await this.refreshRecoveryAlarm(transaction);
         return undefined;

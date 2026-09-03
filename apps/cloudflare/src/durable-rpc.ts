@@ -268,6 +268,10 @@ export interface DecodedBotRunRpcV1 {
     acceptedAt: string;
     text: string;
     skills?: SkillRefV1[];
+    /** The lane this command asks for. Only `user` crosses this seam. */
+    lane?: "user";
+    /** Explicit intent to replace the Turn the client observed running. */
+    supersedes?: { runId: string };
   };
 }
 
@@ -284,7 +288,31 @@ export function decodeBotRunRpcV1(input: unknown): DecodedBotRunRpcV1 {
       },
       // Invoked Skills cross the RPC as refs and are decoded here, at the
       // Durable Object's door, exactly like every other inbound value.
-      { skills: (value, label) => decodeSkillRefsV1(value, label) },
+      {
+        skills: (value, label) => decodeSkillRefsV1(value, label),
+        // Only the User's own composer supersedes. A Turn type is still never
+        // carried here, so the lane the HTTP path may name is exactly the one
+        // an absent lane would already have meant.
+        lane: (value, label) => {
+          if (value !== "user") throw new Error(`${label} is invalid`);
+          return "user" as const;
+        },
+        supersedes: (value, label) => {
+          if (!value || typeof value !== "object" || Array.isArray(value)) {
+            throw new Error(`${label} is invalid`);
+          }
+          const keys = Reflect.ownKeys(value);
+          const candidate = value as Record<string, unknown>;
+          if (
+            keys.length !== 1 ||
+            !Object.hasOwn(candidate, "runId") ||
+            typeof candidate.runId !== "string"
+          ) {
+            throw new Error(`${label} is invalid`);
+          }
+          return { runId: decodeRunIdV1(candidate.runId) };
+        },
+      },
     ),
   });
   const command = request.command as DecodedBotRunRpcV1["command"];

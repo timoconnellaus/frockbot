@@ -22,7 +22,34 @@ export interface StoredRunCodecV1<Snapshot> {
 }
 
 export type StoredRunStatus =
-  "running" | "completed" | "failed" | "cancelled" | "reconciliation-required";
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "superseded"
+  | "reconciliation-required";
+
+/**
+ * The admission lane a Turn was accepted on.
+ *
+ * A `user` admission is a person speaking to the Bot and may supersede
+ * whatever is running; a `background` admission — a Routine firing, a subagent
+ * dispatch — never supersedes and waits. The lane is durable because the
+ * decision to interrupt is made in the admission transaction and has to
+ * survive eviction alongside the run it interrupted.
+ */
+export type RunLaneV1 = "user" | "background";
+
+const RUN_LANES_V1: readonly RunLaneV1[] = ["user", "background"];
+
+/**
+ * The lane a turn type belongs to when its record names none. Chat is the
+ * conversation, so it is the User's lane; every other turn type is work the
+ * Bot started for itself.
+ */
+export function defaultRunLaneV1(turnType: TurnTypeV1): RunLaneV1 {
+  return turnType === "chat" ? "user" : "background";
+}
 
 export type StoredEffectAdmissionOutcome = "admitted" | "fenced";
 
@@ -81,6 +108,13 @@ export interface StoredRunAdmissionV1 {
   schemaVersion: 1;
   turnType: TurnTypeV1;
   /**
+   * The lane this Turn was admitted on. Absent means the lane its turn type
+   * defaults to, so no producer writing today's lanes changes a stored byte;
+   * a later lane that is not a turn type's default — bot-to-bot messaging's
+   * `agent` lane — names itself here.
+   */
+  lane?: RunLaneV1;
+  /**
    * The subagent role the Turn was admitted under, when it had one. Recorded
    * for the same reason the turn type is: recovery after eviction has to
    * re-mount the *same* catalog, and the role is half of what selects it.
@@ -90,7 +124,7 @@ export interface StoredRunAdmissionV1 {
 }
 
 export type StoredRunPhase =
-  "admitted" | "executing" | "reconciliation-required";
+  "queued" | "admitted" | "executing" | "reconciliation-required";
 
 export interface StoredRunV1<Snapshot = unknown> {
   runId: string;
@@ -106,6 +140,15 @@ export interface StoredRunV1<Snapshot = unknown> {
   phase: StoredRunPhase;
   /** Durable Stop intent; orthogonal to status and phase. */
   stopRequestedAt?: string;
+  /**
+   * Durable supersede intent: a later user-lane admission has taken this
+   * Turn's place. Orthogonal to status and phase exactly as Stop is, and read
+   * the same way — every new effect is fenced from the instant it is
+   * recorded, and the settlement that follows is terminal `superseded`.
+   */
+  supersededAt?: string;
+  /** The run whose admission superseded this one. */
+  supersededBy?: string;
   /** The Composition generation pinned in the same transaction that admitted the run. */
   compositionGenerationId: string;
   configurationSnapshot: Snapshot;
@@ -137,6 +180,15 @@ export function storedRunTurnTypeV1(run: {
   return run.admission?.turnType ?? "chat";
 }
 
+/** The lane a stored run was admitted on. */
+export function storedRunLaneV1(run: {
+  admission?: StoredRunAdmissionV1;
+}): RunLaneV1 {
+  return (
+    run.admission?.lane ?? defaultRunLaneV1(run.admission?.turnType ?? "chat")
+  );
+}
+
 /**
  * The `admission` field a Turn records — nothing at all for a chat Turn with
  * no recorded origin, so no stored bytes change for the Turn every producer
@@ -146,14 +198,25 @@ export function storedRunAdmissionV1(
   turnType: TurnTypeV1 | undefined,
   origin?: StoredRunOriginV1,
   subagentRole?: string,
+  lane?: RunLaneV1,
 ): { admission?: StoredRunAdmissionV1 } {
   const admitted = turnType ?? "chat";
-  if (admitted === "chat" && origin === undefined && subagentRole === undefined)
+  // A lane that is already the turn type's default is not written: it says
+  // nothing the record does not, and writing it would change the bytes of the
+  // Turn every producer writes today.
+  const named = lane && lane !== defaultRunLaneV1(admitted) ? lane : undefined;
+  if (
+    admitted === "chat" &&
+    origin === undefined &&
+    subagentRole === undefined &&
+    named === undefined
+  )
     return {};
   return {
     admission: {
       schemaVersion: 1,
       turnType: admitted,
+      ...(named ? { lane: named } : {}),
       ...(subagentRole ? { subagentRole } : {}),
       ...(origin ? { origin } : {}),
     },
@@ -168,9 +231,11 @@ const STORED_RUN_STATUSES: readonly StoredRunStatus[] = [
   "completed",
   "failed",
   "cancelled",
+  "superseded",
   "reconciliation-required",
 ];
 const STORED_RUN_PHASES: readonly StoredRunPhase[] = [
+  "queued",
   "admitted",
   "executing",
   "reconciliation-required",
@@ -193,6 +258,8 @@ const STORED_RUN_OPTIONAL_KEYS = [
   "responseText",
   "failure",
   "stopRequestedAt",
+  "supersededAt",
+  "supersededBy",
   "admission",
   "directTool",
 ] as const;
@@ -333,6 +400,7 @@ function decodeStoredRunAdmission(
   const allowed = new Set([
     "schemaVersion",
     "turnType",
+    "lane",
     "subagentRole",
     "origin",
   ]);
@@ -352,6 +420,13 @@ function decodeStoredRunAdmission(
   } catch {
     throw new Error(`run "${runId}" has an invalid admission turn type`);
   }
+  const lane =
+    candidate.lane === undefined
+      ? undefined
+      : RUN_LANES_V1.find((value) => value === candidate.lane);
+  if (candidate.lane !== undefined && !lane) {
+    throw new Error(`run "${runId}" has an invalid admission lane`);
+  }
   if (
     candidate.subagentRole !== undefined &&
     (typeof candidate.subagentRole !== "string" ||
@@ -363,6 +438,7 @@ function decodeStoredRunAdmission(
   return {
     schemaVersion: 1,
     turnType,
+    ...(lane === undefined ? {} : { lane }),
     ...(candidate.subagentRole === undefined
       ? {}
       : { subagentRole: candidate.subagentRole as string }),
@@ -522,6 +598,25 @@ function requireStoredRunRecordV1<Snapshot>(
     throw new Error(`run "${runId}" has invalid stopRequestedAt`);
   }
   if (
+    candidate.supersededAt !== undefined &&
+    (!boundedString(candidate.supersededAt, 64) ||
+      !Number.isFinite(Date.parse(candidate.supersededAt as string)))
+  ) {
+    throw new Error(`run "${runId}" has invalid supersededAt`);
+  }
+  if (
+    candidate.supersededBy !== undefined &&
+    !boundedString(candidate.supersededBy, 128)
+  ) {
+    throw new Error(`run "${runId}" has invalid supersededBy`);
+  }
+  if (
+    candidate.supersededBy !== undefined &&
+    candidate.supersededAt === undefined
+  ) {
+    throw new Error(`run "${runId}" names a superseder with no supersede time`);
+  }
+  if (
     status === "completed"
       ? candidate.responseText === undefined || candidate.failure !== undefined
       : candidate.responseText !== undefined
@@ -537,6 +632,9 @@ function requireStoredRunRecordV1<Snapshot>(
   }
   if (status === "cancelled" && candidate.stopRequestedAt === undefined) {
     throw new Error(`run "${runId}" has no durable stop intent`);
+  }
+  if (status === "superseded" && candidate.supersededAt === undefined) {
+    throw new Error(`run "${runId}" has no durable supersede intent`);
   }
   if (
     (status === "reconciliation-required") !==
@@ -566,6 +664,12 @@ function requireStoredRunRecordV1<Snapshot>(
     ...(candidate.stopRequestedAt === undefined
       ? {}
       : { stopRequestedAt: candidate.stopRequestedAt as string }),
+    ...(candidate.supersededAt === undefined
+      ? {}
+      : { supersededAt: candidate.supersededAt as string }),
+    ...(candidate.supersededBy === undefined
+      ? {}
+      : { supersededBy: candidate.supersededBy as string }),
     ...(candidate.admission === undefined
       ? {}
       : { admission: decodeStoredRunAdmission(candidate.admission, runId) }),
@@ -602,6 +706,18 @@ export interface BotTurnCommand {
    */
   skills?: SkillRefV1[];
   directTool?: DirectToolCommandV1;
+  /**
+   * The lane this command asks to be admitted on. Absent means the lane its
+   * turn type defaults to.
+   */
+  lane?: RunLaneV1;
+  /**
+   * The explicit intent to supersede the named run. A user-lane command that
+   * carries it is the authenticated cancellation of whatever is running: the
+   * named run terminalizes `superseded` and this one takes its place. Without
+   * it a second command is refused exactly as it always was.
+   */
+  supersedes?: { runId: string };
 }
 
 /**
@@ -616,12 +732,15 @@ export function botTurnCommandFingerprintV1(
 ): string {
   const turnType = command.turnType ?? "chat";
   const skills = command.skills ?? [];
+  const lane = command.lane ?? defaultRunLaneV1(turnType);
   if (
     turnType !== "chat" ||
     command.origin !== undefined ||
     command.subagentRole !== undefined ||
     skills.length > 0 ||
-    command.directTool !== undefined
+    command.directTool !== undefined ||
+    lane !== defaultRunLaneV1(turnType) ||
+    command.supersedes !== undefined
   ) {
     return `bot-turn-command-v2:${JSON.stringify({
       userId: command.userId,
@@ -629,8 +748,10 @@ export function botTurnCommandFingerprintV1(
       sessionId: command.sessionId,
       text: command.text,
       turnType,
+      ...(lane === defaultRunLaneV1(turnType) ? {} : { lane }),
       ...(command.subagentRole ? { subagentRole: command.subagentRole } : {}),
       ...(command.origin ? { origin: command.origin } : {}),
+      ...(command.supersedes ? { supersedes: command.supersedes } : {}),
       ...(skills.length > 0 ? { skills: skills.map(formatSkillRefV1) } : {}),
       ...(command.directTool ? { directTool: command.directTool } : {}),
     })}`;

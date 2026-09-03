@@ -45,8 +45,21 @@ export class MemoryStorage {
     );
   }
 
+  /**
+   * Transactions run one at a time, as a Durable Object's do. Two admissions
+   * that arrive together must not both read "no run is pending" and both
+   * write themselves into the slot, and a fixture that let them would prove
+   * the opposite of what the tests are for.
+   */
+  #serialized: Promise<unknown> = Promise.resolve();
+
   transaction<T>(callback: (storage: MemoryStorage) => Promise<T>): Promise<T> {
-    return callback(this);
+    const next = this.#serialized.then(
+      () => callback(this),
+      () => callback(this),
+    );
+    this.#serialized = next.catch(() => undefined);
+    return next;
   }
 
   setAlarm(scheduledTime: number): Promise<void> {

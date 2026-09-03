@@ -64,7 +64,10 @@ export function isSettledAuditRunV1(run: { status: string }): boolean {
   return (
     run.status === "completed" ||
     run.status === "failed" ||
-    run.status === "cancelled"
+    run.status === "cancelled" ||
+    // A Turn the User's next message replaced still ran tools, and an audit
+    // surface with silent gaps answers no question anybody asks of it.
+    run.status === "superseded"
   );
 }
 

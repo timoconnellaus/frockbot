@@ -149,6 +149,13 @@ class LoopAgent implements Agent {
   #inbox: AgentInput[] = [];
   #activity: Promise<void> = Promise.resolve();
   #controller: AbortController | undefined;
+  /**
+   * Why the current cancellation happened, as an opaque bounded string the
+   * caller supplied. The loop never reads it: it records it on the `turn/end`
+   * it writes, so the durable log says what interrupted the Turn rather than
+   * only that something did.
+   */
+  #cancelDetail: string | undefined;
   #disposeRequested = false;
   #resumeRequested = false;
 
@@ -216,8 +223,9 @@ class LoopAgent implements Agent {
     this.#wake();
   }
 
-  cancel(reason: "user" | "shutdown" = "user"): void {
+  cancel(reason: "user" | "shutdown" = "user", detail?: string): void {
     if (this.#status === "disposed") return;
+    this.#cancelDetail = turnEndReason(detail);
     this.#ctx.emit("agent/cancel-requested", this, reason);
     const queued = this.#inbox.splice(0);
     if (queued.length > 0) {
@@ -587,6 +595,7 @@ class LoopAgent implements Agent {
         signal.aborted
       ) {
         turnOutcome = "cancelled";
+        turnReason = this.#cancelDetail;
       } else {
         turnOutcome = "model-error";
         turnReason = turnEndReason(modelFailureMessage(error));
@@ -746,6 +755,7 @@ class LoopAgent implements Agent {
         signal.aborted
       ) {
         turnOutcome = "cancelled";
+        turnReason = this.#cancelDetail;
       } else {
         turnOutcome = "model-error";
         turnReason = turnEndReason(modelFailureMessage(error));

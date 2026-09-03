@@ -30,6 +30,8 @@ import {
   SIDEBAR_PREVIEW_KEY,
   UNREAD_STATE_KEY,
 } from "./unread.js";
+import { enqueuePendingBotInputV1 } from "@frockbot/plugin-routines/inbox-store";
+import type { PendingBotInputV1 } from "@frockbot/plugin-routines/inbox";
 import { approvalTerminalRecordsV1 } from "./approvals.js";
 import { routineTerminalRecordsForRunV1 } from "./backend-routines.js";
 
@@ -131,6 +133,52 @@ const SHELL_TERMINAL_PRODUCERS_V1 = [
   routineRecordsV1,
   approvalRecordsV1,
 ] as const;
+
+/**
+ * What a Turn the User's next message replaced leaves behind.
+ *
+ * One durable input, drained once by the next conversational Turn. The session
+ * log already carries what the Turn sent and what its tools returned; this is
+ * the part that is *not* in the log — that it was cut off, that nothing still
+ * in flight completed, and that a subagent it dispatched is still working.
+ * Background work survives a supersede, so the reminder is how the Bot learns
+ * that an answer is still coming rather than losing track of it.
+ *
+ * An automation Turn contributes nothing: a firing is not the conversation,
+ * and it reaches the User through its own inbox entry.
+ */
+export async function supersededTurnRecordsV1(input: {
+  run: ShellTerminalRunV1;
+  now: string;
+  read<T>(key: string): Promise<T | undefined>;
+}): Promise<Record<string, unknown>> {
+  if ((input.run.admission?.turnType ?? "chat") !== "chat") return {};
+  const pending = {
+    schemaVersion: 1,
+    kind: "superseded-turn",
+    runId: input.run.runId,
+    unfinishedWork: input.run.events.some(
+      (event) => event.type === "task/dispatched",
+    ),
+    createdAt: input.now,
+  } satisfies PendingBotInputV1;
+  const records: Record<string, unknown> = {};
+  await enqueuePendingBotInputV1(
+    {
+      get: <T>(key: string) => input.read<T>(key),
+      // A settling transaction cannot list. De-duplication is by the input's
+      // id, which is this run's, and a run settles once.
+      list: <T>() => Promise.resolve(new Map<string, T>()),
+      put: (key: string, value: unknown) => {
+        records[key] = value;
+        return Promise.resolve();
+      },
+      delete: () => Promise.resolve(false),
+    },
+    pending,
+  );
+  return records;
+}
 
 export async function shellTerminalRecordsV1(
   input: ShellTerminalInputV1,

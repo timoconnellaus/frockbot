@@ -758,6 +758,13 @@ export function createUserApplication() {
             // so what a Turn runs on is still whatever the instruction root
             // holds at the generation the Turn resolves.
             ...(turnCommand.skills ? { skills: turnCommand.skills } : {}),
+            // A person typed this while the Bot was working. The intent to
+            // replace the running Turn is the User's explicit authenticated
+            // command; the lane is `user` because only the composer reaches
+            // this route.
+            ...(turnCommand.supersedes
+              ? { supersedes: turnCommand.supersedes, lane: "user" as const }
+              : {}),
           },
         }),
       );

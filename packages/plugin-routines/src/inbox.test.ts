@@ -400,3 +400,38 @@ describe("the machine-result variant", () => {
     ).toBe("exit 0 — nothing to commit");
   });
 });
+
+describe("a Turn the User's next message replaced", () => {
+  const superseded = {
+    schemaVersion: 1 as const,
+    kind: "superseded-turn" as const,
+    runId: "run-1",
+    unfinishedWork: true,
+    createdAt: NOW,
+  };
+
+  test("round-trips, and is keyed by the Turn it replaced", () => {
+    expect(decodePendingBotInputV1(superseded, "input")).toEqual(superseded);
+    expect(() =>
+      decodePendingBotInputV1(
+        { ...superseded, unfinishedWork: "yes" },
+        "input",
+      ),
+    ).toThrow(/unfinishedWork is invalid/);
+    expect(() =>
+      decodePendingBotInputV1({ ...superseded, extra: 1 }, "input"),
+    ).toThrow();
+  });
+
+  test("tells the next Turn what happened and what is still running", () => {
+    const preamble = pendingBotInputPreambleV1([superseded]);
+
+    expect(preamble).toContain("[Superseded]");
+    expect(preamble).toContain("must not be assumed to have happened");
+    expect(preamble).toContain("Subagents that Turn dispatched are still");
+    // With nothing left running the reminder says nothing about subagents.
+    expect(
+      pendingBotInputPreambleV1([{ ...superseded, unfinishedWork: false }]),
+    ).not.toContain("Subagents");
+  });
+});

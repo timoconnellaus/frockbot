@@ -6,7 +6,10 @@
 // records where the Turn earned one — a firing with two inbox entries — and
 // nobody would notice until they counted.
 import { describe, expect, test } from "bun:test";
-import { shellTerminalRecordsV1 } from "./terminal-records.js";
+import {
+  shellTerminalRecordsV1,
+  supersededTurnRecordsV1,
+} from "./terminal-records.js";
 import { SIDEBAR_PREVIEW_KEY, UNREAD_STATE_KEY } from "./unread.js";
 import { approvalKeyV1, decodeApprovalRecordV1 } from "./approvals.js";
 import { decodeRoutineInboxEntryV1 } from "@frockbot/plugin-routines/inbox";
@@ -213,5 +216,53 @@ describe("the settling transaction's records", () => {
     expect(new Set(Object.keys(records)).size).toBe(
       Object.keys(records).length,
     );
+  });
+});
+
+describe("what a superseded Turn leaves for the Turn that replaced it", () => {
+  const run = {
+    runId: "run-1",
+    sessionId: "user-1:primary",
+    acceptedAt: "2026-09-03T00:00:00.000Z",
+    input: "first",
+    events: [] as { type: string }[],
+  };
+  const now = "2026-09-03T00:00:05.000Z";
+  const read = <T>(): Promise<T | undefined> => Promise.resolve(undefined);
+
+  test("one durable input, keyed by the Turn it replaced", async () => {
+    const records = await supersededTurnRecordsV1({ run, now, read });
+
+    const values = Object.values(records);
+    expect(values).toHaveLength(2);
+    expect(values).toContainEqual({
+      schemaVersion: 1,
+      kind: "superseded-turn",
+      runId: "run-1",
+      unfinishedWork: false,
+      createdAt: now,
+    });
+  });
+
+  test("a Turn that dispatched a subagent says so, because it is still running", async () => {
+    const records = await supersededTurnRecordsV1({
+      run: { ...run, events: [{ type: "task/dispatched" }] },
+      now,
+      read,
+    });
+
+    expect(Object.values(records)).toContainEqual(
+      expect.objectContaining({ unfinishedWork: true }),
+    );
+  });
+
+  test("an automation Turn contributes nothing: a firing is not the conversation", async () => {
+    expect(
+      await supersededTurnRecordsV1({
+        run: { ...run, admission: { turnType: "automation" } },
+        now,
+        read,
+      }),
+    ).toEqual({});
   });
 });

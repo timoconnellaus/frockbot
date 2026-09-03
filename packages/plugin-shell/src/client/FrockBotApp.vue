@@ -167,16 +167,26 @@ const macDesktop =
 const botName = computed(
   () => state.value.botSettings?.profile.name ?? "Barebones",
 );
-const isRunning = computed(() => Boolean(state.value.activeRunId));
+/** A Turn is executing. The composer stays open; only Stop depends on this. */
+const isRunning = computed(() => Boolean(state.value.runningRunId));
 const isConnecting = computed(() => state.value.connection !== "ready");
+/**
+ * Sending while the Bot is working is the point: the message supersedes the
+ * running Turn. So the only things that close the composer are the ones that
+ * would make any message impossible.
+ */
 const canSend = computed(
   () =>
     state.value.connection === "ready" &&
     state.value.modelReady &&
     Boolean(state.value.activeBotId) &&
-    !isRunning.value &&
     draft.value.trim().length > 0,
 );
+/**
+ * Stop takes the button only while there is nothing to send. The moment the
+ * User has typed something, sending it is what they mean by interrupting.
+ */
+const showStop = computed(() => isRunning.value && !canSend.value);
 
 /*
  * Tool activity is internal to the Turn. A Turn that produced only tool calls
@@ -694,7 +704,10 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             :id="turnAnchors.get(message.id)"
             :key="message.id"
             class="message"
-            :class="`message-${message.role}`"
+            :class="[
+              `message-${message.role}`,
+              { 'message-pending': message.pending },
+            ]"
           >
             <p v-if="message.role === 'system'" class="message-system-line">
               {{ message.text }}
@@ -907,7 +920,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                     ? 'Model unavailable'
                     : `Message ${botName}`
               "
-              :disabled="isConnecting || !state.modelReady || isRunning"
+              :disabled="isConnecting || !state.modelReady"
               rows="1"
               role="combobox"
               :aria-expanded="skillPopoverOpen"
@@ -920,7 +933,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             />
           </div>
           <UiIconButton
-            v-if="isRunning"
+            v-if="showStop"
             class="stop-button"
             icon="stop"
             label="Stop generating"
