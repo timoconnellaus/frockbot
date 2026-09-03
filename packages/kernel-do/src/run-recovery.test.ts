@@ -96,7 +96,7 @@ describe("unresolvedModelRequestFailure", () => {
   });
 });
 
-// ADR 0027. A restart mid-Turn used to park every in-flight run on a
+// ADR 0028. A restart mid-Turn used to park every in-flight run on a
 // reconciliation nobody could perform: the providers this deployment actually
 // uses expose no response retrieval, so the banner's Resolve action had one
 // possible outcome and the Bot stayed wedged until somebody clicked it.

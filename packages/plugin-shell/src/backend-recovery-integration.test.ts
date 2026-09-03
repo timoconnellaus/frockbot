@@ -626,7 +626,7 @@ describe("Bot recovery", () => {
     expect(await recoveredAgain.listNotifications()).toEqual(notifications);
   });
 
-  // ADR 0027. This used to park the run and hand the person a Resolve button.
+  // ADR 0028. This used to park the run and hand the person a Resolve button.
   // `provider-1` has no retrieval — none of the providers this deployment
   // ships does — so there was never an answer to resolve it with, and the Bot
   // stayed wedged behind it.

@@ -80,7 +80,7 @@ describe("a Turn that runs out of wall clock", () => {
 
     // The model effect is unsettled, so the Turn is owed a reconciliation
     // rather than a clean end — but it *ended*, which is the whole point, and
-    // ADR 0027 settles it from there.
+    // ADR 0028 settles it from there.
     const journal = handle.agent.session.events;
     expect(
       journal.some((event) => event.type === "model/reconciliation-required"),

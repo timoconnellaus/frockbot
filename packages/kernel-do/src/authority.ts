@@ -147,7 +147,7 @@ export interface BotDurableAuthorityHooks<Snapshot> {
   }): Promise<Record<string, unknown>>;
   /**
    * Whether the named provider can be asked what happened to a model request
-   * it never answered (ADR 0027).
+   * it never answered (ADR 0028).
    *
    * Synchronous and pure, because it is consulted inside the recovery
    * transaction: it answers from what the deployment knows about a provider
@@ -1459,7 +1459,7 @@ export class BotDurableAuthority<Snapshot> {
         return undefined;
       }
       if (plan.kind === "fail") {
-        // The repairs matter when the failure is ADR 0027's: they close the
+        // The repairs matter when the failure is ADR 0028's: they close the
         // tool occurrences the restart left open, so the settled run's journal
         // is a complete account rather than one that stops mid-sentence twice.
         const events = plan.repairs

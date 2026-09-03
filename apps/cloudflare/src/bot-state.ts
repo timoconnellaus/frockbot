@@ -195,6 +195,7 @@ import {
   rpcPattern,
   rpcString,
 } from "./durable-rpc.js";
+import { answeredEntryV1, loggedEntryV1 } from "./entry-boundary.js";
 
 function isFlockAiGatewayBindingV1(
   value: BotStateEnv["AI"],
@@ -1840,18 +1841,43 @@ export class BotState extends DurableObject<BotStateEnv> {
     // The outbox drain is in a `finally` for the same reason the kernel's
     // re-arm is: it is the audit trail's second chance, and a throw anywhere in
     // the Bot's own settlement must not be what stops entries leaving.
-    try {
-      await (await this.contribution()).alarm();
-    } finally {
-      // The alarm the Bot already has is also the audit outbox's second chance:
-      // entries a settlement could not deliver leave on the next firing rather
-      // than waiting for the Bot to be spoken to again.
-      await this.drainAuditOutbox();
-    }
+    //
+    // Both halves are then wrapped: an alarm has no caller, so anything that
+    // escapes here is an uncaught exception in the object — which is one of the
+    // ways the dev Worker died. The alarm is rescheduled by whatever owns it,
+    // so recording the failure and letting the next firing try again is the
+    // whole of the recovery.
+    await loggedEntryV1("Bot alarm", async () => {
+      try {
+        await (await this.contribution()).alarm();
+      } finally {
+        // The alarm the Bot already has is also the audit outbox's second
+        // chance: entries a settlement could not deliver leave on the next
+        // firing rather than waiting for the Bot to be spoken to again.
+        await loggedEntryV1("Bot audit outbox drain", () =>
+          this.drainAuditOutbox(),
+        );
+      }
+    });
   }
 
-  /** Internal fetch surface reached only after the gateway authenticates ownership. */
-  async fetch(request: Request): Promise<Response> {
+  /**
+   * Internal fetch surface reached only after the gateway authenticates
+   * ownership.
+   *
+   * This is the state-channel upgrade, and it is where a `BotNotFoundError`
+   * escaped and took the dev Worker down twice: a Durable Object's own `fetch`
+   * is an entry point, so a throw here has no caller inside the object to catch
+   * it. A Bot that is not there is a 404, and every other failure is a 500 that
+   * still carries a reason.
+   */
+  fetch(request: Request): Promise<Response> {
+    return answeredEntryV1("Bot-state channel failed", () =>
+      this.#openChannel(request),
+    );
+  }
+
+  async #openChannel(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname !== BOT_STATE_CHANNEL_INTERNAL_PATH) {
       return new Response("Not found", { status: 404 });
@@ -1870,15 +1896,30 @@ export class BotState extends DurableObject<BotStateEnv> {
     return this.stateChannel.upgrade(request, identity);
   }
 
-  webSocketMessage(socket: WebSocket, _message: string | ArrayBuffer): void {
-    this.stateChannel.message(socket);
+  // Three more entry points with no caller. A throw in any of them is an
+  // uncaught exception in the object, and none of them has anybody to answer.
+  webSocketMessage(
+    socket: WebSocket,
+    _message: string | ArrayBuffer,
+  ): Promise<void> {
+    return loggedEntryV1("Bot-state channel message", () =>
+      this.stateChannel.message(socket),
+    );
   }
 
-  webSocketClose(socket: WebSocket, code: number, reason: string): void {
-    this.stateChannel.close(socket, code, reason);
+  webSocketClose(
+    socket: WebSocket,
+    code: number,
+    reason: string,
+  ): Promise<void> {
+    return loggedEntryV1("Bot-state channel close", () =>
+      this.stateChannel.close(socket, code, reason),
+    );
   }
 
-  webSocketError(socket: WebSocket, _error: unknown): void {
-    this.stateChannel.error(socket);
+  webSocketError(socket: WebSocket, _error: unknown): Promise<void> {
+    return loggedEntryV1("Bot-state channel error", () =>
+      this.stateChannel.error(socket),
+    );
   }
 }

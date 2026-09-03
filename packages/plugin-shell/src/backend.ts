@@ -449,7 +449,7 @@ import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contrib
 /**
  * The providers that can be asked what happened to a model request they never
  * answered — that is, the ones whose Package registers an
- * `LlmReconciliationCapability` (ADR 0027).
+ * `LlmReconciliationCapability` (ADR 0028).
  *
  * It is a list rather than a lookup because recovery consults it inside the
  * durable transaction that settles the run, where nothing may be mounted or

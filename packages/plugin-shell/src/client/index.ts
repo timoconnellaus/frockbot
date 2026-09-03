@@ -342,7 +342,7 @@ function assistantMessage(
   }
   // A Turn that broke after it had started talking keeps what it said, with
   // the reason underneath it — the treatment a stopped Turn already gets, for
-  // the same reason: the words arrived and the person read them (ADR 0027).
+  // the same reason: the words arrived and the person read them (ADR 0028).
   // A Turn that broke before saying anything is still just the reason.
   if (run.status === "failed" && run.responseText) {
     return {

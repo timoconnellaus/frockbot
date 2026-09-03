@@ -182,7 +182,7 @@ export type ClientRunOutcomeV1 =
   /**
    * A Turn that broke keeps what it had already said, for the same reason a
    * stopped one does: the words arrived, the person read them, and replacing
-   * them with a notice would rewrite what they watched happen (ADR 0027).
+   * them with a notice would rewrite what they watched happen (ADR 0028).
    */
   | { type: "failed"; message: string; text?: string }
   /**
