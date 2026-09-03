@@ -447,6 +447,25 @@ import {
 } from "./unread.js";
 import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
+/**
+ * The providers that can be asked what happened to a model request they never
+ * answered — that is, the ones whose Package registers an
+ * `LlmReconciliationCapability` (ADR 0028).
+ *
+ * It is a list rather than a lookup because recovery consults it inside the
+ * durable transaction that settles the run, where nothing may be mounted or
+ * awaited. The cost is that a provider Package which gains retrieval has to
+ * name itself here; the ADR carries that obligation, and the failure mode of
+ * forgetting is a Turn settled as failed rather than one wedged forever, which
+ * is the direction this deployment wants to be wrong in.
+ *
+ * Today: the in-process foundation provider, and nothing else. Ollama Cloud
+ * exposes no provider-bound retrieval (ADR 0010) and neither does Flock AI.
+ */
+const RECONCILING_PROVIDER_IDS_V1: ReadonlySet<string> = new Set([
+  "foundation",
+]);
+
 export const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
 const STOP_RECEIPT_PREFIX = "stop-receipt:";
@@ -785,6 +804,8 @@ export class ShellBotBackendContribution {
         deferScheduledWork: (transaction) =>
           this.deferScheduledWork(transaction),
         settleScheduledWork: () => this.settleScheduledWork(),
+        providerReconciles: (providerId) =>
+          RECONCILING_PROVIDER_IDS_V1.has(providerId),
       },
     });
   }

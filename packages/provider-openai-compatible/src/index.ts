@@ -2,6 +2,9 @@ import {
   type LlmMessage,
   type LlmProvider,
   type LlmStreamEvent,
+  MODEL_REQUEST_DEADLINES_V1,
+  type ModelRequestDeadlinesV1,
+  ModelRequestDeadlineError,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
@@ -32,17 +35,83 @@ export interface OpenAICompatibleConfig {
    * model id decides through {@link modelAcceptsImagesV1}.
    */
   acceptsImages?: boolean;
+  /** Overrides {@link MODEL_REQUEST_DEADLINES_V1}. */
+  deadlines?: Partial<ModelRequestDeadlinesV1>;
   /**
-   * Deadline for the model request's response headers. The stream that follows
-   * is bounded separately, per read, by {@link SSE_IDLE_READ_TIMEOUT_MS}.
+   * Timer seam, so a deadline test does not have to wait two minutes for one.
+   * Defaults to `setTimeout`.
    */
-  firstByteTimeoutMs?: number;
-  /** Per-read deadline once the stream is open. */
-  idleReadTimeoutMs?: number;
+  schedule?: (run: () => void, milliseconds: number) => () => void;
 }
 
-/** Deadline for a model request's response headers. */
-export const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 60_000;
+/**
+ * A request's clock, watching for silence.
+ *
+ * One controller, aborted with a {@link ModelRequestDeadlineError} when the
+ * provider says nothing for too long, and rearmed on every stream event. It
+ * chains the caller's signal so a Stop still cancels immediately, and it is
+ * always disarmed in a `finally`: a live timer in a Worker isolate holds the
+ * request open long after anyone is listening.
+ */
+class ModelRequestClockV1 {
+  readonly #controller = new AbortController();
+  readonly #deadlines: ModelRequestDeadlinesV1;
+  readonly #schedule: (run: () => void, milliseconds: number) => () => void;
+  #cancelTimer: (() => void) | undefined;
+  #disarmed = false;
+
+  constructor(
+    caller: AbortSignal,
+    deadlines: ModelRequestDeadlinesV1,
+    schedule: (run: () => void, milliseconds: number) => () => void,
+  ) {
+    this.#deadlines = deadlines;
+    this.#schedule = schedule;
+    if (caller.aborted) this.#controller.abort(caller.reason);
+    else {
+      caller.addEventListener(
+        "abort",
+        () => this.#controller.abort(caller.reason),
+        { once: true },
+      );
+    }
+    this.#arm("first-byte");
+  }
+
+  get signal(): AbortSignal {
+    return this.#controller.signal;
+  }
+
+  /** A stream event arrived: the clock restarts on the idle allowance. */
+  progressed(): void {
+    this.#arm("idle");
+  }
+
+  disarm(): void {
+    this.#disarmed = true;
+    this.#cancelTimer?.();
+    this.#cancelTimer = undefined;
+  }
+
+  #arm(phase: "first-byte" | "idle"): void {
+    if (this.#disarmed) return;
+    this.#cancelTimer?.();
+    const milliseconds =
+      phase === "first-byte"
+        ? this.#deadlines.firstByteMs
+        : this.#deadlines.idleMs;
+    this.#cancelTimer = this.#schedule(() => {
+      this.#controller.abort(
+        new ModelRequestDeadlineError(phase, milliseconds),
+      );
+    }, milliseconds);
+  }
+}
+
+function defaultScheduleV1(run: () => void, milliseconds: number): () => void {
+  const timer = setTimeout(run, milliseconds);
+  return () => clearTimeout(timer);
+}
 
 interface ToolAccumulator {
   index: number;
@@ -184,40 +253,6 @@ export function requestToWire(
 
 const MAX_SSE_EVENT_CHARACTERS = 1_048_576;
 const MAX_SSE_RESPONSE_BYTES = 16_777_216;
-/**
- * A provider that opens a stream and then stalls holds the Turn open until the
- * caller aborts, which for an unattended run is never. Each individual read is
- * bounded instead, so a silent stream fails as a stream rather than hanging.
- */
-export const SSE_IDLE_READ_TIMEOUT_MS = 120_000;
-
-class SseIdleTimeoutError extends Error {
-  constructor(idleMs: number) {
-    super(`Model response stream stalled for ${idleMs}ms`);
-    this.name = "SseIdleTimeoutError";
-  }
-}
-
-/** Resolve to the read, or reject once the idle deadline passes. */
-async function readWithin<T>(
-  read: Promise<T>,
-  idleMs: number,
-): Promise<Awaited<T>> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      read,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new SseIdleTimeoutError(idleMs)),
-          idleMs,
-        );
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
 
 async function rejectOversizedSse(
   reader: ReadableStreamDefaultReader<Uint8Array>,
@@ -229,7 +264,6 @@ async function rejectOversizedSse(
 async function* readSseData(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
-  idleMs: number = SSE_IDLE_READ_TIMEOUT_MS,
 ): AsyncIterable<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -242,16 +276,7 @@ async function* readSseData(
   try {
     signal.throwIfAborted();
     while (true) {
-      let done: boolean;
-      let value: Uint8Array | undefined;
-      try {
-        ({ done, value } = await readWithin(reader.read(), idleMs));
-      } catch (error) {
-        if (error instanceof SseIdleTimeoutError) {
-          await reader.cancel(error.message).catch(() => undefined);
-        }
-        throw error;
-      }
+      const { done, value } = await reader.read();
       signal.throwIfAborted();
       responseBytes += value?.byteLength ?? 0;
       if (responseBytes > MAX_SSE_RESPONSE_BYTES) {
@@ -330,13 +355,12 @@ function parseToolInput(value: string): JsonValue {
 export async function* streamOpenAICompatibleBody(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
-  idleMs: number = SSE_IDLE_READ_TIMEOUT_MS,
 ): AsyncIterable<LlmStreamEvent> {
   const tools = new Map<number, ToolAccumulator>();
   let finishReason: string | undefined;
   let terminal = false;
   let sawChoice = false;
-  for await (const data of readSseData(body, signal, idleMs)) {
+  for await (const data of readSseData(body, signal)) {
     if (data === "[DONE]") {
       terminal = true;
       break;
@@ -418,54 +442,59 @@ export class OpenAICompatibleProvider implements LlmProvider {
     };
     if (this.config.apiKey)
       headers.authorization = `Bearer ${this.config.apiKey}`;
-    // The deadline covers the headers only, and is cleared the moment they
-    // arrive: aborting the shared signal later would tear down a stream that is
-    // legitimately still producing tokens.
-    const firstByteMs =
-      this.config.firstByteTimeoutMs ?? DEFAULT_FIRST_BYTE_TIMEOUT_MS;
-    const headersController = new AbortController();
-    const requestSignal = AbortSignal.any([signal, headersController.signal]);
-    const headersTimer = setTimeout(() => {
-      headersController.abort(
-        new Error(`Model request did not respond within ${firstByteMs}ms`),
-      );
-    }, firstByteMs);
-    let response: Response;
+    // Nothing here used to have a time bound: a provider that accepted the
+    // request and then went quiet held the Turn open for as long as the socket
+    // stayed up — seventeen minutes, in the incident this exists for, with
+    // nothing on the person's screen the whole time.
+    const clock = new ModelRequestClockV1(
+      signal,
+      { ...MODEL_REQUEST_DEADLINES_V1, ...this.config.deadlines },
+      this.config.schedule ?? defaultScheduleV1,
+    );
     try {
-      response = await fetcher(`${this.config.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(
-          requestToWire(request, {
-            ...(this.config.acceptsImages === undefined
-              ? {}
-              : { acceptsImages: this.config.acceptsImages }),
-          }),
-        ),
-        signal: requestSignal,
-      });
+      const response = await fetcher(
+        `${this.config.baseUrl}/chat/completions`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify(
+            requestToWire(request, {
+              ...(this.config.acceptsImages === undefined
+                ? {}
+                : { acceptsImages: this.config.acceptsImages }),
+            }),
+          ),
+          signal: clock.signal,
+        },
+      );
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new OpenAICompatibleHttpError(response.status);
+      }
+      if (!response.body)
+        throw new Error("Model response did not include a stream");
+
+      for await (const event of streamOpenAICompatibleBody(
+        response.body,
+        clock.signal,
+      )) {
+        clock.progressed();
+        yield event;
+      }
     } catch (error) {
-      if (headersController.signal.aborted && !signal.aborted) {
-        throw new Error(
-          `Model request did not respond within ${firstByteMs}ms`,
-        );
+      // The abort reason is the real failure; `AbortError` is only how it
+      // reached us. Without this the Turn reports a cancellation nobody asked
+      // for instead of the deadline it actually hit.
+      if (
+        clock.signal.reason instanceof ModelRequestDeadlineError &&
+        !signal.aborted
+      ) {
+        throw clock.signal.reason;
       }
       throw error;
     } finally {
-      clearTimeout(headersTimer);
+      clock.disarm();
     }
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new OpenAICompatibleHttpError(response.status);
-    }
-    if (!response.body)
-      throw new Error("Model response did not include a stream");
-
-    yield* streamOpenAICompatibleBody(
-      response.body,
-      signal,
-      this.config.idleReadTimeoutMs ?? SSE_IDLE_READ_TIMEOUT_MS,
-    );
   }
 }
 

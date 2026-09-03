@@ -135,15 +135,120 @@ function validMcpDetails(input: unknown): boolean {
   );
 }
 
+/** The envelope every dynamic call must be wrapped in, as a worked example. */
+const CALL_DYNAMIC_TOOL_ENVELOPE =
+  '{"namespace":"<namespace>","toolName":"<tool>","arguments":{ … the tool\'s own input … }}';
+
+/**
+ * The names a model reaches for instead of the real ones. Naming the field it
+ * *did* send is what turns a refusal into a one-step recovery: a Bot that sent
+ * `{"args":"…","name":"echo"}` re-read the schema twice and still never
+ * recovered, because the refusal was the single string "Invalid input for
+ * tool: call_dynamic_tool" (finding F3).
+ */
+const CALL_DYNAMIC_TOOL_ALIASES: Readonly<Record<string, string>> = {
+  name: "toolName",
+  tool: "toolName",
+  tool_name: "toolName",
+  toolname: "toolName",
+  function: "toolName",
+  args: "arguments",
+  arguments_: "arguments",
+  input: "arguments",
+  parameters: "arguments",
+  params: "arguments",
+  packageId: "namespace",
+  package: "namespace",
+  package_id: "namespace",
+  ns: "namespace",
+};
+
+function jsonTypeOf(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "an array";
+  const type = typeof value;
+  if (type === "string") return "a string";
+  if (type === "number") return "a number";
+  if (type === "boolean") return "a boolean";
+  if (type === "object") return "an object";
+  return type;
+}
+
+/** The key the caller sent that it probably meant as `field`. */
+function aliasFor(
+  input: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  return Object.keys(input).find(
+    (key) => CALL_DYNAMIC_TOOL_ALIASES[key] === field && key !== field,
+  );
+}
+
+/**
+ * Why this `call_dynamic_tool` input cannot be used, naming the offending
+ * field and the shape it should have — or `undefined` when it is valid.
+ */
+function explainCallDynamicToolInput(input: unknown): string | undefined {
+  const preamble = `${CALL_DYNAMIC_TOOL_NAME} input is invalid`;
+  const expected = `Expected ${CALL_DYNAMIC_TOOL_ENVELOPE}`;
+  if (!isRecord(input)) {
+    return `${preamble}: it must be an object, not ${jsonTypeOf(input)}. ${expected}`;
+  }
+  const problems: string[] = [];
+  for (const field of ["namespace", "toolName"] as const) {
+    const value = input[field];
+    if (typeof value === "string" && value.length > 0) continue;
+    const alias = aliasFor(input, field);
+    if (value === undefined) {
+      problems.push(
+        alias === undefined
+          ? `"${field}" is missing; it must be a non-empty string`
+          : `"${field}" is missing — you sent "${alias}"; the field is "${field}"`,
+      );
+    } else {
+      problems.push(
+        `"${field}" must be a non-empty string, not ${jsonTypeOf(value)}`,
+      );
+    }
+  }
+  if (input.arguments === undefined) {
+    const alias = aliasFor(input, "arguments");
+    if (alias !== undefined) {
+      problems.push(
+        `the tool's own input goes in "arguments" as an object, not in "${alias}"`,
+      );
+    }
+  } else if (!isRecord(input.arguments)) {
+    problems.push(
+      typeof input.arguments === "string"
+        ? `"arguments" must be a JSON object, not a string — send the object itself, not JSON text`
+        : `"arguments" must be a JSON object, not ${jsonTypeOf(input.arguments)}`,
+    );
+  }
+  if (
+    input.mcpDetails !== undefined &&
+    !validMcpDetailsShape(input.mcpDetails)
+  ) {
+    problems.push(
+      `"mcpDetails" must be an object with an optional string "description", boolean "requestSmartModeApproval" and string "smartModeBlockReason"`,
+    );
+  }
+  if (problems.length === 0) return undefined;
+  return `${preamble}: ${problems.join("; ")}. ${expected}`;
+}
+
 function validCallDynamicToolInput(input: unknown): boolean {
+  return explainCallDynamicToolInput(input) === undefined;
+}
+
+/** A bounded, sorted name list for a refusal that has to stay readable. */
+function listOrNone(names: readonly string[]): string {
+  if (names.length === 0) return "none";
+  const sorted = [...names].sort();
+  const shown = sorted.slice(0, 40);
   return (
-    isRecord(input) &&
-    typeof input.namespace === "string" &&
-    input.namespace.length > 0 &&
-    typeof input.toolName === "string" &&
-    input.toolName.length > 0 &&
-    (input.arguments === undefined || isRecord(input.arguments)) &&
-    (input.mcpDetails === undefined || validMcpDetailsShape(input.mcpDetails))
+    shown.join(", ") +
+    (sorted.length > shown.length ? `, … (${sorted.length} in total)` : "")
   );
 }
 
@@ -426,7 +531,8 @@ export class ToolRegistry extends Service implements ToolExecution {
       ) {
         return this.denied(
           call,
-          `Invalid input for tool: ${CALL_DYNAMIC_TOOL_NAME}`,
+          explainCallDynamicToolInput(call.input) ??
+            `${CALL_DYNAMIC_TOOL_NAME} input is invalid: "mcpDetails.description" must be a non-empty string. Expected ${CALL_DYNAMIC_TOOL_ENVELOPE}`,
         );
       }
       return this.prepareRegistered(
@@ -673,16 +779,30 @@ export class ToolRegistry extends Service implements ToolExecution {
   private resolveDynamicCall(
     outer: ToolCall,
   ): ResolvedDynamicCall | { error: string } {
-    if (!validCallDynamicToolInput(outer.input)) {
-      return { error: `Invalid input for tool: ${CALL_DYNAMIC_TOOL_NAME}` };
-    }
+    const invalid = explainCallDynamicToolInput(outer.input);
+    if (invalid !== undefined) return { error: invalid };
     const input = outer.input as Record<string, unknown>;
     const namespace = input.namespace as string;
     const definitions = this.dynamicDefinitions.get(namespace);
-    if (!definitions) return { error: "Namespace not found" };
+    // "Namespace not found" and "Tool not found" alone leave the model
+    // guessing at spelling; the names it may use are cheap to say and are
+    // what let it correct itself in one step.
+    if (!definitions) {
+      return {
+        error: `Namespace not found: "${namespace}". Available namespaces: ${listOrNone(
+          [...this.dynamicDefinitions.keys()],
+        )}`,
+      };
+    }
     const toolName = input.toolName as string;
     const registered = definitions.get(toolName);
-    if (!registered) return { error: "Tool not found" };
+    if (!registered) {
+      return {
+        error: `Tool not found: "${toolName}" in namespace "${namespace}". Tools in this namespace: ${listOrNone(
+          [...definitions.keys()],
+        )}`,
+      };
+    }
     return {
       registered,
       // One durable effect, one call id. Hooks see the inner name and input;
@@ -819,12 +939,32 @@ export class ToolRegistry extends Service implements ToolExecution {
       const registered = selected[0]!.tools.find(
         ({ definition }) => definition.name === toolName,
       );
-      if (!registered) return { content: "Tool not found", isError: true };
+      if (!registered) {
+        return {
+          content: `Tool not found: "${toolName}" in namespace "${namespaceName}". Tools in this namespace: ${listOrNone(
+            selected[0]!.tools.map(({ definition }) => definition.name),
+          )}`,
+          isError: true,
+        };
+      }
+      // The `inputSchema` alone describes the *inner* input, and a model that
+      // reads it here goes on to send it as the whole `call_dynamic_tool`
+      // input. Echoing the envelope the schema has to be wrapped in is what
+      // closes that gap (finding F3).
       return {
         content: JSON.stringify({
           tool: registered.definition.name,
+          namespace: namespaceName,
           description: registered.definition.description,
           inputSchema: registered.definition.inputSchema,
+          callWith: {
+            tool: CALL_DYNAMIC_TOOL_NAME,
+            input: {
+              namespace: namespaceName,
+              toolName: registered.definition.name,
+              arguments: "<an object matching inputSchema>",
+            },
+          },
         }),
         isError: false,
       };

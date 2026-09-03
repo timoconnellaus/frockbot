@@ -571,6 +571,47 @@ describe("Bot selection", () => {
     expect(provided.value.settingsError).toBe("Bot settings unavailable");
   });
 
+  test("says a deployment has no Catalog instead of relaying the gateway's sentence", async () => {
+    // F4: the Plugins/Catalog surface rendered `catalog generation was not
+    // found` beside "No Catalog entry matches that search", for a User who had
+    // searched nothing on a deployment that had published nothing.
+    let provided: Ref<FrockBotWebData> | undefined;
+    let failure = new Error("catalog generation was not found");
+    await shellClientPlugin({
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        readConfiguration: () => Promise.reject(new Error("unused")),
+        hostedRequest: (path) => {
+          expect(path).toBe("/catalog/v1/index");
+          return Promise.reject(failure);
+        },
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+
+    await provided.value.loadPackageCatalog();
+    expect(provided.value.packageCatalog).toEqual([]);
+    expect(provided.value.packageCatalogGeneration).toBeUndefined();
+    expect(provided.value.settingsError).toBe(
+      "No plugins are published for this deployment yet.",
+    );
+
+    // A genuine fault still reaches the operator, labelled as one.
+    failure = new Error("R2 is down");
+    await provided.value.loadPackageCatalog();
+    expect(provided.value.settingsError).toBe(
+      "Plugins could not be loaded: R2 is down",
+    );
+  });
+
   test("commits a catalog without overwriting newer User settings", async () => {
     let provided: Ref<FrockBotWebData> | undefined;
     const catalogManifest = Promise.withResolvers<unknown>();
@@ -1480,6 +1521,55 @@ describe("active durable Turn projection", () => {
       },
       { kind: "unsupported" },
     ]);
+  });
+
+  test("a Turn that sent something draws the send, not the model's own text", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-once",
+          input: "ping",
+          status: "completed",
+          responseText: "pong",
+          events: [
+            { type: "send/to-user", payload: { type: "text", text: "pong" } },
+          ],
+        },
+      ],
+    );
+
+    expect(state.messages[1]?.text).toBe("");
+    expect(state.messages[1]?.sends).toHaveLength(1);
+  });
+
+  test("a Turn that sent nothing still draws the model's text", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-plain",
+          input: "ping",
+          status: "completed",
+          responseText: "pong",
+          events: [],
+        },
+      ],
+    );
+
+    expect(state.messages[1]?.text).toBe("pong");
   });
 
   test("streams running text without a banner and clears busy state", () => {

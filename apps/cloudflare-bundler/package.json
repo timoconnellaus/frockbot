@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "wrangler deploy --dry-run --env=\"\" --outdir dist",
+    "dev": "wrangler dev --local --ip 127.0.0.1 --port ${FROCKBOT_DEV_BUNDLER_PORT:-8788}",
     "test": "bun test src && bun run test:workerd",
     "test:workerd": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json"

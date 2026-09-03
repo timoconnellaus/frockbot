@@ -181,7 +181,12 @@ export interface ClientDynamicToolCallInputV1 {
 
 export type ClientRunOutcomeV1 =
   | { type: "completed"; text: string }
-  | { type: "failed"; message: string }
+  /**
+   * A Turn that broke keeps what it had already said, for the same reason a
+   * stopped one does: the words arrived, the person read them, and replacing
+   * them with a notice would rewrite what they watched happen (ADR 0028).
+   */
+  | { type: "failed"; message: string; text?: string }
   /**
    * A Turn a Stop or a later message ended keeps what it had already said:
    * `text` is that partial answer, and `message` is the line saying why it
@@ -751,6 +756,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
               run.failure ?? "Agent request failed.",
               MAX_FAILURE_BYTES,
             ),
+            ...interruptedOutcomeTextV1(run),
           } satisfies ClientRunOutcomeV1)
         : status === "cancelled"
           ? ({
@@ -1199,10 +1205,11 @@ function decodeOutcome(
     };
   }
   if (outcome.type === "failed" && runStatus === "failed") {
-    exactKeys(outcome, ["type", "message"], "run.outcome");
+    exactKeys(outcome, ["type", "message", "text"], "run.outcome");
     return {
       type: "failed",
       message: wireString(outcome, "message", MAX_FAILURE_BYTES, "run.outcome"),
+      ...decodeInterruptedTextV1(outcome),
     };
   }
   if (outcome.type === "cancelled" && runStatus === "cancelled") {
@@ -1327,7 +1334,12 @@ function decodeRun(value: unknown): ClientRun {
     ...(stopRequestedAt ? { stopRequestedAt } : {}),
     ...(run.queued === true ? { queued: true as const } : {}),
     ...(outcome?.type === "completed" ? { responseText: outcome.text } : {}),
-    ...(outcome?.type === "failed" ? { failure: outcome.message } : {}),
+    ...(outcome?.type === "failed"
+      ? {
+          failure: outcome.message,
+          ...(outcome.text ? { responseText: outcome.text } : {}),
+        }
+      : {}),
     ...(outcome?.type === "cancelled" || outcome?.type === "superseded"
       ? {
           failure: outcome.message,

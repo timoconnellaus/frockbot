@@ -143,10 +143,43 @@ export interface PackageAuthoringHostOptions {
   };
   now?(): Date;
   newId?(): string;
+  /** Overrides `PACKAGE_BUNDLE_TIMEOUT_MS_V1`; tests drive the deadline. */
+  bundleTimeoutMs?: number;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * How long the Package bundler has to answer. It runs esbuild-wasm inline, so
+ * a hang there is a hang of this tool call and of the Turn around it; the
+ * service binding itself imposes no deadline (finding F10). Generous, because
+ * a cold `createWorker` is slow, and far short of any Turn-level bound.
+ */
+const PACKAGE_BUNDLE_TIMEOUT_MS_V1 = 60_000;
+
+/**
+ * `work`, or a rejection at the deadline. The pending work is abandoned, not
+ * cancelled: the bundler is stateless and side-effect free (its caller owns
+ * every durable write), so a late answer changes nothing.
+ */
+async function withDeadline<T>(
+  work: Promise<T>,
+  milliseconds: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), milliseconds);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 /**
@@ -691,18 +724,40 @@ export function createPackageAuthoringHost(
       let bundled;
       try {
         // Never inside a storage transaction: bundler CPU is the bundler's.
+        // Bounded, because the bundler runs esbuild-wasm inline: one that
+        // hangs rather than rejects would hang this tool call and the Turn
+        // with it (F10). An expiry takes the same path as unreachability —
+        // nothing ran either way.
+        const deadline =
+          options.bundleTimeoutMs ?? PACKAGE_BUNDLE_TIMEOUT_MS_V1;
         bundled = decodePackageBundleResultV1(
-          await options.bundler.bundle(bundleRequest),
+          await withDeadline(
+            options.bundler.bundle(bundleRequest),
+            deadline,
+            `the Package bundler did not answer within ${deadline}ms`,
+          ),
         );
       } catch (error) {
-        return refused(
-          await recordFailure({
+        const failure = await recordFailure({
+          effectId,
+          packageId,
+          phase: "bundle",
+          reason: `the Package bundler could not be reached: ${errorMessage(error)}`,
+        });
+        // The bundler never answered, so nothing about this effect is
+        // uncertain. Recording that explicitly is what lets an identical
+        // retry in the same run proceed instead of classifying `unknown`
+        // forever (F11).
+        await options.storage.put({
+          [authorshipArtifactKey(effectId)]: {
+            schemaVersion: 1,
+            status: "unreachable",
             effectId,
-            packageId,
-            phase: "bundle",
-            reason: `the Package bundler could not be reached: ${errorMessage(error)}`,
-          }),
-        );
+            failureId: failure.failureId,
+            reason: failure.reason,
+          } satisfies AuthoringEffectOutcomeV1,
+        });
+        return refused(failure);
       }
       if (bundled.status === "failed") {
         const failure = await recordFailure({
@@ -744,15 +799,26 @@ export function createPackageAuthoringHost(
             );
           }));
       if (uiMismatch || (uiPages === undefined && returnedPages.length > 0)) {
-        return refused(
-          await recordFailure({
+        const failure = await recordFailure({
+          effectId,
+          packageId,
+          phase: "bundle",
+          reason:
+            "the Package bundler returned UI bytes that do not match the recorded manifest",
+        });
+        // The bundler did answer, and deterministically: the same source
+        // would mismatch again. That is a settled failure, not an unknown —
+        // it too used to leave the effect with no outcome at all (F11).
+        await options.storage.put({
+          [authorshipArtifactKey(effectId)]: {
+            schemaVersion: 1,
+            status: "failed",
             effectId,
-            packageId,
-            phase: "bundle",
-            reason:
-              "the Package bundler returned UI bytes that do not match the recorded manifest",
-          }),
-        );
+            failureId: failure.failureId,
+            reason: failure.reason,
+          } satisfies AuthoringEffectOutcomeV1,
+        });
+        return refused(failure);
       }
       // Content-addressed and immutable: writing the same hash twice is a
       // no-op, so the object write is safe to repeat and the record is not.

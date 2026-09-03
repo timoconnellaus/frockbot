@@ -98,6 +98,41 @@ function refusalText(
   ].join(" ");
 }
 
+/**
+ * Close an open `package/*-intent` with the failure that ended it, then answer
+ * the model. The pair is the proof the effect happened at all, so the failure
+ * event is flushed before the tool result is returned; a failure to record the
+ * failure is not allowed to hide the original one.
+ */
+async function closeWithFailure(
+  session: Session,
+  position: AuthoringTurnPositionV1,
+  failure: {
+    effectId: string;
+    effect: "author" | "undo" | "catalog-change";
+    reason: string;
+    failureId?: string;
+    content: string;
+  },
+): Promise<{ content: string; isError: true }> {
+  try {
+    session.append({
+      type: "package/effect-failed",
+      ...position,
+      effectId: failure.effectId,
+      effect: failure.effect,
+      reason: failure.reason,
+      ...(failure.failureId === undefined
+        ? {}
+        : { failureId: failure.failureId }),
+    });
+    await session.flush();
+  } catch {
+    // Deliberately swallowed: the model still gets the real reason.
+  }
+  return { content: failure.content, isError: true };
+}
+
 function authoredText(
   outcome: Extract<AuthorPackageOutcomeV1, { status: "authored" }>,
 ): string {
@@ -181,15 +216,34 @@ export function createPackageAuthorTool(
       });
       await session.flush();
 
-      const outcome = await host.author({
-        input: decoded,
-        sourceHash,
-        effectId,
-        sessionId: context.sessionId,
-        position,
-      });
+      let outcome: AuthorPackageOutcomeV1;
+      try {
+        outcome = await host.author({
+          input: decoded,
+          sourceHash,
+          effectId,
+          sessionId: context.sessionId,
+          position,
+        });
+      } catch (error) {
+        // An unmodelled throw — a storage error, a quota RPC rejection, a
+        // manifest that will not decode — used to escape `execute` and leave
+        // the intent with no outcome of any kind (F12).
+        return closeWithFailure(session, position, {
+          effectId,
+          effect: "author",
+          reason: errorMessage(error),
+          content: `package_author failed: ${errorMessage(error)} Nothing was activated.`,
+        });
+      }
       if (outcome.status === "refused") {
-        return { content: refusalText(outcome), isError: true };
+        return closeWithFailure(session, position, {
+          effectId,
+          effect: "author",
+          reason: outcome.reason,
+          failureId: outcome.failureId,
+          content: refusalText(outcome),
+        });
       }
       session.append({
         type: "package/authored",
@@ -255,17 +309,30 @@ export function createPackageUndoTool(
           : {}),
       });
       await session.flush();
-      const outcome = await host.undo({
-        input: decoded,
-        effectId,
-        sessionId: context.sessionId,
-        position,
-      });
+      let outcome: PackageUndoOutcomeV1;
+      try {
+        outcome = await host.undo({
+          input: decoded,
+          effectId,
+          sessionId: context.sessionId,
+          position,
+        });
+      } catch (error) {
+        return closeWithFailure(session, position, {
+          effectId,
+          effect: "undo",
+          reason: errorMessage(error),
+          content: `package_undo failed: ${errorMessage(error)} No connection action was undone.`,
+        });
+      }
       if (outcome.status === "refused") {
-        return {
+        return closeWithFailure(session, position, {
+          effectId,
+          effect: "undo",
+          reason: outcome.reason,
+          failureId: outcome.failureId,
           content: `Package undo was refused: ${outcome.reason} A durable failure record "${outcome.failureId}" was written. No connection action was undone.`,
-          isError: true,
-        };
+        });
       }
       session.append({
         type: "package/undo-recorded",

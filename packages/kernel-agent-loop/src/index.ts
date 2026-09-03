@@ -41,6 +41,11 @@ declare module "cordis" {
 
 export interface AgentLoopConfig {
   maxSteps?: number;
+  /**
+   * The wall clock one Turn is allowed, in milliseconds. Defaults to
+   * {@link TURN_DEADLINE_MS_V1}; named by a caller only to test it.
+   */
+  turnDeadlineMs?: number;
   /** The Composition generation this mounted root was pinned to at admission. */
   composition: CompositionPinV1;
 }
@@ -103,6 +108,29 @@ class StepLimitReachedError extends Error {
     this.name = "StepLimitReachedError";
   }
 }
+
+/**
+ * The longest a single Turn may run before the loop stops waiting for it.
+ *
+ * Nothing bounded a Turn's wall clock before this: one hung for seventeen
+ * minutes with an animated avatar and nothing else, and would have hung until
+ * the isolate died. Fifteen minutes is well past any Turn a person is watching
+ * and well inside the point at which they have concluded the product is broken.
+ */
+export const TURN_DEADLINE_MS_V1 = 15 * 60 * 1000;
+
+/**
+ * How many times one step will send its model request.
+ *
+ * Two: the first attempt and one retry. It applies only to a failure the
+ * provider classified as never having started, so no retry can duplicate a
+ * call that may already have run.
+ */
+export const MODEL_REQUEST_ATTEMPTS_V1 = 2;
+
+/** What a `turn/end` records when the Turn ran out of wall clock. */
+export const TURN_DEADLINE_REASON_V1 =
+  "This Turn ran for 15 minutes without finishing and was stopped. Try sending it again.";
 
 /** Durable Stop won the final effect-admission transaction. */
 class EffectAdmissionFencedError extends Error {
@@ -174,6 +202,16 @@ class LoopAgent implements Agent {
   #cancelDetail: string | undefined;
   #disposeRequested = false;
   #resumeRequested = false;
+  /**
+   * The Turn's wall clock, rearmed for each Turn a wake runs.
+   *
+   * It aborts the same controller Stop uses, so nothing in the step loop has
+   * to learn about a second signal; the flag beside it is what tells the
+   * settlement that the abort was a deadline rather than a person.
+   */
+  #turnDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  #turnDeadlineReached = false;
+  #turnDeadlineMs: number;
 
   constructor(
     ctx: Context,
@@ -181,6 +219,7 @@ class LoopAgent implements Agent {
     options: EffectAdmittingAgentOptions,
     maxSteps: number,
     composition: CompositionPinV1,
+    turnDeadlineMs: number,
   ) {
     this.#ctx = ctx;
     this.#composition = composition;
@@ -194,6 +233,7 @@ class LoopAgent implements Agent {
     this.#turnType = options.turnType ?? "chat";
     this.#subagentRole = options.subagentRole;
     this.#maxSteps = maxSteps;
+    this.#turnDeadlineMs = turnDeadlineMs;
   }
 
   get status(): AgentStatus {
@@ -254,6 +294,27 @@ class LoopAgent implements Agent {
       );
     }
     this.#controller?.abort(new Error(`agent cancelled by ${reason}`));
+  }
+
+  /**
+   * Start this Turn's clock. Any previous Turn's is cleared first, so a wake
+   * that runs three queued Turns gives each of them the full allowance rather
+   * than sharing one.
+   */
+  #armTurnDeadline(): void {
+    this.#disarmTurnDeadline();
+    this.#turnDeadlineReached = false;
+    this.#turnDeadlineTimer = setTimeout(() => {
+      this.#turnDeadlineReached = true;
+      this.#controller?.abort(new Error(TURN_DEADLINE_REASON_V1));
+    }, this.#turnDeadlineMs);
+  }
+
+  #disarmTurnDeadline(): void {
+    if (this.#turnDeadlineTimer !== undefined) {
+      clearTimeout(this.#turnDeadlineTimer);
+      this.#turnDeadlineTimer = undefined;
+    }
   }
 
   async whenIdle(): Promise<void> {
@@ -385,6 +446,7 @@ class LoopAgent implements Agent {
     let turnOutcome: StepOutcome = "interrupted";
     let turnReason: string | undefined;
     let reconciliationRequired = false;
+    this.#armTurnDeadline();
     try {
       if (latestAssistant) {
         await this.#notifyModelOutcome(latestAssistant.requestId, "completed");
@@ -631,6 +693,13 @@ class LoopAgent implements Agent {
       ) {
         reconciliationRequired = true;
         this.#ctx.emit("agent/error", this, error);
+      } else if (this.#turnDeadlineReached) {
+        // Ahead of the cancellation branch on purpose: the deadline aborts the
+        // same controller Stop does, and a Turn the clock ended must not be
+        // reported to the person as one they stopped.
+        turnOutcome = "interrupted";
+        turnReason = turnEndReason(TURN_DEADLINE_REASON_V1);
+        this.#ctx.emit("agent/error", this, error);
       } else if (
         error instanceof EffectAdmissionFencedError ||
         signal.aborted
@@ -647,6 +716,13 @@ class LoopAgent implements Agent {
         this.#ctx.emit("agent/error", this, error);
       }
     } finally {
+      this.#disarmTurnDeadline();
+      // A Turn owed a reconciliation writes no `turn/end`: its model request
+      // has no durable outcome, and a `turn/end` would claim to know how it
+      // ended. That is right for as long as the run might still resume — and
+      // the moment it will not, the Turn is closed by whoever settles it, in
+      // `kernel-do`'s `settledEventsV1`. Closing it here instead would either
+      // lie about an outcome or make the run unresumable (ADR 0028).
       if (!reconciliationRequired) {
         if (openStep !== undefined && turnOutcome === "cancelled") {
           await this.#settleCancelledStep(openTurn, openStep);
@@ -699,6 +775,7 @@ class LoopAgent implements Agent {
     let turnOutcome: StepOutcome = "interrupted";
     let turnReason: string | undefined;
     let reconciliationRequired = false;
+    this.#armTurnDeadline();
     try {
       let inputs = [input];
       for (let step = 1; step <= this.#maxSteps; step += 1) {
@@ -798,6 +875,13 @@ class LoopAgent implements Agent {
       ) {
         reconciliationRequired = true;
         this.#ctx.emit("agent/error", this, error);
+      } else if (this.#turnDeadlineReached) {
+        // Ahead of the cancellation branch on purpose: the deadline aborts the
+        // same controller Stop does, and a Turn the clock ended must not be
+        // reported to the person as one they stopped.
+        turnOutcome = "interrupted";
+        turnReason = turnEndReason(TURN_DEADLINE_REASON_V1);
+        this.#ctx.emit("agent/error", this, error);
       } else if (
         error instanceof EffectAdmissionFencedError ||
         signal.aborted
@@ -814,6 +898,13 @@ class LoopAgent implements Agent {
         this.#ctx.emit("agent/error", this, error);
       }
     } finally {
+      this.#disarmTurnDeadline();
+      // A Turn owed a reconciliation writes no `turn/end`: its model request
+      // has no durable outcome, and a `turn/end` would claim to know how it
+      // ended. That is right for as long as the run might still resume — and
+      // the moment it will not, the Turn is closed by whoever settles it, in
+      // `kernel-do`'s `settledEventsV1`. Closing it here instead would either
+      // lie about an outcome or make the run unresumable (ADR 0028).
       if (!reconciliationRequired) {
         if (openStep !== undefined && turnOutcome === "cancelled") {
           await this.#settleCancelledStep(turn, openStep);
@@ -871,7 +962,16 @@ class LoopAgent implements Agent {
       turnType: this.#turnType,
     });
 
+    // One automatic retry, and only for a failure the provider itself
+    // classified as "the request never started" — a rejected key, an
+    // unresolvable binding, a connection refused before any byte was sent.
+    // Those are exactly the failures where retrying cannot duplicate anything,
+    // and the ones a person watching a blank screen would retry by hand. Every
+    // other failure is uncertain and is never retried, which is the whole of
+    // ADR 0024's durability contract.
+    let attempts = 0;
     while (true) {
+      attempts += 1;
       const proposedMessages = this.session.deriveMessages();
       const messages = await this.#ctx.waterfall(
         "agent/message-window",
@@ -976,14 +1076,24 @@ class LoopAgent implements Agent {
         });
         await this.session.flush();
         await this.#notifyModelOutcome(request.requestId, "not-started");
+        // The durable evidence of a retry is the log itself: a `model/request`,
+        // the `model/effect-not-started` just journaled against it, and then a
+        // second `model/request`. A Package listening on `agent/request-error`
+        // still has the final say in either direction.
         const action = await this.#ctx.waterfall(
           "agent/request-error",
           this,
           error,
           signal,
-          () => Promise.resolve({ kind: "fail" as const }),
+          () =>
+            Promise.resolve(
+              attempts < MODEL_REQUEST_ATTEMPTS_V1
+                ? ({ kind: "retry" } as const)
+                : ({ kind: "fail" } as const),
+            ),
         );
         if (action.kind !== "retry") throw error;
+        this.#ctx.emit("agent/error", this, error);
       }
     }
   }
@@ -1327,6 +1437,7 @@ class LoopAgent implements Agent {
 export class AgentLoop extends Service implements AgentFactory {
   static inject = ["sessions", "systemPrompt", "llm", "tools", "agents"];
   private maxSteps: number;
+  private turnDeadlineMs: number;
   private composition: CompositionPinV1;
   private handles = new Set<AgentHandle>();
 
@@ -1334,6 +1445,7 @@ export class AgentLoop extends Service implements AgentFactory {
     super(ctx, "agentLoop");
     this.composition = config.composition;
     this.maxSteps = config.maxSteps ?? 20;
+    this.turnDeadlineMs = config.turnDeadlineMs ?? TURN_DEADLINE_MS_V1;
     if (!Number.isInteger(this.maxSteps) || this.maxSteps <= 0) {
       throw new Error("agent-loop maxSteps must be a positive integer");
     }
@@ -1350,6 +1462,7 @@ export class AgentLoop extends Service implements AgentFactory {
       options as EffectAdmittingAgentOptions,
       this.maxSteps,
       this.composition,
+      this.turnDeadlineMs,
     );
     const unregister = this.ctx.agents.register(agent);
     let disposed = false;
