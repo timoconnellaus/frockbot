@@ -16,6 +16,7 @@ import {
   type Locator,
   type Page,
 } from "@playwright/test";
+import type { FakeOllamaChatMode } from "./harness.ts";
 
 export interface E2EOptions {
   /** The fake Ollama server the harness started, for `api-base-url`. */
@@ -416,11 +417,14 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
   });
 }
 
-/** Point the fake provider at a chat mode; `unauthorized` revokes the key. */
+/**
+ * Point the fake provider at a chat mode; `unauthorized` revokes the key and
+ * `slow` holds every completion open long enough to reload the page mid-Turn.
+ */
 export async function setFakeOllamaChatMode(
   page: Page,
   ollamaBaseUrl: string,
-  mode: "ok" | "unauthorized",
+  mode: FakeOllamaChatMode,
 ): Promise<void> {
   const response = await page.request.post(`${ollamaBaseUrl}/__e2e/chat-mode`, {
     data: { mode },
