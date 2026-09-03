@@ -235,6 +235,26 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       state.value.unread = Object.fromEntries(
         directory.unread.map((view) => [view.botId, view]),
       );
+      // A Turn that settles in the conversation the User is looking at has
+      // been read by the time it arrives, so the badge that counted it is
+      // wrong the instant it appears. Reading up to it is still the explicit
+      // authenticated command; what the poll refreshed is only which cursor it
+      // names. Every other Bot's badge is left exactly as the fan-out said.
+      const openBotId = shell?.value.activeBotId;
+      if (
+        openBotId &&
+        (state.value.unread[openBotId]?.count ?? 0) > 0 &&
+        !state.value.unread[openBotId]?.manuallyUnread &&
+        typeof document !== "undefined" &&
+        document.visibilityState === "visible" &&
+        document.hasFocus()
+      ) {
+        try {
+          await state.value.markRead(openBotId);
+        } catch {
+          // The badge stays until the next poll; nothing durable is lost.
+        }
+      }
     },
     async markRead(botId) {
       const cursor = state.value.unread[botId]?.lastActivityCursor;

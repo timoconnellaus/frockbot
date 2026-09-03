@@ -59,8 +59,17 @@ export const E2E_CREDENTIAL_KEYRING = JSON.stringify({
   keys: { primary: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY" },
 });
 
-/** How the fake server should answer chat completions. */
-export type FakeOllamaChatMode = "ok" | "unauthorized";
+/**
+ * How the fake server should answer chat completions.
+ *
+ * `slow` answers exactly as `ok` does, after a pause long enough for a spec to
+ * reload the page while the Turn is still running. It is the only way to test
+ * what a browser does with a Turn it is not holding open.
+ */
+export type FakeOllamaChatMode = "ok" | "unauthorized" | "slow";
+
+/** How long `slow` holds a chat completion before it answers. */
+export const E2E_SLOW_CHAT_DELAY_MS = 10_000;
 
 const READY_TIMEOUT_MS = 120_000;
 const SHUTDOWN_GRACE_MS = 5_000;
@@ -192,7 +201,10 @@ export function startFakeOllama(port: number): Promise<{
             }
           ).mode,
         );
-        chatMode = requested === "unauthorized" ? "unauthorized" : "ok";
+        chatMode =
+          requested === "unauthorized" || requested === "slow"
+            ? requested
+            : "ok";
         json(200, { mode: chatMode });
       });
       return;
@@ -244,49 +256,61 @@ export function startFakeOllama(port: number): Promise<{
         return;
       }
       const chunks: Buffer[] = [];
+      const slow = chatMode === "slow";
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
       request.on("end", () => {
-        const calls = scriptedToolCalls(Buffer.concat(chunks).toString("utf8"));
-        response.writeHead(200, { "content-type": "text/event-stream" });
-        if (calls.length > 0) {
-          response.write(
-            `data: ${JSON.stringify({
-              choices: [
-                {
-                  delta: {
-                    tool_calls: calls.map((call, index) => ({
-                      index,
-                      id: `e2e-call-${index}`,
-                      type: "function",
-                      function: {
-                        name: call.name,
-                        arguments: call.arguments,
-                      },
-                    })),
+        const answer = () => {
+          const calls = scriptedToolCalls(
+            Buffer.concat(chunks).toString("utf8"),
+          );
+          response.writeHead(200, { "content-type": "text/event-stream" });
+          if (calls.length > 0) {
+            response.write(
+              `data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: calls.map((call, index) => ({
+                        index,
+                        id: `e2e-call-${index}`,
+                        type: "function",
+                        function: {
+                          name: call.name,
+                          arguments: call.arguments,
+                        },
+                      })),
+                    },
                   },
-                },
-              ],
-            })}\n\n`,
-          );
-          response.write(
-            `data: ${JSON.stringify({
-              choices: [{ delta: {}, finish_reason: "tool_calls" }],
-            })}\n\n`,
-          );
-        } else {
-          response.write(
-            `data: ${JSON.stringify({
-              choices: [{ delta: { content: E2E_ASSISTANT_REPLY } }],
-            })}\n\n`,
-          );
-          response.write(
-            `data: ${JSON.stringify({
-              choices: [{ delta: {}, finish_reason: "stop" }],
-            })}\n\n`,
-          );
+                ],
+              })}\n\n`,
+            );
+            response.write(
+              `data: ${JSON.stringify({
+                choices: [{ delta: {}, finish_reason: "tool_calls" }],
+              })}\n\n`,
+            );
+          } else {
+            response.write(
+              `data: ${JSON.stringify({
+                choices: [{ delta: { content: E2E_ASSISTANT_REPLY } }],
+              })}\n\n`,
+            );
+            response.write(
+              `data: ${JSON.stringify({
+                choices: [{ delta: {}, finish_reason: "stop" }],
+              })}\n\n`,
+            );
+          }
+          response.write("data: [DONE]\n\n");
+          response.end();
+        };
+        if (!slow) {
+          answer();
+          return;
         }
-        response.write("data: [DONE]\n\n");
-        response.end();
+        // The Turn is still running while the spec reloads the page. The
+        // timer is unreferenced so a finished spec never waits on it.
+        setTimeout(answer, E2E_SLOW_CHAT_DELAY_MS).unref();
       });
       return;
     }

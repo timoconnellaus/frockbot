@@ -345,19 +345,30 @@ export async function createFoundationResidentRuntime(
           if (execution.subagentRole !== residentSubagentRole) {
             throw new Error("resident Bot runtime subagent role changed");
           }
+          // The log is contiguous and kernel-validated, so its length and the
+          // identity of its last event settle whether the resident copy is the
+          // durable one. Deep-comparing every event cost a full
+          // `JSON.stringify` of the whole history on every Turn.
           const current = agent.agent.session.events;
-          if (
+          const residentLast = current.at(-1);
+          const durableLast = execution.previousEvents.at(-1);
+          const diverged =
             current.length !== execution.previousEvents.length ||
-            current.some(
-              (event, index) =>
-                JSON.stringify(event) !==
-                JSON.stringify(execution.previousEvents[index]),
-            )
-          ) {
-            throw new Error(
-              "resident Bot runtime history diverged from durable state",
-            );
+            residentLast?.seq !== durableLast?.seq ||
+            residentLast?.timestamp !== durableLast?.timestamp ||
+            residentLast?.type !== durableLast?.type;
+          if (diverged) {
+            // Divergence is a stale resident copy, not a broken Bot: durable
+            // state is the authority, so this one is dropped and rebuilt from
+            // it. Throwing left the same resident Agent in place, so the next
+            // Turn diverged identically and the Bot stayed broken until the
+            // object was evicted.
+            const stale = agent;
+            agent = undefined;
+            await stale.dispose();
           }
+        }
+        if (agent) {
           activePersist = execution.persistSessionEvents;
           activeEffectAdmission = execution.admitEffect;
         } else {
