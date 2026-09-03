@@ -263,6 +263,17 @@
   margin-top: 18px;
 }
 
+/*
+ * A message the User sent while the Bot was still working. It is an ordinary
+ * message the Bot has not reached yet, so it is drawn as one and simply held
+ * back — no label, no icon, no word for the User to learn. It goes to full
+ * strength the moment its own Turn starts.
+ */
+.message-pending {
+  opacity: 0.55;
+  transition: opacity var(--frock-motion-enter);
+}
+
 /* A Session announcement: the conversation narrating itself, not a party. */
 .message-system {
   align-items: center;

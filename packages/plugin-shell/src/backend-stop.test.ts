@@ -12,7 +12,7 @@ import {
   botTurnCommandFingerprintV1,
   type StoredRun,
 } from "./backend-contracts.js";
-import { planStoppedRunRecovery } from "./backend-recovery.js";
+import { planInterruptedRunRecoveryV1 } from "./backend-recovery.js";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();
@@ -298,7 +298,7 @@ describe("stopped run recovery", () => {
       ],
     });
 
-    const plan = planStoppedRunRecovery(run, run.events);
+    const plan = planInterruptedRunRecoveryV1(run, run.events);
 
     expect(plan.kind).toBe("cancel");
     if (plan.kind !== "cancel") throw new Error("expected cancellation");
@@ -323,7 +323,7 @@ describe("stopped run recovery", () => {
       ],
     });
 
-    const plan = planStoppedRunRecovery(run, run.events);
+    const plan = planInterruptedRunRecoveryV1(run, run.events);
 
     expect(plan.kind).toBe("cancel");
     if (plan.kind !== "cancel") throw new Error("expected cancellation");
@@ -341,7 +341,7 @@ describe("stopped run recovery", () => {
       ],
     });
 
-    expect(planStoppedRunRecovery(run, run.events)).toEqual({
+    expect(planInterruptedRunRecoveryV1(run, run.events)).toEqual({
       kind: "reconcile",
     });
   });
@@ -349,8 +349,8 @@ describe("stopped run recovery", () => {
   test("refuses to plan recovery for a run carrying no durable Stop intent", () => {
     const run = storedRun({ events: modelIntentEvents() });
 
-    expect(() => planStoppedRunRecovery(run, run.events)).toThrow(
-      `run "${turn.runId}" has no durable stop intent`,
+    expect(() => planInterruptedRunRecoveryV1(run, run.events)).toThrow(
+      `run "${turn.runId}" has no durable stop or supersede intent`,
     );
   });
 });

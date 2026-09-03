@@ -6,7 +6,6 @@ import {
 } from "@frockbot/plugin-user-machine/delivery";
 import {
   APPLET_ID_V1,
-  decodeSkillRefsV1,
   decodePackageIframeToolCommandV1,
   type AppletBuildViewV1,
   type AppletSourceViewV1,
@@ -155,6 +154,7 @@ import {
   rpcIdentifier,
   rpcJsonSnapshotV1,
   rpcObject,
+  rpcBotTurnCommandOptionalsV1,
   rpcPattern,
   rpcString,
 } from "./durable-rpc.js";
@@ -412,6 +412,13 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
           acceptedAt: command.acceptedAt,
           text: command.text,
           ...(command.skills ? { skills: command.skills } : {}),
+          // The composer's supersede intent and the lane it implies. This
+          // rebuilds the command field by field rather than spreading it, so
+          // anything not named here is dropped silently — which is exactly how
+          // a supersede reached the Bot Durable Object as an ordinary second
+          // command and came back "bot already has an active run".
+          ...(command.lane ? { lane: command.lane } : {}),
+          ...(command.supersedes ? { supersedes: command.supersedes } : {}),
         },
       }),
     listRuns: (query) =>
@@ -700,7 +707,9 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
           acceptedAt: rpcString(64),
           text: rpcString(100_000),
         },
-        { skills: (value, label) => decodeSkillRefsV1(value, label) },
+        // The same optional members the Bot Durable Object's door accepts —
+        // a supersede the composer sends must not be refused one door earlier.
+        rpcBotTurnCommandOptionalsV1,
       ),
     });
     const command = request.command as BotTurnCommand;

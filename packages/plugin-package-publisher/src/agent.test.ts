@@ -46,7 +46,11 @@ async function execute(
     signal: new AbortController().signal,
   };
   const prepared = await tools.prepare(
-    { id: crypto.randomUUID(), name, input },
+    {
+      id: crypto.randomUUID(),
+      name: "call_dynamic_tool",
+      input: { namespace: "frockbot", toolName: name, arguments: input },
+    },
     context,
   );
   if (prepared.kind !== "ready") throw new Error("tool was denied");
@@ -118,7 +122,7 @@ describe("Package Publisher Agent contribution", () => {
 
     expect(
       harness.root.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
-    ).toEqual(["list_setup_revisions", "publish_setup", "rollback_setup"]);
+    ).toEqual(["get_dynamic_tools", "call_dynamic_tool"]);
     expect(
       JSON.parse(
         (await execute(harness.root.tools, "list_setup_revisions", {})).content,
@@ -146,7 +150,9 @@ describe("Package Publisher Agent contribution", () => {
     });
 
     await fiber.dispose();
-    expect(harness.root.tools.schemas({ turnType: "chat" })).toEqual([]);
+    expect(
+      harness.root.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
+    ).toEqual(["get_dynamic_tools", "call_dynamic_tool"]);
     await harness.dispose();
   });
 

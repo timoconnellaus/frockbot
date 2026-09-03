@@ -42,9 +42,15 @@ export const CLIENT_RUN_PAGE_LIMIT = 32;
 export const CLIENT_RUN_LIST_MAX_BYTES = 512_000;
 
 export type ClientRunStatusV1 =
-  "running" | "completed" | "failed" | "cancelled" | "reconciliation-required";
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "superseded"
+  | "reconciliation-required";
 
 const CANCELLED_RUN_MESSAGE = "Stopped by an authenticated Stop command.";
+const SUPERSEDED_RUN_MESSAGE = "Interrupted by your next message.";
 
 export type ClientRunEventV1 =
   | {
@@ -53,7 +59,11 @@ export type ClientRunEventV1 =
     }
   | {
       type: "tool/call";
-      call: { id: string; name: string };
+      call: {
+        id: string;
+        name: string;
+        input?: ClientDynamicToolCallInputV1;
+      };
     }
   | {
       type: "tool/result";
@@ -102,10 +112,19 @@ export type ClientRunEventV1 =
       background: boolean;
     };
 
+/** The bounded, public identity needed to present a dynamic tool call. */
+export interface ClientDynamicToolCallInputV1 {
+  namespace: string;
+  toolName: string;
+  /** JSON keeps this cross-runtime DTO shallow while preserving tool input. */
+  argumentsJson?: string;
+}
+
 export type ClientRunOutcomeV1 =
   | { type: "completed"; text: string }
   | { type: "failed"; message: string }
-  | { type: "cancelled"; message: string };
+  | { type: "cancelled"; message: string }
+  | { type: "superseded"; message: string };
 
 export interface ClientRunRecoveryV1 {
   action: "resume";
@@ -126,6 +145,12 @@ export interface ClientRunV1 {
   events: ClientRunEventV1[];
   /** Durable Stop intent, projected independently of the run status. */
   stopRequestedAt?: string;
+  /**
+   * True while the Turn is admitted and waiting rather than running. The
+   * thread draws it as an ordinary message the Bot has not reached yet, and
+   * the flag is durable state, so a reload draws the same thing.
+   */
+  queued?: true;
   outcome?: ClientRunOutcomeV1;
   recovery?: ClientRunRecoveryV1;
 }
@@ -175,6 +200,20 @@ export interface ClientTurnCommandV1 {
    * by pretending to invoke one.
    */
   skills?: SkillRefV1[];
+  /**
+   * The explicit authenticated intent to replace whatever the Bot is doing
+   * with this message. Without it a second command is refused exactly as it
+   * always was, so a reconnecting client never interrupts a Turn by accident.
+   *
+   * `runId` is provenance, not the target, and it is optional. The composer
+   * sends this intent on every send, because "replace what you are doing with
+   * this" is what a person means by typing — and whether the client had yet
+   * *observed* a run when they pressed send is a race, not a decision they
+   * made. A composer that names no run still supersedes whatever is actually
+   * active; one that names a run may name a stale one, and the Bot Durable
+   * Object supersedes the active Turn either way.
+   */
+  supersedes?: { runId?: string };
 }
 
 export interface ClientNotificationAcknowledgementCommandV1 {
@@ -282,7 +321,10 @@ function publicEventId(value: string, label: string): string {
 
 function isTerminalRunStatus(status: ClientRunStatusV1): boolean {
   return (
-    status === "completed" || status === "failed" || status === "cancelled"
+    status === "completed" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "superseded"
   );
 }
 
@@ -313,6 +355,67 @@ interface ProjectionUnitV1 {
   droppable: boolean;
 }
 
+function dynamicToolCallInput(
+  value: unknown,
+): ClientDynamicToolCallInputV1 | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const input = value as Record<string, unknown>;
+  if (
+    typeof input.namespace !== "string" ||
+    typeof input.toolName !== "string"
+  ) {
+    return undefined;
+  }
+  const argumentsJson = Object.hasOwn(input, "arguments")
+    ? JSON.stringify(input.arguments)
+    : undefined;
+  return {
+    namespace: truncateWireString(input.namespace, MAX_EVENT_NAME_BYTES),
+    toolName: truncateWireString(input.toolName, MAX_EVENT_NAME_BYTES),
+    ...(argumentsJson !== undefined &&
+    wireBytes(argumentsJson) <= MAX_INPUT_BYTES
+      ? { argumentsJson }
+      : {}),
+  };
+}
+
+function decodeDynamicToolCallInput(
+  value: unknown,
+): ClientDynamicToolCallInputV1 {
+  const input = record(value, "run event.call.input");
+  exactKeys(
+    input,
+    ["namespace", "toolName", "argumentsJson"],
+    "run event.call.input",
+  );
+  return {
+    namespace: wireString(
+      input,
+      "namespace",
+      MAX_EVENT_NAME_BYTES,
+      "run event.call.input",
+    ),
+    toolName: wireString(
+      input,
+      "toolName",
+      MAX_EVENT_NAME_BYTES,
+      "run event.call.input",
+    ),
+    ...(Object.hasOwn(input, "argumentsJson")
+      ? {
+          argumentsJson: wireString(
+            input,
+            "argumentsJson",
+            MAX_INPUT_BYTES,
+            "run event.call.input",
+          ),
+        }
+      : {}),
+  };
+}
+
 function projectionUnits(
   events: readonly SessionEvent[],
   status: ClientRunStatusV1,
@@ -328,11 +431,16 @@ function projectionUnits(
         );
       }
       callCount += 1;
+      const dynamicInput =
+        event.name === "call_dynamic_tool"
+          ? dynamicToolCallInput(event.input)
+          : undefined;
       const call: ClientToolCallV1 = {
         type: "tool/call",
         call: {
           id: `tool-${callCount}`,
           name: truncateWireString(event.name, MAX_EVENT_NAME_BYTES),
+          ...(dynamicInput ? { input: dynamicInput } : {}),
         },
       };
       const unit: ProjectionUnitV1 = { events: [call], droppable: false };
@@ -482,7 +590,12 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
               type: "cancelled",
               message: CANCELLED_RUN_MESSAGE,
             } satisfies ClientRunOutcomeV1)
-          : undefined;
+          : status === "superseded"
+            ? ({
+                type: "superseded",
+                message: SUPERSEDED_RUN_MESSAGE,
+              } satisfies ClientRunOutcomeV1)
+            : undefined;
   const recovery =
     status === "reconciliation-required"
       ? ({
@@ -508,6 +621,9 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
           stopRequestedAt: truncate(run.stopRequestedAt, MAX_TIMESTAMP_LENGTH),
         }
       : {}),
+    ...(status === "running" && run.phase === "queued"
+      ? { queued: true as const }
+      : {}),
     ...(outcome ? { outcome } : {}),
     ...(recovery ? { recovery } : {}),
   };
@@ -516,9 +632,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
 function lookupState(
   status: ClientRunStatusV1,
 ): Exclude<ClientRunLookupStateV1, "not-admitted"> {
-  if (status === "completed" || status === "failed" || status === "cancelled") {
-    return "terminal";
-  }
+  if (isTerminalRunStatus(status)) return "terminal";
   if (status === "reconciliation-required") {
     return "reconciliation-required";
   }
@@ -687,6 +801,7 @@ function status(value: unknown): ClientRunStatusV1 {
     value !== "completed" &&
     value !== "failed" &&
     value !== "cancelled" &&
+    value !== "superseded" &&
     value !== "reconciliation-required"
   ) {
     throw new Error("run.status is invalid");
@@ -714,7 +829,21 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
   if (event.type === "tool/call") {
     exactKeys(event, ["type", "call"], "run event");
     const call = record(event.call, "run event.call");
-    exactKeys(call, ["id", "name"], "run event.call");
+    exactKeys(call, ["id", "name", "input"], "run event.call");
+    const name = wireString(
+      call,
+      "name",
+      MAX_EVENT_NAME_BYTES,
+      "run event.call",
+    );
+    const input = Object.hasOwn(call, "input")
+      ? decodeDynamicToolCallInput(call.input)
+      : undefined;
+    if (input && name !== "call_dynamic_tool") {
+      throw new Error(
+        "run event.call.input is valid only for a dynamic tool call",
+      );
+    }
     return {
       type: "tool/call",
       call: {
@@ -722,7 +851,8 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
           string(call, "id", MAX_EVENT_ID_LENGTH, "run event.call"),
           "run event.call.id",
         ),
-        name: wireString(call, "name", MAX_EVENT_NAME_BYTES, "run event.call"),
+        name,
+        ...(input ? { input } : {}),
       },
     };
   }
@@ -880,6 +1010,13 @@ function decodeOutcome(
       message: wireString(outcome, "message", MAX_FAILURE_BYTES, "run.outcome"),
     };
   }
+  if (outcome.type === "superseded" && runStatus === "superseded") {
+    exactKeys(outcome, ["type", "message"], "run.outcome");
+    return {
+      type: "superseded",
+      message: wireString(outcome, "message", MAX_FAILURE_BYTES, "run.outcome"),
+    };
+  }
   throw new Error("run.outcome does not match run.status");
 }
 
@@ -919,6 +1056,7 @@ function decodeRun(value: unknown): ClientRun {
       "status",
       "events",
       "stopRequestedAt",
+      "queued",
       "outcome",
       "recovery",
     ],
@@ -960,6 +1098,12 @@ function decodeRun(value: unknown): ClientRun {
   if (runStatus === "cancelled" && stopRequestedAt === undefined) {
     throw new Error("cancelled run.stopRequestedAt is required");
   }
+  if (run.queued !== undefined && run.queued !== true) {
+    throw new Error("run.queued is invalid");
+  }
+  if (run.queued === true && runStatus !== "running") {
+    throw new Error("only a running run may be queued");
+  }
   return {
     runId,
     admittedAt,
@@ -967,9 +1111,11 @@ function decodeRun(value: unknown): ClientRun {
     status: runStatus,
     events: decodeEvents(run.events, runStatus),
     ...(stopRequestedAt ? { stopRequestedAt } : {}),
+    ...(run.queued === true ? { queued: true as const } : {}),
     ...(outcome?.type === "completed" ? { responseText: outcome.text } : {}),
     ...(outcome?.type === "failed" ? { failure: outcome.message } : {}),
     ...(outcome?.type === "cancelled" ? { failure: outcome.message } : {}),
+    ...(outcome?.type === "superseded" ? { failure: outcome.message } : {}),
     ...(recovery ? { failure: recovery.message, recovery } : {}),
   };
 }
@@ -1109,7 +1255,7 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
   const command = record(input, "turn command");
   exactKeys(
     command,
-    ["schemaVersion", "commandId", "text", "skills"],
+    ["schemaVersion", "commandId", "text", "skills", "supersedes"],
     "turn command",
   );
   if (command.schemaVersion !== 1) {
@@ -1131,12 +1277,42 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
     "turn command",
   ).trim();
   if (!text) throw new Error("turn command.text is required");
-  if (command.skills === undefined)
-    return { schemaVersion: 1, commandId, text };
-  const skills = decodeSkillRefsV1(command.skills, "turn command.skills");
-  return skills.length > 0
-    ? { schemaVersion: 1, commandId, text, skills }
-    : { schemaVersion: 1, commandId, text };
+  let supersedes: { runId?: string } | undefined;
+  if (command.supersedes !== undefined) {
+    const named = record(command.supersedes, "turn command.supersedes");
+    exactKeys(named, ["runId"], "turn command.supersedes");
+    if (named.runId === undefined) {
+      // Intent with no provenance: the composer sent while it had observed no
+      // running Turn. It still means "replace whatever you are doing".
+      supersedes = {};
+    } else {
+      try {
+        supersedes = {
+          runId: decodeRunIdV1(
+            string(
+              named,
+              "runId",
+              MAX_RUN_ID_LENGTH,
+              "turn command.supersedes",
+            ),
+          ),
+        };
+      } catch {
+        throw new Error("turn command.supersedes.runId is invalid");
+      }
+    }
+  }
+  const skills =
+    command.skills === undefined
+      ? []
+      : decodeSkillRefsV1(command.skills, "turn command.skills");
+  return {
+    schemaVersion: 1,
+    commandId,
+    text,
+    ...(skills.length > 0 ? { skills } : {}),
+    ...(supersedes ? { supersedes } : {}),
+  };
 }
 
 export function decodeClientNotificationAcknowledgementCommandV1(

@@ -416,6 +416,46 @@ describe("client run protocol v1", () => {
       }),
     ).toThrow("turn command.schemaVersion is invalid");
 
+    // Supersede intent is carried by the field's presence. The composer sends
+    // it on every send, and names a run only when it observed one.
+    expect(
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "hello",
+        supersedes: {},
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      commandId: "command-1",
+      text: "hello",
+      supersedes: {},
+    });
+    expect(
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "hello",
+        supersedes: { runId: "run-1" },
+      }).supersedes,
+    ).toEqual({ runId: "run-1" });
+    expect(() =>
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "hello",
+        supersedes: { runId: "not a run id" },
+      }),
+    ).toThrow("turn command.supersedes.runId is invalid");
+    expect(() =>
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "hello",
+        supersedes: { runId: "run-1", extra: 1 },
+      }),
+    ).toThrow();
+
     expect(
       decodeClientNotificationAcknowledgementCommandV1({
         schemaVersion: 1,
@@ -569,6 +609,58 @@ describe("client run protocol v1", () => {
     ]) {
       expect(wire).not.toContain(privateValue);
     }
+  });
+
+  test("projects dynamic call identity so the client can show the inner tool", () => {
+    const projected = projectClientTurnV1({
+      runId: "run-dynamic-tool",
+      text: "",
+      events: [
+        event({
+          type: "tool/call",
+          seq: 0,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "call_dynamic_tool",
+          input: {
+            namespace: "user-Github--acme",
+            toolName: "search_issues",
+            arguments: { query: "is:open" },
+            mcpDetails: { description: "Find open issues." },
+          },
+        }),
+        event({
+          type: "tool/result",
+          seq: 1,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "call_dynamic_tool",
+          content: "[]",
+          isError: false,
+          status: "completed",
+        }),
+      ],
+    });
+
+    expect(projected.events[0]).toEqual({
+      type: "tool/call",
+      call: {
+        id: "tool-1",
+        name: "call_dynamic_tool",
+        input: {
+          namespace: "user-Github--acme",
+          toolName: "search_issues",
+          argumentsJson: '{"query":"is:open"}',
+        },
+      },
+    });
+    expect(decodeClientTurnV1(structuredClone(projected)).events[0]).toEqual(
+      projected.events[0],
+    );
   });
 
   test("projects only bounded user-visible run state", () => {

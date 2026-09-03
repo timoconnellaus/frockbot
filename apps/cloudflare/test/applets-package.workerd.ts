@@ -31,6 +31,7 @@ import {
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import appletsManifest from "@frockbot/plugin-applets/manifest";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
+import { dynamicToolInputV1 } from "./dynamic-tools.ts";
 import { provisionBot } from "./provision-bot.ts";
 
 const APPLETS_SPECIFIER = "@frockbot/plugin-applets";
@@ -185,8 +186,10 @@ describe("the same Package authored through package_author", () => {
     // manifest claims: the isolate host refuses a mount whose health report
     // disagrees with the manifest, so this list is the module's own answer.
     const registered = await stub.mountedToolNames();
+    // An isolate-loaded member's tools are disclosed under its Package id
+    // (ADR 0023), so the registry names them `applets/<tool>`.
     for (const tool of shipped.tools ?? []) {
-      expect(registered).toContain(tool.name);
+      expect(registered).toContain(`applets/${tool.name}`);
     }
 
     const authoredManifest = (await stub.memberManifest(
@@ -250,7 +253,15 @@ describe("the shipped member inside a real Bot", () => {
         runId: `run-list-${id}`,
         sessionId: `${identity.userId}:${identity.botId}`,
         acceptedAt: new Date().toISOString(),
-        text: toolCallTriggerPrompt(["applet_list", {}]),
+        text: toolCallTriggerPrompt([
+          "call_dynamic_tool",
+          dynamicToolInputV1({
+            namespace: "applets",
+            toolName: "applet_list",
+            input: {},
+            description: "List the Applets",
+          }),
+        ]),
       },
     });
 
@@ -266,8 +277,13 @@ describe("the shipped member inside a real Bot", () => {
         sessionId: `${identity.userId}:${identity.botId}`,
         acceptedAt: new Date().toISOString(),
         text: toolCallTriggerPrompt([
-          "applet_create",
-          { displayName: "Weekly Todos" },
+          "call_dynamic_tool",
+          dynamicToolInputV1({
+            namespace: "applets",
+            toolName: "applet_create",
+            input: { displayName: "Weekly Todos" },
+            description: "Create the Weekly Todos Applet",
+          }),
         ]),
       },
     });
@@ -290,7 +306,15 @@ describe("the shipped member inside a real Bot", () => {
         runId: `run-list-again-${id}`,
         sessionId: `${identity.userId}:${identity.botId}`,
         acceptedAt: new Date().toISOString(),
-        text: toolCallTriggerPrompt(["applet_list", {}]),
+        text: toolCallTriggerPrompt([
+          "call_dynamic_tool",
+          dynamicToolInputV1({
+            namespace: "applets",
+            toolName: "applet_list",
+            input: {},
+            description: "List the Applets",
+          }),
+        ]),
       },
     });
     const relisted = toolResult(again as never);

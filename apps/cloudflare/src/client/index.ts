@@ -113,6 +113,7 @@ const application = new ClientApplication({
     signal: AbortSignal,
     commandId: string,
     skills?: readonly SkillRefV1[],
+    supersedes?: { runId?: string },
   ): Promise<ClientTurnResponse> {
     signal.throwIfAborted();
     const path = `/api/bots/${encodeURIComponent(botId)}/turns`;
@@ -123,6 +124,7 @@ const application = new ClientApplication({
       // Omitted rather than sent empty: the command decoder takes exact keys,
       // and "no Skills" is the absence of the field.
       ...(skills && skills.length > 0 ? { skills } : {}),
+      ...(supersedes ? { supersedes } : {}),
     });
     const response = window.frockbotDesktop
       ? await Promise.race([

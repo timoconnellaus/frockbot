@@ -7,6 +7,36 @@ import type { Plugin } from "cordis";
 export const FOUNDATION_PROVIDER = "foundation";
 export const FOUNDATION_MODEL = "deterministic-v1";
 
+function presentedToolName(
+  request: Parameters<LlmProvider["stream"]>[0],
+  toolCallId: string,
+  name: string,
+): string {
+  if (name !== "call_dynamic_tool") return name;
+  const call = request.messages
+    .toReversed()
+    .find((message) => message.role === "assistant")
+    ?.toolCalls.find((candidate) => candidate.id === toolCallId);
+  if (
+    !call ||
+    typeof call.input !== "object" ||
+    call.input === null ||
+    Array.isArray(call.input)
+  ) {
+    return name;
+  }
+  const input = call.input as Record<string, unknown>;
+  if (
+    typeof input.namespace !== "string" ||
+    typeof input.toolName !== "string"
+  ) {
+    return name;
+  }
+  return input.namespace === "frockbot"
+    ? input.toolName
+    : `${input.namespace}/${input.toolName}`;
+}
+
 async function* foundationStream(
   request: Parameters<LlmProvider["stream"]>[0],
   signal: AbortSignal,
@@ -14,7 +44,8 @@ async function* foundationStream(
   signal.throwIfAborted();
   const latest = request.messages.at(-1);
   if (latest?.role === "tool") {
-    const label = latest.name === "echo" ? "Echo" : latest.name;
+    const name = presentedToolName(request, latest.callId, latest.name);
+    const label = name === "echo" ? "Echo" : name;
     yield { type: "text-delta", text: `${label}: ` };
     await Promise.resolve();
     signal.throwIfAborted();

@@ -177,8 +177,15 @@ export async function executeDirectToolTurn(
   const session = composition.runtime.agent.agent.session;
   const call = {
     id: command.runId,
-    name: command.directTool.name,
-    input: command.directTool.input,
+    name: "call_dynamic_tool",
+    input: {
+      namespace: command.directTool.packageId,
+      toolName: command.directTool.name,
+      arguments: command.directTool.input,
+      mcpDetails: {
+        description: `The User invoked ${command.directTool.name} from the Package UI.`,
+      },
+    },
   };
   try {
     let turnStart = [...session.events].findLast(

@@ -22,6 +22,7 @@ function decodeEchoInput(input: unknown): EchoInput | undefined {
 
 export const echoTool: ToolDefinition = {
   name: ECHO_TOOL_NAME,
+  namespace: "frockbot",
   description: "Return text to the conversation unchanged.",
   inputSchema: {
     type: "object",
@@ -56,7 +57,15 @@ async function* requestEchoTool(
   yield {
     // pi-lens-ignore: ts:2322
     type: "tool-call",
-    call: { id: crypto.randomUUID(), name: ECHO_TOOL_NAME, input: { text } },
+    call: {
+      id: crypto.randomUUID(),
+      name: "call_dynamic_tool",
+      input: {
+        namespace: "frockbot",
+        toolName: ECHO_TOOL_NAME,
+        arguments: { text },
+      },
+    },
   };
   yield {
     type: "finish",

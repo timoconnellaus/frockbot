@@ -24,6 +24,14 @@ _Avoid_: Chat, transcript
 One run of an agent that begins when queued input is durably admitted and ends when the agent completes, fails, is blocked, is interrupted, or is cancelled. A turn may contain several model-and-tool steps.
 _Avoid_: Message, request
 
+**Lane**:
+The queue a turn is admitted on. `user` is the conversation and may supersede what is running; `background` is work the bot started for itself — a routine firing, a subagent dispatch — and always waits. A turn's lane is what its turn type says unless its record names another.
+_Avoid_: Priority, queue, channel
+
+**Supersede**:
+A user message sent mid-turn taking the place of the running turn: the running turn is interrupted and reaches the terminal state `superseded`, and the message becomes a new turn. Never an injection into the model request already in flight, and never a stop — the bot's background work carries on.
+_Avoid_: Steer, interrupt, barge-in, queue
+
 **Package**:
 A versioned, installable FrockBot distribution containing a manifest and one or more Contributions.
 _Avoid_: Plugin, extension
@@ -39,6 +47,10 @@ _Avoid_: User Connection, credential, integration, account
 **Capability**:
 Behavior made available by an installed Package, such as a model, tool set, memory provider, or notification adapter.
 _Avoid_: Plugin, feature
+
+**Tool Namespace**:
+A model-facing group of dynamic tools disclosed by name in the system prompt and by schema only on request. A tool without a namespace is native; a namespaced tool is discovered and invoked through the registry's two meta-tools.
+_Avoid_: Package, Connection, tool prefix
 
 **Enablement**:
 A User-owned grant turning a Package or Connection on for every one of that user's bots. There is no per-bot grant.

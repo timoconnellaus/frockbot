@@ -143,6 +143,55 @@ function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
 
+/**
+ * A Turn the Bot Durable Object declined to admit, told apart from one that
+ * broke.
+ *
+ * Admission refusals are ordinary, expected answers — the object is busy with
+ * a Turn this command did not ask to replace, or is holding an uncertain
+ * effect that has to be retrieved first, or the run was fenced. None of them
+ * is a server fault, and answering 500 made the client log a console error for
+ * something it should simply show the person. They are 409: the request was
+ * well formed and the Bot's current state refuses it.
+ */
+const TURN_ADMISSION_REFUSALS_V1: readonly {
+  match: RegExp;
+  reason: ClientTurnRefusalReasonV1;
+}[] = [
+  { match: /bot already has an active run/i, reason: "busy" },
+  {
+    match: /requires reconciliation before/i,
+    reason: "reconciliation-required",
+  },
+  { match: /admission was fenced/i, reason: "fenced" },
+  { match: /already (exists|completed)/i, reason: "duplicate" },
+];
+
+export type ClientTurnRefusalReasonV1 =
+  "busy" | "reconciliation-required" | "fenced" | "duplicate";
+
+/** The versioned body a refused Turn answers with, decoded by the client. */
+export interface ClientTurnRefusalV1 {
+  schemaVersion: 1;
+  status: "refused";
+  reason: ClientTurnRefusalReasonV1;
+  error: string;
+}
+
+function turnRefusal(error: unknown): ClientTurnRefusalV1 | undefined {
+  const message = error instanceof Error ? error.message : "";
+  const matched = TURN_ADMISSION_REFUSALS_V1.find((candidate) =>
+    candidate.match.test(message),
+  );
+  if (!matched) return undefined;
+  return {
+    schemaVersion: 1,
+    status: "refused",
+    reason: matched.reason,
+    error: message,
+  };
+}
+
 async function requireRegisteredBot(
   env: UserApplicationEnv,
   botId: string,
@@ -956,10 +1005,20 @@ export function createUserApplication() {
             // so what a Turn runs on is still whatever the instruction root
             // holds at the generation the Turn resolves.
             ...(turnCommand.skills ? { skills: turnCommand.skills } : {}),
+            // The composer's explicit authenticated intent to replace whatever
+            // the Bot is doing. It is forwarded exactly as sent — including
+            // the empty form, which means the sender had observed no run —
+            // because its presence is the decision. The lane is `user`
+            // because only the composer reaches this route.
+            ...(turnCommand.supersedes
+              ? { supersedes: turnCommand.supersedes, lane: "user" as const }
+              : {}),
           },
         }),
       );
     } catch (error) {
+      const refusal = turnRefusal(error);
+      if (refusal) return Response.json(refusal, { status: 409 });
       return jsonError(
         500,
         error instanceof Error ? error.message : "Bot turn failed",

@@ -1705,7 +1705,17 @@ describe("Cloudflare user application gateway", () => {
     expect(decodeClientTurnV1(publicTurn)).toMatchObject({
       text: "Echo: hello workers",
       events: [
-        { type: "tool/call", call: { name: "echo" } },
+        {
+          type: "tool/call",
+          call: {
+            name: "call_dynamic_tool",
+            input: {
+              namespace: "frockbot",
+              toolName: "echo",
+              argumentsJson: '{"text":"hello workers"}',
+            },
+          },
+        },
         { type: "tool/result", content: "hello workers" },
       ],
     });
@@ -1718,7 +1728,7 @@ describe("Cloudflare user application gateway", () => {
     ]);
     expect(wire).not.toContain("model/request");
     expect(wire).not.toContain("input/queued");
-    expect(wire).not.toContain('"input"');
+    expect(wire).not.toContain("tool-input-secret");
     expect(new Set(loader.ids)).toEqual(new Set(["alice:foundation-v1"]));
     expect(
       loader.codes.every((code) => code.globalOutbound === undefined),

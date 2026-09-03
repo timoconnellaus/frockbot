@@ -23,7 +23,7 @@ export function completeStoredRun(
   previous: readonly SessionEvent[],
   result: BotTurnCompletion,
   packageRecords?: TerminalPackageRecords<BotSettingsViewV1>,
-): Promise<"completed" | "cancelled"> {
+): Promise<"completed" | "cancelled" | "superseded"> {
   return completeKernelStoredRun(
     storedRunCodecV1,
     storage,
@@ -42,7 +42,9 @@ export function failStoredRun(
   previous: readonly SessionEvent[],
   events: readonly SessionEvent[],
   failure: string,
-): Promise<"failed" | "cancelled" | "preserved-completion" | "missing"> {
+): Promise<
+  "failed" | "cancelled" | "superseded" | "preserved-completion" | "missing"
+> {
   return failKernelStoredRun(
     storedRunCodecV1,
     storage,

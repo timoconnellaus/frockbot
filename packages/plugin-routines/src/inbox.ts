@@ -144,16 +144,38 @@ export interface RoutinePendingMachineResultV1 {
 /** The longest preview a machine-result input carries. */
 export const MACHINE_RESULT_PREVIEW_MAX_V1 = 400;
 
+/**
+ * A Turn the User's next message took the place of, waiting to be told to the
+ * Bot.
+ *
+ * The fourth variant, and the only one a Turn writes about itself. A
+ * superseded Turn's sends and completed tool results are already in the
+ * session log, so the model sees what it did; what it cannot see is *why* it
+ * stopped mid-sentence, or that a subagent it dispatched is still working. It
+ * reaches the next Turn as durable input rather than as a silent gap.
+ */
+export interface RoutinePendingSupersededTurnV1 {
+  schemaVersion: 1;
+  kind: "superseded-turn";
+  /** The Turn that was superseded. */
+  runId: string;
+  /** Whether that Turn had dispatched subagents that outlive it. */
+  unfinishedWork: boolean;
+  createdAt: string;
+}
+
 /** One durable input the Bot's next conversational Turn is owed. */
 export type PendingBotInputV1 =
   | RoutinePendingWakeV1
   | RoutinePendingApprovalV1
-  | RoutinePendingMachineResultV1;
+  | RoutinePendingMachineResultV1
+  | RoutinePendingSupersededTurnV1;
 
 /** The id one pending input is keyed and de-duplicated by. */
 export function pendingBotInputIdV1(input: PendingBotInputV1): string {
   if (input.kind === "wake") return input.wakeId;
   if (input.kind === "approval") return input.approvalId;
+  if (input.kind === "superseded-turn") return `superseded-turn:${input.runId}`;
   return `machine-result:${input.commandId}`;
 }
 
@@ -297,6 +319,24 @@ export function decodePendingBotInputV1(
       createdAt: routineTimestamp(candidate.createdAt, `${label} createdAt`),
     };
   }
+  if (candidate.kind === "superseded-turn") {
+    routineExactKeys(
+      candidate,
+      ["schemaVersion", "kind", "runId", "unfinishedWork", "createdAt"],
+      [],
+      label,
+    );
+    if (typeof candidate.unfinishedWork !== "boolean") {
+      throw new RoutineDecodeError(`${label} unfinishedWork is invalid`);
+    }
+    return {
+      schemaVersion: 1,
+      kind: "superseded-turn",
+      runId: routineText(candidate.runId, 256, `${label} runId`),
+      unfinishedWork: candidate.unfinishedWork,
+      createdAt: routineTimestamp(candidate.createdAt, `${label} createdAt`),
+    };
+  }
   if (candidate.kind !== "wake") {
     throw new RoutineDecodeError(`${label} kind is invalid`);
   }
@@ -391,6 +431,18 @@ export function pendingBotInputPreambleV1(
     if (input.kind === "approval") {
       lines.push(
         `[Approval] The decision on "${input.approvalId}" is ${input.decision}.`,
+        "",
+      );
+      continue;
+    }
+    if (input.kind === "superseded-turn") {
+      lines.push(
+        "[Superseded] Your previous Turn was interrupted because the User sent this message before it finished. What you had already sent and the tool results you had already received are above; anything still in flight was abandoned and must not be assumed to have happened.",
+        ...(input.unfinishedWork
+          ? [
+              "Subagents that Turn dispatched are still running and will report when they finish.",
+            ]
+          : []),
         "",
       );
       continue;

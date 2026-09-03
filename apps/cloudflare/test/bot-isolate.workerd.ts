@@ -29,6 +29,28 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(result).toEqual({ content: "tobkcorf", isError: false });
   });
 
+  test("an isolate namespace is external, so a call without metadata is refused", async () => {
+    const stub = probe(`external-${crypto.randomUUID()}`);
+    const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
+
+    // Same tool, same namespace, same arguments — only `mcpDetails.description`
+    // is missing. A non-first-party namespace is external (ADR 0023), and the
+    // registry refuses the call before the isolate is reached rather than
+    // letting an unexplained invocation through.
+    const result = await stub.callTool({
+      userId: "user-1",
+      botId: "bot-1",
+      artifact,
+      tool: "reverse_text",
+      toolInput: { text: "frockbot" },
+      omitDescription: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("requires mcpDetails.description");
+    expect(result.content).not.toContain("tobkcorf");
+  });
+
   test("an isolate tool is reached by the Agent loop in a Turn", async () => {
     const stub = probe(`turn-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);

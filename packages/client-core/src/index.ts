@@ -33,7 +33,7 @@ import {
 
 export interface ClientTurnEvent {
   type: string;
-  call?: { id: string; name: string };
+  call?: { id: string; name: string; input?: unknown };
   callId?: string;
   content?: string;
   isError?: boolean;
@@ -122,11 +122,18 @@ export interface ClientRun {
     | "completed"
     | "failed"
     | "cancelled"
+    | "superseded"
     | "reconciliation-required";
   responseText?: string;
   failure?: string;
   /** Durable Stop intent, projected independently of the run status. */
   stopRequestedAt?: string;
+  /**
+   * True while the Turn is admitted and waiting rather than running: the User
+   * sent it while the Bot was still on the previous one. The thread draws it
+   * as an ordinary message it has not reached yet.
+   */
+  queued?: true;
   recovery?: { action: "resume"; message: string };
 }
 
@@ -143,6 +150,12 @@ export interface AgentTransport {
      * transport that has no composer — a Routine's, a test's — needs no change.
      */
     skills?: readonly SkillRefV1[],
+    /**
+     * The Turn this message replaces, when the User sent it while one was
+     * running. Absent means the ordinary case, where a second command in
+     * flight is still refused.
+     */
+    supersedes?: { runId?: string },
   ): Promise<ClientTurnResponse>;
   /**
    * The Bot's invocable Skills, for the composer's `/` and `@` popover.
@@ -251,12 +264,16 @@ function decodeTurnEvent(value: unknown): ClientTurnEvent {
     decoded.call = {
       id: responseString(event, "occurrenceId", "turn event"),
       name: responseString(event, "name", "turn event"),
+      ...(event.name === "call_dynamic_tool" ? { input: event.input } : {}),
     };
   } else if (event.call !== undefined) {
     const call = responseRecord(event.call, "tool call");
     decoded.call = {
       id: responseString(call, "id", "tool call"),
       name: responseString(call, "name", "tool call"),
+      ...(call.name === "call_dynamic_tool" && Object.hasOwn(call, "input")
+        ? { input: call.input }
+        : {}),
     };
   }
   if (event.type === "tool/result" && event.occurrenceId !== undefined) {

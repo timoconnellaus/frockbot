@@ -303,6 +303,61 @@ describe("user application Bot seam", () => {
     expect(calls).toEqual([{ botId: "primary", text: "hello" }]);
   });
 
+  test("answers a refused admission 409, and a real fault 500", async () => {
+    const refusals = [
+      { thrown: "bot already has an active run", reason: "busy" },
+      {
+        thrown: 'run "run-1" requires reconciliation before another Turn',
+        reason: "reconciliation-required",
+      },
+      { thrown: 'run "run-1" admission was fenced', reason: "fenced" },
+      { thrown: 'run "run-1" already exists', reason: "duplicate" },
+    ] as const;
+    const post = async (thrown: string): Promise<Response> => {
+      const botState = {
+        run: () => Promise.reject(new Error(thrown)),
+        assertRegistered: () => Promise.resolve(),
+      } as unknown as BotStateBinding;
+      return createUserApplication()(
+        new Request("https://frockbot.test/api/bots/primary/turns", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            schemaVersion: 1,
+            text: "hello",
+            commandId: "command-1",
+            supersedes: {},
+          }),
+        }),
+        {
+          BOT_STATE: rpcBindingFor(botState),
+          DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+        } satisfies UserApplicationEnv,
+      );
+    };
+
+    for (const refusal of refusals) {
+      const response = await post(refusal.thrown);
+      // A refused admission is the Bot's current state answering, not a
+      // server fault. 500 made the client log a console error for something it
+      // should simply show the person.
+      expect(response.status).toBe(409);
+      expect(await response.json<unknown>()).toEqual({
+        schemaVersion: 1,
+        status: "refused",
+        reason: refusal.reason,
+        error: refusal.thrown,
+      });
+    }
+
+    // Anything the Bot did not refuse on purpose is still a fault.
+    const broken = await post("the Composition could not mount");
+    expect(broken.status).toBe(500);
+    expect(await broken.json<unknown>()).toEqual({
+      error: "the Composition could not mount",
+    });
+  });
+
   test("rejects every unregistered Bot route before dispatch", async () => {
     let dispatches = 0;
     const unexpected = () => {

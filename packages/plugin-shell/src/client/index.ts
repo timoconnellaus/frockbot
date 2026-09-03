@@ -98,13 +98,49 @@ import "@frockbot/client-core/fonts.css";
 import "./styles.css";
 import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
 
+function presentedToolCall(call: NonNullable<ClientTurnEvent["call"]>): {
+  name: string;
+  input?: unknown;
+} {
+  if (
+    call.name === "call_dynamic_tool" &&
+    typeof call.input === "object" &&
+    call.input !== null &&
+    !Array.isArray(call.input)
+  ) {
+    const input = call.input as Record<string, unknown>;
+    if (
+      typeof input.namespace === "string" &&
+      typeof input.toolName === "string"
+    ) {
+      let innerArguments: unknown = {};
+      if (typeof input.argumentsJson === "string") {
+        try {
+          innerArguments = JSON.parse(input.argumentsJson) as unknown;
+        } catch {
+          innerArguments = {};
+        }
+      }
+      return {
+        name: `${input.namespace}/${input.toolName}`,
+        input: innerArguments,
+      };
+    }
+  }
+  return {
+    name: call.name,
+    ...(call.input === undefined ? {} : { input: call.input }),
+  };
+}
+
 function toolsFrom(events: ClientTurnEvent[]): WebToolActivity[] {
   const tools = new Map<string, WebToolActivity>();
   for (const event of events) {
     if (event.type === "tool/call" && event.call) {
+      const presented = presentedToolCall(event.call);
       tools.set(event.call.id, {
         id: event.call.id,
-        name: event.call.name,
+        ...presented,
         status: "running",
       });
     }
@@ -179,7 +215,7 @@ function tasksFrom(events: ClientTurnEvent[]): WebTaskChip[] {
 
 type DurableRunProjectionState = Pick<
   FrockBotWebData,
-  "messages" | "activeRunId" | "activeRun" | "error"
+  "messages" | "activeRunId" | "runningRunId" | "activeRun" | "error"
 >;
 
 /**
@@ -218,7 +254,8 @@ function isTerminalRun(run: ClientRun): boolean {
   return (
     run.status === "completed" ||
     run.status === "failed" ||
-    run.status === "cancelled"
+    run.status === "cancelled" ||
+    run.status === "superseded"
   );
 }
 
@@ -235,6 +272,23 @@ function assistantMessage(
       role: "assistant",
       text: run.responseText ?? "",
       status: "streaming",
+      // A Turn that has not started shows nothing of its own: the greyed user
+      // message is the whole of what the thread says about it.
+      ...(run.queued ? { pending: true } : {}),
+      tools: toolsFrom(run.events),
+      sends: sendsFrom(run.events),
+      tasks: tasksFrom(run.events),
+    };
+  }
+  if (run.status === "superseded") {
+    // The same quiet treatment a stopped Turn gets. It keeps everything it
+    // already sent; the line only says why it ends where it does.
+    return {
+      id: `${run.runId}:assistant`,
+      runId: run.runId,
+      role: "assistant",
+      text: run.failure ?? "Interrupted by your next message.",
+      status: "aborted",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
       tasks: tasksFrom(run.events),
@@ -321,6 +375,9 @@ export function projectDurableRuns(
   // Busy state and the banner are separate: a running Turn keeps the composer
   // busy without producing a banner of its own.
   let busyRunId: string | undefined;
+  // The Turn Stop targets: the one that is executing, never the one waiting
+  // behind it.
+  let runningRunId: string | undefined;
   for (const run of runs) {
     const notification = notifications.find(
       (candidate) => candidate.runId === run.runId,
@@ -340,6 +397,9 @@ export function projectDurableRuns(
           ? { at: existingUser.at }
           : {}),
       status: "completed",
+      // Greyed while its Turn waits, ordinary the moment it is running. The
+      // flag comes from durable run state, so a reload draws the same thing.
+      ...(run.queued ? { pending: true } : {}),
       tools: [],
       sends: [],
     };
@@ -360,6 +420,7 @@ export function projectDurableRuns(
     activeRun = activeRunView(run) ?? activeRun;
     if (run.status === "running" || run.status === "reconciliation-required") {
       busyRunId = run.runId;
+      if (!run.queued) runningRunId = run.runId;
     }
     if (notification && isTerminalRun(run)) {
       projected.add(notification.notificationId);
@@ -376,6 +437,10 @@ export function projectDurableRuns(
   if (busyRunId) state.activeRunId = busyRunId;
   else if (state.activeRunId && terminalRunIds.has(state.activeRunId)) {
     state.activeRunId = undefined;
+  }
+  if (runningRunId) state.runningRunId = runningRunId;
+  else if (state.runningRunId && terminalRunIds.has(state.runningRunId)) {
+    state.runningRunId = undefined;
   }
   if (activeRun) state.activeRun = activeRun;
   else if (
@@ -1156,6 +1221,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       web.value.messages = [];
       web.value.activeRun = undefined;
       web.value.activeRunId = undefined;
+      web.value.runningRunId = undefined;
       web.value.skillCatalog = [];
       web.value.approvals = [];
       web.value.tasks = [];
@@ -2211,12 +2277,20 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       text: string,
       skills?: readonly SkillRefV1[],
     ): Promise<SendPromptResult> {
-      if (web.value.activeRunId) return { accepted: false, error: "busy" };
       const botId = web.value.activeBotId;
       if (!botId) return { accepted: false, error: "no-bot" };
       const generation = selectionGeneration;
       const pendingRunId = crypto.randomUUID();
       const optimisticAt = new Date().toISOString();
+      // Every send carries the intent, because "do this instead" is what a
+      // person means by pressing send and it does not depend on what this
+      // client had managed to observe first. Whether a run was showing as
+      // active is a race — the composer unlocks the instant a Turn settles,
+      // and a fast typist beats the next poll — so gating the intent on
+      // `activeRunId` made the Bot refuse a message the User had every right
+      // to send. The observed run rides along as provenance when there is one.
+      const observed = web.value.activeRunId;
+      const supersedes = observed ? { runId: observed } : {};
       web.value.activeRunId = pendingRunId;
       web.value.error = undefined;
       web.value.messages.push(
@@ -2227,6 +2301,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           text,
           at: optimisticAt,
           status: "completed",
+          // Greyed until its own Turn is admitted and running. Optimistic
+          // only: the durable projection replaces it by run id.
+          ...(observed ? { pending: true } : {}),
           tools: [],
           sends: [],
         },
@@ -2237,6 +2314,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           text: "",
           at: optimisticAt,
           status: "streaming",
+          ...(observed ? { pending: true } : {}),
           tools: [],
           sends: [],
         },
@@ -2257,6 +2335,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           requestController.signal,
           pendingRunId,
           skills,
+          supersedes,
         );
         if (
           generation !== selectionGeneration ||
@@ -2385,7 +2464,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     },
     async stopRun(): Promise<void> {
       const botId = web.value.activeBotId;
-      const runId = web.value.activeRun?.runId ?? web.value.activeRunId;
+      // The Turn that is executing, never the message waiting behind it: Stop
+      // cancels what the Bot is doing and does not discard what the User just
+      // sent.
+      const runId =
+        web.value.activeRun?.runId ??
+        web.value.runningRunId ??
+        web.value.activeRunId;
       if (!botId || !runId) return;
       if (!ctx.transport.stopRun) {
         web.value.settingsError = "Stop is unavailable";

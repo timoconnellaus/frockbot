@@ -8,6 +8,14 @@ export const RUN_ADMISSION_FENCE_PREFIX = "run-admission-fence:";
 export const RUN_ADMISSION_FENCE_INDEX_KEY = "run-admission-fences";
 export const MAX_RUN_ADMISSION_FENCES = 256;
 export const ACTIVE_RUN_KEY = "active-run";
+/**
+ * The one admitted user-lane Turn waiting for the object to become free.
+ *
+ * A single slot, not a queue: a second user message supersedes the first
+ * waiting one exactly as it supersedes a running one, so the Bot is never
+ * working through a backlog of things the User has already replaced.
+ */
+export const PENDING_RUN_KEY = "pending-run";
 export const LATEST_EVENTS_KEY = "latest-events";
 export const IDENTITY_KEY = "identity";
 export const NOTIFICATION_PREFIX = "notification:";

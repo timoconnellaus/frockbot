@@ -119,7 +119,7 @@ import {
   eventsForFailedRun,
   latestModelRequestJournalState,
   planBotRunRecovery,
-  planStoppedRunRecovery,
+  planInterruptedRunRecoveryV1,
 } from "./backend-recovery.js";
 import {
   bootstrapCompositionGeneration,
@@ -379,7 +379,10 @@ import {
   projectPackageIframeCompositionV1,
 } from "./composition-views.js";
 import { executeBotTurn, executeDirectToolTurn } from "./backend-runner.js";
-import { shellTerminalRecordsV1 } from "./terminal-records.js";
+import {
+  shellTerminalRecordsV1,
+  supersededTurnRecordsV1,
+} from "./terminal-records.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
   CLIENT_RUN_PAGE_LIMIT,
@@ -472,7 +475,10 @@ interface StoredStopReceipt {
 
 function isTerminalStoredRunStatus(status: StoredRunStatus): boolean {
   return (
-    status === "completed" || status === "failed" || status === "cancelled"
+    status === "completed" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "superseded"
   );
 }
 
@@ -678,7 +684,8 @@ export class ShellBotBackendContribution {
         subagentRole?: string;
         mounted: ShellMountedComposition;
         signal: AbortSignal;
-        cancel(): void;
+        /** `detail` is recorded on the Turn's `turn/end`, never interpreted. */
+        cancel(detail?: string): void;
       }
     | undefined;
   /**
@@ -762,6 +769,9 @@ export class ShellBotBackendContribution {
         notification: (snapshot, result) =>
           this.createNotification(snapshot, result),
         terminalRecords: (input) => this.terminalPackageRecords(input),
+        supersededRecords: (input) => this.supersededPackageRecords(input),
+        interruptTurn: (runId, reason) =>
+          this.interruptActiveTurn(runId, reason),
         scheduledDeadlines: (transaction) =>
           this.scheduledDeadlines(transaction),
         scheduledWorkInFlight: () =>
@@ -1639,9 +1649,9 @@ export class ShellBotBackendContribution {
         : {}),
       mounted: activation.mounted,
       signal: controller.signal,
-      cancel: () => {
+      cancel: (detail?: string) => {
         controller.abort("user");
-        activation.mounted.runtime.agent.agent.cancel("user");
+        activation.mounted.runtime.agent.agent.cancel("user", detail);
       },
     };
     this.activeTurn = active;
@@ -1750,6 +1760,7 @@ export class ShellBotBackendContribution {
   private cancelActiveTurn(cancellation: {
     sessionId: string;
     runId: string;
+    detail?: string;
   }): boolean {
     const active = this.activeTurn;
     if (
@@ -1759,8 +1770,22 @@ export class ShellBotBackendContribution {
     ) {
       return false;
     }
-    active.cancel();
+    active.cancel(cancellation.detail);
     return true;
+  }
+
+  /**
+   * The kernel's advisory interrupt, bound to this object's resident Agent.
+   *
+   * It runs only after the durable intent that justifies it is written, and it
+   * changes nothing durable itself: a Turn whose Agent is no longer resident
+   * is stopped by the effect fence on its next external effect instead, which
+   * is the same outcome by a slower road.
+   */
+  private interruptActiveTurn(runId: string, reason: string): void {
+    const active = this.activeTurn;
+    if (!active || active.runId !== runId) return;
+    active.cancel(reason);
   }
 
   /** The visible half of failing closed, through the Bot's notifications. */
@@ -5296,6 +5321,27 @@ export class ShellBotBackendContribution {
     });
   }
 
+  /**
+   * What a superseded Turn leaves for the Turn that replaced it.
+   *
+   * One durable input, drained once by the next conversational Turn. The
+   * session log already carries what the Turn sent and what its tools
+   * returned; this is the part that is not in the log — that it was cut off,
+   * that nothing in flight completed, and that a subagent it dispatched is
+   * still working. "A firing's outcome is delivered to the Bot's next
+   * conversational Turn as durable input" and a superseded Turn's is too.
+   */
+  private supersededPackageRecords(input: {
+    run: StoredRun;
+    read<T>(key: string): Promise<T | undefined>;
+  }): Promise<Record<string, unknown>> {
+    return supersededTurnRecordsV1({
+      run: input.run,
+      now: new Date().toISOString(),
+      read: input.read,
+    });
+  }
+
   async alarm(): Promise<void> {
     // One alarm: the kernel defers while work is in flight, settles Package
     // scheduled work, and recovers the active run. A run left
@@ -5953,7 +5999,12 @@ export class ShellBotBackendContribution {
           `effect admission "${effect.effectId}" does not match durable intent`,
         );
       }
-      const outcome = run.stopRequestedAt ? "fenced" : "admitted";
+      // Supersede fences exactly as Stop does. It is what makes an interrupt
+      // durable rather than advisory: a Turn whose Agent never got the signal
+      // — because the object was evicted and resumed — still starts no new
+      // provider call or tool effect once the intent is recorded.
+      const outcome =
+        run.stopRequestedAt || run.supersededAt ? "fenced" : "admitted";
       const next = requireStoredRunV1({
         ...run,
         effectAdmissions: [

@@ -45,6 +45,7 @@ export interface WebToolAttachment {
 export interface WebToolActivity {
   id: string;
   name: string;
+  input?: unknown;
   status: "running" | "completed" | "failed";
   text?: string;
   attachments?: WebToolAttachment[];
@@ -93,6 +94,13 @@ export interface WebChatMessage {
     | "error"
     | "interrupted"
     | "reconciliation-required";
+  /**
+   * True while this line's Turn is admitted but has not started, because the
+   * User sent it while the Bot was still on the previous one. The thread
+   * greys it and nothing else: it is an ordinary message the Bot has not
+   * reached, not a state the User has to understand.
+   */
+  pending?: boolean;
   tools: WebToolActivity[];
   /** The typed payloads this Turn sent to the user, oldest first. */
   sends: WebSendPayload[];
@@ -161,7 +169,17 @@ export interface FrockBotWebData {
   activeBotId?: string;
   composerContext?: unknown;
   messages: WebChatMessage[];
+  /**
+   * The newest Turn that has not settled — running, or admitted and waiting.
+   * A message sent now supersedes this one.
+   */
   activeRunId?: string;
+  /**
+   * The Turn actually executing, which is what Stop targets. It differs from
+   * `activeRunId` only while a message the User sent mid-Turn is waiting: Stop
+   * cancels what the Bot is doing and never discards what they just sent.
+   */
+  runningRunId?: string;
   activeRun?: WebActiveRun;
   error?: string;
   botSettings?: BotSettingsViewV1;

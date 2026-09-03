@@ -252,7 +252,10 @@ describe("the web-fetch Capability enablement", () => {
       expect({
         turnType,
         names: root.tools.schemas({ turnType }).map((schema) => schema.name),
-      }).toEqual({ turnType, names: ["web_fetch"] });
+      }).toEqual({
+        turnType,
+        names: ["web_fetch", "get_dynamic_tools", "call_dynamic_tool"],
+      });
     }
     await root.fiber.dispose();
   });

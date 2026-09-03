@@ -10,11 +10,192 @@ import {
   type ToolExecutionContext,
   type ToolExecutionResult,
   type ToolGuard,
+  type ToolNamespaceRegistration,
   type ToolPreparation,
   type ToolRegistrationOptions,
   type ToolSchema,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
+
+export const GET_DYNAMIC_TOOLS_NAME = "get_dynamic_tools";
+export const CALL_DYNAMIC_TOOL_NAME = "call_dynamic_tool";
+export const FROCKBOT_TOOL_NAMESPACE = "frockbot";
+
+const CATALOG_DESCRIPTION_MAX_CHARS = 200;
+const TRUNCATION_SUFFIX = "... [truncated]";
+
+export const FROCKBOT_NAMESPACE_USE_INSTRUCTIONS =
+  "Native FrockBot tools for this session. You MUST read the tool schemas before calling them.";
+
+const GET_DYNAMIC_TOOLS_DESCRIPTION = [
+  "Discover schemas for dynamic tools.",
+  "Call forms: get_dynamic_tools() returns the namespace catalog; get_dynamic_tools({ pattern }) searches namespace and tool names; get_dynamic_tools({ namespace }) returns every complete tool schema in one namespace; get_dynamic_tools({ namespace, pattern }) searches within one namespace; get_dynamic_tools({ namespace, toolName }) returns one complete tool schema.",
+  "Catalog and pattern results omit input schemas and truncate descriptions to 200 characters ending in ... [truncated]. Namespace and single-tool lookups return complete descriptions and input schemas.",
+  `IMPORTANT: Always call ${GET_DYNAMIC_TOOLS_NAME} for this namespace/tool before calling to ensure correct parameters.`,
+  "Namespaces whose status is not ready are unusable until fixed.",
+].join(" ");
+
+const CALL_DYNAMIC_TOOL_DESCRIPTION = [
+  "Invoke a dynamic tool using a descriptor returned by get_dynamic_tools.",
+  "Discovery call forms: get_dynamic_tools() returns the namespace catalog; get_dynamic_tools({ pattern }) searches namespace and tool names; get_dynamic_tools({ namespace }) returns every complete tool schema in one namespace; get_dynamic_tools({ namespace, pattern }) searches within one namespace; get_dynamic_tools({ namespace, toolName }) returns one complete tool schema.",
+  "Catalog and pattern results omit input schemas and truncate descriptions to 200 characters ending in ... [truncated]. Namespace and single-tool lookups return complete descriptions and input schemas.",
+  `IMPORTANT: Always call ${GET_DYNAMIC_TOOLS_NAME} for this namespace/tool before calling to ensure correct parameters.`,
+  "Pass the descriptor's namespace and tool name, put its input in arguments, and include mcpDetails.description for an external namespace.",
+  "Namespaces whose status is not ready are unusable until fixed.",
+].join(" ");
+
+const GET_DYNAMIC_TOOLS_SCHEMA: ToolSchema = {
+  name: GET_DYNAMIC_TOOLS_NAME,
+  description: GET_DYNAMIC_TOOLS_DESCRIPTION,
+  inputSchema: {
+    type: "object",
+    properties: {
+      namespace: {
+        description: "Dynamic namespace to inspect, e.g. an MCP server.",
+        type: "string",
+      },
+      pattern: {
+        description:
+          "RE2 regex pattern to search namespace and tool names (max 256 chars).",
+        type: "string",
+      },
+      toolName: {
+        description:
+          "Tool name within the namespace. Requires namespace to be set.",
+        type: "string",
+      },
+    },
+  },
+};
+
+const CALL_DYNAMIC_TOOL_SCHEMA: ToolSchema = {
+  name: CALL_DYNAMIC_TOOL_NAME,
+  description: CALL_DYNAMIC_TOOL_DESCRIPTION,
+  inputSchema: {
+    type: "object",
+    properties: {
+      arguments: {
+        description:
+          "Arguments to pass to the tool, as described by the tool descriptor.",
+        type: "object",
+      },
+      mcpDetails: {
+        description:
+          "MCP-specific call metadata. Set only for external MCP namespaces; omit for frockbot.",
+        type: "object",
+        properties: {
+          description: { type: "string" },
+          requestSmartModeApproval: { type: "boolean" },
+          smartModeBlockReason: { type: "string" },
+        },
+        required: ["description"],
+      },
+      namespace: { type: "string" },
+      toolName: { type: "string" },
+    },
+    required: ["namespace", "toolName"],
+  },
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function optionalString(record: Record<string, unknown>, key: string): boolean {
+  return record[key] === undefined || typeof record[key] === "string";
+}
+
+function validGetDynamicToolsInput(input: unknown): boolean {
+  return (
+    input === undefined ||
+    (isRecord(input) &&
+      optionalString(input, "namespace") &&
+      optionalString(input, "pattern") &&
+      optionalString(input, "toolName"))
+  );
+}
+
+function validMcpDetailsShape(input: unknown): boolean {
+  if (!isRecord(input)) return false;
+  return (
+    (input.description === undefined ||
+      typeof input.description === "string") &&
+    (input.requestSmartModeApproval === undefined ||
+      typeof input.requestSmartModeApproval === "boolean") &&
+    (input.smartModeBlockReason === undefined ||
+      typeof input.smartModeBlockReason === "string")
+  );
+}
+
+function validMcpDetails(input: unknown): boolean {
+  return (
+    isRecord(input) &&
+    validMcpDetailsShape(input) &&
+    typeof input.description === "string"
+  );
+}
+
+function validCallDynamicToolInput(input: unknown): boolean {
+  return (
+    isRecord(input) &&
+    typeof input.namespace === "string" &&
+    input.namespace.length > 0 &&
+    typeof input.toolName === "string" &&
+    input.toolName.length > 0 &&
+    (input.arguments === undefined || isRecord(input.arguments)) &&
+    (input.mcpDetails === undefined || validMcpDetailsShape(input.mcpDetails))
+  );
+}
+
+function truncateCatalogText(value: string): string {
+  const characters = [...value];
+  if (characters.length <= CATALOG_DESCRIPTION_MAX_CHARS) return value;
+  return `${characters
+    .slice(0, CATALOG_DESCRIPTION_MAX_CHARS - TRUNCATION_SUFFIX.length)
+    .join("")}${TRUNCATION_SUFFIX}`;
+}
+
+function unsafeRegexPattern(pattern: string): boolean {
+  // JS RegExp is intentionally used here. Reject the common catastrophic
+  // forms before compiling so model-supplied searches cannot monopolise the
+  // isolate: a quantified group containing another quantifier, backreferences,
+  // and repeated match-any quantifiers.
+  return (
+    /(^|[^\\])\((?:\\.|[^()])*?(?:[+*]|\{\d+(?:,\d*)?\})(?:\\.|[^()])*\)(?:[+*]|\{\d+(?:,\d*)?\})/.test(
+      pattern,
+    ) ||
+    /(^|[^\\])\\[1-9]/.test(pattern) ||
+    /\.\*(?:[^|)]*\.\*)/.test(pattern)
+  );
+}
+
+function compilePattern(
+  pattern: string,
+): { regex: RegExp } | { error: string } {
+  if ([...pattern].length > 256) {
+    return { error: "Pattern exceeds the 256 character limit" };
+  }
+  if (unsafeRegexPattern(pattern)) {
+    return { error: "Pattern is unsafe" };
+  }
+  try {
+    return { regex: new RegExp(pattern) };
+  } catch {
+    return { error: "Pattern is invalid" };
+  }
+}
+
+function xmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\t", "&#9;")
+    .replaceAll("\n", "&#10;")
+    .replaceAll("\r", "&#13;");
+}
 
 function sameToolCall(left: ToolCall, right: ToolCall): boolean {
   return (
@@ -41,22 +222,69 @@ interface RegisteredTool {
   admittedRoles: readonly string[] | undefined;
 }
 
+interface AvailableNamespace {
+  name: string;
+  metadata?: ToolNamespaceRegistration;
+  tools: RegisteredTool[];
+}
+
+interface ResolvedDynamicCall {
+  call: ToolCall;
+  registered: RegisteredTool;
+}
+
 export class ToolRegistry extends Service implements ToolExecution {
-  private definitions = new Map<string, RegisteredTool>();
+  private nativeDefinitions = new Map<string, RegisteredTool>();
+  private dynamicDefinitions = new Map<string, Map<string, RegisteredTool>>();
+  private namespaces = new Map<string, ToolNamespaceRegistration>();
   private guards: ToolGuard[] = [];
+  private preparedDefinitions = new WeakMap<object, RegisteredTool>();
 
   constructor(ctx: Context) {
     super(ctx, "tools");
+    this.namespaces.set(FROCKBOT_TOOL_NAMESPACE, {
+      name: FROCKBOT_TOOL_NAMESPACE,
+      external: false,
+      useInstructions: FROCKBOT_NAMESPACE_USE_INSTRUCTIONS,
+    });
+    this.installMetaTool({
+      ...GET_DYNAMIC_TOOLS_SCHEMA,
+      validate: validGetDynamicToolsInput,
+      idempotent: true,
+      execute: (input, context) => this.discover(input, context),
+    });
+    // Successful calls are rewritten to the inner definition during prepare;
+    // this body exists only to keep the registered definition total.
+    this.installMetaTool({
+      ...CALL_DYNAMIC_TOOL_SCHEMA,
+      validate: validCallDynamicToolInput,
+      execute: () =>
+        Promise.resolve({
+          content: "Dynamic tool call was not prepared",
+          isError: true,
+        }),
+    });
+    // A ToolRegistry is useful in narrow test/runtime roots without prompt
+    // assembly. When the prompt Package is present, this lifecycle-owned child
+    // registration activates and disappears with the registry.
+    void ctx.inject(["systemPrompt"], (promptCtx) =>
+      promptCtx.systemPrompt.register({
+        id: "dynamic-tool-catalog",
+        order: 70,
+        render: (context) => this.renderDynamicToolCatalog(context.turnType),
+      }),
+    );
   }
 
-  register(
+  private installMetaTool(definition: ToolDefinition): void {
+    this.nativeDefinitions.set(definition.name, this.registered(definition));
+  }
+
+  private registered(
     definition: ToolDefinition,
     options?: ToolRegistrationOptions,
-  ): () => void {
-    if (this.definitions.has(definition.name)) {
-      throw new Error(`tool "${definition.name}" is already registered`);
-    }
-    const registered: RegisteredTool = {
+  ): RegisteredTool {
+    return {
       definition,
       admitted: admittedTurnTypesV1(
         definition.admission?.turnTypes,
@@ -67,16 +295,67 @@ export class ToolRegistry extends Service implements ToolExecution {
         options?.subagentRoleCeiling,
       ),
     };
-    this.definitions.set(definition.name, registered);
+  }
+
+  registerNamespace(namespace: ToolNamespaceRegistration): () => void {
+    if (!namespace.name.trim()) {
+      throw new Error("tool namespace name must be non-empty");
+    }
+    if (this.namespaces.has(namespace.name)) {
+      throw new Error(
+        `tool namespace "${namespace.name}" is already registered`,
+      );
+    }
+    const registered = { ...namespace };
+    this.namespaces.set(namespace.name, registered);
     return () => {
-      if (this.definitions.get(definition.name) === registered) {
-        this.definitions.delete(definition.name);
+      if (this.namespaces.get(namespace.name) === registered) {
+        this.namespaces.delete(namespace.name);
+      }
+    };
+  }
+
+  register(
+    definition: ToolDefinition,
+    options?: ToolRegistrationOptions,
+  ): () => void {
+    const namespace = definition.namespace;
+    if (namespace !== undefined && !namespace.trim()) {
+      throw new Error("tool namespace must be non-empty");
+    }
+    const definitions =
+      namespace === undefined
+        ? this.nativeDefinitions
+        : (this.dynamicDefinitions.get(namespace) ?? new Map());
+    if (definitions.has(definition.name)) {
+      const identity =
+        namespace === undefined
+          ? definition.name
+          : `${namespace}/${definition.name}`;
+      throw new Error(`tool "${identity}" is already registered`);
+    }
+    if (namespace !== undefined && !this.dynamicDefinitions.has(namespace)) {
+      this.dynamicDefinitions.set(namespace, definitions);
+    }
+    const registered = this.registered(definition, options);
+    definitions.set(definition.name, registered);
+    return () => {
+      if (definitions.get(definition.name) === registered) {
+        definitions.delete(definition.name);
+        if (namespace !== undefined && definitions.size === 0) {
+          this.dynamicDefinitions.delete(namespace);
+        }
       }
     };
   }
 
   registeredNames(): string[] {
-    return [...this.definitions.keys()].toSorted();
+    return [
+      ...this.nativeDefinitions.keys(),
+      ...[...this.dynamicDefinitions].flatMap(([namespace, definitions]) =>
+        [...definitions.keys()].map((name) => `${namespace}/${name}`),
+      ),
+    ].toSorted();
   }
 
   guard(guard: ToolGuard): () => void {
@@ -91,9 +370,11 @@ export class ToolRegistry extends Service implements ToolExecution {
     turnType: TurnTypeV1;
     subagentRole?: string;
   }): ToolSchema[] {
-    return [...this.definitions.values()]
+    const exposed = [...this.nativeDefinitions.values()]
       .filter(
         (registered) =>
+          registered.definition.name !== GET_DYNAMIC_TOOLS_NAME &&
+          registered.definition.name !== CALL_DYNAMIC_TOOL_NAME &&
           registered.admitted.includes(admission.turnType) &&
           isSubagentRoleAdmittedV1(
             registered.admittedRoles,
@@ -105,10 +386,69 @@ export class ToolRegistry extends Service implements ToolExecution {
         description,
         inputSchema,
       }));
+    return [
+      exposed,
+      [GET_DYNAMIC_TOOLS_SCHEMA, CALL_DYNAMIC_TOOL_SCHEMA],
+    ].flat();
   }
 
   async prepare(
     call: ToolCall,
+    context: ToolExecutionContext,
+  ): Promise<ToolPreparation> {
+    if (call.name === CALL_DYNAMIC_TOOL_NAME) {
+      const resolved = this.resolveDynamicCall(call);
+      if ("error" in resolved) return this.denied(call, resolved.error);
+      const metadata = this.namespaces.get(
+        resolved.registered.definition.namespace!,
+      );
+      if (metadata?.status && metadata.status !== "ready") {
+        return this.denied(
+          call,
+          `Namespace is not ready: ${metadata.name} (${metadata.status})`,
+        );
+      }
+      const input = call.input as Record<string, unknown>;
+      if (
+        metadata?.external === true &&
+        (!isRecord(input.mcpDetails) ||
+          typeof input.mcpDetails.description !== "string" ||
+          !input.mcpDetails.description.trim())
+      ) {
+        return this.denied(
+          call,
+          `External namespace "${metadata.name}" requires mcpDetails.description`,
+        );
+      }
+      if (
+        input.mcpDetails !== undefined &&
+        !validMcpDetails(input.mcpDetails)
+      ) {
+        return this.denied(
+          call,
+          `Invalid input for tool: ${CALL_DYNAMIC_TOOL_NAME}`,
+        );
+      }
+      return this.prepareRegistered(
+        resolved.call,
+        resolved.registered,
+        context,
+      );
+    }
+    return this.prepareRegistered(
+      call,
+      this.nativeDefinitions.get(call.name),
+      context,
+    );
+  }
+
+  private denied(call: ToolCall, content: string): ToolPreparation {
+    return { kind: "denied", call, result: { content, isError: true } };
+  }
+
+  private async prepareRegistered(
+    call: ToolCall,
+    registered: RegisteredTool | undefined,
     context: ToolExecutionContext,
   ): Promise<ToolPreparation> {
     const prepared = await this.ctx.waterfall(
@@ -116,7 +456,6 @@ export class ToolRegistry extends Service implements ToolExecution {
       call,
       context,
       async () => {
-        const registered = this.definitions.get(call.name);
         if (!registered) {
           return {
             kind: "denied",
@@ -186,6 +525,7 @@ export class ToolRegistry extends Service implements ToolExecution {
         result: { content: denial.reason, isError: true },
       };
     }
+    this.preparedDefinitions.set(prepared, registered!);
     return prepared;
   }
 
@@ -193,7 +533,12 @@ export class ToolRegistry extends Service implements ToolExecution {
     preparation: Extract<ToolPreparation, { kind: "ready" }>,
     context: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
-    const definition = this.definitions.get(preparation.call.name)?.definition;
+    const registered =
+      this.preparedDefinitions.get(preparation) ??
+      this.nativeDefinitions.get(preparation.call.name);
+    const definition = this.isRegistered(registered)
+      ? registered.definition
+      : undefined;
     const initial = await this.ctx.waterfall(
       "tools/execute",
       preparation.call,
@@ -238,16 +583,42 @@ export class ToolRegistry extends Service implements ToolExecution {
         ),
       };
     }
-    if (!sameToolCall(preparation.call, expectedCall)) {
+    const expected =
+      expectedCall.name === CALL_DYNAMIC_TOOL_NAME
+        ? this.resolveDynamicCall(expectedCall)
+        : {
+            call: expectedCall,
+            registered: this.nativeDefinitions.get(expectedCall.name),
+          };
+    if ("error" in expected || !expected.registered) {
       return {
         status: "unavailable",
         reason: boundedReconciliationReason(
-          `Prepared tool ${preparation.call.name} does not match durable effect ${expectedCall.name}`,
+          "error" in expected
+            ? expected.error
+            : `Tool ${expectedCall.name} is unavailable for effect reconciliation`,
           expectedCall.name,
         ),
       };
     }
-    const definition = this.definitions.get(expectedCall.name)?.definition;
+    const preparedDefinition =
+      this.preparedDefinitions.get(preparation) ??
+      this.nativeDefinitions.get(preparation.call.name);
+    if (
+      preparedDefinition !== expected.registered ||
+      !sameToolCall(preparation.call, expected.call)
+    ) {
+      return {
+        status: "unavailable",
+        reason: boundedReconciliationReason(
+          `Prepared tool ${preparation.call.name} does not match durable effect ${expected.call.name}`,
+          expectedCall.name,
+        ),
+      };
+    }
+    const definition = this.isRegistered(expected.registered)
+      ? expected.registered.definition
+      : undefined;
     if (!definition) {
       return {
         status: "unavailable",
@@ -264,10 +635,7 @@ export class ToolRegistry extends Service implements ToolExecution {
       try {
         return {
           status: "recovered",
-          result: await this.executePrepared(
-            { ...preparation, call: expectedCall, idempotent: true },
-            context,
-          ),
+          result: await this.executePrepared(preparation, context),
         };
       } catch (error) {
         return {
@@ -287,11 +655,11 @@ export class ToolRegistry extends Service implements ToolExecution {
     }
     try {
       const outcome = normalizedReconciliation(
-        await definition.reconcile(expectedCall.input, context),
-        expectedCall.name,
+        await definition.reconcile(expected.call.input, context),
+        expected.call.name,
       );
       if (outcome.status === "recovered") {
-        this.ctx.emit("tools/result", expectedCall, outcome.result);
+        this.ctx.emit("tools/result", expected.call, outcome.result);
       }
       return outcome;
     } catch (error) {
@@ -300,6 +668,227 @@ export class ToolRegistry extends Service implements ToolExecution {
         reason: boundedReconciliationReason(error, expectedCall.name),
       };
     }
+  }
+
+  private resolveDynamicCall(
+    outer: ToolCall,
+  ): ResolvedDynamicCall | { error: string } {
+    if (!validCallDynamicToolInput(outer.input)) {
+      return { error: `Invalid input for tool: ${CALL_DYNAMIC_TOOL_NAME}` };
+    }
+    const input = outer.input as Record<string, unknown>;
+    const namespace = input.namespace as string;
+    const definitions = this.dynamicDefinitions.get(namespace);
+    if (!definitions) return { error: "Namespace not found" };
+    const toolName = input.toolName as string;
+    const registered = definitions.get(toolName);
+    if (!registered) return { error: "Tool not found" };
+    return {
+      registered,
+      // One durable effect, one call id. Hooks see the inner name and input;
+      // the outer call remains the exact durable intent in context.toolCall.
+      call: {
+        id: outer.id,
+        name: toolName,
+        input: input.arguments ?? {},
+      },
+    };
+  }
+
+  private isRegistered(
+    registered: RegisteredTool | undefined,
+  ): registered is RegisteredTool {
+    if (!registered) return false;
+    const namespace = registered.definition.namespace;
+    return namespace === undefined
+      ? this.nativeDefinitions.get(registered.definition.name) === registered
+      : this.dynamicDefinitions
+          .get(namespace)
+          ?.get(registered.definition.name) === registered;
+  }
+
+  private admitted(
+    registered: RegisteredTool,
+    admission: { turnType: TurnTypeV1; subagentRole?: string },
+  ): boolean {
+    return (
+      registered.admitted.includes(admission.turnType) &&
+      isSubagentRoleAdmittedV1(registered.admittedRoles, admission.subagentRole)
+    );
+  }
+
+  private availableNamespaces(admission: {
+    turnType: TurnTypeV1;
+    subagentRole?: string;
+  }): AvailableNamespace[] {
+    return [...this.dynamicDefinitions]
+      .map(([name, definitions]) => ({
+        name,
+        metadata: this.namespaces.get(name),
+        tools: [...definitions.values()]
+          .filter((registered) => this.admitted(registered, admission))
+          .toSorted((left, right) =>
+            left.definition.name.localeCompare(right.definition.name),
+          ),
+      }))
+      .filter(({ tools }) => tools.length > 0)
+      .toSorted((left, right) => left.name.localeCompare(right.name));
+  }
+
+  private catalogNamespace(
+    namespace: AvailableNamespace,
+    tools: readonly RegisteredTool[] = namespace.tools,
+  ): Record<string, unknown> {
+    return {
+      namespace: namespace.name,
+      ...(namespace.metadata?.description
+        ? {
+            namespaceDescription: truncateCatalogText(
+              namespace.metadata.description,
+            ),
+          }
+        : {}),
+      ...(namespace.metadata?.status
+        ? { namespaceStatus: namespace.metadata.status }
+        : {}),
+      tools: tools.map(({ definition }) => ({
+        tool: definition.name,
+        description: truncateCatalogText(definition.description),
+      })),
+    };
+  }
+
+  private fullNamespace(
+    namespace: AvailableNamespace,
+  ): Record<string, unknown> {
+    return {
+      namespace: namespace.name,
+      ...(namespace.metadata?.description
+        ? { namespaceDescription: namespace.metadata.description }
+        : {}),
+      ...(namespace.metadata?.status
+        ? { namespaceStatus: namespace.metadata.status }
+        : {}),
+      tools: namespace.tools.map(({ definition }) => ({
+        tool: definition.name,
+        description: definition.description,
+        inputSchema: definition.inputSchema,
+      })),
+    };
+  }
+
+  private async discover(
+    rawInput: unknown,
+    context: ToolExecutionContext,
+  ): Promise<ToolExecutionResult> {
+    if (!validGetDynamicToolsInput(rawInput)) {
+      return {
+        content: `Invalid input for tool: ${GET_DYNAMIC_TOOLS_NAME}`,
+        isError: true,
+      };
+    }
+    const input = isRecord(rawInput) ? rawInput : {};
+    const namespaceName = input.namespace as string | undefined;
+    const toolName = input.toolName as string | undefined;
+    const pattern = input.pattern as string | undefined;
+    if (toolName !== undefined && namespaceName === undefined) {
+      return {
+        content: "toolName requires namespace",
+        isError: true,
+      };
+    }
+    if (toolName !== undefined && pattern !== undefined) {
+      return {
+        content: "toolName and pattern cannot be combined",
+        isError: true,
+      };
+    }
+    const namespaces = this.availableNamespaces({
+      turnType: context.turnType,
+      ...(context.subagentRole === undefined
+        ? {}
+        : { subagentRole: context.subagentRole }),
+    });
+    const selected = namespaceName
+      ? namespaces.filter(({ name }) => name === namespaceName)
+      : namespaces;
+    if (namespaceName && selected.length === 0) {
+      return { content: "Namespace not found", isError: true };
+    }
+    if (toolName !== undefined) {
+      const registered = selected[0]!.tools.find(
+        ({ definition }) => definition.name === toolName,
+      );
+      if (!registered) return { content: "Tool not found", isError: true };
+      return {
+        content: JSON.stringify({
+          tool: registered.definition.name,
+          description: registered.definition.description,
+          inputSchema: registered.definition.inputSchema,
+        }),
+        isError: false,
+      };
+    }
+    if (pattern === undefined && namespaceName !== undefined) {
+      return {
+        content: JSON.stringify(this.fullNamespace(selected[0]!)),
+        isError: false,
+      };
+    }
+    let regex: RegExp | undefined;
+    if (pattern !== undefined) {
+      const compiled = compilePattern(pattern);
+      if ("error" in compiled) {
+        return { content: compiled.error, isError: true };
+      }
+      regex = compiled.regex;
+    }
+    const catalog = selected.flatMap((namespace) => {
+      if (!regex) return [this.catalogNamespace(namespace)];
+      const tools = regex.test(namespace.name)
+        ? namespace.tools
+        : namespace.tools.filter(({ definition }) =>
+            regex!.test(definition.name),
+          );
+      return tools.length > 0 ? [this.catalogNamespace(namespace, tools)] : [];
+    });
+    return {
+      content: JSON.stringify({ mode: "catalog", namespaces: catalog }),
+      isError: false,
+    };
+  }
+
+  private renderDynamicToolCatalog(turnType: TurnTypeV1): string {
+    const namespaces = this.availableNamespaces({ turnType });
+    if (namespaces.length === 0) return "";
+    const entries = namespaces.map((namespace) => {
+      const attributes = [
+        `name="${xmlAttribute(namespace.name)}"`,
+        `tools="${xmlAttribute(
+          namespace.tools.map(({ definition }) => definition.name).join(", "),
+        )}"`,
+        ...(namespace.metadata?.useInstructions
+          ? [
+              `namespaceUseInstructions="${xmlAttribute(
+                namespace.metadata.useInstructions,
+              )}"`,
+            ]
+          : []),
+        ...(namespace.metadata?.status
+          ? [`namespaceStatus="${xmlAttribute(namespace.metadata.status)}"`]
+          : []),
+      ];
+      return `<namespace ${attributes.join(" ")} />`;
+    });
+    return [
+      "<dynamic_tool_catalog>",
+      `These dynamic tool namespaces were available when this conversation started. Availability may have changed, so use ${GET_DYNAMIC_TOOLS_NAME} to check current state before calling ${CALL_DYNAMIC_TOOL_NAME}.`,
+      "",
+      "<dynamic_tool_namespaces>",
+      ...entries,
+      "</dynamic_tool_namespaces>",
+      "</dynamic_tool_catalog>",
+    ].join("\n");
   }
 }
 

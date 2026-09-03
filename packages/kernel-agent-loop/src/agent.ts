@@ -70,7 +70,7 @@ export interface Agent extends LoopAgentRuntimeV1 {
   readonly status: AgentStatus;
   send(input: string | AgentSendV1): string;
   resume(): void;
-  cancel(reason?: "user" | "shutdown"): void;
+  cancel(reason?: "user" | "shutdown", detail?: string): void;
   whenIdle(): Promise<void>;
 }
 

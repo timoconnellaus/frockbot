@@ -974,6 +974,52 @@ describe("Bot selection", () => {
 });
 
 describe("detached Turn projection", () => {
+  test("shows a dynamic call as its namespace/tool with inner arguments", () => {
+    const messages: Parameters<typeof projectCompletedRuns>[0] = [];
+    projectCompletedRuns(
+      messages,
+      [],
+      [
+        {
+          runId: "run-dynamic",
+          input: "Find open issues",
+          status: "completed",
+          responseText: "Done",
+          events: [
+            {
+              type: "tool/call",
+              call: {
+                id: "tool-1",
+                name: "call_dynamic_tool",
+                input: {
+                  namespace: "user-Github--acme",
+                  toolName: "search_issues",
+                  argumentsJson: '{"query":"is:open"}',
+                },
+              },
+            },
+            {
+              type: "tool/result",
+              callId: "tool-1",
+              content: "[]",
+              isError: false,
+            },
+          ],
+        },
+      ],
+    );
+
+    expect(messages[1]?.tools).toEqual([
+      {
+        id: "tool-1",
+        name: "user-Github--acme/search_issues",
+        input: { query: "is:open" },
+        status: "completed",
+        text: "[]",
+      },
+    ]);
+  });
+
   test("projects a completed run before it can be acknowledged", () => {
     const messages: Parameters<typeof projectCompletedRuns>[0] = [];
     const projected = projectCompletedRuns(
@@ -2649,5 +2695,167 @@ describe("Connection operation reconciliation", () => {
 
     expect(commandIds).toHaveLength(2);
     expect(commandIds[1]).not.toBe(commandIds[0]);
+  });
+});
+
+describe("a message sent while a Turn is running", () => {
+  test("is accepted, and carries the intent to supersede what is running", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: { href: "https://app.example/?bot=primary" },
+        history: { replaceState: () => undefined },
+      },
+    });
+    let provided: Ref<FrockBotWebData> | undefined;
+    const sent: {
+      text: string;
+      supersedes?: { runId?: string };
+    }[] = [];
+    let releaseFirst!: () => void;
+    const firstTurn = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    await shellClientPlugin({
+      transport: {
+        turn: async (_botId, text, _signal, commandId, _skills, supersedes) => {
+          sent.push({ text, ...(supersedes ? { supersedes } : {}) });
+          if (sent.length === 1) await firstTurn;
+          return { runId: commandId, text: `answer to ${text}`, events: [] };
+        },
+        readConfiguration: () =>
+          Promise.resolve(initializeBotSettingsV1("primary")),
+        listRuns: () => Promise.resolve([]),
+        listNotifications: () => Promise.resolve([]),
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "primary";
+    provided.value.composerContext = "primary";
+
+    const first = provided.value.sendPrompt("first");
+    await Promise.resolve();
+    const runningRunId = provided.value.activeRunId;
+    expect(runningRunId).toBeString();
+
+    // The composer is open while a Turn runs, and what it sends replaces it.
+    const second = provided.value.sendPrompt("second");
+    releaseFirst();
+    expect(await first).toMatchObject({ accepted: true });
+    expect(await second).toMatchObject({ accepted: true });
+
+    expect(sent.map((entry) => entry.text).sort()).toEqual(["first", "second"]);
+    // Every send carries the intent. The first had observed no run, so it
+    // carries no provenance — and that is exactly the send that used to be
+    // refused when a person typed faster than the client could observe the
+    // Turn it had just started.
+    expect(sent.find((entry) => entry.text === "first")?.supersedes).toEqual(
+      {},
+    );
+    expect(sent.find((entry) => entry.text === "second")?.supersedes).toEqual({
+      runId: runningRunId!,
+    });
+  });
+
+  test("greys the queued Turn, and un-greys it when it starts", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "runningRunId" | "activeRun"
+    > = { messages: [] };
+
+    projectDurableRuns(
+      state,
+      [],
+      [
+        { runId: "run-1", input: "first", events: [], status: "running" },
+        {
+          runId: "run-2",
+          input: "second",
+          events: [],
+          status: "running",
+          queued: true,
+        },
+      ],
+    );
+
+    // Ordinary messages; the waiting one is simply held back.
+    expect(state.messages.map((message) => message.pending)).toEqual([
+      undefined,
+      undefined,
+      true,
+      true,
+    ]);
+    // A new message supersedes the newest unsettled Turn; Stop cancels the one
+    // that is actually executing.
+    expect(state.activeRunId).toBe("run-2");
+    expect(state.runningRunId).toBe("run-1");
+
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-1",
+          input: "first",
+          events: [],
+          status: "superseded",
+          failure: "Interrupted by your next message.",
+        },
+        { runId: "run-2", input: "second", events: [], status: "running" },
+      ],
+    );
+
+    expect(state.messages.every((message) => !message.pending)).toBe(true);
+    expect(state.activeRunId).toBe("run-2");
+    expect(state.runningRunId).toBe("run-2");
+    // The superseded Turn keeps the quiet treatment a stopped one gets.
+    expect(state.messages[1]).toMatchObject({
+      status: "aborted",
+      text: "Interrupted by your next message.",
+    });
+  });
+
+  test("a reload reconstructs the greyed state from durable runs alone", () => {
+    const reloaded: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "runningRunId" | "activeRun"
+    > = { messages: [] };
+
+    projectDurableRuns(
+      reloaded,
+      [],
+      [
+        {
+          runId: "run-1",
+          input: "first",
+          events: [],
+          status: "superseded",
+          failure: "Interrupted by your next message.",
+        },
+        {
+          runId: "run-2",
+          input: "second",
+          events: [],
+          status: "running",
+          queued: true,
+        },
+      ],
+    );
+
+    expect(reloaded.messages[2]).toMatchObject({
+      role: "user",
+      text: "second",
+      pending: true,
+    });
+    expect(reloaded.runningRunId).toBeUndefined();
+    expect(reloaded.activeRunId).toBe("run-2");
   });
 });

@@ -119,6 +119,7 @@ export function createPackageAuthorTool(
 ): ToolDefinition {
   return {
     name: "package_author",
+    namespace: "frockbot",
     // A general work tool: the full toolset an `executor` subagent gets, and
     // not part of the narrow reach of `browserUse`, `computerUse`, or the two
     // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
@@ -212,6 +213,7 @@ export function createPackageUndoTool(
 ): ToolDefinition {
   return {
     name: "package_undo",
+    namespace: "frockbot",
     admission: { subagentRoles: ["executor"] },
     description:
       "Undo your latest Package setup change, or restore an earlier Composition generation. This only changes Package setup; it never undoes actions taken through Connections. The resulting generation activates on the next Turn.",
@@ -290,6 +292,7 @@ export function createPackageInspectSelfTool(
 ): ToolDefinition {
   return {
     name: "package_inspect_self",
+    namespace: "frockbot",
     admission: { subagentRoles: ["executor"] },
     description:
       "Read your exact Package execution context contract, current Composition (including your stored Package source), and latest authoring or activation failure per authored Package.",
