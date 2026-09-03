@@ -265,6 +265,52 @@ export interface UserBotStateBinding {
     botId: string;
     path: unknown;
   }): Promise<ClientWorkspaceFileV1>;
+  /**
+   * The User's Applets, and the two short-lived projections an open Applet
+   * needs (ADR 0022 §4). Account-wide, so they take no Bot: they sit on this
+   * User-scoped binding because it is the only door the hosted application has
+   * to the User Durable Object.
+   */
+  listApplets(input?: { schemaVersion: 1 }): Promise<unknown>;
+  mintAppletViewerToken(input: {
+    schemaVersion: 1;
+    appletId: string;
+  }): Promise<{
+    token: string;
+    expiresAt: string;
+    appletId: string;
+    generationId: string;
+  }>;
+  readAppletUi(input: { schemaVersion: 1; appletId: string }): Promise<{
+    appletId: string;
+    generationId: string;
+    contentHash: string;
+  }>;
+  readFocusedApplet(input: {
+    schemaVersion: 1;
+    botId: string;
+  }): Promise<unknown>;
+  setFocusedApplet(input: {
+    schemaVersion: 1;
+    botId: string;
+    appletId: string | null;
+  }): Promise<unknown>;
+  /**
+   * An Applet's source, for the Applet canvas's building state. The root is
+   * User-scoped, so any of the User's Bots reads the same files; the Bot names
+   * the Durable Object that holds the Workspace binding and nothing more.
+   */
+  readAppletSourceV1(input: {
+    schemaVersion: 1;
+    botId: string;
+    appletId: string;
+  }): Promise<import("@frockbot/kernel-contracts").AppletSourceViewV1>;
+  /** The outcome last recorded for `applet check` or `applet build`. */
+  readAppletBuildV1(input: {
+    schemaVersion: 1;
+    botId: string;
+    appletId: string;
+  }): Promise<import("@frockbot/kernel-contracts").AppletBuildViewV1>;
   listNotifications(input: {
     schemaVersion: 1;
     botId: string;
@@ -412,7 +458,7 @@ export interface BundleRequestV1 {
   compatibilityDate: string;
   entry: "package.ts";
   sources: { path: string; text: string }[];
-  ui?: { path: "ui.html"; html: string };
+  uiPages?: { id: string; html: string }[];
 }
 
 export type BundleResultV1 =
@@ -421,8 +467,7 @@ export type BundleResultV1 =
       effectId: string;
       status: "bundled";
       artifact: ArtifactRefV1;
-      uiArtifact?: UiArtifactRefV1;
-      uiHtml?: string;
+      uiArtifacts?: { id: string; artifact: UiArtifactRefV1; html: string }[];
       module: string;
       diagnostics: string[];
     }
@@ -749,6 +794,20 @@ export interface GatewayDependencies {
   botStateFor(userId: string): UserBotStateBinding;
   userConfigurationFor(userId: string): UserConfigurationBinding;
   botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
+  /**
+   * The Applet viewer door (ADR 0022 §4). Both absent in a deployment without
+   * Applets, and `/api/applets/:id/socket` then reports itself unconfigured
+   * rather than the Worker failing to construct.
+   */
+  appletViewerSecret?: string;
+  /**
+   * The Applet object's HTTP door, for the viewer socket: a 101 response and
+   * its WebSocket only cross the stub boundary over `fetch`.
+   */
+  appletStateFor?(
+    userId: string,
+    appletId: string,
+  ): { fetch(request: Request): Promise<Response> };
   /** Authenticated observer transport into the Bot Durable Object. */
   openBotStateChannel?(
     userId: string,
@@ -760,6 +819,26 @@ export interface GatewayDependencies {
   catalog?: CatalogGatewayStore;
   /** Absent, or with no token, when the deployment publishes no `/api/debug`. */
   debug?: DebugGatewaySurface;
+  /**
+   * The Workspace seed door, present only in an environment that sets
+   * `WORKSPACE_SEED_TOKEN`: an end-to-end run has no Computer, and this is how
+   * it lands the bytes `applet build` would have written, as the User, through
+   * the same store and generation record the sync uses. Production sets no
+   * token and the route does not exist.
+   */
+  workspaceSeed?: {
+    token: string;
+    write(
+      userId: string,
+      botId: string,
+      request: {
+        root: unknown;
+        path: string;
+        bytesBase64: string;
+        mediaType?: string;
+      },
+    ): Promise<unknown>;
+  };
   backendContributions?: readonly BackendRouteContribution[];
   /** Webview origins allowed to call `/api/*` cross-origin. */
   allowedClientOrigins?: string[];

@@ -16,6 +16,7 @@ import {
   packagePublisherStateKey,
   type PackagePublisherClientState,
 } from "./state.js";
+import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
 
 export const packagePublisherClientPlugin: ClientPlugin = (ctx) => {
   const surfaces = ctx.inject(clientSurfaceRegistryKey);
@@ -82,3 +83,13 @@ export const packagePublisherClientPlugin: ClientPlugin = (ctx) => {
 };
 
 export default packagePublisherClientPlugin;
+
+/**
+ * The manifest's `client` entry, resolved by specifier. The application looks
+ * this descriptor up in its Contribution table; it never branches on which
+ * Package it belongs to.
+ */
+export const clientContribution = defineClientContribution<ClientPlugin>({
+  specifier: "@frockbot/plugin-package-publisher/client",
+  plugin: packagePublisherClientPlugin,
+});

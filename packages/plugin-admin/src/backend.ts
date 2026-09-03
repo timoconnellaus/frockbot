@@ -5,6 +5,7 @@ import {
   type DeploymentPolicyV1,
   type SetSignupsCommandV1,
 } from "./shared.js";
+import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
 export interface AdminGatewayHost {
   readDeploymentPolicy(): Promise<DeploymentPolicyV1>;
@@ -118,3 +119,16 @@ export namespace createAdminBackendContribution {
     return () => lifecycle.mount(createAdminBackendContribution(host));
   }
 }
+
+/**
+ * The manifest's gateway `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineGatewayContribution<
+  AdminGatewayHost,
+  AdminBackendRouteContribution
+>({
+  specifier: "@frockbot/plugin-admin/backend",
+  create: createAdminBackendContribution.plugin,
+});

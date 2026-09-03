@@ -63,6 +63,7 @@ import {
   type TemplateShareListViewV1,
   type TemplateShareReceiptV1,
 } from "./shared.js";
+import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 export const BOT_TEMPLATE_PACKAGE_ID = "bot-template";
 
@@ -909,3 +910,26 @@ export function createBotTemplateUserBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(createBotTemplateUserBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: the Bot Template share ledger, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface BotTemplateUserApplicationHostV1 {
+  botTemplate: BotTemplateUserHostV1;
+}
+
+/**
+ * The manifest's `user` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const userContribution = defineUserBackendContribution<
+  BotTemplateUserApplicationHostV1,
+  BotTemplateUserBackendContribution
+>({
+  specifier: "@frockbot/plugin-bot-template/user",
+  create: (host, lifecycle) =>
+    createBotTemplateUserBackendPlugin(host.botTemplate, lifecycle),
+});

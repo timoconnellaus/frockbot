@@ -76,7 +76,7 @@ async function openSession(): Promise<{
 }
 
 describe("the managed Skill source", () => {
-  test("ships the four first-party Skills, content-addressed", async () => {
+  test("ships the first-party Skills, content-addressed", async () => {
     const loaded = await loadManagedSkillsV1();
 
     expect(loaded.refusals).toEqual([]);
@@ -85,6 +85,7 @@ describe("the managed Skill source", () => {
       "export-bot-template",
       "import-bot-template",
       "learn-from-demonstration",
+      "applets",
     ]);
     for (const skill of loaded.skills) {
       expect(skill.ref?.source).toBe("managed");
@@ -500,6 +501,7 @@ describe("a Turn's whole catalog", () => {
 
     expect(catalog.current().skills.map((skill) => skill.ref?.source)).toEqual([
       "bot",
+      "managed",
       "managed",
       "managed",
       "managed",

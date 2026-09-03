@@ -88,8 +88,15 @@ async function compileModelTestApplication(): ReturnType<
   return {
     ...application,
     packages: [
+      // Artifact-backed members are dropped with them: `bun test` gives this
+      // host no Worker Loader, so an isolate member has nowhere to load from
+      // and the Composition would fail verification closed — correct, and not
+      // what this suite is about. workerd's suites mount the real thing.
       ...application.packages.filter(
-        (pkg) => pkg.id !== provider.id && pkg.id !== "custom-models",
+        (pkg) =>
+          pkg.artifact === undefined &&
+          pkg.id !== provider.id &&
+          pkg.id !== "custom-models",
       ),
       provider,
       {

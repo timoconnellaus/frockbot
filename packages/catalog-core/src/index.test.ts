@@ -324,10 +324,17 @@ describe("catalog entry decoding", () => {
       },
     });
 
+    // The Catalog carries a released single-page record; the manifest decoder
+    // migrates it forward to the one multi-page shape.
     expect(decoded.bundle?.manifest.contributions.client).toEqual({
       kind: "iframe",
-      artifact: uiArtifact,
-      mounts: [{ slot: "frockbot.tool-result:track_parcel" }],
+      pages: [
+        {
+          id: "main",
+          artifact: uiArtifact,
+          mounts: [{ slot: "frockbot.tool-result:track_parcel" }],
+        },
+      ],
     });
   });
 

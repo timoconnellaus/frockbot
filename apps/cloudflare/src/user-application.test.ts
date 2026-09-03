@@ -10,6 +10,23 @@ import { createUserApplication } from "./user-application.js";
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
     assertRegistered: () => Promise.resolve(),
+    listApplets: () =>
+      Promise.resolve({ schemaVersion: 1, revision: 0, applets: [] }),
+    mintAppletViewerToken: () =>
+      Promise.reject(new Error("Applet is unavailable")),
+    readAppletUi: () => Promise.reject(new Error("Applet is unavailable")),
+    readFocusedApplet: () =>
+      Promise.resolve({
+        schemaVersion: 1,
+        appletId: null,
+        changedAt: new Date(0).toISOString(),
+      }),
+    setFocusedApplet: ({ appletId }) =>
+      Promise.resolve({
+        schemaVersion: 1,
+        appletId,
+        changedAt: new Date(0).toISOString(),
+      }),
     listSkills: () =>
       Promise.resolve({ schemaVersion: 1 as const, skills: [] }),
     listPackageUi: ({ botId }) =>
@@ -32,6 +49,9 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
         status: "not-found" as const,
         reason: "no workspace in this test",
       }),
+    readAppletSourceV1: ({ appletId }) =>
+      Promise.resolve({ appletId, files: [], truncated: false }),
+    readAppletBuildV1: () => Promise.resolve({ status: "unknown" as const }),
     run: ({ botId, command }) => state.run(botId, command),
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),

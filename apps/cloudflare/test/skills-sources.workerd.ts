@@ -34,6 +34,7 @@ const SKILL_BODY =
 
 const MANAGED_PATHS = [
   "managed/add-connector/SKILL.md",
+  "managed/applets/SKILL.md",
   "managed/export-bot-template/SKILL.md",
   "managed/import-bot-template/SKILL.md",
   "managed/learn-from-demonstration/SKILL.md",

@@ -23,6 +23,7 @@ import {
   defineComponent,
   Fragment,
   h,
+  shallowReactive,
   type App,
   type Component,
   type ComputedRef,
@@ -376,6 +377,12 @@ export interface ClientSlotRegistration {
   slot: string;
   order: number;
   component: Component;
+  /**
+   * A stable key for one filler, so a slot whose fillers come from data —
+   * a Package's declared entries, say — keeps each filler's element across a
+   * re-render instead of reusing the one that happens to share its order.
+   */
+  key?: string;
 }
 
 export interface ClientSurfaceRegistration {
@@ -428,7 +435,15 @@ function disposeResult(result: ClientPluginResult): void {
 }
 
 export class ClientApplication {
-  private readonly registrations: ClientSlotRegistration[] = [];
+  /*
+   * Reactive, because a slot filler is not always known at install time: a
+   * Package's declarative entries arrive with the Bot's Composition and are
+   * registered and disposed as it changes. A plain array would leave the
+   * sidebar showing the entries of whichever Bot was selected first.
+   */
+  private readonly registrations: ClientSlotRegistration[] = shallowReactive(
+    [],
+  );
   private readonly providers: ProviderRegistration[] = [];
   private readonly pluginDisposers: (() => void)[] = [];
   private app: App | undefined;
@@ -464,9 +479,11 @@ export class ClientApplication {
       setup: (props: { name: string }) => () =>
         h(
           Fragment,
-          this.slots(props.name).map((registration) =>
+          this.slots(props.name).map((registration, index) =>
             h(registration.component, {
-              key: `${props.name}:${registration.order}`,
+              key:
+                registration.key ??
+                `${props.name}:${registration.order}:${index}`,
             }),
           ),
         ),

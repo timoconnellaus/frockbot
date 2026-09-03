@@ -25,7 +25,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createServer as createTcpServer } from "node:net";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -108,6 +108,62 @@ function unauthorized(): { status: number; body: string } {
  * `POST /__e2e/chat-mode` is not an Ollama route: it lets a spec revoke the key
  * mid-run, so a Turn can fail at the provider after the Connection is ready.
  */
+/**
+ * The trigger a spec puts in the message it sends, so the fake model calls a
+ * tool.
+ *
+ * The same device `test/harness/miniflare.ts` uses for the workerd layers, and
+ * for the same reason: one fake server serves every spec in the run and cannot
+ * be reconfigured per test, so the script travels on the wire with the request
+ * it belongs to. A tool result falls through to prose, or the loop would call
+ * the same tool until it exhausted its step budget.
+ */
+export const E2E_TOOL_CALL_TRIGGER = "frockbot-e2e-tool-call:";
+
+export function e2eToolCallPrompt(name: string, input: unknown = {}): string {
+  return `${E2E_TOOL_CALL_TRIGGER}${name}:${JSON.stringify(input)}`;
+}
+
+function scriptedToolCalls(
+  body: string,
+): Array<{ name: string; arguments: string }> {
+  let parsed: { messages?: unknown };
+  try {
+    parsed = JSON.parse(body || "{}") as { messages?: unknown };
+  } catch {
+    return [];
+  }
+  const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
+  const last = messages.at(-1) as { role?: unknown } | undefined;
+  if (last?.role === "tool") return [];
+  // The *last* user message only, stringified: a provider may send the user
+  // turn as parts rather than a string, and the trigger only has to be found,
+  // not parsed. Earlier user messages travel with every later request, so
+  // reading them all would replay every Turn's tool call on every Turn after.
+  const lastUser = messages.findLast(
+    (message) => (message as { role?: unknown }).role === "user",
+  ) as { content?: unknown } | undefined;
+  const value = lastUser?.content;
+  const content =
+    typeof value === "string" ? value : JSON.stringify(value ?? "");
+  const calls: Array<{ name: string; arguments: string }> = [];
+  // A JSON-encoded message escapes the newline, so both separators end a
+  // trigger line.
+  for (const line of content.split(/\\n|\n/)) {
+    const trimmed = line.trim();
+    const start = trimmed.indexOf(E2E_TOOL_CALL_TRIGGER);
+    if (start < 0) continue;
+    const rest = trimmed.slice(start + E2E_TOOL_CALL_TRIGGER.length);
+    const separator = rest.indexOf(":");
+    if (separator < 0) continue;
+    calls.push({
+      name: rest.slice(0, separator),
+      arguments: rest.slice(separator + 1),
+    });
+  }
+  return calls;
+}
+
 export function startFakeOllama(port: number): Promise<{
   url: string;
   close(): Promise<void>;
@@ -178,8 +234,8 @@ export function startFakeOllama(port: number): Promise<{
       return;
     }
     if (url.pathname === "/v1/chat/completions") {
-      request.resume();
       if (key !== E2E_OLLAMA_GOOD_API_KEY || chatMode === "unauthorized") {
+        request.resume();
         const refusal = unauthorized();
         response.writeHead(refusal.status, {
           "content-type": "application/json",
@@ -187,19 +243,51 @@ export function startFakeOllama(port: number): Promise<{
         response.end(refusal.body);
         return;
       }
-      response.writeHead(200, { "content-type": "text/event-stream" });
-      response.write(
-        `data: ${JSON.stringify({
-          choices: [{ delta: { content: E2E_ASSISTANT_REPLY } }],
-        })}\n\n`,
-      );
-      response.write(
-        `data: ${JSON.stringify({
-          choices: [{ delta: {}, finish_reason: "stop" }],
-        })}\n\n`,
-      );
-      response.write("data: [DONE]\n\n");
-      response.end();
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        const calls = scriptedToolCalls(Buffer.concat(chunks).toString("utf8"));
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        if (calls.length > 0) {
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: calls.map((call, index) => ({
+                      index,
+                      id: `e2e-call-${index}`,
+                      type: "function",
+                      function: {
+                        name: call.name,
+                        arguments: call.arguments,
+                      },
+                    })),
+                  },
+                },
+              ],
+            })}\n\n`,
+          );
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [{ delta: {}, finish_reason: "tool_calls" }],
+            })}\n\n`,
+          );
+        } else {
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [{ delta: { content: E2E_ASSISTANT_REPLY } }],
+            })}\n\n`,
+          );
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [{ delta: {}, finish_reason: "stop" }],
+            })}\n\n`,
+          );
+        }
+        response.write("data: [DONE]\n\n");
+        response.end();
+      });
       return;
     }
     request.resume();
@@ -343,6 +431,69 @@ async function seedPackageCatalog(persistDirectory: string): Promise<void> {
   }
 }
 
+/** The bearer token `/api/debug/*` accepts in an end-to-end run. */
+export const E2E_DEBUG_TOKEN = "e2e-debug-token";
+
+/** The `--persist-to` directory of the run listening on `port`. */
+export function e2ePersistDirectory(port: number): string {
+  return join(tmpdir(), `frockbot-e2e-${port}`);
+}
+
+/** The bearer token the Workspace seed door accepts in an end-to-end run. */
+export const E2E_WORKSPACE_SEED_TOKEN = "e2e-workspace-seed-token";
+
+/**
+ * Land one file in one of the User's durable roots while the Worker is up.
+ *
+ * Production has exactly one writer of a durable root's bytes besides the
+ * Package that owns it: the Computer's sync. An end-to-end run has no Computer,
+ * so a spec that needs a file "the Computer wrote" — an Applet's `dist/` after
+ * `applet build` — writes it through the gateway's seed door, which the Bot
+ * Durable Object serves as a User write over the same store and generation
+ * record the sync uses. Nothing else is faked: the publish that reads it is
+ * real.
+ *
+ * Over HTTP rather than a second `wrangler r2 object put` against the running
+ * server's `--persist-to` directory: that second process shares the local
+ * store's files with the live one, and on Linux it took the dev server down.
+ */
+export async function seedWorkspaceFile(
+  baseUrl: string,
+  userId: string,
+  botId: string,
+  root: unknown,
+  path: string,
+  file: string,
+  mediaType: string,
+): Promise<void> {
+  const bytes = await readFile(file);
+  const response = await fetch(
+    `${baseUrl}/api/workspace-seed/${encodeURIComponent(userId)}/${encodeURIComponent(botId)}`,
+    {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${E2E_WORKSPACE_SEED_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        root,
+        path,
+        bytesBase64: Buffer.from(bytes).toString("base64"),
+        mediaType,
+      }),
+    },
+  );
+  const outcome = (await response.json()) as {
+    status?: string;
+    reason?: string;
+  };
+  if (!response.ok || outcome.status !== "written") {
+    throw new Error(
+      `seeding ${path} failed: ${response.status} ${outcome.reason ?? ""}`,
+    );
+  }
+}
+
 export interface HarnessOptions {
   /** The port `wrangler dev` listens on. */
   port: number;
@@ -367,7 +518,13 @@ export interface RunningHarness {
 export async function startHarness(
   options: HarnessOptions,
 ): Promise<RunningHarness> {
-  const persistDirectory = await mkdtemp(join(tmpdir(), "frockbot-e2e-"));
+  // Named by port rather than random, so a spec that must seed object storage
+  // while the Worker runs — an Applet's built `dist/`, which only a Computer
+  // writes in production — can find the same directory from
+  // `FROCKBOT_E2E_PORT` (see `e2ePersistDirectory`). Still fresh per run.
+  const persistDirectory = e2ePersistDirectory(options.port);
+  await rm(persistDirectory, { recursive: true, force: true });
+  await mkdir(persistDirectory, { recursive: true });
   let ollama: Awaited<ReturnType<typeof startFakeOllama>> | undefined;
   let flockAi: ChildProcess | undefined;
   let worker: ChildProcess | undefined;
@@ -461,6 +618,17 @@ export async function startHarness(
         // better-auth needs a secret to construct; no spec signs in with it.
         "--var",
         "BETTER_AUTH_SECRET:e2e",
+        // Applet viewer tokens are HMACs over this; any value works locally.
+        "--var",
+        "APPLET_VIEWER_SECRET:e2e-applet-viewer-secret",
+        // The operator surface, so a spec can read a Turn's tool results — the
+        // transcript deliberately hides them — when it has to explain a state.
+        "--var",
+        `DEBUG_TOKEN:${E2E_DEBUG_TOKEN}`,
+        // The Workspace seed door: how a run with no Computer lands a file
+        // the Computer would have written. See `seedWorkspaceFile`.
+        "--var",
+        `WORKSPACE_SEED_TOKEN:${E2E_WORKSPACE_SEED_TOKEN}`,
         "--persist-to",
         persistDirectory,
         // As above: the per-request log is the flood, not the signal.

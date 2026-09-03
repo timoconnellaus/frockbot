@@ -282,7 +282,7 @@ describe("open", () => {
       type: "result",
       result: {
         effectId: "effect-1",
-        provisioning: { status: "complete", index: 5 },
+        provisioning: { status: "complete", index: PROVISION_PHASES.length },
       },
     });
     expect(host.inFlightCount).toBe(0);
@@ -502,7 +502,9 @@ describe("open", () => {
     expect(response.status).toBe(503);
     const failure = decodeComputerHostProblemV1(await response.json());
     expect(failure.code).toBe("provider-unavailable");
-    expect(failure.message).toContain("installing the desktop packages (2/5)");
+    expect(failure.message).toContain(
+      `installing the desktop packages (2/${PROVISION_PHASES.length})`,
+    );
   });
 
   test("names the phase a failed provisioning run stopped in", async () => {
@@ -518,7 +520,9 @@ describe("open", () => {
     const response = await host.handle(request({ kind: "open" }));
     expect(response.status).toBe(502);
     const failure = decodeComputerHostProblemV1(await response.json());
-    expect(failure.message).toContain("installing the desktop packages (2/5)");
+    expect(failure.message).toContain(
+      `installing the desktop packages (2/${PROVISION_PHASES.length})`,
+    );
     expect(failure.message).toContain("Unable to fetch chromium");
     expect(failure.retryable).toBe(true);
   });
@@ -534,7 +538,9 @@ describe("open", () => {
     expect(response.status).toBe(502);
     expect(
       decodeComputerHostProblemV1(await response.json()).message,
-    ).toContain("installing the desktop packages (2/5)");
+    ).toContain(
+      `installing the desktop packages (2/${PROVISION_PHASES.length})`,
+    );
   });
 
   test("attaches the tenant through the ensure script and reports its display", async () => {

@@ -20,6 +20,10 @@ import {
   type ComputerTenantV1,
   type WorkspaceLayoutV1,
 } from "@frockbot/computer-core";
+import {
+  workspaceRootKeyV1,
+  type WorkspaceRootV1,
+} from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 import {
   computerBotKey,
@@ -30,7 +34,11 @@ import {
   flySpriteNameForBot,
 } from "./computer.js";
 import { FlyComputerWorkspace } from "./workspace.js";
-import { createFlySpriteSyncV1, type WorkspaceSyncReportV1 } from "./sync.js";
+import {
+  createFlySpriteSyncV1,
+  declaredWorkspaceRootsV1,
+  type WorkspaceSyncReportV1,
+} from "./sync.js";
 
 const encoder = new TextEncoder();
 
@@ -181,6 +189,8 @@ function commandFor(
  */
 class FlySpriteComputerSync implements ComputerSyncV1 {
   private readonly sync: ReturnType<typeof createFlySpriteSyncV1>;
+  /** Every root this sync covers, so a per-root run can refuse a stranger. */
+  private readonly declared: readonly WorkspaceRootV1[];
 
   constructor(
     computer: FlySpriteAgentComputer,
@@ -188,12 +198,25 @@ class FlySpriteComputerSync implements ComputerSyncV1 {
     tenant: ComputerTenantV1,
     host: ComputerSyncHostV1,
   ) {
+    // The layout's own kinds, plus the `package-declared` roots the host said
+    // this User's enabled Packages declare. This provider knows where such a
+    // root is mounted and nothing about which ones exist, so without the
+    // host's list it reconciles none of them — which is what it did before
+    // any host supplied one.
+    this.declared = declaredWorkspaceRootsV1(FLY_WORKSPACE_LAYOUT, {
+      userId: identity.userId,
+      botIds: [tenant.botId],
+      ...(host.packageRoots ? { packageRoots: host.packageRoots } : {}),
+    });
     this.sync = createFlySpriteSyncV1({
       computer,
       layout: FLY_WORKSPACE_LAYOUT,
       userId: identity.userId,
       botDirectoryKey: computerBotKey,
       botIds: [tenant.botId],
+      // The same list, so "what the sync covers" and "what a per-root run will
+      // accept" cannot answer differently.
+      roots: [...this.declared],
       store: host.store,
       ...(host.effects ? { effects: host.effects } : {}),
       ...(host.generations ? { generations: host.generations } : {}),
@@ -217,6 +240,45 @@ class FlySpriteComputerSync implements ComputerSyncV1 {
       );
     }
     return summarize(report);
+  }
+
+  /**
+   * One declared root, pulled and pushed. Never throws, exactly like
+   * `reconcile`: the caller records the outcome and carries on.
+   *
+   * A root this Computer does not cover is `refused` rather than reconciled.
+   * Silently syncing an undeclared root would mount a directory the layout
+   * never placed, and silently succeeding on nothing would tell a publish its
+   * artifact had reached the store when it had not.
+   */
+  async reconcileRoot(
+    root: WorkspaceRootV1,
+    _reason: ComputerSyncReasonV1,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerSyncSummaryV1> {
+    if (options?.signal?.aborted) {
+      return computerSyncSummaryV1("skipped", "the Turn was cancelled");
+    }
+    const key = workspaceRootKeyV1(root);
+    if (!this.declared.some((known) => workspaceRootKeyV1(known) === key)) {
+      return computerSyncSummaryV1(
+        "refused",
+        `this Computer syncs no durable root ${key}`,
+      );
+    }
+    try {
+      const report = await this.sync.syncRoot(root);
+      return summarize({
+        roots: [report],
+        conflicts: report.conflicts,
+        failures: report.failures,
+      });
+    } catch (error) {
+      return computerSyncSummaryV1(
+        "unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
 
   async signal(

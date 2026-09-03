@@ -437,9 +437,9 @@ export function createPackageAuthoringHost(
         runId: options.runId,
         packageId: input.packageId,
         sourceHash: input.sourceHash,
-        ...(input.uiHtmlHash === undefined
+        ...(input.uiPageHashes === undefined
           ? {}
-          : { uiHtmlHash: input.uiHtmlHash }),
+          : { uiPageHashes: input.uiPageHashes }),
         ...(input.hooks === undefined ? {} : { hooks: input.hooks }),
       }),
 
@@ -560,13 +560,20 @@ export function createPackageAuthoringHost(
       );
       const ordinal = (previous?.ordinal ?? 0) + 1;
       const version = authoredVersionV1(ordinal);
-      const uiArtifact = request.input.ui
-        ? {
-            contentHash: await sha256(request.input.ui.html),
-            size: new TextEncoder().encode(request.input.ui.html).byteLength,
-            mediaType: "text/html" as const,
-            bundlerVersion: PACKAGE_UI_ARTIFACT_VERSION,
-          }
+      const uiPages = request.input.ui
+        ? await Promise.all(
+            request.input.ui.pages.map(async (page) => ({
+              id: page.id,
+              html: page.html,
+              mounts: page.mounts,
+              artifact: {
+                contentHash: await sha256(page.html),
+                size: new TextEncoder().encode(page.html).byteLength,
+                mediaType: "text/html" as const,
+                bundlerVersion: PACKAGE_UI_ARTIFACT_VERSION,
+              },
+            })),
+          )
         : undefined;
       const rawManifest = authoredManifestV1({
         packageId,
@@ -574,11 +581,17 @@ export function createPackageAuthoringHost(
         version,
         tools: request.input.tools,
         hooks: request.input.hooks,
-        ...(request.input.ui && uiArtifact
+        ...(request.input.ui && uiPages
           ? {
               ui: {
-                artifact: uiArtifact,
-                mounts: request.input.ui.mounts,
+                pages: uiPages.map((page) => ({
+                  id: page.id,
+                  artifact: page.artifact,
+                  mounts: page.mounts,
+                })),
+                ...(request.input.ui.entries
+                  ? { entries: request.input.ui.entries }
+                  : {}),
               },
             }
           : {}),
@@ -653,8 +666,13 @@ export function createPackageAuthoringHost(
         compatibilityDate: options.compatibilityDate,
         entry: "package.ts",
         sources: [{ path: "package.ts", text: request.input.source }],
-        ...(request.input.ui
-          ? { ui: { path: "ui.html" as const, html: request.input.ui.html } }
+        ...(uiPages
+          ? {
+              uiPages: uiPages.map((page) => ({
+                id: page.id,
+                html: page.html,
+              })),
+            }
           : {}),
       };
       let bundled;
@@ -696,15 +714,23 @@ export function createPackageAuthoringHost(
       }
 
       const { artifact } = bundled;
-      if (
-        uiArtifact &&
-        (!bundled.uiArtifact ||
-          bundled.uiHtml !== request.input.ui?.html ||
-          bundled.uiArtifact.contentHash !== uiArtifact.contentHash ||
-          bundled.uiArtifact.size !== uiArtifact.size ||
-          bundled.uiArtifact.mediaType !== uiArtifact.mediaType ||
-          bundled.uiArtifact.bundlerVersion !== uiArtifact.bundlerVersion)
-      ) {
+      const returnedPages = bundled.uiArtifacts ?? [];
+      const uiMismatch =
+        uiPages !== undefined &&
+        (returnedPages.length !== uiPages.length ||
+          uiPages.some((page, index) => {
+            const returned = returnedPages[index];
+            return (
+              !returned ||
+              returned.id !== page.id ||
+              returned.html !== page.html ||
+              returned.artifact.contentHash !== page.artifact.contentHash ||
+              returned.artifact.size !== page.artifact.size ||
+              returned.artifact.mediaType !== page.artifact.mediaType ||
+              returned.artifact.bundlerVersion !== page.artifact.bundlerVersion
+            );
+          }));
+      if (uiMismatch || (uiPages === undefined && returnedPages.length > 0)) {
         return refused(
           await recordFailure({
             effectId,
@@ -721,10 +747,10 @@ export function createPackageAuthoringHost(
         artifact.contentHash,
         bundled.module,
       );
-      if (bundled.uiArtifact && bundled.uiHtml) {
+      for (const page of returnedPages) {
         await options.artifacts.putPackageUiArtifact!(
-          bundled.uiArtifact.contentHash,
-          bundled.uiHtml,
+          page.artifact.contentHash,
+          page.html,
         );
       }
       await options.artifacts.putPackageSource(

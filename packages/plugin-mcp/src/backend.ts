@@ -31,6 +31,7 @@ import {
 } from "./records.js";
 import { MCP_PACKAGE_ID } from "./agent.js";
 import { mcpAuthorizationConnectionIdV1 } from "./oauth-records.js";
+import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
 export const MCP_SERVERS_ROUTE = "/api/mcp/servers";
 export const MCP_CONNECTIONS_ROUTE = "/api/plugins/mcp/connections";
@@ -488,3 +489,16 @@ export namespace createMcpBackendContribution {
     return () => lifecycle.mount(createMcpBackendContribution(host));
   }
 }
+
+/**
+ * The manifest's gateway `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineGatewayContribution<
+  McpGatewayHost,
+  McpBackendRouteContribution
+>({
+  specifier: "@frockbot/plugin-mcp/backend",
+  create: createMcpBackendContribution.plugin,
+});

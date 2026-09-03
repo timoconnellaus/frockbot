@@ -1,10 +1,10 @@
-import type { PackageIframeHostMessageV1 } from "@frockbot/kernel-contracts";
+import type { PackageIframeHostMessageV2 } from "@frockbot/kernel-contracts";
 
 type MessageTarget = Pick<Window, "postMessage">;
 
 export function postPackageIframeHostMessage(
   target: MessageTarget,
-  message: PackageIframeHostMessageV1,
+  message: PackageIframeHostMessageV2,
   lastStateWireByName: Map<string, string>,
 ): void {
   const wire = JSON.stringify(message);
@@ -20,7 +20,7 @@ export function postPackageIframeHostMessage(
 
   // Vue settings values may be reactive proxies, which structured clone
   // rejects. JSON is also the bridge's declared value domain.
-  target.postMessage(JSON.parse(wire) as PackageIframeHostMessageV1, "*");
+  target.postMessage(JSON.parse(wire) as PackageIframeHostMessageV2, "*");
   if (message.type === "state") {
     lastStateWireByName.set(message.name, wire);
   }

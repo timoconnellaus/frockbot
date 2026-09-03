@@ -22,6 +22,7 @@ import {
   type CreateBotCommandV1,
   type FlockReceiptV1,
 } from "./shared.js";
+import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 const DIRECTORY_KEY = "flock:directory:v1";
 const RECEIPT_PREFIX = "flock:create-receipt:";
@@ -410,3 +411,26 @@ export function createFlockUserBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(createFlockUserBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: the User's Bot directory, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface FlockUserApplicationHostV1 {
+  flock: FlockUserBackendHost;
+}
+
+/**
+ * The manifest's `user` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const userContribution = defineUserBackendContribution<
+  FlockUserApplicationHostV1,
+  FlockUserBackendContribution
+>({
+  specifier: "@frockbot/plugin-flock/user",
+  create: (host, lifecycle) =>
+    createFlockUserBackendPlugin(host.flock, lifecycle),
+});

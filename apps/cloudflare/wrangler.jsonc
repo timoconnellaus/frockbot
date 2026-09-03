@@ -25,6 +25,13 @@
     {
       "binding": "BOT_PACKAGES",
     },
+    // Applet server artifacts, loaded from the AppletState Durable Object and
+    // mounted as a facet (ADR 0022). Its own binding, because a loader id is
+    // served from cache with the env it was first loaded with, and an Applet's
+    // env is not a Bot Package's.
+    {
+      "binding": "APPLETS",
+    },
   ],
   // One array: a second "services" key would silently replace this one, and
   // the app would deploy with PACKAGE_BUNDLER unbound.
@@ -90,6 +97,13 @@
         "name": "DEPLOYMENT_POLICY",
         "class_name": "DeploymentPolicy",
       },
+      // One object per Applet instance, `idFromName("<userId>:<appletId>")`.
+      // It is the kernel's authority for the instance and mounts the Applet's
+      // code as a facet of itself (ADR 0022).
+      {
+        "name": "APPLET_STATES",
+        "class_name": "AppletState",
+      },
     ],
   },
   "migrations": [
@@ -104,6 +118,10 @@
     {
       "tag": "v3",
       "new_sqlite_classes": ["DeploymentPolicy"],
+    },
+    {
+      "tag": "v4",
+      "new_sqlite_classes": ["AppletState"],
     },
   ],
   "vars": {
@@ -124,6 +142,9 @@
         },
         {
           "binding": "BOT_PACKAGES",
+        },
+        {
+          "binding": "APPLETS",
         },
       ],
       "services": [
@@ -187,6 +208,10 @@
             "name": "DEPLOYMENT_POLICY",
             "class_name": "DeploymentPolicy",
           },
+          {
+            "name": "APPLET_STATES",
+            "class_name": "AppletState",
+          },
         ],
       },
       "vars": {
@@ -230,6 +255,9 @@
         },
         {
           "binding": "BOT_PACKAGES",
+        },
+        {
+          "binding": "APPLETS",
         },
       ],
       "services": [
@@ -291,6 +319,10 @@
             "name": "DEPLOYMENT_POLICY",
             "class_name": "DeploymentPolicy",
           },
+          {
+            "name": "APPLET_STATES",
+            "class_name": "AppletState",
+          },
         ],
       },
       "vars": {
@@ -325,6 +357,9 @@
         },
         {
           "binding": "BOT_PACKAGES",
+        },
+        {
+          "binding": "APPLETS",
         },
       ],
       // Declared as production declares them. Neither Worker runs beside the
@@ -385,6 +420,10 @@
           {
             "name": "DEPLOYMENT_POLICY",
             "class_name": "DeploymentPolicy",
+          },
+          {
+            "name": "APPLET_STATES",
+            "class_name": "AppletState",
           },
         ],
       },

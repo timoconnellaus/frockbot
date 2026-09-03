@@ -31,17 +31,43 @@ describe("decodeBundleRequestV1", () => {
     });
   });
 
-  it("accepts exactly one optional raw ui.html page", () => {
+  it("accepts 1..8 identified raw HTML pages", () => {
     expect(
       decodeBundleRequestV1(
-        request({ ui: { path: "ui.html", html: "<!doctype html>" } }),
-      ).ui,
-    ).toEqual({ path: "ui.html", html: "<!doctype html>" });
+        request({
+          uiPages: [
+            { id: "main", html: "<!doctype html>" },
+            { id: "board", html: "<!doctype html><b>2</b>" },
+          ],
+        }),
+      ).uiPages,
+    ).toEqual([
+      { id: "main", html: "<!doctype html>" },
+      { id: "board", html: "<!doctype html><b>2</b>" },
+    ]);
+    expect(() => decodeBundleRequestV1(request({ uiPages: [] }))).toThrow(
+      "uiPages must be a non-empty bounded array",
+    );
     expect(() =>
       decodeBundleRequestV1(
-        request({ ui: { path: "page.html", html: "<!doctype html>" } }),
+        request({ uiPages: [{ id: "Main", html: "<!doctype html>" }] }),
       ),
-    ).toThrow("ui must contain one non-empty ui.html");
+    ).toThrow("uiPages entry is invalid");
+    expect(() =>
+      decodeBundleRequestV1(
+        request({
+          uiPages: [
+            { id: "main", html: "<!doctype html>" },
+            { id: "main", html: "<!doctype html><b>2</b>" },
+          ],
+        }),
+      ),
+    ).toThrow("duplicate ids");
+    expect(() =>
+      decodeBundleRequestV1(
+        request({ uiPages: [{ path: "ui.html", html: "<!doctype html>" }] }),
+      ),
+    ).toThrow(BundleDecodeError);
   });
 
   it("rejects an unknown field", () => {

@@ -76,6 +76,7 @@ describe("the Skill catalog", () => {
       skills: [
         { path: "skills/kept/SKILL.md", name: "kept" },
         { path: "managed/add-connector/SKILL.md" },
+        { path: "managed/applets/SKILL.md" },
         { path: "managed/export-bot-template/SKILL.md" },
         { path: "managed/import-bot-template/SKILL.md" },
         { path: "managed/learn-from-demonstration/SKILL.md" },

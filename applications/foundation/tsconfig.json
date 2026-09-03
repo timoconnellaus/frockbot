@@ -11,5 +11,5 @@
     "lib": ["ES2023", "DOM"],
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "generated/**/*.ts"]
 }

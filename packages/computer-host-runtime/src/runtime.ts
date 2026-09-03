@@ -113,6 +113,41 @@ export const PLAYWRIGHT_VERSION = "1.55.0";
 export const PLAYWRIGHT_PLATFORM = "ubuntu24.04-x64";
 
 /**
+ * Where the Applets SDK and its runtime are installed (ADR 0022 decision 7).
+ *
+ * A prefix of its own rather than the runtime root's `node_modules`, because
+ * the browser's `playwright-core` and the SDK's `miniflare` are two unrelated
+ * dependency trees on two unrelated release cadences, and one `npm install`
+ * resolving both would let an Applets upgrade move the browser driver.
+ */
+export const APPLETS_ROOT = `${RUNTIME_ROOT}/applets`;
+/**
+ * The `applet` shim on a tenant's PATH.
+ *
+ * In `bin` rather than `shims`: `shims` holds refusals — the sanctioned-surface
+ * shims that decline a GUI command — and this is the opposite, a real command
+ * a Bot is meant to run. `bin` leads a tenant's PATH after `shims`
+ * (`plugin-fly-sprite/src/computer.ts`, `tenantEnvironment`), so `applet` is
+ * reachable by name from the working directory the Bot already has.
+ */
+export const APPLET_SHIM_PATH = `${BIN_ROOT}/applet`;
+/**
+ * Written when the SDK install failed, and read by the doctor.
+ *
+ * `@frockbot/applet-sdk` is not on npm yet. Its install is therefore guarded:
+ * a Computer whose SDK could not be fetched is a Computer that still browses,
+ * execs, and syncs, so the phase leaves this file and succeeds rather than
+ * failing provisioning over a Package that has not shipped. The doctor turns
+ * the file into a named check, which is where an unshipped SDK belongs — a
+ * reported fact, not a Computer nobody can open.
+ */
+export const APPLETS_SDK_FAILURE_PATH = `${APPLETS_ROOT}/.sdk-unavailable`;
+/** The Applets SDK the Computer authors and previews an Applet with. */
+export const APPLET_SDK_VERSION = "0.1.0";
+/** Pinned with the SDK: `applet dev` embeds this Miniflare, never wrangler. */
+export const MINIFLARE_VERSION = "5.20260828.0-alpha";
+
+/**
  * Everything the Computer's desktop needs from the distribution, and nothing
  * that merely recommends itself.
  *
@@ -848,7 +883,7 @@ export const CLOCK_FLOOR_EPOCH = 1_756_684_800;
  * corrected. The version is compared on every adoption instead, and the whole
  * set is rewritten when it moves. Bump it whenever a document below changes.
  */
-export const REFERENCE_DOCS_VERSION = "2026-09-01.1";
+export const REFERENCE_DOCS_VERSION = "2026-09-03.1";
 
 /**
  * What a Bot reads to debug its own Computer.
@@ -919,6 +954,24 @@ on an image rebuild, a Computer reset, and a host migration. Put working files
 here, never the only copy of anything.
 
 \`/tmp\` is the same story with a shorter life: assume a restart empties it.
+
+## Applets — written here, run somewhere else
+
+Applet source is a durable root like any other:
+\`${DATA_ROOT}/user-packages/applets/source/<appletId>/\`. Write it with the
+ordinary file tools, then use \`applet\` — it is on your PATH:
+
+| Command | What |
+|---|---|
+| \`applet check\` | type-check and lint one Applet |
+| \`applet build\` | write \`<appletId>/dist/\` — this is what a publish reads |
+| \`applet dev\` | run it locally on this Computer and print a URL to open in the browser |
+
+The SDK and its runtime live under \`${APPLETS_ROOT}\`, installed when this
+Computer was provisioned. An Applet **never runs for real here**: \`applet dev\`
+is a preview, and publishing hands the built artifact to the kernel, which runs
+it. If \`applet\` says the SDK is not installed, run the self-check and read the
+\`applets-sdk\` line.
 `,
   },
   {
@@ -1161,6 +1214,37 @@ export const provisionPathPreamble = `if [ -r /etc/profile.d/languages_paths ]; 
 fi`;
 
 /**
+ * `applet` on a tenant's PATH (ADR 0022 decision 7).
+ *
+ * A shim rather than a symlink, for the same reason every other node entry
+ * point here is: `/.sprite/bin/node` is a bash re-exec shim whose last resort
+ * is `command -v node`, which in a non-login shell finds the shim again and
+ * loops for ever. The preamble puts the real toolchain on PATH first, so the
+ * SDK's own `#!/usr/bin/env node` resolves to a binary.
+ *
+ * A missing SDK is a sentence, not a stack trace: the install is guarded (see
+ * {@link APPLETS_SDK_FAILURE_PATH}), so this is the state a Bot will meet
+ * until `@frockbot/applet-sdk` is published, and it says where to look.
+ */
+export const appletShimScript = `#!/usr/bin/env bash
+set -u
+${provisionPathPreamble}
+APPLET=${APPLETS_ROOT}/node_modules/.bin/applet
+if [ ! -x "$APPLET" ]; then
+  echo "the Applets SDK is not installed at ${APPLETS_ROOT}; run computer_doctor and read the applets-sdk check" >&2
+  exit 127
+fi
+exec "$APPLET" "$@"
+`;
+
+/** The files the `applets` phase installs, with their modes. */
+export const APPLETS_RUNTIME_FILES: readonly {
+  readonly path: string;
+  readonly content: string;
+  readonly mode: number;
+}[] = [{ path: APPLET_SHIM_PATH, content: appletShimScript, mode: 0o755 }];
+
+/**
  * The Computer's self-check (parity row 27).
  *
  * GrokBot runs `box-doctor` at startup and on demand and leaves
@@ -1323,6 +1407,23 @@ elif [ "$CONFLICTS" -gt 0 ]; then
   record sync-signal fail "$CONFLICTS conflicting generation(s) are held under .frockbot-sync/conflicts and need a human"
 else
   record sync-signal pass "signal $(cat "$SIGNAL" 2>/dev/null), last moved $((NOW - $(stat -c %Y "$SIGNAL"))) s ago, no conflicts"
+fi
+if [ -x ${APPLET_SHIM_PATH} ] && [ -d ${APPLETS_ROOT}/node_modules/miniflare ]; then
+  record applets pass "the Applets runtime is installed under ${APPLETS_ROOT} and \\"applet\\" is on your PATH"
+elif [ -x ${APPLET_SHIM_PATH} ]; then
+  record applets fail "\\"applet\\" is on your PATH but no miniflare is installed under ${APPLETS_ROOT}; \\"applet dev\\" cannot run an Applet"
+else
+  record applets fail "no ${APPLET_SHIM_PATH}; provisioning installs it, and no Applet can be checked, built, or previewed without it"
+fi
+# Named and non-fatal on purpose: \`@frockbot/applet-sdk\` is not published
+# yet, so the provisioning phase's guarded install is expected to fail and
+# leave this file rather than fail the whole run. This is where that shows up.
+if [ -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]; then
+  record applets-sdk pass "the Applets SDK is installed under ${APPLETS_ROOT}"
+elif [ -f ${APPLETS_SDK_FAILURE_PATH} ]; then
+  record applets-sdk fail "$(head -n 1 ${APPLETS_SDK_FAILURE_PATH} 2>/dev/null); everything else on this Computer is unaffected"
+else
+  record applets-sdk fail "no Applets SDK under ${APPLETS_ROOT} and no record of an attempt; it installs when this Computer is next provisioned"
 fi
 INSTALLED=$(cat ${REFERENCE_ROOT}/.version 2>/dev/null || echo none)
 if [ "$INSTALLED" = "${REFERENCE_DOCS_VERSION}" ]; then
@@ -1503,6 +1604,39 @@ if [ ! -x ${CHROMIUM_PATH} ]; then
 fi`,
   },
   {
+    name: "applets",
+    label: "installing the Applets SDK",
+    // Version-guarded by its own `[ ! -d ]` tests rather than by a marker, for
+    // the same reason the reference phase is: a marker would make this run
+    // exactly once in a Computer's life, and `@frockbot/applet-sdk` is not on
+    // npm yet — the first run on a Computer provisioned today is expected to
+    // fail its guarded step. Once both trees are present this phase is two
+    // directory tests and a file install, so running it again costs nothing.
+    always: true,
+    // ADR 0022 decision 7: an Applet is authored on the Computer and run in
+    // the loader, so this installs what authoring needs and nothing that runs
+    // an Applet for real. Everything is `npm install --prefix` into a prefix
+    // of this phase's own: no `apt`, no distribution package, no daemon, and
+    // nothing that outlives the command.
+    body: `mkdir -p ${APPLETS_ROOT}
+if [ ! -d ${APPLETS_ROOT}/node_modules/miniflare ]; then
+  npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund miniflare@${MINIFLARE_VERSION}
+fi
+# Guarded, and deliberately not fatal. \`@frockbot/applet-sdk\` is not on npm
+# yet, and a Computer that cannot fetch it is still a Computer: it browses,
+# execs, and syncs. The failure is recorded as a file the doctor reports under
+# \`applets-sdk\` rather than as a phase that fails and leaves the whole
+# provisioning run resumable-but-unfinished.
+if [ ! -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]; then
+  if npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund @frockbot/applet-sdk@${APPLET_SDK_VERSION}; then
+    rm -f ${APPLETS_SDK_FAILURE_PATH}
+  else
+    printf '%s\\n' "npm could not install @frockbot/applet-sdk@${APPLET_SDK_VERSION}" > ${APPLETS_SDK_FAILURE_PATH}
+  fi
+fi
+${installDeclaredFiles(APPLETS_RUNTIME_FILES)}`,
+  },
+  {
     name: "reference",
     label: "writing the Computer reference",
     // Version-guarded rather than marker-guarded: a marker would make this
@@ -1532,6 +1666,16 @@ export const UPDATE_PHASES: readonly {
     name: "runtime",
     label: "Updating the Computer runtime",
     body: PROVISION_PHASES.find((phase) => phase.name === "runtime")!.body,
+  },
+  {
+    name: "applets",
+    label: "Updating the Applets command",
+    // The shim and nothing else. The provisioning phase beside it also runs
+    // `npm install`, which is a network fetch into a dependency tree an
+    // `applet dev` may be running out of right now; an in-place update
+    // replaces files atomically and must not do that. A Computer picks up a
+    // newly published SDK on its next provisioning adoption, not here.
+    body: installDeclaredFiles(APPLETS_RUNTIME_FILES),
   },
   {
     name: "reference",
@@ -1687,6 +1831,7 @@ export const RUNTIME_DOCUMENT_FILES: readonly {
 }[] = [
   { path: PROVISION_SCRIPT, content: provisionScript },
   ...COMPUTER_RUNTIME_FILES,
+  ...APPLETS_RUNTIME_FILES,
   ...REFERENCE_RUNTIME_FILES,
 ];
 

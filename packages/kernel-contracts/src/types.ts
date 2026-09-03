@@ -611,7 +611,10 @@ export interface SessionEventMap {
    *
    * `reason` is why the sync ran: `open` before the Turn's first Computer tool
    * call, `signal` when the on-Computer watcher reported a change mid-Turn,
-   * `turn-end` after a Turn that used the Computer.
+   * `turn-end` after a Turn that used the Computer, and `publish` for the one
+   * sanctioned reconciliation outside that policy — a single declared root
+   * pulled and pushed so an Applet publish can read the artifact `applet
+   * build` left on the Computer (ADR 0022 decision 7).
    */
   /**
    * A background process on the Computer changed hands: it was launched,
@@ -640,7 +643,7 @@ export interface SessionEventMap {
   };
   "computer/sync": {
     turn: number;
-    reason: "open" | "signal" | "turn-end";
+    reason: "open" | "signal" | "turn-end" | "publish";
     status: "ok" | "unavailable" | "refused" | "skipped";
     detail: string;
     pulled: number;
@@ -1875,7 +1878,11 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         "session event",
       );
       turn();
-      if (!["open", "signal", "turn-end"].includes(event.reason as string)) {
+      if (
+        !["open", "signal", "turn-end", "publish"].includes(
+          event.reason as string,
+        )
+      ) {
         throw new Error("session event.reason is invalid");
       }
       if (

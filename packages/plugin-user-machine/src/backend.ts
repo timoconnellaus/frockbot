@@ -60,6 +60,7 @@ import {
 } from "@frockbot/machine-protocol";
 import type { Plugin } from "cordis";
 import { verifyMachinePairingCodeV1 } from "./pairing.js";
+import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
 /** What one machine call carries into the User Durable Object. */
 export interface MachineCallV1 {
@@ -368,3 +369,16 @@ export namespace createMachineBackendContribution {
     return () => lifecycle.mount(createMachineBackendContribution(host));
   }
 }
+
+/**
+ * The manifest's gateway `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineGatewayContribution<
+  MachineGatewayHostV1,
+  MachineBackendRouteContribution
+>({
+  specifier: "@frockbot/plugin-user-machine/backend",
+  create: createMachineBackendContribution.plugin,
+});

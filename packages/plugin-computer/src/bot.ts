@@ -49,6 +49,7 @@ import {
   isStoredComputerControlFreshV1,
   type StoredComputerControlV1,
 } from "./control-record.js";
+import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 export { COMPUTER_CONTROL_RECORD_KEY } from "./control-record.js";
 
@@ -1374,3 +1375,26 @@ export function createComputerBotBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(createComputerBotBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: the Bot's view of its User's Computer, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface ComputerBotApplicationHostV1 {
+  computer: ComputerBotBackendHost;
+}
+
+/**
+ * The manifest's `bot` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const botContribution = defineBotBackendContribution<
+  ComputerBotApplicationHostV1,
+  ComputerBotBackendContribution
+>({
+  specifier: "@frockbot/plugin-computer/bot",
+  create: (host, lifecycle) =>
+    createComputerBotBackendPlugin(host.computer, lifecycle),
+});

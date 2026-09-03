@@ -25,6 +25,7 @@ import {
   type BotUnreadDirectoryViewV1,
   type BotUnreadReceiptV1,
 } from "@frockbot/plugin-shell/unread";
+import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
 export interface FlockGatewayHost {
   listBots(userId: string): Promise<BotDirectoryViewV1>;
@@ -281,3 +282,16 @@ export namespace createFlockBackendContribution {
     return () => lifecycle.mount(createFlockBackendContribution(host));
   }
 }
+
+/**
+ * The manifest's gateway `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineGatewayContribution<
+  FlockGatewayHost,
+  FlockBackendRouteContribution
+>({
+  specifier: "@frockbot/plugin-flock/backend",
+  create: createFlockBackendContribution.plugin,
+});

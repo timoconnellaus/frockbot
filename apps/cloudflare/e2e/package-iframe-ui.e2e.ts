@@ -96,16 +96,22 @@ async function installPackageRoutes(
               packageId: PACKAGE_ID,
               displayName: "Sydney Weather",
               provenance: "Bot-authored",
-              artifact: {
-                contentHash: CONTENT_HASH,
-                size: new TextEncoder().encode(artifactHtml()).byteLength,
-                mediaType: "text/html",
-                bundlerVersion: "frockbot-inline-html@1",
-              },
-              mounts: [
-                { slot: "frockbot.bot-settings-sections", order: 20 },
-                { slot: `frockbot.tool-result:${TOOL_NAME}`, order: 20 },
+              pages: [
+                {
+                  id: "main",
+                  artifact: {
+                    contentHash: CONTENT_HASH,
+                    size: new TextEncoder().encode(artifactHtml()).byteLength,
+                    mediaType: "text/html",
+                    bundlerVersion: "frockbot-inline-html@1",
+                  },
+                  mounts: [
+                    { slot: "frockbot.bot-settings-sections", order: 20 },
+                    { slot: `frockbot.tool-result:${TOOL_NAME}`, order: 20 },
+                  ],
+                },
               ],
+              entries: [],
               declaredTools: [TOOL_NAME],
             },
           ],

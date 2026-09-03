@@ -19,6 +19,7 @@
 import {
   BUNDLER_ENTRY,
   BUNDLER_MAX_SOURCE_BYTES,
+  BUNDLER_UI_ARTIFACT_VERSION,
   BundleDecodeError,
   decodeBundleRequestV1,
   failedResult,
@@ -26,6 +27,7 @@ import {
   type BundleRequestV1,
   type BundleResultV1,
   type BundlerBinding,
+  type UiArtifactPageV1,
 } from "../../cloudflare-bundler/src/contracts.ts";
 
 export const FAKE_BUNDLER_VERSION = "transpile-only-fallback@0";
@@ -67,7 +69,13 @@ export async function fakeBundlePackage(
       "the bundler produced no module text",
     ]);
   }
-  if (!/export\s+(const|async\s+function|function)/.test(code)) {
+  // A declaration export or a trailing export list. esbuild emits the second
+  // form for a bundled module, and the real bundler accepts both, because the
+  // wrapper only ever reads the module's named exports.
+  if (
+    !/export\s+(const|async\s+function|function)/.test(code) &&
+    !/export\s*\{/.test(code)
+  ) {
     return failedResult(request.effectId, "bundle-failed", [
       "package.ts exports nothing the isolate wrapper can mount",
     ]);
@@ -77,6 +85,28 @@ export async function fakeBundlePackage(
     return failedResult(request.effectId, "unresolved-import", [
       `the bundled module still imports the unresolved specifier "${unresolved}"`,
     ]);
+  }
+  // Pages are content-addressed exactly as the real Worker addresses them:
+  // the HTML is already inline by contract, so there is nothing to transform
+  // and the digest and the declared version are the whole answer.
+  const uiArtifacts: UiArtifactPageV1[] = [];
+  for (const page of request.uiPages ?? []) {
+    const pageBytes = new TextEncoder().encode(page.html);
+    if (pageBytes.byteLength > BUNDLER_MAX_SOURCE_BYTES) {
+      return failedResult(request.effectId, "ui-too-large", [
+        `page "${page.id}" is ${pageBytes.byteLength} bytes; the limit is ${BUNDLER_MAX_SOURCE_BYTES}`,
+      ]);
+    }
+    uiArtifacts.push({
+      id: page.id,
+      artifact: {
+        contentHash: await sha256Hex(pageBytes),
+        size: pageBytes.byteLength,
+        mediaType: "text/html",
+        bundlerVersion: BUNDLER_UI_ARTIFACT_VERSION,
+      },
+      html: page.html,
+    });
   }
   const bytes = new TextEncoder().encode(code);
   return {
@@ -90,6 +120,7 @@ export async function fakeBundlePackage(
       bundlerVersion: FAKE_BUNDLER_VERSION,
     },
     module: code,
+    ...(uiArtifacts.length > 0 ? { uiArtifacts } : {}),
     diagnostics: [],
   };
 }

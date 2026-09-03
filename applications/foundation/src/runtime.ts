@@ -3,6 +3,7 @@ import {
   compileApplicationPlan,
   type ApplicationDeclarationPlan,
   type ApplicationPlan,
+  type ApplicationPackageSelection,
   type ApplicationSource,
 } from "@frockbot/kernel-composition/compiler";
 import type {
@@ -20,24 +21,6 @@ import type {
 } from "@frockbot/configuration-core";
 import auditManifest from "@frockbot/plugin-audit/manifest";
 import adminManifest from "@frockbot/plugin-admin/manifest";
-import {
-  createAdminBackendContribution,
-  type AdminGatewayHost,
-} from "@frockbot/plugin-admin/backend";
-const createAdminGatewayPlugin = createAdminBackendContribution.plugin;
-// Gateway Audit behavior is resolved as a lifecycle-owned Plugin.
-import {
-  createAuditBackendContribution,
-  type AuditGatewayHost,
-} from "@frockbot/plugin-audit/backend";
-const createAuditGatewayPlugin = (
-  createAuditBackendContribution as typeof createAuditBackendContribution & {
-    plugin(
-      host: AuditGatewayHost,
-      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
-    ): Plugin;
-  }
-).plugin;
 import authManifest from "@frockbot/plugin-auth/manifest";
 import botTemplateManifest from "@frockbot/plugin-bot-template/manifest";
 import {
@@ -45,12 +28,6 @@ import {
   type BotTemplateRuntimeHostV1,
 } from "@frockbot/plugin-bot-template/agent";
 export type { BotTemplateRuntimeHostV1 } from "@frockbot/plugin-bot-template/agent";
-import {
-  createBotTemplateBackendContribution,
-  type BotTemplateGatewayHostV1,
-} from "@frockbot/plugin-bot-template/backend";
-const createBotTemplateGatewayPlugin =
-  createBotTemplateBackendContribution.plugin;
 import authoringManifest from "@frockbot/plugin-authoring/manifest";
 import {
   createAuthoringRuntimePlugin,
@@ -64,33 +41,8 @@ import {
 import clockRuntimePlugin from "@frockbot/plugin-clock/agent";
 // Every selected package manifest participates in the compiled application hash.
 import clockManifest from "@frockbot/plugin-clock/manifest";
-import { Context, type Plugin } from "cordis";
+import { type Plugin } from "cordis";
 
-export interface BackendRouteContribution {
-  packageId: string;
-  /**
-   * A route the gateway dispatches *before* it authenticates anyone.
-   *
-   * Exactly one Contribution needs it — the `mcp-oauth` callback, which an
-   * authorization server reaches by redirecting a browser that carries no
-   * FrockBot session. A `publicRoute` takes its identity from a signed
-   * artifact it verifies itself; it never reads one from the request.
-   */
-  publicRoute?(
-    request: Request,
-    url: URL,
-    context: { userId?: string; client?: "browser" | "desktop" },
-  ): Promise<Response | undefined>;
-  route(
-    request: Request,
-    url: URL,
-    context: {
-      userId?: string;
-      client: "browser" | "desktop";
-      isAdmin: boolean;
-    },
-  ): Promise<Response | undefined>;
-}
 // pi-lens-ignore: ts:2307
 import computerManifest from "@frockbot/plugin-computer/manifest";
 import {
@@ -98,10 +50,6 @@ import {
   type ComputerAgentPluginConfig,
   type ComputerProcessStorageV1,
 } from "@frockbot/plugin-computer/agent";
-import {
-  createComputerBackendPlugin,
-  type ComputerGatewayHost,
-} from "@frockbot/plugin-computer/backend";
 import {
   createSharedComputerProviderPlugin,
   type SharedComputerHostClient,
@@ -130,20 +78,6 @@ import {
   type FlockSelfRuntimeHostV1,
 } from "@frockbot/plugin-flock/agent";
 export type { FlockSelfRuntimeHostV1 } from "@frockbot/plugin-flock/agent";
-// Gateway Flock behavior is resolved as a lifecycle-owned Plugin.
-import {
-  createFlockBackendContribution,
-  type FlockGatewayHost,
-} from "@frockbot/plugin-flock";
-const createFlockGatewayPlugin = (
-  createFlockBackendContribution as typeof createFlockBackendContribution & {
-    plugin(
-      host: FlockGatewayHost,
-      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
-    ): Plugin;
-  }
-).plugin;
-
 import echoManifest from "@frockbot/plugin-echo/manifest";
 import identityRuntimePlugin from "@frockbot/plugin-identity/agent";
 import identityManifest from "@frockbot/plugin-identity/manifest";
@@ -157,13 +91,6 @@ import {
   type McpLifecycleToolHostV1,
 } from "@frockbot/plugin-mcp/lifecycle-tools";
 export type { McpLifecycleToolHostV1 } from "@frockbot/plugin-mcp/lifecycle-tools";
-// The MCP status and lifecycle routes are the Package's own; the Settings
-// gateway Contribution stays provider-neutral.
-import {
-  createMcpBackendContribution,
-  type McpGatewayHost,
-} from "@frockbot/plugin-mcp/backend";
-const createMcpGatewayPlugin = createMcpBackendContribution.plugin;
 import memoryManifest from "@frockbot/plugin-memory/manifest";
 import mobileClipboardManifest from "@frockbot/plugin-mobile-clipboard/manifest";
 import mobileNotificationsManifest from "@frockbot/plugin-mobile-notifications/manifest";
@@ -173,12 +100,6 @@ import {
   type PackagePublisherAgentHost,
 } from "@frockbot/plugin-package-publisher/agent";
 export type { PackagePublisherAgentHost } from "@frockbot/plugin-package-publisher/agent";
-import {
-  createPackagePublisherBackendContribution,
-  type PackagePublisherGatewayHost,
-} from "@frockbot/plugin-package-publisher/backend"; // built-in publication Contribution
-const createPackagePublisherGatewayPlugin =
-  createPackagePublisherBackendContribution.plugin;
 import foundationProviderManifest from "@frockbot/plugin-provider-foundation/manifest";
 import foundationProviderPlugin, {
   FOUNDATION_MODEL,
@@ -192,38 +113,12 @@ import {
 import flockAiManifest from "@frockbot/plugin-provider-flock-ai/manifest";
 import { createFlockAiRuntimePlugin } from "@frockbot/plugin-provider-flock-ai/runtime";
 import routinesManifest from "@frockbot/plugin-routines/manifest";
-// The Routines gateway Contribution carries the Bot-scoped Routine routes.
-import {
-  createRoutinesBackendContribution,
-  type RoutinesGatewayHost,
-} from "@frockbot/plugin-routines/backend";
-const createRoutinesGatewayPlugin = (
-  createRoutinesBackendContribution as typeof createRoutinesBackendContribution & {
-    plugin(
-      host: RoutinesGatewayHost,
-      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
-    ): Plugin;
-  }
-).plugin;
 import {
   createRoutinesRuntimePlugin,
   type RoutinesRuntimeHostV1,
 } from "@frockbot/plugin-routines/agent";
 export type { RoutinesRuntimeHostV1 } from "@frockbot/plugin-routines/agent";
 import subagentsManifest from "@frockbot/plugin-subagents/manifest";
-// The Subagents gateway Contribution carries the Bot-scoped task routes.
-import {
-  createSubagentsBackendContribution,
-  type SubagentsGatewayHost,
-} from "@frockbot/plugin-subagents/backend";
-const createSubagentsGatewayPlugin = (
-  createSubagentsBackendContribution as typeof createSubagentsBackendContribution & {
-    plugin(
-      host: SubagentsGatewayHost,
-      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
-    ): Plugin;
-  }
-).plugin;
 import userMachineManifest from "@frockbot/plugin-user-machine/manifest";
 import machineMessagesManifest from "@frockbot/plugin-machine-messages/manifest";
 import { createMachineMessagesRuntimePlugin } from "@frockbot/plugin-machine-messages/agent";
@@ -236,59 +131,18 @@ import {
   type MachineRuntimeHostV1,
 } from "@frockbot/plugin-user-machine/agent";
 export type { MachineRuntimeHostV1 } from "@frockbot/plugin-user-machine/agent";
-// The registered-machine routes: three authenticated, four `publicRoute`s
-// carrying a machine token rather than a session.
-import {
-  createMachineBackendContribution,
-  type MachineGatewayHostV1,
-} from "@frockbot/plugin-user-machine/backend";
-export type { MachineGatewayHostV1 } from "@frockbot/plugin-user-machine/backend";
-const createMachineGatewayPlugin = (
-  createMachineBackendContribution as typeof createMachineBackendContribution & {
-    plugin(
-      host: MachineGatewayHostV1,
-      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
-    ): Plugin;
-  }
-).plugin;
 import {
   createSubagentsRuntimePlugin,
   type SubagentsRuntimeHostV1,
 } from "@frockbot/plugin-subagents/agent";
 export type { SubagentsRuntimeHostV1 } from "@frockbot/plugin-subagents/agent";
 import searchManifest from "@frockbot/plugin-search/manifest";
-// Gateway Search behavior is resolved as a lifecycle-owned Plugin.
-import {
-  createSearchBackendContribution,
-  type SearchGatewayHost,
-} from "@frockbot/plugin-search/backend";
-const createSearchGatewayPlugin = (
-  createSearchBackendContribution as typeof createSearchBackendContribution & {
-    plugin(
-      host: SearchGatewayHost,
-      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
-    ): Plugin;
-  }
-).plugin;
 import { createConfiguredOllamaWebSearchRuntimeContribution } from "@frockbot/plugin-provider-ollama-cloud/web-search";
 // The Web Package contributes `web_fetch`: no Connection, no provider, and no
 // Computer — it works while the User's Computer is hibernated.
 import webManifest from "@frockbot/plugin-web/manifest";
 import { createConfiguredWebFetchRuntimeContribution } from "@frockbot/plugin-web/agent";
 import settingsManifest from "@frockbot/plugin-settings/manifest";
-// Provider-neutral Connection transport is owned by the Settings gateway Contribution.
-import {
-  createSettingsBackendContribution,
-  type SettingsGatewayHost,
-} from "@frockbot/plugin-settings/backend";
-const createSettingsGatewayPlugin = (
-  createSettingsBackendContribution as typeof createSettingsBackendContribution & {
-    plugin(
-      host: SettingsGatewayHost,
-      lifecycle: BackendContributionLifecycle<BackendRouteContribution>,
-    ): Plugin;
-  }
-).plugin;
 import {
   createMemoryRuntimePlugin,
   type MemoryRuntimeHostV1,
@@ -306,7 +160,12 @@ import {
   type SkillsRuntimeHostV1,
 } from "@frockbot/plugin-skills/agent";
 import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
+import appletsManifest from "@frockbot/plugin-applets/manifest";
 import applicationJson from "../frockbot.application.json" with { type: "json" };
+// The Applets Package has no runtime plugin to import: it is artifact-backed
+// (ADR 0022 decision 8), so the application declares only its manifest here and
+// its artifact in `frockbot.application.json`, and the isolate host mounts it
+// like a Bot-authored Package.
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 
@@ -345,6 +204,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-settings", settingsManifest],
   ["@frockbot/plugin-routines", routinesManifest],
   ["@frockbot/plugin-subagents", subagentsManifest],
+  ["@frockbot/plugin-applets", appletsManifest],
   ["@frockbot/plugin-user-machine", userMachineManifest],
   ["@frockbot/plugin-machine-messages", machineMessagesManifest],
 ]);
@@ -556,9 +416,18 @@ const modelRuntimeContributionFactories = new Map<
   ],
 ]);
 
+/*
+ * The application's own declaration, cast once at the JSON boundary.
+ *
+ * A JSON module infers `mediaType: string` where `ArtifactRefV1` wants the
+ * literal, so the artifact-backed member's selection would not structurally
+ * satisfy `ApplicationPackageSelection` without this. Nothing is trusted by the
+ * cast: `compileApplicationDeclarations` runs every selection, artifact
+ * included, through `decodeArtifactRefV1` before it reaches a plan.
+ */
 const applicationSource: ApplicationSource = {
   schemaVersion: 1,
-  packages: applicationJson.packages,
+  packages: applicationJson.packages as ApplicationPackageSelection[],
 };
 
 /**
@@ -590,9 +459,15 @@ export function isPlatformOwnedPackageV1(
 export function isUserInstallablePackageV1(
   manifest: Pick<FrockBotManifest, "contributions" | "configuration">,
 ): boolean {
-  const mountsApplicationRoot = (
-    manifest.contributions.client?.mounts ?? []
-  ).some((mount) => mount.slot === APPLICATION_ROOT_SLOT_V1);
+  const client = manifest.contributions.client;
+  const clientMounts = client
+    ? "pages" in client
+      ? client.pages.flatMap((page) => page.mounts)
+      : client.mounts
+    : [];
+  const mountsApplicationRoot = clientMounts.some(
+    (mount) => mount.slot === APPLICATION_ROOT_SLOT_V1,
+  );
   if (mountsApplicationRoot) return false;
 
   const configuration = manifest.configuration;
@@ -654,171 +529,28 @@ export function compileFoundationApplicationDeclarations(): ApplicationDeclarati
   );
 }
 
-function contributionSpecifier(specifier: string, entry: string): string {
-  return `${specifier}${entry.slice(1)}`;
-}
-
-export interface BackendContributionLifecycle<T> {
-  mount(contribution: T): () => void;
-}
-
-export interface FoundationBackendPluginHost<T> {
-  backendHost: "bot" | "user";
-  resolve(
-    specifier: string,
-    lifecycle: BackendContributionLifecycle<T>,
-  ): Plugin;
-}
-
-export interface MountedFoundationBackend<T> {
-  readonly contributions: readonly T[];
-  dispose(): Promise<void>;
-}
-
-/** Mount every declared backend Contribution into one owned Cordis root. */
-export type FoundationGatewayHost = {
-  backendHost: "gateway";
-} & AdminGatewayHost &
-  BotTemplateGatewayHostV1 &
-  ComputerGatewayHost &
-  FlockGatewayHost &
-  McpGatewayHost &
-  SettingsGatewayHost &
-  RoutinesGatewayHost &
-  SubagentsGatewayHost &
-  MachineGatewayHostV1 &
-  SearchGatewayHost &
-  AuditGatewayHost &
-  PackagePublisherGatewayHost;
-
-export async function createFoundationBackendContributions(
-  plan: ApplicationPlan,
-  host: FoundationGatewayHost,
-): Promise<MountedFoundationBackend<BackendRouteContribution>>;
-export async function createFoundationBackendContributions<T>(
-  plan: ApplicationPlan,
-  host: FoundationBackendPluginHost<T>,
-  root?: Context,
-): Promise<MountedFoundationBackend<T>>;
-export async function createFoundationBackendContributions<T>(
-  plan: ApplicationPlan,
-  host: FoundationGatewayHost | FoundationBackendPluginHost<T>,
-  residentRoot?: Context,
-): Promise<MountedFoundationBackend<BackendRouteContribution | T>> {
-  const ownsRoot = !residentRoot;
-  const root = residentRoot ?? new Context();
-  const fibers: Array<ReturnType<Context["plugin"]>> = [];
-  const contributions: Array<BackendRouteContribution | T> = [];
-  const lifecycle: BackendContributionLifecycle<BackendRouteContribution | T> =
-    {
-      mount(contribution) {
-        contributions.push(contribution);
-        let mounted = true;
-        return () => {
-          if (!mounted) return;
-          mounted = false;
-          const index = contributions.indexOf(contribution);
-          if (index >= 0) contributions.splice(index, 1);
-        };
-      },
-    };
-  try {
-    for (const pkg of plan.packages) {
-      if (!plan.contributions.backend.includes(pkg.id)) continue;
-      for (const backend of pkg.manifest.contributions.backend ?? []) {
-        if (backend.host !== host.backendHost) continue;
-        const specifier = contributionSpecifier(pkg.specifier, backend.entry);
-        let plugin: Plugin;
-        if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-admin/backend"
-        ) {
-          plugin = createAdminGatewayPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-computer/backend"
-        ) {
-          plugin = createComputerBackendPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-flock/backend"
-        ) {
-          plugin = createFlockGatewayPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-mcp/backend"
-        ) {
-          plugin = createMcpGatewayPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-bot-template/backend"
-        ) {
-          plugin = createBotTemplateGatewayPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-settings/backend"
-        ) {
-          plugin = createSettingsGatewayPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-routines/backend"
-        ) {
-          plugin = createRoutinesGatewayPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-subagents/backend"
-        ) {
-          plugin = createSubagentsGatewayPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-user-machine/backend"
-        ) {
-          plugin = createMachineGatewayPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-search/backend"
-        ) {
-          plugin = createSearchGatewayPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-audit/backend"
-        ) {
-          plugin = createAuditGatewayPlugin(host, lifecycle);
-        } else if (
-          host.backendHost === "gateway" &&
-          specifier === "@frockbot/plugin-package-publisher/backend"
-        ) {
-          plugin = createPackagePublisherGatewayPlugin(host, lifecycle);
-        } else if (host.backendHost === "gateway") {
-          throw new Error(
-            `unknown foundation backend contribution: ${specifier}`,
-          );
-        } else {
-          plugin = host.resolve(specifier, lifecycle);
-        }
-        const fiber = root.plugin(plugin);
-        fibers.push(fiber);
-        await fiber;
-      }
-    }
-  } catch (error) {
-    await Promise.allSettled(fibers.reverse().map((fiber) => fiber.dispose()));
-    if (ownsRoot) await root.fiber.dispose();
-    throw error;
-  }
-  let disposed = false;
-  return {
-    contributions,
-    async dispose() {
-      if (disposed) return;
-      disposed = true;
-      await Promise.allSettled(
-        fibers.reverse().map((fiber) => fiber.dispose()),
-      );
-      if (ownsRoot) await root.fiber.dispose();
-    },
-  };
-}
+/**
+ * Backend Contribution resolution lives in `./contributions.ts`: the one
+ * module that knows which first-party Package implements which specifier.
+ * Re-exported here so every caller keeps its existing import, and so this
+ * module never has to name a Package to mount one.
+ */
+import { contributionSpecifierV1 as contributionSpecifier } from "./contributions.js";
+export {
+  createFoundationBackendContributions,
+  foundationBackendContributions,
+  assertFoundationBackendContributionsResolvable,
+} from "./contributions.js";
+export type { MachineGatewayHostV1 } from "@frockbot/plugin-user-machine/backend";
+export type {
+  BackendRouteContribution,
+  BackendContributionLifecycle,
+  FoundationBackendPluginHost,
+  FoundationBotBackendHostV1,
+  FoundationGatewayHost,
+  FoundationUserBackendHostV1,
+  MountedFoundationBackend,
+} from "./contributions.js";
 
 export interface FoundationRuntimePackage {
   specifier: string;
@@ -1432,7 +1164,12 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   return {
     plan,
     packages: plan.packages
-      .filter((pkg) => runtimeIds.has(pkg.id))
+      // An artifact-backed member is not in this table and never should be: its
+      // runtime Contribution is immutable bytes the isolate host loads, not a
+      // plugin compiled into this bundle (ADR 0022 decision 8). The test is the
+      // artifact, so a first-party Package that ships as one needs no entry
+      // here and no name anywhere in this function.
+      .filter((pkg) => pkg.artifact === undefined && runtimeIds.has(pkg.id))
       .map((pkg) => ({
         specifier: pkg.specifier,
         manifest: {

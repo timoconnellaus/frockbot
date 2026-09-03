@@ -9,6 +9,10 @@ import {
   isRpcIdentifier,
 } from "@frockbot/configuration-core";
 import {
+  APPLET_ID_V1,
+  decodeAppletFocusViewV1,
+  decodeAppletListViewV1,
+  decodeAppletUiViewV1,
   decodePackageIframeToolCommandV1,
   type PackageIframeCatalogV1,
 } from "@frockbot/kernel-contracts";
@@ -127,7 +131,9 @@ function withSecurityHeaders(
     "content-security-policy",
     // Package pages use the anonymous artifact origin. The expanded Computer
     // viewer frames the Sprite's own noVNC page (ADR 0004); both are optional
-    // projections and neither becomes an authority in the hosted client.
+    // projections and neither becomes an authority in the hosted client. An
+    // Applet's own UI is another page on the same artifact origin, nested by
+    // the Applets canvas page, so the origin already named here covers it.
     `default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self' ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${artifactOrigin} https://*.sprites.app; frame-ancestors 'none'; base-uri 'none'`,
   );
   return secured;
@@ -274,6 +280,144 @@ export function createUserApplication() {
       });
     }
 
+    // --- Applets (ADR 0022 §4) ---------------------------------------------
+    //
+    // Session-authenticated and User-scoped: the gateway has already proved who
+    // is asking, and an Applet belongs to the User rather than to a Bot. The
+    // token these mint is the only credential an Applet page ever holds, and it
+    // names one User, one Applet, and one generation for fifteen minutes.
+    if (url.pathname === "/api/applets") {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      try {
+        // Projected through the view decoder the client uses, so the two sides
+        // cannot disagree: the durable answer carries a `revision` the view
+        // does not declare, and an exact-keys decoder is right to refuse it.
+        const listed = (await env.BOT_STATE.listApplets()) as {
+          applets: unknown;
+        };
+        return Response.json(
+          decodeAppletListViewV1({
+            schemaVersion: 1,
+            applets: listed.applets,
+          }),
+        );
+      } catch (error) {
+        return jsonError(
+          503,
+          error instanceof Error ? error.message : "Applets are unavailable",
+        );
+      }
+    }
+    const appletTokenMatch = url.pathname.match(
+      /^\/api\/applets\/([^/]+)\/token$/,
+    );
+    const appletUiMatch = url.pathname.match(/^\/api\/applets\/([^/]+)\/ui$/);
+    if (appletTokenMatch || appletUiMatch) {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      let appletId: string;
+      try {
+        appletId = decodeURIComponent((appletTokenMatch ?? appletUiMatch)![1]);
+      } catch {
+        return jsonError(400, "invalid applet id");
+      }
+      try {
+        if (appletUiMatch) {
+          const ui = await env.BOT_STATE.readAppletUi({
+            schemaVersion: 1,
+            appletId,
+          });
+          return Response.json(
+            decodeAppletUiViewV1({
+              // The anonymous artifact origin, exactly as a Package page is
+              // served: the Applet's UI is immutable content addressed by hash.
+              uiUrl: `${packageUiArtifactOrigin(url)}/packages/${ui.contentHash}.html`,
+              ...(ui.generationId === undefined
+                ? {}
+                : { generationId: ui.generationId }),
+            }),
+          );
+        }
+        const minted = await env.BOT_STATE.mintAppletViewerToken({
+          schemaVersion: 1,
+          appletId,
+        });
+        const socket = new URL(url.origin);
+        socket.protocol = url.protocol === "http:" ? "ws:" : "wss:";
+        socket.pathname = `/api/applets/${encodeURIComponent(appletId)}/socket`;
+        socket.searchParams.set("token", minted.token);
+        return Response.json({
+          token: minted.token,
+          expiresAt: minted.expiresAt,
+          socketUrl: socket.toString(),
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Applet is unavailable";
+        return jsonError(
+          message.includes("unavailable") || message.includes("no active")
+            ? 404
+            : 503,
+          message,
+        );
+      }
+    }
+    const appletFocusMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/applets\/focus$/,
+    );
+    if (appletFocusMatch) {
+      let focusBotId: string;
+      try {
+        focusBotId = decodeBotIdV1(decodeURIComponent(appletFocusMatch[1]));
+      } catch {
+        return jsonError(400, "invalid bot id");
+      }
+      const missing = await requireRegisteredBot(env, focusBotId);
+      if (missing) return missing;
+      try {
+        if (request.method === "GET") {
+          // Projected to the view, not the record. `FocusedAppletV1` carries
+          // `changedAt`, which is durable bookkeeping; `AppletFocusViewV1` is
+          // exactly `{ appletId }` and its decoder refuses an extra field, so
+          // handing the record over the wire made every read fail closed and
+          // the canvas never opened.
+          const focused = (await env.BOT_STATE.readFocusedApplet({
+            schemaVersion: 1,
+            botId: focusBotId,
+          })) as { appletId: string | null };
+          return Response.json(
+            decodeAppletFocusViewV1({ appletId: focused.appletId }),
+          );
+        }
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+        const body = (await request.json()) as { appletId?: unknown };
+        if (
+          !body ||
+          typeof body !== "object" ||
+          Array.isArray(body) ||
+          Object.keys(body).length !== 1 ||
+          !("appletId" in body) ||
+          (body.appletId !== null && typeof body.appletId !== "string")
+        ) {
+          return jsonError(400, "focus command is invalid");
+        }
+        const recorded = (await env.BOT_STATE.setFocusedApplet({
+          schemaVersion: 1,
+          botId: focusBotId,
+          appletId: body.appletId,
+        })) as { appletId: string | null };
+        return Response.json(
+          decodeAppletFocusViewV1({ appletId: recorded.appletId }),
+        );
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "Applet focus failed",
+        );
+      }
+    }
+
     const notificationMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/notifications$/,
     );
@@ -411,6 +555,12 @@ export function createUserApplication() {
     const packageUiToolMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/package-ui\/tools$/,
     );
+    const appletSourceMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/applets\/([^/]+)\/source$/,
+    );
+    const appletBuildMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/applets\/([^/]+)\/build$/,
+    );
     const workspaceFileMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/workspace\/file$/,
     );
@@ -431,6 +581,8 @@ export function createUserApplication() {
       !skillsMatch &&
       !packageUiMatch &&
       !packageUiToolMatch &&
+      !appletSourceMatch &&
+      !appletBuildMatch &&
       !workspaceFileMatch &&
       !turnMatch &&
       !lookupMatch &&
@@ -446,6 +598,8 @@ export function createUserApplication() {
         skillsMatch ??
         packageUiMatch ??
         packageUiToolMatch ??
+        appletSourceMatch ??
+        appletBuildMatch ??
         workspaceFileMatch ??
         turnMatch ??
         lookupMatch ??
@@ -519,6 +673,45 @@ export function createUserApplication() {
         return jsonError(
           message.includes("did not declare") ? 403 : 409,
           message,
+        );
+      }
+    }
+
+    if (appletSourceMatch || appletBuildMatch) {
+      // The Applet canvas's two reads. Both answer from the Workspace store
+      // and the Bot Durable Object's own records, so a hibernated Computer
+      // stays hibernated: rendering what a Bot wrote never wakes the machine
+      // it wrote it on.
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      let appletId: string;
+      try {
+        appletId = decodeURIComponent(
+          (appletSourceMatch ?? appletBuildMatch)![2],
+        );
+      } catch {
+        return jsonError(400, "invalid applet id");
+      }
+      if (!APPLET_ID_V1.test(appletId)) {
+        return jsonError(400, "invalid applet id");
+      }
+      try {
+        return Response.json(
+          appletSourceMatch
+            ? await env.BOT_STATE.readAppletSourceV1({
+                schemaVersion: 1,
+                botId,
+                appletId,
+              })
+            : await env.BOT_STATE.readAppletBuildV1({
+                schemaVersion: 1,
+                botId,
+                appletId,
+              }),
+        );
+      } catch (error) {
+        return jsonError(
+          500,
+          error instanceof Error ? error.message : "Applet read failed",
         );
       }
     }
