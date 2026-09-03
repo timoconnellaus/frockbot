@@ -202,11 +202,7 @@ export class FakeAuditSql implements AuditSqlV1 {
   }
 
   /** Applies the `WHERE bot_id/kind/target` clauses the store builds. */
-  private filtered(
-    table: string,
-    sql: string,
-    bindings: unknown[],
-  ): FakeRow[] {
+  private filtered(table: string, sql: string, bindings: unknown[]): FakeRow[] {
     const values = [...bindings];
     const where = /WHERE (.+?)(?: ORDER BY| LIMIT|$)/.exec(sql)?.[1] ?? "";
     if (where.startsWith("at <")) {

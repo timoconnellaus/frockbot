@@ -3079,9 +3079,10 @@ export class ShellBotBackendContribution {
       runId: fire.fireId,
       createdAt: new Date().toISOString(),
       title: `${settings.profile.name} could not run a Routine`,
-      body: (
-        outcome.summary ?? "The firing ended without saying why."
-      ).slice(0, 240),
+      body: (outcome.summary ?? "The firing ended without saying why.").slice(
+        0,
+        240,
+      ),
     });
   }
   // -------------------------------------------------------------------------

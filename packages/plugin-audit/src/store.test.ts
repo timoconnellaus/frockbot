@@ -240,7 +240,9 @@ describe("a rebuild that fails", () => {
     // `audit-rebuilding` was written and never read as a lock, so two
     // concurrent rebuilds wiped each other.
     await expect(
-      table.rebuild([{ botId: "foreman", page: async () => ({ entries: [] }) }]),
+      table.rebuild([
+        { botId: "foreman", page: async () => ({ entries: [] }) },
+      ]),
     ).rejects.toThrow("already running");
 
     release?.();

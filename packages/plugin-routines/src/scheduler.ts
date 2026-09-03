@@ -222,7 +222,14 @@ export class RoutineScheduler {
         // locked Routine contributed no deadline, so the kernel's
         // `deleteAlarm()` ran and the Bot went silent for ever. The lease
         // expiry is the deadline, and `settle` is what reaps it.
-        deadlines.push(this.#leaseExpiry(locked));
+        // The hold still applies, for the same reason it applies to a debt: an
+        // expired lease on a Routine whose Turn is executing right now would
+        // otherwise arm the alarm on a moment already past, over and over,
+        // which is a spin rather than a deadline. `defer()` moves the hold and
+        // never the lease, so the reaping still happens — just not on a loop.
+        deadlines.push(
+          Math.max(this.#leaseExpiry(locked), state.deferredUntil ?? 0),
+        );
         continue;
       }
       deadlines.push(routineDeadlineV1(state));
@@ -295,12 +302,10 @@ export class RoutineScheduler {
         // or the throw escapes `settle` with the fire lock still held.
         Promise.resolve()
           .then(() => execute(fire, controller.signal))
-          .catch(
-            (error: unknown): RoutineFireOutcomeV1 => ({
-              status: "failed",
-              summary: error instanceof Error ? error.message : String(error),
-            }),
-          ),
+          .catch((error: unknown): RoutineFireOutcomeV1 => ({
+            status: "failed",
+            summary: error instanceof Error ? error.message : String(error),
+          })),
         expiry,
       ]);
     } finally {

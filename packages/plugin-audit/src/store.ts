@@ -230,10 +230,7 @@ export class AuditStoreV1 {
   }
 
   /** The insert half, named so a rebuild can aim it at its shadow table. */
-  private insertInto(
-    table: string,
-    entries: readonly AuditEntryV1[],
-  ): number {
+  private insertInto(table: string, entries: readonly AuditEntryV1[]): number {
     let inserted = 0;
     for (const entry of entries) {
       const existing = this.sql
