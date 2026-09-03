@@ -452,7 +452,18 @@ export class RoutineScheduler {
       state: RoutineScheduleStateV1;
     }> = [];
     for (const value of stored.values()) {
-      const record = decodeRoutineRecordV1(value);
+      let record: RoutineRecordV1;
+      try {
+        record = decodeRoutineRecordV1(value);
+      } catch {
+        // One record written by a newer deploy and read back after a rollback
+        // used to poison every alarm refresh and every Turn settlement of the
+        // whole object: `#clocks` is reached from `deadlines()` →
+        // `refreshRecoveryAlarm`, which runs inside `completeRun`, `failRun`
+        // and `acceptRun`. A record nothing can read is one Routine that does
+        // not fire, never a Bot that cannot settle a Turn.
+        continue;
+      }
       if (!record.enabled || record.schedule === undefined) continue;
       const normalized = normalizeRoutineScheduleV1(
         record.schedule,
@@ -541,7 +552,14 @@ export class RoutineScheduler {
       // record it would have run is gone, and a firing needs one.
       return undefined;
     }
-    const record = decodeRoutineRecordV1(stored);
+    let record: RoutineRecordV1;
+    try {
+      record = decodeRoutineRecordV1(stored);
+    } catch {
+      // The waiting firing named a record nothing can read. Dropping the
+      // request is the same answer as a deleted record: a firing needs one.
+      return undefined;
+    }
     const fire: RoutineFireV1 = {
       schemaVersion: 1,
       routineId,

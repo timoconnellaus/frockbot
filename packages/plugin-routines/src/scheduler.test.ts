@@ -758,3 +758,33 @@ describe("a failed firing", () => {
     );
   });
 });
+
+describe("an undecodable Routine record", () => {
+  test("degrades that one Routine, never the whole object", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER);
+    // A record written by a newer deploy and read back after a rollback: the
+    // decoder is exact-keys, so it refuses it outright.
+    await storage.put("routine:from-the-future", {
+      schemaVersion: 1,
+      routineId: "from-the-future",
+      unknownFieldFromANewerDeploy: true,
+    });
+
+    // `#clocks` is reached from `deadlines()` → `refreshRecoveryAlarm`, which
+    // runs inside `completeRun`, `failRun` and `acceptRun`: a throw here used
+    // to poison every alarm refresh and every Turn settlement of the object.
+    time.set("2026-01-01T09:00:00.000Z");
+    expect(await scheduler.deadlines(storage)).toEqual([
+      Date.parse("2026-01-01T09:00:00.000Z"),
+    ]);
+    expect(await scheduler.nextRuns()).toEqual(
+      new Map([["brief", "2026-01-01T09:00:00.000Z"]]),
+    );
+    // And the healthy Routine still fires.
+    expect(await drain(scheduler)).toHaveLength(1);
+  });
+});
