@@ -195,9 +195,16 @@ function iframeEntriesFor(tool: WebToolActivity) {
   const slot = `frockbot.tool-result:${tool.name}`;
   return (state.value.packageUi?.contributions ?? [])
     .flatMap((contribution) =>
-      contribution.mounts
-        .filter((mount) => mount.slot === slot)
-        .map((mount) => ({ contribution, slot, order: mount.order ?? 0 })),
+      contribution.pages.flatMap((page) =>
+        page.mounts
+          .filter((mount) => mount.slot === slot)
+          .map((mount) => ({
+            contribution,
+            page,
+            slot,
+            order: mount.order ?? 0,
+          })),
+      ),
     )
     .sort(
       (left, right) =>
@@ -717,9 +724,10 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               <template v-for="tool in message.tools" :key="tool.id">
                 <PackageIframeHost
                   v-for="entry in iframeEntriesFor(tool)"
-                  :key="`${tool.id}:${entry.contribution.packageId}`"
+                  :key="`${tool.id}:${entry.contribution.packageId}:${entry.page.id}`"
                   class="message-package-iframe"
                   :contribution="entry.contribution"
+                  :page="entry.page"
                   :slot="entry.slot"
                   :state-name="`tool:${tool.name}`"
                   :state-value="toolResultState(tool)"

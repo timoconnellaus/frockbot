@@ -115,7 +115,7 @@ describe("the package_author tool", () => {
     await dispose();
   });
 
-  test("includes the UI HTML hash and declared hooks in the effect identity", async () => {
+  test("includes every UI page hash and declared hooks in the effect identity", async () => {
     const { sessions, dispose } = await openSession();
     const effectInputs: Parameters<PackageAuthoringHost["effectIdFor"]>[0][] =
       [];
@@ -138,8 +138,18 @@ describe("the package_author tool", () => {
         ...INPUT,
         hooks: ["agent/tool-exposure"],
         ui: {
-          html,
-          mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+          pages: [
+            {
+              id: "main",
+              html,
+              mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+            },
+            {
+              id: "board",
+              html: "<!doctype html><h1>Board</h1>",
+              mounts: [{ slot: "frockbot.right-panel" }],
+            },
+          ],
         },
       },
       CONTEXT,
@@ -149,7 +159,13 @@ describe("the package_author tool", () => {
       {
         packageId: "weather-lookup",
         sourceHash: await sha256HexV1(INPUT.source),
-        uiHtmlHash: await sha256HexV1(html),
+        uiPageHashes: [
+          { id: "main", htmlHash: await sha256HexV1(html) },
+          {
+            id: "board",
+            htmlHash: await sha256HexV1("<!doctype html><h1>Board</h1>"),
+          },
+        ],
         hooks: ["agent/tool-exposure"],
       },
     ]);

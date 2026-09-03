@@ -56,8 +56,12 @@ export default defineConfig<E2EOptions>({
   timeout: 240_000,
   expect: { timeout: 30_000 },
   outputDir: "test-results",
+  // CI runs this project as several `--shard`s on separate runners, so no one
+  // runner sees the whole suite and none of them can write the whole HTML
+  // report. Each shard emits a blob instead, and CI merges the blobs into one
+  // report when a shard fails.
   reporter: process.env.CI
-    ? [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]]
+    ? [["list"], ["blob", { outputDir: "blob-report" }]]
     : [["list"]],
   use: {
     ...devices["Desktop Chrome"],

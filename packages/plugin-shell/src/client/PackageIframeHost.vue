@@ -4,6 +4,7 @@ import {
   packageIframeToolAllowedV1,
   type PackageIframeContributionViewV1,
   type PackageIframeHostMessageV1,
+  type PackageIframePageViewV1,
 } from "@frockbot/kernel-contracts";
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { frockBotWebDataKey } from "../shared.js";
@@ -11,6 +12,7 @@ import { postPackageIframeHostMessage } from "./package-iframe-host-message.js";
 
 const props = defineProps<{
   contribution: PackageIframeContributionViewV1;
+  page: PackageIframePageViewV1;
   slot: string;
   stateName: string;
   stateValue: unknown;
@@ -26,7 +28,7 @@ const catalog = computed(() => web.value.packageUi);
 const source = computed(() => {
   const origin = catalog.value?.artifactOrigin;
   return origin
-    ? `${origin}/packages/${props.contribution.artifact.contentHash}.html`
+    ? `${origin}/packages/${props.page.artifact.contentHash}.html`
     : "about:blank";
 });
 
@@ -74,6 +76,7 @@ function initialize(): void {
     packageId: props.contribution.packageId,
     botId,
     slot: props.slot,
+    pageId: props.page.id,
   });
   post({
     schemaVersion: 1,

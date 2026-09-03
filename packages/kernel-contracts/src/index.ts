@@ -1,3 +1,4 @@
+export * from "./applets.js";
 export * from "./authoring.js";
 export * from "./iframe-ui.js";
 export * from "./isolate.js";

@@ -57,8 +57,15 @@ export async function projectPackageIframeCompositionV1(input: {
       displayName: manifest.displayName,
       provenance:
         member.provenance.kind === "bot" ? "Bot-authored" : "User-installed",
-      artifact: { ...client.artifact },
-      mounts: client.mounts.map((mount) => ({ ...mount })),
+      pages: client.pages.map((page) => ({
+        id: page.id,
+        artifact: { ...page.artifact },
+        mounts: page.mounts.map((mount) => ({ ...mount })),
+      })),
+      entries: (client.entries ?? []).map((entry) => ({
+        ...entry,
+        opens: { ...entry.opens },
+      })),
       declaredTools: (manifest.tools ?? []).map((tool) => tool.name),
     });
   }
