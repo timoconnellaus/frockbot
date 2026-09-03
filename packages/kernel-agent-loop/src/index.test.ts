@@ -2970,4 +2970,46 @@ describe("AgentLoop", () => {
     expect(end).toMatchObject({ type: "turn/end", outcome: "completed" });
     expect(end && Object.hasOwn(end, "reason")).toBe(false);
   });
+
+  test("a Turn whose first flush fails ends once instead of spinning", async () => {
+    let streams = 0;
+    const provider: LlmProvider = {
+      id: "persist-fails",
+      async *stream() {
+        streams += 1;
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    let writes = 0;
+    const root = await mountRuntime(
+      provider,
+      undefined,
+      // Storage that is simply gone: every durable write rejects.
+      () => {
+        writes += 1;
+        return Promise.reject(new Error("durable storage is unavailable"));
+      },
+    );
+    const handle = await root.agents.create({
+      ...allowEffectOptions,
+      botId: "persist-bot",
+      sessionId: "persist-fails",
+      provider: "persist-fails",
+      model: "test-model",
+    });
+
+    handle.agent.send("say something");
+    // The failure reaches the caller, exactly once: the input was claimed
+    // before the flush, so nothing hands it back to be started again.
+    await expect(handle.agent.whenIdle()).rejects.toThrow(
+      "durable storage is unavailable",
+    );
+    const attempts = writes;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(writes).toBe(attempts);
+    expect(streams).toBe(0);
+    expect(
+      handle.agent.session.events.filter((event) => event.type === "turn/start"),
+    ).toHaveLength(1);
+  });
 });

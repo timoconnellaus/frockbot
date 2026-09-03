@@ -272,11 +272,23 @@ class LoopAgent implements Agent {
     }
     this.#controller = new AbortController();
     this.#setStatus("running");
-    const activity = this.#drive(this.#controller.signal).finally(() => {
-      this.#controller = undefined;
-      if (!this.#disposeRequested) this.#setStatus("idle");
-      if (!this.#disposeRequested && this.#inbox.length > 0) this.#wake();
-    });
+    let failed = false;
+    const activity = this.#drive(this.#controller.signal)
+      .catch((error: unknown) => {
+        // A Turn that could not even journal its own start throws out of
+        // `#drive`. Re-waking on the inbox it left behind would append another
+        // `turn/start`, fail the same way, and spin — so the failure ends the
+        // waking and reaches whoever is awaiting this Turn.
+        failed = true;
+        throw error;
+      })
+      .finally(() => {
+        this.#controller = undefined;
+        if (!this.#disposeRequested) this.#setStatus("idle");
+        if (!this.#disposeRequested && !failed && this.#inbox.length > 0) {
+          this.#wake();
+        }
+      });
     this.#activity = activity;
   }
 
@@ -643,8 +655,11 @@ class LoopAgent implements Agent {
       { type: "turn/admission", turn, turnType: this.#turnType },
       { type: "input/admitted", messageId: input.messageId, turn },
     ]);
-    await this.session.flush();
+    // Claimed before the flush, not after: the input has been journaled as
+    // admitted, and leaving it in the inbox while the write settles meant a
+    // failed first flush handed it straight back to `#wake`.
     this.#inbox.shift();
+    await this.session.flush();
     this.#ctx.emit("agent/inbox/claimed", this, [input], turn);
 
     let openStep: number | undefined;
