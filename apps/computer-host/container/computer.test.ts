@@ -739,42 +739,57 @@ describe("open", () => {
     ).toHaveLength(1);
   });
 
-  test("a fresh human-control lease defers the update and records it", async () => {
+  test("a fresh human-control lease installs the update but defers the gateway", async () => {
     const { host, sprite } = provisioned();
     writeFile(sprite, PROVISION_DIGEST, "stale\n");
     const lease = `${RUNTIME_ROOT}/bots/another-tenant/human-control`;
     writeFile(sprite, lease, "viewer-1\n");
+    sprite.scripts = [
+      report("running", updatingRuntime, "update"),
+      report("stopped", updateReady, "update"),
+    ];
+    const declarations = sprite.serviceCreates.filter(
+      (name) => name === DESKTOP_SERVICE,
+    ).length;
 
     const response = await host.handle(request({ kind: "open" }));
 
+    // The update phases are file installs and run even under a human lease:
+    // deferring them is what left a Computer serving no viewer page.
     expect(response.status).toBe(200);
     expect(
       sprite.commands.some((command) =>
         command.stdin.includes(`${PROVISION_SCRIPT} update`),
       ),
-    ).toBe(false);
+    ).toBe(true);
+    // The gateway is the one disruptive step, so it waits for the lease.
+    expect(
+      sprite.serviceCreates.filter((name) => name === DESKTOP_SERVICE).length,
+    ).toBe(declarations);
     expect(
       JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
     ).toMatchObject({
       version: 1,
       generation: 4,
       update: {
-        status: "pending",
+        status: "started",
         digest: runtimeDocumentDigestV1(),
       },
     });
 
+    // Once the lease goes stale the next open reconciles the re-declaration
+    // and clears the durable intent, without installing anything again.
     sprite.files.get(lease)!.mtime = new Date("2026-08-30T23:58:00.000Z");
-    sprite.scripts = [
-      report("running", updatingRuntime, "update"),
-      report("stopped", updateReady, "update"),
-    ];
     const resumed = await host.handle(
       request({ kind: "open" }, { effectId: "open-after-lease" }),
     );
+    expect(resumed.status).toBe(200);
     expect(
-      decodeComputerHostOpenResultV1(await resumed.json()).provisioning,
-    ).toMatchObject({ kind: "update", status: "complete" });
+      sprite.serviceCreates.filter((name) => name === DESKTOP_SERVICE).length,
+    ).toBe(declarations + 1);
+    expect(
+      JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
+    ).toMatchObject({ version: 1, generation: 4 });
   });
 
   test("a second caller waits its bound then receives computer-updating with the current label", async () => {

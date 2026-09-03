@@ -595,6 +595,10 @@ interface ComputerHostStateV1 {
   version: 1;
   generation: number;
   update?: {
+    // `pending` is no longer written: an update under a human-control lease
+    // now installs its files and records `started`, deferring only the
+    // gateway re-declaration. It stays decodable because Computers provisioned
+    // before that change still carry it, and their next open reconciles it.
     status: "pending" | "started";
     digest: string;
     recordedAt: string;
@@ -1196,19 +1200,6 @@ export class ComputerHost {
       return record;
     }
 
-    if (inspection.humanControlFresh) {
-      await this.writeHostState(sprite, {
-        version: 1,
-        generation: record.generation,
-        update: {
-          status: "pending",
-          digest,
-          recordedAt: new Date(this.now()).toISOString(),
-        },
-      });
-      return record;
-    }
-
     const progress: ComputerHostProvisioningV1 = {
       kind: "update",
       phase: UPDATE_STARTING_PHASE.name,
@@ -1224,6 +1215,7 @@ export class ComputerHost {
       record,
       progress,
       onProgress,
+      inspection.humanControlFresh,
     ).finally(() => {
       if (this.updates.get(userId) === held) this.updates.delete(userId);
     });
@@ -1239,6 +1231,7 @@ export class ComputerHost {
     record: ComputerRecord,
     progress: ComputerHostProvisioningV1,
     onProgress?: (progress: ComputerHostProvisioningV1) => void,
+    deferGateway = false,
   ): Promise<ComputerRecord> {
     const digest = runtimeDocumentDigestV1();
     // Durable intent precedes the launcher. Recovery sees `started`, compares
@@ -1260,6 +1253,15 @@ export class ComputerHost {
         onProgress?.(observed);
       },
     );
+    // A human is driving this desktop. `UPDATE_PHASES` disturbed nothing —
+    // they are idempotent file installs, and a running websockify serves the
+    // viewer page it just rewrote from the same `--web` directory on the next
+    // request. Re-declaring the gateway is the one step that would drop the
+    // live viewer out from under them, so leave `started` on the state file:
+    // the digest now matches, and the reconciliation above re-declares it on
+    // the first open after the lease goes stale. Deferring the whole update
+    // instead is what left a Computer serving no viewer page at all.
+    if (deferGateway) return { ...record, provisioning: updated };
     // A running websockify keeps the `--web` directory from its original
     // process. Re-declare the provider-owned service so the newly installed
     // digest-tracked viewer page is served by this very open (P3).
