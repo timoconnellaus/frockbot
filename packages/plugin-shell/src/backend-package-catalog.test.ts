@@ -28,7 +28,7 @@ const UI_SIZE = 42;
 const CREATED_AT = "2026-09-02T00:00:00.000Z";
 
 const manifest = {
-  schemaVersion: 3 as const,
+  schemaVersion: 5 as const,
   id: "parcel-tracking",
   displayName: "Parcel tracking",
   version: "0.0.1",
@@ -38,13 +38,18 @@ const manifest = {
     runtime: { entry: "./package.js", host: "bot-isolate" as const },
     client: {
       kind: "iframe" as const,
-      artifact: {
-        contentHash: UI_CONTENT_HASH,
-        size: UI_SIZE,
-        mediaType: "text/html" as const,
-        bundlerVersion: "frockbot-inline-html@1",
-      },
-      mounts: [{ slot: "frockbot.tool-result:track_parcel" }],
+      pages: [
+        {
+          id: "main",
+          artifact: {
+            contentHash: UI_CONTENT_HASH,
+            size: UI_SIZE,
+            mediaType: "text/html" as const,
+            bundlerVersion: "frockbot-inline-html@1",
+          },
+          mounts: [{ slot: "frockbot.tool-result:track_parcel" }],
+        },
+      ],
     },
   },
   configuration: {

@@ -11,9 +11,11 @@ const slot = "frockbot.bot-settings-sections";
 const contributions = computed(() =>
   (web.value.packageUi?.contributions ?? [])
     .flatMap((contribution) =>
-      contribution.mounts
-        .filter((mount) => mount.slot === slot)
-        .map((mount) => ({ contribution, order: mount.order ?? 0 })),
+      contribution.pages.flatMap((page) =>
+        page.mounts
+          .filter((mount) => mount.slot === slot)
+          .map((mount) => ({ contribution, page, order: mount.order ?? 0 })),
+      ),
     )
     .sort(
       (left, right) =>
@@ -34,8 +36,9 @@ function settingsFor(packageId: string): Record<string, unknown> {
   <div v-if="contributions.length > 0" class="package-iframe-settings">
     <PackageIframeHost
       v-for="entry in contributions"
-      :key="entry.contribution.packageId"
+      :key="`${entry.contribution.packageId}:${entry.page.id}`"
       :contribution="entry.contribution"
+      :page="entry.page"
       :slot="slot"
       state-name="settings"
       :state-value="settingsFor(entry.contribution.packageId)"

@@ -354,18 +354,27 @@ describe("a Bot authoring a Package", () => {
     });
   });
 
-  test("stores the second immutable artifact and records it in the same manifest", async () => {
+  test("stores every immutable page artifact and records them in the same manifest", async () => {
     const html = "<!doctype html><h1>Hello</h1>";
+    const boardHtml = "<!doctype html><h1>Board</h1>";
     const contentHash = await sha256HexV1(html);
+    const boardHash = await sha256HexV1(boardHtml);
+    const uiArtifact = (hash: string, text: string) => ({
+      contentHash: hash,
+      size: new TextEncoder().encode(text).byteLength,
+      mediaType: "text/html" as const,
+      bundlerVersion: "frockbot-inline-html@1",
+    });
     const bundler = countingBundler((effectId) => ({
       ...bundledResult(effectId),
-      uiArtifact: {
-        contentHash,
-        size: new TextEncoder().encode(html).byteLength,
-        mediaType: "text/html",
-        bundlerVersion: "frockbot-inline-html@1",
-      },
-      uiHtml: html,
+      uiArtifacts: [
+        { id: "main", artifact: uiArtifact(contentHash, html), html },
+        {
+          id: "board",
+          artifact: uiArtifact(boardHash, boardHtml),
+          html: boardHtml,
+        },
+      ],
     }));
     const request = requestFor();
     const outcome = await host({ bundler }).author({
@@ -374,13 +383,32 @@ describe("a Bot authoring a Package", () => {
         ...request.input,
         hooks: ["agent/tool-exposure", "tools/post-execute"],
         ui: {
-          html,
-          mounts: [{ slot: "frockbot.tool-result:hello" }],
+          pages: [
+            {
+              id: "main",
+              html,
+              mounts: [{ slot: "frockbot.tool-result:hello" }],
+            },
+            {
+              id: "board",
+              html: boardHtml,
+              mounts: [{ slot: "frockbot.surface:board" }],
+            },
+          ],
+          entries: [
+            {
+              id: "open",
+              slot: "frockbot.sidebar-actions",
+              label: "Board",
+              icon: "sparkle",
+              opens: { kind: "surface", page: "board" },
+            },
+          ],
         },
       },
     });
     expect(outcome.status).toBe("authored");
-    expect(writtenUi).toEqual([contentHash]);
+    expect(writtenUi).toEqual([contentHash, boardHash]);
     const artifact = storage.values.get(
       artifactKey("b".repeat(64)),
     ) as AuthoredArtifactRecordV1;
@@ -390,13 +418,27 @@ describe("a Bot authoring a Package", () => {
     const manifest = decodeFrockBotManifest(stored.manifest);
     expect(manifest.contributions.client).toEqual({
       kind: "iframe",
-      artifact: {
-        contentHash,
-        size: new TextEncoder().encode(html).byteLength,
-        mediaType: "text/html",
-        bundlerVersion: "frockbot-inline-html@1",
-      },
-      mounts: [{ slot: "frockbot.tool-result:hello" }],
+      pages: [
+        {
+          id: "main",
+          artifact: uiArtifact(contentHash, html),
+          mounts: [{ slot: "frockbot.tool-result:hello" }],
+        },
+        {
+          id: "board",
+          artifact: uiArtifact(boardHash, boardHtml),
+          mounts: [{ slot: "frockbot.surface:board" }],
+        },
+      ],
+      entries: [
+        {
+          id: "open",
+          slot: "frockbot.sidebar-actions",
+          label: "Board",
+          icon: "sparkle",
+          opens: { kind: "surface", page: "board" },
+        },
+      ],
     });
     expect(manifest.hooks).toEqual([
       "agent/tool-exposure",

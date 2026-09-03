@@ -83,12 +83,34 @@ describe("decodeAuthorPackageInputV1", () => {
     ).toThrow();
   });
 
-  test("accepts one inline iframe page and refuses external resources or an oversized page", () => {
-    const ui = {
+  test("accepts inline iframe pages with entries and refuses external resources or an oversized page", () => {
+    const main = {
+      id: "main",
       html: "<!doctype html><style>body{color:red}</style><script>window.frockbot.resize()</script>",
       mounts: [
         { slot: "frockbot.tool-result:weather_lookup", order: 10 },
         { slot: "frockbot.bot-settings-sections" },
+      ],
+    };
+    const board = {
+      id: "board",
+      html: "<!doctype html><h1>Board</h1>",
+      mounts: [
+        { slot: "frockbot.surface:board" },
+        { slot: "frockbot.right-panel" },
+      ],
+    };
+    const ui = {
+      pages: [main, board],
+      entries: [
+        {
+          id: "open",
+          slot: "frockbot.sidebar-actions" as const,
+          order: 5,
+          label: "Weather board",
+          icon: "sparkle",
+          opens: { kind: "surface" as const, page: "board" },
+        },
       ],
     };
     expect(
@@ -98,18 +120,70 @@ describe("decodeAuthorPackageInputV1", () => {
         ui,
       }),
     ).toMatchObject({ hooks: ["agent/tool-exposure"], ui });
+    const withPages = (pages: unknown) => ({ ...VALID, ui: { pages } });
     expect(() =>
-      decodeAuthorPackageInputV1({
-        ...VALID,
-        ui: { ...ui, html: '<script src="https://example.com/x.js"></script>' },
-      }),
+      decodeAuthorPackageInputV1(
+        withPages([
+          {
+            ...main,
+            html: '<script src="https://example.com/x.js"></script>',
+          },
+        ]),
+      ),
     ).toThrow("inline resources only");
     expect(() =>
+      decodeAuthorPackageInputV1(
+        withPages([{ ...main, html: "a".repeat(256 * 1024 + 1) }]),
+      ),
+    ).toThrow();
+    expect(() => decodeAuthorPackageInputV1(withPages([]))).toThrow(
+      "non-empty bounded array",
+    );
+    expect(() =>
+      decodeAuthorPackageInputV1(withPages([main, { ...board, id: "main" }])),
+    ).toThrow("duplicate ids");
+    expect(() =>
+      decodeAuthorPackageInputV1(withPages([{ ...main, id: "Main" }])),
+    ).toThrow("id is invalid");
+    expect(() =>
+      decodeAuthorPackageInputV1(
+        withPages([{ ...main, mounts: [{ slot: "frockbot.surface:absent" }] }]),
+      ),
+    ).toThrow("not iframe-safe");
+    expect(() =>
+      decodeAuthorPackageInputV1(
+        withPages([
+          { ...main, mounts: [{ slot: "frockbot.tool-result:unknown_tool" }] },
+        ]),
+      ),
+    ).toThrow("not iframe-safe");
+    expect(() =>
       decodeAuthorPackageInputV1({
         ...VALID,
-        ui: { ...ui, html: "a".repeat(256 * 1024 + 1) },
+        ui: {
+          pages: [main, board],
+          entries: [
+            { ...ui.entries[0]!, opens: { kind: "surface", page: "main" } },
+          ],
+        },
       }),
-    ).toThrow();
+    ).toThrow("names no page with a matching surface mount");
+    expect(() =>
+      decodeAuthorPackageInputV1({
+        ...VALID,
+        ui: {
+          pages: [main, board],
+          entries: [{ ...ui.entries[0]!, label: "x".repeat(33) }],
+        },
+      }),
+    ).toThrow("label must be a bounded non-empty string");
+    // The retired single-page shape is not honoured backward.
+    expect(() =>
+      decodeAuthorPackageInputV1({
+        ...VALID,
+        ui: { html: main.html, mounts: main.mounts },
+      }),
+    ).toThrow("has invalid fields");
   });
 });
 
@@ -140,8 +214,38 @@ describe("authoring identity", () => {
       runId: "run-1",
       packageId: VALID.packageId,
       sourceHash,
-      uiHtmlHash: await sha256HexV1("<!doctype html><h1>Weather</h1>"),
+      uiPageHashes: [
+        {
+          id: "main",
+          htmlHash: await sha256HexV1("<!doctype html><h1>Weather</h1>"),
+        },
+      ],
     });
+    const otherUiPageId = await authoringEffectIdV1({
+      runId: "run-1",
+      packageId: VALID.packageId,
+      sourceHash,
+      uiPageHashes: [
+        {
+          id: "board",
+          htmlHash: await sha256HexV1("<!doctype html><h1>Weather</h1>"),
+        },
+      ],
+    });
+    expect(otherUi).not.toBe(otherUiPageId);
+    const twoPages = await authoringEffectIdV1({
+      runId: "run-1",
+      packageId: VALID.packageId,
+      sourceHash,
+      uiPageHashes: [
+        {
+          id: "main",
+          htmlHash: await sha256HexV1("<!doctype html><h1>Weather</h1>"),
+        },
+        { id: "board", htmlHash: await sha256HexV1("<!doctype html>b") },
+      ],
+    });
+    expect(twoPages).not.toBe(otherUi);
     const otherHooks = await authoringEffectIdV1({
       runId: "run-1",
       packageId: VALID.packageId,
@@ -215,18 +319,56 @@ describe("authoring identity", () => {
       version: "0.0.1",
       tools: VALID.tools,
       ui: {
-        artifact,
-        mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+        pages: [
+          {
+            id: "main",
+            artifact,
+            mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+          },
+          {
+            id: "board",
+            artifact: { ...artifact, contentHash: "b".repeat(64) },
+            mounts: [{ slot: "frockbot.surface:board" }],
+          },
+        ],
+        entries: [
+          {
+            id: "open",
+            slot: "frockbot.sidebar-actions",
+            label: "Weather board",
+            icon: "sparkle",
+            opens: { kind: "surface", page: "board" },
+          },
+        ],
       },
     });
     expect(manifest).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 5,
       contributions: {
         runtime: { host: "bot-isolate" },
         client: {
           kind: "iframe",
-          artifact,
-          mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+          pages: [
+            {
+              id: "main",
+              artifact,
+              mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+            },
+            {
+              id: "board",
+              artifact: { ...artifact, contentHash: "b".repeat(64) },
+              mounts: [{ slot: "frockbot.surface:board" }],
+            },
+          ],
+          entries: [
+            {
+              id: "open",
+              slot: "frockbot.sidebar-actions",
+              label: "Weather board",
+              icon: "sparkle",
+              opens: { kind: "surface", page: "board" },
+            },
+          ],
         },
       },
     });

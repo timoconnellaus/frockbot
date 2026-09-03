@@ -408,13 +408,19 @@ describe("Bot selection", () => {
       packageId: "weather-page",
       displayName: "Sydney Weather",
       provenance: "Bot-authored" as const,
-      artifact: {
-        contentHash: "a".repeat(64),
-        size: 1,
-        mediaType: "text/html" as const,
-        bundlerVersion: "frockbot-inline-html@1",
-      },
-      mounts: [{ slot: "frockbot.bot-settings-sections", order: 20 }],
+      pages: [
+        {
+          id: "main",
+          artifact: {
+            contentHash: "a".repeat(64),
+            size: 1,
+            mediaType: "text/html" as const,
+            bundlerVersion: "frockbot-inline-html@1",
+          },
+          mounts: [{ slot: "frockbot.bot-settings-sections", order: 20 }],
+        },
+      ],
+      entries: [],
       declaredTools: ["weather_lookup"],
     };
     const requests: Array<{

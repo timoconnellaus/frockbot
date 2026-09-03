@@ -9,7 +9,13 @@
 import {
   BOT_ISOLATE_HOOK_EVENTS_V1,
   isBotIsolateHookEventNameV1,
+  iframePageSlotAllowedV1,
   PACKAGE_BUNDLE_MAX_SOURCE_BYTES,
+  PACKAGE_IFRAME_ENTRY_LABEL_MAX_V1,
+  PACKAGE_IFRAME_ENTRY_SLOT_V1,
+  PACKAGE_IFRAME_ID_V1,
+  PACKAGE_IFRAME_MAX_ENTRIES_V1,
+  PACKAGE_IFRAME_MAX_PAGES_V1,
   type BotIsolateHookEventNameV1,
 } from "@frockbot/kernel-contracts";
 
@@ -24,10 +30,21 @@ export interface AuthorPackageInputV1 {
   hooks?: BotIsolateHookEventNameV1[];
   /** TypeScript text; exactly one `package.ts`. */
   source: string;
-  /** Optional sandboxed page. All CSS and JavaScript must be inline. */
+  /** Optional sandboxed pages. All CSS and JavaScript must be inline. */
   ui?: {
-    html: string;
-    mounts: Array<{ slot: string; order?: number }>;
+    pages: Array<{
+      id: string;
+      html: string;
+      mounts: Array<{ slot: string; order?: number }>;
+    }>;
+    entries?: Array<{
+      id: string;
+      slot: "frockbot.sidebar-actions";
+      order?: number;
+      label: string;
+      icon: string;
+      opens: { kind: "surface"; page: string };
+    }>;
   };
 }
 
@@ -259,62 +276,165 @@ export function decodeAuthorPackageInputV1(
   let ui: AuthorPackageInputV1["ui"];
   if (value.ui !== undefined) {
     const rawUi = record(value.ui, `${label}.ui`);
-    exactKeys(rawUi, ["html", "mounts"], [], `${label}.ui`);
-    const html = boundedString(
-      rawUi.html,
-      `${label}.ui.html`,
-      PACKAGE_BUNDLE_MAX_SOURCE_BYTES,
-    );
+    exactKeys(rawUi, ["pages"], ["entries"], `${label}.ui`);
     if (
-      new TextEncoder().encode(html).byteLength >
-      PACKAGE_BUNDLE_MAX_SOURCE_BYTES
+      !Array.isArray(rawUi.pages) ||
+      rawUi.pages.length === 0 ||
+      rawUi.pages.length > PACKAGE_IFRAME_MAX_PAGES_V1
     ) {
-      throw new Error(`${label}.ui.html exceeds the per-Package source quota`);
+      throw new Error(`${label}.ui.pages must be a non-empty bounded array`);
     }
-    if (
-      /<(?:script|iframe|img|audio|video|source|embed|input)\b[^>]*\bsrc\s*=\s*["'](?!data:)/i.test(
-        html,
-      ) ||
-      /<object\b[^>]*\bdata\s*=\s*["'](?!data:)/i.test(html) ||
-      /\bsrcset\s*=/i.test(html) ||
-      /<link\b/i.test(html) ||
-      /@import\b/i.test(html) ||
-      /<meta\b[^>]*http-equiv\s*=\s*["']?refresh/i.test(html) ||
-      /url\(\s*["']?(?!data:|["']?\s*\))/i.test(html)
-    ) {
-      throw new Error(`${label}.ui.html may contain inline resources only`);
+    const pageIds = rawUi.pages.map((candidate, index) => {
+      const page = record(candidate, `${label}.ui.pages[${index}]`);
+      const id = boundedString(page.id, `${label}.ui.pages[${index}].id`, 32);
+      if (!PACKAGE_IFRAME_ID_V1.test(id)) {
+        throw new Error(`${label}.ui.pages[${index}].id is invalid`);
+      }
+      return id;
+    });
+    if (new Set(pageIds).size !== pageIds.length) {
+      throw new Error(`${label}.ui.pages contains duplicate ids`);
     }
-    if (
-      !Array.isArray(rawUi.mounts) ||
-      rawUi.mounts.length === 0 ||
-      rawUi.mounts.length > 64
-    ) {
-      throw new Error(`${label}.ui.mounts must be a non-empty bounded array`);
-    }
-    const mounts = rawUi.mounts.map((candidate, index) => {
-      const mount = record(candidate, `${label}.ui.mounts[${index}]`);
-      exactKeys(mount, ["slot"], ["order"], `${label}.ui.mounts[${index}]`);
-      const slot = boundedString(
-        mount.slot,
-        `${label}.ui.mounts[${index}].slot`,
-        160,
+    const declaredTools = tools.map((tool) => tool.name);
+    const pages = rawUi.pages.map((candidate, index) => {
+      const pageLabel = `${label}.ui.pages[${index}]`;
+      const page = record(candidate, pageLabel);
+      exactKeys(page, ["id", "html", "mounts"], [], pageLabel);
+      const html = boundedString(
+        page.html,
+        `${pageLabel}.html`,
+        PACKAGE_BUNDLE_MAX_SOURCE_BYTES,
       );
       if (
-        slot !== "frockbot.bot-settings-sections" &&
-        !slot.startsWith("frockbot.tool-result:")
+        new TextEncoder().encode(html).byteLength >
+        PACKAGE_BUNDLE_MAX_SOURCE_BYTES
       ) {
-        throw new Error(`${label}.ui.mounts[${index}].slot is not iframe-safe`);
+        throw new Error(
+          `${pageLabel}.html exceeds the per-Package source quota`,
+        );
       }
-      const order = mount.order;
       if (
-        order !== undefined &&
-        (typeof order !== "number" || !Number.isFinite(order))
+        /<(?:script|iframe|img|audio|video|source|embed|input)\b[^>]*\bsrc\s*=\s*["'](?!data:)/i.test(
+          html,
+        ) ||
+        /<object\b[^>]*\bdata\s*=\s*["'](?!data:)/i.test(html) ||
+        /\bsrcset\s*=/i.test(html) ||
+        /<link\b/i.test(html) ||
+        /@import\b/i.test(html) ||
+        /<meta\b[^>]*http-equiv\s*=\s*["']?refresh/i.test(html) ||
+        /url\(\s*["']?(?!data:|["']?\s*\))/i.test(html)
       ) {
-        throw new Error(`${label}.ui.mounts[${index}].order must be finite`);
+        throw new Error(`${pageLabel}.html may contain inline resources only`);
       }
-      return { slot, ...(order === undefined ? {} : { order }) };
+      if (
+        !Array.isArray(page.mounts) ||
+        page.mounts.length === 0 ||
+        page.mounts.length > 64
+      ) {
+        throw new Error(
+          `${pageLabel}.mounts must be a non-empty bounded array`,
+        );
+      }
+      const mounts = page.mounts.map((candidateMount, mountIndex) => {
+        const mount = record(
+          candidateMount,
+          `${pageLabel}.mounts[${mountIndex}]`,
+        );
+        exactKeys(
+          mount,
+          ["slot"],
+          ["order"],
+          `${pageLabel}.mounts[${mountIndex}]`,
+        );
+        const slot = boundedString(
+          mount.slot,
+          `${pageLabel}.mounts[${mountIndex}].slot`,
+          160,
+        );
+        if (!iframePageSlotAllowedV1(slot, { declaredTools, pageIds })) {
+          throw new Error(
+            `${pageLabel}.mounts[${mountIndex}].slot is not iframe-safe`,
+          );
+        }
+        const order = mount.order;
+        if (
+          order !== undefined &&
+          (typeof order !== "number" || !Number.isFinite(order))
+        ) {
+          throw new Error(
+            `${pageLabel}.mounts[${mountIndex}].order must be finite`,
+          );
+        }
+        return { slot, ...(order === undefined ? {} : { order }) };
+      });
+      return { id: pageIds[index]!, html, mounts };
     });
-    ui = { html, mounts };
+    let entries: NonNullable<AuthorPackageInputV1["ui"]>["entries"];
+    if (rawUi.entries !== undefined) {
+      if (
+        !Array.isArray(rawUi.entries) ||
+        rawUi.entries.length > PACKAGE_IFRAME_MAX_ENTRIES_V1
+      ) {
+        throw new Error(`${label}.ui.entries must be a bounded array`);
+      }
+      entries = rawUi.entries.map((candidate, index) => {
+        const entryLabel = `${label}.ui.entries[${index}]`;
+        const entry = record(candidate, entryLabel);
+        exactKeys(
+          entry,
+          ["id", "slot", "label", "icon", "opens"],
+          ["order"],
+          entryLabel,
+        );
+        const id = boundedString(entry.id, `${entryLabel}.id`, 32);
+        if (!PACKAGE_IFRAME_ID_V1.test(id)) {
+          throw new Error(`${entryLabel}.id is invalid`);
+        }
+        if (entry.slot !== PACKAGE_IFRAME_ENTRY_SLOT_V1) {
+          throw new Error(`${entryLabel}.slot is invalid`);
+        }
+        const order = entry.order;
+        if (
+          order !== undefined &&
+          (typeof order !== "number" || !Number.isFinite(order))
+        ) {
+          throw new Error(`${entryLabel}.order must be finite`);
+        }
+        const opens = record(entry.opens, `${entryLabel}.opens`);
+        exactKeys(opens, ["kind", "page"], [], `${entryLabel}.opens`);
+        if (opens.kind !== "surface") {
+          throw new Error(`${entryLabel}.opens.kind is invalid`);
+        }
+        const page = boundedString(opens.page, `${entryLabel}.opens.page`, 32);
+        const target = pages.find((candidatePage) => candidatePage.id === page);
+        if (
+          !target ||
+          !target.mounts.some(
+            (mount) => mount.slot === `frockbot.surface:${page}`,
+          )
+        ) {
+          throw new Error(
+            `${entryLabel}.opens.page names no page with a matching surface mount`,
+          );
+        }
+        return {
+          id,
+          slot: PACKAGE_IFRAME_ENTRY_SLOT_V1 as "frockbot.sidebar-actions",
+          ...(order === undefined ? {} : { order }),
+          label: boundedString(
+            entry.label,
+            `${entryLabel}.label`,
+            PACKAGE_IFRAME_ENTRY_LABEL_MAX_V1,
+          ),
+          icon: boundedString(entry.icon, `${entryLabel}.icon`, 64),
+          opens: { kind: "surface" as const, page },
+        };
+      });
+      if (new Set(entries.map((entry) => entry.id)).size !== entries.length) {
+        throw new Error(`${label}.ui.entries contains duplicate ids`);
+      }
+    }
+    ui = { pages, ...(entries ? { entries } : {}) };
   }
   return {
     packageId,
@@ -370,28 +490,81 @@ export const AUTHOR_PACKAGE_INPUT_SCHEMA_V1 = {
     ui: {
       type: "object",
       additionalProperties: false,
-      required: ["html", "mounts"],
+      required: ["pages"],
       properties: {
-        html: {
-          type: "string",
-          description:
-            "One ui.html page (maximum 256 KB). CSS and JavaScript must be inline; images may use data: URLs.",
-        },
-        mounts: {
+        pages: {
           type: "array",
           minItems: 1,
-          maxItems: 64,
+          maxItems: PACKAGE_IFRAME_MAX_PAGES_V1,
+          description:
+            "Up to 8 sandboxed HTML pages, each mounted into one or more slots.",
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["slot"],
+            required: ["id", "html", "mounts"],
             properties: {
-              slot: {
+              id: {
                 type: "string",
                 description:
-                  "frockbot.bot-settings-sections or frockbot.tool-result:<declaredToolName>",
+                  "Lowercase page id, /^[a-z][a-z0-9-]{0,31}$/, unique in this Package.",
               },
+              html: {
+                type: "string",
+                description:
+                  "One HTML page (maximum 256 KB). CSS and JavaScript must be inline; images may use data: URLs.",
+              },
+              mounts: {
+                type: "array",
+                minItems: 1,
+                maxItems: 64,
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["slot"],
+                  properties: {
+                    slot: {
+                      type: "string",
+                      description:
+                        "frockbot.bot-settings-sections, frockbot.tool-result:<declaredToolName>, frockbot.right-panel, or frockbot.surface:<pageId>",
+                    },
+                    order: { type: "number" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        entries: {
+          type: "array",
+          maxItems: PACKAGE_IFRAME_MAX_ENTRIES_V1,
+          description:
+            "Up to 4 sidebar launchers. Each opens one of your pages as an overlay surface; that page must mount frockbot.surface:<its own id>.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "slot", "label", "icon", "opens"],
+            properties: {
+              id: {
+                type: "string",
+                description:
+                  "Lowercase entry id, /^[a-z][a-z0-9-]{0,31}$/, unique in this Package.",
+              },
+              slot: { type: "string", enum: [PACKAGE_IFRAME_ENTRY_SLOT_V1] },
               order: { type: "number" },
+              label: {
+                type: "string",
+                maxLength: PACKAGE_IFRAME_ENTRY_LABEL_MAX_V1,
+              },
+              icon: { type: "string", description: "A FrockBot UiIcon name." },
+              opens: {
+                type: "object",
+                additionalProperties: false,
+                required: ["kind", "page"],
+                properties: {
+                  kind: { type: "string", enum: ["surface"] },
+                  page: { type: "string" },
+                },
+              },
             },
           },
         },
@@ -449,7 +622,8 @@ export async function authoringEffectIdV1(input: {
   runId: string;
   packageId: string;
   sourceHash: string;
-  uiHtmlHash?: string;
+  /** Every page the bundler is asked for, in declaration order. */
+  uiPageHashes?: Array<{ id: string; htmlHash: string }>;
   hooks?: BotIsolateHookEventNameV1[];
 }): Promise<string> {
   const digest = await sha256HexV1(
@@ -457,7 +631,7 @@ export async function authoringEffectIdV1(input: {
       input.runId,
       input.packageId,
       input.sourceHash,
-      input.uiHtmlHash ?? null,
+      (input.uiPageHashes ?? []).map((page) => [page.id, page.htmlHash]),
       input.hooks ?? [],
     ]),
   );
@@ -502,17 +676,21 @@ export function authoredManifestV1(input: {
   tools: AuthorPackageInputV1["tools"];
   hooks?: AuthorPackageInputV1["hooks"];
   ui?: {
-    artifact: {
-      contentHash: string;
-      size: number;
-      mediaType: "text/html";
-      bundlerVersion: string;
-    };
-    mounts: Array<{ slot: string; order?: number }>;
+    pages: Array<{
+      id: string;
+      artifact: {
+        contentHash: string;
+        size: number;
+        mediaType: "text/html";
+        bundlerVersion: string;
+      };
+      mounts: Array<{ slot: string; order?: number }>;
+    }>;
+    entries?: NonNullable<AuthorPackageInputV1["ui"]>["entries"];
   };
 }): Record<string, unknown> {
   return {
-    schemaVersion: 3,
+    schemaVersion: 5,
     id: input.packageId,
     displayName: input.displayName,
     version: input.version,
@@ -524,8 +702,19 @@ export function authoredManifestV1(input: {
         ? {
             client: {
               kind: "iframe",
-              artifact: { ...input.ui.artifact },
-              mounts: input.ui.mounts.map((mount) => ({ ...mount })),
+              pages: input.ui.pages.map((page) => ({
+                id: page.id,
+                artifact: { ...page.artifact },
+                mounts: page.mounts.map((mount) => ({ ...mount })),
+              })),
+              ...(input.ui.entries
+                ? {
+                    entries: input.ui.entries.map((entry) => ({
+                      ...entry,
+                      opens: { ...entry.opens },
+                    })),
+                  }
+                : {}),
             },
           }
         : {}),

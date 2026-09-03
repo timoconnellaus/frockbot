@@ -259,13 +259,15 @@ export function createPackageCatalogHost(
     }
     const client = entry.bundle.manifest.contributions.client;
     if (client && isClientIframeContribution(client)) {
-      const uiArtifact = await options.catalog.headUiArtifact(
-        client.artifact.contentHash,
-      );
-      if (!uiArtifact || uiArtifact.size !== client.artifact.size) {
-        throw new Error(
-          `Catalog iframe artifact "${client.artifact.contentHash}" is absent or has the wrong size`,
+      for (const page of client.pages) {
+        const uiArtifact = await options.catalog.headUiArtifact(
+          page.artifact.contentHash,
         );
+        if (!uiArtifact || uiArtifact.size !== page.artifact.size) {
+          throw new Error(
+            `Catalog iframe artifact "${page.artifact.contentHash}" is absent or has the wrong size`,
+          );
+        }
       }
     }
   }

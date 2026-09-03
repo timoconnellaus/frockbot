@@ -15,13 +15,19 @@ describe("Package iframe server admission", () => {
         packageId: "weather-page",
         displayName: "Weather page",
         provenance: "Bot-authored",
-        artifact: {
-          contentHash: "a".repeat(64),
-          size: 123,
-          mediaType: "text/html",
-          bundlerVersion: "frockbot-inline-html@1",
-        },
-        mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+        pages: [
+          {
+            id: "main",
+            artifact: {
+              contentHash: "a".repeat(64),
+              size: 123,
+              mediaType: "text/html",
+              bundlerVersion: "frockbot-inline-html@1",
+            },
+            mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+          },
+        ],
+        entries: [],
         declaredTools: ["weather_lookup"],
       },
     ],
@@ -56,7 +62,7 @@ describe("Package iframe server admission", () => {
       bundlerVersion: "frockbot-inline-html@1",
     };
     const manifest: FrockBotManifest = {
-      schemaVersion: 3,
+      schemaVersion: 5,
       id: "weather-page",
       displayName: "Weather page",
       version: "0.0.1",
@@ -66,8 +72,13 @@ describe("Package iframe server admission", () => {
         runtime: { entry: "./package.js", host: "bot-isolate" },
         client: {
           kind: "iframe",
-          artifact: uiArtifact,
-          mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+          pages: [
+            {
+              id: "main",
+              artifact: uiArtifact,
+              mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+            },
+          ],
         },
       },
       tools: [
@@ -122,8 +133,14 @@ describe("Package iframe server admission", () => {
         packageId: "weather-page",
         displayName: "Weather page",
         provenance: "User-installed",
-        artifact: uiArtifact,
-        mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+        pages: [
+          {
+            id: "main",
+            artifact: uiArtifact,
+            mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+          },
+        ],
+        entries: [],
         declaredTools: ["weather_lookup"],
       },
     ]);

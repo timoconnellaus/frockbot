@@ -65,25 +65,70 @@ it("reports the sha-256 of the module bytes it returns", async () => {
   expect(result.artifact.contentHash).toBe(hex);
 });
 
-it("returns raw ui.html under its own content hash", async () => {
-  const html = "<!doctype html><script>window.frockbot.resize()</script>";
-  const result = await bundle(bundleRequest({ ui: { path: "ui.html", html } }));
+it("returns every raw UI page under its own content hash", async () => {
+  const main = "<!doctype html><script>window.frockbot.resize()</script>";
+  const board = "<!doctype html><h1>Board</h1>";
+  const result = await bundle(
+    bundleRequest({
+      uiPages: [
+        { id: "main", html: main },
+        { id: "board", html: board },
+      ],
+    }),
+  );
   expect(result.status).toBe("bundled");
   if (result.status !== "bundled") return;
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(html),
-  );
-  const hash = [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-  expect(result.uiHtml).toBe(html);
-  expect(result.uiArtifact).toEqual({
-    contentHash: hash,
-    size: new TextEncoder().encode(html).byteLength,
-    mediaType: "text/html",
-    bundlerVersion: "frockbot-inline-html@1",
-  });
+  const hashOf = async (html: string) => {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(html),
+    );
+    return [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  };
+  expect(result.uiArtifacts).toEqual([
+    {
+      id: "main",
+      artifact: {
+        contentHash: await hashOf(main),
+        size: new TextEncoder().encode(main).byteLength,
+        mediaType: "text/html",
+        bundlerVersion: "frockbot-inline-html@1",
+      },
+      html: main,
+    },
+    {
+      id: "board",
+      artifact: {
+        contentHash: await hashOf(board),
+        size: new TextEncoder().encode(board).byteLength,
+        mediaType: "text/html",
+        bundlerVersion: "frockbot-inline-html@1",
+      },
+      html: board,
+    },
+  ]);
+});
+
+it("refuses UI pages outside the id, count, and uniqueness bounds", async () => {
+  for (const uiPages of [
+    [],
+    [{ id: "Main", html: "<!doctype html>" }],
+    [
+      { id: "main", html: "<!doctype html>" },
+      { id: "main", html: "<!doctype html><b>2</b>" },
+    ],
+    Array.from({ length: 9 }, (_unused, index) => ({
+      id: `page-${index}`,
+      html: "<!doctype html>",
+    })),
+  ]) {
+    const result = await bundle(bundleRequest({ uiPages }));
+    expect(result.status).toBe("failed");
+    if (result.status !== "failed") continue;
+    expect(result.failure).toBe("invalid-request");
+  }
 });
 
 it("fails a syntax error with a file:line:col diagnostic and no artifact", async () => {
@@ -159,10 +204,10 @@ it("refuses source over the 256 KB quota", async () => {
   expect(result.failure).toBe("source-too-large");
 });
 
-it("refuses ui.html over the 256 KB quota", async () => {
+it("refuses a UI page over the 256 KB quota", async () => {
   const result = await bundle(
     bundleRequest({
-      ui: { path: "ui.html", html: "x".repeat(256 * 1024 + 1) },
+      uiPages: [{ id: "main", html: "x".repeat(256 * 1024 + 1) }],
     }),
   );
   expect(result.status).toBe("failed");

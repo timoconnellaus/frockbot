@@ -1,9 +1,16 @@
 import {
   isBotIsolateHookEventNameV1,
   decodeTurnTypeV1,
+  iframePageSlotAllowedV1,
+  PACKAGE_IFRAME_ENTRY_LABEL_MAX_V1,
+  PACKAGE_IFRAME_ENTRY_SLOT_V1,
+  PACKAGE_IFRAME_ID_V1,
+  PACKAGE_IFRAME_MAX_ENTRIES_V1,
+  PACKAGE_IFRAME_MAX_PAGES_V1,
   type BotIsolateHookEventNameV1,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
+import type { ArtifactRefV1 } from "./generation.ts";
 
 /** The Contribution kinds a Package manifest can declare. */
 export type ManifestContributionKind =
@@ -55,11 +62,52 @@ export interface ClientIframeArtifactV1 {
   bundlerVersion: string;
 }
 
-/** A non-first-party page. It never becomes JavaScript in the app origin. */
-export interface ClientIframeContribution {
-  kind: "iframe";
+/** One non-first-party page. It never becomes JavaScript in the app origin. */
+export interface ClientIframePageV1 {
+  /** `/^[a-z][a-z0-9-]{0,31}$/`, unique within the Contribution. */
+  id: string;
   artifact: ClientIframeArtifactV1;
   mounts: ClientMount[];
+}
+
+/**
+ * Manifest v5. A declarative launcher for one of the Package's pages. The
+ * shell renders it; the Package never scripts the app origin to place it.
+ */
+export interface ClientEntryV1 {
+  id: string;
+  slot: "frockbot.sidebar-actions";
+  order?: number;
+  /** At most 32 characters. */
+  label: string;
+  /** A `UiIcon` name. */
+  icon: string;
+  opens: { kind: "surface"; page: string };
+}
+
+/**
+ * Manifest v5. The multi-page iframe client. A v3/v4 record carrying one
+ * top-level `artifact` and `mounts` is migrated to `pages: [{ id: "main" }]`
+ * at the decoder; there is one in-memory shape, never two.
+ */
+export interface ClientIframeContribution {
+  kind: "iframe";
+  /** 1..8 pages. */
+  pages: ClientIframePageV1[];
+  /** 0..4 entries. */
+  entries?: ClientEntryV1[];
+}
+
+/**
+ * Manifest v5. What a Package contributes as one durable instance per User —
+ * an Applet. The kernel mounts `server` as a facet under its own Applet
+ * Durable Object; `tools` is what that instance offers the User's Bots.
+ */
+export interface InstanceContributionV1 {
+  contract: 1;
+  server: ArtifactRefV1;
+  ui: ClientIframeArtifactV1;
+  tools: ManifestToolDeclaration[];
 }
 
 export type ClientContribution =
@@ -169,7 +217,7 @@ export interface PackageConfiguration {
 }
 
 export interface FrockBotManifest {
-  schemaVersion: 2 | 3 | 4;
+  schemaVersion: 2 | 3 | 4 | 5;
   id: string;
   displayName: string;
   version: string;
@@ -182,6 +230,8 @@ export interface FrockBotManifest {
     client?: ClientContribution;
     desktop?: DesktopContribution;
     mobile?: MobileContribution;
+    /** Manifest v5 only; refused below it. */
+    instance?: InstanceContributionV1;
   };
   permissions: string[];
   configuration?: PackageConfiguration;
@@ -440,7 +490,187 @@ function decodeV1(value: Record<string, unknown>): FrockBotManifest {
  * Manifest v4 extends v3, so every v3 rule applies unchanged to a v4 body.
  */
 function isV3OrLater(value: Record<string, unknown>): boolean {
-  return value.schemaVersion === 3 || value.schemaVersion === 4;
+  return (
+    value.schemaVersion === 3 ||
+    value.schemaVersion === 4 ||
+    value.schemaVersion === 5
+  );
+}
+
+function isV5(value: Record<string, unknown>): boolean {
+  return value.schemaVersion === 5;
+}
+
+function decodeClientMounts(value: unknown, label: string): ClientMount[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+  return value.map((mount) => {
+    if (!isRecord(mount)) throw new Error(`${label} entry must be an object`);
+    exactFields(mount, ["slot", "order"], label);
+    const order = mount.order;
+    if (
+      order !== undefined &&
+      (typeof order !== "number" || !Number.isFinite(order))
+    ) {
+      throw new Error(`${label} order must be finite`);
+    }
+    return {
+      slot: requiredString(mount, "slot"),
+      ...(order === undefined ? {} : { order }),
+    };
+  });
+}
+
+function decodeClientIframeArtifact(
+  value: unknown,
+  label: string,
+): ClientIframeArtifactV1 {
+  if (!isRecord(value)) throw new Error(`${label} must be an object`);
+  exactFields(
+    value,
+    ["contentHash", "size", "mediaType", "bundlerVersion"],
+    label,
+  );
+  if (
+    typeof value.contentHash !== "string" ||
+    !/^[0-9a-f]{64}$/.test(value.contentHash)
+  ) {
+    throw new Error(`${label} contentHash must be a sha-256 digest`);
+  }
+  if (
+    !Number.isSafeInteger(value.size) ||
+    (value.size as number) < 0 ||
+    (value.size as number) > 256 * 1024
+  ) {
+    throw new Error(`${label} size must be within the 256 KB quota`);
+  }
+  if (value.mediaType !== "text/html") {
+    throw new Error(`${label} mediaType is invalid`);
+  }
+  return {
+    contentHash: value.contentHash,
+    size: value.size as number,
+    mediaType: "text/html",
+    bundlerVersion: requiredString(value, "bundlerVersion"),
+  };
+}
+
+function decodeInstanceContribution(value: unknown): InstanceContributionV1 {
+  if (!isRecord(value)) {
+    throw new Error("manifest instance Contribution must be an object");
+  }
+  exactFields(
+    value,
+    ["contract", "server", "ui", "tools"],
+    "manifest instance Contribution",
+  );
+  if (value.contract !== 1) {
+    throw new Error("manifest instance Contribution contract is unsupported");
+  }
+  if (!isRecord(value.server)) {
+    throw new Error("manifest instance Contribution server must be an object");
+  }
+  exactFields(
+    value.server,
+    ["contentHash", "size", "mediaType", "bundlerVersion"],
+    "manifest instance Contribution server",
+  );
+  const server = value.server;
+  if (
+    typeof server.contentHash !== "string" ||
+    !/^[0-9a-f]{64}$/.test(server.contentHash)
+  ) {
+    throw new Error(
+      "manifest instance Contribution server contentHash must be a sha-256 digest",
+    );
+  }
+  if (!Number.isSafeInteger(server.size) || (server.size as number) < 0) {
+    throw new Error(
+      "manifest instance Contribution server size must be a non-negative integer",
+    );
+  }
+  if (server.mediaType !== "application/javascript") {
+    throw new Error(
+      "manifest instance Contribution server mediaType is invalid",
+    );
+  }
+  const tools = decodeManifestTools(value.tools);
+  if (!tools) {
+    throw new Error(
+      "manifest instance Contribution must declare its instance tools",
+    );
+  }
+  return {
+    contract: 1,
+    server: {
+      contentHash: server.contentHash,
+      size: server.size as number,
+      mediaType: "application/javascript",
+      bundlerVersion: requiredString(server, "bundlerVersion"),
+    },
+    ui: decodeClientIframeArtifact(
+      value.ui,
+      "manifest instance Contribution ui",
+    ),
+    tools,
+  };
+}
+
+function decodeClientEntries(value: unknown): ClientEntryV1[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > PACKAGE_IFRAME_MAX_ENTRIES_V1) {
+    throw new Error("manifest iframe client entries must be a bounded array");
+  }
+  const entries = value.map((candidate, index) => {
+    const label = `manifest iframe client entries[${index}]`;
+    if (!isRecord(candidate)) throw new Error(`${label} must be an object`);
+    exactFields(
+      candidate,
+      ["id", "slot", "order", "label", "icon", "opens"],
+      label,
+    );
+    const id = requiredString(candidate, "id");
+    if (!PACKAGE_IFRAME_ID_V1.test(id)) {
+      throw new Error(`${label} id is invalid`);
+    }
+    if (candidate.slot !== PACKAGE_IFRAME_ENTRY_SLOT_V1) {
+      throw new Error(`${label} slot is invalid`);
+    }
+    const order = candidate.order;
+    if (
+      order !== undefined &&
+      (typeof order !== "number" || !Number.isFinite(order))
+    ) {
+      throw new Error(`${label} order must be finite`);
+    }
+    const entryLabel = requiredString(candidate, "label");
+    if (entryLabel.length > PACKAGE_IFRAME_ENTRY_LABEL_MAX_V1) {
+      throw new Error(`${label} label is too long`);
+    }
+    const icon = requiredString(candidate, "icon");
+    if (icon.length > 64) throw new Error(`${label} icon is too long`);
+    if (!isRecord(candidate.opens)) {
+      throw new Error(`${label} opens must be an object`);
+    }
+    exactFields(candidate.opens, ["kind", "page"], `${label} opens`);
+    if (candidate.opens.kind !== "surface") {
+      throw new Error(`${label} opens.kind is invalid`);
+    }
+    return {
+      id,
+      slot: PACKAGE_IFRAME_ENTRY_SLOT_V1 as "frockbot.sidebar-actions",
+      ...(order === undefined ? {} : { order }),
+      label: entryLabel,
+      icon,
+      opens: {
+        kind: "surface" as const,
+        page: requiredString(candidate.opens, "page"),
+      },
+    };
+  });
+  if (new Set(entries.map((entry) => entry.id)).size !== entries.length) {
+    throw new Error("manifest iframe client entries contain duplicate ids");
+  }
+  return entries;
 }
 
 function decodeV2(value: Record<string, unknown>): FrockBotManifest {
@@ -456,7 +686,7 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
   exactFields(
     value.contributions,
     isV3OrLater(value)
-      ? ["backend", "runtime", "client", "desktop", "mobile"]
+      ? ["backend", "runtime", "client", "desktop", "mobile", "instance"]
       : ["runtime", "client", "desktop", "mobile"],
     "manifest contributions",
   );
@@ -509,74 +739,77 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
     const client = value.contributions.client;
     if (!isRecord(client))
       throw new Error("manifest client contribution must be an object");
-    const mounts = client.mounts;
-    if (!Array.isArray(mounts)) {
-      throw new Error("manifest client mounts must be an array");
-    }
-    const decodedMounts = mounts.map((mount) => {
-      if (!isRecord(mount))
-        throw new Error("manifest client mount must be an object");
-      exactFields(mount, ["slot", "order"], "manifest client mount");
-      const order = mount.order;
-      if (
-        order !== undefined &&
-        (typeof order !== "number" || !Number.isFinite(order))
-      ) {
-        throw new Error("manifest client mount order must be finite");
-      }
-      return {
-        slot: requiredString(mount, "slot"),
-        ...(order === undefined ? {} : { order }),
-      };
-    });
     if (client.kind === "iframe") {
       if (!isV3OrLater(value)) {
         throw new Error("manifest iframe client requires schema version 3");
       }
-      exactFields(
-        client,
-        ["kind", "artifact", "mounts"],
-        "manifest iframe client contribution",
-      );
-      if (!isRecord(client.artifact)) {
-        throw new Error("manifest iframe client artifact must be an object");
-      }
-      exactFields(
-        client.artifact,
-        ["contentHash", "size", "mediaType", "bundlerVersion"],
-        "manifest iframe client artifact",
-      );
-      const artifact = client.artifact;
-      if (
-        typeof artifact.contentHash !== "string" ||
-        !/^[0-9a-f]{64}$/.test(artifact.contentHash)
-      ) {
-        throw new Error(
-          "manifest iframe client artifact contentHash must be a sha-256 digest",
+      if (isV5(value)) {
+        exactFields(
+          client,
+          ["kind", "pages", "entries"],
+          "manifest iframe client contribution",
         );
-      }
-      if (
-        !Number.isSafeInteger(artifact.size) ||
-        (artifact.size as number) < 0 ||
-        (artifact.size as number) > 256 * 1024
-      ) {
-        throw new Error(
-          "manifest iframe client artifact size must be within the 256 KB quota",
+        if (
+          !Array.isArray(client.pages) ||
+          client.pages.length === 0 ||
+          client.pages.length > PACKAGE_IFRAME_MAX_PAGES_V1
+        ) {
+          throw new Error(
+            "manifest iframe client pages must be a non-empty bounded array",
+          );
+        }
+        const pages = client.pages.map((candidate, index) => {
+          const label = `manifest iframe client pages[${index}]`;
+          if (!isRecord(candidate))
+            throw new Error(`${label} must be an object`);
+          exactFields(candidate, ["id", "artifact", "mounts"], label);
+          const id = requiredString(candidate, "id");
+          if (!PACKAGE_IFRAME_ID_V1.test(id)) {
+            throw new Error(`${label} id is invalid`);
+          }
+          return {
+            id,
+            artifact: decodeClientIframeArtifact(
+              candidate.artifact,
+              `${label} artifact`,
+            ),
+            mounts: decodeClientMounts(candidate.mounts, `${label} mounts`),
+          };
+        });
+        if (new Set(pages.map((page) => page.id)).size !== pages.length) {
+          throw new Error("manifest iframe client pages contain duplicate ids");
+        }
+        const entries = decodeClientEntries(client.entries);
+        contributions.client = {
+          kind: "iframe",
+          pages,
+          ...(entries ? { entries } : {}),
+        };
+      } else {
+        // Migration, not compatibility: the v3/v4 single-page record becomes
+        // the one in-memory multi-page shape and is written back as v5.
+        exactFields(
+          client,
+          ["kind", "artifact", "mounts"],
+          "manifest iframe client contribution",
         );
+        contributions.client = {
+          kind: "iframe",
+          pages: [
+            {
+              id: "main",
+              artifact: decodeClientIframeArtifact(
+                client.artifact,
+                "manifest iframe client artifact",
+              ),
+              mounts: decodeClientMounts(
+                client.mounts,
+                "manifest client mount",
+              ),
+            },
+          ],
+        };
       }
-      if (artifact.mediaType !== "text/html") {
-        throw new Error("manifest iframe client artifact mediaType is invalid");
-      }
-      contributions.client = {
-        kind: "iframe",
-        artifact: {
-          contentHash: artifact.contentHash,
-          size: artifact.size as number,
-          mediaType: "text/html",
-          bundlerVersion: requiredString(artifact, "bundlerVersion"),
-        },
-        mounts: decodedMounts,
-      };
     } else {
       exactFields(
         client,
@@ -585,7 +818,7 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
       );
       contributions.client = {
         entry: relativeEntry(client, "entry"),
-        mounts: decodedMounts,
+        mounts: decodeClientMounts(client.mounts, "manifest client mount"),
         outlets: optionalStringArray(client, "outlets"),
       };
     }
@@ -625,12 +858,23 @@ function decodeV2(value: Record<string, unknown>): FrockBotManifest {
       commands: optionalStringArray(desktop, "commands"),
     };
   }
+  if (value.contributions.instance !== undefined) {
+    if (!isV5(value)) {
+      throw new Error(
+        "manifest instance Contribution requires schema version 5",
+      );
+    }
+    contributions.instance = decodeInstanceContribution(
+      value.contributions.instance,
+    );
+  }
   if (
     !contributions.backend &&
     !contributions.runtime &&
     !contributions.client &&
     !contributions.desktop &&
-    !contributions.mobile
+    !contributions.mobile &&
+    !contributions.instance
   ) {
     throw new Error("manifest has no contributions");
   }
@@ -1447,29 +1691,68 @@ function decodeV4(value: Record<string, unknown>): FrockBotManifest {
   };
 }
 
+/**
+ * v5 is v4 plus the multi-page iframe client, declarative entries, and the
+ * Instance Contribution. A v3 or v4 record decodes to the same in-memory
+ * shape through the single-page migration in `decodeV2`.
+ */
+function decodeV5(value: Record<string, unknown>): FrockBotManifest {
+  const base = decodeV2(value);
+  const tools = decodeManifestTools(value.tools);
+  const hooks = decodeManifestHooks(value.hooks);
+  const botIsolate = base.contributions.runtime?.host === "bot-isolate";
+  if (botIsolate !== (tools !== undefined)) {
+    throw new Error(
+      "manifest bot-isolate runtime and tools declaration must appear together",
+    );
+  }
+  if (!botIsolate && hooks !== undefined) {
+    throw new Error("manifest hooks require a bot-isolate runtime");
+  }
+  validateIframeClientContribution(base.contributions.client, tools);
+  return {
+    ...base,
+    schemaVersion: 5,
+    configuration: decodeConfiguration(value.configuration, true),
+    ...(tools ? { tools } : {}),
+    ...(hooks ? { hooks } : {}),
+  };
+}
+
 function validateIframeClientContribution(
   client: ClientContribution | undefined,
   tools: ManifestToolDeclaration[] | undefined,
 ): void {
   if (!client || !isClientIframeContribution(client)) return;
-  if (client.mounts.length === 0 || client.mounts.length > 64) {
-    throw new Error(
-      "manifest iframe client mounts must be a non-empty bounded array",
-    );
-  }
-  const toolNames = new Set((tools ?? []).map((tool) => tool.name));
-  for (const mount of client.mounts) {
-    if (mount.slot === "frockbot.bot-settings-sections") continue;
-    const prefix = "frockbot.tool-result:";
-    if (!mount.slot.startsWith(prefix)) {
+  const declaredTools = (tools ?? []).map((tool) => tool.name);
+  const pageIds = client.pages.map((page) => page.id);
+  for (const page of client.pages) {
+    if (page.mounts.length === 0 || page.mounts.length > 64) {
       throw new Error(
-        `manifest iframe client slot "${mount.slot}" is not iframe-safe`,
+        `manifest iframe client page "${page.id}" mounts must be a non-empty bounded array`,
       );
     }
-    const toolName = mount.slot.slice(prefix.length);
-    if (!toolNames.has(toolName)) {
+    for (const mount of page.mounts) {
+      if (!iframePageSlotAllowedV1(mount.slot, { declaredTools, pageIds })) {
+        const toolResult = "frockbot.tool-result:";
+        throw new Error(
+          mount.slot.startsWith(toolResult)
+            ? `manifest iframe client tool-result slot names undeclared tool "${mount.slot.slice(toolResult.length)}"`
+            : `manifest iframe client slot "${mount.slot}" is not iframe-safe`,
+        );
+      }
+    }
+  }
+  for (const entry of client.entries ?? []) {
+    const target = client.pages.find((page) => page.id === entry.opens.page);
+    if (
+      !target ||
+      !target.mounts.some(
+        (mount) => mount.slot === `frockbot.surface:${entry.opens.page}`,
+      )
+    ) {
       throw new Error(
-        `manifest iframe client tool-result slot names undeclared tool "${toolName}"`,
+        `manifest iframe client entry "${entry.id}" opens page "${entry.opens.page}", which declares no surface mount`,
       );
     }
   }
@@ -1495,7 +1778,8 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
   if (
     value.schemaVersion === 2 ||
     value.schemaVersion === 3 ||
-    value.schemaVersion === 4
+    value.schemaVersion === 4 ||
+    value.schemaVersion === 5
   ) {
     exactFields(
       value,
@@ -1517,7 +1801,8 @@ export function decodeFrockBotManifest(value: unknown): FrockBotManifest {
     );
     if (value.schemaVersion === 2) return decodeV2(value);
     if (value.schemaVersion === 3) return decodeV3(value);
-    return decodeV4(value);
+    if (value.schemaVersion === 4) return decodeV4(value);
+    return decodeV5(value);
   }
   throw new Error("unsupported FrockBot manifest version");
 }

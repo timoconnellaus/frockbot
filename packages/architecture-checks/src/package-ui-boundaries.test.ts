@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
 import { authoredManifestV1 } from "@frockbot/plugin-authoring/shared";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
@@ -16,24 +17,30 @@ describe("non-first-party Package UI boundaries", () => {
         { name: "weather_lookup", description: "Weather", inputSchema: {} },
       ],
       ui: {
-        artifact: {
-          contentHash: "a".repeat(64),
-          size: 1,
-          mediaType: "text/html",
-          bundlerVersion: "frockbot-inline-html@1",
-        },
-        mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+        pages: [
+          {
+            id: "main",
+            artifact: {
+              contentHash: "a".repeat(64),
+              size: 1,
+              mediaType: "text/html",
+              bundlerVersion: "frockbot-inline-html@1",
+            },
+            mounts: [{ slot: "frockbot.tool-result:weather_lookup" }],
+          },
+        ],
       },
     });
+    // The synthesized manifest crosses the kernel's own strict decoder.
+    expect(decodeFrockBotManifest(manifest).schemaVersion).toBe(5);
     const client = (manifest.contributions as Record<string, unknown>)
       .client as Record<string, unknown>;
     expect(client.kind).toBe("iframe");
     expect(client).not.toHaveProperty("entry");
+    expect(client).not.toHaveProperty("artifact");
     const host = read("packages/plugin-shell/src/client/PackageIframeHost.vue");
     expect(host).toContain("<iframe");
-    expect(host).toContain(
-      "/packages/${props.contribution.artifact.contentHash}.html",
-    );
+    expect(host).toContain("/packages/${props.page.artifact.contentHash}.html");
   });
 
   test("a page cannot read the app's cookies or storage", () => {

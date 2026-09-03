@@ -590,9 +590,15 @@ export function isPlatformOwnedPackageV1(
 export function isUserInstallablePackageV1(
   manifest: Pick<FrockBotManifest, "contributions" | "configuration">,
 ): boolean {
-  const mountsApplicationRoot = (
-    manifest.contributions.client?.mounts ?? []
-  ).some((mount) => mount.slot === APPLICATION_ROOT_SLOT_V1);
+  const client = manifest.contributions.client;
+  const clientMounts = client
+    ? "pages" in client
+      ? client.pages.flatMap((page) => page.mounts)
+      : client.mounts
+    : [];
+  const mountsApplicationRoot = clientMounts.some(
+    (mount) => mount.slot === APPLICATION_ROOT_SLOT_V1,
+  );
   if (mountsApplicationRoot) return false;
 
   const configuration = manifest.configuration;

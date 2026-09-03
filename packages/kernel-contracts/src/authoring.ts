@@ -18,9 +18,27 @@ export const PACKAGE_BUNDLE_ENTRY = "package.ts";
 /** Raw HTML is content-addressed without transforming it. */
 export const PACKAGE_UI_ARTIFACT_VERSION = "frockbot-inline-html@1";
 
+/** Manifest v5: 1..8 UI pages, each hashed and stored under its own id. */
+export const PACKAGE_UI_MAX_PAGES = 8;
+export const PACKAGE_UI_PAGE_ID = /^[a-z][a-z0-9-]{0,31}$/;
+
 export interface PackageBundleSourceV1 {
   path: string;
   text: string;
+}
+
+/** One inline-only HTML page in a bundle request. */
+export interface PackageUiPageSourceV1 {
+  id: string;
+  html: string;
+}
+
+/** One content-addressed HTML page in a bundle result. */
+export interface PackageUiArtifactPageV1 {
+  id: string;
+  artifact: PackageUiArtifactV1;
+  /** Exact HTML bytes; the Durable Object owns the immutable write. */
+  html: string;
 }
 
 export interface PackageBundleRequestV1 {
@@ -31,8 +49,8 @@ export interface PackageBundleRequestV1 {
   compatibilityDate: string;
   entry: "package.ts";
   sources: PackageBundleSourceV1[];
-  /** Optional immutable inline-only HTML page; never compiled into app code. */
-  ui?: { path: "ui.html"; html: string };
+  /** Immutable inline-only HTML pages; never compiled into app code. */
+  uiPages?: PackageUiPageSourceV1[];
 }
 
 export interface PackageBundleArtifactV1 {
@@ -57,9 +75,7 @@ export type PackageBundleResultV1 =
       effectId: string;
       status: "bundled";
       artifact: PackageBundleArtifactV1;
-      uiArtifact?: PackageUiArtifactV1;
-      /** Exact HTML bytes; the Durable Object owns the immutable write. */
-      uiHtml?: string;
+      uiArtifacts?: PackageUiArtifactPageV1[];
       /** The module bytes as text; the Durable Object owns the artifact write. */
       module: string;
       diagnostics: string[];
@@ -191,12 +207,7 @@ export function decodePackageBundleResultV1(
     throw new Error(`${label}.schemaVersion is unsupported`);
   const effectId = boundedString(value.effectId, `${label}.effectId`, 200);
   if (value.status === "bundled") {
-    const hasUi = value.uiArtifact !== undefined || value.uiHtml !== undefined;
-    if ((value.uiArtifact === undefined) !== (value.uiHtml === undefined)) {
-      throw new Error(
-        `${label} must return UI artifact metadata and HTML together`,
-      );
-    }
+    const hasUi = value.uiArtifacts !== undefined;
     exactKeys(
       value,
       [
@@ -206,7 +217,7 @@ export function decodePackageBundleResultV1(
         "artifact",
         "module",
         "diagnostics",
-        ...(hasUi ? ["uiArtifact", "uiHtml"] : []),
+        ...(hasUi ? ["uiArtifacts"] : []),
       ],
       label,
     );
@@ -216,14 +227,39 @@ export function decodePackageBundleResultV1(
     );
     if (typeof value.module !== "string" || value.module.length === 0)
       throw new Error(`${label}.module must be a non-empty string`);
-    const uiArtifact = hasUi
-      ? decodePackageUiArtifactV1(value.uiArtifact, `${label}.uiArtifact`)
-      : undefined;
-    if (
-      hasUi &&
-      (typeof value.uiHtml !== "string" || value.uiHtml.length === 0)
-    ) {
-      throw new Error(`${label}.uiHtml must be a non-empty string`);
+    let uiArtifacts: PackageUiArtifactPageV1[] | undefined;
+    if (hasUi) {
+      if (
+        !Array.isArray(value.uiArtifacts) ||
+        value.uiArtifacts.length === 0 ||
+        value.uiArtifacts.length > PACKAGE_UI_MAX_PAGES
+      ) {
+        throw new Error(
+          `${label}.uiArtifacts must be a non-empty bounded array`,
+        );
+      }
+      uiArtifacts = value.uiArtifacts.map((candidate, index) => {
+        const pageLabel = `${label}.uiArtifacts[${index}]`;
+        const page = record(candidate, pageLabel);
+        exactKeys(page, ["id", "artifact", "html"], pageLabel);
+        const id = boundedString(page.id, `${pageLabel}.id`, 32);
+        if (!PACKAGE_UI_PAGE_ID.test(id))
+          throw new Error(`${pageLabel}.id is invalid`);
+        if (typeof page.html !== "string" || page.html.length === 0)
+          throw new Error(`${pageLabel}.html must be a non-empty string`);
+        return {
+          id,
+          artifact: decodePackageUiArtifactV1(
+            page.artifact,
+            `${pageLabel}.artifact`,
+          ),
+          html: page.html,
+        };
+      });
+      if (
+        new Set(uiArtifacts.map((page) => page.id)).size !== uiArtifacts.length
+      )
+        throw new Error(`${label}.uiArtifacts contains duplicate ids`);
     }
     return {
       schemaVersion: 1,
@@ -231,7 +267,7 @@ export function decodePackageBundleResultV1(
       status: "bundled",
       artifact,
       module: value.module,
-      ...(uiArtifact ? { uiArtifact, uiHtml: value.uiHtml as string } : {}),
+      ...(uiArtifacts ? { uiArtifacts } : {}),
       diagnostics: diagnostics(value.diagnostics, `${label}.diagnostics`),
     };
   }

@@ -412,7 +412,7 @@ export interface BundleRequestV1 {
   compatibilityDate: string;
   entry: "package.ts";
   sources: { path: string; text: string }[];
-  ui?: { path: "ui.html"; html: string };
+  uiPages?: { id: string; html: string }[];
 }
 
 export type BundleResultV1 =
@@ -421,8 +421,7 @@ export type BundleResultV1 =
       effectId: string;
       status: "bundled";
       artifact: ArtifactRefV1;
-      uiArtifact?: UiArtifactRefV1;
-      uiHtml?: string;
+      uiArtifacts?: { id: string; artifact: UiArtifactRefV1; html: string }[];
       module: string;
       diagnostics: string[];
     }
