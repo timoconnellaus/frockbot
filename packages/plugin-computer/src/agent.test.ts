@@ -262,6 +262,37 @@ describe("computer agent contribution", () => {
     await harness.dispose();
   });
 
+  test("an unconfigured deployment offers no Computer tool and no Computer prompt", async () => {
+    const harness = await createPluginHarness([
+      ComputerRegistry,
+      ToolRegistry,
+      SystemPromptRegistry,
+      SessionStore,
+    ]);
+    await harness.mount(
+      createComputerAgentPlugin({
+        userId: "user-1",
+        defaultProviderId: "fixture",
+        configured: false,
+      }),
+    );
+
+    expect(
+      harness.root.tools
+        .registeredNames()
+        .filter((name) => name.startsWith("computer_")),
+    ).toEqual([]);
+    const prompt = await harness.root.systemPrompt.assemble({
+      sessionId: "session-1",
+      provider: "fixture",
+      model: "fixture",
+      turnType: "chat",
+    });
+    expect(prompt.text).not.toContain("Persistent Computer");
+    expect(prompt.text).not.toContain("computer_exec");
+    await harness.dispose();
+  });
+
   test("satisfies plugin package conventions", () => {
     expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
       name: "@frockbot/plugin-computer",

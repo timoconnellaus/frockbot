@@ -6,6 +6,7 @@
 // the URL is held in this Contribution instance until a read projects it.
 import {
   computerBotPathKeyV1,
+  COMPUTER_UNCONFIGURED_MESSAGE_V1,
   ComputerError,
   decodeComputerDoctorReportV1,
   type ComputerConnectionProgressV1,
@@ -685,6 +686,21 @@ export class ComputerBotBackendContribution {
         "Computer command does not match Bot registration",
       );
     }
+    // A host with no Computer rejects every command with the same reason,
+    // before admission. `connect` in particular must not answer `accepted`:
+    // admitting work that provably cannot be done leaves the User watching a
+    // projection that will never move, and there is nothing to reconcile
+    // later because nothing was ever started.
+    if (!this.host.configured) {
+      return {
+        version: 1,
+        commandId: command.commandId,
+        type: command.type,
+        status: "rejected",
+        completedAt: this.now().toISOString(),
+        failure: COMPUTER_UNCONFIGURED_MESSAGE_V1,
+      };
+    }
     const admitted = await this.admit(userId, command);
     if ("replay" in admitted) return admitted.replay;
     if (command.type === "connect") {
@@ -1303,7 +1319,7 @@ export class ComputerBotBackendContribution {
     let message: string;
     if (!this.host.configured) {
       phase = "unconfigured";
-      message = "No Computer provider is configured for this host";
+      message = COMPUTER_UNCONFIGURED_MESSAGE_V1;
     } else if (provider?.phase === "disconnected") {
       phase = "disconnected";
       message = provider.message;

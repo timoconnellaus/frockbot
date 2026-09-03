@@ -4,7 +4,11 @@ import type {
   ComputerControlLease,
   ComputerHandle,
 } from "@frockbot/computer-core";
-import { computerBotPathKeyV1, ComputerError } from "@frockbot/computer-core";
+import {
+  computerBotPathKeyV1,
+  COMPUTER_UNCONFIGURED_MESSAGE_V1,
+  ComputerError,
+} from "@frockbot/computer-core";
 import {
   COMPUTER_CONNECT_DEFERRAL_MS,
   COMPUTER_CONNECT_START_DELAY_MS,
@@ -127,6 +131,46 @@ function fakeHandle(options: {
 }
 
 describe("Computer Bot Durable Object Contribution", () => {
+  test("an unconfigured host rejects every command, connect included", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: false,
+      providerLabel: "Fake Computer",
+      openComputer: () => {
+        throw new Error("an unconfigured host must not reach a provider");
+      },
+    });
+
+    for (const type of [
+      "connect",
+      "takeControl",
+      "releaseControl",
+      "runDoctor",
+    ] as const) {
+      const receipt = await contribution.execute("user-1", "scout", {
+        version: 1,
+        commandId: `command-${type}`,
+        botId: "scout",
+        type,
+      });
+      expect(receipt).toMatchObject({
+        version: 1,
+        type,
+        status: "rejected",
+        failure: COMPUTER_UNCONFIGURED_MESSAGE_V1,
+      });
+    }
+    // Nothing was admitted, so the projection never claims work is under way.
+    expect(await contribution.read("user-1", "scout")).toMatchObject({
+      phase: "unconfigured",
+      message: COMPUTER_UNCONFIGURED_MESSAGE_V1,
+    });
+    // The refusal is written for the person reading it.
+    expect(COMPUTER_UNCONFIGURED_MESSAGE_V1).not.toContain("SPRITES_TOKEN");
+  });
+
+
   test("records provider progress durably and projects its ordered steps", async () => {
     const storage = new MemoryStorage();
     let contribution: ReturnType<typeof createComputerBotBackendContribution>;
