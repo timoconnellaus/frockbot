@@ -266,6 +266,50 @@ describe("ComputerHostClient open", () => {
     expect(opened).toEqual(result);
   });
 
+  test("an older host that rejects `stream` is asked again without it", async () => {
+    const result = {
+      version: 1 as const,
+      effectId: "effect-1",
+      spriteName: "frockbot-abc",
+      directory: "/home/box/agent-data/agents/bot-1",
+      generation: 1,
+    };
+    // Staging binds to the production Computer host, so an app Worker on main
+    // meets a host that no version tag has moved yet. The host refuses while
+    // decoding, before it touches a Sprite, so asking again without progress
+    // starts no second effect.
+    let attempt = 0;
+    const { fetcher, calls } = recorder(() => {
+      attempt += 1;
+      return attempt === 1
+        ? new Response(
+            JSON.stringify({
+              version: 1,
+              code: "invalid-request",
+              message: "Computer host request has an unknown field: stream",
+              retryable: false,
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          )
+        : new Response(JSON.stringify(result), {
+            headers: { "content-type": "application/json" },
+          });
+    });
+    const seen: ComputerHostProvisioningV1[] = [];
+
+    const opened = await client(fetcher).open({
+      onProgress: (progress: ComputerHostProvisioningV1) => {
+        seen.push(progress);
+      },
+    });
+
+    expect(calls[0]?.body.stream).toBe(true);
+    expect(calls[1]?.body.stream).toBeUndefined();
+    expect(calls).toHaveLength(2);
+    expect(seen).toEqual([]);
+    expect(opened).toEqual(result);
+  });
+
   test("a stream that ends before its result is unavailable and retryable", async () => {
     const { fetcher } = recorder(() =>
       openNdjson([{ type: "progress", progress: starting }], 5),

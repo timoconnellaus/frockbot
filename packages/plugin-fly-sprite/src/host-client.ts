@@ -357,6 +357,30 @@ export class ComputerHostClient {
         effectId,
         options.onProgress,
       );
+    } catch (error) {
+      // A host that predates streamed `open` rejects the request while
+      // decoding it — "unknown field: stream" — and the decode is the first
+      // thing it does, before it touches a Sprite. So this exact refusal is
+      // the one failure here that provably started no work, and asking again
+      // without progress is a second first attempt rather than a retry of an
+      // admitted effect.
+      //
+      // The skew is real and expected: `apps/cloudflare/wrangler.jsonc` binds
+      // staging to the *production* Computer host, so every merge to main
+      // meets a host that a version tag has not yet moved. Losing the progress
+      // report is the correct price; failing every Computer open until the tag
+      // lands is not.
+      if (
+        !(error instanceof ComputerError) ||
+        error.code !== ERROR_CODES["invalid-request"]
+      ) {
+        throw error;
+      }
+      return await this.json(
+        { kind: "open" },
+        decodeComputerHostOpenResultV1,
+        options,
+      );
     } finally {
       lease.release();
     }
