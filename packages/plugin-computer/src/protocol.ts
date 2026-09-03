@@ -147,6 +147,22 @@ export type ComputerCommandReceiptV1 =
       failure: string;
     };
 
+/**
+ * A connect command has been durably admitted and scheduled. Version 2 is a
+ * distinct wire shape from the terminal version 1 receipt: it never claims
+ * that the Computer effect has completed.
+ */
+export interface ComputerCommandAcceptedV2 {
+  version: 2;
+  commandId: string;
+  type: "connect";
+  status: "accepted";
+  admittedAt: string;
+}
+
+export type ComputerCommandResponse =
+  ComputerCommandReceiptV1 | ComputerCommandAcceptedV2;
+
 export class ComputerProtocolDecodeError extends Error {
   override readonly name = "ComputerProtocolDecodeError";
 }
@@ -561,6 +577,44 @@ export function decodeComputerCommandReceiptV1(
   throw new ComputerProtocolDecodeError(
     "Computer command receipt status is invalid",
   );
+}
+
+export function decodeComputerCommandResponse(
+  value: unknown,
+): ComputerCommandResponse {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>).version === 2
+  ) {
+    const candidate = record(value, "Computer command acceptance");
+    exactKeys(
+      candidate,
+      ["version", "commandId", "type", "status", "admittedAt"],
+      [],
+      "Computer command acceptance",
+    );
+    if (candidate.type !== "connect" || candidate.status !== "accepted") {
+      throw new ComputerProtocolDecodeError(
+        "Computer command acceptance is invalid",
+      );
+    }
+    return {
+      version: 2,
+      commandId: text(
+        candidate.commandId,
+        "Computer command acceptance commandId",
+      ),
+      type: "connect",
+      status: "accepted",
+      admittedAt: timestamp(
+        candidate.admittedAt,
+        "Computer command acceptance admittedAt",
+      ),
+    };
+  }
+  return decodeComputerCommandReceiptV1(value);
 }
 
 export function computerCommandFingerprintV1(

@@ -66,7 +66,7 @@ class FakeRuntime implements ComputerClientRuntime {
 
 type Phase = "idle" | "updating" | "ready" | "human-control" | "disconnected";
 
-function mountHostedProvider() {
+function mountHostedProvider(options: { stateChannel?: boolean } = {}) {
   const shell = ref({ activeBotId: "scout" });
   const calls: Array<[string, string | undefined, string | undefined]> = [];
   const runtime = new FakeRuntime();
@@ -77,9 +77,28 @@ function mountHostedProvider() {
   let heldClose: { release: () => void; pending: Promise<void> } | undefined;
   let state: { value: ComputerState } | undefined;
   const slots: ClientSlotRegistration[] = [];
+  let stateObserver:
+    | Parameters<
+        NonNullable<ClientPluginContext["transport"]["watchBotState"]>
+      >[1]
+    | undefined;
   const context: ClientPluginContext = {
     transport: {
       turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+      ...(options.stateChannel
+        ? {
+            watchBotState: (
+              _botId: string,
+              observer: NonNullable<typeof stateObserver>,
+            ) => {
+              stateObserver = observer;
+              observer.status("connecting");
+              return () => {
+                stateObserver = undefined;
+              };
+            },
+          }
+        : {}),
       hostedRequest: (path, method, body) => {
         calls.push([path, method, body]);
         if (method === "POST") {
@@ -221,6 +240,9 @@ function mountHostedProvider() {
       });
       heldClose = { release, pending };
       return () => heldClose?.release();
+    },
+    channelStatus(status: "connecting" | "open" | "fallback" | "hidden") {
+      stateObserver?.status(status);
     },
     dispose() {
       if (Array.isArray(disposers)) {
@@ -449,6 +471,18 @@ describe("hosted Computer provider", () => {
     expect(
       mounted.calls.filter(([, method]) => !method).length,
     ).toBeGreaterThan(initialReads);
+    mounted.dispose();
+  });
+
+  test("polls only while the WebSocket channel is in fallback", async () => {
+    const mounted = mountHostedProvider({ stateChannel: true });
+    await flush();
+
+    expect(mounted.runtime.count(PROJECTION_POLL_INTERVAL_MS)).toBe(0);
+    mounted.channelStatus("fallback");
+    expect(mounted.runtime.count(PROJECTION_POLL_INTERVAL_MS)).toBe(1);
+    mounted.channelStatus("open");
+    expect(mounted.runtime.count(PROJECTION_POLL_INTERVAL_MS)).toBe(0);
     mounted.dispose();
   });
 });

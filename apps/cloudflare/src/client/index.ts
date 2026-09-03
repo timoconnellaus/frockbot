@@ -34,6 +34,7 @@ import {
 } from "@frockbot/plugin-shell/run-protocol";
 import { decodeClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 import type { SkillRefV1 } from "@frockbot/kernel-contracts";
+import { BrowserBotStateChannel } from "./bot-state-channel.js";
 
 function requireAuthenticatedUserId(value: unknown): string {
   if (!isRpcIdentifier(value) || value === "anonymous") {
@@ -103,6 +104,7 @@ async function apiRequest(
   return value;
 }
 
+const botStateChannel = new BrowserBotStateChannel();
 const application = new ClientApplication({
   connectionsAvailable: true,
   async turn(
@@ -265,6 +267,9 @@ const application = new ClientApplication({
   hostedRequest(path, method = "GET", body) {
     return apiRequest(path, method, body);
   },
+  watchBotState(botId, observer) {
+    return botStateChannel.watch(botId, observer);
+  },
   async readAuthenticatedUserId() {
     return decodeAuthenticatedIdentity(await apiRequest("/api/identity"));
   },
@@ -324,6 +329,7 @@ const application = new ClientApplication({
   },
 });
 
+await application.install(() => () => botStateChannel.dispose());
 for (const plugin of foundationClientPlugins) await application.install(plugin);
 application.mount("#app");
 // Optional native Contributions never block the hosted product bootstrap.

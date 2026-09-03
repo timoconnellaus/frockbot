@@ -117,6 +117,7 @@ function packageUiArtifactOrigin(requestUrl: URL): string {
 function withSecurityHeaders(
   response: Response,
   artifactOrigin: string,
+  applicationUrl: URL,
 ): Response {
   const secured = new Response(response.body, response);
   secured.headers.set("x-content-type-options", "nosniff");
@@ -126,7 +127,7 @@ function withSecurityHeaders(
     // Package pages use the anonymous artifact origin. The expanded Computer
     // viewer frames the Sprite's own noVNC page (ADR 0004); both are optional
     // projections and neither becomes an authority in the hosted client.
-    `default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-src ${artifactOrigin} https://*.sprites.app; frame-ancestors 'none'; base-uri 'none'`,
+    `default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self' ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${artifactOrigin} https://*.sprites.app; frame-ancestors 'none'; base-uri 'none'`,
   );
   return secured;
 }
@@ -199,6 +200,7 @@ export function createUserApplication() {
           },
         ),
         packageUiArtifactOrigin(url),
+        url,
       );
     }
     if (request.method === "GET" && url.pathname === "/app.js") {
@@ -210,6 +212,7 @@ export function createUserApplication() {
           },
         }),
         packageUiArtifactOrigin(url),
+        url,
       );
     }
     if (request.method === "GET" && url.pathname === "/app.css") {
@@ -221,6 +224,7 @@ export function createUserApplication() {
           },
         }),
         packageUiArtifactOrigin(url),
+        url,
       );
     }
     if (request.method === "GET" && url.pathname === "/favicon.ico") {
@@ -234,6 +238,7 @@ export function createUserApplication() {
           },
         }),
         packageUiArtifactOrigin(url),
+        url,
       );
     }
     if (request.method === "GET" && url.pathname === "/app-manifest") {

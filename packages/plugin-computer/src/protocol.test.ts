@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ComputerProtocolDecodeError,
+  decodeComputerCommandResponse,
   decodeComputerProjectionV1,
   type ComputerProgressViewV1,
   type ComputerProjectionV1,
@@ -89,5 +90,25 @@ describe("Computer projection progress", () => {
         },
       }),
     ).toThrow(ComputerProtocolDecodeError);
+  });
+});
+
+describe("Computer command acceptance", () => {
+  test("keeps durable admission distinct from a terminal receipt", () => {
+    expect(
+      decodeComputerCommandResponse({
+        version: 2,
+        commandId: "connect-1",
+        type: "connect",
+        status: "accepted",
+        admittedAt: "2026-09-03T00:00:00.000Z",
+      }),
+    ).toEqual({
+      version: 2,
+      commandId: "connect-1",
+      type: "connect",
+      status: "accepted",
+      admittedAt: "2026-09-03T00:00:00.000Z",
+    });
   });
 });

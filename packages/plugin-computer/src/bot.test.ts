@@ -6,15 +6,22 @@ import type {
 } from "@frockbot/computer-core";
 import { computerBotPathKeyV1, ComputerError } from "@frockbot/computer-core";
 import {
+  COMPUTER_CONNECT_DEFERRAL_MS,
+  COMPUTER_CONNECT_START_DELAY_MS,
+  COMPUTER_CONNECT_WATCHDOG_MS,
   COMPUTER_CONTROL_RECORD_KEY,
   COMPUTER_INTENT_PREFIX,
+  COMPUTER_PENDING_CONNECT_KEY,
   COMPUTER_PROVIDER_RECORD_KEY,
   COMPUTER_VIEWER_RECORD_KEY,
   createComputerBotBackendContribution,
   type ComputerBotStorage,
   type ComputerBotTransaction,
 } from "./bot.js";
-import type { ComputerCommandV1 } from "./protocol.js";
+import {
+  computerCommandFingerprintV1,
+  type ComputerCommandV1,
+} from "./protocol.js";
 import { FakeWorkspace } from "./workspace-fixture.js";
 
 function png(): Uint8Array {
@@ -191,6 +198,7 @@ describe("Computer Bot Durable Object Contribution", () => {
       "scout",
       command("connect", "connect-progress"),
     );
+    await contribution.settleScheduledWork();
 
     expect(
       (storage.values.get(COMPUTER_PROVIDER_RECORD_KEY) as { version: number })
@@ -236,6 +244,7 @@ describe("Computer Bot Durable Object Contribution", () => {
       "scout",
       command("connect", "connect-after-v1"),
     );
+    await contribution.settleScheduledWork();
     expect(storage.values.get(COMPUTER_PROVIDER_RECORD_KEY)).toMatchObject({
       version: 2,
       phase: "ready",
@@ -322,16 +331,173 @@ describe("Computer Bot Durable Object Contribution", () => {
       "scout",
       command("connect", "connect-1"),
     );
+    expect(first.status).toBe("accepted");
+    await contribution.settleScheduledWork();
     const replay = await contribution.execute(
       "user-1",
       "scout",
       command("connect", "connect-1"),
     );
-    expect(replay).toEqual(first);
+    expect(replay.status).toBe("applied");
     expect(calls).toBe(1);
     expect(JSON.stringify([...storage.values.values()])).not.toContain(
       "viewer.invalid",
     );
+  });
+
+  test("contributes a future deadline for a freshly admitted connect", async () => {
+    const storage = new MemoryStorage();
+    const now = new Date("2026-09-03T00:00:00.000Z");
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () => Promise.reject(new Error("alarm has not fired")),
+      now: () => now,
+    });
+
+    expect(
+      await contribution.execute(
+        "user-1",
+        "scout",
+        command("connect", "future-connect"),
+      ),
+    ).toMatchObject({ version: 2, status: "accepted" });
+    const [deadline] = await contribution.scheduledDeadlines(storage);
+
+    expect(deadline).toBe(now.getTime() + COMPUTER_CONNECT_START_DELAY_MS);
+  });
+
+  test("migrates a held connect intent onto a future scheduled deadline", async () => {
+    const storage = new MemoryStorage();
+    const now = new Date("2026-09-03T00:00:00.000Z");
+    const connect = command("connect", "held-connect");
+    await storage.put(`${COMPUTER_INTENT_PREFIX}${connect.commandId}`, {
+      version: 1,
+      fingerprint: computerCommandFingerprintV1(connect),
+      command: connect,
+      admittedAt: "2026-09-02T00:00:00.000Z",
+    });
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () => Promise.reject(new Error("alarm has not fired")),
+      now: () => now,
+    });
+
+    expect(
+      await contribution.execute("user-1", "scout", connect),
+    ).toMatchObject({ version: 2, status: "accepted" });
+    expect(await contribution.scheduledDeadlines(storage)).toEqual([
+      now.getTime() + COMPUTER_CONNECT_START_DELAY_MS,
+    ]);
+  });
+
+  test("a cold contribution resumes an accepted connect from durable scheduling", async () => {
+    const storage = new MemoryStorage();
+    let calls = 0;
+    let now = "2026-09-03T00:00:00.000Z";
+    const host = {
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () => {
+        calls += 1;
+        return Promise.resolve(
+          fakeHandle({
+            presence: () =>
+              Promise.resolve({
+                id: "viewer-1",
+                url: "https://viewer.invalid/secret",
+                expiresAt: "2026-09-03T00:01:30.000Z",
+              }),
+          }),
+        );
+      },
+      now: () => new Date(now),
+    };
+    const warm = createComputerBotBackendContribution(host);
+
+    expect(
+      await warm.execute(
+        "user-1",
+        "scout",
+        command("connect", "scheduled-connect"),
+      ),
+    ).toMatchObject({ version: 2, status: "accepted" });
+    expect(calls).toBe(0);
+    expect(storage.values.has(COMPUTER_PENDING_CONNECT_KEY)).toBe(true);
+
+    const cold = createComputerBotBackendContribution(host);
+    expect(await cold.scheduledDeadlines(storage)).toEqual([
+      Date.parse("2026-09-03T00:00:00.000Z") + COMPUTER_CONNECT_START_DELAY_MS,
+    ]);
+    now = "2026-09-03T00:00:05.000Z";
+    await cold.deferScheduledWork(storage);
+    expect(await cold.scheduledDeadlines(storage)).toEqual([
+      Date.parse(now) + COMPUTER_CONNECT_DEFERRAL_MS,
+    ]);
+    await cold.settleScheduledWork();
+    expect(calls).toBe(1);
+    expect(storage.values.has(COMPUTER_PENDING_CONNECT_KEY)).toBe(false);
+    expect(
+      await cold.execute(
+        "user-1",
+        "scout",
+        command("connect", "scheduled-connect"),
+      ),
+    ).toMatchObject({ version: 1, status: "applied" });
+  });
+
+  test("leaves a durable watchdog armed while connect is in flight", async () => {
+    const storage = new MemoryStorage();
+    const now = new Date("2026-09-03T00:00:00.000Z");
+    let entered!: () => void;
+    const providerEntered = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release!: () => void;
+    const providerFinished = new Promise<{
+      id: string;
+      url: string;
+      expiresAt: string;
+    }>((resolve) => {
+      release = () =>
+        resolve({
+          id: "viewer-1",
+          url: "https://viewer.invalid/secret",
+          expiresAt: "2026-09-03T00:01:30.000Z",
+        });
+    });
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            presence: () => {
+              entered();
+              return providerFinished;
+            },
+          }),
+        ),
+      now: () => now,
+    });
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "watched-connect"),
+    );
+    const settlement = contribution.settleScheduledWork();
+    await providerEntered;
+
+    expect(await contribution.scheduledDeadlines(storage)).toEqual([
+      now.getTime() + COMPUTER_CONNECT_WATCHDOG_MS,
+    ]);
+    release();
+    await settlement;
   });
 
   test("records and replays one viewer renewal without storing its bearer URL", async () => {
@@ -371,6 +537,7 @@ describe("Computer Bot Durable Object Contribution", () => {
       "scout",
       command("connect", "connect-viewer"),
     );
+    await contribution.settleScheduledWork();
     expect((await contribution.read("user-1", "scout")).screenshots).toEqual(
       [],
     );
@@ -419,6 +586,7 @@ describe("Computer Bot Durable Object Contribution", () => {
       "scout",
       command("connect", "connect-update"),
     );
+    await contribution.settleScheduledWork();
 
     expect(await contribution.read("user-1", "scout")).toMatchObject({
       phase: "updating",
@@ -450,6 +618,13 @@ describe("Computer Bot Durable Object Contribution", () => {
       now: () => new Date("2026-09-02T00:00:00.000Z"),
     });
 
+    const accepted = await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-updating"),
+    );
+    expect(accepted.status).toBe("accepted");
+    await contribution.settleScheduledWork();
     const receipt = await contribution.execute(
       "user-1",
       "scout",
@@ -602,6 +777,7 @@ describe("Computer Bot Durable Object Contribution", () => {
       "scout",
       command("connect", "connect-viewer"),
     );
+    await contribution.settleScheduledWork();
 
     const receipt = await contribution.execute(
       "user-1",
@@ -668,6 +844,7 @@ describe("Computer Bot Durable Object Contribution", () => {
       "scout",
       command("connect", "connect-controlled-viewer"),
     );
+    await contribution.settleScheduledWork();
 
     const receipt = await contribution.execute(
       "user-1",
@@ -711,11 +888,13 @@ describe("Computer Bot Durable Object Contribution", () => {
       },
       now: () => new Date("2026-09-03T00:00:15.000Z"),
     };
-    await createComputerBotBackendContribution(host).execute(
+    const resident = createComputerBotBackendContribution(host);
+    await resident.execute(
       "user-1",
       "scout",
       command("connect", "connect-before-eviction"),
     );
+    await resident.settleScheduledWork();
 
     const reconstructed = createComputerBotBackendContribution(host);
     const receipt = await reconstructed.execute(

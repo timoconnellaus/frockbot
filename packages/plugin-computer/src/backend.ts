@@ -4,10 +4,10 @@
 import type { Plugin } from "cordis";
 import {
   ComputerProtocolDecodeError,
-  decodeComputerCommandReceiptV1,
+  decodeComputerCommandResponse,
   decodeComputerCommandV1,
   decodeComputerProjectionV1,
-  type ComputerCommandReceiptV1,
+  type ComputerCommandResponse,
   type ComputerCommandV1,
   type ComputerProjectionV1,
 } from "./protocol.js";
@@ -18,7 +18,7 @@ export interface ComputerGatewayHost {
     userId: string,
     botId: string,
     command: ComputerCommandV1,
-  ): Promise<ComputerCommandReceiptV1>;
+  ): Promise<ComputerCommandResponse>;
 }
 
 export interface ComputerBackendRouteContribution {
@@ -144,7 +144,7 @@ export function createComputerBackendContribution(
           );
         }
         return Response.json(
-          decodeComputerCommandReceiptV1(
+          decodeComputerCommandResponse(
             await host.executeComputerCommand(context.userId, botId, decoded),
           ),
         );
