@@ -23,6 +23,10 @@ import {
   COMPUTER_SCREENSHOT_RETENTION,
 } from "./roots.js";
 import {
+  fileComputerScreenshotV1,
+  type ComputerProjectionFileKindV1,
+} from "./capture.js";
+import {
   ComputerProtocolDecodeError,
   computerCommandFingerprintV1,
   computerUpdateLabelV1,
@@ -51,6 +55,11 @@ export const COMPUTER_VIEWER_RECORD_KEY = "computer:viewer:v1";
 export const COMPUTER_PROVIDER_RECORD_KEY = "computer:provider:v1";
 export const COMPUTER_INTENT_PREFIX = "computer:intent:v1:";
 export const COMPUTER_RECEIPT_PREFIX = "computer:receipt:v1:";
+/**
+ * Known writes invalidate immediately; thirty seconds only bounds how long an
+ * out-of-band Workspace/sync write can remain hidden.
+ */
+export const COMPUTER_PROJECTION_FILE_CACHE_TTL_MS = 30_000;
 
 export interface ComputerBotTransaction {
   get<T>(key: string): Promise<T | undefined>;
@@ -115,6 +124,11 @@ interface LiveViewer {
   id: string;
   url: string;
   expiresAt: string;
+}
+
+interface ProjectionFileCacheEntry<T> {
+  expiresAt: number;
+  value: Promise<T>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -328,6 +342,14 @@ function isFresh(expiresAt: string, now: Date): boolean {
 
 export class ComputerBotBackendContribution {
   #liveViewer?: LiveViewer;
+  readonly #screenshotsCache = new Map<
+    string,
+    ProjectionFileCacheEntry<ComputerScreenshotViewV1[]>
+  >();
+  readonly #doctorCache = new Map<
+    string,
+    ProjectionFileCacheEntry<ComputerDoctorViewV1 | undefined>
+  >();
 
   constructor(private readonly host: ComputerBotBackendHost) {}
 
@@ -337,6 +359,44 @@ export class ComputerBotBackendContribution {
 
   private newId(): string {
     return this.host.newId?.() ?? crypto.randomUUID();
+  }
+
+  private projectionKey(userId: string, botId: string): string {
+    return `${userId}\u0000${botId}`;
+  }
+
+  private cachedProjectionFile<T>(
+    cache: Map<string, ProjectionFileCacheEntry<T>>,
+    userId: string,
+    botId: string,
+    load: () => Promise<T>,
+  ): Promise<T> {
+    const key = this.projectionKey(userId, botId);
+    const now = this.now().getTime();
+    const cached = cache.get(key);
+    if (cached && cached.expiresAt > now) return cached.value;
+    const value = load();
+    const entry: ProjectionFileCacheEntry<T> = {
+      expiresAt: now + COMPUTER_PROJECTION_FILE_CACHE_TTL_MS,
+      value,
+    };
+    entry.value = value.catch((error) => {
+      if (cache.get(key) === entry) cache.delete(key);
+      throw error;
+    });
+    cache.set(key, entry);
+    return entry.value;
+  }
+
+  /** Drops only this Bot/User's resident performance cache after a known write. */
+  invalidateProjectionFile(
+    userId: string,
+    botId: string,
+    kind: ComputerProjectionFileKindV1,
+  ): void {
+    const key = this.projectionKey(userId, botId);
+    if (kind === "screenshots") this.#screenshotsCache.delete(key);
+    else this.#doctorCache.delete(key);
   }
 
   private async admit(
@@ -471,6 +531,9 @@ export class ComputerBotBackendContribution {
           break;
         case "refreshViewer":
           await this.refreshViewer(userId, command);
+          break;
+        case "closeViewer":
+          await this.closeViewer(userId, command);
           break;
         case "releaseControl":
           await this.releaseControl(userId, command);
@@ -768,6 +831,54 @@ export class ComputerBotBackendContribution {
     await this.host.storage.delete(COMPUTER_CONTROL_RECORD_KEY);
   }
 
+  /**
+   * Files the frame the User just stopped watching without making close
+   * depend on a best-effort capture. A resident, fresh viewer is the proof
+   * that this command is attaching to an already-watched desktop rather than
+   * waking a hibernated Computer.
+   */
+  private async closeViewer(
+    userId: string,
+    command: ComputerCommandV1,
+  ): Promise<void> {
+    const viewerValue = await this.host.storage.get<unknown>(
+      COMPUTER_VIEWER_RECORD_KEY,
+    );
+    if (viewerValue === undefined || !this.host.workspace) return;
+    const viewer = decodeStoredViewer(viewerValue);
+    if (
+      this.#liveViewer?.id !== viewer.id ||
+      !isFresh(viewer.expiresAt, this.now())
+    ) {
+      return;
+    }
+    const controlValue = await this.host.storage.get<unknown>(
+      COMPUTER_CONTROL_RECORD_KEY,
+    );
+    if (controlValue !== undefined) {
+      const control = decodeStoredComputerControlV1(controlValue);
+      if (isStoredComputerControlFreshV1(control, this.now())) return;
+    }
+    try {
+      await this.withComputer(userId, command, async (computer) => {
+        const root = this.root(userId, COMPUTER_SCREENSHOTS_ROOT_ID);
+        const botKey = computerBotPathKeyV1(command.botId);
+        await fileComputerScreenshotV1({
+          computer,
+          workspace: this.host.workspace!,
+          path: { root, path: `${botKey}/user-${command.commandId}.png` },
+          writer: { kind: "user", userId },
+          botKey,
+          effectId: `computer:${command.commandId}:close-viewer-screenshot`,
+        });
+      });
+      this.invalidateProjectionFile(userId, command.botId, "screenshots");
+    } catch {
+      // Closing the viewer is never held open by an opportunistic capture.
+      // In particular, the provider's human-control refusal stays a refusal.
+    }
+  }
+
   private async runDoctor(
     userId: string,
     command: ComputerCommandV1,
@@ -805,6 +916,7 @@ export class ComputerBotBackendContribution {
         `The doctor report could not be filed: ${written.reason}`,
       );
     }
+    this.invalidateProjectionFile(userId, command.botId, "doctor");
   }
 
   private root(userId: string, rootId: string): WorkspaceRootV1 {
@@ -817,6 +929,18 @@ export class ComputerBotBackendContribution {
   }
 
   private async screenshots(
+    userId: string,
+    botId: string,
+  ): Promise<ComputerScreenshotViewV1[]> {
+    return this.cachedProjectionFile(
+      this.#screenshotsCache,
+      userId,
+      botId,
+      () => this.loadScreenshots(userId, botId),
+    );
+  }
+
+  private async loadScreenshots(
     userId: string,
     botId: string,
   ): Promise<ComputerScreenshotViewV1[]> {
@@ -847,6 +971,15 @@ export class ComputerBotBackendContribution {
   }
 
   private async doctor(
+    userId: string,
+    botId: string,
+  ): Promise<ComputerDoctorViewV1 | undefined> {
+    return this.cachedProjectionFile(this.#doctorCache, userId, botId, () =>
+      this.loadDoctor(userId, botId),
+    );
+  }
+
+  private async loadDoctor(
     userId: string,
     botId: string,
   ): Promise<ComputerDoctorViewV1 | undefined> {

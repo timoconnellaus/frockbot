@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
 import { ToolRegistry } from "@frockbot/plugin-tools";
 import {
+  ComputerError,
   ComputerRegistry,
   computerBotPathKeyV1,
   type ComputerHandle,
@@ -47,12 +48,27 @@ function providerWith(
         tenant,
         workspace,
         screenshot: { capture: () => capture() },
+        exec: {
+          execute: () =>
+            Promise.resolve({
+              exitCode: 0,
+              stdout: new TextEncoder().encode("done"),
+              stderr: new Uint8Array(),
+              outputTruncated: false,
+            }),
+        },
         close: () => Promise.resolve(),
       }),
   };
 }
 
-async function mount(provider: ComputerProvider, writer = true) {
+async function mount(
+  provider: ComputerProvider,
+  writer = true,
+  projectionFiles?: {
+    invalidate(botId: string, kind: "screenshots" | "doctor"): void;
+  },
+) {
   const harness = await createPluginHarness([
     ComputerRegistry,
     ToolRegistry,
@@ -73,13 +89,16 @@ async function mount(provider: ComputerProvider, writer = true) {
             },
           }
         : {}),
+      ...(projectionFiles ? { projectionFiles } : {}),
     }),
   );
   return harness;
 }
 
-async function capture(
+async function executeTool(
   harness: Awaited<ReturnType<typeof createPluginHarness>>,
+  name: string,
+  input: unknown,
 ) {
   const context = {
     botId: "bot-1",
@@ -91,11 +110,15 @@ async function capture(
     signal: new AbortController().signal,
   };
   const prepared = await harness.root.tools.prepare(
-    { id: crypto.randomUUID(), name: "computer_screenshot", input: {} },
+    { id: crypto.randomUUID(), name, input },
     context,
   );
   if (prepared.kind !== "ready") throw new Error(prepared.result.content);
   return harness.root.tools.executePrepared(prepared, context);
+}
+
+function capture(harness: Awaited<ReturnType<typeof createPluginHarness>>) {
+  return executeTool(harness, "computer_screenshot", {});
 }
 
 describe("computer_screenshot", () => {
@@ -237,6 +260,80 @@ describe("computer_screenshot", () => {
         .schemas({ turnType: "chat" })
         .map((schema) => schema.name),
     ).not.toContain("computer_screenshot");
+    await harness.dispose();
+  });
+
+  test("captures a final frame after a Turn that used the Computer", async () => {
+    const workspace = new FakeWorkspace();
+    const invalidations: string[] = [];
+    const harness = await mount(
+      providerWith(workspace, () =>
+        Promise.resolve({
+          bytes: png(1280, 720),
+          mediaType: "image/png" as const,
+          display: ":100",
+          capturedAt: "2026-09-03T00:00:10.000Z",
+        }),
+      ),
+      true,
+      {
+        invalidate: (botId, kind) => invalidations.push(`${botId}:${kind}`),
+      },
+    );
+    const session = harness.root.sessions.create("session-1");
+    const agent = { botId: "bot-1", session };
+    await harness.root.waterfall(
+      "agent/pre-step",
+      agent as never,
+      [],
+      1,
+      1,
+      () => Promise.resolve({ kind: "enter" as const, inputs: [] }),
+    );
+    await executeTool(harness, "computer_exec", { command: "pwd" });
+
+    await harness.root.serial("agent/turn-stopping", agent as never, 1);
+
+    expect(workspace.writes).toHaveLength(1);
+    expect(workspace.writes[0]?.writer).toEqual({
+      kind: "bot",
+      botId: "bot-1",
+      sessionId: "session-1",
+      turnId: "run-9",
+      runId: "run-9",
+    });
+    expect(invalidations).toEqual(["bot-1:screenshots"]);
+    await harness.dispose();
+  });
+
+  test("a final-frame capture is refused while the User holds control", async () => {
+    const workspace = new FakeWorkspace();
+    let captures = 0;
+    const harness = await mount(
+      providerWith(workspace, () => {
+        captures += 1;
+        return Promise.reject(
+          new ComputerError("human-control-active", "held by User"),
+        );
+      }),
+    );
+    const session = harness.root.sessions.create("session-1");
+    const agent = { botId: "bot-1", session };
+    await harness.root.waterfall(
+      "agent/pre-step",
+      agent as never,
+      [],
+      1,
+      1,
+      () => Promise.resolve({ kind: "enter" as const, inputs: [] }),
+    );
+    await executeTool(harness, "computer_exec", { command: "pwd" });
+
+    await expect(
+      harness.root.serial("agent/turn-stopping", agent as never, 1),
+    ).resolves.toBeUndefined();
+    expect(captures).toBe(1);
+    expect(workspace.writes).toHaveLength(0);
     await harness.dispose();
   });
 });

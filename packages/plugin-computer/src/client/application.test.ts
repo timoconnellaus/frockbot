@@ -74,6 +74,7 @@ function mountHostedProvider() {
   let hostUpdating = false;
   let controlHeld = false;
   let renewFails = false;
+  let heldClose: { release: () => void; pending: Promise<void> } | undefined;
   let state: { value: ComputerState } | undefined;
   const slots: ClientSlotRegistration[] = [];
   const context: ClientPluginContext = {
@@ -85,7 +86,11 @@ function mountHostedProvider() {
           const command = JSON.parse(body ?? "{}") as {
             commandId: string;
             type:
-              "connect" | "takeControl" | "releaseControl" | "refreshViewer";
+              | "connect"
+              | "takeControl"
+              | "releaseControl"
+              | "refreshViewer"
+              | "closeViewer";
           };
           if (command.type === "connect") {
             phase = hostUpdating ? "updating" : "ready";
@@ -101,7 +106,7 @@ function mountHostedProvider() {
           if (command.type === "refreshViewer" && renewFails) {
             phase = "disconnected";
           }
-          return Promise.resolve({
+          const receipt = {
             version: 1,
             commandId: command.commandId,
             type: command.type,
@@ -113,7 +118,11 @@ function mountHostedProvider() {
             ...(command.type === "refreshViewer" && renewFails
               ? { failure: "viewer session expired" }
               : {}),
-          });
+          };
+          if (command.type === "closeViewer" && heldClose) {
+            return heldClose.pending.then(() => receipt);
+          }
+          return Promise.resolve(receipt);
         }
         return Promise.resolve({
           version: 1,
@@ -205,6 +214,14 @@ function mountHostedProvider() {
     setReady() {
       hostUpdating = false;
     },
+    holdCloseViewer() {
+      let release = (): void => {};
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      heldClose = { release, pending };
+      return () => heldClose?.release();
+    },
     dispose() {
       if (Array.isArray(disposers)) {
         for (const dispose of disposers.toReversed()) dispose();
@@ -261,7 +278,11 @@ describe("hosted Computer provider", () => {
     expect(mounted.runtime.count(VIEWER_REFRESH_INTERVAL_MS)).toBe(0);
     mounted.runtime.tick(VIEWER_REFRESH_INTERVAL_MS);
     await flush();
-    expect(postedTypes(mounted.calls)).toEqual(["connect", "refreshViewer"]);
+    expect(postedTypes(mounted.calls)).toEqual([
+      "connect",
+      "refreshViewer",
+      "closeViewer",
+    ]);
     mounted.dispose();
   });
 
@@ -354,7 +375,13 @@ describe("hosted Computer provider", () => {
     await mounted.state.closeViewer();
     expect(
       postedTypes(mounted.calls).filter((type) => type !== "refreshControl"),
-    ).toEqual(["connect", "takeControl", "refreshViewer", "releaseControl"]);
+    ).toEqual([
+      "connect",
+      "takeControl",
+      "refreshViewer",
+      "releaseControl",
+      "closeViewer",
+    ]);
     expect(mounted.state.expanded).toBe(false);
     mounted.dispose();
   });
@@ -376,7 +403,29 @@ describe("hosted Computer provider", () => {
       "connect",
       "takeControl",
       "releaseControl",
+      "closeViewer",
     ]);
+    mounted.dispose();
+  });
+
+  test("the overlay collapses without waiting for the close capture", async () => {
+    const mounted = mountHostedProvider();
+    await flush();
+    await mounted.state.openViewer();
+    const releaseClose = mounted.holdCloseViewer();
+
+    // The backend files an opportunistic screenshot on close, which crosses a
+    // service binding to reach the Sprite. The User asked for the overlay to
+    // go away; it must not sit on screen until a capture comes back.
+    await mounted.state.closeViewer();
+
+    expect(mounted.state.expanded).toBe(false);
+    expect(postedTypes(mounted.calls)).toEqual(["connect", "closeViewer"]);
+    expect(mounted.runtime.count(VIEWER_REFRESH_INTERVAL_MS)).toBe(0);
+
+    releaseClose();
+    await flush();
+    expect(mounted.state.expanded).toBe(false);
     mounted.dispose();
   });
 

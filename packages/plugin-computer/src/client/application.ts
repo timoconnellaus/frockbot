@@ -18,7 +18,6 @@ import {
   initialComputerMachineState,
   transitionComputerState,
   type ComputerMachineEvent,
-  type ComputerMachineState,
 } from "./state-machine.js";
 import "./styles.css";
 
@@ -308,7 +307,21 @@ export function createComputerClientPlugin(
         }
       }
       if (machine.takingControl) await releaseControl();
+      // Collapse first. The capture the backend files on close is
+      // opportunistic, and it crosses a service binding to take a screenshot
+      // on the Sprite; an overlay that stayed on screen waiting for that would
+      // be the stall this capture was added to make unnecessary. Post rather
+      // than execute, so a refused capture never projects a failure onto a
+      // Computer the User has already stopped watching.
       apply({ type: "viewer-collapsed" });
+      void (async () => {
+        try {
+          await post("closeViewer");
+          await load();
+        } catch {
+          // The durable projection remains the only truth about the Computer.
+        }
+      })();
     }
 
     function takeControl(): Promise<void> {

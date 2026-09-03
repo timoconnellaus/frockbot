@@ -560,6 +560,11 @@ export interface ShellBotBackendHost {
    * Durable Object has no honest way to dispatch one.
    */
   subagents?: SubagentDurableBindingV1;
+  invalidateComputerProjectionFile?(
+    userId: string,
+    botId: string,
+    kind: "screenshots" | "doctor",
+  ): void;
 }
 
 /** The narrow storage seam the Bot's announcement log is written through. */
@@ -655,6 +660,7 @@ export class ShellBotBackendContribution {
    */
   private readonly tasks: TaskStore;
   private readonly subagentBinding: SubagentDurableBindingV1 | undefined;
+  private readonly invalidateComputerProjectionFile?: ShellBotBackendHost["invalidateComputerProjectionFile"];
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
@@ -663,6 +669,8 @@ export class ShellBotBackendContribution {
       host.compileApplication ?? compileFoundationApplication;
     this.lifecycleAdmission = host.assertLifecycleActive;
     this.outboundFetch = host.outboundFetch;
+    this.invalidateComputerProjectionFile =
+      host.invalidateComputerProjectionFile;
     const routines = createBotRoutines(
       host.state.storage,
       createBotRoutineHookMinter(
@@ -3865,6 +3873,21 @@ export class ShellBotBackendContribution {
               // Prompt assembly reads the Bot DO's Step 1 lease record
               // directly; passing storage wakes no Computer.
               computerControlRecords: this.ctx.storage,
+              ...(this.invalidateComputerProjectionFile
+                ? {
+                    computerProjectionFiles: {
+                      invalidate: (
+                        botId: string,
+                        kind: "screenshots" | "doctor",
+                      ) =>
+                        this.invalidateComputerProjectionFile?.(
+                          identity.userId,
+                          botId,
+                          kind,
+                        ),
+                    },
+                  }
+                : {}),
               // A computerUse child is the holder of the User-wide lease its
               // parent acquired. Its guarded commands must name that same
               // durable task owner or the shared fence would refuse itself.

@@ -4,7 +4,7 @@ import type {
   ComputerControlLease,
   ComputerHandle,
 } from "@frockbot/computer-core";
-import { ComputerError } from "@frockbot/computer-core";
+import { computerBotPathKeyV1, ComputerError } from "@frockbot/computer-core";
 import {
   COMPUTER_CONTROL_RECORD_KEY,
   COMPUTER_INTENT_PREFIX,
@@ -15,6 +15,16 @@ import {
   type ComputerBotTransaction,
 } from "./bot.js";
 import type { ComputerCommandV1 } from "./protocol.js";
+import { FakeWorkspace } from "./workspace-fixture.js";
+
+function png(): Uint8Array {
+  const bytes = new Uint8Array(32);
+  bytes.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, 1280);
+  view.setUint32(20, 720);
+  return bytes;
+}
 
 class MemoryStorage implements ComputerBotStorage {
   readonly values = new Map<string, unknown>();
@@ -75,6 +85,12 @@ function fakeHandle(options: {
     scope?: string,
   ): Promise<ComputerControlLease>;
   release?(lease: ComputerControlLease, scope?: string): Promise<void>;
+  capture?(): Promise<{
+    bytes: Uint8Array;
+    mediaType: "image/png";
+    display: string;
+    capturedAt: string;
+  }>;
 }): ComputerHandle {
   return {
     assignment: { providerId: "fake", generation: 1 },
@@ -96,6 +112,9 @@ function fakeHandle(options: {
       renew: (lease, request) => options.renew!(lease, request?.scope),
       release: (lease, request) => options.release!(lease, request?.scope),
     },
+    ...(options.capture
+      ? { screenshot: { capture: () => options.capture!() } }
+      : {}),
     close: () => Promise.resolve(),
   };
 }
@@ -352,6 +371,9 @@ describe("Computer Bot Durable Object Contribution", () => {
       "scout",
       command("connect", "connect-viewer"),
     );
+    expect((await contribution.read("user-1", "scout")).screenshots).toEqual(
+      [],
+    );
     const first = await contribution.execute(
       "user-1",
       "scout",
@@ -542,6 +564,303 @@ describe("Computer Bot Durable Object Contribution", () => {
       command("takeControl", "take-2"),
     );
     expect(acquired).toEqual(["human:owner-1", "human:owner-2"]);
+  });
+
+  test("captures the current desktop when a live viewer closes, attributed to the User", async () => {
+    const storage = new MemoryStorage();
+    const workspace = new FakeWorkspace();
+    let opens = 0;
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      workspace,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () => {
+        opens += 1;
+        return Promise.resolve(
+          fakeHandle({
+            presence: () =>
+              Promise.resolve({
+                id: "viewer-1",
+                url: "https://viewer.invalid/secret",
+                expiresAt: "2026-09-03T00:01:30.000Z",
+              }),
+            capture: () =>
+              Promise.resolve({
+                bytes: png(),
+                mediaType: "image/png",
+                display: ":100",
+                capturedAt: "2026-09-03T00:00:10.000Z",
+              }),
+          }),
+        );
+      },
+      now: () => new Date("2026-09-03T00:00:15.000Z"),
+    });
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-viewer"),
+    );
+
+    const receipt = await contribution.execute(
+      "user-1",
+      "scout",
+      command("closeViewer", "close-viewer"),
+    );
+    const replay = await contribution.execute(
+      "user-1",
+      "scout",
+      command("closeViewer", "close-viewer"),
+    );
+
+    expect(receipt.status).toBe("applied");
+    expect(replay).toEqual(receipt);
+    expect(opens).toBe(2);
+    expect(workspace.writes).toHaveLength(1);
+    expect(workspace.writes[0]?.writer).toEqual({
+      kind: "user",
+      userId: "user-1",
+    });
+    expect((await contribution.read("user-1", "scout")).screenshots).toEqual([
+      expect.objectContaining({
+        path: expect.stringContaining("close-viewer"),
+      }),
+    ]);
+  });
+
+  test("does not capture a viewer close while the User's control lease is active", async () => {
+    const storage = new MemoryStorage();
+    const workspace = new FakeWorkspace();
+    let captures = 0;
+    await storage.put(COMPUTER_CONTROL_RECORD_KEY, {
+      version: 1,
+      ownerId: "human:owner-1",
+      acquiredAt: "2026-09-03T00:00:00.000Z",
+      expiresAt: "2026-09-03T00:01:30.000Z",
+    });
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      workspace,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            presence: () =>
+              Promise.resolve({
+                id: "viewer-1",
+                url: "https://viewer.invalid/secret",
+                expiresAt: "2026-09-03T00:01:30.000Z",
+              }),
+            capture: () => {
+              captures += 1;
+              return Promise.reject(
+                new ComputerError("human-control-active", "held by User"),
+              );
+            },
+          }),
+        ),
+      now: () => new Date("2026-09-03T00:00:15.000Z"),
+    });
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-controlled-viewer"),
+    );
+
+    const receipt = await contribution.execute(
+      "user-1",
+      "scout",
+      command("closeViewer", "close-controlled-viewer"),
+    );
+
+    expect(receipt.status).toBe("applied");
+    expect(captures).toBe(0);
+    expect(workspace.writes).toHaveLength(0);
+  });
+
+  test("does not wake a Computer to close a viewer after Bot DO eviction", async () => {
+    const storage = new MemoryStorage();
+    const workspace = new FakeWorkspace();
+    let opens = 0;
+    const host = {
+      storage,
+      workspace,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () => {
+        opens += 1;
+        return Promise.resolve(
+          fakeHandle({
+            presence: () =>
+              Promise.resolve({
+                id: "viewer-1",
+                url: "https://viewer.invalid/secret",
+                expiresAt: "2026-09-03T00:01:30.000Z",
+              }),
+            capture: () =>
+              Promise.resolve({
+                bytes: png(),
+                mediaType: "image/png" as const,
+                display: ":100",
+                capturedAt: "2026-09-03T00:00:10.000Z",
+              }),
+          }),
+        );
+      },
+      now: () => new Date("2026-09-03T00:00:15.000Z"),
+    };
+    await createComputerBotBackendContribution(host).execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-before-eviction"),
+    );
+
+    const reconstructed = createComputerBotBackendContribution(host);
+    const receipt = await reconstructed.execute(
+      "user-1",
+      "scout",
+      command("closeViewer", "close-after-eviction"),
+    );
+
+    expect(receipt.status).toBe("applied");
+    expect(opens).toBe(1);
+    expect(workspace.writes).toHaveLength(0);
+  });
+
+  test("serves repeated projection file reads from the resident cache", async () => {
+    const storage = new MemoryStorage();
+    const workspace = new FakeWorkspace();
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      workspace,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () => Promise.reject(new Error("must stay wake-free")),
+      now: () => new Date("2026-09-03T00:00:00.000Z"),
+    });
+
+    await contribution.read("user-1", "scout");
+    await contribution.read("user-1", "scout");
+
+    expect(workspace.lists).toHaveLength(1);
+    expect(workspace.reads).toHaveLength(1);
+  });
+
+  test("invalidates the doctor cache when a User-run report is written", async () => {
+    const storage = new MemoryStorage();
+    const workspace = new FakeWorkspace();
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      workspace,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve({
+          assignment: { providerId: "fake", generation: 1 },
+          identity: { userId: "user-1" },
+          tenant: { botId: "scout" },
+          doctor: {
+            run: () =>
+              Promise.resolve({
+                schemaVersion: 2,
+                generation: 1,
+                capturedAt: "2026-09-03T00:00:05.000Z",
+                checks: [{ name: "disk", status: "pass", detail: "healthy" }],
+                summary: "1 check, 1 passed, 0 failed",
+              }),
+          },
+          close: () => Promise.resolve(),
+        }),
+      now: () => new Date("2026-09-03T00:00:10.000Z"),
+    });
+    await contribution.read("user-1", "scout");
+
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("runDoctor", "doctor-write"),
+    );
+    const projected = await contribution.read("user-1", "scout");
+
+    expect(workspace.reads).toHaveLength(2);
+    expect(projected.doctor?.summary).toBe("1 check, 1 passed, 0 failed");
+  });
+
+  test("expires projection file caches so out-of-band durable-root writes surface", async () => {
+    const storage = new MemoryStorage();
+    const workspace = new FakeWorkspace();
+    let now = new Date("2026-09-03T00:00:00.000Z");
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      workspace,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () => Promise.reject(new Error("must stay wake-free")),
+      now: () => now,
+    });
+    await contribution.read("user-1", "scout");
+    now = new Date("2026-09-03T00:00:30.001Z");
+
+    await contribution.read("user-1", "scout");
+
+    expect(workspace.lists).toHaveLength(2);
+    expect(workspace.reads).toHaveLength(2);
+  });
+
+  test("never shares a projection file cache across Bots or Users", async () => {
+    const storage = new MemoryStorage();
+    const workspace = new FakeWorkspace();
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      workspace,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () => Promise.reject(new Error("must stay wake-free")),
+      now: () => new Date("2026-09-03T00:00:00.000Z"),
+    });
+
+    await contribution.read("user-1", "scout");
+    await contribution.read("user-1", "builder");
+    await contribution.read("user-2", "scout");
+    await contribution.read("user-1", "scout");
+
+    expect(workspace.lists).toHaveLength(3);
+    expect(workspace.reads).toHaveLength(3);
+  });
+
+  test("a cold instance projects the same files as a warm instance", async () => {
+    const storage = new MemoryStorage();
+    const workspace = new FakeWorkspace();
+    await workspace.write({
+      path: {
+        root: {
+          kind: "package-declared",
+          userId: "user-1",
+          packageId: "computer",
+          rootId: "screenshots",
+        },
+        path: `${computerBotPathKeyV1("scout")}/capture.png`,
+      },
+      bytes: png(),
+      writer: { kind: "user", userId: "user-1" },
+    });
+    const host = {
+      storage,
+      workspace,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () => Promise.reject(new Error("must stay wake-free")),
+      now: () => new Date("2026-09-03T00:00:00.000Z"),
+    };
+    const warm = createComputerBotBackendContribution(host);
+    const expected = await warm.read("user-1", "scout");
+    await warm.read("user-1", "scout");
+
+    const cold = createComputerBotBackendContribution(host);
+    expect(await cold.read("user-1", "scout")).toEqual(expected);
+    expect(workspace.lists).toHaveLength(2);
   });
 
   test("projects reconstructed durable state without opening the Computer", async () => {

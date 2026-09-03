@@ -347,6 +347,8 @@ export class BotState extends DurableObject<BotStateEnv> {
                     // hooks.
                     createAuthority: (options) =>
                       new BotDurableAuthority(options),
+                    invalidateComputerProjectionFile: (userId, botId, kind) =>
+                      computer?.invalidateProjectionFile(userId, botId, kind),
                     // An archived Bot admits no configuration command; the Flock
                     // Contribution owns that durable lifecycle state.
                     assertLifecycleActive: (storage, botId) => {

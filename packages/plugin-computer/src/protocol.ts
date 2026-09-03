@@ -9,6 +9,7 @@ export const COMPUTER_COMMAND_TYPES = [
   "releaseControl",
   "refreshControl",
   "refreshViewer",
+  "closeViewer",
   "runDoctor",
 ] as const;
 
