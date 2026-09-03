@@ -1001,14 +1001,18 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   function updateModelLabel(): void {
     const bot = web.value.botSettings;
     const user = web.value.userSettings;
-    if (!bot || !user) {
+    if (!user) {
       web.value.modelSource = "none";
       web.value.modelReady = false;
       web.value.modelLabel = modelRuntimeLabel({ source: "none" });
       return;
     }
     const effective = resolveEffectiveBotModelV1({
-      bot: toRaw(bot),
+      // Before the first Bot exists — and in the window before a selected
+      // Bot's settings arrive — the account's own effective model is still
+      // the truth. An empty Bot scope simply declines to override it, so the
+      // shell reports the account model instead of claiming it is unavailable.
+      bot: bot ? toRaw(bot) : { packageValues: {} },
       user: toRaw(user),
       packages: toRaw(web.value.pluginCatalog).map((pkg) => ({
         packageId: pkg.packageId,
