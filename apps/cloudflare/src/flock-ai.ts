@@ -10,38 +10,90 @@ export interface FlockAiGatewayHostV1 {
   ): Promise<ReadableStream<Uint8Array>>;
 }
 
+export interface FlockAiGatewayConfigV1 {
+  gatewayId?: string;
+  autoRoute?: string;
+  /**
+   * The Cloudflare account owning the Gateway. Present with `token`, requests
+   * take the compat HTTP transport; absent, they take the `AI` binding.
+   */
+  accountId?: string;
+  /** The `cf-aig-authorization` bearer for an authenticated Gateway. */
+  token?: string;
+  /** Injectable for tests; defaults to the global `fetch`. */
+  fetch?: typeof fetch;
+}
+
+export function compatChatCompletionsUrlV1(
+  accountId: string,
+  gatewayId: string,
+): string {
+  return `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/compat/chat/completions`;
+}
+
+/**
+ * A rejected request answers with a JSON error body rather than an SSE stream.
+ * Left unchecked it decodes as a stream that ends before its terminal marker,
+ * which the Agent reads as an *uncertain* outcome and parks the run on — so the
+ * status is what tells the two apart.
+ */
+async function streamOrThrowV1(
+  response: Response,
+): Promise<ReadableStream<Uint8Array>> {
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => "")).slice(0, 512);
+    throw new Error(
+      `AI Gateway rejected the request (${response.status})${
+        detail ? `: ${detail}` : ""
+      }`,
+    );
+  }
+  if (!response.body) {
+    throw new Error("AI Gateway did not return a response stream");
+  }
+  return response.body;
+}
+
 /** Keep the generated Cloudflare binding type on the Worker side of the seam. */
 export function createFlockAiGatewayHostV1(
   ai: Pick<Ai, "gateway">,
-  config: { gatewayId?: string; autoRoute?: string },
+  config: FlockAiGatewayConfigV1,
 ): FlockAiGatewayHostV1 {
   const gatewayId = config.gatewayId || DEFAULT_FLOCK_AI_GATEWAY_ID_V1;
   const autoRoute = config.autoRoute || FLOCK_AI_DEFAULT_AUTO_ROUTE;
+  const { accountId, token } = config;
+  // The `AI` binding's `gateway(...).run()` reaches the Gateway's *universal*
+  // endpoint, whose request-shape translation rejects a `dynamic/<route>` model
+  // before inference runs — cloudflare/ai#617. Concrete `workers-ai/@cf/...`
+  // ids survive that translation, so the binding stays the transport wherever
+  // no Gateway credentials are configured, which is every local and CI
+  // environment that binds a stand-in for `AI`.
+  const useCompat = Boolean(accountId && token);
+  const doFetch = config.fetch ?? fetch;
   return {
     autoRoute,
     async runChatCompletion(gatewayModel, body) {
+      if (useCompat) {
+        const response = await doFetch(
+          compatChatCompletionsUrlV1(accountId!, gatewayId),
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "cf-aig-authorization": `Bearer ${token!}`,
+            },
+            body: JSON.stringify({ ...body, model: gatewayModel }),
+          },
+        );
+        return streamOrThrowV1(response);
+      }
       const response = await ai.gateway(gatewayId).run({
         provider: "compat",
         endpoint: "chat/completions",
         headers: {},
         query: { ...body, model: gatewayModel },
       });
-      // A rejected request answers with a JSON error body rather than an SSE
-      // stream. Left unchecked it decodes as a stream that ends before its
-      // terminal marker, which the Agent reads as an *uncertain* outcome and
-      // parks the run on — so the status is what tells the two apart.
-      if (!response.ok) {
-        const detail = (await response.text().catch(() => "")).slice(0, 512);
-        throw new Error(
-          `AI Gateway rejected the request (${response.status})${
-            detail ? `: ${detail}` : ""
-          }`,
-        );
-      }
-      if (!response.body) {
-        throw new Error("AI Gateway did not return a response stream");
-      }
-      return response.body;
+      return streamOrThrowV1(response);
     },
   };
 }

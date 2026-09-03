@@ -220,6 +220,10 @@ interface Env {
   AI: Ai;
   FLOCK_AI_GATEWAY_ID?: string;
   FLOCK_AI_AUTO_ROUTE?: string;
+  /** Cloudflare account owning the AI Gateway; enables the compat transport. */
+  FLOCK_AI_ACCOUNT_ID?: string;
+  /** `cf-aig-authorization` bearer for the authenticated AI Gateway. */
+  FLOCK_AI_GATEWAY_TOKEN?: string;
   BOT_STATES: DurableObjectNamespace<BotState>;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
