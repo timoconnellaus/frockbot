@@ -91,7 +91,7 @@ interface ProbeExports {
 /**
  * One scripted Turn: the provider discovers `tool`, calls it through
  * `call_dynamic_tool`, then reports the result. Two round-trips, because
- * that is what ADR 0021 costs a real model — nothing here is reachable by
+ * that is what ADR 0023 costs a real model — nothing here is reachable by
  * bare name.
  */
 export interface AuthoringProbeTurn {

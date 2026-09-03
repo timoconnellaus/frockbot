@@ -1,6 +1,6 @@
-// Addressing a progressively disclosed tool, the way a model has to (ADR 0021).
+// Addressing a progressively disclosed tool, the way a model has to (ADR 0023).
 //
-// After ADR 0021 the only tools a model is handed by name are the native set
+// After ADR 0023 the only tools a model is handed by name are the native set
 // plus the two meta-tools. Everything else — `frockbot`'s own tools, a Bot
 // isolate's, a connected account's — is reachable only through
 // `call_dynamic_tool`, and an external namespace additionally requires
@@ -10,7 +10,7 @@
 //
 // So the helpers here are deliberately the *whole* envelope rather than a
 // convenience wrapper that hides it: a test reads the namespace and the
-// external-ness at its call site, which is exactly the part ADR 0021 made
+// external-ness at its call site, which is exactly the part ADR 0023 made
 // load-bearing.
 import type {
   LlmMessage,
@@ -137,7 +137,7 @@ export interface TwoTierScriptV1 {
 /**
  * The next step of a model that must find a tool before it can call it.
  *
- * This is the whole of ADR 0021 from the model's side: one `get_dynamic_tools`
+ * This is the whole of ADR 0023 from the model's side: one `get_dynamic_tools`
  * round-trip to learn which namespace owns the name, then one
  * `call_dynamic_tool` carrying that namespace. It is derived from the
  * transcript rather than from probe-side state, so an evicted-and-resumed Turn
@@ -150,7 +150,7 @@ export function twoTierStepV1(
   const { messages } = request;
   // A native tool is offered by name in the request, so it is called by name.
   // Only what the request does *not* name has to be discovered — which is the
-  // whole distinction ADR 0021 draws, and the one a real model acts on.
+  // whole distinction ADR 0023 draws, and the one a real model acts on.
   const native = request.tools.some((tool) => tool.name === script.toolName);
   // Only this Turn's exchange counts. A Session runs several Turns, and the
   // discovery the *previous* Turn did is history, not an answer to this one.

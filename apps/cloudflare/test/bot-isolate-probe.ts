@@ -48,7 +48,7 @@ import { dynamicToolCallV1, twoTierStepV1 } from "./dynamic-tools.ts";
 
 /**
  * The Package id this probe's isolate mounts under, which is therefore also
- * the namespace its tools are disclosed in (ADR 0021). Non-first-party
+ * the namespace its tools are disclosed in (ADR 0023). Non-first-party
  * namespaces are external, so a call into one carries `mcpDetails.description`.
  */
 export const PROBE_PACKAGE_ID = "bot-authored";
@@ -478,7 +478,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
     try {
       await composition.verify(new AbortController().signal);
       // A Bot isolate's tools are namespaced by its immutable Package id and
-      // the namespace is external (ADR 0021), so the only way in is
+      // the namespace is external (ADR 0023), so the only way in is
       // `call_dynamic_tool` carrying that namespace and call metadata. The
       // tests still name the bare tool; the addressing lives here, once.
       const call = dynamicToolCallV1("call-1", {

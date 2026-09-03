@@ -34,7 +34,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
     // Same tool, same namespace, same arguments — only `mcpDetails.description`
-    // is missing. A non-first-party namespace is external (ADR 0021), and the
+    // is missing. A non-first-party namespace is external (ADR 0023), and the
     // registry refuses the call before the isolate is reached rather than
     // letting an unexplained invocation through.
     const result = await stub.callTool({

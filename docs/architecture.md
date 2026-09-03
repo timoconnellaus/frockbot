@@ -141,7 +141,7 @@ The browser uses the Cordis WebUI client root and Vue. First-party and reviewed 
 
 #### The chat thread and its composer
 
-The composer stays open while a Turn runs. Sending mid-Turn supersedes it (ADR 0022), so the only things that close the composer are the ones that would make any message impossible — no Bot selected, no model, no connection. Stop takes the send button's place only while there is nothing to send; the moment the User has typed something, sending it is what they mean by interrupting, and `stopRun` targets `runningRunId` — the Turn that is executing — rather than `activeRunId`, which is the newest unsettled Turn a new message would supersede.
+The composer stays open while a Turn runs. Sending mid-Turn supersedes it (ADR 0024), so the only things that close the composer are the ones that would make any message impossible — no Bot selected, no model, no connection. Stop takes the send button's place only while there is nothing to send; the moment the User has typed something, sending it is what they mean by interrupting, and `stopRun` targets `runningRunId` — the Turn that is executing — rather than `activeRunId`, which is the newest unsettled Turn a new message would supersede.
 
 A message sent mid-Turn appears immediately at the bottom of the thread as an ordinary user message at reduced opacity: no label, no icon, and no word for the User to learn. The greyed state is `.message-pending`, driven by `WebChatMessage.pending`, which the client sets optimistically and then reconciles by run id against `ClientRunV1.queued` — durable state, so a reload draws the same thing without the client remembering anything. It goes to full strength the moment its own Turn is admitted and running. The superseded Turn keeps everything it already sent and takes the treatment a stopped Turn already has.
 
@@ -314,7 +314,7 @@ Admission is declared at two levels, a ceiling and a narrowing inside it:
 
 Reconstructibility needs nothing new. `model/request` already persists the whole normalized request including its tool schemas, so the trimmed catalog **is** the recorded request; `turn/admission` records the input that produced it. A Turn recorded before turn admission existed carries no `turn/admission` event and replays as `chat`.
 
-### Lanes, and superseding a running Turn (ADR 0022)
+### Lanes, and superseding a running Turn (ADR 0024)
 
 Every Turn is also admitted on a **lane**: `user` for the conversation, `background` for a Routine firing or a subagent dispatch. The lane is derived from the recorded turn type — `chat` is `user`, everything else is `background` — and written explicitly on `admission.lane` only when it differs, so no stored byte of today's records carries it.
 

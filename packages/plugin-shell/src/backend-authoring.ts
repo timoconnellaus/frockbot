@@ -279,7 +279,7 @@ export function createPackageAuthoringHost(
    * currently stored declarations are subtracted from the mounted catalog;
    * every first-party tool and every other authored Package remains reserved.
    *
-   * The comparison is on bare names. Since ADR 0021 the mounted catalog
+   * The comparison is on bare names. Since ADR 0023 the mounted catalog
    * reports a progressively disclosed tool as `namespace/name`, while a Package
    * declares bare names, so comparing the two directly matches nothing and the
    * guard silently stops refusing anything. Stripping the namespace keeps the

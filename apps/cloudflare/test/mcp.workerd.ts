@@ -76,7 +76,7 @@ describe("the MCP runtime Contribution in workerd", () => {
       const schemas = root.tools.schemas({ turnType: "chat" });
       // An MCP tool is native — it carries no namespace — so it is still
       // offered by name, now beside the two meta-tools every registry
-      // contributes (ADR 0021).
+      // contributes (ADR 0023).
       expect(schemas.map((schema) => schema.name)).toEqual([
         "mcp__example__echo",
         ...META_TOOL_NAMES_V1,
