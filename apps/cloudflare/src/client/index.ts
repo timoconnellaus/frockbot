@@ -21,6 +21,7 @@ import {
   ClientApplication,
   decodeAcknowledgement,
   decodeNotificationList,
+  readJsonResponseV1,
   decodeRevocationResult,
   decodeStartConnectionResult,
   type ClientTurnResponse,
@@ -81,27 +82,9 @@ async function apiRequest(
         headers: body ? { "content-type": "application/json" } : undefined,
         body,
       });
-  const value: unknown = await response.json();
-  if (!response.ok) {
-    const error =
-      typeof value === "object" &&
-      value !== null &&
-      "error" in value &&
-      typeof value.error === "string"
-        ? value.error
-        : "Hosted request failed";
-    const failure = new Error(error) as Error & { definitive?: boolean };
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      "definitive" in value &&
-      value.definitive === true
-    ) {
-      failure.definitive = true;
-    }
-    throw failure;
-  }
-  return value;
+  // Every read of a response goes through the shared reader: it classifies a
+  // failed or non-JSON reply rather than letting `JSON.parse` speak for it.
+  return await readJsonResponseV1(response);
 }
 
 const botStateChannel = new BrowserBotStateChannel();
@@ -153,18 +136,7 @@ const application = new ClientApplication({
           signal,
         });
     signal.throwIfAborted();
-    const result: unknown = await response.json();
-    if (!response.ok) {
-      const error =
-        typeof result === "object" &&
-        result !== null &&
-        "error" in result &&
-        typeof result.error === "string"
-          ? result.error
-          : "Agent request failed";
-      throw new Error(error);
-    }
-    return decodeClientTurnV1(result);
+    return decodeClientTurnV1(await readJsonResponseV1(response));
   },
   readConfiguration(query: ConfigurationQueryV1) {
     const path =

@@ -85,8 +85,13 @@ onMounted(() => void flock.value.load());
 
 <template>
   <div class="flock-list-actions">
-    <button type="button" class="flock-manage" @click="flock.toggleArchived">
-      {{ flock.showArchived ? "Hide archived" : "Manage" }}
+    <button
+      type="button"
+      class="flock-manage"
+      :aria-pressed="flock.showArchived"
+      @click="flock.toggleArchived"
+    >
+      {{ flock.showArchived ? "Done" : "Manage" }}
     </button>
   </div>
   <div v-if="flock.loading" class="flock-skeleton" aria-busy="true">
@@ -99,6 +104,21 @@ onMounted(() => void flock.value.load());
       </span>
     </div>
   </div>
+  <!--
+    An unreadable list is not an empty one. Offering to add a first Bot to a
+    User whose Bots simply did not load is the worst thing this column can say,
+    so the failure takes the slot and offers the read again instead.
+  -->
+  <p
+    v-else-if="flock.error && !flock.directory.bots.length"
+    class="flock-error"
+    role="alert"
+  >
+    {{ flock.error }}
+    <button type="button" class="flock-retry" @click="flock.load()">
+      Retry
+    </button>
+  </p>
   <p v-else-if="!flock.directory.bots.length" class="flock-empty">
     No Bots yet. Add your first sheep.
   </p>
@@ -250,5 +270,13 @@ onMounted(() => void flock.value.load());
       </TransitionGroup>
     </div>
   </template>
-  <p v-if="flock.error" class="flock-error" role="alert">{{ flock.error }}</p>
+  <!-- The same failure over a list that still has rows: a banner, not a
+       replacement, because what is on screen is still the last thing known. -->
+  <p
+    v-if="flock.error && flock.directory.bots.length"
+    class="flock-error"
+    role="alert"
+  >
+    {{ flock.error }}
+  </p>
 </template>

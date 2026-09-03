@@ -12,6 +12,16 @@ import { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
 export { decodeExternalAuthorizationUrl };
 
+export {
+  classifyClientFailureV1,
+  clientFailureDetailV1,
+  presentClientFailureV1,
+  readJsonResponseV1,
+  TransportFailureV1,
+  type ClientFailureKindV1,
+  type ClientFailureV1,
+} from "./errors.js";
+
 import type {
   ConfigurationCommandV1,
   ConfigurationQueryV1,

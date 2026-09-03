@@ -195,6 +195,18 @@
   -webkit-app-region: no-drag;
 }
 
+/*
+ * The Bot's own header controls on a phone, where the right panel that
+ * usually carries them is a closed drawer.
+ */
+.topbar-bot-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
 /* Thread */
 
 .thread {
@@ -371,6 +383,49 @@
   50% {
     opacity: 1;
     transform: scale(1.06);
+  }
+}
+
+/*
+ * The bubble a Turn has before it has words: three dots that say the Bot is
+ * working, where the reply itself will appear.
+ */
+.message-working {
+  display: flex;
+  align-items: center;
+  min-height: 20px;
+}
+
+.working-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.working-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--frock-text-muted);
+  animation: frock-working-dot 1.2s ease-in-out infinite;
+}
+
+.working-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.working-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes frock-working-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+  }
+
+  30% {
+    opacity: 1;
   }
 }
 
@@ -1029,17 +1084,15 @@
     padding-left: 0;
   }
 
+  /* No window chrome and no collapse control at this width, so the row ends
+     where the Bot's own actions do. */
   .topbar {
     gap: 8px;
-    padding: 0 100px 0 4px;
+    padding: 0 4px;
   }
 
   .brand-mark {
     font-size: var(--frock-text-lg);
-  }
-
-  .window-actions {
-    padding: 0 8px;
   }
 
   .nav-toggle {

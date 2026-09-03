@@ -20,6 +20,13 @@ export interface FlockWebData {
   /** Per-Bot unread, as the Bot Durable Objects derive it. Never computed here. */
   unread: Record<string, BotUnreadViewV1>;
   loading: boolean;
+  /**
+   * Whether the Bot list has ever been read from the deployment. An empty
+   * list means "no Bots" only once this is true: before it, and after a load
+   * that failed, an empty list is an unknown list, and the sidebar must not
+   * offer to create a first Bot for a User who already has one.
+   */
+  loaded: boolean;
   error?: string;
   overlay?: "create" | "edit" | "archive";
   lifecycles: Record<string, BotLifecycleStatusV1>;

@@ -279,6 +279,8 @@ const hasBot = computed(() => Boolean(state.value.activeBotId));
  * inventing "Model unavailable" of its own.
  */
 const threadHeading = computed(() => {
+  // An unreadable Bot list is not an empty one.
+  if (state.value.botsUnavailable) return "Couldn't load your Bots.";
   if (!hasBot.value) return "No Bots yet.";
   if (!botName.value) return state.value.modelReady ? "Ready." : "Not ready.";
   return state.value.modelReady
@@ -286,6 +288,9 @@ const threadHeading = computed(() => {
     : `${botName.value} isn't ready.`;
 });
 const threadHint = computed(() => {
+  if (state.value.botsUnavailable) {
+    return "Check your connection, then try again.";
+  }
   if (!hasBot.value) return "Add your first sheep to start a conversation.";
   if (state.value.modelReady) {
     return "Start with a conversation. Cordis plugins can add the rest.";
@@ -810,6 +815,17 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             <small>{{ state.modelLabel }}</small>
           </div>
           <k-slot name="frockbot.header-actions" />
+          <!--
+            A phone has no right panel on screen, so the controls that live in
+            its header — the settings gear above all, the only route to
+            Routines, the audit log and template import — have nowhere to be.
+            They come here instead, where the panel's own header would be at a
+            desktop width. The panel keeps them at every other size, so they
+            are never drawn twice.
+          -->
+          <div v-if="phoneLayout" class="topbar-bot-actions">
+            <k-slot name="frockbot.bot-actions" />
+          </div>
         </header>
 
         <section
@@ -858,6 +874,23 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               </div>
               <div v-if="message.text" class="message-bubble">
                 <UiMarkdown :text="message.text" />
+              </div>
+              <!--
+                The working state. Until the model has produced a word there
+                was nothing beside the avatar at all, for twenty seconds and
+                occasionally for two minutes, and the only other signal — the
+                composer's stop button — is at the far end of the window from
+                where the reply will appear.
+              -->
+              <div
+                v-else-if="message.status === 'streaming'"
+                class="message-bubble message-working"
+                role="status"
+                aria-label="Working on a reply"
+              >
+                <span class="working-dots" aria-hidden="true">
+                  <i></i><i></i><i></i>
+                </span>
               </div>
               <template v-for="tool in message.tools" :key="tool.id">
                 <PackageIframeHost
@@ -985,7 +1018,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               type="button"
               @click="web.resumeRun(state.activeRun.runId)"
             >
-              Resolve Turn
+              Try again
             </button>
           </div>
         </Transition>
@@ -1158,7 +1191,13 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         </div>
       </aside>
 
-      <div class="window-actions">
+      <!--
+        Collapsing the side panel is a desktop gesture: on a phone the panel
+        is a drawer that is already closed, so the control said "hide" about
+        something that was not there, while the gear it shared a row with had
+        nowhere to be at all (it is in the topbar above).
+      -->
+      <div v-if="!phoneLayout" class="window-actions">
         <UiIconButton
           class="panel-toggle"
           :icon="rightPanelOpen ? 'chevrons-right' : 'chevrons-left'"

@@ -268,6 +268,24 @@
   color: var(--frock-danger-text);
 }
 
+/* The way to try the read again, beside the sentence that says it failed. */
+.flock-retry {
+  display: inline-block;
+  margin-top: 6px;
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-control);
+  background: transparent;
+  color: var(--frock-text);
+  padding: 2px 8px;
+  font: inherit;
+  font-size: var(--frock-text-xs);
+  cursor: pointer;
+}
+
+.flock-retry:hover {
+  background: var(--frock-fill-hover);
+}
+
 /* Header identity */
 
 .flock-identity-button {

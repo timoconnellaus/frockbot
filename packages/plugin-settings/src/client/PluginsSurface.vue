@@ -8,7 +8,11 @@
  * all of it and simply stops being available to any Bot. Installing something
  * new is the Package Catalog, one surface over.
  */
-import { clientSurfaceRegistryKey } from "@frockbot/client-core";
+import {
+  clientFailureDetailV1,
+  clientSurfaceRegistryKey,
+  presentClientFailureV1,
+} from "@frockbot/client-core";
 import { UiAnchor, UiButton, UiIcon } from "@frockbot/client-ui";
 import {
   frockBotWebDataKey,
@@ -111,13 +115,21 @@ function openPackageCatalog(): void {
   surfaces.open("package-catalog");
 }
 
+/** The read the error banner offers again. */
+async function reload(): Promise<void> {
+  await web.value.loadPluginCatalog();
+}
+
 async function install(item: PluginCatalogItem): Promise<void> {
   busyPackageId.value = item.packageId;
   try {
     await web.value.installPackage(item.packageId, item.version);
   } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not add the Package";
+    web.value.settingsError = presentClientFailureV1(
+      error,
+      `add ${item.displayName}`,
+    );
+    console.debug("plugin install failed", clientFailureDetailV1(error));
   } finally {
     busyPackageId.value = undefined;
   }
@@ -128,10 +140,11 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
   try {
     await web.value.setPackageEnabled(packageId, next);
   } catch (error) {
-    web.value.settingsError =
-      error instanceof Error
-        ? error.message
-        : "Could not change the Package state";
+    web.value.settingsError = presentClientFailureV1(
+      error,
+      next ? "turn that plugin on" : "turn that plugin off",
+    );
+    console.debug("plugin toggle failed", clientFailureDetailV1(error));
   } finally {
     busyPackageId.value = undefined;
   }
@@ -153,6 +166,7 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
     -->
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}
+      <UiButton type="button" @click="reload">Retry</UiButton>
     </p>
     <label class="plugin-search">
       <UiIcon name="search" />
@@ -178,7 +192,10 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
         </UiButton>
       </div>
     </UiAnchor>
-    <div class="plugin-grid">
+    <div
+      class="plugin-grid"
+      :class="{ 'plugin-grid--stale': Boolean(web.settingsError) }"
+    >
       <article
         v-for="item in filteredCatalog"
         :key="item.packageId"
@@ -333,11 +350,19 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
   box-shadow: var(--frock-shadow-control);
 }
 
+/*
+ * The name is the only thing in the row that identifies what a click will
+ * change, so it is the one thing that may not be the first to shrink. A grid
+ * gave the actions a min-content column and let the title collapse to an
+ * ellipsis — on a phone, to nothing at all — so the row wraps instead: the
+ * copy keeps a readable basis and the buttons drop to their own line when
+ * they no longer fit beside it.
+ */
 .plugin-summary {
-  display: grid;
+  display: flex;
   width: 100%;
   min-width: 0;
-  grid-template-columns: 44px minmax(0, 1fr) auto auto;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 8px;
@@ -350,6 +375,7 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
 
 .plugin-logo {
   display: grid;
+  flex: 0 0 auto;
   width: 44px;
   height: 44px;
   place-items: center;
@@ -361,6 +387,7 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
 
 .plugin-card-copy {
   min-width: 0;
+  flex: 1 1 12rem;
 }
 
 .plugin-card-copy strong,
@@ -384,6 +411,8 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
 }
 
 .plugin-state {
+  flex: 0 0 auto;
+  margin-left: auto;
   color: var(--frock-text-muted);
   font-size: var(--frock-text-sm);
   font-weight: 700;
@@ -396,7 +425,9 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
 
 .plugin-actions {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
+  margin-left: auto;
   justify-content: flex-end;
   gap: 8px;
 }
@@ -414,7 +445,20 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
 }
 
 .settings-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   color: var(--frock-danger-text);
   font-size: var(--frock-text-sm);
+}
+
+/*
+ * What is on screen after a failed read is the last thing known, not the
+ * current thing. Dimming it says so, so a toggle is not made against a list
+ * the deployment has just refused to confirm.
+ */
+.plugin-grid--stale {
+  opacity: 0.55;
 }
 </style>
