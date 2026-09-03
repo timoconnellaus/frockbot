@@ -1,5 +1,8 @@
 import type { Entry } from "@cordisjs/plugin-webui";
-import { ComputerError } from "@frockbot/computer-core";
+import {
+  COMPUTER_UNCONFIGURED_MESSAGE_V1,
+  ComputerError,
+} from "@frockbot/computer-core";
 import type { ComputerState } from "@frockbot/plugin-computer/shared";
 import { computerUpdateLabelV1 } from "@frockbot/plugin-computer/protocol";
 import {
@@ -50,7 +53,7 @@ class FlySpriteHostController {
       configured: computer.configured,
       message: computer.configured
         ? "Computer ready"
-        : "This deployment has no computer.",
+        : COMPUTER_UNCONFIGURED_MESSAGE_V1,
     });
     const data: ComputerState = {
       ...this.machine,

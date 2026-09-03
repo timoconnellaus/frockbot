@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  COMPUTER_UNCONFIGURED_MESSAGE_V1,
   ComputerError,
   decodeComputerDoctorReportV1,
   type ComputerConnectionOptionsV1,
@@ -1181,7 +1182,7 @@ export class FlySpriteComputer {
     if (!this.host) {
       throw new ComputerError(
         "provider-unavailable",
-        "This deployment has no computer, and one can't be added from inside the app.",
+        COMPUTER_UNCONFIGURED_MESSAGE_V1,
       );
     }
     let held = this.surfaces.get(layout.key);

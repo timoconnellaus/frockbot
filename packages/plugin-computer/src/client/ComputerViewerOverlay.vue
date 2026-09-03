@@ -10,6 +10,7 @@ import {
   ref,
   watch,
 } from "vue";
+import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computerKey, type ComputerState } from "../shared.ts";
 import { dialogFocusWrapTarget } from "./dialog-focus.ts";
 import { computerProgressFrame, computerProgressRunKind } from "./progress.ts";
@@ -23,6 +24,12 @@ import {
 const computer = inject(computerKey) ?? useRpc<ComputerState>();
 const state = computed(() => computer.value);
 const busy = ref(false);
+// The Bot as its User named it. A raw slug and an infrastructure vendor are
+// architecture, not identity, and the viewer header is the User's screen.
+const shell = inject(frockBotWebDataKey, undefined);
+const botName = computed(
+  () => shell?.value.botSettings?.profile.name ?? "Computer",
+);
 const confirming = ref(false);
 const confirmDialog = ref<HTMLElement>();
 const viewerFrame = ref<HTMLIFrameElement>();
@@ -183,7 +190,9 @@ async function closeViewer(escape = false): Promise<void> {
   try {
     await (escape ? actions.escape() : actions.closeViewer());
   } catch {
-    // A failed release remains visible in the still-open overlay.
+    // The overlay collapses either way: a release the Computer refused is
+    // recorded durably and shown on the card, and is never a reason to trap
+    // the User in a full-screen viewer.
   }
 }
 
@@ -275,6 +284,7 @@ onBeforeUnmount(() => {
     <header class="computer-overlay-toolbar">
       <div class="computer-overlay-identity">
         <strong>Computer</strong>
+        <small>{{ botName }}</small>
       </div>
       <div class="computer-overlay-actions">
         <span class="computer-status" :class="`status-${state.phase}`">

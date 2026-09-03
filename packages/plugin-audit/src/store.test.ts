@@ -166,3 +166,102 @@ describe("the audit table", () => {
     expect(table.count()).toBe(0);
   });
 });
+
+describe("a rebuild that fails", () => {
+  test("leaves the live table exactly as it was", async () => {
+    const table = store();
+    table.insert([entry(), entry({ occurrenceId: "tool:1:1:1" })]);
+    expect(table.count()).toBe(2);
+
+    // The rebuild used to `DELETE FROM` the live table before it fetched page
+    // one, so any source failure left a truncated table still reporting
+    // `ready` — a person would read an audit log with rows silently missing
+    // and nothing saying so.
+    await expect(
+      table.rebuild([
+        {
+          botId: "foreman",
+          page: async () => {
+            throw new Error("the Bot object is unreachable");
+          },
+        },
+      ]),
+    ).rejects.toThrow("unreachable");
+
+    expect(table.count()).toBe(2);
+    expect(table.state()).toBe("ready");
+  });
+
+  test("a rebuild that succeeds replaces the table wholesale", async () => {
+    const table = store();
+    table.insert([entry({ occurrenceId: "tool:9:9:9" })]);
+
+    const receipt = await table.rebuild([
+      {
+        botId: "foreman",
+        page: async (cursor?: string) =>
+          cursor === undefined
+            ? {
+                entries: [entry({ occurrenceId: "tool:1:1:0" })],
+                nextCursor: "p1",
+              }
+            : { entries: [entry({ occurrenceId: "tool:1:1:1" })] },
+      },
+    ]);
+
+    expect(receipt).toMatchObject({ entries: 2, bots: 1, indexState: "ready" });
+    expect(table.count()).toBe(2);
+    // The row the old table held and the sources no longer offer is gone: a
+    // rebuild is a replacement, not a merge.
+    expect(
+      table
+        .query({})
+        .entries.map((row) => row.occurrenceId)
+        .sort(),
+    ).toEqual(["tool:1:1:0", "tool:1:1:1"]);
+  });
+
+  test("refuses a second rebuild while one is running", async () => {
+    const table = store();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = table.rebuild([
+      {
+        botId: "foreman",
+        page: async () => {
+          await gate;
+          return { entries: [entry()] };
+        },
+      },
+    ]);
+
+    // `audit-rebuilding` was written and never read as a lock, so two
+    // concurrent rebuilds wiped each other.
+    await expect(
+      table.rebuild([
+        { botId: "foreman", page: async () => ({ entries: [] }) },
+      ]),
+    ).rejects.toThrow("already running");
+
+    release?.();
+    await first;
+    expect(table.state()).toBe("ready");
+  });
+});
+
+describe("retention", () => {
+  test("is enforced on a read too, not only when something is written", () => {
+    let now = Date.parse("2026-08-31T00:00:00.000Z");
+    const table = store({ maxAgeMs: 60_000, now: () => now });
+    table.insert([entry({ at: "2026-08-31T00:00:00.000Z" })]);
+    expect(table.count()).toBe(1);
+
+    // A Bot nobody has spoken to since kept every row past the age bound,
+    // because eviction only ever ran on insert. Retention is a promise about
+    // time.
+    now += 10 * 60_000;
+    expect(table.query({}).entries).toHaveLength(0);
+  });
+});

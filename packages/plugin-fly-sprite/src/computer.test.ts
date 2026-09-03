@@ -2,6 +2,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { ComputerConnectionProgressV1 } from "@frockbot/computer-core";
+import { COMPUTER_UNCONFIGURED_MESSAGE_V1 } from "@frockbot/computer-core";
 import { verifyPluginPackage } from "@frockbot/plugin-testkit";
 import { DESKTOP_GUI_LEASE_KEY } from "@frockbot/computer-host-runtime";
 import manifest from "../frockbot.json" with { type: "json" };
@@ -316,8 +317,10 @@ describe("Fly Sprite computer", () => {
   test("an unconfigured Computer refuses rather than pretending", async () => {
     const computer = new FlySpriteComputer({ spriteName: "frockbot-test" });
     expect(computer.configured).toBe(false);
+    // The refusal is addressed to the User, not to whoever deploys the host:
+    // it names no environment variable and no settings screen.
     await expect(computer.bot("general").ensure()).rejects.toThrow(
-      "This deployment has no computer",
+      COMPUTER_UNCONFIGURED_MESSAGE_V1,
     );
   });
 

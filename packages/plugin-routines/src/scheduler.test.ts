@@ -6,12 +6,17 @@ import {
 } from "./scheduler.js";
 import { decodeRoutineScheduleStateV1, type RoutineFireV1 } from "./firing.js";
 import { RoutineStore } from "./store.js";
+import { RoutineInboxStore } from "./inbox-store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
 import {
   routineFireKeyV1,
   routineScheduleKeyV1,
+  ROUTINE_FAILURE_PAUSE_AFTER,
+  ROUTINE_FIRE_LEASE_MS,
   ROUTINE_QUEUE_LIMIT,
+  ROUTINE_RUN_PREFIX,
 } from "./storage-keys.js";
+import { decodeRoutineRunEntryV1 } from "./records.js";
 import type { RoutineCommandV1 } from "./shared.js";
 
 const USER = { kind: "user" } as const;
@@ -30,10 +35,23 @@ function clock(start: string) {
   };
 }
 
-function harness(options: { start: string; schedule?: string }) {
+function harness(options: {
+  start: string;
+  schedule?: string;
+  fireTimeoutMs?: number;
+  fireLeaseMs?: number;
+}) {
   const storage = createMemoryRoutineStorageV1();
   const time = clock(options.start);
-  const scheduler = new RoutineScheduler(storage, { now: time.now });
+  const scheduler = new RoutineScheduler(storage, {
+    now: time.now,
+    ...(options.fireTimeoutMs === undefined
+      ? {}
+      : { fireTimeoutMs: options.fireTimeoutMs }),
+    ...(options.fireLeaseMs === undefined
+      ? {}
+      : { fireLeaseMs: options.fireLeaseMs }),
+  });
   const store = new RoutineStore(storage, {
     now: time.now,
     firings: scheduler,
@@ -478,5 +496,295 @@ describe("nextRuns", () => {
       (await store.list("scout", await scheduler.nextRuns())).routines[0]
         ?.nextRunAt,
     ).toBeUndefined();
+  });
+});
+
+describe("an abandoned firing", () => {
+  /** Every run-log entry stored, newest first. */
+  async function runLog(
+    storage: ReturnType<typeof createMemoryRoutineStorageV1>,
+  ) {
+    const stored = await storage.list<unknown>({ prefix: ROUTINE_RUN_PREFIX });
+    return [...stored.values()].map((value) => decodeRoutineRunEntryV1(value));
+  }
+
+  test("still contributes a deadline, so the object's alarm is not deleted under it", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER);
+
+    // The isolate is killed between `#writeClaim` and `#settleFiring`: the
+    // lock is durable and nothing will ever delete it.
+    time.set("2026-01-01T09:00:00.000Z");
+    await scheduler.settle(async () => {
+      throw new DOMException("CPU time limit", "Error");
+    });
+    // (that one settles) — now stage a genuinely orphaned lock.
+    await storage.put(routineFireKeyV1("brief"), {
+      schemaVersion: 1,
+      routineId: "brief",
+      fireId: "rf-brief-orphan",
+      trigger: "cron",
+      cue: "Routine fired.",
+      mintedAt: "2026-01-01T09:00:00.000Z",
+      entryId: "rf-brief-orphan-entry",
+    });
+
+    // Before the lease: the Routine is being dealt with, and the deadline the
+    // object arms on is when the lease runs out — never nothing, which is what
+    // let `deleteAlarm()` silence the Bot.
+    time.set("2026-01-01T09:01:00.000Z");
+    expect(await scheduler.deadlines(storage)).toEqual([
+      Date.parse("2026-01-01T09:00:00.000Z") + ROUTINE_FIRE_LEASE_MS,
+    ]);
+  });
+
+  test("is reaped once its lease expires, and the Routine fires again", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER);
+    await storage.put(routineFireKeyV1("brief"), {
+      schemaVersion: 1,
+      routineId: "brief",
+      fireId: "rf-brief-orphan",
+      trigger: "cron",
+      cue: "Routine fired.",
+      mintedAt: "2026-01-01T09:00:00.000Z",
+      entryId: "rf-brief-orphan-entry",
+    });
+
+    time.set(
+      new Date(
+        Date.parse("2026-01-01T09:00:00.000Z") + ROUTINE_FIRE_LEASE_MS + 1,
+      ).toISOString(),
+    );
+    const fired = await drain(scheduler);
+
+    // The lock is gone, the abandoned firing is `failed` in the log with a
+    // reason, and the next occurrence really ran.
+    expect(await storage.get(routineFireKeyV1("brief"))).toBeUndefined();
+    const log = await runLog(storage);
+    expect(
+      log.find((entry) => entry.fireId === "rf-brief-orphan"),
+    ).toMatchObject({ status: "failed" });
+    expect(fired).toHaveLength(1);
+  });
+
+  test("releases a lock nothing can decode", async () => {
+    const { storage, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER);
+    await storage.put(routineFireKeyV1("brief"), { schemaVersion: 99 });
+
+    await scheduler.reapExpiredFirings();
+
+    expect(await storage.get(routineFireKeyV1("brief"))).toBeUndefined();
+  });
+});
+
+describe("a firing that never comes back", () => {
+  test("is stopped at its timeout and settled as failed", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+      fireTimeoutMs: 5,
+    });
+    await store.execute(create, USER);
+
+    time.set("2026-01-01T09:00:00.000Z");
+    let aborted = false;
+    await scheduler.settle(
+      (_fire, signal) =>
+        new Promise((resolve) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            // Never resolves on its own: the timeout is the only thing that
+            // ends this firing.
+          });
+          void resolve;
+        }),
+    );
+
+    expect(aborted).toBe(true);
+    expect(await storage.get(routineFireKeyV1("brief"))).toBeUndefined();
+    const stored = await storage.list<unknown>({ prefix: ROUTINE_RUN_PREFIX });
+    const entries = [...stored.values()].map((value) =>
+      decodeRoutineRunEntryV1(value),
+    );
+    expect(entries[0]).toMatchObject({ status: "failed" });
+    expect(entries[0]?.summary).toContain("longer than");
+  });
+});
+
+describe("a firing that keeps failing", () => {
+  test("backs off instead of re-arming identically, and pauses itself", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+
+    // The live wedge was `ok, ok, ok, failed, failed, …` at exactly 60s
+    // intervals, for ever: every failure re-armed the next occurrence
+    // identically and nothing paused, backed off, or said so.
+    const failing = async () =>
+      scheduler.settle(async () => {
+        firedAt.push(time.now().getTime());
+        return { status: "failed", summary: "the provider refused" };
+      });
+    const firedAt: number[] = [];
+
+    time.set("2026-01-01T00:01:00.000Z");
+    await failing();
+    time.set("2026-01-01T00:02:00.000Z");
+    await failing();
+    expect(firedAt).toHaveLength(2);
+    // The third occurrence is due — and the backoff holds it, where before
+    // every failure re-armed the next occurrence identically.
+    time.set("2026-01-01T00:03:00.000Z");
+    await failing();
+    expect(firedAt).toHaveLength(2);
+
+    // Given all the time in the world it still fires only until it gives up.
+    for (let step = 1; step <= 10; step += 1) {
+      time.set(
+        new Date(
+          Date.parse("2026-01-01T00:02:00.000Z") + step * 60 * 60_000,
+        ).toISOString(),
+      );
+      await failing();
+    }
+    expect(firedAt).toHaveLength(ROUTINE_FAILURE_PAUSE_AFTER);
+    const listed = await store.list("scout", await scheduler.nextRuns());
+    expect(listed.routines[0]).toMatchObject({ enabled: false });
+    // The reason is durable and in the run log the panel already renders.
+    const runs = await storage.list<unknown>({ prefix: ROUTINE_RUN_PREFIX });
+    const paused = [...runs.values()]
+      .map((value) => decodeRoutineRunEntryV1(value))
+      .find((entry) => entry.summary?.includes("times in a row"));
+    expect(paused).toMatchObject({ status: "skipped" });
+  });
+
+  test("a firing that succeeds clears the backoff", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+
+    time.set("2026-01-01T00:01:00.000Z");
+    await drain(scheduler, { status: "failed", summary: "flaked" });
+    expect((await state(storage)).consecutiveFailures).toBe(1);
+
+    time.set("2026-01-01T00:05:00.000Z");
+    await drain(scheduler);
+    expect((await state(storage)).consecutiveFailures).toBeUndefined();
+  });
+});
+
+describe("a burst of missed occurrences", () => {
+  test("coalesces into one firing even inside the grace window", async () => {
+    const { time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+
+    // Four minutes of stall — well inside the five-minute grace, which is
+    // exactly where each occurrence used to be claimed on its own and one
+    // drain ran four Turns back to back.
+    time.set("2026-01-01T00:04:30.000Z");
+    const fired = await drain(scheduler);
+
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.missedCount).toBe(4);
+    expect(fired[0]?.cue).toContain("4 scheduled occurrences elapsed");
+  });
+});
+
+describe("a failed firing", () => {
+  test("writes a completion-inbox entry the person can see", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+
+    time.set("2026-01-01T00:01:00.000Z");
+    await drain(scheduler, {
+      status: "failed",
+      summary: "turn 10 started while turn 9 is open",
+    });
+
+    // Before this, a failed firing produced only a `failed` run-log row: the
+    // header badge stayed at its old count through six consecutive failures
+    // and the only trace was behind Run log → expand a row.
+    const inbox = new RoutineInboxStore(storage, { now: time.now });
+    const entries = await inbox.list();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      routineId: "brief",
+      acknowledged: false,
+    });
+    expect(entries[0]?.text).toContain("Morning brief");
+    expect(entries[0]?.text).toContain("turn 10 started while turn 9 is open");
+    // A failure is addressed to the person, not handed to the Bot's next
+    // conversational Turn: no pending wake.
+    expect(await inbox.pending()).toEqual([]);
+  });
+
+  test("records one entry however many times the settle is retried", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+    time.set("2026-01-01T00:01:00.000Z");
+    await drain(scheduler, { status: "failed", summary: "flaked" });
+    time.set("2026-01-01T02:00:00.000Z");
+    await drain(scheduler, { status: "failed", summary: "flaked" });
+
+    const entries = await new RoutineInboxStore(storage, {
+      now: time.now,
+    }).list();
+    expect(new Set(entries.map((entry) => entry.entryId)).size).toBe(
+      entries.length,
+    );
+  });
+});
+
+describe("an undecodable Routine record", () => {
+  test("degrades that one Routine, never the whole object", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+    });
+    await store.execute(create, USER);
+    // A record written by a newer deploy and read back after a rollback: the
+    // decoder is exact-keys, so it refuses it outright.
+    await storage.put("routine:from-the-future", {
+      schemaVersion: 1,
+      routineId: "from-the-future",
+      unknownFieldFromANewerDeploy: true,
+    });
+
+    // `#clocks` is reached from `deadlines()` → `refreshRecoveryAlarm`, which
+    // runs inside `completeRun`, `failRun` and `acceptRun`: a throw here used
+    // to poison every alarm refresh and every Turn settlement of the object.
+    time.set("2026-01-01T09:00:00.000Z");
+    expect(await scheduler.deadlines(storage)).toEqual([
+      Date.parse("2026-01-01T09:00:00.000Z"),
+    ]);
+    expect(await scheduler.nextRuns()).toEqual(
+      new Map([["brief", "2026-01-01T09:00:00.000Z"]]),
+    );
+    // And the healthy Routine still fires.
+    expect(await drain(scheduler)).toHaveLength(1);
   });
 });

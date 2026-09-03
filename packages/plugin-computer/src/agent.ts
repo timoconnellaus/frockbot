@@ -111,6 +111,16 @@ export interface ComputerWriterIdentityV1 {
 export interface ComputerAgentPluginConfig {
   userId: string;
   defaultProviderId: string;
+  /**
+   * Whether this deployment has a Computer at all.
+   *
+   * False, and the Package mounts no Computer tool and adds no Computer
+   * section to the system prompt: a prompt that promises a persistent Linux
+   * Computer where there is none costs the User a Turn of model spend per
+   * question and ends in the model guessing at a remedy. Absent means
+   * configured, so a host that does not know keeps the tools.
+   */
+  configured?: boolean;
   idempotentEffects?: boolean;
   writer?: ComputerWriterIdentityV1;
   /**
@@ -287,9 +297,13 @@ function decodeBrowser(input: unknown): ComputerBrowserAction | undefined {
 function failure(error: unknown): { content: string; isError: true } {
   if (error instanceof ComputerError) {
     if (error.code === "human-control-active") {
+      // The holder is named, so a second Bot of the same User — and the User
+      // reading the transcript — can tell which session has the desktop.
+      const holder = error.message.trim();
       return {
-        content:
-          "The user is controlling this Computer; do not retry this Turn",
+        content: holder
+          ? `${holder}; do not retry this Turn`
+          : "The user is controlling this Computer; do not retry this Turn",
         isError: true,
       };
     }
@@ -534,6 +548,11 @@ export function createComputerAgentPlugin(
   }
 
   const plugin: Plugin.Function = (ctx) => {
+    // A deployment with no Computer offers no Computer tool and no Computer
+    // prompt. The alternative — tools that always fail — spends a Turn's model
+    // budget discovering what this host already knows, and leaves the model
+    // inventing a way for the User to fix it.
+    if (config.configured === false) return [];
     // One Computer per User (ADR 0012): the assignment is keyed by the User,
     // and the Bot attaches to it as a tenant.
     const identity = { userId };
@@ -783,6 +802,11 @@ export function createComputerAgentPlugin(
         };
       }
       const store = processes;
+      // The intent this call wrote, until the launch that follows it settles.
+      // Left as `starting` by a launch that threw, it is a record nothing can
+      // ever answer for and nothing can forget — a failing Computer would
+      // spend the Bot's whole 100-record budget having run nothing at all.
+      let unsettled: ComputerProcessRecordV1 | undefined;
       try {
         return await useComputer(
           await open(context.botId, context.sessionId, context.signal),
@@ -812,6 +836,7 @@ export function createComputerAgentPlugin(
               logPath: "",
             };
             await store.record({ ...intent, cwd: "/", logPath: "/" });
+            unsettled = { ...intent, cwd: "/", logPath: "/" };
             const launched = await computer.processes.launch(
               { processId, command },
               { signal: context.signal, effectId: context.effectId },
@@ -825,6 +850,7 @@ export function createComputerAgentPlugin(
               pid: launched.pid,
             };
             await store.update(running);
+            unsettled = undefined;
             await noteProcess(context.sessionId, turnOf(context), {
               processId,
               action: "launch",
@@ -845,6 +871,18 @@ export function createComputerAgentPlugin(
           },
         );
       } catch (error) {
+        if (unsettled) {
+          // `unknown`, not deleted: the launch may have started something
+          // before it threw, and "recovery can read its outcome or classify it
+          // as unknown without repeating it". Terminal, so the record is
+          // prunable rather than holding a slot for the life of the Bot.
+          try {
+            await store.update({ ...unsettled, status: "unknown" });
+          } catch {
+            // Reconciling the intent is never why a tool call fails; the
+            // launch failure below is the answer the model needs.
+          }
+        }
         if (error instanceof ComputerProcessLimitError) {
           return { content: error.message, isError: true };
         }

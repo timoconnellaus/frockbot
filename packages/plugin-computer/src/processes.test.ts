@@ -53,7 +53,7 @@ interface Computer {
   workspace: FakeWorkspace;
 }
 
-function fakeComputer(): Computer {
+function fakeComputer(options: { launchFails?: boolean } = {}): Computer {
   const calls: string[] = [];
   const workspace = new FakeWorkspace();
   const computer: Computer = {
@@ -72,6 +72,9 @@ function fakeComputer(): Computer {
           processes: {
             launch: (request) => {
               calls.push(`launch:${request.processId}:${request.command}`);
+              if (options.launchFails) {
+                return Promise.reject(new Error("Sprite is unreachable"));
+              }
               return Promise.resolve({
                 pid: 4321,
                 logPath: `/processes/${request.processId}/log`,
@@ -171,6 +174,26 @@ describe("computer_exec with background:true", () => {
     ]);
     // And the answer says out loud that nothing keeps the Computer awake.
     expect(result.content).toContain("hibernates");
+    await harness.dispose();
+  });
+
+  test("settles the intent a failed launch left behind", async () => {
+    const computer = fakeComputer({ launchFails: true });
+    const held = storage();
+    const harness = await mount(computer, held);
+
+    const result = await call(harness, "computer_exec", {
+      command: "npm run build",
+      background: true,
+    });
+
+    expect(result).toMatchObject({ isError: true });
+    // The record survives — the launch may have started something before it
+    // threw — but it is terminal, so the store can prune it. Left `starting`,
+    // a failing Computer would burn the Bot's 100-record budget having run
+    // nothing at all, and permanently disable background exec.
+    const records = [...held.map.values()] as Array<{ status: string }>;
+    expect(records).toMatchObject([{ status: "unknown" }]);
     await harness.dispose();
   });
 

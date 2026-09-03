@@ -31,6 +31,14 @@ export interface ComputerEffectJournalEnv {
 interface StoredEffectIntent {
   fingerprint: string;
   response?: ComputerHostEffectResponseV1;
+  /**
+   * When an attempt on this claim ended with no terminal outcome — a dropped
+   * socket, a 5xx, a timeout. Only a terminal outcome is ever stored as
+   * `response`; this marks a claim whose attempt is over, so the next request
+   * with the same `effectId` re-drives the container instead of being told
+   * forever that an answer is still coming.
+   */
+  unresolvedAt?: string;
 }
 
 export { shardCount };
@@ -56,7 +64,14 @@ export class ComputerEffectJournal {
       const stored = await storage.get<StoredEffectIntent>("effect");
       if (stored) {
         if (stored.fingerprint !== fingerprint) return "collision" as const;
-        return stored.response ?? ("unresolved" as const);
+        if (stored.response) return stored.response;
+        // An attempt that ended with no terminal outcome releases its claim,
+        // so this request drives the effect rather than inheriting a failure.
+        if (stored.unresolvedAt === undefined) return "unresolved" as const;
+        await storage.put("effect", {
+          fingerprint,
+        } satisfies StoredEffectIntent);
+        return "owner" as const;
       }
       await storage.put("effect", { fingerprint } satisfies StoredEffectIntent);
       return "owner" as const;
@@ -113,6 +128,22 @@ export class ComputerEffectJournal {
             ? error.message
             : "Computer host outcome is unavailable",
       };
+    }
+    if (response.status === "unresolved") {
+      // A dropped socket, a 5xx or a timeout is not this effect's answer.
+      // Stored as one it became permanent and terminal-looking: the
+      // transaction above handed it back with HTTP 200 on every later attempt
+      // with the same `effectId`, so a one-off network blip meant the effect
+      // could never be retried and never resolved. Only a terminal outcome is
+      // durable; this marks the claim so the next attempt re-drives, and
+      // answers 202 as the in-flight branch already does.
+      await this.ctx.storage.put("effect", {
+        fingerprint,
+        unresolvedAt: new Date().toISOString(),
+      } satisfies StoredEffectIntent);
+      return Response.json(computerHostEffectResponseWireV1(response), {
+        status: 202,
+      });
     }
     await this.ctx.storage.put("effect", { fingerprint, response });
     return Response.json(computerHostEffectResponseWireV1(response));

@@ -585,6 +585,25 @@ function runtimePackage(
  * proxy is registered beside it so an identified effect can be replayed rather
  * than repeated across Durable Object eviction.
  */
+/**
+ * Whether this deployment can reach a Computer.
+ *
+ * `SPRITES_TOKEN` is not a credential in this Worker — the Computer host holds
+ * the only copy — but it is still the one durable answer to "has this
+ * deployment a Computer at all", and without the host binding there is nothing
+ * to send the call to.
+ */
+function computerConfiguredV1(host: {
+  readSecret(name: string): string | undefined;
+  computerHost?: SharedComputerHostClient;
+  computerHostBinding?: ComputerHostBinding;
+}): boolean {
+  if (host.computerHost) return true;
+  return Boolean(
+    host.readSecret("SPRITES_TOKEN")?.trim() && host.computerHostBinding,
+  );
+}
+
 function computerProviderPlugin(host: {
   readSecret(name: string): string | undefined;
   computerSync?: ComputerSyncHostV1;
@@ -595,8 +614,8 @@ function computerProviderPlugin(host: {
   // `SPRITES_TOKEN` is no longer a credential here — the Computer host holds
   // the only copy, and this Worker could not use one if it had it. It survives
   // as the answer to one question: has this deployment a Computer at all? With
-  // it unset the Computer card still reads "Set SPRITES_TOKEN to attach a
-  // computer", which is the truth: no host of ours has a Sprites account.
+  // it unset every Computer surface reads as unconfigured, which is the truth:
+  // no host of ours has a Sprites account.
   const configured = Boolean(host.readSecret("SPRITES_TOKEN")?.trim());
   const binding = host.computerHostBinding;
   const fly = createFlySpriteProviderPlugin(undefined, {
@@ -884,6 +903,10 @@ export function createFoundationHostedRuntimePackages(
       createComputerAgentPlugin({
         userId: host.userId,
         defaultProviderId: "fly-sprite",
+        // Exactly the condition `computerProviderPlugin` uses to hand the
+        // provider a host. Read here too, so the tools and the prompt agree
+        // with the provider about whether there is a Computer at all.
+        configured: computerConfiguredV1(host),
         ...(host.computerWriter ? { writer: host.computerWriter } : {}),
         ...(host.computerProcesses
           ? { processes: host.computerProcesses }
