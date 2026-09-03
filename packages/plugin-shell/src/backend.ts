@@ -139,7 +139,10 @@ import {
   createPackageCatalogHost,
   createR2BotPackageCatalogReader,
 } from "./backend-package-catalog.js";
-import { createBotComputerSyncHost } from "./backend-computer.js";
+import {
+  createBotComputerSyncHost,
+  declaredPackageRootsV1,
+} from "./backend-computer.js";
 import {
   decodeDirectoryViewV1,
   decodeFlockReceiptV1,
@@ -3608,6 +3611,13 @@ export class ShellBotBackendContribution {
       user,
       packages: packageDefinitions,
     });
+    // The durable roots this User's enabled Packages declare, read from the
+    // same installations and the same compiled manifests the Composition is
+    // resolved from. Handed to the Computer sync below; nothing else reads it.
+    const packageRoots = declaredPackageRootsV1({
+      installations: user.packages,
+      packages: application.packages,
+    });
     const readSecret = (name: string) => {
       // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
       const value = (this.env as unknown as Record<string, unknown>)[name];
@@ -3853,7 +3863,7 @@ export class ShellBotBackendContribution {
         // object storage with an unattributed writer.
         ...(turn
           ? {
-              computerSync: createBotComputerSyncHost(this.env),
+              computerSync: createBotComputerSyncHost(this.env, packageRoots),
               // The same Turn, as the writer a durable Computer write records.
               computerWriter: {
                 sessionId: turn.sessionId,

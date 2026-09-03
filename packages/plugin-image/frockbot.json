@@ -8,6 +8,7 @@
     "runtime": { "entry": "./agent" }
   },
   "permissions": ["image:generate", "workspace:write"],
+  "roots": [{ "id": "generated", "scope": "user" }],
   "configuration": {
     "settings": [
       {

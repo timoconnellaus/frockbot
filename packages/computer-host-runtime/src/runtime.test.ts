@@ -13,6 +13,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
+  APPLET_SDK_VERSION,
+  APPLET_SHIM_PATH,
+  appletShimScript,
+  APPLETS_ROOT,
+  APPLETS_RUNTIME_FILES,
+  APPLETS_SDK_FAILURE_PATH,
+  MINIFLARE_VERSION,
   BIN_ROOT,
   BOTS_ROOT,
   boxDoctorScript,
@@ -424,9 +431,10 @@ state running`);
     );
   });
 
-  test("the update runner contains only the runtime and reference phases", () => {
+  test("the update runner replaces files and installs nothing", () => {
     expect(UPDATE_PHASES.map((phase) => phase.name)).toEqual([
       "runtime",
+      "applets",
       "reference",
     ]);
     for (const phase of UPDATE_PHASES) {
@@ -435,6 +443,85 @@ state running`);
     const updateDocument = UPDATE_PHASES.map((phase) => phase.body).join("\n");
     expect(updateDocument).not.toContain("apt-get");
     expect(updateDocument).not.toContain("playwright-core/cli.js install");
+    // An in-place update swaps names over files it owns and reaches no
+    // network: the `applets` phase installs the shim and leaves the SDK's
+    // dependency tree — which an `applet dev` may be running out of — alone.
+    expect(updateDocument).not.toContain("npm install");
+  });
+});
+
+describe("the applets phase", () => {
+  test("installs the Applets runtime after the browser", () => {
+    const names = PROVISION_PHASES.map((phase) => phase.name);
+    expect(names).toEqual([
+      "layout",
+      "packages",
+      "runtime",
+      "browser",
+      "applets",
+      "reference",
+    ]);
+  });
+
+  test("installs miniflare and the SDK into a prefix of their own", () => {
+    const applets = PROVISION_PHASES.find((phase) => phase.name === "applets")!;
+    // Not the runtime root: the browser driver and the Applets runtime are two
+    // dependency trees, and one resolution over both would let an Applets
+    // upgrade move `playwright-core`.
+    expect(applets.body).toContain(
+      `npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund miniflare@${MINIFLARE_VERSION}`,
+    );
+    expect(applets.body).toContain(
+      `npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund @frockbot/applet-sdk@${APPLET_SDK_VERSION}`,
+    );
+    expect(APPLETS_ROOT.startsWith(`${RUNTIME_ROOT}/`)).toBe(true);
+  });
+
+  test("an SDK that cannot be fetched leaves a record and not a failed run", () => {
+    // `@frockbot/applet-sdk` is not on npm yet. A Computer whose SDK could not
+    // be installed still browses, execs, and syncs, so the phase records the
+    // failure for the doctor rather than failing provisioning.
+    const applets = PROVISION_PHASES.find((phase) => phase.name === "applets")!;
+    expect(applets.body).toContain(`> ${APPLETS_SDK_FAILURE_PATH}`);
+    expect(applets.body).toContain(`rm -f ${APPLETS_SDK_FAILURE_PATH}`);
+    expect(boxDoctorScript).toContain("record applets-sdk fail");
+    expect(boxDoctorScript).toContain("record applets-sdk pass");
+  });
+
+  test("runs again rather than once, because the SDK has not shipped", () => {
+    const applets = PROVISION_PHASES.find((phase) => phase.name === "applets")!;
+    expect(applets.always).toBe(true);
+    expect(provisionScript).not.toContain('[ ! -f "$MARKERS/applets"');
+    // Both installs are guarded, so a second run on a provisioned Computer is
+    // two directory tests.
+    expect(applets.body).toContain(`[ ! -d ${APPLETS_ROOT}/node_modules/`);
+  });
+
+  test("puts `applet` on the tenant's PATH, execing the SDK's own binary", () => {
+    // `bin` leads a tenant's PATH after `shims`, and `shims` holds refusals —
+    // this is a real command, so it belongs in `bin`.
+    expect(APPLET_SHIM_PATH).toBe(`${BIN_ROOT}/applet`);
+    expect(appletShimScript).toContain('exec "$APPLET" "$@"');
+    expect(appletShimScript).toContain(
+      `APPLET=${APPLETS_ROOT}/node_modules/.bin/applet`,
+    );
+    // The node shim on the base image re-execs itself for ever without this.
+    expect(appletShimScript).toContain("/etc/profile.d/languages_paths");
+    expect(APPLETS_RUNTIME_FILES[0]!.mode).toBe(0o755);
+    // Declared, so the digest moves when the shim does and an existing
+    // Computer is actually reached by the change.
+    expect(RUNTIME_DOCUMENT_FILES.map((file) => file.path)).toContain(
+      APPLET_SHIM_PATH,
+    );
+  });
+
+  test("the reference set tells a Bot the command exists and where it is", () => {
+    const layout = REFERENCE_DOCS.find(
+      (document) => document.name === "layout.md",
+    );
+    expect(layout?.content).toContain("applet build");
+    expect(layout?.content).toContain(APPLETS_ROOT);
+    expect(layout?.content).toContain("user-packages/applets/source");
   });
 });
 
@@ -1046,6 +1133,8 @@ describe("box-doctor", () => {
         "browser-profile",
         "browser-identity",
         "sync-signal",
+        "applets",
+        "applets-sdk",
         "reference-docs",
         "launcher",
         "clock",

@@ -610,8 +610,18 @@ export interface ComputerControl {
   ): Promise<void>;
 }
 
-/** Why one run of the durable-root sync happened. */
-export type ComputerSyncReasonV1 = "open" | "signal" | "turn-end";
+/**
+ * Why one run of the durable-root sync happened.
+ *
+ * `publish` is the only reason outside the Turn's own policy, and it is one
+ * root rather than all of them: an Applet publish (ADR 0022 decision 7) reads
+ * the built artifact from the Workspace *store*, so the bytes `applet build`
+ * left on the Computer have to reach the store before it looks. It is recorded
+ * under its own name rather than borrowed from `signal`, because a record that
+ * said "the watcher moved" when a publish asked would be a record nobody could
+ * use to explain the sync afterwards.
+ */
+export type ComputerSyncReasonV1 = "open" | "signal" | "turn-end" | "publish";
 
 /**
  * What one sync run moved, flattened to counts.
@@ -675,6 +685,18 @@ export interface ComputerSyncV1 {
     options?: ComputerOperationOptions,
   ): Promise<ComputerSyncSummaryV1>;
   /**
+   * Reconciles exactly one declared durable root. Never throws.
+   *
+   * Optional, because a provider that cannot reconcile a root on its own has
+   * nothing to answer with and a caller must fall back to `reconcile`. A root
+   * this Computer declares no mount for is `refused`, not silently skipped.
+   */
+  reconcileRoot?(
+    root: WorkspaceRootV1,
+    reason: ComputerSyncReasonV1,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerSyncSummaryV1>;
+  /**
    * The Computer-side watcher's change signal, or `undefined` when it cannot
    * be read. A caller reconciles again when this changes, rather than scanning
    * every root on every tool call.
@@ -698,6 +720,17 @@ export interface ComputerSyncHostV1 {
   effects?: WorkspaceSyncEffectsV1;
   /** The owning object's generation ledger, read to recover a removal writer. */
   generations?: WorkspaceGenerationsV1;
+  /**
+   * The `package-declared` roots the User's enabled Packages declare, which
+   * the Computer Package cannot derive on its own.
+   *
+   * A Computer Package's layout declares root *kinds* and where each is
+   * mounted; only the host knows which Packages this User has installed and
+   * which roots their manifests declare. Absent, and the sync reconciles the
+   * layout's own kinds and no Package root at all — which is what every host
+   * did before this field existed.
+   */
+  packageRoots?: readonly { packageId: string; rootId: string }[];
   // There is deliberately no writer here. "A file that reaches a durable root
   // without passing through the Workspace file surface (a shell write on the
   // Computer) is mirrored to object storage by the sync with an unattributed

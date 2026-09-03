@@ -125,6 +125,63 @@ describe("PackageCatalog", () => {
     ).toThrow('manifest v2 desktop execution must be "sandboxed-renderer"');
   });
 
+  // Constitution — Computer and Workspace: "durable roots, declared by the
+  // Computer Package's Workspace layout **and by Package manifests**". This is
+  // the manifest half; `image` and `applets` are its two callers today.
+  test("decodes the durable roots a Package declares, and refuses a malformed one", () => {
+    const base = {
+      schemaVersion: 4 as const,
+      id: "image",
+      displayName: "Image generation",
+      version: "1.0.0",
+      compatibility: { frockbot: "*" },
+      contributions: { runtime: { entry: "./agent" } },
+      permissions: [],
+    };
+    expect(
+      decodeFrockBotManifest({
+        ...base,
+        roots: [{ id: "generated", scope: "user" }],
+      }).roots,
+    ).toEqual([{ id: "generated", scope: "user" }]);
+    // Absent stays absent: a Package that declares no root has none, and the
+    // sync must not invent one.
+    expect(decodeFrockBotManifest(base).roots).toBeUndefined();
+    for (const [roots, message] of [
+      [[], "non-empty bounded array"],
+      [[{ id: "Generated", scope: "user" }], "id is invalid"],
+      [[{ id: "-bad", scope: "user" }], "id is invalid"],
+      // A `package-declared` root names no Bot, so a Bot-scoped one would be a
+      // root `WorkspaceRootV1` cannot address.
+      [[{ id: "generated", scope: "bot" }], 'scope must be "user"'],
+      [[{ id: "generated" }], 'scope must be "user"'],
+      [
+        [
+          { id: "generated", scope: "user" },
+          { id: "generated", scope: "user" },
+        ],
+        "duplicate ids",
+      ],
+    ] as const) {
+      expect(() => decodeFrockBotManifest({ ...base, roots })).toThrow(message);
+    }
+  });
+
+  test("keeps a declared root out of reach of a v2 manifest", () => {
+    expect(() =>
+      decodeFrockBotManifest({
+        schemaVersion: 2,
+        id: "legacy",
+        displayName: "Legacy",
+        version: "1.0.0",
+        compatibility: { frockbot: "*" },
+        contributions: { runtime: { entry: "./agent" } },
+        permissions: [],
+        roots: [{ id: "generated", scope: "user" }],
+      }),
+    ).toThrow('manifest has unknown field "roots"');
+  });
+
   test("keeps backend Contributions unavailable to v2 manifests", () => {
     expect(() =>
       decodeFrockBotManifest({
