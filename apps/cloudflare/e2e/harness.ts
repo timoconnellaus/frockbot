@@ -108,6 +108,61 @@ function unauthorized(): { status: number; body: string } {
  * `POST /__e2e/chat-mode` is not an Ollama route: it lets a spec revoke the key
  * mid-run, so a Turn can fail at the provider after the Connection is ready.
  */
+/**
+ * The trigger a spec puts in the message it sends, so the fake model calls a
+ * tool.
+ *
+ * The same device `test/harness/miniflare.ts` uses for the workerd layers, and
+ * for the same reason: one fake server serves every spec in the run and cannot
+ * be reconfigured per test, so the script travels on the wire with the request
+ * it belongs to. A tool result falls through to prose, or the loop would call
+ * the same tool until it exhausted its step budget.
+ */
+export const E2E_TOOL_CALL_TRIGGER = "frockbot-e2e-tool-call:";
+
+export function e2eToolCallPrompt(name: string, input: unknown = {}): string {
+  return `${E2E_TOOL_CALL_TRIGGER}${name}:${JSON.stringify(input)}`;
+}
+
+function scriptedToolCalls(
+  body: string,
+): Array<{ name: string; arguments: string }> {
+  let parsed: { messages?: unknown };
+  try {
+    parsed = JSON.parse(body || "{}") as { messages?: unknown };
+  } catch {
+    return [];
+  }
+  const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
+  const last = messages.at(-1) as { role?: unknown } | undefined;
+  if (last?.role === "tool") return [];
+  // Every message, stringified: a provider may send the user turn as parts
+  // rather than a string, and the trigger only has to be found, not parsed.
+  const content = messages
+    .filter((message) => (message as { role?: unknown }).role === "user")
+    .map((message) => {
+      const value = (message as { content?: unknown }).content;
+      return typeof value === "string" ? value : JSON.stringify(value ?? "");
+    })
+    .join("\n");
+  const calls: Array<{ name: string; arguments: string }> = [];
+  // A JSON-encoded message escapes the newline, so both separators end a
+  // trigger line.
+  for (const line of content.split(/\\n|\n/)) {
+    const trimmed = line.trim();
+    const start = trimmed.indexOf(E2E_TOOL_CALL_TRIGGER);
+    if (start < 0) continue;
+    const rest = trimmed.slice(start + E2E_TOOL_CALL_TRIGGER.length);
+    const separator = rest.indexOf(":");
+    if (separator < 0) continue;
+    calls.push({
+      name: rest.slice(0, separator),
+      arguments: rest.slice(separator + 1),
+    });
+  }
+  return calls;
+}
+
 export function startFakeOllama(port: number): Promise<{
   url: string;
   close(): Promise<void>;
@@ -178,8 +233,8 @@ export function startFakeOllama(port: number): Promise<{
       return;
     }
     if (url.pathname === "/v1/chat/completions") {
-      request.resume();
       if (key !== E2E_OLLAMA_GOOD_API_KEY || chatMode === "unauthorized") {
+        request.resume();
         const refusal = unauthorized();
         response.writeHead(refusal.status, {
           "content-type": "application/json",
@@ -187,19 +242,51 @@ export function startFakeOllama(port: number): Promise<{
         response.end(refusal.body);
         return;
       }
-      response.writeHead(200, { "content-type": "text/event-stream" });
-      response.write(
-        `data: ${JSON.stringify({
-          choices: [{ delta: { content: E2E_ASSISTANT_REPLY } }],
-        })}\n\n`,
-      );
-      response.write(
-        `data: ${JSON.stringify({
-          choices: [{ delta: {}, finish_reason: "stop" }],
-        })}\n\n`,
-      );
-      response.write("data: [DONE]\n\n");
-      response.end();
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        const calls = scriptedToolCalls(Buffer.concat(chunks).toString("utf8"));
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        if (calls.length > 0) {
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: calls.map((call, index) => ({
+                      index,
+                      id: `e2e-call-${index}`,
+                      type: "function",
+                      function: {
+                        name: call.name,
+                        arguments: call.arguments,
+                      },
+                    })),
+                  },
+                },
+              ],
+            })}\n\n`,
+          );
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [{ delta: {}, finish_reason: "tool_calls" }],
+            })}\n\n`,
+          );
+        } else {
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [{ delta: { content: E2E_ASSISTANT_REPLY } }],
+            })}\n\n`,
+          );
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [{ delta: {}, finish_reason: "stop" }],
+            })}\n\n`,
+          );
+        }
+        response.write("data: [DONE]\n\n");
+        response.end();
+      });
       return;
     }
     request.resume();

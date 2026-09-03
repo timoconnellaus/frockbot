@@ -10,6 +10,9 @@ import {
 } from "@frockbot/configuration-core";
 import {
   APPLET_ID_V1,
+  decodeAppletFocusViewV1,
+  decodeAppletListViewV1,
+  decodeAppletUiViewV1,
   decodePackageIframeToolCommandV1,
   type PackageIframeCatalogV1,
 } from "@frockbot/kernel-contracts";
@@ -281,7 +284,18 @@ export function createUserApplication() {
     if (url.pathname === "/api/applets") {
       if (request.method !== "GET") return jsonError(405, "method not allowed");
       try {
-        return Response.json(await env.BOT_STATE.listApplets());
+        // Projected through the view decoder the client uses, so the two sides
+        // cannot disagree: the durable answer carries a `revision` the view
+        // does not declare, and an exact-keys decoder is right to refuse it.
+        const listed = (await env.BOT_STATE.listApplets()) as {
+          applets: unknown;
+        };
+        return Response.json(
+          decodeAppletListViewV1({
+            schemaVersion: 1,
+            applets: listed.applets,
+          }),
+        );
       } catch (error) {
         return jsonError(
           503,
@@ -307,14 +321,16 @@ export function createUserApplication() {
             schemaVersion: 1,
             appletId,
           });
-          return Response.json({
-            schemaVersion: 1,
-            appletId: ui.appletId,
-            generationId: ui.generationId,
-            // The anonymous artifact origin, exactly as a Package page is
-            // served: the Applet's UI is immutable content addressed by hash.
-            uiUrl: `${packageUiArtifactOrigin(url)}/packages/${ui.contentHash}.html`,
-          });
+          return Response.json(
+            decodeAppletUiViewV1({
+              // The anonymous artifact origin, exactly as a Package page is
+              // served: the Applet's UI is immutable content addressed by hash.
+              uiUrl: `${packageUiArtifactOrigin(url)}/packages/${ui.contentHash}.html`,
+              ...(ui.generationId === undefined
+                ? {}
+                : { generationId: ui.generationId }),
+            }),
+          );
         }
         const minted = await env.BOT_STATE.mintAppletViewerToken({
           schemaVersion: 1,
@@ -354,11 +370,17 @@ export function createUserApplication() {
       if (missing) return missing;
       try {
         if (request.method === "GET") {
+          // Projected to the view, not the record. `FocusedAppletV1` carries
+          // `changedAt`, which is durable bookkeeping; `AppletFocusViewV1` is
+          // exactly `{ appletId }` and its decoder refuses an extra field, so
+          // handing the record over the wire made every read fail closed and
+          // the canvas never opened.
+          const focused = (await env.BOT_STATE.readFocusedApplet({
+            schemaVersion: 1,
+            botId: focusBotId,
+          })) as { appletId: string | null };
           return Response.json(
-            await env.BOT_STATE.readFocusedApplet({
-              schemaVersion: 1,
-              botId: focusBotId,
-            }),
+            decodeAppletFocusViewV1({ appletId: focused.appletId }),
           );
         }
         if (request.method !== "POST") {
@@ -375,12 +397,13 @@ export function createUserApplication() {
         ) {
           return jsonError(400, "focus command is invalid");
         }
+        const recorded = (await env.BOT_STATE.setFocusedApplet({
+          schemaVersion: 1,
+          botId: focusBotId,
+          appletId: body.appletId,
+        })) as { appletId: string | null };
         return Response.json(
-          await env.BOT_STATE.setFocusedApplet({
-            schemaVersion: 1,
-            botId: focusBotId,
-            appletId: body.appletId,
-          }),
+          decodeAppletFocusViewV1({ appletId: recorded.appletId }),
         );
       } catch (error) {
         return jsonError(
