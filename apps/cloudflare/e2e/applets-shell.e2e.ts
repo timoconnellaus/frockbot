@@ -286,10 +286,10 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   stubs.publish();
   await listFrame.getByRole("button", { name: "Open Todo" }).click();
   await surface.page().keyboard.press("Escape");
-  // The header names the live generation in words and keeps the exact id as
-  // the tooltip.
+  // The header names the live generation in words. The exact id is not on the
+  // page at all — it is an internal identifier, and the Applet the frame loads
+  // is what proves the right generation went live.
   await expect(canvas.getByText(/^Live/)).toBeVisible();
-  await expect(canvas.getByTitle("generation-2")).toBeVisible();
   const appFrame = canvas.locator(".applet-canvas-app iframe").contentFrame();
   await expect(appFrame.getByText("live:generation-2")).toBeVisible();
 
