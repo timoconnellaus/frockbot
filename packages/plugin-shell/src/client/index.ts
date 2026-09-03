@@ -620,15 +620,19 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
       !isRecord(candidate) ||
       // A Package that declares no configuration is serialised without the
       // key (JSON drops an undefined field), so the key is owned but optional.
-      !hasExactFields(
-        candidate,
-        Object.hasOwn(candidate, "configuration")
-          ? ["id", "displayName", "version", "contributions", "configuration"]
-          : ["id", "displayName", "version", "contributions"],
-      ) ||
+      !hasExactFields(candidate, [
+        "id",
+        "displayName",
+        "version",
+        "contributions",
+        ...(Object.hasOwn(candidate, "configuration") ? ["configuration"] : []),
+        ...(Object.hasOwn(candidate, "platformOwned") ? ["platformOwned"] : []),
+      ]) ||
       typeof candidate.id !== "string" ||
       typeof candidate.displayName !== "string" ||
       typeof candidate.version !== "string" ||
+      (candidate.platformOwned !== undefined &&
+        typeof candidate.platformOwned !== "boolean") ||
       !Array.isArray(candidate.contributions) ||
       candidate.contributions.length > 5 ||
       new Set(candidate.contributions).size !==
@@ -702,6 +706,7 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
             ? candidate.displayName
             : candidate.id,
         version: candidate.version,
+        ...(candidate.platformOwned === true ? { platformOwned: true } : {}),
         capabilities: decodedCapabilities,
         connectionTypes: decodedConnections,
         settings,

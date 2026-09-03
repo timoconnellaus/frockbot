@@ -1,5 +1,6 @@
 import type {
   ConnectionView,
+  OperationReceiptV1,
   UserConfigurationCommandV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
@@ -50,7 +51,7 @@ interface FlockAiUserSettingsHost {
     userId: string,
     command: UserConfigurationCommandV1,
     storage: FlockAiUserSettingsTransaction,
-  ): Promise<unknown>;
+  ): Promise<OperationReceiptV1>;
   createConnection(
     userId: string,
     connection: ConnectionView,
@@ -149,6 +150,42 @@ function ambientConnection(): ConnectionView {
   };
 }
 
+function platformModelResolves(settings: UserSettingsViewV1): boolean {
+  const model = settings.platformModel;
+  if (!model) return false;
+  const connection = settings.connections.find(
+    (candidate) => candidate.connectionId === model.connectionId,
+  );
+  if (!connection || connection.state !== "ready") return false;
+  const installed = settings.packages.some(
+    (candidate) =>
+      candidate.packageId === connection.packageId &&
+      candidate.state === "installed",
+  );
+  return Boolean(
+    installed &&
+    connection.modelCatalog?.models.some(
+      (candidate) => candidate.providerModelId === model.providerModelId,
+    ),
+  );
+}
+
+function flockConnectionNeedsRepair(connection: ConnectionView): boolean {
+  return (
+    connection.state !== "ready" ||
+    connection.providerType !== FLOCK_AI_PROVIDER_TYPE ||
+    !connection.modelCatalog?.models.some(
+      (candidate) => candidate.providerModelId === FLOCK_AI_DEFAULT_MODEL,
+    )
+  );
+}
+
+function requireApplied(receipt: OperationReceiptV1): void {
+  if (receipt.status === "rejected") {
+    throw new Error(receipt.failure);
+  }
+}
+
 export class FlockAiUserBackendContribution implements UserConfigurationReadBootstrap {
   readonly packageId = FLOCK_AI_PACKAGE_ID;
 
@@ -162,30 +199,33 @@ export class FlockAiUserBackendContribution implements UserConfigurationReadBoot
         if (decoded.userId !== userId) {
           throw new Error("Flock AI bootstrap belongs to another User");
         }
-        return;
       }
 
       let settings = await this.host.settings.read(userId, storage);
+      const installation = settings.packages.find(
+        (candidate) => candidate.packageId === FLOCK_AI_PACKAGE_ID,
+      );
       if (
-        !settings.packages.some(
-          (installation) => installation.packageId === FLOCK_AI_PACKAGE_ID,
-        )
+        installation?.state !== "installed" ||
+        installation.version !== PACKAGE_VERSION
       ) {
-        await this.host.settings.executeConfigurationCommand(
-          userId,
-          {
-            schemaVersion: 1,
-            type: "user/install-package",
-            commandId: "flock-ai-bootstrap-install",
-            expectedRevision: settings.revision,
-            packageId: FLOCK_AI_PACKAGE_ID,
-            version: PACKAGE_VERSION,
-          },
-          storage,
+        requireApplied(
+          await this.host.settings.executeConfigurationCommand(
+            userId,
+            {
+              schemaVersion: 1,
+              type: "user/install-package",
+              commandId: `flock-ai-repair-install-v1-${settings.revision}`,
+              expectedRevision: settings.revision,
+              packageId: FLOCK_AI_PACKAGE_ID,
+              version: PACKAGE_VERSION,
+            },
+            storage,
+          ),
         );
       }
 
-      const connection = await this.host.settings.createConnection(
+      let connection = await this.host.settings.createConnection(
         userId,
         ambientConnection(),
         storage,
@@ -196,25 +236,38 @@ export class FlockAiUserBackendContribution implements UserConfigurationReadBoot
       ) {
         throw new Error("Flock AI Connection identity is invalid");
       }
-
-      settings = await this.host.settings.read(userId, storage);
-      if (settings.platformModel === undefined) {
-        await this.host.settings.executeConfigurationCommand(
+      if (flockConnectionNeedsRepair(connection)) {
+        await this.host.settings.replaceConnection(
           userId,
-          {
-            schemaVersion: 1,
-            type: "user/set-platform-model",
-            commandId: "flock-ai-bootstrap-platform-model",
-            expectedRevision: settings.revision,
-            model: {
-              connectionId: FLOCK_AI_CONNECTION_ID,
-              providerModelId: FLOCK_AI_DEFAULT_MODEL,
-            },
-          },
+          FLOCK_AI_CONNECTION_ID,
+          connection.generation,
+          ambientConnection(),
           storage,
         );
       }
-      await storage.put(BOOTSTRAP_KEY, { schemaVersion: 1, userId });
+
+      settings = await this.host.settings.read(userId, storage);
+      if (!platformModelResolves(settings)) {
+        requireApplied(
+          await this.host.settings.executeConfigurationCommand(
+            userId,
+            {
+              schemaVersion: 1,
+              type: "user/set-platform-model",
+              commandId: `flock-ai-repair-platform-model-v1-${settings.revision}`,
+              expectedRevision: settings.revision,
+              model: {
+                connectionId: FLOCK_AI_CONNECTION_ID,
+                providerModelId: FLOCK_AI_DEFAULT_MODEL,
+              },
+            },
+            storage,
+          ),
+        );
+      }
+      if (marker === undefined) {
+        await storage.put(BOOTSTRAP_KEY, { schemaVersion: 1, userId });
+      }
     });
   }
 

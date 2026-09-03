@@ -37,16 +37,19 @@ const search = ref("");
 const busyPackageId = ref<string>();
 
 const installations = computed(() => web.value.userSettings?.packages ?? []);
+const userPackages = computed(() =>
+  web.value.pluginCatalog.filter((item) => !item.platformOwned),
+);
 const installedPluginCount = computed(
   () =>
-    web.value.pluginCatalog.filter((item) =>
+    userPackages.value.filter((item) =>
       isPackageInstalled(installations.value, item.packageId),
     ).length,
 );
 const filteredCatalog = computed(() => {
   const query = search.value.trim().toLocaleLowerCase();
-  if (!query) return web.value.pluginCatalog;
-  return web.value.pluginCatalog.filter(
+  if (!query) return userPackages.value;
+  return userPackages.value.filter(
     (item) =>
       item.displayName.toLocaleLowerCase().includes(query) ||
       item.packageId.toLocaleLowerCase().includes(query),
@@ -143,6 +146,14 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
       </span>
       {{ installedPluginCount }} installed
     </div>
+    <!--
+      A refused command is the answer to the click that caused it, so it is
+      shown above the list where the click happened, not below a long grid
+      where it scrolls out of view.
+    -->
+    <p v-if="web.settingsError" class="settings-error" role="alert">
+      {{ web.settingsError }}
+    </p>
     <label class="plugin-search">
       <UiIcon name="search" />
       <input
@@ -223,16 +234,13 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
     </div>
 
     <p
-      v-if="web.pluginCatalog.length === 0 && !web.settingsError"
+      v-if="userPackages.length === 0 && !web.settingsError"
       class="plugin-empty"
     >
       This application ships no Packages.
     </p>
     <p v-else-if="filteredCatalog.length === 0" class="plugin-empty">
       No Package matches that search.
-    </p>
-    <p v-if="web.settingsError" class="settings-error" role="alert">
-      {{ web.settingsError }}
     </p>
   </div>
 </template>

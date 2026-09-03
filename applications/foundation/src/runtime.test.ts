@@ -8,6 +8,7 @@ import {
   createFoundationHostedRuntimePackages,
   createFoundationModelRuntimePackage,
   createFoundationRuntimeApplication,
+  isPlatformOwnedPackageV1,
   isUserInstallablePackageV1,
 } from "./runtime.js";
 import { Context, type Plugin } from "cordis";
@@ -287,53 +288,49 @@ describe("foundation application", () => {
     ]);
   });
 
-  test("offers every Package a User can install, and not the shell", async () => {
+  test("offers only Packages whose enablement is a User choice", async () => {
     const plan = await compileFoundationApplication();
     const listed = plan.packages
       .filter((pkg) => isUserInstallablePackageV1(pkg.manifest))
       .map((pkg) => pkg.id);
 
-    // The application mounts its own shell: the User never chose it, cannot
-    // uninstall it, and assigns nothing from it.
-    expect(listed).not.toContain("shell");
-    // Everything the Plugins surface can install or assign today survives —
-    // including Flock and Routines, whose only Capability is a tool that takes
-    // no Connection, which is the shape a tool Package has.
-    for (const packageId of [
+    expect(listed).toEqual([
       "flock",
-      "routines",
+      "bot-template",
+      "custom-models",
+      "image",
+      "user-machine",
+      "machine-messages",
+      "mcp",
+      "web",
       "provider-ollama-cloud",
-      "package-publisher",
-      "settings",
-      "clock",
-      "memory",
-    ]) {
-      expect(listed).toContain(packageId);
-    }
-    // Exactly one Package is held back, so the rule is not quietly hiding
-    // anything else.
-    expect(
-      plan.packages.map((pkg) => pkg.id).filter((id) => !listed.includes(id)),
-    ).toEqual(["shell"]);
+      "routines",
+      "subagents",
+    ]);
+    expect(listed).not.toContain("shell");
+    expect(listed).not.toContain("provider-flock-ai");
   });
 
-  test("keys installability on the application root slot, not on Connections", () => {
-    const client = (slots: string[]) => ({
-      contributions: {
-        client: { mounts: slots.map((slot) => ({ slot })) },
-      },
-    });
+  test("derives platform ownership from application-root, control, and ambient-model facts", async () => {
+    const plan = await compileFoundationApplication();
+    const defaultPackageIds = foundationDefaultPackageIds(plan);
+    const manifest = (packageId: string) =>
+      plan.packages.find((pkg) => pkg.id === packageId)!.manifest;
 
-    // A tool Package with no client Contribution at all, which is what a
-    // connection-less tool Package looks like.
-    expect(isUserInstallablePackageV1({ contributions: {} })).toBe(true);
-    expect(isUserInstallablePackageV1(client([]))).toBe(true);
-    expect(isUserInstallablePackageV1(client(["frockbot.sidebar-bots"]))).toBe(
-      true,
-    );
-    expect(isUserInstallablePackageV1(client(["authenticated-root"]))).toBe(
-      false,
-    );
+    const platformOwned = (packageId: string) =>
+      isPlatformOwnedPackageV1(
+        manifest(packageId),
+        defaultPackageIds.has(packageId),
+      );
+    expect(platformOwned("shell")).toBe(true);
+    expect(platformOwned("settings")).toBe(true);
+    expect(platformOwned("provider-flock-ai")).toBe(true);
+    expect(platformOwned("custom-models")).toBe(false);
+    expect(platformOwned("web")).toBe(false);
+    expect(platformOwned("provider-ollama-cloud")).toBe(false);
+    // Audit has no User control, but it is not a default installation. It is
+    // statically mounted rather than repaired into User enablement state.
+    expect(platformOwned("audit")).toBe(false);
   });
 
   test("resolves trusted desktop code only from the compiled declaration", async () => {

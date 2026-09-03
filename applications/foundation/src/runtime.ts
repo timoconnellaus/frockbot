@@ -7,6 +7,7 @@ import {
 } from "@frockbot/kernel-composition/compiler";
 import type {
   ContributionResolver,
+  FrockBotManifest,
   PackageSource,
 } from "@frockbot/kernel-composition";
 import type { CredentialLeaseV1 } from "@frockbot/connection-core";
@@ -568,24 +569,58 @@ const applicationSource: ApplicationSource = {
 export const APPLICATION_ROOT_SLOT_V1 = "authenticated-root";
 
 /**
- * Whether a Package belongs in the catalog a User installs from.
+ * Whether a Package is infrastructure the platform must keep available rather
+ * than an enablement choice presented to the User.
  *
- * The application mounts its own shell unconditionally: the User never chose
- * it, cannot uninstall it, and assigns nothing from it, so listing it beside
- * the Packages they can install would offer a choice that does not exist. The
- * rule is the manifest's own: a Package that mounts
- * {@link APPLICATION_ROOT_SLOT_V1} is the application root itself.
- *
- * Everything else stays installable, including a Package whose only
- * Capabilities are tools that take no Connection — a tool Package a User
- * installs and assigns without any credential is exactly that shape.
+ * The predicate is entirely manifest-relative. The application root is the
+ * hosted product UI; a Package with no User- or Bot-scoped setting, Connection
+ * Type, or Capability has no enablement control to offer; and an ambient model
+ * Connection is the platform's zero-configuration model path. None is a User
+ * choice, even though each still has an installation row for composition.
  */
-export function isUserInstallablePackageV1(manifest: {
-  contributions: { client?: { mounts: Array<{ slot: string }> } };
-}): boolean {
-  return !(manifest.contributions.client?.mounts ?? []).some(
-    (mount) => mount.slot === APPLICATION_ROOT_SLOT_V1,
+export function isPlatformOwnedPackageV1(
+  manifest: Pick<FrockBotManifest, "contributions" | "configuration">,
+  installedByDefault: boolean,
+): boolean {
+  if (!installedByDefault) return false;
+  return !isUserInstallablePackageV1(manifest);
+}
+
+/** Whether the manifest declares an enablement choice the User can exercise. */
+export function isUserInstallablePackageV1(
+  manifest: Pick<FrockBotManifest, "contributions" | "configuration">,
+): boolean {
+  const mountsApplicationRoot = (
+    manifest.contributions.client?.mounts ?? []
+  ).some((mount) => mount.slot === APPLICATION_ROOT_SLOT_V1);
+  if (mountsApplicationRoot) return false;
+
+  const configuration = manifest.configuration;
+  const hasUserControl = Boolean(
+    configuration &&
+    (configuration.connectionTypes.length > 0 ||
+      configuration.capabilities.length > 0 ||
+      configuration.settings.some((setting) =>
+        setting.scopes.some((scope) => scope === "user" || scope === "bot"),
+      )),
   );
+  if (!hasUserControl) return false;
+
+  const ambientConnectionTypes = new Set(
+    (configuration?.connectionTypes ?? [])
+      .filter(
+        (connection) => connection.authorization.kind === "ambient-native",
+      )
+      .map((connection) => connection.id),
+  );
+  const ownsAmbientModel = (configuration?.capabilities ?? []).some(
+    (capability) =>
+      capability.kind === "model" &&
+      capability.connectionTypes.some((connectionTypeId) =>
+        ambientConnectionTypes.has(connectionTypeId),
+      ),
+  );
+  return !ownsAmbientModel;
 }
 
 export interface FoundationRuntimeApplication {

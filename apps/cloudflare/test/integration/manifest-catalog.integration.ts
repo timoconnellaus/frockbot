@@ -29,7 +29,11 @@ describe("the live application manifest decodes with the client's decoder", () =
     const body = (await response.json()) as {
       deployment: { applicationHash: string };
       applicationHash: string;
-      packages: Array<{ id: string; configuration?: unknown }>;
+      packages: Array<{
+        id: string;
+        configuration?: unknown;
+        platformOwned?: boolean;
+      }>;
     };
 
     // The two hashes name different things and are never equal in a real
@@ -94,9 +98,15 @@ describe("the live application manifest decodes with the client's decoder", () =
       ["model", ["bot"], "model"],
     ]);
 
-    // The application's own shell is mounted unconditionally and was never
-    // installed, so the producer keeps it out of the catalog entirely.
-    expect(body.packages.map((pkg) => pkg.id)).not.toContain("shell");
-    expect(catalog.map((item) => item.packageId)).not.toContain("shell");
+    // The application's own shell is mounted unconditionally: it is projected
+    // so model resolution sees every manifest, but marked platform-owned so no
+    // enablement surface offers it as a choice.
+    const shell = body.packages.find((pkg) => pkg.id === "shell");
+    expect(shell?.platformOwned).toBe(true);
+    expect(
+      catalog.find((item) => item.packageId === "shell")?.platformOwned,
+    ).toBe(true);
+    // A Package the User does choose carries no ownership mark.
+    expect(flock?.platformOwned).toBeUndefined();
   });
 });

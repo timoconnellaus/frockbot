@@ -1,5 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
-import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
+import {
+  compileFoundationApplication,
+  isPlatformOwnedPackageV1,
+} from "@frockbot/application-foundation/runtime";
 import {
   decodeBotSettingsViewV1,
   migrateStoredBotSettingsV1,
@@ -17,6 +20,18 @@ import {
   legacyDefaultPackagesMarkerV1,
   legacyUserSettingsRecordV1,
 } from "../test/legacy-model-account.js";
+import {
+  PRODUCTION_CATALOG_PIN_KEY,
+  PRODUCTION_DEFAULT_PACKAGES_MARKER_KEY,
+  PRODUCTION_FLOCK_BOOTSTRAP_MARKER_KEY,
+  PRODUCTION_SETTINGS_STATE_KEY,
+  PRODUCTION_OLLAMA_CONNECTION_ID,
+  PRODUCTION_OLLAMA_MODEL_ID,
+  productionCatalogPinV1,
+  productionDefaultPackagesMarkerV2,
+  productionFlockBootstrapMarkerV1,
+  productionUserSettingsRecordV1,
+} from "../test/production-model-account.js";
 
 // `mock.module` is process-global and the first registration in a suite run
 // fixes the module's shape, so this stub has to satisfy every consumer the run
@@ -375,6 +390,198 @@ describe("UserConfiguration Connection routing", () => {
         providerModelId: LEGACY_OLLAMA_MODEL_ID,
       },
     });
+  });
+
+  test("repairs the owner's revision 38 production model state after its v2 marker", async () => {
+    const userId = "production-model-user";
+    const storage = new MemoryStorage();
+    await storage.put({
+      [PRODUCTION_SETTINGS_STATE_KEY]: productionUserSettingsRecordV1(),
+      [PRODUCTION_DEFAULT_PACKAGES_MARKER_KEY]:
+        productionDefaultPackagesMarkerV2(),
+      [PRODUCTION_FLOCK_BOOTSTRAP_MARKER_KEY]:
+        productionFlockBootstrapMarkerV1(userId),
+      [PRODUCTION_CATALOG_PIN_KEY]: productionCatalogPinV1(),
+    });
+    const bound = identity(userId);
+    const configuration = new UserConfiguration(bound.ctx(storage), {
+      ...bound.env,
+      CREDENTIAL_KEYRING: credentialKeyring,
+    });
+
+    const plan = await compileFoundationApplication();
+    const packages = await executionPackages();
+    let user = await configuration.readConfiguration({
+      schemaVersion: 1,
+      userId,
+    });
+    const platformPackageIds = plan.packages
+      .filter((pkg) =>
+        isPlatformOwnedPackageV1(
+          pkg.manifest,
+          new Set(
+            plan.packages
+              .filter(
+                (candidate) =>
+                  candidate.manifest.defaultEnablement !== undefined ||
+                  (candidate.manifest.configuration?.connectionTypes.length ??
+                    0) > 0 ||
+                  (candidate.manifest.configuration?.capabilities.length ?? 0) >
+                    0,
+              )
+              .flatMap((candidate) => [
+                candidate.id,
+                ...Object.keys(candidate.manifest.dependencies),
+              ]),
+          ).has(pkg.id),
+        ),
+      )
+      .map((pkg) => pkg.id);
+    for (const packageId of platformPackageIds) {
+      expect(user.packages).toContainEqual(
+        expect.objectContaining({ packageId, state: "installed" }),
+      );
+    }
+    for (const packageId of [
+      "flock",
+      "bot-template",
+      "user-machine",
+      "machine-messages",
+      "mcp",
+      "routines",
+      "subagents",
+    ]) {
+      expect(user.packages).toContainEqual(
+        expect.objectContaining({ packageId, state: "installed" }),
+      );
+    }
+    for (const packageId of ["custom-models", "provider-ollama-cloud"]) {
+      expect(user.packages).toContainEqual(
+        expect.objectContaining({ packageId, state: "disabled" }),
+      );
+    }
+    expect(user.platformModel).toEqual({
+      connectionId: "flock-ai-ambient",
+      providerModelId: "@flock/auto",
+    });
+    let effective = resolveEffectiveBotModelV1({
+      bot: { packageValues: {} },
+      user,
+      packages,
+    });
+    expect(effective).toMatchObject({
+      source: "platform",
+      binding: { state: "ready", packageId: "provider-flock-ai" },
+    });
+    const execute = async (command: UserConfigurationCommandV1) => {
+      const receipt = await configuration.executeConfiguration({
+        schemaVersion: 1,
+        userId,
+        command,
+      });
+      expect(receipt).toMatchObject({ status: "applied" });
+      user = await configuration.readConfiguration({
+        schemaVersion: 1,
+        userId,
+      });
+      return receipt;
+    };
+    await execute({
+      schemaVersion: 1,
+      type: "user/install-package",
+      commandId: "install-custom-models-from-production-state",
+      expectedRevision: user.revision,
+      packageId: "custom-models",
+      version: "0.0.1",
+    });
+    await execute({
+      schemaVersion: 1,
+      type: "user/set-package-enabled",
+      commandId: "enable-ollama-from-production-state",
+      expectedRevision: user.revision,
+      packageId: "provider-ollama-cloud",
+      enabled: true,
+    });
+    await execute({
+      schemaVersion: 1,
+      type: "user/set-package-settings",
+      commandId: "choose-production-ollama-model",
+      expectedRevision: user.revision,
+      packageId: "custom-models",
+      values: {
+        "account-model": {
+          connectionId: PRODUCTION_OLLAMA_CONNECTION_ID,
+          providerModelId: PRODUCTION_OLLAMA_MODEL_ID,
+        },
+      },
+    });
+    expect(
+      resolveEffectiveBotModelV1({
+        bot: { packageValues: {} },
+        user,
+        packages,
+      }),
+    ).toMatchObject({
+      source: "account",
+      model: {
+        connectionId: PRODUCTION_OLLAMA_CONNECTION_ID,
+        providerModelId: PRODUCTION_OLLAMA_MODEL_ID,
+      },
+      binding: { state: "ready", packageId: "provider-ollama-cloud" },
+    });
+
+    await execute({
+      schemaVersion: 1,
+      type: "user/set-package-settings",
+      commandId: "clear-production-ollama-model",
+      expectedRevision: user.revision,
+      packageId: "custom-models",
+      unset: ["account-model"],
+    });
+    effective = resolveEffectiveBotModelV1({
+      bot: { packageValues: {} },
+      user,
+      packages,
+    });
+    expect(effective).toMatchObject({
+      source: "platform",
+      binding: { state: "ready", packageId: "provider-flock-ai" },
+    });
+
+    for (const packageId of ["shell", "provider-flock-ai"]) {
+      const failure = `Platform-owned Package "${packageId}" cannot be disabled or uninstalled`;
+      for (const command of [
+        {
+          schemaVersion: 1 as const,
+          type: "user/set-package-enabled" as const,
+          commandId: `disable-${packageId}`,
+          expectedRevision: user.revision,
+          packageId,
+          enabled: false,
+        },
+        {
+          schemaVersion: 1 as const,
+          type: "user/uninstall-package" as const,
+          commandId: `uninstall-${packageId}`,
+          expectedRevision: user.revision,
+          packageId,
+        },
+      ]) {
+        await expect(
+          configuration.executeConfiguration({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        ).resolves.toEqual({
+          schemaVersion: 1,
+          commandId: command.commandId,
+          revision: user.revision,
+          status: "rejected",
+          failure,
+        });
+      }
+    }
   });
 
   test("dispatches a Connection command to the Package the User Contribution adjudicates", async () => {

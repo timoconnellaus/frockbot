@@ -117,6 +117,8 @@ export interface PluginCatalogItem {
   packageId: string;
   displayName: string;
   version: string;
+  /** Backend-derived manifest fact; platform infrastructure has no User toggle. */
+  platformOwned?: boolean;
   capabilities: Array<{
     id: string;
     kind: "model" | "tool" | "memory" | "notification" | "computer";

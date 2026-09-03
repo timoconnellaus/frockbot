@@ -1,0 +1,398 @@
+{
+  "schemaVersion": 1,
+  "revision": 38,
+  "profile": { "name": "FrockBot user" },
+  "packages": [
+    {
+      "packageId": "shell",
+      "version": "0.0.1",
+      "state": "disabled",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "flock",
+      "version": "0.0.1",
+      "state": "disabled",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "bot-template",
+      "version": "0.0.1",
+      "state": "disabled",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "image",
+      "version": "0.0.1",
+      "state": "installed",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "user-machine",
+      "version": "0.0.1",
+      "state": "disabled",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "machine-messages",
+      "version": "0.0.1",
+      "state": "disabled",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "mcp",
+      "version": "0.0.1",
+      "state": "disabled",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "web",
+      "version": "0.0.1",
+      "state": "installed",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "provider-ollama-cloud",
+      "version": "0.0.1",
+      "state": "disabled",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "routines",
+      "version": "0.0.1",
+      "state": "disabled",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "subagents",
+      "version": "0.0.1",
+      "state": "disabled",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "ui-theme",
+      "version": "0.0.1",
+      "state": "installed",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "auth",
+      "version": "0.0.1",
+      "state": "installed",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "settings",
+      "version": "0.0.1",
+      "state": "installed",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "credentials",
+      "version": "0.0.1",
+      "state": "installed",
+      "provenance": "first-party"
+    },
+    {
+      "packageId": "custom-models",
+      "version": "0.0.1",
+      "state": "disabled",
+      "provenance": "first-party"
+    }
+  ],
+  "connections": [
+    {
+      "connectionId": "connection-2f57547a-cfd9-4744-a9b8-1dbdddae1593",
+      "packageId": "provider-ollama-cloud",
+      "connectionTypeId": "ollama-cloud-account",
+      "displayName": "Ollama Cloud",
+      "state": "ready",
+      "generation": "451497a0-859b-4569-a231-06da8ecd358d",
+      "providerType": "ollama-cloud",
+      "authorization": {
+        "schemaVersion": 1,
+        "kind": "api-key",
+        "credential": {
+          "schemaVersion": 1,
+          "configured": true,
+          "source": "api-key",
+          "writable": true,
+          "generation": "451497a0-859b-4569-a231-06da8ecd358d",
+          "updatedAt": "2026-09-01T08:20:15.235Z"
+        }
+      },
+      "modelCatalog": {
+        "schemaVersion": 1,
+        "generation": "379c9e6c-ab2a-4839-955d-4d341089f30e",
+        "state": "fresh",
+        "models": [
+          {
+            "providerModelId": "gemma4:31b",
+            "displayName": "gemma4:31b",
+            "contextWindow": 262144,
+            "capabilities": {
+              "tools": true,
+              "vision": true,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "kimi-k2.7-code",
+            "displayName": "kimi-k2.7-code",
+            "contextWindow": 262144,
+            "capabilities": {
+              "tools": true,
+              "vision": true,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "gpt-oss:20b",
+            "displayName": "gpt-oss:20b",
+            "contextWindow": 131072,
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "minimax-m2.7",
+            "displayName": "minimax-m2.7",
+            "contextWindow": 196608,
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "minimax-m3",
+            "displayName": "minimax-m3",
+            "contextWindow": 524288,
+            "capabilities": {
+              "tools": true,
+              "vision": true,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "glm-5.1",
+            "displayName": "glm-5.1",
+            "contextWindow": 202752,
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "kimi-k2.6",
+            "displayName": "kimi-k2.6",
+            "contextWindow": 262144,
+            "capabilities": {
+              "tools": true,
+              "vision": true,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "kimi-k3",
+            "displayName": "kimi-k3",
+            "contextWindow": 1048576,
+            "capabilities": {
+              "tools": true,
+              "vision": true,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "mistral-large-3:675b",
+            "displayName": "mistral-large-3:675b",
+            "contextWindow": 262144,
+            "capabilities": {
+              "tools": true,
+              "vision": true,
+              "reasoning": false
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "glm-5.2",
+            "displayName": "glm-5.2",
+            "contextWindow": 1048576,
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "glm-5.3",
+            "displayName": "glm-5.3",
+            "contextWindow": 1048576,
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "gpt-oss:120b",
+            "displayName": "gpt-oss:120b",
+            "contextWindow": 131072,
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "nemotron-3-super",
+            "displayName": "nemotron-3-super",
+            "contextWindow": 262144,
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "nemotron-3-ultra",
+            "displayName": "nemotron-3-ultra",
+            "contextWindow": 262144,
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "deepseek-v4-pro:0813",
+            "displayName": "deepseek-v4-pro:0813",
+            "contextWindow": 1048576,
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "nemotron-3-nano:30b",
+            "displayName": "nemotron-3-nano:30b",
+            "contextWindow": 262144,
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "qwen3.5:397b",
+            "displayName": "qwen3.5:397b",
+            "contextWindow": 262144,
+            "capabilities": {
+              "tools": true,
+              "vision": true,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "glm-5.3-flash",
+            "displayName": "glm-5.3-flash",
+            "contextWindow": 1048576,
+            "capabilities": {
+              "tools": true,
+              "vision": true,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "deepseek-v4-flash:0731",
+            "displayName": "deepseek-v4-flash:0731",
+            "contextWindow": 1048576,
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          }
+        ],
+        "refreshedAt": "2026-09-02T07:21:34.311Z",
+        "refreshAfter": "2026-09-02T08:21:34.311Z"
+      },
+      "settings": {},
+      "safeMetadata": {
+        "creationCommandId": "4a4c6fcb-1923-4515-a26a-cb2abaa4fa1f"
+      }
+    },
+    {
+      "connectionId": "flock-ai-ambient",
+      "packageId": "provider-flock-ai",
+      "connectionTypeId": "flock-ai-account",
+      "displayName": "Flock AI",
+      "state": "ready",
+      "generation": "flock-ai-ambient-v1",
+      "providerType": "flock-ai",
+      "authorization": {
+        "schemaVersion": 1,
+        "kind": "ambient-native",
+        "credential": {
+          "schemaVersion": 1,
+          "configured": true,
+          "source": "ambient-native",
+          "writable": false,
+          "generation": "flock-ai-ambient-v1"
+        }
+      },
+      "modelCatalog": {
+        "schemaVersion": 1,
+        "generation": "flock-ai-static-v1",
+        "state": "fresh",
+        "models": [
+          {
+            "providerModelId": "@flock/auto",
+            "displayName": "Auto (recommended)",
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          },
+          {
+            "providerModelId": "@flock/deepseek-ai/deepseek-v4-flash-0731",
+            "displayName": "DeepSeek V4 Flash",
+            "capabilities": {
+              "tools": true,
+              "vision": false,
+              "reasoning": true
+            },
+            "source": "discovered"
+          }
+        ]
+      },
+      "safeMetadata": { "catalog": "static" }
+    }
+  ],
+  "catalogGeneration": "g23fe94d0807975498f6974869ece4959",
+  "catalogIndexHash": "adc854f7ec94387d98a48dfafd40085e77b1598a2f414e59b04870486b965b48"
+}

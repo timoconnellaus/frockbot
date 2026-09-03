@@ -34,7 +34,7 @@ import type { Plugin } from "cordis";
 
 const STATE_KEY = "user-configuration";
 const DEFAULT_PACKAGES_BOOTSTRAP_KEY = "user-default-packages-bootstrap:v1";
-const DEFAULT_PACKAGES_BOOTSTRAP_VERSION = 2;
+const DEFAULT_PACKAGES_BOOTSTRAP_VERSION = 3;
 /**
  * The pinned Catalog generation lives beside the settings view rather than in
  * it, so pinning on a read never bumps the settings revision a client is
@@ -132,6 +132,8 @@ export interface AvailableUserPackage {
   installByDefault?: boolean;
   /** The seeded installation state. Omission preserves the enabled default. */
   defaultEnablement?: "enabled" | "disabled";
+  /** Derived from immutable manifest facts by the application compiler. */
+  platformOwned?: boolean;
   /** The Package manifest's Package-id-to-version-range dependency record. */
   dependencies?: Readonly<Record<string, string>>;
   /**
@@ -402,6 +404,9 @@ export class UserSettingsBackendContribution {
   /** Catalog-relative facts supplied to the raw stored-settings migration. */
   private readonly storedSettingsPackages: readonly StoredUserSettingsPackageV1[];
 
+  /** Package ids whose installation state is platform policy, not a User choice. */
+  private readonly platformOwnedPackageIds: ReadonlySet<string>;
+
   /** Declared Package dependencies, by Package id and version. */
   private readonly packageDependencies: ReadonlyMap<
     string,
@@ -417,6 +422,16 @@ export class UserSettingsBackendContribution {
    * bounded set that marker migration may add without replaying every default.
    */
   private readonly enablementRolloutPackages: readonly PackageInstallationView[];
+
+  /**
+   * Default-enabled rows damaged by v0.2.3's v1→v2 migration. The old pass
+   * validated dependencies before it added the rollout's dependency closure,
+   * so it wrote these rows disabled even though the User had made no choice.
+   */
+  private readonly defaultEnabledPackages: ReadonlyMap<
+    string,
+    PackageInstallationView
+  >;
 
   /** Declared User-level settings, by Package id and version. */
   private readonly packageSettingDefinitions: ReadonlyMap<
@@ -436,7 +451,13 @@ export class UserSettingsBackendContribution {
       packageId: pkg.packageId,
       version: pkg.version,
       ...(pkg.dependencies ? { dependencies: pkg.dependencies } : {}),
+      ...(pkg.platformOwned ? { platformOwned: true } : {}),
     }));
+    this.platformOwnedPackageIds = new Set(
+      host.availablePackages
+        .filter((pkg) => pkg.platformOwned)
+        .map((pkg) => pkg.packageId),
+    );
     this.availablePackages = new Set(
       host.availablePackages.map(
         ({ packageId, version }) => `${packageId}\u0000${version}`,
@@ -455,7 +476,7 @@ export class UserSettingsBackendContribution {
       ]),
     );
     this.defaultPackages = host.availablePackages.flatMap((pkg) =>
-      pkg.installByDefault
+      pkg.installByDefault || pkg.platformOwned
         ? [
             {
               packageId: pkg.packageId,
@@ -489,6 +510,80 @@ export class UserSettingsBackendContribution {
     this.enablementRolloutPackages = this.defaultPackages.filter((pkg) =>
       rolloutPackageIds.has(pkg.packageId),
     );
+    this.defaultEnabledPackages = new Map(
+      this.defaultPackages
+        .filter((pkg) => pkg.state === "installed")
+        .map((pkg) => [pkg.packageId, pkg]),
+    );
+  }
+
+  private addMissingPackages(
+    current: UserSettingsViewV1,
+    defaults: readonly PackageInstallationView[],
+  ): UserSettingsViewV1 {
+    const installedPackageIds = new Set(
+      current.packages.map((pkg) => pkg.packageId),
+    );
+    const additions = defaults.filter(
+      (pkg) => !installedPackageIds.has(pkg.packageId),
+    );
+    return additions.length === 0
+      ? current
+      : {
+          ...current,
+          packages: [
+            ...current.packages,
+            ...additions.map((pkg) => structuredClone(pkg)),
+          ],
+        };
+  }
+
+  /** Apply the default-disabled choices first introduced by marker v2. */
+  private applyEnablementRolloutDefaults(
+    current: UserSettingsViewV1,
+  ): UserSettingsViewV1 {
+    let changed = false;
+    const rolloutDefaults = new Map(
+      this.enablementRolloutPackages.map((pkg) => [pkg.packageId, pkg]),
+    );
+    const packages = current.packages.map((pkg) => {
+      const defaultPackage = rolloutDefaults.get(pkg.packageId);
+      if (
+        !defaultPackage ||
+        defaultPackage.version !== pkg.version ||
+        defaultPackage.state !== "disabled" ||
+        pkg.state !== "installed" ||
+        pkg.failure !== undefined ||
+        pkg.provenance === "catalog"
+      ) {
+        return pkg;
+      }
+      changed = true;
+      return { ...pkg, state: "disabled" as const };
+    });
+    return changed ? { ...current, packages } : current;
+  }
+
+  /** One-shot repair for rows the v0.2.3 marker-v2 rollout disabled. */
+  private repairEnablementRolloutV2(
+    current: UserSettingsViewV1,
+  ): UserSettingsViewV1 {
+    let changed = false;
+    const packages = current.packages.map((pkg) => {
+      const defaultPackage = this.defaultEnabledPackages.get(pkg.packageId);
+      if (
+        !defaultPackage ||
+        defaultPackage.version !== pkg.version ||
+        pkg.state !== "disabled" ||
+        pkg.failure !== undefined ||
+        pkg.provenance === "catalog"
+      ) {
+        return pkg;
+      }
+      changed = true;
+      return { ...pkg, state: "installed" as const };
+    });
+    return changed ? { ...current, packages } : current;
   }
 
   /**
@@ -511,70 +606,82 @@ export class UserSettingsBackendContribution {
       const marker = await transaction.get<unknown>(
         DEFAULT_PACKAGES_BOOTSTRAP_KEY,
       );
+      const stored = await transaction.get<unknown>(STATE_KEY);
       if (marker !== undefined) {
         if (
           !marker ||
           typeof marker !== "object" ||
           Array.isArray(marker) ||
           Object.keys(marker).length !== 1 ||
-          ((marker as { schemaVersion?: unknown }).schemaVersion !== 1 &&
-            (marker as { schemaVersion?: unknown }).schemaVersion !==
-              DEFAULT_PACKAGES_BOOTSTRAP_VERSION)
+          ![1, 2, DEFAULT_PACKAGES_BOOTSTRAP_VERSION].includes(
+            (marker as { schemaVersion?: unknown }).schemaVersion as number,
+          )
         ) {
           throw new Error("Stored default Package bootstrap is invalid");
         }
-        if (
-          (marker as { schemaVersion: number }).schemaVersion ===
-          DEFAULT_PACKAGES_BOOTSTRAP_VERSION
-        ) {
-          return this.readSnapshot(transaction);
-        }
-        const stored = await transaction.get<unknown>(STATE_KEY);
-        const current =
+        const markerVersion = (marker as { schemaVersion: number })
+          .schemaVersion;
+
+        // Marker v1 predates default-disabled model Packages and their
+        // dependency closure. Seed that closure before the catalog-relative
+        // fixed point sees it, then validate the complete graph. A later
+        // marker gets only the platform-owned repair on this read: retirement
+        // and dependency validation are one-shot migration steps, never a
+        // read-time rule.
+        const rawMigrated =
           stored === undefined
             ? initialState()
-            : decodeUserSettingsViewV1(
-                migrateStoredUserSettingsV1(
-                  stored,
-                  this.storedSettingsPackages,
-                ),
+            : migrateStoredUserSettingsV1(
+                stored,
+                markerVersion === 1 ? undefined : this.storedSettingsPackages,
+                "repair",
               );
-        const installedPackageIds = new Set(
-          current.packages.map((pkg) => pkg.packageId),
-        );
-        const additions = this.enablementRolloutPackages.filter(
-          (pkg) => !installedPackageIds.has(pkg.packageId),
-        );
-        const next = {
-          ...current,
-          revision: current.revision + 1,
-          packages: [
-            ...current.packages,
-            ...additions.map((pkg) => structuredClone(pkg)),
-          ],
-        } satisfies UserSettingsViewV1;
+        let settingsChanged = stored !== undefined && rawMigrated !== stored;
+        let migrated = decodeUserSettingsViewV1(rawMigrated);
+        if (markerVersion === 1) {
+          const seeded = this.applyEnablementRolloutDefaults(
+            this.addMissingPackages(migrated, this.enablementRolloutPackages),
+          );
+          const validated = migrateStoredUserSettingsV1(
+            seeded,
+            this.storedSettingsPackages,
+          );
+          settingsChanged ||= seeded !== migrated || validated !== seeded;
+          migrated = decodeUserSettingsViewV1(validated);
+        }
+        if (markerVersion === 2) {
+          const repaired = this.repairEnablementRolloutV2(migrated);
+          settingsChanged ||= repaired !== migrated;
+          migrated = repaired;
+        }
+
+        if (
+          markerVersion === DEFAULT_PACKAGES_BOOTSTRAP_VERSION &&
+          !settingsChanged
+        ) {
+          return structuredClone(migrated);
+        }
+        const next = settingsChanged
+          ? { ...migrated, revision: migrated.revision + 1 }
+          : migrated;
         await transaction.put({
-          [STATE_KEY]: next,
+          ...(settingsChanged ? { [STATE_KEY]: next } : {}),
           [DEFAULT_PACKAGES_BOOTSTRAP_KEY]: {
             schemaVersion: DEFAULT_PACKAGES_BOOTSTRAP_VERSION,
           },
         });
         return structuredClone(next);
       }
-      const current = await this.readSnapshot(transaction);
-      const installedPackageIds = new Set(
-        current.packages.map((pkg) => pkg.packageId),
-      );
-      const additions = this.defaultPackages.filter(
-        (pkg) => !installedPackageIds.has(pkg.packageId),
-      );
+      const current =
+        stored === undefined
+          ? initialState()
+          : decodeUserSettingsViewV1(
+              migrateStoredUserSettingsV1(stored, this.storedSettingsPackages),
+            );
+      const seeded = this.addMissingPackages(current, this.defaultPackages);
       const next = {
-        ...current,
-        revision: current.revision + 1,
-        packages: [
-          ...current.packages,
-          ...additions.map((pkg) => structuredClone(pkg)),
-        ],
+        ...seeded,
+        revision: seeded.revision + 1,
       } satisfies UserSettingsViewV1;
       await transaction.put({
         [STATE_KEY]: next,
@@ -625,6 +732,10 @@ export class UserSettingsBackendContribution {
 
   async readConfiguration(input: unknown): Promise<UserSettingsViewV1> {
     const request = decodeUserConfigurationReadRpcV1(input);
+    // Settings owns the stored-record migration and platform-row repair. Run
+    // it before Package bootstraps so every bootstrap observes the repaired
+    // current Catalog in the same configuration read.
+    await this.read(request.userId);
     for (const bootstrap of this.readBootstraps.values()) {
       await bootstrap.bootstrap(request.userId);
     }
@@ -843,6 +954,21 @@ export class UserSettingsBackendContribution {
     }
     if (command.expectedRevision !== current.revision) {
       throw new ConfigurationConflictError(current.revision);
+    }
+    if (
+      (command.type === "user/uninstall-package" ||
+        (command.type === "user/set-package-enabled" && !command.enabled)) &&
+      this.platformOwnedPackageIds.has(command.packageId)
+    ) {
+      const receipt: OperationReceiptV1 = {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        revision: current.revision,
+        status: "rejected",
+        failure: `Platform-owned Package "${command.packageId}" cannot be disabled or uninstalled`,
+      };
+      await storage.put(receiptKey, { commandFingerprint, receipt });
+      return receipt;
     }
     let dependencyFailure: string | undefined;
     if (command.type === "user/install-package" && command.enabled !== false) {

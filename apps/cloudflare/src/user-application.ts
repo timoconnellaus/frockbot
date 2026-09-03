@@ -1,7 +1,8 @@
 import {
   createFoundationRuntimeApplication,
-  isUserInstallablePackageV1,
+  isPlatformOwnedPackageV1,
 } from "@frockbot/application-foundation/runtime";
+import { foundationDefaultPackageIds } from "@frockbot/application-foundation/user";
 import {
   decodeBotIdV1,
   isApplicationDeploymentHash,
@@ -238,28 +239,33 @@ export function createUserApplication() {
     }
     if (request.method === "GET" && url.pathname === "/app-manifest") {
       const compiled = await application;
+      const defaultPackageIds = foundationDefaultPackageIds(compiled.plan);
       return Response.json({
         schemaVersion: 1,
         deployment: env.DEPLOYMENT,
         applicationHash: compiled.plan.applicationHash,
-        // The catalog is what a User can install. The application's own shell
-        // is mounted unconditionally and was never installed, so it is not
-        // offered as a choice; everything else stays listed, including a
-        // Package whose only Capabilities are tools that need no Connection.
-        packages: compiled.plan.packages
-          .filter((pkg) => isUserInstallablePackageV1(pkg.manifest))
-          .map((pkg) => ({
-            id: pkg.id,
-            displayName: pkg.manifest.displayName,
-            version: pkg.version,
-            contributions: [
-              ...(pkg.manifest.contributions.backend ? ["backend"] : []),
-              ...(pkg.manifest.contributions.runtime ? ["runtime"] : []),
-              ...(pkg.manifest.contributions.client ? ["client"] : []),
-              ...(pkg.manifest.contributions.desktop ? ["desktop"] : []),
-            ],
-            configuration: pkg.manifest.configuration,
-          })),
+        // The client needs model-provider manifest facts even when a Package
+        // is platform-owned. The backend therefore projects every Package and
+        // marks the ownership decision it derived from immutable manifest
+        // facts; enablement surfaces omit those rows while model resolution
+        // still sees them.
+        packages: compiled.plan.packages.map((pkg) => ({
+          id: pkg.id,
+          displayName: pkg.manifest.displayName,
+          version: pkg.version,
+          platformOwned: isPlatformOwnedPackageV1(
+            pkg.manifest,
+            defaultPackageIds.has(pkg.id),
+          ),
+          contributions: [
+            ...(pkg.manifest.contributions.backend ? ["backend"] : []),
+            ...(pkg.manifest.contributions.runtime ? ["runtime"] : []),
+            ...(pkg.manifest.contributions.client ? ["client"] : []),
+            ...(pkg.manifest.contributions.desktop ? ["desktop"] : []),
+            ...(pkg.manifest.contributions.mobile ? ["mobile"] : []),
+          ],
+          configuration: pkg.manifest.configuration,
+        })),
       });
     }
 

@@ -407,6 +407,180 @@ describe("User settings backend Contribution", () => {
     ).resolves.toMatchObject({ status: "applied" });
   });
 
+  test("seeds rollout dependencies before validating a pre-existing enablement graph", async () => {
+    const storage = new MemoryStorage();
+    const availablePackages: AvailableUserPackage[] = [
+      {
+        packageId: "custom-models",
+        version: "0.0.1",
+        installByDefault: true,
+        defaultEnablement: "disabled",
+        dependencies: {
+          settings: ">=0.0.1",
+          shell: ">=0.0.1",
+          "ui-theme": ">=0.0.1",
+        },
+      },
+      {
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+        installByDefault: true,
+        defaultEnablement: "disabled",
+        dependencies: {
+          "custom-models": ">=0.0.1",
+          credentials: ">=0.0.1",
+          settings: ">=0.0.1",
+        },
+      },
+      { packageId: "credentials", version: "0.0.1", installByDefault: true },
+      {
+        packageId: "settings",
+        version: "0.0.1",
+        installByDefault: true,
+        dependencies: { shell: ">=0.0.1", "ui-theme": ">=0.0.1" },
+      },
+      {
+        packageId: "shell",
+        version: "0.0.1",
+        installByDefault: true,
+        dependencies: { "ui-theme": ">=0.0.1" },
+      },
+      { packageId: "ui-theme", version: "0.0.1", installByDefault: true },
+      {
+        packageId: "mcp",
+        version: "0.0.1",
+        installByDefault: true,
+        dependencies: {
+          credentials: ">=0.0.1",
+          settings: ">=0.0.1",
+        },
+      },
+    ];
+    await storage.put("user-id", "pre-rollout-user");
+    await storage.put("user-default-packages-bootstrap:v1", {
+      schemaVersion: 1,
+    });
+    await storage.put("user-configuration", {
+      schemaVersion: 1,
+      revision: 12,
+      profile: { name: "Pre-rollout User" },
+      packages: [
+        {
+          packageId: "shell",
+          version: "0.0.1",
+          state: "installed",
+          provenance: "first-party",
+        },
+        {
+          packageId: "mcp",
+          version: "0.0.1",
+          state: "installed",
+          provenance: "first-party",
+        },
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "installed",
+          provenance: "first-party",
+        },
+      ],
+      connections: [],
+    });
+    const settings = createUserSettingsBackendContribution({
+      storage,
+      availablePackages,
+    });
+
+    const migrated = await settings.readConfiguration({
+      schemaVersion: 1,
+      userId: "pre-rollout-user",
+    });
+
+    expect(migrated.packages).toContainEqual(
+      expect.objectContaining({ packageId: "shell", state: "installed" }),
+    );
+    expect(migrated.packages).toContainEqual(
+      expect.objectContaining({ packageId: "mcp", state: "installed" }),
+    );
+    expect(migrated.packages).toContainEqual(
+      expect.objectContaining({
+        packageId: "custom-models",
+        state: "disabled",
+      }),
+    );
+    expect(migrated.packages).toContainEqual(
+      expect.objectContaining({
+        packageId: "provider-ollama-cloud",
+        state: "disabled",
+      }),
+    );
+  });
+
+  test("repairs v2 rollout damage once and preserves choices made after v3", async () => {
+    const storage = new MemoryStorage();
+    await storage.put("user-id", "damaged-user");
+    await storage.put("user-default-packages-bootstrap:v1", {
+      schemaVersion: 2,
+    });
+    await storage.put("user-configuration", {
+      schemaVersion: 1,
+      revision: 38,
+      profile: { name: "Damaged User" },
+      packages: [
+        {
+          packageId: "web",
+          version: "0.0.1",
+          state: "disabled",
+          provenance: "first-party",
+        },
+      ],
+      connections: [],
+    });
+    const settings = createUserSettingsBackendContribution({
+      storage,
+      availablePackages: [
+        { packageId: "web", version: "0.0.1", installByDefault: true },
+      ],
+    });
+
+    const repaired = await settings.readConfiguration({
+      schemaVersion: 1,
+      userId: "damaged-user",
+    });
+    expect(repaired).toMatchObject({
+      revision: 39,
+      packages: [{ packageId: "web", state: "installed" }],
+    });
+    expect(
+      await storage.get<{ schemaVersion: number }>(
+        "user-default-packages-bootstrap:v1",
+      ),
+    ).toEqual({
+      schemaVersion: 3,
+    });
+
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "damaged-user",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "disable-web-after-v3",
+        expectedRevision: 39,
+        packageId: "web",
+        enabled: false,
+      },
+    });
+    const chosen = await settings.readConfiguration({
+      schemaVersion: 1,
+      userId: "damaged-user",
+    });
+    expect(chosen).toMatchObject({
+      revision: 40,
+      packages: [{ packageId: "web", state: "disabled" }],
+    });
+  });
+
   test("installs a Package disabled when explicitly requested", async () => {
     const settings = contribution();
     const receipt = await settings.executeConfiguration({
