@@ -1588,9 +1588,9 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         );
         memoryScope(entry.scope, `${label}.scope`);
         eventString(entry.projectId, `${label}.projectId`, true);
-        if (entry.tier !== "profile" && entry.tier !== "log") {
-          throw new Error(`${label}.tier is invalid`);
-        }
+        // `note` too: a note lives in the log file, and recording it as `log`
+        // left a reader of the durable event unable to tell the tiers apart.
+        memoryTier(entry.tier, `${label}.tier`);
         eventString(entry.via, `${label}.via`, true);
         eventString(entry.learnedAt, `${label}.learnedAt`);
         eventString(entry.text, `${label}.text`);
