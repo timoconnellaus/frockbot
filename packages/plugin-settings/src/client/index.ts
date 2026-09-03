@@ -45,12 +45,12 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
     }),
     surfaces.register({
       id: "package-catalog",
-      title: "Package Catalog",
+      title: "All plugins",
       component: PackageCatalogSurface,
     }),
     surfaces.register({
       id: "user-settings",
-      title: "Application settings",
+      title: "Settings",
       component: UserSettingsSurface,
     }),
     ctx.slot({

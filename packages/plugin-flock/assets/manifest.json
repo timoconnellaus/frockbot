@@ -52,7 +52,7 @@
       },
       {
         "id": "matte-black-top-hat",
-        "label": "Matte-black top hat \u00b7 Qwen layer",
+        "label": "Matte-black top hat",
         "parent": "upper-neutral",
         "kind": "headwear"
       },
@@ -278,7 +278,7 @@
       },
       {
         "id": "purple-scarf",
-        "label": "Purple silk scarf \u00b7 Qwen layer",
+        "label": "Purple silk scarf",
         "parent": "lower-neutral",
         "kind": "neckwear"
       },

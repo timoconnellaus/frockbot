@@ -21,7 +21,11 @@
 // It reads the *stored* run rather than the client projection, because the
 // client projection drops `call.input` and the argument digest needs the exact
 // arguments.
-import { auditKindForToolV1 } from "./classify.js";
+import {
+  auditKindForToolV1,
+  dynamicToolInputV1,
+  resolveDynamicToolNameV1,
+} from "./classify.js";
 import { auditArgumentDigestV1, auditPreviewV1 } from "./redact.js";
 import {
   AUDIT_MAX_OUTBOX_V1,
@@ -71,6 +75,17 @@ export function isSettledAuditRunV1(run: { status: string }): boolean {
   );
 }
 
+/**
+ * A tool result that says the effect has not run yet.
+ *
+ * An approval-gated `machine_exec` answers the model at *queue* time, before
+ * anybody has approved anything, and `isError` is false — so the row said `ok`
+ * for a command that had not run and might never run. The durable log does not
+ * yet know how it ended, which is exactly what `unknown` means.
+ */
+const AWAITING_APPROVAL =
+  /\bnothing has run\b|waiting on the user's approval|awaiting (?:your )?approval|queued for approval/i;
+
 function outcomeFor(
   result: { isError?: boolean; status?: string; content?: string } | undefined,
 ): AuditOutcomeV1 {
@@ -79,7 +94,9 @@ function outcomeFor(
   // silent classification the constitution's reconciliation rule forbids.
   if (!result) return "unknown";
   if (result.status === "interrupted") return "interrupted";
-  if (result.isError !== true) return "ok";
+  if (result.isError !== true) {
+    return AWAITING_APPROVAL.test(result.content ?? "") ? "unknown" : "ok";
+  }
   // A tool that declined before doing anything is a refusal, which is a
   // materially different fact from an effect that ran and failed.
   return /\brefus|not allowed|denied|blocked while\b/i.test(
@@ -122,6 +139,11 @@ export async function auditEntriesFromStoredRunV1(
     if (!occurrenceId || !name) continue;
     const classification = auditKindForToolV1(name, event.input);
     if (!classification) continue;
+    // The row names the tool that ran, not the wrapper it was journalled
+    // under, and previews the arguments that tool was actually given.
+    const toolName = resolveDynamicToolNameV1(name, event.input);
+    const toolInput =
+      toolName === name ? event.input : dynamicToolInputV1(event.input);
     let coordinates: { turn: number; step: number; ordinal: number };
     try {
       coordinates = decodeAuditOccurrenceIdV1(occurrenceId);
@@ -146,9 +168,11 @@ export async function auditEntriesFromStoredRunV1(
       at,
       kind: classification.kind,
       target: classification.target,
-      toolName: name,
+      toolName,
+      // The digest stays over the exact argument JSON the durable `tool/call`
+      // event holds, so a row written months ago still reproduces.
       argumentDigest: await auditArgumentDigestV1(event.input),
-      preview: auditPreviewV1(classification.kind, name, event.input),
+      preview: auditPreviewV1(classification.kind, toolName, toolInput),
       outcome: outcomeFor(result),
       ...(result?.content === undefined
         ? {}

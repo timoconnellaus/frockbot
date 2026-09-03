@@ -143,7 +143,7 @@ onBeforeUnmount(() => {
         {{ auth.signingOut.value ? "Signing out…" : "Sign out" }}
       </button>
       <p v-if="developmentIdentity" class="profile-menu-hint">
-        Local development identity is selected by the development login URL.
+        You're signed in as a local developer.
       </p>
       <p v-if="signOutError" class="profile-menu-error" role="alert">
         {{ signOutError }}

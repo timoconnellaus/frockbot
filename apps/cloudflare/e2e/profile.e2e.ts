@@ -16,7 +16,7 @@ test("a User edits and saves the prefilled profile name", async ({
   await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
 
   const settings = page.getByRole("region", {
-    name: "Application settings",
+    name: "Settings",
   });
   const name = settings.getByLabel("Name");
   await expect(name).toHaveValue("Local developer");

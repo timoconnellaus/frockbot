@@ -70,8 +70,7 @@ function acknowledge(entryIds: string[]): void {
         >
       </header>
       <p v-if="routines.inbox.length === 0" class="routine-inbox__empty">
-        Nothing has been left here. A Routine that finishes lands its message in
-        this drawer rather than in the conversation.
+        Nothing here yet. Finished Routines leave their results here.
       </p>
       <ul v-else class="routine-inbox__list">
         <li

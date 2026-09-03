@@ -108,12 +108,11 @@ function whenLabel(at: string): string {
       rather than quietly answering with less than it holds.
     -->
     <p v-if="search.indexState === 'rebuilding'" class="search-note">
-      Rebuilding the index from every Bot's stored turns. Results are incomplete
-      until it finishes.
+      Rebuilding search. Results are incomplete until it finishes.
     </p>
     <p v-else-if="search.indexState === 'truncated'" class="search-note">
-      This index reached its size limit, so the oldest turns were dropped.
-      Rebuilding will not bring them back.
+      The oldest conversations are no longer searchable. Rebuilding won't bring
+      them back.
     </p>
     <p v-if="search.error" class="search-error" role="alert">
       {{ search.error }}

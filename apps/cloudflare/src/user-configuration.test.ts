@@ -337,8 +337,7 @@ describe("UserConfiguration Connection routing", () => {
       source: "account",
       binding: {
         state: "unavailable",
-        failure:
-          'Package "provider-ollama-cloud" is not installed and enabled; enable it to use Connection "ollama-legacy"',
+        failure: "Turn this model's plugin back on in Plugins to use it.",
       },
     });
 

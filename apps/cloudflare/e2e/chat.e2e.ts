@@ -168,7 +168,7 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
   await sendMessage(page, "will not work");
 
   /*
-   * A failed Turn is a system notice, not the Bot speaking.
+   * A failed Turn is a notice, not the Bot speaking.
    *
    * The thread used to render the durable failure verbatim in an assistant
    * bubble — `Bot turn ended with outcome model-error`, a provider status
@@ -178,7 +178,7 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
    * is one line, in the product's own words.
    */
   await expect(page.locator(".message-notice").last()).toHaveText(
-    "This reply didn't finish. Try sending your message again.",
+    "This Bot couldn't finish its reply. Try again.",
   );
   await expect(page.locator(".thread")).not.toContainText("model-error");
   await expect(page.locator(".thread")).not.toContainText("outcome");

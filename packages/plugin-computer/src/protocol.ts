@@ -108,6 +108,20 @@ export type ComputerPhase = (typeof COMPUTER_PHASES)[number];
 
 export const COMPUTER_UPDATE_MESSAGE_PREFIX = "Updating the Computer: ";
 
+/**
+ * What the Computer card promises a first-ever cold provision will take, as
+ * copy and as the number that copy means.
+ *
+ * The number is here rather than in the card because a provider's `open`
+ * deadline has to outlast it: a wake that takes exactly as long as the product
+ * promised must not abort on our own clock and reach the User as a broken
+ * Computer. The provider Package's test asserts that relationship, so neither
+ * side can drift alone.
+ */
+export const COMPUTER_COLD_PROVISION_EXPECTATION_MS = 180_000;
+export const COMPUTER_COLD_PROVISION_EXPECTATION =
+  "This usually takes 2-3 minutes";
+
 /** Extracts the provider's update phase label without coupling to a provider. */
 export function computerUpdateLabelV1(
   message: string | undefined,

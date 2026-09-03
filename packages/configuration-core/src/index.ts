@@ -514,16 +514,16 @@ export function modelBindingFailureV1(input: {
     (candidate) => candidate.connectionId === input.model.connectionId,
   );
   if (!connection) {
-    return `Connection "${input.model.connectionId}" is unavailable; reconnect it or choose another model`;
+    return "That account is no longer connected. Reconnect it, or pick another model.";
   }
   if (connection.state !== "ready") {
-    return `Connection "${input.model.connectionId}" is ${connection.state}; enable or reconnect it`;
+    return "That account needs reconnecting before this Bot can reply.";
   }
   const installation = input.user.packages.find(
     (candidate) => candidate.packageId === connection.packageId,
   );
   if (!installation || installation.state !== "installed") {
-    return `Package "${connection.packageId}" is not installed and enabled; enable it to use Connection "${connection.connectionId}"`;
+    return "Turn this model's plugin back on in Plugins to use it.";
   }
   const pkg = input.packages.find(
     (candidate) =>
@@ -531,7 +531,7 @@ export function modelBindingFailureV1(input: {
       candidate.version === installation.version,
   );
   if (!pkg) {
-    return `Installed Package "${connection.packageId}" version "${installation.version}" is unavailable`;
+    return "This model's plugin is unavailable. Pick another model.";
   }
   const connectionType = pkg.connectionTypes.find(
     (candidate) => candidate.id === connection.connectionTypeId,
@@ -543,7 +543,7 @@ export function modelBindingFailureV1(input: {
       connectionType?.capabilities.includes(candidate.id),
   );
   if (!connectionType || !modelCapability) {
-    return `Connection "${connection.connectionId}" does not provide a model Capability accepted by Package "${pkg.packageId}"`;
+    return "That account can't provide this model. Pick another one in Models.";
   }
   return undefined;
 }
@@ -581,9 +581,7 @@ export function resolveBotModelBindingV1(input: {
       candidate.version === installation.version,
   )!;
   if (!connection.providerType) {
-    return unavailable(
-      `Connection "${connection.connectionId}" provider type is unavailable`,
-    );
+    return unavailable("That account isn't set up for models yet.");
   }
   const knownModel = connection.modelCatalog?.models.some(
     (candidate: { providerModelId: string }) =>
@@ -664,7 +662,8 @@ export function resolveEffectiveBotModelV1(input: {
     if (declarations.length > 1) {
       const names = declarations.map(({ pkg }) => `"${pkg.packageId}"`);
       return {
-        conflict: `Enabled Packages ${names.join(" and ")} both declare the model role at ${scope === "user" ? "User" : "Bot"} scope; disable one Package`,
+        conflict:
+          "Two plugins are both set as your model. Turn one off in Plugins.",
       };
     }
     const declaration = declarations[0];

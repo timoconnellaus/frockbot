@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { parse } from "@vue/compiler-sfc";
 import type { ComputerState } from "../shared.js";
+import { COMPUTER_COLD_PROVISION_EXPECTATION } from "../protocol.js";
 import {
   createComputerViewerActions,
   decodeComputerViewerFrameMessageV1,
@@ -111,7 +112,7 @@ describe("Computer viewer", () => {
     expect(template).toContain('@click="actions.requestTakeControl"');
     expect(template).toContain('role="alertdialog"');
     expect(template).toContain(
-      "The Bot will be fenced from this desktop until you release control.",
+      "The Bot won't touch this desktop until you release control.",
     );
   });
 
@@ -121,7 +122,19 @@ describe("Computer viewer", () => {
     const template = parsed.descriptor.template?.content ?? "";
 
     expect(cardSource).toContain("Setting up your computer for the first time");
-    expect(cardSource).toContain("This usually takes 2-3 minutes");
+    // An unconfigured card is not a button — clicking it opened a full-screen
+    // modal that repeated the sentence already on the card — and no card
+    // renders until a Bot exists to have a Computer.
+    expect(cardSource).toContain(':disabled="busy || unconfigured"');
+    expect(cardSource).toContain('<section v-if="hasBot"');
+    // The viewer header names the Bot, not its slug and not the Computer
+    // vendor: both are architecture leaking onto the User's screen.
+    expect(overlaySource).toContain("{{ botName }}");
+    expect(overlaySource).not.toContain("state.providerLabel");
+    expect(COMPUTER_COLD_PROVISION_EXPECTATION).toBe(
+      "This usually takes 2-3 minutes",
+    );
+    expect(cardSource).toContain("COMPUTER_COLD_PROVISION_EXPECTATION");
     expect(cardSource).toContain("Updating your computer");
     expect(template).toContain('role="progressbar"');
     expect(template).toContain(':aria-valuenow="progressValueNow"');

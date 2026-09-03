@@ -43,7 +43,11 @@ const PREVIEW_FIELDS: Record<AuditKindV1, readonly string[]> = {
   shell: ["command", "machineId"],
   browser: ["action", "url", "role", "name", "label", "key"],
   process: ["action", "command", "processId", "machineId"],
-  file: ["path", "root", "project", "packageId", "skill", "text"],
+  // No `text`: it previewed up to 200 characters of a `memory_write` or
+  // `skill_write` body into a durable table a person reads later. What was
+  // written is the Workspace's business and the digest's; the audit row says
+  // where it was written, which is the question an audit answers.
+  file: ["path", "root", "project", "packageId", "skill"],
   mcp: [],
 };
 

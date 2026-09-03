@@ -18,7 +18,7 @@
         "schema": {
           "type": "string",
           "title": "Image model",
-          "description": "The text-to-image model generate_image runs. Defaults to @cf/black-forest-labs/flux-1-schnell.",
+          "description": "Which model your Bots use to make images. Uses a fast default if you don't pick one.",
           "enum": [
             "@cf/black-forest-labs/flux-1-schnell",
             "@cf/black-forest-labs/flux-2-klein-4b",

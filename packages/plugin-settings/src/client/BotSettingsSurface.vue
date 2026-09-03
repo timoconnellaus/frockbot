@@ -266,9 +266,13 @@ async function save(): Promise<void> {
         >
           <div>
             <strong>Identity</strong>
-            <p>{{ name || "This Bot" }} · Bot {{ web.activeBotId }}</p>
+            <p>{{ name || "This Bot" }}</p>
           </div>
-          <span>Named by {{ web.botSettings?.profile.namedBy ?? "user" }}</span>
+          <span>{{
+            web.botSettings?.profile.namedBy === "bot"
+              ? "Named by this Bot"
+              : "Named by you"
+          }}</span>
         </UiAnchor>
         <UiAnchor
           anchor="bot-info-members"
@@ -280,7 +284,7 @@ async function save(): Promise<void> {
             <strong>Members</strong>
             <p>This Bot uses what you enable for all of your Bots.</p>
           </div>
-          <span>Packages and Connections are shared</span>
+          <span>Plugins and connected accounts are shared</span>
         </UiAnchor>
         <k-slot name="frockbot.bot-settings-sections" />
       </div>

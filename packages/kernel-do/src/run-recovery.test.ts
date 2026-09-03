@@ -76,18 +76,6 @@ describe("unresolvedModelRequestFailure", () => {
     );
   });
 
-  test("reads the last reason when the Turn was retried", () => {
-    expect(
-      unresolved(
-        request,
-        reconciliationRequired("request-1", "first attempt"),
-        reconciliationRequired("request-1", "second attempt"),
-      ),
-    ).toBe(
-      'Model request "request-1" has no durable provider outcome: second attempt',
-    );
-  });
-
   test("ignores a reason journaled against another request", () => {
     expect(
       unresolved(

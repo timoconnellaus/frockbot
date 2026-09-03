@@ -105,7 +105,7 @@ test.describe("failed requests", () => {
     // One line, in the product's own words, and no bubble pretending the Bot
     // said "Turn was not admitted." to the User whose text was thrown away.
     await expect(page.locator(".message-system-line").last()).toHaveText(
-      "Your message didn't go through. Try again.",
+      "Your message didn't go through. Try sending it again.",
       { timeout: 30_000 },
     );
     await expect(page.locator(".thread")).not.toContainText("admitted");

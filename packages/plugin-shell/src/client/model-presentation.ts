@@ -14,13 +14,13 @@ export function modelRuntimeLabel(input: {
 }): string {
   if (input.failure) return input.failure;
   if (input.source === "none" || !input.providerModelId) {
-    return "Model unavailable";
+    return "No model available — set one up in Models";
   }
   const model =
     input.modelDisplayName ?? input.providerModelId ?? "Connected model";
   const provider = input.packageDisplayName ?? input.connectionDisplayName;
   const runtime = provider ? `${model} · ${provider}` : model;
-  if (input.source === "bot") return `${runtime} · Bot override`;
+  if (input.source === "bot") return `${runtime} · this Bot only`;
   if (input.source === "account") return `${runtime} · Account model`;
   return runtime;
 }
