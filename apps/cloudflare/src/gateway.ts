@@ -109,7 +109,6 @@ function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
 
-
 /** Anonymous immutable artifact route. A configured UI host serves nothing else. */
 export async function servePackageUiArtifact(
   request: Request,

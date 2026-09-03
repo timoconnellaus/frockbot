@@ -50,13 +50,19 @@ describe("an oversized send is refused without taking the Worker down", () => {
   it("survives a large POST that is refused for some other reason entirely", async () => {
     const userId = freshUserId("early-return");
 
-    const refused = await asUser(userId, "/api/bots/absent-bot/does-not-exist", {
-      method: "POST",
-      body: JSON.stringify({ text: "c".repeat(50_000) }),
-    });
+    const refused = await asUser(
+      userId,
+      "/api/bots/absent-bot/does-not-exist",
+      {
+        method: "POST",
+        body: JSON.stringify({ text: "c".repeat(50_000) }),
+      },
+    );
 
     expect(refused.status).toBe(404);
-    expect(await expectJson(refused)).toMatchObject({ error: expect.any(String) });
+    expect(await expectJson(refused)).toMatchObject({
+      error: expect.any(String),
+    });
 
     const next = await asUser(userId, "/");
     expect(next.status).toBe(200);

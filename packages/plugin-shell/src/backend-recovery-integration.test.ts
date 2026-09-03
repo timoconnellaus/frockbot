@@ -626,7 +626,11 @@ describe("Bot recovery", () => {
     expect(await recoveredAgain.listNotifications()).toEqual(notifications);
   });
 
-  test("preserves an unresolved request for an explicit decision", async () => {
+  // ADR 0027. This used to park the run and hand the person a Resolve button.
+  // `provider-1` has no retrieval — none of the providers this deployment
+  // ships does — so there was never an answer to resolve it with, and the Bot
+  // stayed wedged behind it.
+  test("settles an unresolved request no provider can be asked about", async () => {
     const storage = new MemoryStorage();
     const settings = initializeBotSettingsV1("primary");
     const events = [
@@ -690,19 +694,14 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
-    await expect(recovered.listRuns()).resolves.toEqual({
-      schemaVersion: 1,
-      runs: [
-        expect.objectContaining({
-          schemaVersion: 2,
-          runId: "run-lost-marker",
-          status: "reconciliation-required",
-          recovery: expect.objectContaining({ action: "resume" }),
-        }),
-      ],
-      page: { truncated: false },
-    });
-    expect(storage.values.get("active-run")).toBe("run-lost-marker");
+    await recovered.listRuns();
+
+    const settled = storage.values.get("run:run-lost-marker") as StoredRun;
+    expect(settled.status).toBe("failed");
+    expect(settled.failure).toContain("stopped partway");
+    // The Bot is released: nothing is holding the next Turn behind a decision
+    // nobody can make.
+    expect(storage.values.get("active-run")).toBeUndefined();
     expect(storage.alarmAt).toBeUndefined();
   });
 

@@ -101,7 +101,9 @@ class ModelRequestClockV1 {
         ? this.#deadlines.firstByteMs
         : this.#deadlines.idleMs;
     this.#cancelTimer = this.#schedule(() => {
-      this.#controller.abort(new ModelRequestDeadlineError(phase, milliseconds));
+      this.#controller.abort(
+        new ModelRequestDeadlineError(phase, milliseconds),
+      );
     }, milliseconds);
   }
 }
@@ -450,18 +452,21 @@ export class OpenAICompatibleProvider implements LlmProvider {
       this.config.schedule ?? defaultScheduleV1,
     );
     try {
-      const response = await fetcher(`${this.config.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(
-          requestToWire(request, {
-            ...(this.config.acceptsImages === undefined
-              ? {}
-              : { acceptsImages: this.config.acceptsImages }),
-          }),
-        ),
-        signal: clock.signal,
-      });
+      const response = await fetcher(
+        `${this.config.baseUrl}/chat/completions`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify(
+            requestToWire(request, {
+              ...(this.config.acceptsImages === undefined
+                ? {}
+                : { acceptsImages: this.config.acceptsImages }),
+            }),
+          ),
+          signal: clock.signal,
+        },
+      );
       if (!response.ok) {
         await response.body?.cancel();
         throw new OpenAICompatibleHttpError(response.status);

@@ -457,7 +457,9 @@ import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contrib
  * Today: the in-process foundation provider, and nothing else. Ollama Cloud
  * exposes no provider-bound retrieval (ADR 0010) and neither does Flock AI.
  */
-const RECONCILING_PROVIDER_IDS_V1: ReadonlySet<string> = new Set(["foundation"]);
+const RECONCILING_PROVIDER_IDS_V1: ReadonlySet<string> = new Set([
+  "foundation",
+]);
 
 export const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";

@@ -92,7 +92,7 @@ act on. It does not name a run id, a provider, or reconciliation.
   or its Turns will settle as failed rather than parking. That is the safe
   direction to be wrong in, and it is the obligation this ADR carries.
 - `reconciliation-required` does not go away. It is still the outcome for a run
-  whose provider *does* reconcile, and for every unresolved **tool** effect,
+  whose provider _does_ reconcile, and for every unresolved **tool** effect,
   which this ADR does not touch: a tool occurrence is reconciled through the
   journal and the `ToolEffectReconciliation` path exactly as before.
 - A run journaled before this change is settled by the same rule, because the

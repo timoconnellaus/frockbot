@@ -481,8 +481,8 @@ describe("a retried send is idempotent whatever run it names", () => {
   });
 
   test("but the intent itself still is, so a replay cannot gain one", () => {
-    expect(botTurnCommandFingerprintV1({ ...command, supersedes: {} })).not.toBe(
-      botTurnCommandFingerprintV1(command),
-    );
+    expect(
+      botTurnCommandFingerprintV1({ ...command, supersedes: {} }),
+    ).not.toBe(botTurnCommandFingerprintV1(command));
   });
 });

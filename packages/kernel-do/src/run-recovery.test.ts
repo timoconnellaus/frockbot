@@ -6,10 +6,7 @@ import {
   UNRECONCILABLE_RUN_FAILURE_V1,
   unresolvedModelRequestFailure,
 } from "./run-recovery.js";
-import {
-  createStoredRunCodecV1,
-  type StoredRunV1,
-} from "./run-records.js";
+import { createStoredRunCodecV1, type StoredRunV1 } from "./run-records.js";
 
 // Distributive, so each member of the union keeps its own fields: a bare
 // `Omit` over the union collapses to the keys they all share.
@@ -188,12 +185,7 @@ describe("a restart with no retrievable provider outcome", () => {
 
   test("keeps parking a run whose provider can be asked", () => {
     const events = durableJournal(...openTurn, request);
-    const plan = planBotRunRecovery(
-      runWith(events),
-      events,
-      codec,
-      () => true,
-    );
+    const plan = planBotRunRecovery(runWith(events), events, codec, () => true);
 
     expect(plan.kind).toBe("reconcile");
   });
@@ -207,17 +199,13 @@ describe("a restart with no retrievable provider outcome", () => {
   });
 
   test("preserves the words the Turn had already streamed", () => {
-    const events = durableJournal(
-      ...openTurn,
-      request,
-      {
-        type: "assistant/chunk",
-        turn: 1,
-        step: 1,
-        requestId: "request-1",
-        text: "Half a thought",
-      },
-    );
+    const events = durableJournal(...openTurn, request, {
+      type: "assistant/chunk",
+      turn: 1,
+      step: 1,
+      requestId: "request-1",
+      text: "Half a thought",
+    });
     const plan = planBotRunRecovery(
       runWith(events),
       events,
