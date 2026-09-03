@@ -248,3 +248,55 @@ describe("the Bot Durable Object's outbox", () => {
     expect(await outbox.state()).toEqual({ pending: 0, truncated: false });
   });
 });
+
+describe("what the row is allowed to claim", () => {
+  test("an approval-gated command is not `ok` before anybody approved it", async () => {
+    const entries = await auditEntriesFromStoredRunV1(
+      "foreman",
+      run([
+        call("tool:1:1:0", "machine_exec", {
+          command: "rm -rf /tmp/build",
+          machineId: "994dc2ee-1",
+        }),
+        result("tool:1:1:0", {
+          content:
+            'Command "cmd-1" is waiting on the user\'s approval. Nothing has run.',
+        }),
+      ]),
+    );
+
+    // The approval ends the Turn before anything runs, and `isError` is false
+    // at queue time — so the row used to say `ok` for a command that had not
+    // run and might never run.
+    expect(entries[0]).toMatchObject({
+      toolName: "machine_exec",
+      target: "machine:994dc2ee-1",
+      outcome: "unknown",
+    });
+  });
+
+  test("a namespaced dynamic tool is recorded under the tool that ran", async () => {
+    const entries = await auditEntriesFromStoredRunV1(
+      "foreman",
+      run([
+        call("tool:1:1:0", "call_dynamic_tool", {
+          namespace: "frockbot",
+          toolName: "package_author",
+          input: { packageId: "acme", path: "src/index.ts" },
+        }),
+        result("tool:1:1:0", { content: "written" }),
+      ]),
+    );
+
+    // `package_author` produced no row at all before: it is a namespaced
+    // dynamic tool, so the journalled name is `call_dynamic_tool`, and the
+    // same hole hid every Composio and publisher call.
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      toolName: "package_author",
+      kind: "file",
+      outcome: "ok",
+    });
+    expect(entries[0]?.preview).toContain("acme");
+  });
+});
