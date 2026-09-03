@@ -269,9 +269,18 @@ export function decodeSettingsLinkV1(
   const fragment = decodeURIComponent(url.hash.replace(/^#/u, ""));
   const entry = fragment ? settingsAnchorV1(fragment) : undefined;
   const botId = url.searchParams.get("bot") ?? undefined;
+  /*
+   * A fragment naming a row that lives somewhere else is still a request for
+   * that row, so the anchor decides which surface opens. Dropping it instead
+   * is what made `?settings=bot-panel#bot-routines` open the panel and then
+   * sit there: a link that resolves to nothing visible reads as a broken app,
+   * and a row moving between surfaces is exactly what these links have to
+   * survive. A fragment nobody registered still opens the named surface with
+   * no row.
+   */
   return {
-    surface,
-    ...(entry && entry.surface === surface ? { anchor: entry.anchor } : {}),
+    surface: entry ? entry.surface : surface,
+    ...(entry ? { anchor: entry.anchor } : {}),
     ...(botId ? { botId } : {}),
   };
 }

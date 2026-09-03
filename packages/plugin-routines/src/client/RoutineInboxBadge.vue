@@ -50,6 +50,7 @@ function acknowledge(entryIds: string[]): void {
       type="button"
       class="routine-inbox__trigger"
       :aria-expanded="open"
+      :aria-label="`Routine completions${count > 0 ? ` (${badge} unread)` : ''}`"
       :title="`Routine completions${count > 0 ? ` (${badge} unread)` : ''}`"
       @click="toggle"
     >

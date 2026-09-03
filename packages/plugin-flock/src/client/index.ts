@@ -248,6 +248,27 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       state.value.unread = Object.fromEntries(
         directory.unread.map((view) => [view.botId, view]),
       );
+      /*
+       * A reply delivered into the thread the User is looking at has been
+       * read. The count is derived on the Bot, which cannot know that, so the
+       * acknowledgement is sent from here — and only for the open Bot, in a
+       * visible tab, and never for a Bot the User marked unread on purpose.
+       */
+      const active = shell?.value.activeBotId;
+      const view = active ? state.value.unread[active] : undefined;
+      if (
+        active &&
+        view?.unread === true &&
+        !view.manuallyUnread &&
+        (typeof document === "undefined" ||
+          document.visibilityState === "visible")
+      ) {
+        try {
+          await state.value.markRead(active);
+        } catch {
+          // The badge stays until the next poll; nothing durable is lost.
+        }
+      }
     },
     async markRead(botId) {
       const cursor = state.value.unread[botId]?.lastActivityCursor;
