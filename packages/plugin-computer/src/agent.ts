@@ -798,6 +798,11 @@ export function createComputerAgentPlugin(
         };
       }
       const store = processes;
+      // The intent this call wrote, until the launch that follows it settles.
+      // Left as `starting` by a launch that threw, it is a record nothing can
+      // ever answer for and nothing can forget — a failing Computer would
+      // spend the Bot's whole 100-record budget having run nothing at all.
+      let unsettled: ComputerProcessRecordV1 | undefined;
       try {
         return await useComputer(
           await open(context.botId, context.sessionId, context.signal),
@@ -827,6 +832,7 @@ export function createComputerAgentPlugin(
               logPath: "",
             };
             await store.record({ ...intent, cwd: "/", logPath: "/" });
+            unsettled = { ...intent, cwd: "/", logPath: "/" };
             const launched = await computer.processes.launch(
               { processId, command },
               { signal: context.signal, effectId: context.effectId },
@@ -840,6 +846,7 @@ export function createComputerAgentPlugin(
               pid: launched.pid,
             };
             await store.update(running);
+            unsettled = undefined;
             await noteProcess(context.sessionId, turnOf(context), {
               processId,
               action: "launch",
@@ -860,6 +867,18 @@ export function createComputerAgentPlugin(
           },
         );
       } catch (error) {
+        if (unsettled) {
+          // `unknown`, not deleted: the launch may have started something
+          // before it threw, and "recovery can read its outcome or classify it
+          // as unknown without repeating it". Terminal, so the record is
+          // prunable rather than holding a slot for the life of the Bot.
+          try {
+            await store.update({ ...unsettled, status: "unknown" });
+          } catch {
+            // Reconciling the intent is never why a tool call fails; the
+            // launch failure below is the answer the model needs.
+          }
+        }
         if (error instanceof ComputerProcessLimitError) {
           return { content: error.message, isError: true };
         }
