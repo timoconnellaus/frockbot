@@ -318,6 +318,8 @@ export class BotState extends DurableObject<BotStateEnv> {
             FLOCK_AI: createFlockAiGatewayHostV1(env.AI, {
               gatewayId: optionalWorkerVarV1(env, "FLOCK_AI_GATEWAY_ID"),
               autoRoute: optionalWorkerVarV1(env, "FLOCK_AI_AUTO_ROUTE"),
+              accountId: optionalWorkerVarV1(env, "FLOCK_AI_ACCOUNT_ID"),
+              token: optionalWorkerVarV1(env, "FLOCK_AI_GATEWAY_TOKEN"),
             }),
           }
         : {}),

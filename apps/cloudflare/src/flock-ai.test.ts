@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { createFlockAiGatewayHostV1 } from "./flock-ai.js";
+import {
+  compatChatCompletionsUrlV1,
+  createFlockAiGatewayHostV1,
+} from "./flock-ai.js";
+
+const ACCOUNT_ID = "account-under-test";
+const TOKEN = "gateway-token";
 
 /**
  * A stand-in for the `AI` binding's Gateway seam. Only `gateway(id).run()` is
@@ -17,7 +23,98 @@ function gatewayHost(respond: () => Response) {
   return { ai, gatewayIds };
 }
 
-describe("Flock AI Gateway host", () => {
+/** An `AI` binding that fails the test if the compat transport ever leaves it. */
+function unusedBinding(): Pick<Ai, "gateway"> {
+  return {
+    gateway() {
+      throw new Error(
+        "the AI binding must not be used by the compat transport",
+      );
+    },
+  } as unknown as Pick<Ai, "gateway">;
+}
+
+function compatHost(respond: () => Response) {
+  const calls: { url: string; init: RequestInit }[] = [];
+  const host = createFlockAiGatewayHostV1(unusedBinding(), {
+    gatewayId: "flock-test",
+    accountId: ACCOUNT_ID,
+    token: TOKEN,
+    fetch: ((url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return Promise.resolve(respond());
+    }) as unknown as typeof fetch,
+  });
+  return { host, calls };
+}
+
+describe("Flock AI Gateway host, compat transport", () => {
+  // The `AI` binding's `gateway(...).run()` reaches the universal endpoint,
+  // whose translation rejects a `dynamic/<route>` model before inference
+  // (cloudflare/ai#617). Configuring an account and token has to move the
+  // request onto the compat HTTP endpoint, which accepts it.
+  test("posts to the compat endpoint with the Gateway authorization", async () => {
+    const { host, calls } = compatHost(() => new Response("data: [DONE]\n\n"));
+
+    const body = await host.runChatCompletion("dynamic/flock-auto", {
+      messages: [],
+      stream: true,
+    });
+
+    expect(await new Response(body).text()).toBe("data: [DONE]\n\n");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(
+      compatChatCompletionsUrlV1(ACCOUNT_ID, "flock-test"),
+    );
+    expect(calls[0]!.init.method).toBe("POST");
+    expect(
+      (calls[0]!.init.headers as Record<string, string>)[
+        "cf-aig-authorization"
+      ],
+    ).toBe(`Bearer ${TOKEN}`);
+    expect(JSON.parse(calls[0]!.init.body as string)).toEqual({
+      messages: [],
+      stream: true,
+      model: "dynamic/flock-auto",
+    });
+  });
+
+  test("rejects a compat error response before it reaches the stream decoder", async () => {
+    const { host } = compatHost(
+      () =>
+        new Response(JSON.stringify({ error: "upstream said no" }), {
+          status: 400,
+        }),
+    );
+
+    const failure = await host
+      .runChatCompletion("dynamic/flock-auto", { messages: [] })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    expect((failure as Error).message).toBe(
+      'AI Gateway rejected the request (400): {"error":"upstream said no"}',
+    );
+  });
+
+  test("stays on the binding when only one half of the credentials is set", async () => {
+    const { ai, gatewayIds } = gatewayHost(
+      () => new Response("data: [DONE]\n\n"),
+    );
+    const host = createFlockAiGatewayHostV1(ai, {
+      gatewayId: "flock-test",
+      accountId: ACCOUNT_ID,
+    });
+
+    await host.runChatCompletion("dynamic/flock-auto", { messages: [] });
+
+    expect(gatewayIds).toEqual(["flock-test"]);
+  });
+});
+
+describe("Flock AI Gateway host, binding transport", () => {
   test("returns the response stream for an accepted request", async () => {
     const { ai, gatewayIds } = gatewayHost(
       () => new Response("data: [DONE]\n\n"),

@@ -113,7 +113,16 @@ describe("production setup", () => {
       "Checking environment secrets in timoconnellaus/frockbot…",
     );
     expect(stdout).toContain(
-      "Stage 6/6 · GitHub: verify production configuration",
+      "Stage 7/7 · GitHub: verify production configuration",
+    );
+    // The AI Gateway token is optional: skipping it has to leave the run
+    // green and say what stops working, not write an empty secret that a
+    // `--secrets-file` deploy would then push over a good one.
+    expect(stdout).toContain(
+      "No AI Gateway token set; Flock AI Auto will not work until one is provided.",
+    );
+    expect(calls).not.toContain(
+      "secret set FLOCK_AI_GATEWAY_TOKEN --repo timoconnellaus/frockbot --env production",
     );
     expect(calls).toContain(
       "secret set SPRITES_TOKEN --repo timoconnellaus/frockbot --env production",

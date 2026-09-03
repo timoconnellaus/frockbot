@@ -127,6 +127,10 @@
   "vars": {
     "DEFAULT_APPLICATION_HASH": "foundation-v1",
     "FLOCK_AI_GATEWAY_ID": "flock",
+    // Enables the compat HTTP transport, which is the only one that
+    // accepts a `dynamic/<route>` model (cloudflare/ai#617). Pairs
+    // with the FLOCK_AI_GATEWAY_TOKEN secret.
+    "FLOCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
     // The `flock-auto` dynamic route's target model is configured and deployed
     // in the Cloudflare AI Gateway dashboard, never selected in application code.
     "FLOCK_AI_AUTO_ROUTE": "flock-auto",
@@ -217,6 +221,10 @@
       "vars": {
         "DEFAULT_APPLICATION_HASH": "foundation-v1",
         "FLOCK_AI_GATEWAY_ID": "flock",
+        // Enables the compat HTTP transport, which is the only one that
+        // accepts a `dynamic/<route>` model (cloudflare/ai#617). Pairs
+        // with the FLOCK_AI_GATEWAY_TOKEN secret.
+        "FLOCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
         "FLOCK_AI_AUTO_ROUTE": "flock-auto",
         "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
         "UI_ARTIFACT_HOSTS": "ui.localhost",
@@ -327,6 +335,10 @@
       },
       "vars": {
         "DEFAULT_APPLICATION_HASH": "foundation-v1",
+        // Named environments do not inherit top-level vars, so the compat
+        // transport's account id is repeated here (cloudflare/ai#617). The
+        // Gateway id and Auto route keep their code defaults.
+        "FLOCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
         "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
         "UI_ARTIFACT_HOSTS": "ui.staging-bot.frockbot.com",
       },
@@ -430,6 +442,10 @@
       "vars": {
         "DEFAULT_APPLICATION_HASH": "foundation-v1",
         "FLOCK_AI_GATEWAY_ID": "flock",
+        // Enables the compat HTTP transport, which is the only one that
+        // accepts a `dynamic/<route>` model (cloudflare/ai#617). Pairs
+        // with the FLOCK_AI_GATEWAY_TOKEN secret.
+        "FLOCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
         "FLOCK_AI_AUTO_ROUTE": "flock-auto",
         "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
         "UI_ARTIFACT_HOSTS": "ui.localhost",
