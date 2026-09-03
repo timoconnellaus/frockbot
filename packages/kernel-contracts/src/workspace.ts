@@ -313,7 +313,18 @@ export function isWorkspaceConflictV1(
 }
 
 export type WorkspaceWriteOutcomeV1 =
-  | { status: "ok"; generation: WorkspaceGenerationV1 }
+  | {
+      status: "ok";
+      generation: WorkspaceGenerationV1;
+      /**
+       * The bytes are durable but the generation ledger has not recorded them
+       * yet. A write is still `ok`: the fact is the bytes, and the ledger is
+       * the index of the fact. The generation travels beside the bytes, so
+       * `reconcile` repairs the entry on its own; a caller that wants to say
+       * so may, and a caller that does not may ignore it.
+       */
+      ledgerPending?: true;
+    }
   | WorkspaceConflictV1
   | WorkspaceFailureV1;
 

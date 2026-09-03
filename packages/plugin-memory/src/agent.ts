@@ -32,8 +32,8 @@ import type {} from "@frockbot/kernel-agent-loop/agent";
 import type { Plugin } from "cordis";
 import { createMemoryEmbedder } from "./embeddings.js";
 import {
-  listAllMemoryDocumentsV1,
-  type MemoryDocumentV1,
+  readAllMemoryDocumentsV1,
+  type MemoryDocumentListingV1,
 } from "./documents.js";
 import {
   buildMemoryIndexV1,
@@ -295,10 +295,31 @@ export class MemoryProjection {
     return this.#injection;
   }
 
-  /** Rebuilds the derived index incrementally from the current files. */
-  async reindex(): Promise<{ documentsChanged: number; chunksTotal: number }> {
-    const documents = await this.documents();
-    const update = await updateMemoryIndexV1(this.#index, documents);
+  /**
+   * Rebuilds the derived index incrementally from the current files.
+   *
+   * A listing that could not be read whole updates nothing. The indexer reads
+   * an absent document as a deleted one, so applying a short listing turned a
+   * transient object-storage blip into a permanent, silent deletion of that
+   * document's chunks — `memory_search` simply found less, with no event and
+   * no omission to say why. Keeping the previous index costs at worst one
+   * stale chunk until the next Turn.
+   */
+  async reindex(): Promise<{
+    documentsChanged: number;
+    chunksTotal: number;
+    /** True when the files could not be read whole and nothing was applied. */
+    deferred?: true;
+  }> {
+    const listing = await this.documents();
+    if (!listing.complete) {
+      return {
+        documentsChanged: 0,
+        chunksTotal: this.#index.chunks.length,
+        deferred: true,
+      };
+    }
+    const update = await updateMemoryIndexV1(this.#index, listing.documents);
     this.#index = update.index;
     await this.embed();
     return {
@@ -307,16 +328,26 @@ export class MemoryProjection {
     };
   }
 
-  /** Throws the derived index away and builds it again from the files. */
-  async rebuild(): Promise<{ chunksTotal: number }> {
-    this.#index = await buildMemoryIndexV1(await this.documents());
+  /**
+   * Throws the derived index away and builds it again from the files.
+   *
+   * An explicit rebuild on a partial listing is refused rather than half
+   * done: "rebuild the index" that quietly drops what it could not read is
+   * worse than a rebuild that says it could not run.
+   */
+  async rebuild(): Promise<{ chunksTotal: number; deferred?: true }> {
+    const listing = await this.documents();
+    if (!listing.complete) {
+      return { chunksTotal: this.#index.chunks.length, deferred: true };
+    }
+    this.#index = await buildMemoryIndexV1(listing.documents);
     await this.embed();
     return { chunksTotal: this.#index.chunks.length };
   }
 
-  private async documents(): Promise<MemoryDocumentV1[]> {
+  private async documents(): Promise<MemoryDocumentListingV1> {
     const { own, user, projects } = await this.roots();
-    return listAllMemoryDocumentsV1(this.#host.store.reads, [
+    return readAllMemoryDocumentsV1(this.#host.store.reads, [
       own,
       user,
       ...projects.map((project) =>

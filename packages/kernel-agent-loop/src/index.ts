@@ -395,11 +395,7 @@ class LoopAgent implements Agent {
           );
           turnOutcome = "model-error";
           turnReason = turnEndReason(reconciliation.reason);
-          this.#ctx.emit(
-            "agent/error",
-            this,
-            new Error(reconciliation.reason),
-          );
+          this.#ctx.emit("agent/error", this, new Error(reconciliation.reason));
           return;
         }
         if (reconciliation.status === "unavailable") {
