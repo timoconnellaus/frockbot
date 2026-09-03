@@ -85,7 +85,7 @@ test("a Bot creates an Applet, the canvas shows its source, and the surface list
   // building state, showing the scaffold the tool wrote into the durable root.
   const canvas = page.getByRole("region", { name: /Applet Weekly Todos/ });
   await expect(canvas).toBeVisible({ timeout: 60_000 });
-  await expect(canvas.getByText("No published version yet")).toBeVisible();
+  await expect(canvas.getByText("Not published yet")).toBeVisible();
   await expect(canvas.getByRole("button", { name: "server.ts" })).toBeVisible();
   await expect(canvas.getByRole("button", { name: "ui.tsx" })).toBeVisible();
   await canvas.getByRole("button", { name: "server.ts" }).click();

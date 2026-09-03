@@ -171,19 +171,18 @@ export function turnEndReason(value: unknown): string | undefined {
 }
 
 /**
- * The failure text a User sees for a Turn that did not complete. The raw
- * `reason` stays on the run record for the debug surface; what reaches the
- * conversation is a plain sentence about what to do next.
+ * The failure text recorded against a Turn that did not complete. It names the
+ * outcome and the provider's own reason, which the debug surface and the API
+ * both need. It is a diagnostic, not copy: the client never renders it into the
+ * conversation — see `runFailureCopyV1` in the shell's client.
  */
-export function turnFailureMessage(outcome: TurnOutcome): string {
-  if (outcome === "cancelled") return "You stopped this.";
-  if (outcome === "interrupted")
-    return "This reply stopped partway. Try again.";
-  if (outcome === "blocked")
-    return "This Bot couldn't finish that. Try asking a different way.";
-  if (outcome === "tool-error")
-    return "Something this Bot used didn't work. Try again.";
-  return "This Bot couldn't finish its reply. Try again.";
+export function turnFailureMessage(
+  outcome: TurnOutcome,
+  reason?: string,
+): string {
+  return reason
+    ? `Bot turn ended with outcome ${outcome}: ${reason}`
+    : `Bot turn ended with outcome ${outcome}`;
 }
 
 /**

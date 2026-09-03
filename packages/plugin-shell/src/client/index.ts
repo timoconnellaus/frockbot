@@ -241,9 +241,7 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
       status: run.status,
       message: run.stopRequestedAt
         ? "Stopping…"
-        : (run.recovery?.message ??
-          run.failure ??
-          "Something went wrong mid-reply. Try again to pick it up."),
+        : "Something went wrong mid-reply. Try again to pick it up.",
       canResume: !run.stopRequestedAt && run.recovery?.action === "resume",
     };
   }
@@ -287,7 +285,7 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.failure ?? "Interrupted by your next message.",
+      text: "Interrupted by your next message.",
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -299,10 +297,7 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text:
-        run.recovery?.message ??
-        run.failure ??
-        "This reply stopped partway. Try again to continue it.",
+      text: "This reply stopped partway. Try again to continue it.",
       status: "reconciliation-required",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -314,7 +309,7 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.failure ?? "You stopped this.",
+      text: "You stopped this.",
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -327,7 +322,7 @@ function assistantMessage(
     role: "assistant",
     text:
       run.status === "failed"
-        ? (run.failure ?? "Agent request failed.")
+        ? "This Bot couldn't finish its reply. Try again."
         : (run.responseText ?? notification?.body ?? ""),
     status: run.status === "failed" ? "error" : "completed",
     tools: toolsFrom(run.events),

@@ -623,14 +623,13 @@ describe("SessionStore", () => {
     ).toThrow("session event.writer has invalid fields");
   });
 
-  test("gives a turn outcome plain user-facing copy", () => {
-    expect(turnFailureMessage("model-error")).toBe(
-      "This Bot couldn't finish its reply. Try again.",
+  test("composes a failure message from a turn outcome and its reason", () => {
+    expect(turnFailureMessage("model-error", "provider said no")).toBe(
+      "Bot turn ended with outcome model-error: provider said no",
     );
     expect(turnFailureMessage("interrupted")).toBe(
-      "This reply stopped partway. Try again.",
+      "Bot turn ended with outcome interrupted",
     );
-    expect(turnFailureMessage("cancelled")).toBe("You stopped this.");
   });
 });
 

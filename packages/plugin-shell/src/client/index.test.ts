@@ -1217,7 +1217,7 @@ describe("detached Turn projection", () => {
       { role: "user", status: "completed" },
       {
         role: "assistant",
-        text: "Provider reconciliation is required",
+        text: "This Bot couldn't finish its reply. Try again.",
         status: "error",
       },
     ]);
@@ -1562,11 +1562,11 @@ describe("active durable Turn projection", () => {
     expect(reconciliation.activeRun).toEqual({
       runId: "run-reconciliation",
       status: "reconciliation-required",
-      message: "Provider result needs confirmation",
+      message: "Something went wrong mid-reply. Try again to pick it up.",
       canResume: true,
     });
     expect(reconciliation.messages[1]).toMatchObject({
-      text: "Provider result needs confirmation",
+      text: "This reply stopped partway. Try again to continue it.",
       status: "reconciliation-required",
     });
   });
@@ -1853,7 +1853,7 @@ describe("hosted Stop", () => {
     expect(provided.value.activeRun).toBeUndefined();
     expect(provided.value.activeRunId).toBeUndefined();
     expect(provided.value.messages[1]).toMatchObject({
-      text: "Stopped by an authenticated Stop command.",
+      text: "You stopped this.",
       status: "aborted",
     });
 
@@ -1918,7 +1918,7 @@ describe("hosted Stop", () => {
     expect(provided.value.activeRunId).toBeUndefined();
     expect(provided.value.messages.at(-1)).toMatchObject({
       runId: "run-1",
-      text: "Stopped by an authenticated Stop command.",
+      text: "You stopped this.",
       status: "aborted",
     });
   });

@@ -264,7 +264,7 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   const canvas = page.getByRole("region", { name: "Applet Todo" });
   await expect(canvas).toBeVisible();
   await expect(canvas.getByText("Todo", { exact: true })).toBeVisible();
-  await expect(canvas.getByText("No published version yet")).toBeVisible();
+  await expect(canvas.getByText("Not published yet")).toBeVisible();
   await expect(canvas.getByText("Check passed: no diagnostics")).toBeVisible();
   // The code view opens on the most recently changed file.
   await expect(canvas.getByText("export default function App()")).toBeVisible();

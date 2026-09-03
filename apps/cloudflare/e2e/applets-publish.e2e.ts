@@ -220,7 +220,7 @@ test("a Bot publishes an Applet, it goes live in the canvas, and its tool reache
   // The Turn settled, so the client re-read the focus the tool set: the canvas
   // opens on the new Applet without a reload, in its building state.
   await expect(canvas).toBeVisible({ timeout: 60_000 });
-  await expect(canvas.getByText("No published version yet")).toBeVisible();
+  await expect(canvas.getByText("Not published yet")).toBeVisible();
   await expect(canvas.getByRole("button", { name: "server.ts" })).toBeVisible({
     timeout: 30_000,
   });
@@ -241,7 +241,7 @@ test("a Bot publishes an Applet, it goes live in the canvas, and its tool reache
 
   // The publish is a generation; the canvas slides the live Applet in over the
   // code view and the header names the generation instead of "no version".
-  await expect(canvas.getByText("No published version yet"), {
+  await expect(canvas.getByText("Not published yet"), {
     message: await recentToolResults(page, userId),
   }).toHaveCount(0, { timeout: 60_000 });
   await expect(canvas.getByRole("tab", { name: "App" })).toHaveAttribute(

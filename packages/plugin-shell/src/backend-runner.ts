@@ -102,7 +102,7 @@ function settleBotTurn(
   }
   if (terminalTurn.outcome !== "completed") {
     throw new BotTurnExecutionError(
-      turnFailureMessage(terminalTurn.outcome),
+      turnFailureMessage(terminalTurn.outcome, terminalTurn.reason),
       appendedSessionEvents(previousEvents, events),
     );
   }
