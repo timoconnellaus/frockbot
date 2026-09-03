@@ -93,6 +93,8 @@ export function createComputerClientPlugin(
     let stopStateChannel: (() => void) | undefined;
     let updateRejoin: unknown;
     let controlRequest: Promise<void> | undefined;
+    /** Set by a release the backend refused; no heartbeat renews after it. */
+    let controlAbandoned = false;
 
     const state = ref<ComputerState>({
       ...machine,
@@ -122,7 +124,11 @@ export function createComputerClientPlugin(
     }
 
     function syncControlHeartbeat(): void {
-      if (machine.phase !== "human-control") {
+      // A release the backend could not confirm ends the heartbeat for good.
+      // Renewing a lease the User has already asked to drop is how a takeover
+      // becomes one that cannot be cancelled; the next explicit `takeControl`
+      // is what starts it again.
+      if (machine.phase !== "human-control" || controlAbandoned) {
         stopControlHeartbeat();
         return;
       }
@@ -337,7 +343,15 @@ export function createComputerClientPlugin(
           // lease to release before this explicit close finishes.
         }
       }
-      if (machine.takingControl) await releaseControl();
+      if (machine.takingControl) {
+        try {
+          await releaseControl();
+        } catch {
+          // A release the Computer refused is already recorded durably and
+          // has stopped the heartbeat. It is not a reason to keep the User
+          // inside a full-screen viewer they asked to leave.
+        }
+      }
       // Collapse first. The capture the backend files on close is
       // opportunistic, and it crosses a service binding to take a screenshot
       // on the Sprite; an overlay that stayed on screen waiting for that would
@@ -357,6 +371,7 @@ export function createComputerClientPlugin(
 
     function takeControl(): Promise<void> {
       if (controlRequest) return controlRequest;
+      controlAbandoned = false;
       const pending = (async () => {
         if (!machine.viewerUrl) await connect("connect-requested");
         if (!machine.viewerUrl) return;
@@ -370,7 +385,13 @@ export function createComputerClientPlugin(
     }
 
     async function releaseControl(): Promise<void> {
-      await execute("releaseControl");
+      try {
+        await execute("releaseControl");
+      } catch (error) {
+        controlAbandoned = true;
+        syncControlHeartbeat();
+        throw error;
+      }
     }
 
     async function refreshControl(): Promise<void> {
@@ -404,6 +425,7 @@ export function createComputerClientPlugin(
         stopControlHeartbeat();
         stopViewerHeartbeat();
         stopUpdateRejoin();
+        controlAbandoned = false;
         machine = initialComputerMachineState();
         Object.assign(state.value, machine);
         watchStateChannel(selectedBotId);

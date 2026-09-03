@@ -183,7 +183,9 @@ async function closeViewer(escape = false): Promise<void> {
   try {
     await (escape ? actions.escape() : actions.closeViewer());
   } catch {
-    // A failed release remains visible in the still-open overlay.
+    // The overlay collapses either way: a release the Computer refused is
+    // recorded durably and shown on the card, and is never a reason to trap
+    // the User in a full-screen viewer.
   }
 }
 

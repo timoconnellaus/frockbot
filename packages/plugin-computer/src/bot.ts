@@ -1097,17 +1097,31 @@ export class ComputerBotBackendContribution {
     );
     if (currentValue === undefined) return;
     const current = decodeStoredComputerControlV1(currentValue);
-    await this.withComputer(userId, command, async (computer) => {
-      if (!computer.control) {
-        throw new Error("The selected Computer does not support human control");
-      }
-      await computer.control.release(
-        { id: current.ownerId, expiresAt: current.expiresAt },
-        { scope: "desktop-gui", ownerId: current.ownerId },
-        { effectId: `computer:${command.commandId}:release-control` },
-      );
-    });
-    await this.host.storage.delete(COMPUTER_CONTROL_RECORD_KEY);
+    try {
+      await this.withComputer(userId, command, async (computer) => {
+        if (!computer.control) {
+          throw new Error(
+            "The selected Computer does not support human control",
+          );
+        }
+        await computer.control.release(
+          { id: current.ownerId, expiresAt: current.expiresAt },
+          { scope: "desktop-gui", ownerId: current.ownerId },
+          { effectId: `computer:${command.commandId}:release-control` },
+        );
+      });
+    } finally {
+      // The durable record goes whatever the provider answered. It is the
+      // User-wide `desktop-gui` fence: left behind by a release the Computer
+      // could not confirm, it is renewed by the client heartbeat forever, and
+      // every Bot of this User loses the Computer with no way back. The
+      // provider's own lease expires on its side; this one has no expiry a
+      // failing host can be trusted to reach. The failure still reaches the
+      // User — it rejects the receipt and records the `error` phase — but it
+      // never becomes a lease nobody can drop.
+      // Prior art: `releaseDesktopLease` in `@frockbot/plugin-subagents`.
+      await this.host.storage.delete(COMPUTER_CONTROL_RECORD_KEY);
+    }
   }
 
   /**
