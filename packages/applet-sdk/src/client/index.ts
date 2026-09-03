@@ -172,9 +172,19 @@ export function createApplet<TServer extends { tables: TablesShape }>(
   }) as AppletCollections<TServer["tables"]>;
 
   if (autoConnect ?? typeof window !== "undefined") {
+    let lastInit: AppletInitV1 | undefined;
     listenForAppletInit((init) => {
       applyThemeTokens(init.themeTokens);
+      lastInit = init.applet;
       transport.connect(init.applet);
+    });
+    // Leave with a close frame rather than a dropped connection: the server
+    // then sees a 1000, not a 1006 it has to discover on its next write. A
+    // page restored from the back/forward cache reconnects with the same
+    // token; a stale one is answered with a reload by the host.
+    window.addEventListener("pagehide", () => transport.close());
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted && lastInit) transport.connect(lastInit);
     });
   }
 
