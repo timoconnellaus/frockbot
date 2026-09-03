@@ -1914,41 +1914,15 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
     }),
 );
 
-/**
- * The gateway's backend Contribution graph, mounted once per isolate.
- *
- * Mounting is not per-request work: the compiled plan is immutable and the
- * graph it produces holds no request state, so a full mount and dispose on
- * every `/app.js` and every poll bought nothing — and disposing it the instant
- * the `Response` object was returned tore the graph down while a streamed body
- * or an upgraded socket was still using it. A mount that failed is not a
- * durable verdict, so a rejection is cleared and the next request retries; the
- * isolate's teardown is the dispose.
- */
-let mountedGatewayBackend:
-  | Promise<Awaited<ReturnType<typeof createGatewayBackendContributions>>>
-  | undefined;
-
-function gatewayBackendContributions(
-  env: Env,
-): Promise<Awaited<ReturnType<typeof createGatewayBackendContributions>>> {
-  if (!mountedGatewayBackend) {
-    const pending = createGatewayBackendContributions(env);
-    mountedGatewayBackend = pending;
-    void pending.catch(() => {
-      if (mountedGatewayBackend === pending) mountedGatewayBackend = undefined;
-    });
-  }
-  return mountedGatewayBackend;
-}
-
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    let mountedBackend:
+      Awaited<ReturnType<typeof createGatewayBackendContributions>> | undefined;
     try {
       // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
       // workers-types cannot infer the generated local RPC stubs.
       const runtimeExports = ctx.exports as unknown as RuntimeExports;
-      const mountedBackend = await gatewayBackendContributions(env);
+      mountedBackend = await createGatewayBackendContributions(env);
       const gateway = createGateway({
         loader: env.USER_APPLICATIONS,
         artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
@@ -2027,6 +2001,8 @@ export default {
         },
         { status: 500 },
       );
+    } finally {
+      await mountedBackend?.dispose();
     }
   },
 } satisfies ExportedHandler<Env>;

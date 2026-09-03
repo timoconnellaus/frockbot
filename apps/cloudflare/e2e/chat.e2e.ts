@@ -135,6 +135,10 @@ test("a Turn that is running when the page reloads still delivers its reply", as
   await expect(
     assistantMessages(page).last().locator(".bot-avatar-live"),
   ).toHaveCount(0, { timeout: 120_000 });
+
+  // The fake provider is one server for the whole worker, so a spec that
+  // slowed it down puts it back before the next one runs.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
 test("a provider that stops accepting the key ends the Turn with a reason", async ({
