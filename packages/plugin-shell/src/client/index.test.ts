@@ -2704,7 +2704,7 @@ describe("a message sent while a Turn is running", () => {
     let provided: Ref<FrockBotWebData> | undefined;
     const sent: {
       text: string;
-      supersedes?: { runId: string };
+      supersedes?: { runId?: string };
     }[] = [];
     let releaseFirst!: () => void;
     const firstTurn = new Promise<void>((resolve) => {
@@ -2747,8 +2747,12 @@ describe("a message sent while a Turn is running", () => {
     expect(await second).toMatchObject({ accepted: true });
 
     expect(sent.map((entry) => entry.text).sort()).toEqual(["first", "second"]);
-    expect(sent.find((entry) => entry.text === "first")?.supersedes).toBe(
-      undefined,
+    // Every send carries the intent. The first had observed no run, so it
+    // carries no provenance — and that is exactly the send that used to be
+    // refused when a person typed faster than the client could observe the
+    // Turn it had just started.
+    expect(sent.find((entry) => entry.text === "first")?.supersedes).toEqual(
+      {},
     );
     expect(sent.find((entry) => entry.text === "second")?.supersedes).toEqual({
       runId: runningRunId!,

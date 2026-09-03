@@ -113,7 +113,7 @@ const application = new ClientApplication({
     signal: AbortSignal,
     commandId: string,
     skills?: readonly SkillRefV1[],
-    supersedes?: { runId: string },
+    supersedes?: { runId?: string },
   ): Promise<ClientTurnResponse> {
     signal.throwIfAborted();
     const path = `/api/bots/${encodeURIComponent(botId)}/turns`;

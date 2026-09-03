@@ -201,15 +201,19 @@ export interface ClientTurnCommandV1 {
    */
   skills?: SkillRefV1[];
   /**
-   * The Turn this message replaces. The User typed while the Bot was working,
-   * and this is the explicit authenticated intent that lets it: without it a
-   * second command is refused exactly as it always was, so a reconnecting
-   * client never interrupts a Turn by accident. It names the run the composer
-   * observed as running; the Bot Durable Object supersedes whatever is
-   * actually active, because "replace what you are doing with this" is what
-   * the User expressed and the observed id may already be stale.
+   * The explicit authenticated intent to replace whatever the Bot is doing
+   * with this message. Without it a second command is refused exactly as it
+   * always was, so a reconnecting client never interrupts a Turn by accident.
+   *
+   * `runId` is provenance, not the target, and it is optional. The composer
+   * sends this intent on every send, because "replace what you are doing with
+   * this" is what a person means by typing — and whether the client had yet
+   * *observed* a run when they pressed send is a race, not a decision they
+   * made. A composer that names no run still supersedes whatever is actually
+   * active; one that names a run may name a stale one, and the Bot Durable
+   * Object supersedes the active Turn either way.
    */
-  supersedes?: { runId: string };
+  supersedes?: { runId?: string };
 }
 
 export interface ClientNotificationAcknowledgementCommandV1 {
@@ -1273,18 +1277,29 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
     "turn command",
   ).trim();
   if (!text) throw new Error("turn command.text is required");
-  let supersedes: { runId: string } | undefined;
+  let supersedes: { runId?: string } | undefined;
   if (command.supersedes !== undefined) {
     const named = record(command.supersedes, "turn command.supersedes");
     exactKeys(named, ["runId"], "turn command.supersedes");
-    try {
-      supersedes = {
-        runId: decodeRunIdV1(
-          string(named, "runId", MAX_RUN_ID_LENGTH, "turn command.supersedes"),
-        ),
-      };
-    } catch {
-      throw new Error("turn command.supersedes.runId is invalid");
+    if (named.runId === undefined) {
+      // Intent with no provenance: the composer sent while it had observed no
+      // running Turn. It still means "replace whatever you are doing".
+      supersedes = {};
+    } else {
+      try {
+        supersedes = {
+          runId: decodeRunIdV1(
+            string(
+              named,
+              "runId",
+              MAX_RUN_ID_LENGTH,
+              "turn command.supersedes",
+            ),
+          ),
+        };
+      } catch {
+        throw new Error("turn command.supersedes.runId is invalid");
+      }
     }
   }
   const skills =

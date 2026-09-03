@@ -416,6 +416,46 @@ describe("client run protocol v1", () => {
       }),
     ).toThrow("turn command.schemaVersion is invalid");
 
+    // Supersede intent is carried by the field's presence. The composer sends
+    // it on every send, and names a run only when it observed one.
+    expect(
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "hello",
+        supersedes: {},
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      commandId: "command-1",
+      text: "hello",
+      supersedes: {},
+    });
+    expect(
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "hello",
+        supersedes: { runId: "run-1" },
+      }).supersedes,
+    ).toEqual({ runId: "run-1" });
+    expect(() =>
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "hello",
+        supersedes: { runId: "not a run id" },
+      }),
+    ).toThrow("turn command.supersedes.runId is invalid");
+    expect(() =>
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "hello",
+        supersedes: { runId: "run-1", extra: 1 },
+      }),
+    ).toThrow();
+
     expect(
       decodeClientNotificationAcknowledgementCommandV1({
         schemaVersion: 1,

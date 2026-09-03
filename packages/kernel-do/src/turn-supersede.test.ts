@@ -425,6 +425,59 @@ describe("several messages in quick succession", () => {
   });
 });
 
+describe("supersede intent that names no run", () => {
+  test("still replaces whatever is active", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+
+    // The composer sent before it had observed its own run — a person typing
+    // faster than the client polls. The intent is there; the provenance is
+    // not, and the Bot supersedes whatever is actually active regardless.
+    const second = probe.authority.run(
+      command("run-2", "second", { lane: "user", supersedes: {} }),
+    );
+    await first;
+    probe.handle("run-2").finish();
+    await second;
+
+    expect(storedRun(storage, "run-1").status).toBe("superseded");
+    expect(storedRun(storage, "run-1").supersededBy).toBe("run-2");
+    expect(storedRun(storage, "run-2").status).toBe("completed");
+  });
+
+  test("a replayed command replays and never interrupts a second Turn", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+    const superseding = command("run-2", "second", {
+      lane: "user",
+      supersedes: {},
+    });
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    const second = probe.authority.run(superseding);
+    await first;
+    probe.handle("run-2").finish();
+    await second;
+
+    // The same command again — a retried POST. The intent is in its
+    // fingerprint, so this is the same command, and a replay reads back the
+    // Turn it already produced rather than interrupting the one now running.
+    const third = probe.authority.run(command("run-3", "third"));
+    await probe.handle("run-3").started;
+    const replay = await probe.authority.run(superseding);
+    expect(replay.runId).toBe("run-2");
+    expect(storedRun(storage, "run-3").supersededAt).toBeUndefined();
+
+    probe.handle("run-3").finish();
+    await third;
+    expect(storedRun(storage, "run-3").status).toBe("completed");
+  });
+});
+
 describe("a background admission never supersedes", () => {
   test("it is refused exactly as a second command always was", async () => {
     const storage = new MemoryStorage();

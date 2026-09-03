@@ -154,7 +154,7 @@ export interface AgentTransport {
      * running. Absent means the ordinary case, where a second command in
      * flight is still refused.
      */
-    supersedes?: { runId: string },
+    supersedes?: { runId?: string },
   ): Promise<ClientTurnResponse>;
   /**
    * The Bot's invocable Skills, for the composer's `/` and `@` popover.

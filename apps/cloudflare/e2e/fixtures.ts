@@ -385,9 +385,20 @@ export function composerInput(page: Page): Locator {
  * submission is accepted, so an empty composer, and not a click that returned,
  * is the signal that the Turn was admitted.
  */
+export function assistantMessages(page: Page): Locator {
+  return page.locator("article.message-assistant");
+}
+
 export async function sendMessage(page: Page, text: string): Promise<void> {
   const composer = composerInput(page);
   const send = page.getByRole("button", { name: "Send message" });
+  // Counted before the send, because "settled" means one *more* reply than the
+  // thread already had. The Stop button is not that signal: it is absent for a
+  // moment right after a send too, before the client has observed its own run,
+  // so waiting on its absence returned while the Turn was still starting — and
+  // the next `sendMessage` then raced the Turn it was supposed to follow.
+  const replies = assistantMessages(page);
+  const before = await replies.count();
   await composer.fill(text);
   await expect(composer).toHaveValue(text);
   await send.click();
@@ -397,11 +408,12 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
   await expect(page.locator("main").getByText(text)).toBeVisible({
     timeout: 120_000,
   });
-  // There is no SSE: the client POSTs the Turn and polls the run. A settled
-  // Turn is one with no stop control left on screen.
-  await expect(
-    page.getByRole("button", { name: "Stop generating" }),
-  ).toHaveCount(0, { timeout: 120_000 });
+  // There is no SSE: the client POSTs the Turn and polls the run. The Turn has
+  // settled when its own reply exists and has stopped streaming.
+  await expect(replies).toHaveCount(before + 1, { timeout: 120_000 });
+  await expect(replies.last().locator(".bot-avatar-live")).toHaveCount(0, {
+    timeout: 120_000,
+  });
 }
 
 /** Point the fake provider at a chat mode; `unauthorized` revokes the key. */

@@ -712,12 +712,19 @@ export interface BotTurnCommand {
    */
   lane?: RunLaneV1;
   /**
-   * The explicit intent to supersede the named run. A user-lane command that
-   * carries it is the authenticated cancellation of whatever is running: the
-   * named run terminalizes `superseded` and this one takes its place. Without
-   * it a second command is refused exactly as it always was.
+   * The explicit intent to replace whatever is running with this command. A
+   * user-lane command that carries it is the authenticated cancellation of the
+   * active Turn: that run terminalizes `superseded` and this one takes its
+   * place. Without it a second command is refused exactly as it always was.
+   *
+   * `runId` is provenance — the run the sender had observed, which may already
+   * be stale — and never the target. Its absence means the sender had observed
+   * no run at all, which is a race rather than a different intention, so it
+   * supersedes just the same. The whole field is part of the command
+   * fingerprint, so a replayed command replays and never interrupts a second
+   * Turn.
    */
-  supersedes?: { runId: string };
+  supersedes?: { runId?: string };
 }
 
 /**

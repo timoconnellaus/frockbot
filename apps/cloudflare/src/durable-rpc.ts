@@ -271,9 +271,48 @@ export interface DecodedBotRunRpcV1 {
     /** The lane this command asks for. Only `user` crosses this seam. */
     lane?: "user";
     /** Explicit intent to replace the Turn the client observed running. */
-    supersedes?: { runId: string };
+    supersedes?: { runId?: string };
   };
 }
+
+/**
+ * The optional members of a Turn command, shared by every door a Turn command
+ * crosses — the User application's `run` and the Bot Durable Object's — so a
+ * field one door accepts is never one another door rejects.
+ *
+ * Invoked Skills cross the RPC as refs and are decoded here, at the door,
+ * exactly like every other inbound value. Only the User's own composer
+ * supersedes. A Turn type is still never carried here, so the lane the HTTP
+ * path may name is exactly the one an absent lane would already have meant.
+ */
+export const rpcBotTurnCommandOptionalsV1: Readonly<
+  Record<string, RpcValueDecoder>
+> = {
+  skills: (value, label) => decodeSkillRefsV1(value, label),
+  lane: (value, label) => {
+    if (value !== "user") throw new Error(`${label} is invalid`);
+    return "user" as const;
+  },
+  supersedes: (value, label) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`${label} is invalid`);
+    }
+    const keys = Reflect.ownKeys(value);
+    const candidate = value as Record<string, unknown>;
+    // The intent is the whole of the command; the run id is provenance the
+    // composer supplies only when it has observed one. A composer that sent
+    // while it believed nothing was running still means "replace whatever you
+    // are doing with this", so an empty object is valid.
+    if (keys.length > 1 || (keys.length === 1 && keys[0] !== "runId")) {
+      throw new Error(`${label} is invalid`);
+    }
+    if (candidate.runId === undefined) return {};
+    if (typeof candidate.runId !== "string") {
+      throw new Error(`${label} is invalid`);
+    }
+    return { runId: decodeRunIdV1(candidate.runId) };
+  },
+};
 
 export function decodeBotRunRpcV1(input: unknown): DecodedBotRunRpcV1 {
   const request = decodeRpcEnvelopeV1(input, {
@@ -286,33 +325,7 @@ export function decodeBotRunRpcV1(input: unknown): DecodedBotRunRpcV1 {
         acceptedAt: rpcString(64),
         text: rpcString(32_000),
       },
-      // Invoked Skills cross the RPC as refs and are decoded here, at the
-      // Durable Object's door, exactly like every other inbound value.
-      {
-        skills: (value, label) => decodeSkillRefsV1(value, label),
-        // Only the User's own composer supersedes. A Turn type is still never
-        // carried here, so the lane the HTTP path may name is exactly the one
-        // an absent lane would already have meant.
-        lane: (value, label) => {
-          if (value !== "user") throw new Error(`${label} is invalid`);
-          return "user" as const;
-        },
-        supersedes: (value, label) => {
-          if (!value || typeof value !== "object" || Array.isArray(value)) {
-            throw new Error(`${label} is invalid`);
-          }
-          const keys = Reflect.ownKeys(value);
-          const candidate = value as Record<string, unknown>;
-          if (
-            keys.length !== 1 ||
-            !Object.hasOwn(candidate, "runId") ||
-            typeof candidate.runId !== "string"
-          ) {
-            throw new Error(`${label} is invalid`);
-          }
-          return { runId: decodeRunIdV1(candidate.runId) };
-        },
-      },
+      rpcBotTurnCommandOptionalsV1,
     ),
   });
   const command = request.command as DecodedBotRunRpcV1["command"];

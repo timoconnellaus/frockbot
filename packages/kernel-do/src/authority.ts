@@ -241,6 +241,19 @@ export class BotDurableAuthority<Snapshot> {
           // Another Turn holds the object. Recovery drives it to its own
           // durable terminal or resumable state, and this one tries again.
           await this.recoverActiveRun();
+          // Unless what holds the object is an uncertain effect. That is
+          // settled by an explicit reconciliation the User asks for, on their
+          // own clock, and retrying against it would only burn this caller's
+          // attempts and end by failing a Turn the User is owed. The queued
+          // run is durable: it stays queued, and the reconciliation's own
+          // settlement — or the recovery alarm — starts it.
+          if (await this.activeRunAwaitsReconciliation()) {
+            return {
+              runId: command.runId,
+              text: "",
+              events: [],
+            } satisfies BotTurnCompletion;
+          }
           continue;
         }
         if (promoted === "not-queued") {
@@ -264,6 +277,14 @@ export class BotDurableAuthority<Snapshot> {
     } finally {
       this.queuedWaiters.delete(command.runId);
     }
+  }
+
+  /** True while the active run is holding an effect only a User can settle. */
+  private async activeRunAwaitsReconciliation(): Promise<boolean> {
+    const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
+    if (!activeRunId) return false;
+    const run = await this.readRun(activeRunId);
+    return run?.status === "reconciliation-required";
   }
 
   /** Waits out whatever this object is currently running, failures included. */
@@ -1033,6 +1054,10 @@ export class BotDurableAuthority<Snapshot> {
     activeRunId: string,
   ): Promise<((supersededBy: string) => Promise<boolean>) | undefined> {
     const lane = command.lane ?? defaultRunLaneV1(command.turnType ?? "chat");
+    // The intent is the whole of the decision, and it is the *presence* of the
+    // field that carries it. `supersedes: {}` — a composer that had observed
+    // no run when the person pressed send — supersedes exactly as a named one
+    // does; only an absent field is "no intent", and that is still refused.
     if (lane !== "user" || !command.supersedes) {
       throw new Error("bot already has an active run");
     }

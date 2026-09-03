@@ -2073,12 +2073,15 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       const generation = selectionGeneration;
       const pendingRunId = crypto.randomUUID();
       const optimisticAt = new Date().toISOString();
-      // Typing while the Bot works is ordinary, and what the User means by it
-      // is "do this instead". The observed run travels with the command as the
-      // explicit intent that lets the Bot Durable Object interrupt.
-      const supersedes = web.value.activeRunId
-        ? { runId: web.value.activeRunId }
-        : undefined;
+      // Every send carries the intent, because "do this instead" is what a
+      // person means by pressing send and it does not depend on what this
+      // client had managed to observe first. Whether a run was showing as
+      // active is a race — the composer unlocks the instant a Turn settles,
+      // and a fast typist beats the next poll — so gating the intent on
+      // `activeRunId` made the Bot refuse a message the User had every right
+      // to send. The observed run rides along as provenance when there is one.
+      const observed = web.value.activeRunId;
+      const supersedes = observed ? { runId: observed } : {};
       web.value.activeRunId = pendingRunId;
       web.value.error = undefined;
       web.value.messages.push(
@@ -2091,7 +2094,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           status: "completed",
           // Greyed until its own Turn is admitted and running. Optimistic
           // only: the durable projection replaces it by run id.
-          ...(supersedes ? { pending: true } : {}),
+          ...(observed ? { pending: true } : {}),
           tools: [],
           sends: [],
         },
@@ -2102,7 +2105,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           text: "",
           at: optimisticAt,
           status: "streaming",
-          ...(supersedes ? { pending: true } : {}),
+          ...(observed ? { pending: true } : {}),
           tools: [],
           sends: [],
         },
