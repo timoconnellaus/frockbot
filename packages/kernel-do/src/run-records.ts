@@ -758,7 +758,15 @@ export function botTurnCommandFingerprintV1(
       ...(lane === defaultRunLaneV1(turnType) ? {} : { lane }),
       ...(command.subagentRole ? { subagentRole: command.subagentRole } : {}),
       ...(command.origin ? { origin: command.origin } : {}),
-      ...(command.supersedes ? { supersedes: command.supersedes } : {}),
+      // The *intent* is part of the command's identity, exactly as ADR 0024
+      // requires: a replay of a command that carried no supersede can never
+      // become one that interrupts a second Turn. The provenance is not. A
+      // client retrying the same send — same commandId, same text — names
+      // whichever run it happened to have observed by then, and that is a fact
+      // about its polling, not about what the person asked for. Hashing it
+      // turned an ordinary retry into "this idempotency key was reused for a
+      // different command" and refused the send.
+      ...(command.supersedes ? { supersedes: true } : {}),
       ...(skills.length > 0 ? { skills: skills.map(formatSkillRefV1) } : {}),
       ...(command.directTool ? { directTool: command.directTool } : {}),
     })}`;

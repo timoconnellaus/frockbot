@@ -340,6 +340,23 @@ function assistantMessage(
       tasks: tasksFrom(run.events),
     };
   }
+  // A Turn that broke after it had started talking keeps what it said, with
+  // the reason underneath it — the treatment a stopped Turn already gets, for
+  // the same reason: the words arrived and the person read them (ADR 0028).
+  // A Turn that broke before saying anything is still just the reason.
+  if (run.status === "failed" && run.responseText) {
+    return {
+      id: `${run.runId}:assistant`,
+      runId: run.runId,
+      role: "assistant",
+      text: run.responseText,
+      notice: run.failure ?? "Agent request failed.",
+      status: "error",
+      tools: toolsFrom(run.events),
+      sends: sendsFrom(run.events),
+      tasks: tasksFrom(run.events),
+    };
+  }
   return {
     id: `${run.runId}:assistant`,
     runId: run.runId,
