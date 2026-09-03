@@ -780,6 +780,17 @@ function memoryTier(value: unknown, label: string): void {
   }
 }
 
+/**
+ * The tier an *intent* names. A forget does not know which files it will
+ * touch until it has run — it may rewrite the profile file, one or more log
+ * files, or write a retraction — so `pending` is the honest answer, and the
+ * `memory/written` events that follow name the real tier and path.
+ */
+function memoryIntentTier(value: unknown, label: string): void {
+  if (value === "pending") return;
+  memoryTier(value, label);
+}
+
 function memoryAction(value: unknown, label: string): void {
   if (value !== "write" && value !== "forget") {
     throw new Error(`${label} is invalid`);

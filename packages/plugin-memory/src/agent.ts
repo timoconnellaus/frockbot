@@ -709,8 +709,14 @@ export function createMemoryForgetTool(
         action: "forget",
         scope: decoded.scope,
         projectId: decoded.project ?? "",
-        tier: "log",
-        path: `${decoded.scope}/forget`,
+        // A forget is not a tier and has no path until it has run: it may
+        // rewrite the profile file, one or more log files, or write a
+        // retraction. Naming `log` and `<scope>/forget` here made the intent
+        // disagree with its own outcome — a forget of a profile fact recorded
+        // `tier: "log", path: "bot/forget"` and then `path: "profile.md"`.
+        // `pending` says plainly that the files are not known yet.
+        tier: "pending",
+        path: "",
         contentHash,
       });
       await session.flush();

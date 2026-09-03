@@ -66,6 +66,8 @@ import { defineComponent, h, ref, toRaw, watch, type Ref } from "vue";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,
+  decodeConnectionReturnV1,
+  withoutConnectionReturnV1,
   type PluginCatalogItem,
   type SendPromptResult,
   type WebActiveRun,
@@ -1178,8 +1180,24 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     ): Promise<void>;
   };
 
+  // Read once, from the URL the authorization redirect landed on, and then
+  // stripped so a reload does not report the same return again.
+  const connectionReturn =
+    typeof window === "undefined"
+      ? undefined
+      : decodeConnectionReturnV1(window.location.search);
+  if (connectionReturn && typeof window !== "undefined") {
+    const rest = withoutConnectionReturnV1(window.location.search);
+    window.history?.replaceState?.(
+      window.history.state,
+      "",
+      `${window.location.pathname}${rest}${window.location.hash}`,
+    );
+  }
+
   const web: Ref<ShellWebData> = ref({
     connection: "ready",
+    ...(connectionReturn ? { connectionReturn } : {}),
     modelLabel: "Model unavailable",
     modelReady: false,
     modelSource: "none",

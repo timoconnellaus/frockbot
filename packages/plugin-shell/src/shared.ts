@@ -155,6 +155,60 @@ export interface PluginCatalogItem {
   settings?: PackageSettingDefinition[];
 }
 
+/** What an external authorization redirect told the app on the way back. */
+export interface ConnectionReturnV1 {
+  /** The Package that owns the Connection, e.g. `composio`. */
+  packageId: string;
+  status: "ready" | "pending" | "failed";
+  /** A provider- or callback-supplied explanation, when there is one. */
+  reason?: string;
+}
+
+const CONNECTION_RETURN_PARAM = "connection";
+const CONNECTION_RETURN_REASON_PARAM = "connection_reason";
+const MAX_CONNECTION_RETURN_REASON = 300;
+
+/**
+ * Read an authorization return out of a URL query string.
+ *
+ * The callback redirects to `/?connection=<packageId>-<status>`. Left unread it
+ * is a stale query string and nothing else: the User is returned to the app
+ * with no confirmation, and a `failed` grant vanishes entirely.
+ */
+export function decodeConnectionReturnV1(
+  search: string,
+): ConnectionReturnV1 | undefined {
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(search);
+  } catch {
+    return undefined;
+  }
+  const raw = params.get(CONNECTION_RETURN_PARAM);
+  if (!raw) return undefined;
+  const separator = raw.lastIndexOf("-");
+  if (separator <= 0) return undefined;
+  const packageId = raw.slice(0, separator);
+  const status = raw.slice(separator + 1);
+  if (status !== "ready" && status !== "pending" && status !== "failed") {
+    return undefined;
+  }
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(packageId)) return undefined;
+  const reason = params
+    .get(CONNECTION_RETURN_REASON_PARAM)
+    ?.slice(0, MAX_CONNECTION_RETURN_REASON);
+  return { packageId, status, ...(reason ? { reason } : {}) };
+}
+
+/** The same query string with the return parameters removed. */
+export function withoutConnectionReturnV1(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete(CONNECTION_RETURN_PARAM);
+  params.delete(CONNECTION_RETURN_REASON_PARAM);
+  const rest = params.toString();
+  return rest ? `?${rest}` : "";
+}
+
 export interface FrockBotWebData {
   connection: WebConnection;
   modelLabel: string;
@@ -255,6 +309,12 @@ export interface FrockBotWebData {
    */
   mcpServers?: McpServerStatusViewV1;
   settingsError?: string;
+  /**
+   * What the browser came back from an external authorization with. Read once
+   * from the return URL at boot and cleared when the User has seen it, so a
+   * cancelled or failed grant is reported rather than silently discarded.
+   */
+  connectionReturn?: ConnectionReturnV1;
   selectBot(botId: string): Promise<void>;
   loadBotSettings(): Promise<void>;
   saveBotProfile(profile: BotProfile): Promise<void>;

@@ -28,6 +28,38 @@ const web = providedWeb;
 // Connections are User-scoped, so the row's link names no Bot.
 const connectionsLink = settingsLinkV1({ anchor: "user-connections" });
 
+/**
+ * What the browser came back from an external grant with. Read at boot from the
+ * return URL; without this the User lands back in the app with no confirmation
+ * and a cancelled grant is silently discarded.
+ */
+const connectionReturn = computed(() => web.value.connectionReturn);
+
+const connectionReturnMessage = computed(() => {
+  const result = connectionReturn.value;
+  if (!result) return "";
+  const name = connectorDisplayName(result.packageId);
+  if (result.status === "ready") return `${name} is connected.`;
+  if (result.status === "pending") {
+    return `${name} is finishing connecting. This page will show it when it is ready.`;
+  }
+  return result.reason
+    ? `${name} did not connect: ${result.reason}`
+    : `${name} did not connect.`;
+});
+
+/** The Package's display name when the catalog knows it, its id otherwise. */
+function connectorDisplayName(packageId: string): string {
+  return (
+    web.value.pluginCatalog.find((item) => item.packageId === packageId)
+      ?.displayName ?? packageId
+  );
+}
+
+function dismissConnectionReturn(): void {
+  web.value.connectionReturn = undefined;
+}
+
 const connectors = computed(() =>
   configurablePackages({
     catalog: web.value.pluginCatalog,
@@ -329,6 +361,18 @@ async function connect(
     >
       <p class="field-hint">
         Connect an account or service once and every Bot you own can use it.
+      </p>
+
+      <p
+        v-if="connectionReturn"
+        class="connection-return"
+        :class="{
+          'connection-return--failed': connectionReturn.status === 'failed',
+        }"
+        role="status"
+      >
+        {{ connectionReturnMessage }}
+        <UiButton @click="dismissConnectionReturn">Dismiss</UiButton>
       </p>
 
       <section
@@ -732,6 +776,21 @@ async function connect(
   min-height: 28px;
   padding: 0 10px;
   font-size: var(--frock-text-sm);
+}
+
+.connection-return {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-radius: var(--frock-radius-card);
+  background: var(--frock-surface-accent);
+}
+
+.connection-return--failed {
+  background: var(--frock-surface-danger, var(--frock-surface-accent));
 }
 
 .connections-empty {

@@ -103,7 +103,11 @@ export function memoryProjectIdOfRootV1(root: WorkspaceMemoryRootV1): string {
 export function memoryLogRelativeV1(at: Date, part = 0): string {
   const year = at.getUTCFullYear().toString().padStart(4, "0");
   const month = (at.getUTCMonth() + 1).toString().padStart(2, "0");
-  const suffix = part > 0 ? `.${part.toString().padStart(2, "0")}` : "";
+  // `p` and not a bare number: the tier merge relies on path order, and
+  // `2026-08.01.md` sorts *before* `2026-08.md` while `2026-08.p01.md` sorts
+  // after it. The first file of a month keeps its existing name, so nothing
+  // already written moves.
+  const suffix = part > 0 ? `.p${part.toString().padStart(2, "0")}` : "";
   return `${MEMORY_LOG_DIRECTORY}/${year}-${month}${suffix}.md`;
 }
 
@@ -178,7 +182,7 @@ export function memoryFileKindV1(
   // `log/YYYY-MM.md` and its rollover parts `log/YYYY-MM.NN.md`. Both sort
   // after the month they belong to and before the next one, which is the
   // order the tier merge relies on.
-  if (/^log\/\d{4}-\d{2}(\.\d{2})?\.md$/.test(tail)) {
+  if (/^log\/\d{4}-\d{2}(\.p\d{2})?\.md$/.test(tail)) {
     return { kind: "log", shard };
   }
   return undefined;

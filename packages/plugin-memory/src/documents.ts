@@ -10,6 +10,7 @@
 import type {
   MemoryScopeNameV1,
   WorkspaceMemoryRootV1,
+  WorkspacePathV1,
   WorkspaceReadsV1,
 } from "@frockbot/kernel-contracts";
 import {
@@ -17,7 +18,10 @@ import {
   memoryProjectIdOfRootV1,
   memoryScopeOfRootV1,
 } from "./roots.js";
-import { MEMORY_MAX_FILES_PER_TIER, MEMORY_MAX_LIST_PAGES } from "./store.js";
+import {
+  MEMORY_MAX_LIST_PAGES,
+  selectNewestMemoryFilesV1,
+} from "./store.js";
 
 /** One Memory file, addressed by its content and its generation. */
 export interface MemoryDocumentV1 {
@@ -68,40 +72,58 @@ export async function readMemoryDocumentsV1(
 ): Promise<MemoryDocumentListingV1> {
   const scope = memoryScopeOfRootV1(root);
   const projectId = memoryProjectIdOfRootV1(root);
-  const documents: MemoryDocumentV1[] = [];
+  const candidates: Array<{
+    path: WorkspacePathV1;
+    kind: "profile" | "log";
+    shard: string;
+    generation: { writtenAt: string; generationId: string };
+  }> = [];
   let complete = true;
   let cursor: string | undefined;
-  for (let page = 0; page < MEMORY_MAX_LIST_PAGES; page += 1) {
+  let pages = 0;
+  for (; pages < MEMORY_MAX_LIST_PAGES; pages += 1) {
     const outcome = await reads.list(
       cursor === undefined ? { root } : { root, cursor },
     );
-    if (outcome.status !== "ok") return { documents, complete: false };
+    if (outcome.status !== "ok") return { documents: [], complete: false };
     for (const entry of outcome.entries) {
-      if (documents.length >= MEMORY_MAX_FILES_PER_TIER) {
-        // The cap is a bound, not a deletion: past it the tier is not fully
-        // enumerated and must not be treated as if it were.
-        return { documents, complete: false };
-      }
       const classified = memoryFileKindV1(root, entry.path.path);
       if (!classified) continue;
-      const read = await reads.read(entry.path);
-      if (read.status !== "ok") {
-        complete = false;
-        continue;
-      }
-      documents.push({
-        scope,
-        projectId,
-        path: entry.path.path,
-        botId: classified.shard,
+      candidates.push({
+        path: entry.path,
         kind: classified.kind,
-        text: new TextDecoder().decode(read.file.bytes),
-        contentHash: read.file.generation.contentHash,
-        generationId: read.file.generation.generationId,
+        shard: classified.shard,
+        generation: entry.generation,
       });
     }
     if (!outcome.cursor) break;
     cursor = outcome.cursor;
+  }
+  if (cursor !== undefined && pages >= MEMORY_MAX_LIST_PAGES) complete = false;
+  // The same selection the injected block makes, and for the same reason:
+  // the two used to disagree — the block kept the *newest* files by recorded
+  // generation while this kept the *first* in listing order, so past the cap
+  // injection covered recent Memory and `memory_search` covered ancient
+  // Memory, with nothing recording the divergence.
+  const selected = selectNewestMemoryFilesV1(candidates);
+  if (selected.length < candidates.length) complete = false;
+  const documents: MemoryDocumentV1[] = [];
+  for (const candidate of selected) {
+    const read = await reads.read(candidate.path);
+    if (read.status !== "ok") {
+      complete = false;
+      continue;
+    }
+    documents.push({
+      scope,
+      projectId,
+      path: candidate.path.path,
+      botId: candidate.shard,
+      kind: candidate.kind,
+      text: new TextDecoder().decode(read.file.bytes),
+      contentHash: read.file.generation.contentHash,
+      generationId: read.file.generation.generationId,
+    });
   }
   return { documents, complete };
 }
