@@ -111,6 +111,16 @@ export interface ComputerWriterIdentityV1 {
 export interface ComputerAgentPluginConfig {
   userId: string;
   defaultProviderId: string;
+  /**
+   * Whether this deployment has a Computer at all.
+   *
+   * False, and the Package mounts no Computer tool and adds no Computer
+   * section to the system prompt: a prompt that promises a persistent Linux
+   * Computer where there is none costs the User a Turn of model spend per
+   * question and ends in the model guessing at a remedy. Absent means
+   * configured, so a host that does not know keeps the tools.
+   */
+  configured?: boolean;
   idempotentEffects?: boolean;
   writer?: ComputerWriterIdentityV1;
   /**
@@ -534,6 +544,11 @@ export function createComputerAgentPlugin(
   }
 
   const plugin: Plugin.Function = (ctx) => {
+    // A deployment with no Computer offers no Computer tool and no Computer
+    // prompt. The alternative — tools that always fail — spends a Turn's model
+    // budget discovering what this host already knows, and leaves the model
+    // inventing a way for the User to fix it.
+    if (config.configured === false) return [];
     // One Computer per User (ADR 0012): the assignment is keyed by the User,
     // and the Bot attaches to it as a tenant.
     const identity = { userId };
