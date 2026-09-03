@@ -11,6 +11,7 @@ import {
   type ComputerCommandV1,
   type ComputerProjectionV1,
 } from "./protocol.js";
+import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
 export interface ComputerGatewayHost {
   readComputer(userId: string, botId: string): Promise<ComputerProjectionV1>;
@@ -161,3 +162,16 @@ export function createComputerBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(createComputerBackendContribution(host));
 }
+
+/**
+ * The manifest's gateway `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineGatewayContribution<
+  ComputerGatewayHost,
+  ComputerBackendRouteContribution
+>({
+  specifier: "@frockbot/plugin-computer/backend",
+  create: createComputerBackendPlugin,
+});

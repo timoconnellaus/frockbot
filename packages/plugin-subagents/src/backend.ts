@@ -24,6 +24,7 @@ import {
   type TaskListViewV1,
   type TaskViewV1,
 } from "./shared.js";
+import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
 export interface SubagentsGatewayHost {
   listTasks(userId: string, botId: string): Promise<TaskListViewV1>;
@@ -191,3 +192,16 @@ export namespace createSubagentsBackendContribution {
     return () => lifecycle.mount(createSubagentsBackendContribution(host));
   }
 }
+
+/**
+ * The manifest's gateway `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineGatewayContribution<
+  SubagentsGatewayHost,
+  SubagentsBackendRouteContribution
+>({
+  specifier: "@frockbot/plugin-subagents/backend",
+  create: createSubagentsBackendContribution.plugin,
+});

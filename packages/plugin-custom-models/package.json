@@ -23,6 +23,7 @@
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/kernel-composition": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/plugin-settings": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "vue": "3.5.41"

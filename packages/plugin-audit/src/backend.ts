@@ -24,6 +24,7 @@ import {
   type AuditRebuildReceiptV1,
   type ClientAuditPageV1,
 } from "./shared.js";
+import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
 export interface AuditGatewayHost {
   readAudit(userId: string, query: AuditQueryV1): Promise<ClientAuditPageV1>;
@@ -146,3 +147,16 @@ export namespace createAuditBackendContribution {
     return () => lifecycle.mount(createAuditBackendContribution(host));
   }
 }
+
+/**
+ * The manifest's gateway `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineGatewayContribution<
+  AuditGatewayHost,
+  AuditBackendRouteContribution
+>({
+  specifier: "@frockbot/plugin-audit/backend",
+  create: createAuditBackendContribution.plugin,
+});

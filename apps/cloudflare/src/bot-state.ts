@@ -1,10 +1,17 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   compileFoundationApplication,
-  createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
   createFoundationRuntimeApplication,
 } from "@frockbot/application-foundation/runtime";
+import {
+  computerBotContribution,
+  createFoundationBackendContributions,
+  createFoundationMountedContributionsV1,
+  flockBotContribution,
+  plannedFoundationBackendContributions,
+  shellBotContribution,
+} from "@frockbot/application-foundation/contributions";
 import {
   createFoundationResidentRuntime,
   type FoundationResidentRuntime,
@@ -36,15 +43,8 @@ import type {
   BotResidentProjection,
 } from "@frockbot/plugin-shell/backend-execution";
 import { executeResidentBotTurn } from "@frockbot/plugin-shell/backend-runner";
-import { createShellBotBackendPlugin } from "@frockbot/plugin-shell/backend";
-import {
-  createFlockBotBackendPlugin,
-  type FlockBotBackendContribution,
-} from "@frockbot/plugin-flock/bot";
-import {
-  createComputerBotBackendPlugin,
-  type ComputerBotBackendContribution,
-} from "@frockbot/plugin-computer/bot";
+import type { FlockBotBackendContribution } from "@frockbot/plugin-flock/bot";
+import type { ComputerBotBackendContribution } from "@frockbot/plugin-computer/bot";
 import { decodeComputerCommandV1 } from "@frockbot/plugin-computer/protocol";
 import {
   decodeBotLifecycleCommandV1,
@@ -303,9 +303,6 @@ export class BotState extends DurableObject<BotStateEnv> {
   }> {
     if (!this.mounted) {
       this.mounted = this.compileApplication().then(async (plan) => {
-        let shell: ShellBotBackendContribution | undefined;
-        let flock: FlockBotBackendContribution | undefined;
-        let computer: ComputerBotBackendContribution | undefined;
         const root = new Context();
         await root.plugin(ComputerRegistry);
         const computerConfigured = Boolean(
@@ -327,6 +324,15 @@ export class BotState extends DurableObject<BotStateEnv> {
               : {}),
           }),
         );
+        // Where each descriptor's mounted value lands as the mount runs. The
+        // Shell and Flock Contributions need each other, and each reaches the
+        // other by naming the table entry it imported.
+        const mountedContributions = createFoundationMountedContributionsV1();
+        const requireShell = (): ShellBotBackendContribution => {
+          const shell = mountedContributions.get(shellBotContribution);
+          if (!shell) throw new Error("Shell Bot Contribution is unavailable");
+          return shell;
+        };
         const mounted = await createFoundationBackendContributions<
           | ShellBotBackendContribution
           | FlockBotBackendContribution
@@ -335,111 +341,73 @@ export class BotState extends DurableObject<BotStateEnv> {
           plan,
           {
             backendHost: "bot",
-            resolve: (specifier, lifecycle) => {
-              if (specifier === "@frockbot/plugin-shell/backend") {
-                return createShellBotBackendPlugin(
+            mountedContributions,
+            shell: {
+              state: this.ctx,
+              env: this.backendEnv,
+              outboundFetch: this.outboundFetch,
+              // The Durable Object owns the kernel authority; the Shell
+              // Package supplies only its configuration and Composition
+              // hooks.
+              createAuthority: (options) => new BotDurableAuthority(options),
+              // An archived Bot admits no configuration command; the Flock
+              // Contribution owns that durable lifecycle state.
+              assertLifecycleActive: (storage, botId) => {
+                const flock = mountedContributions.get(flockBotContribution);
+                if (!flock) {
+                  throw new Error("Flock Bot Contribution is unavailable");
+                }
+                return flock.assertActive(storage, botId);
+              },
+            },
+            flock: {
+              storage: this.ctx.storage,
+              materializeSettings: async (registration, userId) => {
+                await requireShell().materializeSettings(
+                  { userId, botId: registration.botId },
                   {
-                    state: this.ctx,
-                    env: this.backendEnv,
-                    outboundFetch: this.outboundFetch,
-                    // The Durable Object owns the kernel authority; the Shell
-                    // Package supplies only its configuration and Composition
-                    // hooks.
-                    createAuthority: (options) =>
-                      new BotDurableAuthority(options),
-                    // An archived Bot admits no configuration command; the Flock
-                    // Contribution owns that durable lifecycle state.
-                    assertLifecycleActive: (storage, botId) => {
-                      if (!flock) {
-                        throw new Error(
-                          "Flock Bot Contribution is unavailable",
-                        );
-                      }
-                      return flock.assertActive(storage, botId);
-                    },
-                  },
-                  {
-                    mount(value) {
-                      shell = value;
-                      return lifecycle.mount(value);
-                    },
-                  },
-                );
-              }
-              if (specifier === "@frockbot/plugin-flock/bot") {
-                return createFlockBotBackendPlugin(
-                  {
-                    storage: this.ctx.storage,
-                    materializeSettings: async (registration, userId) => {
-                      if (!shell)
-                        throw new Error(
-                          "Shell Bot Contribution is unavailable",
-                        );
-                      await shell.materializeSettings(
-                        { userId, botId: registration.botId },
-                        {
-                          name: registration.initialName,
-                          ...(registration.initialDescription === undefined
-                            ? {}
-                            : {
-                                description: registration.initialDescription,
-                              }),
-                        },
-                      );
-                    },
-                    archiveEligible: (storage) => {
-                      if (!shell)
-                        throw new Error(
-                          "Shell Bot Contribution is unavailable",
-                        );
-                      return shell.archiveEligible(storage);
-                    },
-                  },
-                  {
-                    mount(value) {
-                      flock = value;
-                      return lifecycle.mount(value);
-                    },
+                    name: registration.initialName,
+                    ...(registration.initialDescription === undefined
+                      ? {}
+                      : { description: registration.initialDescription }),
                   },
                 );
-              }
-              if (specifier === "@frockbot/plugin-computer/bot") {
-                return createComputerBotBackendPlugin(
-                  {
-                    storage: this.ctx.storage,
-                    workspace: this.backendEnv.WORKSPACE_FILES,
-                    providerLabel: "Fly Sprites",
-                    configured: computerConfigured,
-                    openComputer: (userId, botId, effectId) => {
-                      const identity = { userId };
-                      if (!root.computers.assignment(identity)) {
-                        root.computers.assign(identity, "fly-sprite");
-                      }
-                      return root.computers.open(
-                        identity,
-                        { botId },
-                        { effectId },
-                      );
-                    },
-                  },
-                  {
-                    mount(value) {
-                      computer = value;
-                      return lifecycle.mount(value);
-                    },
-                  },
-                );
-              }
-              throw new Error(`Unsupported Bot Contribution: ${specifier}`);
+              },
+              archiveEligible: (storage) =>
+                requireShell().archiveEligible(storage),
+            },
+            computer: {
+              storage: this.ctx.storage,
+              workspace: this.backendEnv.WORKSPACE_FILES,
+              providerLabel: "Fly Sprites",
+              configured: computerConfigured,
+              openComputer: (userId, botId, effectId) => {
+                const identity = { userId };
+                if (!root.computers.assignment(identity)) {
+                  root.computers.assign(identity, "fly-sprite");
+                }
+                return root.computers.open(identity, { botId }, { effectId });
+              },
             },
           },
           root,
         );
+        // The kernel-declared required core set for a Bot, expressed against
+        // the plan's own Contributions: every Bot-host Contribution the plan
+        // declares must have mounted, and each of the three the Bot Durable
+        // Object depends on must be one of them. A Composition that lacks one
+        // never becomes resident.
+        const shell = mounted.get(shellBotContribution);
+        const flock = mounted.get(flockBotContribution);
+        const computer = mounted.get(computerBotContribution);
         if (
           !shell ||
           !flock ||
           !computer ||
-          mounted.contributions.length !== 3
+          mounted.contributions.length !==
+            plannedFoundationBackendContributions(plan).filter(
+              (planned) => planned.host === "bot",
+            ).length
         ) {
           await mounted.dispose();
           await root.fiber.dispose();

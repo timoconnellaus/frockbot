@@ -29,6 +29,7 @@ import {
   type AuditEntrySourceV1,
   type AuditSqlV1,
 } from "./store.js";
+import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 export interface AuditUserBackendHost {
   /** The User Durable Object's own SQL storage. */
@@ -213,3 +214,26 @@ export function createAuditUserBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(new AuditUserBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: the User's audit table, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface AuditUserApplicationHostV1 {
+  audit: AuditUserBackendHost;
+}
+
+/**
+ * The manifest's `user` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const userContribution = defineUserBackendContribution<
+  AuditUserApplicationHostV1,
+  AuditUserBackendContribution
+>({
+  specifier: "@frockbot/plugin-audit/user",
+  create: (host, lifecycle) =>
+    createAuditUserBackendPlugin(host.audit, lifecycle),
+});

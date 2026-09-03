@@ -28,6 +28,7 @@ import {
   type OllamaCloudClientConfig,
 } from "./client.js";
 import { OLLAMA_CLOUD_PROVIDER } from "./runtime.js";
+import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 const PACKAGE_ID = "provider-ollama-cloud";
 const CONNECTION_TYPE_ID = "ollama-cloud-account";
@@ -2390,3 +2391,26 @@ export function createOllamaCloudUserBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(createOllamaCloudUserBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: the Ollama Cloud Connection, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface OllamaCloudUserApplicationHostV1 {
+  ollamaCloud: OllamaUserBackendHost;
+}
+
+/**
+ * The manifest's `user` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const userContribution = defineUserBackendContribution<
+  OllamaCloudUserApplicationHostV1,
+  OllamaCloudUserBackendContribution
+>({
+  specifier: "@frockbot/plugin-provider-ollama-cloud/user",
+  create: (host, lifecycle) =>
+    createOllamaCloudUserBackendPlugin(host.ollamaCloud, lifecycle),
+});

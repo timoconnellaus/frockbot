@@ -22,6 +22,7 @@ import {
   type ComputerMachineState,
 } from "./state-machine.js";
 import "./styles.css";
+import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
 
 export const PROJECTION_POLL_INTERVAL_MS = 20_000;
 export const ACTIVE_PROJECTION_POLL_INTERVAL_MS = 1_500;
@@ -405,3 +406,13 @@ export function createComputerClientPlugin(
 export const computerClientPlugin = createComputerClientPlugin();
 
 export default computerClientPlugin;
+
+/**
+ * The manifest's `client` entry, resolved by specifier. The application looks
+ * this descriptor up in its Contribution table; it never branches on which
+ * Package it belongs to.
+ */
+export const clientContribution = defineClientContribution<ClientPlugin>({
+  specifier: "@frockbot/plugin-computer/client",
+  plugin: computerClientPlugin,
+});

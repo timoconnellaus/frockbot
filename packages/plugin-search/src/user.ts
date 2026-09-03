@@ -28,6 +28,7 @@ import {
   type SearchIndexStateV1,
   type SearchRowV1,
 } from "./shared.js";
+import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 export interface SearchUserBackendHost {
   /** The User Durable Object's own SQL storage. */
@@ -114,3 +115,26 @@ export function createSearchUserBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(new SearchUserBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: the User's transcript index, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface SearchUserApplicationHostV1 {
+  search: SearchUserBackendHost;
+}
+
+/**
+ * The manifest's `user` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const userContribution = defineUserBackendContribution<
+  SearchUserApplicationHostV1,
+  SearchUserBackendContribution
+>({
+  specifier: "@frockbot/plugin-search/user",
+  create: (host, lifecycle) =>
+    createSearchUserBackendPlugin(host.search, lifecycle),
+});

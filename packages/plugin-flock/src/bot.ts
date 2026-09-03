@@ -18,6 +18,7 @@ import {
   type SheepIdentityViewV1,
   type UpdateSheepCommandV1,
 } from "./shared.js";
+import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 const IDENTITY_KEY = "flock:sheep:v1";
 const RECEIPT_PREFIX = "flock:sheep-receipt:";
@@ -253,3 +254,26 @@ export function createFlockBotBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(createFlockBotBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: the Bot's own lifecycle state, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface FlockBotApplicationHostV1 {
+  flock: FlockBotBackendHost;
+}
+
+/**
+ * The manifest's `bot` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const botContribution = defineBotBackendContribution<
+  FlockBotApplicationHostV1,
+  FlockBotBackendContribution
+>({
+  specifier: "@frockbot/plugin-flock/bot",
+  create: (host, lifecycle) =>
+    createFlockBotBackendPlugin(host.flock, lifecycle),
+});

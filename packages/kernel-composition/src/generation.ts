@@ -260,7 +260,10 @@ function decodePackageProvenanceV1(
   return value as unknown as PackageProvenanceV1;
 }
 
-function decodeArtifactRefV1(input: unknown, label: string): ArtifactRefV1 {
+export function decodeArtifactRefV1(
+  input: unknown,
+  label: string,
+): ArtifactRefV1 {
   const value = record(input, label);
   exactKeys(value, ARTIFACT_KEYS, [], label);
   hashString(value.contentHash, `${label}.contentHash`);

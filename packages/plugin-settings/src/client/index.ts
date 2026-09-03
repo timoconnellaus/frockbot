@@ -14,6 +14,7 @@ import PluginsSurface from "./PluginsSurface.vue";
 import PackageCatalogSurface from "./PackageCatalogSurface.vue";
 import UserProfileTrigger from "./UserProfileTrigger.vue";
 import UserSettingsSurface from "./UserSettingsSurface.vue";
+import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
 
 export const settingsClientPlugin: ClientPlugin = (ctx) => {
   const surfaces = ctx.inject(clientSurfaceRegistryKey);
@@ -86,3 +87,13 @@ export {
 } from "./bot-settings.js";
 
 export default settingsClientPlugin;
+
+/**
+ * The manifest's `client` entry, resolved by specifier. The application looks
+ * this descriptor up in its Contribution table; it never branches on which
+ * Package it belongs to.
+ */
+export const clientContribution = defineClientContribution<ClientPlugin>({
+  specifier: "@frockbot/plugin-settings/client",
+  plugin: settingsClientPlugin,
+});

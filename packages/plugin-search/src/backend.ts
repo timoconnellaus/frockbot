@@ -26,6 +26,7 @@ import {
   type SearchQueryV1,
   type SearchRowKindV1,
 } from "./shared.js";
+import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
 export interface SearchGatewayHost {
   searchTranscripts(
@@ -214,3 +215,16 @@ export namespace createSearchBackendContribution {
     return () => lifecycle.mount(createSearchBackendContribution(host));
   }
 }
+
+/**
+ * The manifest's gateway `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineGatewayContribution<
+  SearchGatewayHost,
+  SearchBackendRouteContribution
+>({
+  specifier: "@frockbot/plugin-search/backend",
+  create: createSearchBackendContribution.plugin,
+});

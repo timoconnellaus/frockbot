@@ -8,6 +8,7 @@ import {
   sealCredentialV1,
 } from "@frockbot/connection-core";
 import type { Plugin } from "cordis";
+import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 export {
   createCredentialRuntimePlugin,
   CredentialLeaseRuntime,
@@ -1140,3 +1141,26 @@ export function createCredentialUserBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(createCredentialUserBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: the User's encrypted credential store, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface CredentialsUserApplicationHostV1 {
+  credentials: CredentialUserBackendHost;
+}
+
+/**
+ * The manifest's `user` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const userContribution = defineUserBackendContribution<
+  CredentialsUserApplicationHostV1,
+  CredentialUserBackendContribution
+>({
+  specifier: "@frockbot/plugin-credentials/user",
+  create: (host, lifecycle) =>
+    createCredentialUserBackendPlugin(host.credentials, lifecycle),
+});

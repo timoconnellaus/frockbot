@@ -31,6 +31,7 @@ import {
 import type { ConnectionCommandV1 } from "@frockbot/connection-core";
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import type { Plugin } from "cordis";
+import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 const STATE_KEY = "user-configuration";
 const DEFAULT_PACKAGES_BOOTSTRAP_KEY = "user-default-packages-bootstrap:v1";
@@ -1209,3 +1210,26 @@ export function createUserSettingsBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(createUserSettingsBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: User settings, Package installation, and Connection commands, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface SettingsUserApplicationHostV1 {
+  settings: UserSettingsBackendHost;
+}
+
+/**
+ * The manifest's `user` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const userContribution = defineUserBackendContribution<
+  SettingsUserApplicationHostV1,
+  UserSettingsBackendContribution
+>({
+  specifier: "@frockbot/plugin-settings/user",
+  create: (host, lifecycle) =>
+    createUserSettingsBackendPlugin(host.settings, lifecycle),
+});

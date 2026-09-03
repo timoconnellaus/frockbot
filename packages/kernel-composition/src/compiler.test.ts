@@ -245,3 +245,53 @@ describe("compileApplicationPlan", () => {
     );
   });
 });
+
+describe("artifact-backed application members", () => {
+  const artifact = {
+    contentHash: "a".repeat(64),
+    size: 128,
+    mediaType: "application/javascript" as const,
+    bundlerVersion: "frockbot-bundler@1",
+  };
+
+  test("carries a declared artifact onto the compiled package", () => {
+    const declarations = compileApplicationDeclarations(
+      {
+        schemaVersion: 1,
+        packages: [{ ...selection("@fixture/base"), artifact }],
+      },
+      (specifier) => ({ specifier, manifest: runtimeManifest("base") }),
+      { frockbotVersion: "1.0.0" },
+    );
+
+    expect(declarations.packages[0]?.artifact).toEqual(artifact);
+  });
+
+  test("leaves a member with no artifact first-party in-process", () => {
+    const declarations = compileApplicationDeclarations(
+      { schemaVersion: 1, packages: [selection("@fixture/base")] },
+      (specifier) => ({ specifier, manifest: runtimeManifest("base") }),
+      { frockbotVersion: "1.0.0" },
+    );
+
+    expect(declarations.packages[0]).not.toHaveProperty("artifact");
+  });
+
+  test("refuses an artifact the loader could not fetch", () => {
+    expect(() =>
+      compileApplicationDeclarations(
+        {
+          schemaVersion: 1,
+          packages: [
+            {
+              ...selection("@fixture/base"),
+              artifact: { ...artifact, contentHash: "nope" },
+            },
+          ],
+        },
+        (specifier) => ({ specifier, manifest: runtimeManifest("base") }),
+        { frockbotVersion: "1.0.0" },
+      ),
+    ).toThrow(/artifact.contentHash/);
+  });
+});
