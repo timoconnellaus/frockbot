@@ -410,6 +410,32 @@ function taskChipsOf(message: WebChatMessage): Array<{
   });
 }
 
+/**
+ * The tools this Turn ran, as the thread draws them.
+ *
+ * A tool whose Package draws its own surface is shown by that surface; every
+ * other one is a chip, because a Turn that spends a minute making tool calls
+ * used to show the User nothing at all but a spinning avatar.
+ */
+function toolChipsOf(message: WebChatMessage): WebToolActivity[] {
+  return message.tools.filter((tool) => iframeEntriesFor(tool).length === 0);
+}
+
+/** What a chip says a tool is doing. Its status, in the User's words. */
+function toolChipStatus(tool: WebToolActivity): string {
+  if (tool.status === "running") return "running";
+  return tool.status === "failed" ? "failed" : "done";
+}
+
+/** Which tool chips the User has opened. Local, and per chip. */
+const expandedTools = ref(new Set<string>());
+
+function toggleTool(toolId: string): void {
+  const next = new Set(expandedTools.value);
+  if (!next.delete(toolId)) next.add(toolId);
+  expandedTools.value = next;
+}
+
 /** Which chips the User has opened. Local, and per chip. */
 const expandedTasks = ref(new Set<string>());
 
@@ -436,6 +462,7 @@ function isVisible(message: WebChatMessage): boolean {
   // visible act was dispatching a subagent.
   return (
     message.text.length > 0 ||
+    (message.notice?.length ?? 0) > 0 ||
     message.tools.some((tool) => iframeEntriesFor(tool).length > 0) ||
     message.sends.length > 0 ||
     (message.tasks?.length ?? 0) > 0 ||
@@ -892,6 +919,13 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                   <i></i><i></i><i></i>
                 </span>
               </div>
+              <!--
+                Why the Turn ends where it does, under whatever it had already
+                said rather than in place of it.
+              -->
+              <p v-if="message.notice" class="message-notice">
+                {{ message.notice }}
+              </p>
               <template v-for="tool in message.tools" :key="tool.id">
                 <PackageIframeHost
                   v-for="entry in iframeEntriesFor(tool)"
@@ -938,6 +972,33 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                   :key="sendIndex"
                   :send="send"
                 />
+              </div>
+              <!--
+                What the Bot did, while it is doing it. The chip is the
+                conversation's whole account of an ordinary tool call: its
+                name, whether it is running, and — when the User opens it —
+                what it returned.
+              -->
+              <div v-if="toolChipsOf(message).length > 0" class="message-tools">
+                <button
+                  v-for="tool in toolChipsOf(message)"
+                  :key="tool.id"
+                  type="button"
+                  class="tool-chip"
+                  :class="`tool-chip-${tool.status}`"
+                  :aria-expanded="expandedTools.has(tool.id)"
+                  @click="toggleTool(tool.id)"
+                >
+                  <span class="tool-chip-name">{{ tool.name }}</span>
+                  <span class="tool-chip-status">{{
+                    toolChipStatus(tool)
+                  }}</span>
+                  <span
+                    v-if="expandedTools.has(tool.id) && tool.text !== undefined"
+                    class="tool-chip-result"
+                    >{{ tool.text }}</span
+                  >
+                </button>
               </div>
               <!--
                 The subagents this Turn dispatched. The child's own Session is

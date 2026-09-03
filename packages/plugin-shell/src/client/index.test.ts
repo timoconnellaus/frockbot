@@ -1217,14 +1217,14 @@ describe("detached Turn projection", () => {
       ],
     );
 
-    // The failure is a system notice, never a bubble that reads as the Bot
-    // saying the provider's own words.
+    // The failure is a notice under the reply, never a bubble that reads as
+    // the Bot saying the provider's own words.
     expect(messages).toMatchObject([
       { role: "user", status: "completed" },
-      { role: "assistant", text: "", status: "error" },
       {
-        role: "system",
-        text: "This reply didn't finish. Try sending your message again.",
+        role: "assistant",
+        text: "",
+        notice: "This reply didn't finish. Try sending your message again.",
         status: "error",
       },
     ]);
@@ -1581,11 +1581,8 @@ describe("active durable Turn projection", () => {
     expect(reconciliation.messages[1]).toMatchObject({
       role: "assistant",
       text: "",
+      notice: "Something went wrong part-way through the reply.",
       status: "reconciliation-required",
-    });
-    expect(reconciliation.messages[2]).toMatchObject({
-      role: "system",
-      text: "Something went wrong part-way through the reply.",
     });
     expect(JSON.stringify(reconciliation.messages)).not.toContain(
       "Provider result needs confirmation",
@@ -1867,14 +1864,18 @@ describe("hosted Stop", () => {
     expect(provided.value.activeRun).toMatchObject({
       status: "reconciliation-required",
       message: "Stopping…",
-      canResume: false,
+      // A parked Turn is offered the resolve control, Stop included: hiding
+      // it there hid it in exactly the case Stop creates.
+      canResume: true,
     });
 
     await provided.value.stopRun();
     expect(provided.value.activeRun).toBeUndefined();
     expect(provided.value.activeRunId).toBeUndefined();
+    // The Turn keeps whatever it had already said; the notice is the line
+    // that says why it ends where it does.
     expect(provided.value.messages[1]).toMatchObject({
-      text: "Stopped by an authenticated Stop command.",
+      notice: "Stopped by an authenticated Stop command.",
       status: "aborted",
     });
 
@@ -1931,12 +1932,15 @@ describe("hosted Stop", () => {
 
     await provided.value.stopRun();
 
-    expect(lookups).toBe(1);
+    // Two, and deliberately: a client that finds itself holding an active run
+    // it did not start now observes it (a reload mid-Turn, a second tab), and
+    // Stop then observes the settlement it asked for.
+    expect(lookups).toBe(2);
     expect(provided.value.activeRun).toBeUndefined();
     expect(provided.value.activeRunId).toBeUndefined();
     expect(provided.value.messages.at(-1)).toMatchObject({
       runId: "run-1",
-      text: "Stopped by an authenticated Stop command.",
+      notice: "Stopped by an authenticated Stop command.",
       status: "aborted",
     });
   });
@@ -2917,7 +2921,7 @@ describe("a message sent while a Turn is running", () => {
     // The superseded Turn keeps the quiet treatment a stopped one gets.
     expect(state.messages[1]).toMatchObject({
       status: "aborted",
-      text: "Interrupted by your next message.",
+      notice: "Interrupted by your next message.",
     });
   });
 

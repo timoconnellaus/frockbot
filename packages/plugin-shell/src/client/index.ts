@@ -55,7 +55,10 @@ import {
 import { MCP_OAUTH_CONNECTION_TYPE_ID } from "@frockbot/plugin-mcp/agent";
 import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
-import { decodeClientTurnV1 } from "../run-protocol.js";
+import {
+  ClientTurnRefusedErrorV1,
+  decodeClientTurnV1,
+} from "../run-protocol.js";
 import {
   decodeApprovalDecisionReceiptV1,
   decodeApprovalListViewV1,
@@ -249,7 +252,11 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
       message: run.stopRequestedAt
         ? "Stopping…"
         : "Something went wrong part-way through the reply.",
-      canResume: !run.stopRequestedAt && run.recovery?.action === "resume",
+      // Offered whenever the run is parked, Stop included. Hiding it there
+      // hid it in exactly the case Stop creates: a Turn that was stopped
+      // while the model was mid-answer parks, and the person was left with a
+      // banner and no way to act on it.
+      canResume: run.recovery?.action === "resume",
     };
   }
   return undefined;
@@ -292,7 +299,8 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.failure ?? "Interrupted by your next message.",
+      text: run.responseText ?? "",
+      notice: run.failure ?? "Interrupted by your next message.",
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -304,10 +312,15 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      // A failure is not something the Bot said. The bubble holds the text
-      // the model actually produced — often none — and the system notice
-      // beside it (`failureNotice`) carries the explanation.
+      /*
+       * A failure is not something the Bot said. The bubble holds the text
+       * the model actually produced — often none — and the notice under it
+       * says why the Turn ends there, in the product's own words: what
+       * arrived here read `Model request "1c7dd68e-…" has no durable provider
+       * outcome`, styled exactly like the Bot speaking.
+       */
       text: run.responseText ?? "",
+      notice: "Something went wrong part-way through the reply.",
       status: "reconciliation-required",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -319,7 +332,8 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.failure ?? "Stopped by an authenticated Stop command.",
+      text: run.responseText ?? "",
+      notice: run.failure ?? "Stopped by an authenticated Stop command.",
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -334,39 +348,13 @@ function assistantMessage(
       run.status === "failed"
         ? (run.responseText ?? "")
         : (run.responseText ?? notification?.body ?? ""),
+    ...(run.status === "failed"
+      ? { notice: "This reply didn't finish. Try sending your message again." }
+      : {}),
     status: run.status === "failed" ? "error" : "completed",
     tools: toolsFrom(run.events),
     sends: sendsFrom(run.events),
     tasks: tasksFrom(run.events),
-  };
-}
-
-/**
- * The one line a Turn that did not finish gets.
- *
- * A failure is a fact about the deployment, not something the Bot said, so it
- * is a system row rather than an assistant bubble, and it says the same thing
- * whatever the provider called it. The backend's own text stays on the run,
- * where the console and `/api/debug` can still read it.
- */
-function failureNotice(run: ClientRun): WebChatMessage | undefined {
-  if (run.status !== "failed" && run.status !== "reconciliation-required") {
-    return undefined;
-  }
-  if (run.status === "reconciliation-required" && run.stopRequestedAt) {
-    return undefined;
-  }
-  return {
-    id: `${run.runId}:notice`,
-    runId: run.runId,
-    role: "system",
-    text:
-      run.status === "failed"
-        ? "This reply didn't finish. Try sending your message again."
-        : "Something went wrong part-way through the reply.",
-    status: "error",
-    tools: [],
-    sends: [],
   };
 }
 
@@ -450,20 +438,6 @@ export function projectDurableRuns(
     if (assistantAt) assistant.at = assistantAt;
     if (assistantIndex >= 0) state.messages[assistantIndex] = assistant;
     else state.messages.push(assistant);
-
-    // The failure line sits after the reply it is about, and leaves when the
-    // Turn recovers, so a resumed Turn does not keep an explanation of a
-    // failure that no longer happened.
-    const noticeIndex = state.messages.findIndex(
-      (message) => message.id === `${run.runId}:notice`,
-    );
-    const notice = failureNotice(run);
-    if (notice) {
-      if (noticeIndex >= 0) state.messages[noticeIndex] = notice;
-      else state.messages.push(notice);
-    } else if (noticeIndex >= 0) {
-      state.messages.splice(noticeIndex, 1);
-    }
 
     activeRun = activeRunView(run) ?? activeRun;
     if (run.status === "running" || run.status === "reconciliation-required") {
@@ -2357,6 +2331,12 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       const observed = web.value.activeRunId;
       const supersedes = observed ? { runId: observed } : {};
       web.value.activeRunId = pendingRunId;
+      // Stop is offered for the whole of the Turn the User just started, not
+      // only from the moment a projection happens to arrive. A send that
+      // supersedes a running Turn is the exception: the Turn Stop targets is
+      // still the one executing, and this one is queued behind it. The durable
+      // projection corrects both the instant it arrives.
+      if (!observed) web.value.runningRunId = pendingRunId;
       web.value.error = undefined;
       web.value.messages.push(
         {
@@ -2441,6 +2421,15 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.activeBotId !== botId
         )
           return { accepted: true, runId: pendingRunId };
+        // A refusal is a normal answer, not an uncertain send: the Bot
+        // declined and said why. Show that, drop the optimistic bubbles, and
+        // let the composer give the person their text back — fencing a run
+        // that was never admitted only threw the reason away.
+        if (error instanceof ClientTurnRefusedErrorV1) {
+          removeMessages(web.value.messages, pendingRunId);
+          web.value.error = error.refusal.error;
+          return { accepted: false, error: error.refusal.error };
+        }
         const aborted =
           error instanceof DOMException && error.name === "AbortError";
         replaceMessage(web.value.messages, pendingRunId, {
@@ -2501,6 +2490,14 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.activeRun?.runId !== pendingRunId
         ) {
           web.value.activeRunId = undefined;
+        }
+        // The optimistic Stop target goes with it: a Turn nobody is running is
+        // not a Turn anybody can stop.
+        if (
+          web.value.runningRunId === pendingRunId &&
+          web.value.activeRunId !== pendingRunId
+        ) {
+          web.value.runningRunId = undefined;
         }
       }
     },
@@ -2675,6 +2672,70 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     },
   );
 
+  /*
+   * A running Turn reaches every browser that is looking, not only the one
+   * holding its POST.
+   *
+   * The reply to `POST /api/bots/:bot/turns` is one client's copy of a Turn.
+   * A reload, a second tab, or a dropped request has no such copy, so the
+   * transcript would sit on a spinner until somebody reloaded again. Two
+   * seams close that: the Bot's state channel pushes a `runs` invalidation
+   * whenever the durable run records move, and — for any client that has no
+   * socket — the run is polled to its terminal state. Both end in the same
+   * `GET /api/bots/:bot/turns` projection, so neither invents client state
+   * and the one-bubble-per-send contract is untouched.
+   */
+  let stopRunChannel: (() => void) | undefined;
+  const stopRunChannelWatch = watch(
+    () => web.value.activeBotId,
+    (botId) => {
+      stopRunChannel?.();
+      stopRunChannel = undefined;
+      if (!botId || !ctx.transport.watchBotState) return;
+      const generation = selectionGeneration;
+      stopRunChannel = ctx.transport.watchBotState(botId, {
+        async invalidate(topic) {
+          // A reset carries no topic and means "read everything again".
+          if (topic !== undefined && topic !== "runs") return;
+          if (
+            generation !== selectionGeneration ||
+            web.value.activeBotId !== botId
+          )
+            return;
+          await deliverNotifications(botId, generation);
+        },
+        status() {
+          // The channel's health is not the transcript's: an unavailable
+          // socket falls back to the observation below, which is what a
+          // client without one uses anyway.
+        },
+      });
+    },
+    { immediate: true },
+  );
+
+  const stopRunObservation = watch(
+    () => [web.value.activeBotId, web.value.activeRunId] as const,
+    ([botId, runId]) => {
+      // The send path owns the run it started: its POST is the observation,
+      // and `stopRun` starts its own. This is for every other way a client
+      // finds itself watching a Turn it is not holding open.
+      if (!botId || !runId || activeRequest || runObserver) return;
+      const generation = selectionGeneration;
+      const observer = new AbortController();
+      runObserver = observer;
+      void observeRunUntilTerminal(botId, runId, generation, observer.signal)
+        .catch(() => {
+          // `observeRunUntilTerminal` reports its own failures; a rejection
+          // here would be an unhandled one.
+        })
+        .finally(() => {
+          if (runObserver === observer) runObserver = undefined;
+        });
+    },
+    { immediate: true },
+  );
+
   return [
     ctx.provide(clientSurfaceRegistryKey, surfaces),
     // The shared client projection is updated by the contracts lane. This cast
@@ -2693,6 +2754,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     () => {
       stopEntrySync();
       stopRunFollow();
+      stopRunChannelWatch();
+      stopRunChannel?.();
+      stopRunObservation();
       stopSourceFollow();
       for (const dispose of entryDisposers.splice(0).toReversed()) dispose();
       activeRequest?.abort();
@@ -2711,6 +2775,13 @@ function replaceMessage(
     (message) => message.runId === runId && message.role === "assistant",
   );
   if (index >= 0) messages[index] = replacement;
+}
+
+/** Takes back both optimistic lines of a send the Bot never admitted. */
+function removeMessages(messages: WebChatMessage[], runId: string): void {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.runId === runId) messages.splice(index, 1);
+  }
 }
 
 export default shellClientPlugin;

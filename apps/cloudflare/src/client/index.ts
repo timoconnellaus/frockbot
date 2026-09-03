@@ -32,6 +32,8 @@ import {
   decodeClientRunLookupV1,
   decodeClientRunStopReceiptV1,
   decodeClientTurnV1,
+  decodeClientTurnRefusalV1,
+  ClientTurnRefusedErrorV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import { decodeClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 import type { SkillRefV1 } from "@frockbot/kernel-contracts";
@@ -136,6 +138,22 @@ const application = new ClientApplication({
           signal,
         });
     signal.throwIfAborted();
+    /*
+     * A refusal is the Bot answering, with a reason of its own, so it keeps
+     * its typed error: flattening a 409 to a message sent the client down the
+     * uncertain-admission path, which fenced the run and reported that the
+     * message had not gone through over the top of what the Bot had said.
+     * Every other failure is the shared reader's to classify.
+     */
+    if (!response.ok) {
+      const refusal = decodeClientTurnRefusalV1(
+        await response
+          .clone()
+          .json()
+          .catch(() => undefined),
+      );
+      if (refusal) throw new ClientTurnRefusedErrorV1(refusal);
+    }
     return decodeClientTurnV1(await readJsonResponseV1(response));
   },
   readConfiguration(query: ConfigurationQueryV1) {

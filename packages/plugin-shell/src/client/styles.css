@@ -302,6 +302,17 @@
   text-align: center;
 }
 
+/*
+ * Why a Turn ends where it does — stopped, or replaced by a later message.
+ * Quiet, and under the answer rather than instead of it: the words the Bot
+ * already said are the Turn's content, and this is only its last line.
+ */
+.message-notice {
+  margin: 2px 0 0;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+}
+
 /* An assistant Turn is its avatar and, once there is text, its bubble. */
 .message-assistant {
   flex-direction: row;
@@ -464,6 +475,56 @@
   flex-direction: column;
   gap: 8px;
   width: min(640px, 84%);
+}
+
+/*
+ * Tool calls. Quieter than anything the Bot said: the User is watching work
+ * happen, not reading a message, so a chip carries the name and its state and
+ * opens in place to what the tool returned.
+ */
+
+.message-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(640px, 84%);
+}
+
+.tool-chip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--frock-text-muted);
+  text-align: left;
+  cursor: pointer;
+  background: var(--frock-surface);
+  border: 1px solid var(--frock-border);
+  border-radius: 10px;
+}
+
+.tool-chip-name {
+  color: var(--frock-text);
+  font-weight: 600;
+}
+
+.tool-chip-status {
+  flex: 1 1 auto;
+  font-size: var(--frock-text-xs);
+}
+
+.tool-chip-failed .tool-chip-status {
+  color: var(--frock-danger-text);
+}
+
+.tool-chip-result {
+  flex: 1 0 100%;
+  max-height: 12em;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /*

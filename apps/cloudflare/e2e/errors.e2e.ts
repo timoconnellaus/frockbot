@@ -11,20 +11,7 @@
 // These are the three failures worth provoking from the browser: a deployment
 // that answers with something that is not JSON, a send that is refused, and a
 // Turn that dies at the provider.
-import {
-  test,
-  expect,
-  openApplication,
-  firstRunDialog,
-  connectOllama,
-  closeOverlay,
-  chooseDefaultModel,
-  createBot,
-  ollamaCard,
-  composerInput,
-  E2E_MODEL_LABEL,
-  E2E_CONNECTION_LABEL,
-} from "./fixtures.ts";
+import { test, expect, composerInput, provisionThroughUi } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 import type { Page } from "@playwright/test";
 
@@ -33,26 +20,14 @@ async function withOneBot(
   page: Page,
   userId: string,
   ollamaBaseUrl: string,
-  name: string,
+  botName: string,
 ): Promise<void> {
-  await openApplication(page, userId);
-  await firstRunDialog(page).getByRole("button", { name: "Cancel" }).click();
-  await connectOllama(page, {
+  await provisionThroughUi(page, {
+    userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
     apiBaseUrl: ollamaBaseUrl,
+    botName,
   });
-  await expect(
-    ollamaCard(page).getByText("ready · models fresh"),
-  ).toBeVisible();
-  await closeOverlay(page);
-  await chooseDefaultModel(
-    page,
-    `${E2E_MODEL_LABEL} — ${E2E_CONNECTION_LABEL}`,
-  );
-  await createBot(page, name);
-  await expect(
-    page.getByRole("heading", { name: `${name} is ready.` }),
-  ).toBeVisible();
 }
 
 test.describe("failed requests", () => {

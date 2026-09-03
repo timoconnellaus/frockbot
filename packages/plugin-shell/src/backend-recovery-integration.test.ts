@@ -1310,17 +1310,18 @@ describe("Bot recovery", () => {
         { schemaVersion: 1, runId: `bounded-fence-${index}` },
       );
     }
-    await expect(
-      contribution.fenceRunAdmission(
-        { userId: "user-1", botId: "primary" },
-        { schemaVersion: 1, runId: "fence-over-capacity" },
-      ),
-    ).rejects.toThrow("Run admission fence capacity reached");
+    // The index is a bounded FIFO: the oldest fence ages out, and the fence
+    // itself always succeeds. Refusing it instead meant a Bot that had refused
+    // 256 sends answered every later fence 500, and left the client looping
+    // "Turn admission lookup failed".
+    await contribution.fenceRunAdmission(
+      { userId: "user-1", botId: "primary" },
+      { schemaVersion: 1, runId: "fence-over-capacity" },
+    );
     const fences = await storage.get<string[]>("run-admission-fences");
     expect(fences).toHaveLength(256);
-    expect(fences).toContain("command-fenced");
-    expect(fences).toContain("bounded-fence-0");
-    expect(fences).not.toContain("fence-over-capacity");
+    expect(fences).toContain("fence-over-capacity");
+    expect(fences).not.toContain("command-fenced");
   });
 
   test("rechecks a fence committed during execution-context resolution", async () => {
