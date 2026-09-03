@@ -247,7 +247,11 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
         : (run.recovery?.message ??
           run.failure ??
           "This Turn requires provider reconciliation before it can continue."),
-      canResume: !run.stopRequestedAt && run.recovery?.action === "resume",
+      // Offered whenever the run is parked, Stop included. Hiding it there
+      // hid it in exactly the case Stop creates: a Turn that was stopped
+      // while the model was mid-answer parks, and the person was left with a
+      // banner and no way to act on it.
+      canResume: run.recovery?.action === "resume",
     };
   }
   return undefined;

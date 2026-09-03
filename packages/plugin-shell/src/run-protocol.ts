@@ -789,6 +789,39 @@ export function projectClientTurnV1(result: BotTurnCompletion): ClientTurnV1 {
   };
 }
 
+/**
+ * One stored run on the wire, degraded rather than thrown when the record
+ * cannot be read.
+ *
+ * A single unreadable run — an older shape, or one a bug wrote badly — used to
+ * fail the whole transcript: `GET /turns` answered 500 for every request after
+ * it, and the person's entire conversation disappeared behind one bad row. The
+ * transcript keeps its shape and says which Turn it could not read.
+ */
+export function projectClientRunOrDegradedV1(run: StoredRun): ClientRunV1 {
+  try {
+    return projectClientRunV1(run);
+  } catch {
+    const admittedAt =
+      typeof run.acceptedAt === "string" &&
+      Number.isFinite(Date.parse(run.acceptedAt))
+        ? run.acceptedAt
+        : new Date(0).toISOString();
+    return {
+      schemaVersion: 2,
+      runId: truncate(String(run.runId ?? "unknown"), MAX_RUN_ID_LENGTH),
+      admittedAt,
+      input: typeof run.input === "string" ? run.input : "",
+      status: "failed",
+      events: [],
+      outcome: {
+        type: "failed",
+        message: "This Turn's record could not be read.",
+      },
+    };
+  }
+}
+
 export function projectClientRunListV1(
   runs: readonly StoredRun[],
 ): ClientRunListV1 {

@@ -399,12 +399,22 @@ export class BotDurableAuthority<Snapshot> {
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
       ).map(decodeSessionEvent);
       const settings = run.configurationSnapshot;
-      await transaction.put(key, {
-        ...run,
-        status: "running",
-        phase: "executing",
-        failure: undefined,
-      } satisfies StoredRunV1<Snapshot>);
+      // The failure is *removed*, not set to `undefined`: a running run that
+      // carries a `failure` key is a shape the run record does not allow, and
+      // writing one turned "resolve this Turn" into a record nothing could
+      // read afterwards. `require` checks it here, where the write is, rather
+      // than leaving the projector to fail on every later read.
+      const { failure: _failure, ...resumed } = run;
+      await transaction.put(
+        key,
+        structuredClone(
+          this.codec.require({
+            ...resumed,
+            status: "running",
+            phase: "executing",
+          } satisfies StoredRunV1<Snapshot>),
+        ),
+      );
       await this.refreshRecoveryAlarm(transaction);
       return { run, latest, settings };
     });

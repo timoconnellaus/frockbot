@@ -22,6 +22,7 @@ import {
   projectClientRunLookupV1,
   projectClientRunListV1,
   projectClientRunV1,
+  projectClientRunOrDegradedV1,
   projectClientTurnV1,
 } from "./run-protocol.js";
 
@@ -1355,6 +1356,30 @@ describe("dispatched subagents in the run projection", () => {
     };
     tampered.runs[0]!.events[0]!.prompt = "the child's brief";
     expect(() => decodeClientRunPageV1(tampered)).toThrow();
+  });
+
+  test("a run whose record cannot be read degrades instead of failing the list", () => {
+    // One badly written record — a resolve that wrote a shape the record does
+    // not allow — used to answer 500 for the whole transcript, for good.
+    const broken = {
+      ...storedRun([], "running"),
+      status: "reconciliation-required",
+      phase: "executing",
+    } as unknown as StoredRun;
+    expect(() => projectClientRunV1(broken)).toThrow();
+
+    const degraded = projectClientRunOrDegradedV1(broken);
+    expect(degraded).toMatchObject({
+      runId: "run-events",
+      status: "failed",
+      outcome: { type: "failed" },
+    });
+    // And the degraded row is itself a valid projection, so the page decodes.
+    expect(
+      decodeClientRunPageV1(
+        createClientRunListV1([degraded], { truncated: false }),
+      ).runs,
+    ).toHaveLength(1);
   });
 
   test("an interrupted Turn keeps the text it had already streamed", () => {

@@ -1769,7 +1769,9 @@ describe("hosted Stop", () => {
       status: "reconciliation-required",
       message:
         "Stop accepted; reconciling the provider outcome before cancelling.",
-      canResume: false,
+      // A parked Turn is offered the resolve control, Stop included: hiding
+      // it there hid it in exactly the case Stop creates.
+      canResume: true,
     });
 
     await provided.value.stopRun();
