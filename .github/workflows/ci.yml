@@ -83,7 +83,12 @@ jobs:
 
   e2e:
     name: Browser end-to-end (${{ matrix.shard }}/${{ strategy.job-total }})
-    needs: validate
+    # Deliberately not `needs: validate`. This job shares nothing with Validate
+    # — it installs its own dependencies and the harness builds the artifact
+    # itself — so gating it behind Validate only made a two-minute job wait
+    # nine minutes for an answer it never reads. The cost is that a push which
+    # fails typecheck still spends these runners; `deploy-staging` below is
+    # where the two are actually required to agree.
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
