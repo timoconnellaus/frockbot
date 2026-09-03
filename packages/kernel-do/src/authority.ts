@@ -34,6 +34,7 @@ import {
   eventsForFailedRun,
   latestModelRequestJournalState,
   planBotRunRecovery,
+  repairOrphanedOpenTurnV1,
   unresolvedModelRequestFailure,
 } from "./run-recovery.js";
 import {
@@ -1024,9 +1025,25 @@ export class BotDurableAuthority<Snapshot> {
       const supersede = activeRunId
         ? await this.planSupersede(transaction, command, activeRunId)
         : undefined;
-      const latestEvents = (
+      const storedEvents = (
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
       ).map(decodeSessionEvent);
+      // A Turn that died between `turn/start` and `turn/end` — an event the
+      // encoder refused, a durable write that failed — left the log open, and
+      // every later Turn failed validation with "turn N started while turn
+      // N-1 is open". Nothing owned that repair, because the run that would
+      // have closed it is already terminal, so admission does: with nothing
+      // executing, an open Turn is one nobody is going to finish.
+      const repairs = activeRunId
+        ? []
+        : repairOrphanedOpenTurnV1(command.sessionId, storedEvents);
+      const latestEvents = [...storedEvents, ...repairs];
+      if (repairs.length > 0) {
+        await transaction.put(
+          LATEST_EVENTS_KEY,
+          structuredClone(latestEvents.map(decodeSessionEvent)),
+        );
+      }
       const admittedSettings = await this.hooks.admittedSnapshot(
         transaction,
         settings,

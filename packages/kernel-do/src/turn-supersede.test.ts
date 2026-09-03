@@ -652,6 +652,46 @@ describe("eviction between the two Turns", () => {
   });
 });
 
+describe("a durable log left inside a Turn", () => {
+  test("is repaired at admission instead of refusing every later Turn", async () => {
+    const storage = new MemoryStorage();
+    // Exactly what a Turn that threw between `turn/start` and `turn/end`
+    // leaves behind: an open Turn, and no run to close it.
+    storage.values.set("latest-events", [
+      {
+        type: "session/created",
+        createdAt: "2026-09-03T00:00:00.000Z",
+        seq: 0,
+        timestamp: "2026-09-03T00:00:00.000Z",
+      },
+      {
+        type: "turn/start",
+        turn: 1,
+        seq: 1,
+        timestamp: "2026-09-03T00:00:01.000Z",
+      },
+    ]);
+    const probe = createAuthority(storage);
+
+    const run = probe.authority.run(command("run-1", "hello"));
+    await probe.handle("run-1").started;
+    probe.handle("run-1").finish();
+    await run;
+
+    const events = storage.values.get("latest-events") as Array<{
+      type: string;
+      turn?: number;
+    }>;
+    // The orphaned Turn is closed, so the new one starts.
+    expect(events[2]).toMatchObject({
+      type: "turn/end",
+      turn: 1,
+      outcome: "interrupted",
+    });
+    expect(storedRun(storage, "run-1").status).toBe("completed");
+  });
+});
+
 describe("a failing recovery of an older Turn", () => {
   test("does not swallow the message the User just sent", async () => {
     const storage = new MemoryStorage();
