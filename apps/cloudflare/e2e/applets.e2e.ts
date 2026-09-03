@@ -85,7 +85,7 @@ test("a Bot creates an Applet, the canvas shows its source, and the surface list
   // building state, showing the scaffold the tool wrote into the durable root.
   const canvas = page.getByRole("region", { name: /Applet Weekly Todos/ });
   await expect(canvas).toBeVisible({ timeout: 60_000 });
-  await expect(canvas.getByText("No published version yet")).toBeVisible();
+  await expect(canvas.getByText("Not published yet")).toBeVisible();
   await expect(canvas.getByRole("button", { name: "server.ts" })).toBeVisible();
   await expect(canvas.getByRole("button", { name: "ui.tsx" })).toBeVisible();
   await canvas.getByRole("button", { name: "server.ts" }).click();
@@ -97,7 +97,8 @@ test("a Bot creates an Applet, the canvas shows its source, and the surface list
   // artifact origin and fed the Applets state over bridge v2.
   await entry.click();
   const surface = page.getByRole("region", { name: "Applets" });
-  await expect(surface.getByText("FrockBot Package")).toBeVisible();
+  // A first-party page carries no provenance line: there is nobody to credit.
+  await expect(surface.getByText("FrockBot Package")).toHaveCount(0);
   const listFrame = surface.locator("iframe").contentFrame();
   await expect(listFrame.getByText("Weekly Todos")).toBeVisible({
     timeout: 30_000,

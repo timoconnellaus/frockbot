@@ -13,7 +13,7 @@ const projection: ComputerProjectionV1 = {
   botId: "scout",
   providerLabel: "Fake Computer",
   phase: "idle",
-  message: "Persistent Computer available",
+  message: "Ready to start",
   screenshots: [],
 };
 

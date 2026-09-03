@@ -123,10 +123,7 @@ onBeforeUnmount(() => restoreFocus?.focus());
                 : "Change the look"
             }}
           </h1>
-          <p>
-            Keep this look or tailor each layer. Your choice is saved with the
-            Bot.
-          </p>
+          <p>Keep this look, or change any layer.</p>
           <label v-if="flock.overlay === 'create'" class="flock-name"
             >Bot name<input
               v-model.trim="flock.draftName"

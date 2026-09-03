@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "provider-foundation",
-  "displayName": "Foundation Provider",
+  "displayName": "Built-in models",
   "version": "0.0.1",
   "compatibility": {
     "frockbot": ">=0.0.1"

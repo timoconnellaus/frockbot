@@ -254,7 +254,7 @@ async function addMcpServer(): Promise<void> {
   } catch (error) {
     mcpApiKey.value = "";
     web.value.settingsError =
-      error instanceof Error ? error.message : "Could not add the MCP server";
+      error instanceof Error ? error.message : "Couldn't add that server.";
   }
 }
 
@@ -343,11 +343,7 @@ async function connect(
         >
           <div class="connect-card-copy">
             <strong>{{ connection.pendingAuthorization?.label }}</strong>
-            <span>
-              Needs your authorization. Only you can complete it — FrockBot
-              creates the sign-in link when you press Reconnect, and nothing is
-              stored waiting for it.
-            </span>
+            <span> Needs you to sign in again. </span>
           </div>
           <UiButton
             variant="primary"
@@ -376,11 +372,7 @@ async function connect(
             <span class="connector-copy">
               <strong>{{ item.displayName }}</strong>
               <small>
-                {{
-                  item.connectionTypes
-                    .map((connection) => connection.displayName)
-                    .join(", ")
-                }}
+                {{ item.connectionTypes[0]?.displayName }}
               </small>
             </span>
             <UiButton
@@ -548,12 +540,8 @@ async function connect(
                 />
               </label>
               <p class="field-hint">
-                Leave both empty for a server that registers clients itself,
-                which is what most do. FrockBot registers as a public client; a
-                server that issues a client secret is refused, because a secret
-                would have to live in this Connection's settings. You will be
-                sent to the server to sign in, and no token ever reaches this
-                page.
+                Leave both empty unless the server gave you specific values.
+                You'll sign in on the server's own site.
               </p>
             </template>
             <div class="api-key-actions">

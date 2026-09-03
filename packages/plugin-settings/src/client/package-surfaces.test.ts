@@ -165,9 +165,7 @@ describe("Package configuration homes", () => {
   test("names the surface a Plugins row points at", () => {
     expect(configurationHomeLabel("models")).toBe("Models");
     expect(configurationHomeLabel("connections")).toBe("Connectors");
-    expect(configurationHomeLabel("user-settings")).toBe(
-      "Application settings",
-    );
+    expect(configurationHomeLabel("user-settings")).toBe("Settings");
     expect(configurationHomeLabel("none")).toBeUndefined();
   });
 });

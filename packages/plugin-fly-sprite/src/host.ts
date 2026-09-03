@@ -1,5 +1,8 @@
 import type { Entry } from "@cordisjs/plugin-webui";
-import { ComputerError } from "@frockbot/computer-core";
+import {
+  COMPUTER_UNCONFIGURED_MESSAGE_V1,
+  ComputerError,
+} from "@frockbot/computer-core";
 import type { ComputerState } from "@frockbot/plugin-computer/shared";
 import { computerUpdateLabelV1 } from "@frockbot/plugin-computer/protocol";
 import {
@@ -46,11 +49,11 @@ class FlySpriteHostController {
     this.machine = transitionComputerState(initialComputerMachineState(), {
       type: "configured",
       botId: this.computer.botId,
-      providerLabel: "Fly Sprites",
+      providerLabel: "Computer",
       configured: computer.configured,
       message: computer.configured
-        ? "Persistent Fly Sprite computer"
-        : "Set SPRITES_TOKEN to attach a computer",
+        ? "Computer ready"
+        : COMPUTER_UNCONFIGURED_MESSAGE_V1,
     });
     const data: ComputerState = {
       ...this.machine,

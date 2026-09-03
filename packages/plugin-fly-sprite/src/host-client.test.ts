@@ -11,8 +11,10 @@ import {
   type ComputerHostOpenFrameV1,
   type ComputerHostProvisioningV1,
 } from "@frockbot/computer-host-protocol";
+import { COMPUTER_COLD_PROVISION_EXPECTATION_MS } from "@frockbot/plugin-computer/protocol";
 import {
   ComputerHostClient,
+  COMPUTER_HOST_OPEN_TIMEOUT_MS,
   type ComputerHostFetcherV1,
 } from "./host-client.ts";
 
@@ -565,6 +567,26 @@ describe("ComputerHostClient failures", () => {
       "no such service binding",
     );
   });
+
+  test("open outlasts the cold provision the product advertises", async () => {
+    // A first-ever wake that takes exactly as long as the Computer card
+    // promises must not abort on our own clock: on the shared 120 s default it
+    // reached the User as `provider-unavailable`, which reads as a broken
+    // Computer rather than one that is still coming up.
+    expect(COMPUTER_HOST_OPEN_TIMEOUT_MS).toBeGreaterThan(
+      COMPUTER_COLD_PROVISION_EXPECTATION_MS,
+    );
+  });
+
+  test("a deadline the client set says the Computer may still be starting", async () => {
+    const error = await client(hanging())
+      .exec({ script: "sleep 600", timeoutMs: 5 }, { timeoutMs: 5 })
+      .catch((thrown: unknown) => thrown);
+    // Addressed to whoever reads it in the app, with the next move in it.
+    expect((error as ComputerError).message).toBe(
+      "The Computer did not answer in time. It may still be starting up; try again in a moment.",
+    );
+  }, 10_000);
 
   test("the client's own deadline expiring is provider-unavailable", async () => {
     const error = await client(hanging())

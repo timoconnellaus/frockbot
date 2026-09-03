@@ -10,6 +10,7 @@ import {
   ref,
   watch,
 } from "vue";
+import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computerKey, type ComputerState } from "../shared.ts";
 import { dialogFocusWrapTarget } from "./dialog-focus.ts";
 import { computerProgressFrame, computerProgressRunKind } from "./progress.ts";
@@ -23,11 +24,17 @@ import {
 const computer = inject(computerKey) ?? useRpc<ComputerState>();
 const state = computed(() => computer.value);
 const busy = ref(false);
+// The Bot as its User named it. A raw slug and an infrastructure vendor are
+// architecture, not identity, and the viewer header is the User's screen.
+const shell = inject(frockBotWebDataKey, undefined);
+const botName = computed(
+  () => shell?.value.botSettings?.profile.name ?? "Computer",
+);
 const confirming = ref(false);
 const confirmDialog = ref<HTMLElement>();
 const viewerFrame = ref<HTMLIFrameElement>();
 const frameState = ref<"loading" | ComputerViewerFrameStateV1>("loading");
-const frameMessage = ref("Loading viewer frame…");
+const frameMessage = ref("Loading…");
 const elapsedSeconds = ref(0);
 let elapsedTimer: ReturnType<typeof setInterval> | undefined;
 let localProgressStartedAt = Date.now();
@@ -183,7 +190,9 @@ async function closeViewer(escape = false): Promise<void> {
   try {
     await (escape ? actions.escape() : actions.closeViewer());
   } catch {
-    // A failed release remains visible in the still-open overlay.
+    // The overlay collapses either way: a release the Computer refused is
+    // recorded durably and shown on the card, and is never a reason to trap
+    // the User in a full-screen viewer.
   }
 }
 
@@ -275,7 +284,7 @@ onBeforeUnmount(() => {
     <header class="computer-overlay-toolbar">
       <div class="computer-overlay-identity">
         <strong>Computer</strong>
-        <small>{{ state.botId }} · {{ state.providerLabel }}</small>
+        <small>{{ botName }}</small>
       </div>
       <div class="computer-overlay-actions">
         <span class="computer-status" :class="`status-${state.phase}`">
@@ -327,9 +336,7 @@ onBeforeUnmount(() => {
           @load="handleFrameLoad"
         />
         <div v-else class="computer-placeholder">
-          <strong v-if="state.phase === 'unconfigured'"
-            >Computer not configured</strong
-          >
+          <strong v-if="state.phase === 'unconfigured'">No computer</strong>
           <template v-else-if="opening">
             <strong>{{ openingHeading }}</strong>
             <p v-if="setupExpectation" class="computer-setup-expectation">
@@ -371,7 +378,7 @@ onBeforeUnmount(() => {
           <strong v-else-if="state.phase === 'disconnected'"
             >Viewer disconnected</strong
           >
-          <strong v-else>Persistent Computer</strong>
+          <strong v-else>Computer</strong>
           <p v-if="!opening">{{ state.message }}</p>
           <UiButton
             v-if="state.phase === 'idle' || state.phase === 'disconnected'"
@@ -409,7 +416,7 @@ onBeforeUnmount(() => {
       >
         <h2 id="computer-confirm-title">Take control of this Computer?</h2>
         <p id="computer-confirm-detail">
-          The Bot will be fenced from this desktop until you release control.
+          The Bot won't touch this desktop until you release control.
         </p>
         <div class="computer-confirm-actions">
           <UiButton @click="actions.cancelTakeControl">Cancel</UiButton>

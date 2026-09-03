@@ -2,7 +2,9 @@
 import { useRpc } from "@cordisjs/client";
 import { UiIcon } from "@frockbot/client-ui";
 import { computed, inject, ref } from "vue";
+import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computerKey, type ComputerState } from "../shared.ts";
+import { COMPUTER_COLD_PROVISION_EXPECTATION } from "../protocol.ts";
 import {
   computerProgressElapsedMs,
   computerProgressFrame,
@@ -12,7 +14,16 @@ import {
 const computer = inject(computerKey) ?? useRpc<ComputerState>();
 const state = computed(() => computer.value);
 const busy = ref(false);
+// No Bot, no Computer card. The client machine seeds a placeholder projection
+// before any Bot exists, and rendering it told a brand-new User about the
+// Computer of a Bot they had not created yet.
+const shell = inject(frockBotWebDataKey, undefined);
+const hasBot = computed(() => Boolean(shell?.value.activeBotId));
 const screenshot = computed(() => state.value.screenshots?.[0]);
+// A card that says there is no Computer opens nothing: a full-screen modal
+// repeating the same sentence is a click that costs the User a step and
+// answers nothing.
+const unconfigured = computed(() => state.value.phase === "unconfigured");
 const opening = computed(
   () =>
     state.value.phase === "provisioning" || state.value.phase === "updating",
@@ -32,7 +43,7 @@ const openingHeading = computed(() => {
 });
 const setupExpectation = computed(() =>
   progressRunKind.value === "cold-provision"
-    ? "This usually takes 2-3 minutes"
+    ? COMPUTER_COLD_PROVISION_EXPECTATION
     : undefined,
 );
 const progressPhaseLabel = computed(
@@ -92,11 +103,11 @@ async function open(): Promise<void> {
 </script>
 
 <template>
-  <section class="computer-card">
+  <section v-if="hasBot" class="computer-card">
     <button
       type="button"
       class="computer-screen computer-screen-thumbnail"
-      :disabled="busy"
+      :disabled="busy || unconfigured"
       aria-label="Open computer in full window"
       @click="open"
     >
@@ -137,13 +148,11 @@ async function open(): Promise<void> {
         </template>
         <template v-else>
           <UiIcon name="sparkle" size="lg" />
-          <strong v-if="state.phase === 'unconfigured'"
-            >Computer not configured</strong
-          >
+          <strong v-if="state.phase === 'unconfigured'">No computer</strong>
           <strong v-else-if="state.phase === 'disconnected'"
             >Viewer disconnected</strong
           >
-          <strong v-else>Persistent Computer</strong>
+          <strong v-else>Computer</strong>
           <span class="computer-placeholder-message">{{ state.message }}</span>
         </template>
       </span>

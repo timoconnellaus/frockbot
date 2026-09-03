@@ -18,8 +18,8 @@ onMounted(() => state.value.load());
     <header>
       <h2>Published setup</h2>
       <p>
-        Publishing activates one immutable setup for all of your Bots. Rollback
-        changes the shared active revision.
+        Publishing applies this setup to all of your Bots. You can go back to an
+        earlier one at any time.
       </p>
     </header>
 
@@ -30,9 +30,8 @@ onMounted(() => state.value.load());
         class="revision-card"
       >
         <div>
-          <strong>Revision {{ revision.packageRevision }}</strong>
+          <strong>Version {{ revision.packageRevision }}</strong>
           <small>{{ new Date(revision.publishedAt).toLocaleString() }}</small>
-          <code>{{ revision.applicationHash.slice(0, 22) }}…</code>
         </div>
         <span
           v-if="
@@ -52,7 +51,7 @@ onMounted(() => state.value.load());
       </article>
     </div>
     <p v-else-if="!state.error" class="empty-revisions">
-      No custom setup has been published yet.
+      Nothing published yet.
     </p>
     <p v-if="state.error" class="publisher-error" role="alert">
       {{ state.error }}

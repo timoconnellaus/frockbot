@@ -45,7 +45,7 @@ function botName(botId: string, fallback: string): string {
   return flock.value.profiles[botId]?.name ?? fallback;
 }
 function botSubtitle(botId: string): string {
-  return flock.value.profiles[botId]?.title ?? botId;
+  return flock.value.profiles[botId]?.title ?? "No messages yet";
 }
 function previewText(botId: string): string {
   return flock.value.unread[botId]?.lastMessage?.text ?? botSubtitle(botId);

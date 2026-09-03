@@ -450,7 +450,7 @@ export class BotState extends DurableObject<BotStateEnv> {
             computer: {
               storage: this.stateChannel.computerStorage,
               workspace: this.backendEnv.WORKSPACE_FILES,
-              providerLabel: "Fly Sprites",
+              providerLabel: "Computer",
               configured: computerConfigured,
               openComputer: (userId, botId, effectId) => {
                 const identity = { userId };
@@ -1837,11 +1837,17 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async alarm(): Promise<void> {
-    await (await this.contribution()).alarm();
-    // The alarm the Bot already has is also the audit outbox's second chance:
-    // entries a settlement could not deliver leave on the next firing rather
-    // than waiting for the Bot to be spoken to again.
-    await this.drainAuditOutbox();
+    // The outbox drain is in a `finally` for the same reason the kernel's
+    // re-arm is: it is the audit trail's second chance, and a throw anywhere in
+    // the Bot's own settlement must not be what stops entries leaving.
+    try {
+      await (await this.contribution()).alarm();
+    } finally {
+      // The alarm the Bot already has is also the audit outbox's second chance:
+      // entries a settlement could not deliver leave on the next firing rather
+      // than waiting for the Bot to be spoken to again.
+      await this.drainAuditOutbox();
+    }
   }
 
   /** Internal fetch surface reached only after the gateway authenticates ownership. */

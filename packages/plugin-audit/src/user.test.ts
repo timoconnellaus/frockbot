@@ -93,9 +93,25 @@ describe("the User Contribution", () => {
     await expect(
       audit.indexAuditEntries(Array.from({ length: 513 }, () => entry())),
     ).rejects.toThrow("bound");
-    await expect(
-      audit.indexAuditEntries([{ ...entry(), turn: 7 }]),
-    ).rejects.toThrow("disagree");
+  });
+
+  test("quarantines one undecodable entry and indexes the rest", async () => {
+    const audit = contribution();
+
+    // The page carries one entry whose `turn` disagrees with its occurrence id
+    // — reachable in production through the tool-name length and slug mismatch
+    // between the classifier and the wire codec.
+    const receipt = await audit.indexAuditEntries([
+      entry(),
+      { ...entry(), turn: 7 },
+    ]);
+
+    // Before this, the whole page threw. The throw was swallowed at the Bot's
+    // drain, the outbox was never drained again, and every later entry was
+    // dropped at the 512 bound: one malformed row cost the Bot its whole audit
+    // trail, silently.
+    expect(receipt).toEqual({ indexed: 1, quarantined: 1 });
+    expect(audit.query({}).entries).toHaveLength(1);
   });
 
   test("counts host-journal discrepancies without writing them in", async () => {

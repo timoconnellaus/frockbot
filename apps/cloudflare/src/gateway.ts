@@ -163,7 +163,7 @@ function signupClosedResponse(request: Request, url: URL): Response {
   <main>
     <p>FrockBot</p>
     <h1>${SIGNUPS_CLOSED_MESSAGE}</h1>
-    <p>If you already have access, ask the deployment owner to check your sign-in email.</p>
+    <p>If you already have access, ask whoever invited you to check your sign-in email.</p>
     <a href="/sign-out">Sign out</a>
   </main>
 </body>

@@ -76,9 +76,13 @@ export default defineConfig({
           // Contribution refuses to serve its routes at all otherwise.
           FROCKBOT_AUTHORIZATION_STATE_SECRET:
             "workerd-mcp-oauth-state-secret-0123456789abcdef",
-          // No Sprites credential reaches this Worker, in tests or in
-          // production: the Computer host holds the only copy (ADR 0004).
-          SPRITES_TOKEN: "",
+          // Not a credential: no Sprite token reaches this Worker in
+          // production either, because the Computer host holds the only copy
+          // (ADR 0004). `SPRITES_TOKEN` is only the "is a Computer configured"
+          // gate, and this suite exercises a deployment that has one — with it
+          // unset the Computer Package mounts no tools at all, which is a
+          // different subject.
+          SPRITES_TOKEN: "configured",
           COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
           COMPUTER_HOST_SHARDS: String(FAKE_COMPUTER_HOST_SHARDS),
           // A fixed signing secret, so a test can mint the key it presents.

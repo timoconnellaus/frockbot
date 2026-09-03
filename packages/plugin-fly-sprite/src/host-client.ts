@@ -83,6 +83,18 @@ export const COMPUTER_HOST_TIMEOUT_GRACE_MS = 5_000;
 /** The deadline for a call that declares none of its own. */
 export const COMPUTER_HOST_DEFAULT_TIMEOUT_MS = 120_000;
 
+/**
+ * The deadline for `open`, which is the one call that may provision.
+ *
+ * It has to outlast the slowest thing the product tells the User to expect:
+ * the Computer card advertises "This usually takes 2-3 minutes" for a cold
+ * provision. On the shared 120 s default a first-ever wake that took exactly
+ * as long as the UI promised aborted on our own clock and reached the User as
+ * `provider-unavailable` — "the Computer is broken" — rather than as a
+ * Computer that was still coming up.
+ */
+export const COMPUTER_HOST_OPEN_TIMEOUT_MS = 300_000;
+
 /** The deadline for a best-effort cancel, which must never outlive its caller. */
 const CANCEL_TIMEOUT_MS = 5_000;
 
@@ -336,15 +348,21 @@ export class ComputerHostClient {
   async open(
     options?: ComputerHostOpenOptionsV1,
   ): Promise<ComputerHostOpenResultV1> {
+    // A caller's own deadline still wins; absent one, `open` gets the cold
+    // provision's, not the shared default.
+    const openOptions: ComputerHostOpenOptionsV1 = {
+      ...options,
+      timeoutMs: options?.timeoutMs ?? COMPUTER_HOST_OPEN_TIMEOUT_MS,
+    };
     if (!options?.onProgress) {
       return this.json(
         { kind: "open" },
         decodeComputerHostOpenResultV1,
-        options,
+        openOptions,
       );
     }
-    const effectId = this.effectIdFor(options);
-    const lease = this.lease(COMPUTER_HOST_DEFAULT_TIMEOUT_MS, options);
+    const effectId = this.effectIdFor(openOptions);
+    const lease = this.lease(COMPUTER_HOST_OPEN_TIMEOUT_MS, openOptions);
     try {
       const response = await this.send(
         { kind: "open", stream: true },
@@ -379,7 +397,7 @@ export class ComputerHostClient {
       return await this.json(
         { kind: "open" },
         decodeComputerHostOpenResultV1,
-        options,
+        openOptions,
       );
     } finally {
       lease.release();
@@ -900,9 +918,12 @@ export class ComputerHostClient {
       );
     }
     if (lease.timedOut) {
+      // Written for whoever reads it in the app. A deadline this call set is
+      // not a broken Computer: most often the Computer is still starting, and
+      // "try again" is exactly the right next move.
       return new ComputerError(
         "provider-unavailable",
-        "The Computer host did not answer within the effect's deadline",
+        "The Computer did not answer in time. It may still be starting up; try again in a moment.",
         true,
         { cause: error },
       );
