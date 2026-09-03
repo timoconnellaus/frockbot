@@ -40,7 +40,9 @@ import {
 import {
   memoryFileKindV1,
   memoryFilePathV1,
+  memoryLogPathV1,
   memoryShardOfV1,
+  MEMORY_MAX_LOG_PARTS_V1,
   type MemoryOwnerV1,
   type MemoryTierV1,
 } from "./roots.js";
@@ -310,12 +312,8 @@ export class MemoryStore {
     const secret = refuseMemorySecretV1(text);
     if (secret) return { status: "refused", reason: secret.reason };
     const at = request.at ?? this.#clock();
-    const path = memoryFilePathV1(
-      request.root,
-      this.owner.botId,
-      request.tier,
-      at,
-    );
+    const path = await this.tierWritePath(request.root, request.tier, at);
+    if ("status" in path) return path;
     const refusal = this.refuseForeignShard(path, request.writer);
     if (refusal) return refusal;
     const line: MemoryFactV1 = { date: memoryDayV1(at), text };
@@ -326,6 +324,43 @@ export class MemoryStore {
       }
       return [...facts, line];
     });
+  }
+
+  /**
+   * The file this tier's next fact goes in, rolling the log over when the
+   * current file is full.
+   *
+   * A log file that grew past the per-file cap used to take its whole tier
+   * down with it: the read skips an oversized file, so the tier vanished from
+   * injection, and `forget` answered `unavailable` for it, so no tool could
+   * trim it back. Rolling to `log/YYYY-MM.NN.md` keeps every fact, keeps
+   * every file readable, and needs no migration — the existing month file is
+   * part 0 and stays exactly where it is.
+   *
+   * The profile tier does not roll: it is a bounded, curated file, and one
+   * that reached the cap is a real refusal the User should see.
+   */
+  private async tierWritePath(
+    root: WorkspaceMemoryRootV1,
+    tier: MemoryTierV1,
+    at: Date,
+  ): Promise<WorkspacePathV1 | MemoryWriteOutcomeV1> {
+    const path = memoryFilePathV1(root, this.owner.botId, tier, at);
+    if (tier === "profile") return path;
+    for (let part = 0; part <= MEMORY_MAX_LOG_PARTS_V1; part += 1) {
+      const candidate = memoryLogPathV1(root, this.owner.botId, at, part);
+      const head = await this.#files.stat(candidate);
+      if (head.status === "not-found") return candidate;
+      if (head.status !== "ok") return { status: head.status, reason: head.reason };
+      // Room for at least one more fact of the maximum size, so a write never
+      // pushes a file past the cap and strands it.
+      if (head.generation.size + MEMORY_MAX_FACT_LENGTH < MEMORY_MAX_FILE_BYTES)
+        return candidate;
+    }
+    return {
+      status: "refused",
+      reason: `this month's Memory log already has ${MEMORY_MAX_LOG_PARTS_V1} files`,
+    };
   }
 
   /**
@@ -381,33 +416,36 @@ export class MemoryStore {
     const mine = [...tier.profile, ...tier.recent].filter(
       (fact) => fact.botId === this.owner.botId && matches(fact.text),
     );
+    // Both halves always run. Removing my own line and returning left another
+    // Bot's copy of the same fact being injected forever, under a tool result
+    // that said "Forgotten. The line is gone from …" — so a shared fact two
+    // Bots had recorded came back on the very next Turn.
+    const ownWrites: MemoryFileChangeV1[] = [];
+    let ownLast: MemoryWriteOutcomeV1 | undefined;
     if (mine.length > 0) {
-      // The Bot owns every file the fact sits in, so removing the line is both
-      // permitted and the honest record: nothing else recorded it.
-      let last: MemoryWriteOutcomeV1 | undefined;
-      // Each rewritten file is recorded as it lands, so a failure part-way
-      // through still answers with the generations that already exist on disk.
-      const written: MemoryFileChangeV1[] = [];
+      // Removing the line from my own shard is permitted and is the honest
+      // record for the copies I wrote. Each rewritten file is recorded as it
+      // lands, so a failure part-way through still answers with the
+      // generations that already exist on disk.
       for (const source of tier.sources) {
         if (source.botId !== this.owner.botId) continue;
         const path: WorkspacePathV1 = { root: request.root, path: source.path };
         const refusal = this.refuseForeignShard(path, request.writer);
-        if (refusal) return { ...refusal, written };
+        if (refusal) return { ...refusal, written: ownWrites };
         const outcome = await this.rewrite(path, request.writer, (facts) => {
           const kept = facts.filter((fact) => !matches(fact.text));
           return kept.length === facts.length ? "unchanged" : kept;
         });
-        if (outcome.status !== "ok") return { ...outcome, written };
+        if (outcome.status !== "ok") return { ...outcome, written: ownWrites };
         if (!outcome.duplicate) {
-          last = outcome;
-          written.push({
+          ownLast = outcome;
+          ownWrites.push({
             path: outcome.path,
             generationId: outcome.generationId,
             contentHash: outcome.contentHash,
           });
         }
       }
-      if (last) return { ...last, written };
     }
 
     const elsewhere = [
@@ -419,13 +457,16 @@ export class MemoryStore {
       ),
     ];
     if (elsewhere.length === 0) {
+      // Nothing else holds it. My own removal, if there was one, is the whole
+      // answer.
+      if (ownLast) return { ...ownLast, written: ownWrites };
       return {
         status: "refused",
         reason: `no fact matching "${text}" is recorded in this tier`,
       };
     }
-    const written: MemoryFileChangeV1[] = [];
-    let last: MemoryWriteOutcomeV1 | undefined;
+    const written: MemoryFileChangeV1[] = [...ownWrites];
+    let last: MemoryWriteOutcomeV1 | undefined = ownLast;
     for (const recorded of elsewhere) {
       const retraction = await this.write({
         root: request.root,

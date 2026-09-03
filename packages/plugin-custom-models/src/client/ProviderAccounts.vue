@@ -101,7 +101,8 @@ function retryConnection(
 ): void {
   beginConnect(item);
   apiKeyLabel.value = connection.displayName;
-  apiKeyBaseUrl.value = connection.settings?.["api-base-url"] ?? "";
+  const baseUrl = connection.settings?.["api-base-url"];
+  apiKeyBaseUrl.value = typeof baseUrl === "string" ? baseUrl : "";
   retryingConnectionId.value = connection.connectionId;
 }
 

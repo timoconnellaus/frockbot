@@ -1949,7 +1949,10 @@ export class OllamaCloudUserBackendContribution {
         },
       );
     }
-    await this.finishRecord({ ...record, validationFailure: failure }, "failed");
+    await this.finishRecord(
+      { ...record, validationFailure: failure },
+      "failed",
+    );
   }
 
   private async finishRecord(

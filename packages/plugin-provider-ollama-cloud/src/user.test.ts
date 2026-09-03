@@ -469,7 +469,9 @@ describe("Ollama Cloud User Contribution", () => {
     // command must not re-drive forever, and the Connection must not sit in
     // `authorizing` where the User is shown nothing at all.
     const { settings, ollama } = await fixture((_input, init) =>
-      Promise.reject(init?.signal?.reason ?? new Error("provider never answered")),
+      Promise.reject(
+        init?.signal?.reason ?? new Error("provider never answered"),
+      ),
     );
     const created = await ollama.executeConnection("account-1", {
       schemaVersion: 1,
