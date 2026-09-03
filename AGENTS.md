@@ -77,6 +77,9 @@ These rules govern production features and architecture. Treat them as invariant
 - Compilation and bundling happen outside Durable Objects. Composition consumes immutable, content-addressed artifacts and never builds them.
 - A Composition generation is keyed by its resolved artifact set. An isolate's loader identity is derived only from that artifact set and the digest of the bindings it was granted, so identical artifacts under identical authority share one isolate and a changed grant never reaches a cached isolate. Generation creation rate, artifact size, retained generations, Workspace disk, and Bot isolate CPU, subrequests, and model spend are bounded by durable per-User quotas; exceeding a quota refuses the operation and records a visible failure.
 - Every Package whose recorded provenance is not first-party executes in a Dynamic Worker isolate the Bot's Durable Object loads for it, with `globalOutbound` disabled, only the bindings that expose what the Bot holds — its resolved model, enabled tools, Memory, Workspace, and its User's enabled Connections as opaque leases — and no access to secrets, the keyring, or any Durable Object state other than the bindings expose. Network access exists only through those bindings. First-party Packages may run in the kernel's isolate only when reviewed and shipped with FrockBot.
+- A Package may declare an Instance Contribution: a server class, a UI page, and tools that run as one durable instance per User — an Applet. The kernel mounts the instance's server artifact as a Durable Object facet under a kernel-owned Applet Durable Object it loads through Worker Loader with `globalOutbound` disabled and the same capability bindings as any isolate. The facet's storage is User product state, not Composition: it survives every code generation, is migrated forward by the Applet, and is deleted only by the kernel when the User deletes the Applet. The kernel is the authority for the instance — its directory entry, current generation, version history, viewer sessions, tool routing, and deletion — and never for its contents. Composition Packages never own storage; facets exist only under the Applet Durable Object.
+- An Applet's declared tools are Composition members of every Bot its User owns, so each admitted Turn records the Applet generation whose tools it ran under, and a published generation activates at the next admitted Turn. A tool call routes through the Applet Durable Object to its facet.
+- Every Contribution kind is resolved from the manifest and an artifact, never from a switch over Package identity. A first-party Package that declares only Bot-authorable Contribution kinds ships as an artifact-backed member and loads through the same path as a Bot-authored one.
 
 ## Self-modification
 
@@ -85,6 +88,7 @@ These rules govern production features and architecture. Treat them as invariant
 - A Bot-authored change is a durable effect: the Bot records intent, the resulting artifact is immutable and content-addressed, and its provenance names the Bot, Session, and Turn that produced it. Artifacts are superseded, never edited in place.
 - Activation is immediate and needs no human approval, subject to composition failing closed. The User can inspect, diff, disable, and revert any Bot-authored change; reverting is itself a recorded generation. A Bot may revert its own setup generations when its User asks; undo covers the Bot's setup, never actions taken through Connections, and last known-good is set only by a successful mount, never by a revert.
 - Self-modification never widens authority. Bot-authored and installed code runs with exactly what the Bot already holds; there is no path by which a Bot requests more, and a capability the Bot does not hold is unavailable to its code.
+- An Applet is authored as TypeScript under the Applets Package's durable root on the User's Computer, checked, linted, and previewed there through the Applets SDK, and published as an immutable generation the Applet Durable Object mounts. The Computer is where an Applet is written and never where it runs: a Turn that uses an Applet's tools or a User who opens an Applet wakes nothing. Publishing reads the built artifact through the Workspace file surface; no credential reaches the Computer for it.
 - Skills are files under the Bot's instruction root. An edit is visible to the Bot on its next admitted Turn; the exact Skill generation each Turn used is reconstructable.
 - Bot-authored Packages are shareable: they are publishable and installable by other Bots and Users through the same catalog and manifest as first-party Packages. Publication beyond the authoring User is a User action.
 
@@ -126,7 +130,8 @@ These rules govern production features and architecture. Treat them as invariant
 
 ## Package contributions
 
-- A Package declares each Contribution by runtime: backend runtime, Bot isolate, hosted client, desktop shell, or mobile shell.
+- A Package declares each Contribution by runtime: backend runtime, Bot isolate, hosted client, desktop shell, mobile shell, or instance.
+- A hosted client Contribution from a non-first-party Package is a sandboxed cookieless iframe page in a declared slot, or a declarative entry — a sidebar action or an overlay surface — the shell renders from the manifest with no Package JavaScript in the app origin. Core chrome is never Package-owned.
 - Canonical state and orchestration live in backend runtime Contributions.
 - Desktop and mobile Contributions provide optional platform adapters; their absence does not stop Agent execution.
 - The hosted client renders backend state and submits commands. It does not become an alternate authority.
@@ -182,6 +187,9 @@ Add automated checks for constitutional rules whenever they can be enforced mech
 - with a per-Bot override Package disabled, every Bot resolves the account-level value, and the overrides it captured survive to be restored when it is re-enabled;
 - a broken Bot-authored generation leaves the last known-good Composition running, records a visible failure, and delivers that failure to the Bot on its next Turn;
 - a generation that lacks a required core member, or carries one under non-first-party provenance, is refused;
+- an Applet's facet storage survives a code generation change and a revert; a generation whose health check fails leaves the prior facet resident; deleting an Applet deletes its storage, versions, and directory entry;
+- the Applets Package authored through `package_author` mounts and behaves identically to the shipped artifact-backed member, and no Contribution is resolved by a switch over Package identity;
+- an open Applet's page carries no credential and reaches its facet only through a short-lived viewer token scoped to that Applet and User;
 - reverting a Bot-authored change restores the prior generation, whether the User or the Bot reverts, and a revert never sets last known-good;
 - a Skill written outside the Bot's own authority is not loaded as an instruction;
 - an operation exceeding a durable per-User quota is refused and records a visible failure;
