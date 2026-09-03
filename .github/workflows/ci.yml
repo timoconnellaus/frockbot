@@ -150,6 +150,28 @@ jobs:
           path: apps/cloudflare/e2e/test-results
           retention-days: 7
 
+  e2e-gate:
+    # The `main` ruleset requires a check by this exact name, and sharding the
+    # job renamed the four that do the work — a required check that no job
+    # reports blocks every pull request forever. This job keeps the name
+    # stable, so the shard count stays a one-line edit to `matrix.shard`
+    # rather than a change to the repository's protection rules.
+    name: Browser end-to-end
+    needs: e2e
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Require every shard to have passed
+        # A matrix result is `success` only when no leg failed, and `fail-fast`
+        # is off, so this reports on the whole suite rather than the first loss.
+        env:
+          SHARDS: ${{ needs.e2e.result }}
+        run: |
+          echo "Browser end-to-end shards: $SHARDS"
+          if [[ "$SHARDS" != "success" ]]; then exit 1; fi
+
   e2e-report:
     name: Browser end-to-end report
     needs: e2e
