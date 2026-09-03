@@ -27,9 +27,16 @@
     />
     <meta name="theme-color" content="#faf7f2" />
   </head>
+  <!--
+    The client's auth projection decodes all three attributes and throws
+    rather than mounting when one is missing, so the development document
+    stamps the same set the Worker-rendered document does. `development` is an
+    admin identity by the gateway's own rule (`isDeploymentAdminV1`).
+  -->
   <body
     data-frockbot-user-id="development"
     data-frockbot-auth-mode="development"
+    data-frockbot-is-admin="true"
   >
     <div id="app"></div>
     <script type="module" src="/src/client/index.ts"></script>

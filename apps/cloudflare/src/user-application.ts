@@ -75,6 +75,20 @@ function hostedIsAdmin(request: Request): boolean {
   return value === "true";
 }
 
+/**
+ * The `<body>` attributes the hosted client's auth projection decodes
+ * (`packages/plugin-auth/src/client/browser.ts`, which throws rather than
+ * mounting when one is missing). Every document that mounts the client - the
+ * Worker-rendered one below and the vite development document
+ * (`apps/cloudflare/index.html`) - carries all of them, so the list lives in
+ * one place and both documents are tested against it.
+ */
+export const HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1 = [
+  "data-frockbot-user-id",
+  "data-frockbot-auth-mode",
+  "data-frockbot-is-admin",
+] as const;
+
 function appHtml(
   userId: string,
   applicationHash: string,
