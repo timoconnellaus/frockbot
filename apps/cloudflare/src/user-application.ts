@@ -37,6 +37,7 @@ import {
 import { decodeApprovalDecisionCommandV1 } from "@frockbot/plugin-shell/approvals";
 import { botTurnRefusalCodeV1 } from "@frockbot/kernel-do";
 import type { UserApplicationEnv } from "./contracts.js";
+import { answeredEntryV1 } from "./entry-boundary.js";
 import {
   drainedAnswerV1,
   isRequestTooLargeV1,
@@ -296,7 +297,16 @@ export function createUserApplication() {
     if (oversized) {
       return drainedAnswerV1(request, jsonError(413, TURN_TOO_LONG_MESSAGE_V1));
     }
-    return drainedAnswerV1(request, await route(request, env));
+    // This Worker's `fetch` is an entry point of its own: a route that throws
+    // has no caller left inside the isolate, and the log showed exactly that —
+    // `BotNotFoundError` five times in one window, then a refused Turn, then
+    // the process exiting. A Bot that is not there is a 404 the client can act
+    // on; anything else is a 500 that still carries a readable reason, and the
+    // isolate survives to answer the next request.
+    return drainedAnswerV1(
+      request,
+      await answeredEntryV1("request failed", () => route(request, env)),
+    );
   };
 }
 
