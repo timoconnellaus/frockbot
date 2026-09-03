@@ -24,6 +24,7 @@ import {
   type RoutineFormSubmissionV1,
   type RoutinesClientState,
 } from "./state.js";
+import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
 
 function message(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -287,3 +288,13 @@ export const routinesClientPlugin: ClientPlugin = (ctx) => {
 };
 
 export default routinesClientPlugin;
+
+/**
+ * The manifest's `client` entry, resolved by specifier. The application looks
+ * this descriptor up in its Contribution table; it never branches on which
+ * Package it belongs to.
+ */
+export const clientContribution = defineClientContribution<ClientPlugin>({
+  specifier: "@frockbot/plugin-routines/client",
+  plugin: routinesClientPlugin,
+});

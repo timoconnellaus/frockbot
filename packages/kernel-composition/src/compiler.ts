@@ -3,6 +3,7 @@ import {
   isClientIframeContribution,
   type FrockBotManifest,
 } from "./manifest.ts";
+import { decodeArtifactRefV1, type ArtifactRefV1 } from "./generation.ts";
 import { satisfies, valid } from "semver";
 
 export type JsonValue =
@@ -13,6 +14,18 @@ export interface ApplicationPackageSelection {
   version: string;
   config?: JsonValue;
   grants: string[];
+  /**
+   * The immutable module bytes this member loads from.
+   *
+   * Absent ⇒ first-party, in-process: the application resolves the member's
+   * Contributions from its own Contribution table, which is how every member
+   * of the foundation application works today. Present ⇒ the member loads
+   * through the isolate host like a Bot-authored Package, even though its
+   * provenance is first-party — the shape ADR 0022 gives the Applets Package.
+   * Declaring one changes nothing about how the plan is compiled; it only
+   * records that the code is not in this bundle.
+   */
+  artifact?: ArtifactRefV1;
 }
 
 export interface ApplicationSource {
@@ -42,6 +55,8 @@ export interface CompiledPackage {
   config: JsonValue;
   grants: string[];
   manifest: FrockBotManifest;
+  /** Absent ⇒ first-party in-process; present ⇒ loaded from the artifact. */
+  artifact?: ArtifactRefV1;
 }
 
 export interface ApplicationPlan {
@@ -233,6 +248,13 @@ export function compileApplicationDeclarations(
     if (byId.has(manifest.id)) {
       throw new Error(`duplicate package id "${manifest.id}"`);
     }
+    const artifact =
+      selection.artifact === undefined
+        ? undefined
+        : decodeArtifactRefV1(
+            selection.artifact,
+            `package "${selection.specifier}" artifact`,
+          );
     const pkg: CompiledPackage = {
       id: manifest.id,
       specifier: selection.specifier,
@@ -240,6 +262,7 @@ export function compileApplicationDeclarations(
       config: selection.config ?? null,
       grants: [...selection.grants].sort(),
       manifest,
+      ...(artifact === undefined ? {} : { artifact }),
     };
     validateGrants(pkg);
     byId.set(pkg.id, pkg);

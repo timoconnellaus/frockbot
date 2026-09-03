@@ -46,6 +46,7 @@ import {
   type RoutineRunDetailViewV1,
   type RoutineRunListViewV1,
 } from "./shared.js";
+import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
 /** One delivery, as the Bot Durable Object answers it. */
 export interface RoutineHookDeliveryReceiptV1 {
@@ -373,3 +374,16 @@ export namespace createRoutinesBackendContribution {
     return () => lifecycle.mount(createRoutinesBackendContribution(host));
   }
 }
+
+/**
+ * The manifest's gateway `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineGatewayContribution<
+  RoutinesGatewayHost,
+  RoutinesBackendRouteContribution
+>({
+  specifier: "@frockbot/plugin-routines/backend",
+  create: createRoutinesBackendContribution.plugin,
+});

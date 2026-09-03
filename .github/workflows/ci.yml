@@ -150,6 +150,18 @@ jobs:
           path: apps/cloudflare/e2e/test-results
           retention-days: 7
 
+      - name: Upload wrangler logs
+        # `wrangler dev` writes its debug log — including everything workerd
+        # printed — to this directory whatever `--log-level` says. When the
+        # runtime dies mid-suite, this is the only record of why.
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wrangler-logs-${{ matrix.shard }}
+          path: ~/.config/.wrangler/logs
+          retention-days: 7
+          if-no-files-found: warn
+
   e2e-gate:
     # The `main` ruleset requires a check by this exact name, and sharding the
     # job renamed the four that do the work — a required check that no job

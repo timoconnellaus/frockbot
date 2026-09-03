@@ -313,12 +313,104 @@ function text(bytes: Uint8Array): string {
 }
 
 /**
+ * Appends one `computer/sync` outcome to a Session and flushes it.
+ *
+ * The single place a sync becomes a durable record, so the Turn's own policy
+ * and the one sanctioned caller outside it ({@link syncWorkspaceRootNowV1})
+ * cannot record the same fact in two shapes. A Session that is gone or
+ * disposed records nothing: a sync is never a reason to fail anything.
+ */
+async function recordComputerSyncV1(
+  sessions: SessionStore,
+  sessionId: string,
+  turn: number,
+  reason: ComputerSyncReasonV1,
+  summary: ComputerSyncSummaryV1,
+): Promise<void> {
+  const session = sessions.get(sessionId);
+  if (!session || session.disposed) return;
+  session.append({
+    type: "computer/sync",
+    turn: Math.max(1, turn),
+    reason,
+    ...summary,
+  });
+  // The record is durable before anything reports the sync happened.
+  await session.flush();
+}
+
+/**
+ * Reconciles ONE declared durable root now, outside the Turn's sync policy.
+ *
+ * THE ONE SANCTIONED EXTRA CALLER. {@link ComputerTurnSync} was deliberately
+ * narrowed — "a caller cannot get the policy wrong because there is no way to
+ * ask for a sync at another time" — and this function is the single, named
+ * exception to that sentence, added for Applet publish (ADR 0022 decision 7):
+ * "Publishing reads the built artifact from the durable root through the
+ * Workspace file surface." `applet build` writes `<appletId>/dist/` on the
+ * Computer with an ordinary shell write, and the publish reads it from the
+ * *store*. Without a push between those two the publish would read the
+ * previous build, or nothing, and record a generation for bytes that never
+ * existed — a wrong artifact rather than a visible failure. The Turn's own
+ * `turn-end` push is too late: publish happens inside the Turn.
+ *
+ * It stays narrow in four ways, and the narrowness is the reason it is
+ * allowed. It reconciles one root and not the Workspace. It wakes nothing: it
+ * takes an already-open {@link ComputerHandle}, so a hibernated Computer stays
+ * hibernated and this can never become a reason one starts. It records its
+ * outcome exactly as the Turn's policy does, under its own `publish` reason,
+ * so a Session log still says what every sync run moved and why. And it never
+ * throws — an unavailable Computer is a summary its caller reads and refuses
+ * the publish on, not an exception on the Turn.
+ *
+ * A provider with no per-root reconciliation answers `refused`, and so does a
+ * root this Computer does not sync. Neither is silently upgraded to a full
+ * `reconcile`: the caller asked for one root's bytes to be durable and is owed
+ * a true answer about that root.
+ */
+export async function syncWorkspaceRootNowV1(request: {
+  computer: ComputerHandle;
+  sessions: SessionStore;
+  sessionId: string;
+  turn: number;
+  root: WorkspaceRootV1;
+  signal?: AbortSignal;
+}): Promise<ComputerSyncSummaryV1> {
+  const { computer, sessions, sessionId, turn, root, signal } = request;
+  const sync = computer.sync;
+  let summary: ComputerSyncSummaryV1;
+  if (!sync?.reconcileRoot) {
+    summary = computerSyncSummaryV1(
+      "refused",
+      "this Computer cannot reconcile a single durable root",
+    );
+  } else {
+    try {
+      summary = await sync.reconcileRoot(
+        root,
+        "publish",
+        signal ? { signal } : undefined,
+      );
+    } catch (error) {
+      summary = computerSyncSummaryV1(
+        "unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+  await recordComputerSyncV1(sessions, sessionId, turn, "publish", summary);
+  return summary;
+}
+
+/**
  * The Turn's sync state, and the only place this Package decides to sync.
  *
  * Deep and small on purpose: `beforeUse` and `afterTurn` are the whole
  * surface, they never throw, and every path through them either records a
  * `computer/sync` event or has nothing to record. A caller cannot get the
- * policy wrong because there is no way to ask for a sync at another time.
+ * policy wrong because there is no way to ask for a sync at another time —
+ * with exactly one named exception, {@link syncWorkspaceRootNowV1}, which
+ * reconciles a single root for an Applet publish and is documented there.
  */
 class ComputerTurnSync {
   #turn = 0;
@@ -405,21 +497,18 @@ class ComputerTurnSync {
     );
   }
 
-  private async record(
+  private record(
     sessionId: string,
     reason: ComputerSyncReasonV1,
     summary: ComputerSyncSummaryV1,
   ): Promise<void> {
-    const session = this.sessions.get(sessionId);
-    if (!session || session.disposed) return;
-    session.append({
-      type: "computer/sync",
-      turn: Math.max(1, this.#turn),
+    return recordComputerSyncV1(
+      this.sessions,
+      sessionId,
+      this.#turn,
       reason,
-      ...summary,
-    });
-    // The record is durable before anything reports the sync happened.
-    await session.flush();
+      summary,
+    );
   }
 }
 

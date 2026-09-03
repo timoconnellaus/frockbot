@@ -54,7 +54,20 @@ import {
   type SubagentSlotReceiptV1,
 } from "@frockbot/plugin-subagents/quota";
 import { machineTokenClaimsV1 } from "@frockbot/machine-protocol";
-import { DurableWorkspaceGenerations } from "@frockbot/kernel-do";
+import {
+  appletStateNameV1,
+  DurableWorkspaceGenerations,
+} from "@frockbot/kernel-do";
+import {
+  decodeAppletProvenanceV1,
+  decodeAppletToolDeclarationV1,
+  type AppletSummaryV1,
+} from "@frockbot/kernel-contracts";
+import {
+  AppletDirectory,
+  type AppletDirectoryViewV1,
+} from "./applet-directory.js";
+import type { AppletState } from "./applet-state.js";
 import {
   decodeWorkspaceGenerationRecordV1,
   decodeWorkspaceRootV1,
@@ -143,6 +156,13 @@ interface UserConfigurationEnv {
    * exactly as before.
    */
   PACKAGE_CATALOG?: R2Bucket;
+  /**
+   * One Applet Durable Object per Applet instance (ADR 0022). The User object
+   * owns the directory and calls `delete()` on the instance; it never reads an
+   * Applet's contents. Optional so a deployment without the binding still
+   * serves every other User RPC, and an Applet deletion refuses visibly.
+   */
+  APPLET_STATES?: DurableObjectNamespace<AppletState>;
 }
 
 /** The page of a Bot's projected rows a rebuild pulls, one Bot at a time. */
@@ -1074,6 +1094,119 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         contributions.audit.purgeAuditForBot(lifecycle.botId);
       }
     }
+  }
+
+  // --- Applet directory (ADR 0022 decision 3) ------------------------------
+  //
+  // Account-wide by decision D2: every Bot of this User sees every Applet. The
+  // directory holds identity, the current generation, and the tool
+  // declarations; the instance itself lives in its own Durable Object and its
+  // contents are never read here.
+
+  private appletDirectory(): AppletDirectory {
+    return new AppletDirectory({
+      get: (key) => this.ctx.storage.get(key),
+      put: (entries) => this.ctx.storage.put(entries),
+      list: (options) => this.ctx.storage.list(options),
+    });
+  }
+
+  private appletState(
+    userId: string,
+    appletId: string,
+  ): DurableObjectStub<AppletState> {
+    const namespace = this.env.APPLET_STATES;
+    if (!namespace) {
+      throw new Error("Applets are not configured for this deployment");
+    }
+    return namespace.get(
+      namespace.idFromName(appletStateNameV1(userId, appletId)),
+    );
+  }
+
+  async listApplets(input: unknown): Promise<AppletDirectoryViewV1> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return this.appletDirectory().list();
+  }
+
+  /**
+   * The Applet members one Bot's next Composition generation resolves, with
+   * the directory revision they were resolved at. A Bot re-resolves when the
+   * revision it recorded no longer matches.
+   */
+  async readAppletCompositionInput(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return this.appletDirectory().compositionInput();
+  }
+
+  async createApplet(input: unknown): Promise<AppletSummaryV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      displayName: rpcString(128),
+      provenance: rpcDecodedValue,
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    return this.appletDirectory().create({
+      ownerId: userId,
+      displayName: request.displayName as string,
+      provenance: decodeAppletProvenanceV1(
+        rpcJsonSnapshotV1(request.provenance),
+      ),
+    });
+  }
+
+  /**
+   * Records the generation the Applet Durable Object activated, and advances
+   * the directory revision so every Bot picks the tools up at its next
+   * Composition resolution.
+   */
+  async recordAppletGeneration(input: unknown): Promise<AppletSummaryV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      appletId: rpcString(129),
+      generationId: rpcString(128),
+      tools: rpcDecodedValue,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const tools = rpcJsonSnapshotV1(request.tools);
+    if (!Array.isArray(tools)) {
+      throw new Error("Applet tool declarations must be an array");
+    }
+    return this.appletDirectory().recordGeneration({
+      appletId: request.appletId as string,
+      generationId: request.generationId as string,
+      tools: tools.map((tool, index) =>
+        decodeAppletToolDeclarationV1(
+          tool,
+          `Applet tool declaration[${index}]`,
+        ),
+      ),
+    });
+  }
+
+  /**
+   * Deletion in the order the constitution's failure rule wants: the entry is
+   * marked deleted and the revision advanced first, so no Bot can still offer
+   * the tools of an Applet whose storage is about to go, and the instance's
+   * facet, versions, and records are deleted after. Artifacts are immutable
+   * content and are left to the existing garbage collection.
+   */
+  async deleteApplet(input: unknown): Promise<AppletSummaryV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      appletId: rpcString(129),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const appletId = request.appletId as string;
+    const deleted = await this.appletDirectory().markDeleted(appletId);
+    await this.appletState(userId, appletId).delete({
+      schemaVersion: 1,
+      userId,
+      appletId,
+    });
+    return deleted;
   }
 
   async listBots(input: unknown) {

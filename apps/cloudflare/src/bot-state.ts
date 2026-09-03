@@ -5,10 +5,18 @@ import {
 } from "./bot-state-channel.js";
 import {
   compileFoundationApplication,
-  createFoundationBackendContributions,
   createFoundationHostedRuntimePackages,
   createFoundationRuntimeApplication,
 } from "@frockbot/application-foundation/runtime";
+import {
+  computerBotContribution,
+  createFoundationBackendContributions,
+  createFoundationMountedContributionsV1,
+  flockBotContribution,
+  plannedFoundationBackendContributions,
+  shellBotContribution,
+} from "@frockbot/application-foundation/contributions";
+import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/application-foundation/generated/applets-artifact";
 import {
   createFoundationResidentRuntime,
   type FoundationResidentRuntime,
@@ -40,15 +48,8 @@ import type {
   BotResidentProjection,
 } from "@frockbot/plugin-shell/backend-execution";
 import { executeResidentBotTurn } from "@frockbot/plugin-shell/backend-runner";
-import { createShellBotBackendPlugin } from "@frockbot/plugin-shell/backend";
-import {
-  createFlockBotBackendPlugin,
-  type FlockBotBackendContribution,
-} from "@frockbot/plugin-flock/bot";
-import {
-  createComputerBotBackendPlugin,
-  type ComputerBotBackendContribution,
-} from "@frockbot/plugin-computer/bot";
+import type { FlockBotBackendContribution } from "@frockbot/plugin-flock/bot";
+import type { ComputerBotBackendContribution } from "@frockbot/plugin-computer/bot";
 import { decodeComputerCommandV1 } from "@frockbot/plugin-computer/protocol";
 import {
   decodeBotLifecycleCommandV1,
@@ -80,21 +81,41 @@ import {
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateNotificationRequestV1,
   decodeIsolateScheduleRequestV1,
+  decodeIsolateAppletsRequestV1,
   decodeIsolateToolRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
   decodeIsolateWorkspacePathV1,
   decodeIsolateWorkspaceWriteRequestV1,
   decodeNormalizedModelRequestV1,
+  decodeWorkspaceRootV1,
 } from "@frockbot/kernel-contracts";
 import type {
+  AppletBuildViewV1,
+  AppletSourceViewV1,
   NormalizedModelRequest,
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
   WorkspacePathV1,
+  WorkspaceRootV1,
   WorkspaceSyncEffectsV1,
 } from "@frockbot/kernel-contracts";
-import { decodeWorkspacePathV1 } from "@frockbot/kernel-contracts";
+import {
+  APPLET_ID_V1,
+  APPLET_SOURCE_MAX_BYTES_V1,
+  APPLET_SOURCE_MAX_FILES_V1,
+  decodeWorkspacePathV1,
+} from "@frockbot/kernel-contracts";
+
+/*
+ * Where an Applet's source lives.
+ *
+ * The Applets Package declares this root in its manifest (plan §7); these are
+ * the ids that name it, restated here because the canvas's read is served from
+ * the Bot Durable Object rather than from the Package's own module.
+ */
+const APPLETS_SOURCE_PACKAGE_ID_V1 = "applets";
+const APPLETS_SOURCE_ROOT_ID_V1 = "source";
 
 /** Base64 without a Node Buffer: this object runs in workerd. */
 function bytesToBase64(bytes: Uint8Array): string {
@@ -165,11 +186,13 @@ import {
 import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
+  rpcAppletIdOrNull,
   rpcBotId,
   rpcDecoded,
   rpcIdentifier,
   rpcInteger,
   rpcObject,
+  rpcPattern,
   rpcString,
 } from "./durable-rpc.js";
 
@@ -309,9 +332,6 @@ export class BotState extends DurableObject<BotStateEnv> {
   }> {
     if (!this.mounted) {
       this.mounted = this.compileApplication().then(async (plan) => {
-        let shell: ShellBotBackendContribution | undefined;
-        let flock: FlockBotBackendContribution | undefined;
-        let computer: ComputerBotBackendContribution | undefined;
         const root = new Context();
         await root.plugin(ComputerRegistry);
         const computerConfigured = Boolean(
@@ -333,6 +353,15 @@ export class BotState extends DurableObject<BotStateEnv> {
               : {}),
           }),
         );
+        // Where each descriptor's mounted value lands as the mount runs. The
+        // Shell and Flock Contributions need each other, and each reaches the
+        // other by naming the table entry it imported.
+        const mountedContributions = createFoundationMountedContributionsV1();
+        const requireShell = (): ShellBotBackendContribution => {
+          const shell = mountedContributions.get(shellBotContribution);
+          if (!shell) throw new Error("Shell Bot Contribution is unavailable");
+          return shell;
+        };
         const mounted = await createFoundationBackendContributions<
           | ShellBotBackendContribution
           | FlockBotBackendContribution
@@ -341,123 +370,106 @@ export class BotState extends DurableObject<BotStateEnv> {
           plan,
           {
             backendHost: "bot",
-            resolve: (specifier, lifecycle) => {
-              if (specifier === "@frockbot/plugin-shell/backend") {
-                return createShellBotBackendPlugin(
+            mountedContributions,
+            shell: {
+              state: this.ctx,
+              env: this.backendEnv,
+              outboundFetch: this.outboundFetch,
+              // One application, compiled once: the Contributions mounted here
+              // and the Composition the Shell bootstraps have to be the same
+              // plan, or a member could be in one and not the other.
+              compileApplication: this.compileApplication,
+              // The immutable bytes of every first-party artifact-backed
+              // member the application ships (ADR 0022 decision 8). The store
+              // reads object storage first and falls back to these, so a
+              // deploy needs no seeding step for a Package that is already in
+              // this bundle.
+              bundledPackageArtifacts: FIRST_PARTY_PACKAGE_ARTIFACTS_V1,
+              // The Durable Object owns the kernel authority; the Shell
+              // Package supplies only its configuration and Composition
+              // hooks.
+              createAuthority: (options) => new BotDurableAuthority(options),
+              // The Computer Contribution's projection cache and its share of
+              // the authority's one durable alarm, reached through the table
+              // once it has mounted.
+              invalidateComputerProjectionFile: (userId, botId, kind) =>
+                mountedContributions
+                  .get(computerBotContribution)
+                  ?.invalidateProjectionFile(userId, botId, kind),
+              scheduledDeadlines: (transaction) =>
+                mountedContributions
+                  .get(computerBotContribution)
+                  ?.scheduledDeadlines(transaction) ?? Promise.resolve([]),
+              scheduledWorkInFlight: () =>
+                mountedContributions
+                  .get(computerBotContribution)
+                  ?.scheduledWorkInFlight() ?? false,
+              deferScheduledWork: (transaction) =>
+                mountedContributions
+                  .get(computerBotContribution)
+                  ?.deferScheduledWork(transaction) ?? Promise.resolve(),
+              settleScheduledWork: () =>
+                mountedContributions
+                  .get(computerBotContribution)
+                  ?.settleScheduledWork() ?? Promise.resolve(),
+              // An archived Bot admits no configuration command; the Flock
+              // Contribution owns that durable lifecycle state.
+              assertLifecycleActive: (storage, botId) => {
+                const flock = mountedContributions.get(flockBotContribution);
+                if (!flock) {
+                  throw new Error("Flock Bot Contribution is unavailable");
+                }
+                return flock.assertActive(storage, botId);
+              },
+            },
+            flock: {
+              storage: this.ctx.storage,
+              materializeSettings: async (registration, userId) => {
+                await requireShell().materializeSettings(
+                  { userId, botId: registration.botId },
                   {
-                    state: this.ctx,
-                    env: this.backendEnv,
-                    outboundFetch: this.outboundFetch,
-                    // The Durable Object owns the kernel authority; the Shell
-                    // Package supplies only its configuration and Composition
-                    // hooks.
-                    createAuthority: (options) =>
-                      new BotDurableAuthority(options),
-                    invalidateComputerProjectionFile: (userId, botId, kind) =>
-                      computer?.invalidateProjectionFile(userId, botId, kind),
-                    scheduledDeadlines: (transaction) =>
-                      computer?.scheduledDeadlines(transaction) ??
-                      Promise.resolve([]),
-                    scheduledWorkInFlight: () =>
-                      computer?.scheduledWorkInFlight() ?? false,
-                    deferScheduledWork: (transaction) =>
-                      computer?.deferScheduledWork(transaction) ??
-                      Promise.resolve(),
-                    settleScheduledWork: () =>
-                      computer?.settleScheduledWork() ?? Promise.resolve(),
-                    // An archived Bot admits no configuration command; the Flock
-                    // Contribution owns that durable lifecycle state.
-                    assertLifecycleActive: (storage, botId) => {
-                      if (!flock) {
-                        throw new Error(
-                          "Flock Bot Contribution is unavailable",
-                        );
-                      }
-                      return flock.assertActive(storage, botId);
-                    },
-                  },
-                  {
-                    mount(value) {
-                      shell = value;
-                      return lifecycle.mount(value);
-                    },
-                  },
-                );
-              }
-              if (specifier === "@frockbot/plugin-flock/bot") {
-                return createFlockBotBackendPlugin(
-                  {
-                    storage: this.ctx.storage,
-                    materializeSettings: async (registration, userId) => {
-                      if (!shell)
-                        throw new Error(
-                          "Shell Bot Contribution is unavailable",
-                        );
-                      await shell.materializeSettings(
-                        { userId, botId: registration.botId },
-                        {
-                          name: registration.initialName,
-                          ...(registration.initialDescription === undefined
-                            ? {}
-                            : {
-                                description: registration.initialDescription,
-                              }),
-                        },
-                      );
-                    },
-                    archiveEligible: (storage) => {
-                      if (!shell)
-                        throw new Error(
-                          "Shell Bot Contribution is unavailable",
-                        );
-                      return shell.archiveEligible(storage);
-                    },
-                  },
-                  {
-                    mount(value) {
-                      flock = value;
-                      return lifecycle.mount(value);
-                    },
+                    name: registration.initialName,
+                    ...(registration.initialDescription === undefined
+                      ? {}
+                      : { description: registration.initialDescription }),
                   },
                 );
-              }
-              if (specifier === "@frockbot/plugin-computer/bot") {
-                return createComputerBotBackendPlugin(
-                  {
-                    storage: this.stateChannel.computerStorage,
-                    workspace: this.backendEnv.WORKSPACE_FILES,
-                    providerLabel: "Fly Sprites",
-                    configured: computerConfigured,
-                    openComputer: (userId, botId, effectId) => {
-                      const identity = { userId };
-                      if (!root.computers.assignment(identity)) {
-                        root.computers.assign(identity, "fly-sprite");
-                      }
-                      return root.computers.open(
-                        identity,
-                        { botId },
-                        { effectId },
-                      );
-                    },
-                  },
-                  {
-                    mount(value) {
-                      computer = value;
-                      return lifecycle.mount(value);
-                    },
-                  },
-                );
-              }
-              throw new Error(`Unsupported Bot Contribution: ${specifier}`);
+              },
+              archiveEligible: (storage) =>
+                requireShell().archiveEligible(storage),
+            },
+            computer: {
+              storage: this.stateChannel.computerStorage,
+              workspace: this.backendEnv.WORKSPACE_FILES,
+              providerLabel: "Fly Sprites",
+              configured: computerConfigured,
+              openComputer: (userId, botId, effectId) => {
+                const identity = { userId };
+                if (!root.computers.assignment(identity)) {
+                  root.computers.assign(identity, "fly-sprite");
+                }
+                return root.computers.open(identity, { botId }, { effectId });
+              },
             },
           },
           root,
         );
+        // The kernel-declared required core set for a Bot, expressed against
+        // the plan's own Contributions: every Bot-host Contribution the plan
+        // declares must have mounted, and each of the three the Bot Durable
+        // Object depends on must be one of them. A Composition that lacks one
+        // never becomes resident.
+        const shell = mounted.get(shellBotContribution);
+        const flock = mounted.get(flockBotContribution);
+        const computer = mounted.get(computerBotContribution);
         if (
           !shell ||
           !flock ||
           !computer ||
-          mounted.contributions.length !== 3
+          mounted.contributions.length !==
+            plannedFoundationBackendContributions(plan).filter(
+              (planned) => planned.host === "bot",
+            ).length
         ) {
           await mounted.dispose();
           await root.fiber.dispose();
@@ -824,6 +836,33 @@ export class BotState extends DurableObject<BotStateEnv> {
     );
   }
 
+  async isolateApplets(input: unknown) {
+    return (await this.contribution()).isolateApplets(
+      decodeIsolateCallRpcV1(input, decodeIsolateAppletsRequestV1) as never,
+    );
+  }
+
+  /** The Session's focused Applet (plan §6). One per Session by decision D10. */
+  async readFocusedApplet(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    return (await this.contribution()).readFocusedApplet(identity);
+  }
+
+  async setFocusedApplet(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      appletId: rpcAppletIdOrNull,
+    });
+    return (await this.contribution()).setFocusedApplet(
+      {
+        userId: request.userId as string,
+        botId: request.botId as string,
+      },
+      request.appletId as string | null,
+    );
+  }
+
   async resolveConfiguration(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
@@ -1031,6 +1070,98 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
   }
 
+  /*
+   * An Applet's source, for the canvas's building state.
+   *
+   * The Workspace store is read and nothing else: the Applets Package's
+   * declared root is User-scoped, so this answers from object storage while
+   * the Computer is hibernated, exactly as the plan requires ("the store is
+   * read, never the Sprite"). Text only and bounded, because this is a
+   * projection for a person watching a Bot write code, not a file transfer.
+   */
+  async readAppletSourceV1(input: unknown): Promise<AppletSourceViewV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      appletId: rpcPattern(APPLET_ID_V1, 129),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const appletId = request.appletId as string;
+    const files = this.backendEnv.WORKSPACE_FILES;
+    if (!files) return { appletId, files: [], truncated: false };
+    const root: WorkspaceRootV1 = {
+      kind: "package-declared",
+      userId: identity.userId,
+      packageId: APPLETS_SOURCE_PACKAGE_ID_V1,
+      rootId: APPLETS_SOURCE_ROOT_ID_V1,
+    };
+    const listing = await files.list({
+      root,
+      prefix: appletId,
+      limit: APPLET_SOURCE_MAX_FILES_V1,
+    });
+    if (listing.status !== "ok")
+      return { appletId, files: [], truncated: false };
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const source: AppletSourceViewV1["files"] = [];
+    let bytes = 0;
+    let truncated = listing.cursor !== undefined;
+    for (const entry of listing.entries) {
+      const relative = entry.path.path.slice(appletId.length + 1);
+      if (!relative) continue;
+      // `dist/` is what `applet build` wrote, not what the Bot wrote: the
+      // canvas shows source, and the publish reads the build.
+      if (relative === "dist" || relative.startsWith("dist/")) continue;
+      if (bytes + entry.generation.size > APPLET_SOURCE_MAX_BYTES_V1) {
+        truncated = true;
+        continue;
+      }
+      const outcome = await files.read(entry.path);
+      if (outcome.status !== "ok") continue;
+      let text: string;
+      try {
+        text = decoder.decode(outcome.file.bytes);
+      } catch {
+        // A binary artifact under the root is not source; the canvas says
+        // nothing about it rather than drawing mojibake.
+        continue;
+      }
+      bytes += outcome.file.generation.size;
+      source.push({
+        path: relative,
+        text,
+        generationId: outcome.file.generation.generationId,
+        changedAt: outcome.file.generation.writtenAt,
+      });
+    }
+    return { appletId, files: source, truncated };
+  }
+
+  /**
+   * The outcome the Bot last recorded for `applet check` or `applet build`.
+   * Until the Applet authority records one, this is honestly `unknown` rather
+   * than a green tick nobody earned.
+   */
+  async readAppletBuildV1(input: unknown): Promise<AppletBuildViewV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      appletId: rpcPattern(APPLET_ID_V1, 129),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return { status: "unknown" };
+  }
+
   async listSkills(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
@@ -1070,6 +1201,39 @@ export class BotState extends DurableObject<BotStateEnv> {
    * instruction root — so an imported Skill is loadable on the Bot's first
    * Turn and its provenance records who put it there.
    */
+  /**
+   * A file written into one of the User's durable roots, as the User. The
+   * gateway's seed door calls this in an environment with no Computer; see
+   * `writeUserWorkspaceFile` on the Shell Contribution for why it is a User
+   * write and nothing wider.
+   */
+  async writeUserWorkspaceFileV1(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        botId: rpcBotId,
+        root: rpcDecoded(decodeWorkspaceRootV1),
+        path: rpcString(1_024),
+        bytesBase64: rpcString(8 * 1024 * 1024),
+      },
+      { mediaType: rpcString(128) },
+    );
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.writeUserWorkspaceFile(identity, {
+      root: request.root as WorkspaceRootV1,
+      path: request.path as string,
+      bytes: Uint8Array.from(atob(request.bytesBase64 as string), (character) =>
+        character.charCodeAt(0),
+      ),
+      ...(request.mediaType ? { mediaType: request.mediaType as string } : {}),
+    });
+  }
+
   async writeUserSkill(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

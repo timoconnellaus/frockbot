@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
-import { PACKAGE_UI_CSP, servePackageUiArtifact } from "../src/gateway.ts";
+import { packageUiCspV1, servePackageUiArtifact } from "../src/gateway.ts";
 
 describe("Package UI artifact route in workerd", () => {
   test("streams R2-backed HTML under the immutable CSP", async () => {
@@ -32,7 +32,7 @@ describe("Package UI artifact route in workerd", () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("content-security-policy")).toBe(
-      PACKAGE_UI_CSP,
+      packageUiCspV1(new URL(request.url)),
     );
     expect(response.headers.get("cache-control")).toBe(
       "public, max-age=31536000, immutable",

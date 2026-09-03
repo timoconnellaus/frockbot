@@ -1,39 +1,15 @@
 import type { ClientPlugin } from "@frockbot/client-core";
-import authClientPlugin from "@frockbot/plugin-auth/client";
-import adminClientPlugin from "@frockbot/plugin-admin/client";
-import botTemplateClientPlugin from "@frockbot/plugin-bot-template/client";
-import uiThemeClientPlugin from "@frockbot/plugin-ui-theme/client";
-import packagePublisherClientPlugin from "@frockbot/plugin-package-publisher/client";
-import routinesClientPlugin from "@frockbot/plugin-routines/client";
-import settingsClientPlugin from "@frockbot/plugin-settings/client";
-import customModelsClientPlugin from "@frockbot/plugin-custom-models/client";
+import { foundationClientContributions } from "./client-contributions.js";
 
-// The immutable application owns the concrete client contribution list.
-import computerClientPlugin from "../../../packages/plugin-computer/src/client/application.js";
-import flockClientPlugin from "@frockbot/plugin-flock/client";
-import auditClientPlugin from "@frockbot/plugin-audit/client";
-import searchClientPlugin from "@frockbot/plugin-search/client";
-import userMachineClientPlugin from "@frockbot/plugin-user-machine/client";
-import shellClientPlugin from "@frockbot/plugin-shell/client";
-
-export const foundationClientPlugins: readonly ClientPlugin[] = [
-  uiThemeClientPlugin,
-  authClientPlugin,
-  shellClientPlugin,
-  adminClientPlugin,
-  computerClientPlugin,
-  flockClientPlugin,
-  // After Flock: the Search surface injects the shell registry Flock also uses.
-  searchClientPlugin,
-  settingsClientPlugin,
-  customModelsClientPlugin,
-  routinesClientPlugin,
-  botTemplateClientPlugin,
-  // After Settings: the Audit log mounts into the Advanced Bot settings slot
-  // Settings declares.
-  auditClientPlugin,
-  packagePublisherClientPlugin,
-  // After Settings: the Computer section mounts into the User settings slot
-  // Settings declares.
-  userMachineClientPlugin,
-];
+/**
+ * The client Plugins this application mounts, resolved from the Contribution
+ * table rather than named here.
+ *
+ * Nothing in this module knows which Package supplies which surface: it reads
+ * the descriptors the Packages themselves export, in the order the table
+ * records, and takes each descriptor's Plugin. `client.test.ts` holds it to
+ * the compiled plan's client Contribution count, and the architecture check
+ * holds every specifier in `frockbot.application.json` to a table entry.
+ */
+export const foundationClientPlugins: readonly ClientPlugin[] =
+  foundationClientContributions.map((contribution) => contribution.plugin);

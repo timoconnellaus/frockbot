@@ -39,7 +39,26 @@ export type CompositionMemberManifestReaderV1 = (
   member: CompositionMemberV1,
 ) => Promise<FrockBotManifest | undefined>;
 
-/** Project iframe Contributions from either Bot or Catalog provenance. */
+/** What the shell attributes an iframe page to, by where its code came from. */
+function iframeProvenanceV1(
+  member: CompositionMemberV1,
+): PackageIframeCompositionV1["contributions"][number]["provenance"] {
+  if (member.provenance.kind === "bot") return "Bot-authored";
+  if (member.provenance.kind === "first-party") return "FrockBot";
+  return "User-installed";
+}
+
+/**
+ * Project iframe Contributions from every artifact-backed member.
+ *
+ * The test is the artifact, not the provenance. "Every Contribution kind is
+ * resolved from the manifest and an artifact, never from a switch over Package
+ * identity" — a first-party Package that ships as an artifact-backed member
+ * (ADR 0022 decision 8) has a manifest the Bot object holds and pages the
+ * anonymous origin can serve, so there is nothing left for a provenance test
+ * to decide. A first-party member with no artifact is in-process code whose
+ * client Contribution is a compiled module, and it has no iframe page to show.
+ */
 export async function projectPackageIframeCompositionV1(input: {
   botId: string;
   generation: CompositionGenerationV1;
@@ -47,7 +66,7 @@ export async function projectPackageIframeCompositionV1(input: {
 }): Promise<PackageIframeCompositionV1> {
   const contributions: PackageIframeCompositionV1["contributions"] = [];
   for (const member of input.generation.members) {
-    if (member.provenance.kind === "first-party") continue;
+    if (member.artifact === undefined) continue;
     const manifest = await input.readMemberManifest(member);
     if (!manifest) continue;
     const client = manifest.contributions.client;
@@ -55,10 +74,16 @@ export async function projectPackageIframeCompositionV1(input: {
     contributions.push({
       packageId: member.packageId,
       displayName: manifest.displayName,
-      provenance:
-        member.provenance.kind === "bot" ? "Bot-authored" : "User-installed",
-      artifact: { ...client.artifact },
-      mounts: client.mounts.map((mount) => ({ ...mount })),
+      provenance: iframeProvenanceV1(member),
+      pages: client.pages.map((page) => ({
+        id: page.id,
+        artifact: { ...page.artifact },
+        mounts: page.mounts.map((mount) => ({ ...mount })),
+      })),
+      entries: (client.entries ?? []).map((entry) => ({
+        ...entry,
+        opens: { ...entry.opens },
+      })),
       declaredTools: (manifest.tools ?? []).map((tool) => tool.name),
     });
   }

@@ -366,6 +366,18 @@ else
   set_required_production_secret MACHINE_TOKEN_SECRET "$MACHINE_TOKEN_SECRET"
   unset MACHINE_TOKEN_SECRET
 fi
+if awk '{print $1}' <<<"$PRODUCTION_SECRETS" | grep -qx APPLET_VIEWER_SECRET; then
+  note "Preserving the existing APPLET_VIEWER_SECRET so open Applet pages keep their tokens."
+else
+  say "Provision the secret every Applet viewer token is signed with (ADR 0022)."
+  APPLET_VIEWER_SECRET="$(openssl rand -hex 32)"
+  [[ -n "$APPLET_VIEWER_SECRET" ]] || {
+    warn "Applet viewer secret generation failed"
+    exit 1
+  }
+  set_required_production_secret APPLET_VIEWER_SECRET "$APPLET_VIEWER_SECRET"
+  unset APPLET_VIEWER_SECRET
+fi
 unset PRODUCTION_SECRETS
 
 stage "GitHub: verify production configuration"

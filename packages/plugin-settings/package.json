@@ -27,6 +27,7 @@
     "@frockbot/configuration-core": "workspace:*",
     "@frockbot/connection-core": "workspace:*",
     "@frockbot/kernel-composition": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "cordis": "4.0.0-rc.8",

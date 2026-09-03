@@ -27,6 +27,21 @@ export interface UiArtifactRefV1 {
   bundlerVersion: string;
 }
 
+/** Manifest v5: 1..8 UI pages per Package, each with its own id. */
+export const BUNDLER_MAX_UI_PAGES = 8;
+export const BUNDLER_UI_PAGE_ID = /^[a-z][a-z0-9-]{0,31}$/;
+
+export interface UiPageSourceV1 {
+  id: string;
+  html: string;
+}
+
+export interface UiArtifactPageV1 {
+  id: string;
+  artifact: UiArtifactRefV1;
+  html: string;
+}
+
 export interface BundleSourceV1 {
   path: string;
   text: string;
@@ -39,7 +54,7 @@ export interface BundleRequestV1 {
   compatibilityDate: string;
   entry: "package.ts";
   sources: BundleSourceV1[]; // exactly 1 file in this slice
-  ui?: { path: "ui.html"; html: string };
+  uiPages?: UiPageSourceV1[];
 }
 
 export type BundleResultV1 =
@@ -48,8 +63,7 @@ export type BundleResultV1 =
       effectId: string;
       status: "bundled";
       artifact: ArtifactRefV1;
-      uiArtifact?: UiArtifactRefV1;
-      uiHtml?: string;
+      uiArtifacts?: UiArtifactPageV1[];
       /** The module bytes as text. D4: the DO owns the R2 write, not the bundler. */
       module: string;
       diagnostics: string[];
@@ -141,7 +155,7 @@ export function decodeBundleRequestV1(input: unknown): BundleRequestV1 {
       "entry",
       "sources",
     ],
-    ["ui"],
+    ["uiPages"],
   );
   if (value.schemaVersion !== 1)
     throw new BundleDecodeError("unsupported bundle request");
@@ -151,18 +165,31 @@ export function decodeBundleRequestV1(input: unknown): BundleRequestV1 {
     throw new BundleDecodeError("entry is invalid");
   if (!Array.isArray(value.sources) || value.sources.length !== 1)
     throw new BundleDecodeError("exactly one source file is required");
-  let ui: BundleRequestV1["ui"];
-  if (value.ui !== undefined) {
-    const rawUi = record(value.ui, "bundle request ui");
-    exact(rawUi, ["path", "html"]);
+  let uiPages: BundleRequestV1["uiPages"];
+  if (value.uiPages !== undefined) {
     if (
-      rawUi.path !== "ui.html" ||
-      typeof rawUi.html !== "string" ||
-      rawUi.html.length === 0
+      !Array.isArray(value.uiPages) ||
+      value.uiPages.length === 0 ||
+      value.uiPages.length > BUNDLER_MAX_UI_PAGES
     ) {
-      throw new BundleDecodeError("ui must contain one non-empty ui.html");
+      throw new BundleDecodeError("uiPages must be a non-empty bounded array");
     }
-    ui = { path: "ui.html", html: rawUi.html };
+    uiPages = value.uiPages.map((candidate) => {
+      const page = record(candidate, "bundle request uiPages entry");
+      exact(page, ["id", "html"]);
+      if (
+        typeof page.id !== "string" ||
+        !BUNDLER_UI_PAGE_ID.test(page.id) ||
+        typeof page.html !== "string" ||
+        page.html.length === 0
+      ) {
+        throw new BundleDecodeError("uiPages entry is invalid");
+      }
+      return { id: page.id, html: page.html };
+    });
+    if (new Set(uiPages.map((page) => page.id)).size !== uiPages.length) {
+      throw new BundleDecodeError("uiPages contains duplicate ids");
+    }
   }
   return {
     schemaVersion: 1,
@@ -171,7 +198,7 @@ export function decodeBundleRequestV1(input: unknown): BundleRequestV1 {
     compatibilityDate: compatibilityDate(value.compatibilityDate),
     entry: BUNDLER_ENTRY,
     sources: value.sources.map(decodeBundleSourceV1),
-    ...(ui ? { ui } : {}),
+    ...(uiPages ? { uiPages } : {}),
   };
 }
 

@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import {
   ComputerRegistry,
   computerSyncSummaryV1,
+  type ComputerHandle,
   type ComputerProvider,
   type ComputerSyncSummaryV1,
 } from "@frockbot/computer-core";
@@ -19,12 +20,13 @@ import {
   SessionStore,
   type LlmProvider,
   type SessionEvent,
+  type WorkspaceRootV1,
 } from "@frockbot/kernel-contracts";
 import { LlmRegistry } from "@frockbot/plugin-models";
 import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
 import { ToolRegistry } from "@frockbot/plugin-tools";
 import { Context, type Plugin } from "cordis";
-import { createComputerAgentPlugin } from "./agent.js";
+import { createComputerAgentPlugin, syncWorkspaceRootNowV1 } from "./agent.js";
 
 const COMPOSITION = {
   generationId: "1970-01-01T00:00:00.000Z:0123456789abcdef",
@@ -251,5 +253,144 @@ describe("the Computer Package as the sync's caller", () => {
       ["turn-end", "unavailable"],
     ]);
     expect(syncEvents(events)[0]?.detail).toContain("paused");
+  });
+});
+
+/**
+ * The one sanctioned caller outside the Turn's own sync policy (ADR 0022
+ * decision 7). `applet build` writes `dist/` on the Computer with a shell, and
+ * an Applet publish reads those bytes from the *store*; without a push in
+ * between it would publish the previous build, or nothing.
+ */
+describe("syncWorkspaceRootNowV1", () => {
+  const appletsRoot: WorkspaceRootV1 = {
+    kind: "package-declared",
+    userId: "user-1",
+    packageId: "applets",
+    rootId: "source",
+  };
+
+  async function sessionHarness() {
+    const context = new Context();
+    await context.plugin(SessionStore, {});
+    const session = context.sessions.create("session-1");
+    return {
+      sessions: context.sessions,
+      session,
+      dispose: () => context.fiber.dispose(),
+    };
+  }
+
+  function handleWith(sync: ComputerHandle["sync"]): ComputerHandle {
+    return {
+      assignment: { providerId: "recording", generation: 1 },
+      identity: { userId: "user-1" },
+      tenant: { botId: "bot-1" },
+      ...(sync ? { sync } : {}),
+      close: () => Promise.resolve(),
+    };
+  }
+
+  test("reconciles one root and records the outcome as `publish`", async () => {
+    const calls: string[] = [];
+    const computer = handleWith({
+      reconcile: () => {
+        calls.push("reconcile");
+        return Promise.resolve(computerSyncSummaryV1("ok"));
+      },
+      reconcileRoot: (asked, reason) => {
+        calls.push(`reconcileRoot:${reason}:${asked.kind}`);
+        return Promise.resolve({ ...computerSyncSummaryV1("ok"), pushed: 1 });
+      },
+      signal: () => Promise.resolve(undefined),
+    });
+    const harness = await sessionHarness();
+
+    const summary = await syncWorkspaceRootNowV1({
+      computer,
+      sessions: harness.sessions,
+      sessionId: "session-1",
+      turn: 3,
+      root: appletsRoot,
+    });
+
+    expect(summary.status).toBe("ok");
+    // One root, never the whole Workspace: the Turn's own policy still owns
+    // `open`, `signal`, and `turn-end`, and this borrows none of them.
+    expect(calls).toEqual(["reconcileRoot:publish:package-declared"]);
+    const recorded = syncEvents([...harness.session.events]);
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      turn: 3,
+      reason: "publish",
+      status: "ok",
+      pushed: 1,
+    });
+    await harness.dispose();
+  });
+
+  test("a provider that cannot sync one root refuses, and never syncs all of them", async () => {
+    const calls: string[] = [];
+    const computer = handleWith({
+      reconcile: () => {
+        calls.push("reconcile");
+        return Promise.resolve(computerSyncSummaryV1("ok"));
+      },
+      signal: () => Promise.resolve(undefined),
+    });
+    const harness = await sessionHarness();
+
+    const summary = await syncWorkspaceRootNowV1({
+      computer,
+      sessions: harness.sessions,
+      sessionId: "session-1",
+      turn: 1,
+      root: appletsRoot,
+    });
+
+    expect(summary.status).toBe("refused");
+    expect(calls).toEqual([]);
+    expect(syncEvents([...harness.session.events])[0]?.reason).toBe("publish");
+    await harness.dispose();
+  });
+
+  test("a provider that throws is a recorded outcome, never an exception", async () => {
+    const computer = handleWith({
+      reconcile: () => Promise.resolve(computerSyncSummaryV1("ok")),
+      reconcileRoot: () =>
+        Promise.reject(new Error("the Computer is paused")) as Promise<never>,
+      signal: () => Promise.resolve(undefined),
+    });
+    const harness = await sessionHarness();
+
+    const summary = await syncWorkspaceRootNowV1({
+      computer,
+      sessions: harness.sessions,
+      sessionId: "session-1",
+      turn: 1,
+      root: appletsRoot,
+    });
+
+    expect(summary.status).toBe("unavailable");
+    expect(summary.detail).toContain("paused");
+    expect(syncEvents([...harness.session.events])).toHaveLength(1);
+    await harness.dispose();
+  });
+
+  test("a Computer with no sync records the refusal rather than nothing", async () => {
+    const computer = handleWith(undefined);
+    const harness = await sessionHarness();
+
+    const summary = await syncWorkspaceRootNowV1({
+      computer,
+      sessions: harness.sessions,
+      sessionId: "session-1",
+      turn: 1,
+      root: appletsRoot,
+    });
+
+    expect(summary.status).toBe("refused");
+    expect(syncEvents([...harness.session.events])).toHaveLength(1);
+    await harness.dispose();
   });
 });

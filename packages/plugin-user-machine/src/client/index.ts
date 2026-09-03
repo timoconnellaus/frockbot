@@ -39,6 +39,7 @@ import {
   type MachineAgentBridgeV1,
   type MachinesClientState,
 } from "./state.js";
+import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
 
 /** The surface the section opens. Not a settings anchor: a registered surface. */
 export const MACHINE_SURFACE_ID_V1 = "user-machines";
@@ -178,3 +179,13 @@ export const userMachineClientPlugin: ClientPlugin = (ctx) => {
 };
 
 export default userMachineClientPlugin;
+
+/**
+ * The manifest's `client` entry, resolved by specifier. The application looks
+ * this descriptor up in its Contribution table; it never branches on which
+ * Package it belongs to.
+ */
+export const clientContribution = defineClientContribution<ClientPlugin>({
+  specifier: "@frockbot/plugin-user-machine/client",
+  plugin: userMachineClientPlugin,
+});

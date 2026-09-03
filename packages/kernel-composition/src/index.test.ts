@@ -125,6 +125,63 @@ describe("PackageCatalog", () => {
     ).toThrow('manifest v2 desktop execution must be "sandboxed-renderer"');
   });
 
+  // Constitution — Computer and Workspace: "durable roots, declared by the
+  // Computer Package's Workspace layout **and by Package manifests**". This is
+  // the manifest half; `image` and `applets` are its two callers today.
+  test("decodes the durable roots a Package declares, and refuses a malformed one", () => {
+    const base = {
+      schemaVersion: 4 as const,
+      id: "image",
+      displayName: "Image generation",
+      version: "1.0.0",
+      compatibility: { frockbot: "*" },
+      contributions: { runtime: { entry: "./agent" } },
+      permissions: [],
+    };
+    expect(
+      decodeFrockBotManifest({
+        ...base,
+        roots: [{ id: "generated", scope: "user" }],
+      }).roots,
+    ).toEqual([{ id: "generated", scope: "user" }]);
+    // Absent stays absent: a Package that declares no root has none, and the
+    // sync must not invent one.
+    expect(decodeFrockBotManifest(base).roots).toBeUndefined();
+    for (const [roots, message] of [
+      [[], "non-empty bounded array"],
+      [[{ id: "Generated", scope: "user" }], "id is invalid"],
+      [[{ id: "-bad", scope: "user" }], "id is invalid"],
+      // A `package-declared` root names no Bot, so a Bot-scoped one would be a
+      // root `WorkspaceRootV1` cannot address.
+      [[{ id: "generated", scope: "bot" }], 'scope must be "user"'],
+      [[{ id: "generated" }], 'scope must be "user"'],
+      [
+        [
+          { id: "generated", scope: "user" },
+          { id: "generated", scope: "user" },
+        ],
+        "duplicate ids",
+      ],
+    ] as const) {
+      expect(() => decodeFrockBotManifest({ ...base, roots })).toThrow(message);
+    }
+  });
+
+  test("keeps a declared root out of reach of a v2 manifest", () => {
+    expect(() =>
+      decodeFrockBotManifest({
+        schemaVersion: 2,
+        id: "legacy",
+        displayName: "Legacy",
+        version: "1.0.0",
+        compatibility: { frockbot: "*" },
+        contributions: { runtime: { entry: "./agent" } },
+        permissions: [],
+        roots: [{ id: "generated", scope: "user" }],
+      }),
+    ).toThrow('manifest has unknown field "roots"');
+  });
+
   test("keeps backend Contributions unavailable to v2 manifests", () => {
     expect(() =>
       decodeFrockBotManifest({
@@ -328,9 +385,22 @@ describe("decodeFrockBotManifest", () => {
     const decoded = decodeFrockBotManifest(manifest);
     const client = decoded.contributions.client;
     expect(client && "kind" in client ? client.kind : undefined).toBe("iframe");
-    expect(client?.mounts[0]).toEqual({
-      slot: "frockbot.tool-result:weather_lookup",
-    });
+    // Migration: the v3 single-page record decodes to the one v5 shape.
+    expect(client && "pages" in client ? client.pages : undefined).toEqual([
+      {
+        id: "main",
+        artifact: {
+          contentHash: "a".repeat(64),
+          size: 123,
+          mediaType: "text/html",
+          bundlerVersion: "frockbot-inline-html@1",
+        },
+        mounts: [
+          { slot: "frockbot.tool-result:weather_lookup" },
+          { slot: "frockbot.bot-settings-sections", order: 10 },
+        ],
+      },
+    ]);
     expect(decoded.hooks).toEqual(["agent/tool-exposure"]);
     expect(() =>
       decodeFrockBotManifest({
@@ -371,6 +441,290 @@ describe("decodeFrockBotManifest", () => {
         },
       }),
     ).toThrow("256 KB quota");
+  });
+
+  // The literal previous released shape of a stored iframe Contribution. It
+  // is written out rather than derived so a change to the v5 decoder that
+  // silently stopped migrating it would fail here.
+  const releasedV4IframeManifest = () => ({
+    schemaVersion: 4,
+    id: "weather-page",
+    displayName: "Weather page",
+    version: "0.0.1",
+    compatibility: { frockbot: ">=0.0.1" },
+    dependencies: {},
+    contributions: {
+      runtime: { entry: "./package.js", host: "bot-isolate" },
+      client: {
+        kind: "iframe",
+        artifact: {
+          contentHash: "b".repeat(64),
+          size: 42,
+          mediaType: "text/html",
+          bundlerVersion: "frockbot-inline-html@1",
+        },
+        mounts: [{ slot: "frockbot.tool-result:weather_lookup", order: 3 }],
+      },
+    },
+    tools: [
+      { name: "weather_lookup", description: "Weather", inputSchema: {} },
+    ],
+    permissions: [],
+  });
+
+  test("migrates a released v4 single-page iframe record to v5 pages", () => {
+    const decoded = decodeFrockBotManifest(releasedV4IframeManifest());
+    const client = decoded.contributions.client;
+    expect(client && "pages" in client ? client.pages : undefined).toEqual([
+      {
+        id: "main",
+        artifact: {
+          contentHash: "b".repeat(64),
+          size: 42,
+          mediaType: "text/html",
+          bundlerVersion: "frockbot-inline-html@1",
+        },
+        mounts: [{ slot: "frockbot.tool-result:weather_lookup", order: 3 }],
+      },
+    ]);
+    expect(client && "entries" in client ? client.entries : undefined).toBe(
+      undefined,
+    );
+    // One in-memory shape: the migrated record round-trips as v5.
+    const roundTripped = decodeFrockBotManifest({
+      ...releasedV4IframeManifest(),
+      schemaVersion: 5,
+      contributions: {
+        runtime: { entry: "./package.js", host: "bot-isolate" },
+        client: {
+          kind: "iframe",
+          pages: client && "pages" in client ? client.pages : [],
+        },
+      },
+    });
+    expect(roundTripped.contributions.client).toEqual(
+      decoded.contributions.client!,
+    );
+  });
+
+  test("refuses a v4 record that declares v5 pages or an instance", () => {
+    expect(() =>
+      decodeFrockBotManifest({
+        ...releasedV4IframeManifest(),
+        contributions: {
+          runtime: { entry: "./package.js", host: "bot-isolate" },
+          client: { kind: "iframe", pages: [] },
+        },
+      }),
+    ).toThrow("unknown field");
+    expect(() =>
+      decodeFrockBotManifest({
+        ...releasedV4IframeManifest(),
+        contributions: {
+          ...releasedV4IframeManifest().contributions,
+          instance: {
+            contract: 1,
+            server: {
+              contentHash: "c".repeat(64),
+              size: 10,
+              mediaType: "application/javascript",
+              bundlerVersion: "frockbot-esbuild@1",
+            },
+            ui: {
+              contentHash: "d".repeat(64),
+              size: 10,
+              mediaType: "text/html",
+              bundlerVersion: "frockbot-inline-html@1",
+            },
+            tools: [{ name: "add_todo", description: "Add", inputSchema: {} }],
+          },
+        },
+      }),
+    ).toThrow("schema version 5");
+  });
+
+  const v5Manifest = () => ({
+    schemaVersion: 5,
+    id: "applets",
+    displayName: "Applets",
+    version: "0.0.1",
+    compatibility: { frockbot: ">=0.0.1" },
+    dependencies: {},
+    contributions: {
+      runtime: { entry: "./package.js", host: "bot-isolate" },
+      client: {
+        kind: "iframe",
+        pages: [
+          {
+            id: "list",
+            artifact: {
+              contentHash: "a".repeat(64),
+              size: 10,
+              mediaType: "text/html",
+              bundlerVersion: "frockbot-inline-html@1",
+            },
+            mounts: [{ slot: "frockbot.surface:list" }],
+          },
+          {
+            id: "canvas",
+            artifact: {
+              contentHash: "b".repeat(64),
+              size: 10,
+              mediaType: "text/html",
+              bundlerVersion: "frockbot-inline-html@1",
+            },
+            mounts: [{ slot: "frockbot.right-panel" }],
+          },
+        ],
+        entries: [
+          {
+            id: "open",
+            slot: "frockbot.sidebar-actions",
+            order: 5,
+            label: "Applets",
+            icon: "applets",
+            opens: { kind: "surface", page: "list" },
+          },
+        ],
+      },
+      instance: {
+        contract: 1,
+        server: {
+          contentHash: "c".repeat(64),
+          size: 10,
+          mediaType: "application/javascript",
+          bundlerVersion: "frockbot-esbuild@1",
+        },
+        ui: {
+          contentHash: "d".repeat(64),
+          size: 10,
+          mediaType: "text/html",
+          bundlerVersion: "frockbot-inline-html@1",
+        },
+        tools: [{ name: "add_todo", description: "Add", inputSchema: {} }],
+      },
+    },
+    tools: [{ name: "applet_list", description: "List", inputSchema: {} }],
+    permissions: [],
+  });
+
+  test("decodes a v5 multi-page client, entries, and Instance Contribution", () => {
+    const decoded = decodeFrockBotManifest(v5Manifest());
+    expect(decoded.schemaVersion).toBe(5);
+    const client = decoded.contributions.client;
+    expect(
+      client && "pages" in client ? client.pages.map((p) => p.id) : [],
+    ).toEqual(["list", "canvas"]);
+    expect(client && "entries" in client ? client.entries : undefined).toEqual([
+      {
+        id: "open",
+        slot: "frockbot.sidebar-actions",
+        order: 5,
+        label: "Applets",
+        icon: "applets",
+        opens: { kind: "surface", page: "list" },
+      },
+    ]);
+    expect(decoded.contributions.instance?.contract).toBe(1);
+    expect(decoded.contributions.instance?.tools.map((t) => t.name)).toEqual([
+      "add_todo",
+    ]);
+  });
+
+  test("refuses v5 pages and entries that break their bounds", () => {
+    const base = v5Manifest();
+    const withPages = (pages: unknown) => ({
+      ...base,
+      contributions: {
+        ...base.contributions,
+        client: { ...base.contributions.client, pages },
+      },
+    });
+    expect(() => decodeFrockBotManifest(withPages([]))).toThrow(
+      "non-empty bounded array",
+    );
+    expect(() =>
+      decodeFrockBotManifest(
+        withPages(
+          Array.from({ length: 9 }, (_unused, index) => ({
+            ...base.contributions.client.pages[0]!,
+            id: `page-${index}`,
+            mounts: [{ slot: "frockbot.right-panel" }],
+          })),
+        ),
+      ),
+    ).toThrow("non-empty bounded array");
+    expect(() =>
+      decodeFrockBotManifest(
+        withPages([
+          base.contributions.client.pages[0]!,
+          { ...base.contributions.client.pages[1]!, id: "list" },
+        ]),
+      ),
+    ).toThrow("duplicate ids");
+    expect(() =>
+      decodeFrockBotManifest(
+        withPages([
+          { ...base.contributions.client.pages[0]!, id: "List" },
+          base.contributions.client.pages[1]!,
+        ]),
+      ),
+    ).toThrow("id is invalid");
+    expect(() =>
+      decodeFrockBotManifest(
+        withPages([
+          {
+            ...base.contributions.client.pages[0]!,
+            mounts: [{ slot: "frockbot.surface:missing" }],
+          },
+          base.contributions.client.pages[1]!,
+        ]),
+      ),
+    ).toThrow("not iframe-safe");
+    const withEntries = (entries: unknown) => ({
+      ...base,
+      contributions: {
+        ...base.contributions,
+        client: { ...base.contributions.client, entries },
+      },
+    });
+    expect(() =>
+      decodeFrockBotManifest(
+        withEntries([
+          {
+            ...base.contributions.client.entries[0]!,
+            opens: { kind: "surface", page: "canvas" },
+          },
+        ]),
+      ),
+    ).toThrow("declares no surface mount");
+    expect(() =>
+      decodeFrockBotManifest(
+        withEntries([
+          {
+            ...base.contributions.client.entries[0]!,
+            label: "x".repeat(33),
+          },
+        ]),
+      ),
+    ).toThrow("label is too long");
+    expect(() =>
+      decodeFrockBotManifest(
+        withEntries([
+          { ...base.contributions.client.entries[0]!, slot: "frockbot.root" },
+        ]),
+      ),
+    ).toThrow("slot is invalid");
+    expect(() =>
+      decodeFrockBotManifest(
+        withEntries(
+          Array.from({ length: 5 }, (_unused, index) => ({
+            ...base.contributions.client.entries[0]!,
+            id: `open-${index}`,
+          })),
+        ),
+      ),
+    ).toThrow("bounded array");
   });
 
   test("keeps trusted Electron main execution exclusive to manifest v3", () => {
@@ -761,7 +1115,7 @@ describe("decodeFrockBotManifest", () => {
   test("rejects an unsupported manifest version", () => {
     expect(() =>
       decodeFrockBotManifest({
-        schemaVersion: 5,
+        schemaVersion: 6,
         id: "future",
         displayName: "Future",
         version: "1.0.0",

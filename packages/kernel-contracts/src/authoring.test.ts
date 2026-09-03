@@ -31,6 +31,53 @@ describe("the kernel-declared bundler seam", () => {
     expect(decodePackageBundleArtifactV1(ARTIFACT)).toEqual(ARTIFACT as never);
   });
 
+  test("decodes multi-page UI artifacts exactly", () => {
+    const page = (id: string, hash: string) => ({
+      id,
+      artifact: {
+        contentHash: hash.repeat(64),
+        size: 32,
+        mediaType: "text/html",
+        bundlerVersion: "frockbot-inline-html@1",
+      },
+      html: `<!doctype html><h1>${id}</h1>`,
+    });
+    const bundled = (uiArtifacts: unknown) => ({
+      schemaVersion: 1,
+      effectId: "author-1",
+      status: "bundled",
+      artifact: ARTIFACT,
+      module: "export const tools = [];",
+      uiArtifacts,
+      diagnostics: [],
+    });
+    const result = decodePackageBundleResultV1(
+      bundled([page("main", "b"), page("board", "c")]),
+    );
+    expect(
+      result.status === "bundled"
+        ? result.uiArtifacts?.map((entry) => entry.id)
+        : undefined,
+    ).toEqual(["main", "board"]);
+    expect(() => decodePackageBundleResultV1(bundled([]))).toThrow(
+      "non-empty bounded array",
+    );
+    expect(() =>
+      decodePackageBundleResultV1(
+        bundled([page("main", "b"), page("main", "c")]),
+      ),
+    ).toThrow("duplicate ids");
+    expect(() =>
+      decodePackageBundleResultV1(bundled([page("Main", "b")])),
+    ).toThrow("id is invalid");
+    expect(() =>
+      decodePackageBundleResultV1({
+        ...bundled([page("main", "b")]),
+        uiHtml: "<!doctype html>",
+      }),
+    ).toThrow("invalid fields");
+  });
+
   test("decodes a failed result exactly", () => {
     expect(
       decodePackageBundleResultV1({

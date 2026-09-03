@@ -12,3 +12,6 @@ bun.lock
 *.ico
 *.icns
 *.woff2
+
+# Applet scaffold: __APPLET_ID__ placeholders are not valid Markdown or TS
+packages/applet-sdk/template/

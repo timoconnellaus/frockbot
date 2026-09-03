@@ -4,6 +4,7 @@
 // every Package mounted for this Bot lists the same Connections and model.
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type {
+  IsolateAppletsOutcomeV1,
   IsolateCapabilityListOutcomeV1,
   IsolateConnectionOutcomeV1,
   IsolateMemoryOutcomeV1,
@@ -14,6 +15,7 @@ import type {
   IsolateWorkspaceOutcomeV1,
 } from "@frockbot/kernel-contracts";
 import {
+  decodeIsolateAppletsRequestV1,
   decodeIsolateCapabilityListV1,
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
@@ -60,6 +62,7 @@ interface BotIsolateRpc {
   isolateConnection(input: unknown): Promise<IsolateConnectionOutcomeV1>;
   isolateNotify(input: unknown): Promise<IsolateNotificationOutcomeV1>;
   isolateSchedule(input: unknown): Promise<IsolateScheduleOutcomeV1>;
+  isolateApplets(input: unknown): Promise<IsolateAppletsOutcomeV1>;
 }
 
 export class BotCapabilities extends WorkerEntrypoint<
@@ -257,6 +260,21 @@ export class BotCapabilities extends WorkerEntrypoint<
       );
     } catch {
       return unavailable("notifications are unavailable");
+    }
+  }
+
+  /**
+   * The Applet capability (ADR 0022). Account-wide, so it carries no narrower
+   * grant than the rest of `env`: an Applet is the User's, and every Bot of
+   * that User sees the same directory.
+   */
+  async applets(request: unknown): Promise<IsolateAppletsOutcomeV1> {
+    try {
+      return await this.rpc.isolateApplets(
+        this.scope(decodeIsolateAppletsRequestV1(request)),
+      );
+    } catch {
+      return unavailable("Applets are unavailable");
     }
   }
 

@@ -20,6 +20,7 @@ import {
   FLOCK_AI_PROVIDER_TYPE,
   flockAiStaticCatalogV1,
 } from "./catalog.js";
+import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 const BOOTSTRAP_KEY = "provider-flock-ai:bootstrap-v1";
 const COMMAND_PREFIX = "provider-flock-ai:command:";
@@ -373,3 +374,26 @@ export function createFlockAiUserBackendPlugin(
     };
   };
 }
+
+/**
+ * What an application hands this Contribution: the ambient Flock AI Connection, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface FlockAiUserApplicationHostV1 {
+  flockAi: FlockAiUserBackendHost;
+}
+
+/**
+ * The manifest's `user` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const userContribution = defineUserBackendContribution<
+  FlockAiUserApplicationHostV1,
+  FlockAiUserBackendContribution
+>({
+  specifier: "@frockbot/plugin-provider-flock-ai/user",
+  create: (host, lifecycle) =>
+    createFlockAiUserBackendPlugin(host.flockAi, lifecycle),
+});

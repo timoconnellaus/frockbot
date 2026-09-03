@@ -34,6 +34,7 @@ import {
   eventsForFailedRun,
   latestModelRequestJournalState,
   planBotRunRecovery,
+  unresolvedModelRequestFailure,
 } from "./run-recovery.js";
 import {
   BotTurnReconciliationRequiredError,
@@ -487,7 +488,7 @@ export class BotDurableAuthority<Snapshot> {
           previous,
           events,
           modelState.status === "unresolved"
-            ? `Model request "${modelState.request.request.requestId}" has no durable provider outcome`
+            ? unresolvedModelRequestFailure(events, modelState.request)
             : message,
         );
         throw new Error(message);
@@ -619,7 +620,7 @@ export class BotDurableAuthority<Snapshot> {
           previous,
           events,
           modelState.status === "unresolved"
-            ? `Model request "${modelState.request.request.requestId}" has no durable provider outcome`
+            ? unresolvedModelRequestFailure(events, modelState.request)
             : message,
         );
         throw new Error(message);

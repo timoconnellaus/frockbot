@@ -1,0 +1,180 @@
+<!doctype html>
+<!--
+  The Applets surface: everything this User owns, and one action per row.
+
+  It is a page of the Applets Package, not of the shell, so it holds no
+  authority: it reads the `applets` state the host feeds it and asks the host
+  to change the focus. Every colour is a `--frockbot-*` token the host injects
+  on `init`, so the page follows the User's theme without knowing which one is
+  on.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Applets</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+
+      html,
+      body {
+        margin: 0;
+        color: var(--frockbot-text);
+        background: var(--frockbot-surface);
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          sans-serif;
+        font-size: 14px;
+      }
+
+      main {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 16px;
+      }
+
+      h1 {
+        margin: 0 0 4px;
+        font-size: 18px;
+        font-weight: 600;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        border: 1px solid var(--frockbot-border);
+        border-radius: var(--frockbot-radius-card, 12px);
+        background: var(--frockbot-surface-raised);
+      }
+
+      .grow {
+        display: flex;
+        min-width: 0;
+        flex: 1;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .name {
+        overflow: hidden;
+        font-weight: 600;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .meta {
+        overflow: hidden;
+        color: var(--frockbot-text-muted);
+        font-size: 12px;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      button {
+        flex: 0 0 auto;
+        padding: 6px 12px;
+        border: 1px solid var(--frockbot-border);
+        border-radius: 999px;
+        color: var(--frockbot-accent-text);
+        background: var(--frockbot-accent-surface);
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .empty {
+        padding: 24px 12px;
+        color: var(--frockbot-text-muted);
+        text-align: center;
+      }
+
+      .empty strong {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--frockbot-text);
+        font-size: 15px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Applets</h1>
+      <div id="applets" aria-live="polite">
+        <p class="empty">Loading…</p>
+      </div>
+    </main>
+    <script>
+      PACKAGE_IFRAME_HELPER_JS_V1;
+    </script>
+    <script>
+      (() => {
+        const host = document.getElementById("applets");
+
+        function meta(applet) {
+          const generation = applet.currentGenerationId
+            ? `generation ${applet.currentGenerationId}`
+            : "not published yet";
+          const tools =
+            applet.tools.length === 0
+              ? "no tools"
+              : `${applet.tools.length} tool${applet.tools.length === 1 ? "" : "s"}`;
+          return `${applet.status} · ${generation} · ${tools}`;
+        }
+
+        function render(state) {
+          const applets = Array.isArray(state?.list) ? state.list : [];
+          host.textContent = "";
+          if (applets.length === 0) {
+            const empty = document.createElement("p");
+            empty.className = "empty";
+            const title = document.createElement("strong");
+            title.textContent = "No Applets yet";
+            empty.append(
+              title,
+              "Ask this Bot to build one — a todo list, a tracker, a board. It writes it, publishes it, and it opens here.",
+            );
+            host.append(empty);
+            window.frockbot.resize();
+            return;
+          }
+          for (const applet of applets) {
+            const row = document.createElement("div");
+            row.className = "row";
+            const grow = document.createElement("div");
+            grow.className = "grow";
+            const name = document.createElement("span");
+            name.className = "name";
+            name.textContent = applet.displayName;
+            const detail = document.createElement("span");
+            detail.className = "meta";
+            detail.textContent = meta(applet);
+            grow.append(name, detail);
+            const open = document.createElement("button");
+            open.type = "button";
+            open.textContent =
+              state.focused && state.focused.appletId === applet.appletId
+                ? "Showing"
+                : "Open";
+            open.addEventListener("click", () => {
+              window.frockbot.focus(applet.appletId);
+            });
+            row.append(grow, open);
+            host.append(row);
+          }
+          window.frockbot.resize();
+        }
+
+        window.frockbot.ready.then(() => {
+          window.frockbot.subscribe("applets", render);
+          window.frockbot.resize();
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -214,6 +214,7 @@ describe("the managed and plugin-borne Skill sources", () => {
     expect(injected).toMatchObject({ turn: 1 });
     expect(injected?.skills?.map((skill) => skill.path)).toEqual([
       "managed/add-connector/SKILL.md",
+      "managed/applets/SKILL.md",
       "managed/export-bot-template/SKILL.md",
       "managed/import-bot-template/SKILL.md",
       "managed/learn-from-demonstration/SKILL.md",

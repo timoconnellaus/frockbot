@@ -33,6 +33,7 @@ import {
   type TemplateShareListViewV1,
   type TemplateShareReceiptV1,
 } from "./shared.js";
+import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 
 export interface PublishedTemplateV1 {
   hash: string;
@@ -260,3 +261,16 @@ export namespace createBotTemplateBackendContribution {
     return () => lifecycle.mount(createBotTemplateBackendContribution(host));
   }
 }
+
+/**
+ * The manifest's gateway `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineGatewayContribution<
+  BotTemplateGatewayHostV1,
+  BotTemplateBackendRouteContribution
+>({
+  specifier: "@frockbot/plugin-bot-template/backend",
+  create: createBotTemplateBackendContribution.plugin,
+});

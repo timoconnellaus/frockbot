@@ -6,6 +6,7 @@ import AuthGate from "./AuthGate.vue";
 import { createBrowserAuthSessionClient } from "./browser.js";
 import "@frockbot/client-core/fonts.css";
 import "./styles.css";
+import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
 
 export const authClientPlugin: ClientPlugin = (ctx: ClientPluginContext) => [
   ctx.provide(authSessionClientKey, createBrowserAuthSessionClient()),
@@ -13,3 +14,13 @@ export const authClientPlugin: ClientPlugin = (ctx: ClientPluginContext) => [
 ];
 
 export default authClientPlugin;
+
+/**
+ * The manifest's `client` entry, resolved by specifier. The application looks
+ * this descriptor up in its Contribution table; it never branches on which
+ * Package it belongs to.
+ */
+export const clientContribution = defineClientContribution<ClientPlugin>({
+  specifier: "@frockbot/plugin-auth/client",
+  plugin: authClientPlugin,
+});

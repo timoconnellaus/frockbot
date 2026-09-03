@@ -4,6 +4,7 @@
  * fall back to Unicode symbols, whose ink offsets differ per font.
  */
 export type UiIconName =
+  | "applets"
   | "arrow-down"
   | "arrow-up"
   | "check"
@@ -25,6 +26,15 @@ export type UiIconName =
   | "user";
 
 export const uiIconPaths: Record<UiIconName, string[]> = {
+  // An Applet: a window with its own title bar, standing on the shell.
+  applets: [
+    "M4 5h16v14H4z",
+    "M4 9h16",
+    "M7 7h.01",
+    "M9.5 7h.01",
+    "M8 13h5",
+    "M8 16h8",
+  ],
   "arrow-down": ["m19 12-7 7-7-7", "M12 5v14"],
   "arrow-up": ["m5 12 7-7 7 7", "M12 19V5"],
   check: ["M20 6 9 17l-5-5"],

@@ -11,6 +11,10 @@ import {
   isPublicIdentifier,
 } from "@frockbot/configuration-core";
 import { decodeDeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
+import {
+  AppletViewerTokenError,
+  verifyAppletViewerTokenV1,
+} from "@frockbot/kernel-do";
 import { isDeploymentAdminV1 } from "./admin-identities.js";
 import type {
   CatalogGatewayDocument,
@@ -31,6 +35,56 @@ const PUBLIC_ASSET_PATHS = new Set([
 const PACKAGE_UI_PATH = /^\/packages\/([0-9a-f]{64})\.html$/;
 export const PACKAGE_UI_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'";
+
+/**
+ * The gateway origin an artifact host belongs to: `ui.bot.example` serves the
+ * pages of `bot.example`.
+ *
+ * An Applet's page opens a WebSocket back to its own account's gateway and to
+ * nothing else, so the `connect-src` it is served with is derived here rather
+ * than widened to a wildcard. Every other Package page is unaffected: it simply
+ * gains a `connect-src` it does not use.
+ */
+export function packageUiGatewayOriginV1(url: URL): string {
+  const host = url.hostname.startsWith("ui.")
+    ? url.hostname.slice("ui.".length)
+    : url.hostname;
+  const port = url.port ? `:${url.port}` : "";
+  return `${url.protocol}//${host}${port}`;
+}
+
+/**
+ * What a Package page may do.
+ *
+ * Still `default-src 'none'`: a page loads nothing from anywhere, and its
+ * script and style are the inline ones in the artifact itself. Two openings,
+ * both named rather than wildcarded, and both derived from the request so a
+ * deployment on any hostname gets exactly its own:
+ *
+ * - `connect-src <gateway origin> <gateway ws origin>` lets an Applet's UI open
+ *   its viewer socket back to the `AppletState` object on the gateway, which
+ *   is the only endpoint it is given (ADR 0022 §4).
+ * - `frame-src <artifact origin>` lets a page nest another page on the same
+ *   anonymous origin — the Applets canvas page nesting the Applet's own UI.
+ *   The nested frame is served by this very route, with this very policy.
+ *
+ * No `frame-ancestors` relaxation and no `form-action`.
+ */
+export function packageUiCspV1(url: URL): string {
+  const origin = packageUiGatewayOriginV1(url);
+  const origins = [origin];
+  // Local development serves the app on `localhost` or `127.0.0.1` and both
+  // map to the one `ui.localhost` artifact host, so a page there may connect
+  // to either spelling of the loopback gateway. A deployed host maps to
+  // exactly one origin.
+  if (new URL(origin).hostname === "localhost") {
+    origins.push(origin.replace("//localhost", "//127.0.0.1"));
+  }
+  const connect = origins
+    .flatMap((candidate) => [candidate, candidate.replace(/^http/, "ws")])
+    .join(" ");
+  return `${PACKAGE_UI_CSP}; connect-src ${connect}; frame-src ${url.origin}`;
+}
 export const SIGNUPS_CLOSED_MESSAGE =
   "FrockBot isn't taking new signups right now.";
 
@@ -76,7 +130,7 @@ export async function servePackageUiArtifact(
   const headers = {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "public, max-age=31536000, immutable",
-    "content-security-policy": PACKAGE_UI_CSP,
+    "content-security-policy": packageUiCspV1(url),
     "cross-origin-resource-policy": "cross-origin",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
@@ -288,6 +342,31 @@ function allowedClientOrigin(
   return origin;
 }
 
+/**
+ * Whether `presented` is the anonymous artifact origin that serves this
+ * gateway's Package pages: `ui.<host>` in a deployment, and `ui.localhost` for
+ * a gateway on either spelling of the loopback in development.
+ */
+export function isPackageUiArtifactOriginFor(
+  presented: string,
+  gateway: URL,
+): boolean {
+  let origin: URL;
+  try {
+    origin = new URL(presented);
+  } catch {
+    return false;
+  }
+  if (origin.protocol !== gateway.protocol || origin.port !== gateway.port) {
+    return false;
+  }
+  const loopback =
+    gateway.hostname === "localhost" || gateway.hostname === "127.0.0.1";
+  return loopback
+    ? origin.hostname === "ui.localhost"
+    : origin.hostname === `ui.${gateway.hostname}`;
+}
+
 function preflightResponse(origin: string): Response {
   return new Response(null, {
     status: 204,
@@ -309,6 +388,126 @@ function withClientOrigin(response: Response, origin: string): Response {
   return shared;
 }
 
+const APPLET_SOCKET_PATH = /^\/api\/applets\/([^/]+)\/socket$/;
+
+/**
+ * `GET /api/applets/:appletId/socket?token=…`.
+ *
+ * Ahead of session authentication on purpose, and for the same reason the
+ * machine door is: an Applet's page runs in a cookieless sandboxed iframe and
+ * carries no session. The signed viewer token is the whole of the decision —
+ * it names the User, the Applet, and the generation, it was minted by this
+ * deployment, and it expires in fifteen minutes. A token that does not verify
+ * never reaches a Durable Object, so an anonymous caller cannot create one.
+ */
+async function routeAppletSocket(
+  request: Request,
+  url: URL,
+  dependencies: GatewayDependencies,
+): Promise<Response> {
+  if (request.method !== "GET") return jsonError(405, "method not allowed");
+  if (!dependencies.appletViewerSecret || !dependencies.appletStateFor) {
+    return jsonError(503, "Applet viewer sessions are not configured");
+  }
+  let appletId: string;
+  try {
+    appletId = decodeURIComponent(url.pathname.match(APPLET_SOCKET_PATH)![1]);
+  } catch {
+    return jsonError(400, "invalid applet id");
+  }
+  let claims;
+  try {
+    claims = await verifyAppletViewerTokenV1(
+      dependencies.appletViewerSecret,
+      url.searchParams.get("token"),
+    );
+  } catch (error) {
+    return jsonError(
+      error instanceof AppletViewerTokenError ? error.status : 401,
+      "Applet viewer token is invalid",
+    );
+  }
+  // The token is scoped to one Applet: a valid token for another Applet of the
+  // same User is not a token for this one.
+  if (claims.a !== appletId) {
+    return jsonError(401, "Applet viewer token is invalid");
+  }
+  const forwarded = new URL(url);
+  forwarded.searchParams.delete("token");
+  forwarded.searchParams.set("u", claims.u);
+  forwarded.searchParams.set("a", claims.a);
+  forwarded.searchParams.set("g", claims.g);
+  // `fetch`, not an RPC method: a 101 response with its WebSocket only
+  // crosses the stub boundary on the object's HTTP door.
+  return dependencies
+    .appletStateFor(claims.u, claims.a)
+    .fetch(new Request(forwarded, request));
+}
+
+const WORKSPACE_SEED_PATH = /^\/api\/workspace-seed\/([^/]+)\/([^/]+)$/;
+
+/**
+ * `PUT /api/workspace-seed/:userId/:botId`, bearer-authenticated by the seed
+ * token, present only where `WORKSPACE_SEED_TOKEN` is set. See
+ * `GatewayDependencies.workspaceSeed`.
+ */
+async function routeWorkspaceSeed(
+  request: Request,
+  url: URL,
+  dependencies: GatewayDependencies,
+): Promise<Response> {
+  const seed = dependencies.workspaceSeed;
+  if (!seed) return jsonError(404, "not found");
+  if (request.method !== "PUT") return jsonError(405, "method not allowed");
+  const header = request.headers.get("authorization") ?? "";
+  const presented = header.toLowerCase().startsWith("bearer ")
+    ? header.slice("bearer ".length).trim()
+    : "";
+  if (presented.length === 0 || presented !== seed.token) {
+    return jsonError(401, "seed token is invalid");
+  }
+  const match = url.pathname.match(WORKSPACE_SEED_PATH)!;
+  let body: {
+    root?: unknown;
+    path?: unknown;
+    bytesBase64?: unknown;
+    mediaType?: unknown;
+  };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return jsonError(400, "seed body is not JSON");
+  }
+  if (
+    typeof body.path !== "string" ||
+    typeof body.bytesBase64 !== "string" ||
+    (body.mediaType !== undefined && typeof body.mediaType !== "string")
+  ) {
+    return jsonError(400, "seed body is invalid");
+  }
+  try {
+    return Response.json(
+      await seed.write(
+        decodeURIComponent(match[1]!),
+        decodeURIComponent(match[2]!),
+        {
+          root: body.root,
+          path: body.path,
+          bytesBase64: body.bytesBase64,
+          ...(body.mediaType === undefined
+            ? {}
+            : { mediaType: body.mediaType }),
+        },
+      ),
+    );
+  } catch (error) {
+    return jsonError(
+      400,
+      error instanceof Error ? error.message : "seed write failed",
+    );
+  }
+}
+
 export function createGateway(dependencies: GatewayDependencies) {
   const compatibilityDate = dependencies.compatibilityDate ?? "2026-08-27";
   const debugRoute = createDebugRoute(dependencies.debug);
@@ -316,6 +515,12 @@ export function createGateway(dependencies: GatewayDependencies) {
   const route = async (request: Request, url: URL): Promise<Response> => {
     if (url.pathname.startsWith("/api/auth/")) {
       return dependencies.auth.handler(request);
+    }
+    if (APPLET_SOCKET_PATH.test(url.pathname)) {
+      return routeAppletSocket(request, url, dependencies);
+    }
+    if (WORKSPACE_SEED_PATH.test(url.pathname)) {
+      return routeWorkspaceSeed(request, url, dependencies);
     }
     if (url.pathname === "/sign-out") {
       return routeSignOut(request, url, dependencies);
@@ -673,10 +878,23 @@ export function createGateway(dependencies: GatewayDependencies) {
     );
     const isApiPath = url.pathname.startsWith("/api/");
     const presentedOrigin = request.headers.get("origin");
+    // The Applet viewer socket is the one `/api/*` upgrade that does not come
+    // from the app. Its page runs in a sandboxed iframe with no
+    // `allow-same-origin`, so the browser sends the literal `Origin: null` — an
+    // opaque origin — and a page on the artifact host itself would send
+    // `ui.<this host>`. Either is admitted here and nothing else: the page is
+    // cookieless, so this guard protects nothing on that path, and the signed
+    // token in the URL is the whole of the decision (ADR 0022 §4).
+    const appletSocketFromArtifactOrigin =
+      APPLET_SOCKET_PATH.test(url.pathname) &&
+      presentedOrigin !== null &&
+      (presentedOrigin === "null" ||
+        isPackageUiArtifactOriginFor(presentedOrigin, url));
     if (
       isApiPath &&
       presentedOrigin &&
       !origin &&
+      !appletSocketFromArtifactOrigin &&
       (request.method !== "GET" ||
         request.headers.get("upgrade")?.toLowerCase() === "websocket") &&
       request.method !== "HEAD"

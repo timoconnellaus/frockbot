@@ -1,0 +1,128 @@
+<!doctype html>
+<!--
+  The Applet canvas page.
+
+  `AppletCanvas.vue` owns the frame — the header, the two states, the slide —
+  and mounts this page in `frockbot.right-panel` for the "ready" half. All this
+  page does is nest the Applet's own UI artifact and hand it the one thing it
+  cannot fetch for itself: the short-lived viewer token, the socket URL, and
+  the theme tokens, in the `init` message `listenForAppletInit` in
+  `@frockbot/applet-sdk/client` waits for.
+
+  Two frames rather than one because the trust boundaries differ. This page is
+  a page of the Applets Package, pinned by the Composition. The Applet inside
+  it is one User's own code, on its own generation, replaced whenever they
+  publish — so it gets its own document, and a new generation is a new frame,
+  never a reused one.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Applet</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        color: var(--frockbot-text);
+        background: var(--frockbot-surface);
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          sans-serif;
+        font-size: 14px;
+      }
+
+      #frame {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: var(--frockbot-surface);
+      }
+
+      #idle {
+        display: flex;
+        height: 100%;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        color: var(--frockbot-text-muted);
+        text-align: center;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="idle">This Applet has no published version yet.</p>
+    <iframe
+      id="frame"
+      hidden
+      title="Applet"
+      sandbox="allow-scripts"
+      referrerpolicy="no-referrer"
+    ></iframe>
+    <script>
+      PACKAGE_IFRAME_HELPER_JS_V1;
+    </script>
+    <script>
+      (() => {
+        const frame = document.getElementById("frame");
+        const idle = document.getElementById("idle");
+        let themeTokens = {};
+        let mounted = null;
+        let pending = null;
+
+        /* The Applet is told who it is once its own document has loaded. */
+        frame.addEventListener("load", () => {
+          if (!pending || !frame.contentWindow) return;
+          frame.contentWindow.postMessage(
+            {
+              schemaVersion: 1,
+              type: "init",
+              themeTokens,
+              applet: {
+                socketUrl: pending.socketUrl,
+                token: pending.token,
+                generationId: pending.generationId,
+              },
+            },
+            "*",
+          );
+        });
+
+        function show(viewer) {
+          if (!viewer) {
+            mounted = null;
+            pending = null;
+            frame.hidden = true;
+            frame.removeAttribute("src");
+            idle.hidden = false;
+            return;
+          }
+          idle.hidden = true;
+          frame.hidden = false;
+          pending = viewer;
+          // A new generation, a new token, or a new URL is a new document: the
+          // Applet's `init` is delivered on load and never re-sent into a page
+          // that has already connected with a token that is about to expire.
+          const identity = `${viewer.generationId}|${viewer.uiUrl}|${viewer.token}`;
+          if (identity === mounted) return;
+          mounted = identity;
+          frame.setAttribute("src", viewer.uiUrl);
+        }
+
+        window.frockbot.ready.then((init) => {
+          themeTokens = init.themeTokens;
+          window.frockbot.subscribe("applets", (state) => {
+            show(state && state.viewer ? state.viewer : null);
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -368,6 +368,7 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
           connections,
           ...(turn.model ? { model: turn.model } : {}),
           compositionGenerationId: generation.generationId,
+          runId: turn.runId,
         }),
         compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
       },
@@ -432,6 +433,39 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
     const generation = await this.authority.composition.read(generationId);
     if (!generation) throw new Error(`generation "${generationId}" is unknown`);
     return generation;
+  }
+
+  /** The tools the last mounted Composition actually registered. */
+  async mountedToolNames(): Promise<string[]> {
+    return [...this.currentToolNames];
+  }
+
+  /** The manifest a member was authored with, as the mount reads it. */
+  async memberManifest(
+    generationId: string,
+    packageId: string,
+  ): Promise<unknown> {
+    const generation = await this.generation(generationId);
+    const member = generation.members.find(
+      (candidate) => candidate.packageId === packageId,
+    );
+    if (!member) throw new Error(`no member "${packageId}"`);
+    const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
+      authorshipManifestKey(member.manifestHash),
+    );
+    if (!stored) throw new Error("stored authored manifest is missing");
+    return stored.manifest;
+  }
+
+  /** The member as the generation records it, artifact included. */
+  async member(
+    generationId: string,
+    packageId: string,
+  ): Promise<CompositionGenerationV1["members"][number] | undefined> {
+    const generation = await this.generation(generationId);
+    return generation.members.find(
+      (candidate) => candidate.packageId === packageId,
+    );
   }
 
   async artifactRecords(): Promise<AuthoredArtifactRecordV1[]> {

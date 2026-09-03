@@ -21,6 +21,7 @@ import {
   type PersistSessionEvents,
   type SessionEvent,
   type WorkspacePathV1,
+  type WorkspaceRootV1,
   validateToolOccurrenceJournal,
   type BotCapabilitiesStub,
   type IsolateModelInvocationV1,
@@ -36,7 +37,11 @@ import {
   isClientIframeContribution,
   type FrockBotManifest,
 } from "@frockbot/kernel-composition";
+import { canonicalJson, sha256 } from "@frockbot/kernel-composition/compiler";
 import type { Plugin } from "cordis";
+import type { ComputerRegistry } from "@frockbot/computer-core";
+import { appletsSourceRootV1 } from "@frockbot/plugin-applets/root";
+import { syncWorkspaceRootNowV1 } from "@frockbot/plugin-computer/agent";
 import {
   ACTIVE_RUN_KEY,
   BotDurableAuthority,
@@ -119,9 +124,31 @@ import {
 import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
+  type ShellAppletMountOptions,
   type ShellIsolateMountOptions,
   type ShellMountedComposition,
 } from "./backend-composition.js";
+import {
+  createAppletCapabilityHostV1,
+  createAppletInstanceBindingV1,
+  appletRpcSnapshotV1 as rpcJsonSnapshotV1,
+  resolveAppletCompositionV1,
+  type AppletCapabilityHostV1,
+  type AppletInstanceNamespaceV1,
+  type AppletUserDirectoryV1,
+} from "./backend-applets.js";
+import {
+  APPLET_FOCUSED_KEY,
+  decodeFocusedAppletV1,
+  type FocusedAppletV1,
+} from "@frockbot/kernel-do";
+import {
+  decodeAppletProvenanceV1,
+  decodeAppletSummaryV1,
+  decodeAppletToolDeclarationV1,
+  decodeIsolateAppletsRequestV1,
+  type IsolateAppletsOutcomeV1,
+} from "@frockbot/kernel-contracts";
 import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
 import {
   activateCompositionV1,
@@ -139,7 +166,10 @@ import {
   createPackageCatalogHost,
   createR2BotPackageCatalogReader,
 } from "./backend-package-catalog.js";
-import { createBotComputerSyncHost } from "./backend-computer.js";
+import {
+  createBotComputerSyncHost,
+  declaredPackageRootsV1,
+} from "./backend-computer.js";
 import {
   decodeDirectoryViewV1,
   decodeFlockReceiptV1,
@@ -409,6 +439,7 @@ import {
   type BotUnreadReceiptV1,
   type BotUnreadViewV1,
 } from "./unread.js";
+import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 export const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
@@ -496,6 +527,13 @@ export interface BotStateEnv {
   /** Immutable, content-addressed Package artifacts, read hash-verified. */
   APPLICATION_ARTIFACTS?: R2Bucket;
   /**
+   * One Applet Durable Object per Applet instance (ADR 0022). Optional so a
+   * host without Applets still compiles; a Composition generation carrying an
+   * Applet member then fails verification, exactly as an isolate member does
+   * without a loader.
+   */
+  APPLET_STATES?: AppletInstanceNamespaceV1;
+  /**
    * The remote Package Catalog bucket. Read here only to index the Skills that
    * arrived with the User's installed entries, at the generation each install
    * pinned. Optional so a deployment without a Catalog still compiles: a Turn
@@ -566,6 +604,13 @@ export interface ShellBotBackendHost {
    * Durable Object has no honest way to dispatch one.
    */
   subagents?: SubagentDurableBindingV1;
+  /**
+   * Immutable Package artifacts this bundle already carries, by object key.
+   *
+   * The application supplies these; the shell only hands them to the artifact
+   * store as a second place to look. See `createR2PackageArtifactStore`.
+   */
+  bundledPackageArtifacts?: ReadonlyMap<string, string>;
   invalidateComputerProjectionFile?(
     userId: string,
     botId: string,
@@ -617,6 +662,7 @@ export class ShellBotBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: BotStateEnv;
   private readonly compileApplication: typeof compileFoundationApplication;
+  private readonly bundledPackageArtifacts?: ReadonlyMap<string, string>;
   private readonly lifecycleAdmission?: ShellBotBackendHost["assertLifecycleActive"];
   private readonly reconciliationActivities = new Map<
     string,
@@ -683,6 +729,7 @@ export class ShellBotBackendContribution {
     this.env = host.env;
     this.compileApplication =
       host.compileApplication ?? compileFoundationApplication;
+    this.bundledPackageArtifacts = host.bundledPackageArtifacts;
     this.lifecycleAdmission = host.assertLifecycleActive;
     this.outboundFetch = host.outboundFetch;
     this.invalidateComputerProjectionFile =
@@ -1069,6 +1116,12 @@ export class ShellBotBackendContribution {
   }
 
   async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
+    // Before admission, so the pin this Turn takes already carries whatever the
+    // User's Applet directory says now.
+    await this.resolveAppletComposition(
+      { userId: command.userId, botId: command.botId },
+      command,
+    );
     return projectClientTurnV1(await this.authority.run(command));
   }
 
@@ -1151,7 +1204,34 @@ export class ShellBotBackendContribution {
     const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
       authorshipManifestKey(member.manifestHash),
     );
-    return stored ? decodeFrockBotManifest(stored.manifest) : undefined;
+    if (stored) return decodeFrockBotManifest(stored.manifest);
+    return await this.readApplicationMemberManifest(member);
+  }
+
+  /**
+   * The manifest of a member the *application* declared, not the Bot.
+   *
+   * `authorship:manifest:<hash>` is written by the authoring path and by a
+   * Catalog install, so it exists for every member a Bot or its User put into
+   * the Composition. A first-party artifact-backed member (ADR 0022 decision
+   * 8) came from neither: it is in the compiled application, whose manifests
+   * are already in this bundle. The `manifestHash` is still what decides —
+   * the plan's manifest is accepted only when it hashes to exactly what the
+   * generation recorded — so this is a second *place* to look, never a second
+   * answer.
+   */
+  private async readApplicationMemberManifest(
+    member: CompositionMemberV1,
+  ): Promise<FrockBotManifest | undefined> {
+    if (!member.artifact) return undefined;
+    const application = await this.compileApplication();
+    const declared = application.packages.find(
+      (candidate) => candidate.id === member.packageId,
+    );
+    if (!declared) return undefined;
+    const hash = await sha256(canonicalJson(declared.manifest));
+    if (hash !== member.manifestHash) return undefined;
+    return declared.manifest;
   }
 
   private async requireCompositionMemberManifest(
@@ -1194,6 +1274,59 @@ export class ShellBotBackendContribution {
    * and its provenance says who put it there. The write goes through the same
    * `writeSkillDocumentV1` the Bot's own `skill_write` uses, quota included.
    */
+  /**
+   * One file written into one of the User's durable roots, as the User.
+   *
+   * This is the stand-in for the Computer's sync in an environment that has
+   * no Computer: an end-to-end run lands the bytes `applet build` would have
+   * written, at the path the sync would have mirrored them to, through the
+   * same store and with the same generation record. The writer is the User —
+   * the authority the sync's `unattributed` mirror is *narrower* than — so
+   * nothing here is a write the User could not have made from their own
+   * Computer. A root belonging to another User is refused by the store.
+   */
+  async writeUserWorkspaceFile(
+    identity: BotIdentity,
+    request: {
+      root: WorkspaceRootV1;
+      path: string;
+      bytes: Uint8Array;
+      mediaType?: string;
+    },
+  ): Promise<
+    | { status: "written"; generationId: string }
+    | { status: "refused"; reason: string }
+  > {
+    await this.validateIdentity(identity);
+    const files = (this.env as { WORKSPACE_FILES?: WorkspaceFilesV1 })
+      .WORKSPACE_FILES;
+    if (!files) {
+      return { status: "refused", reason: "this Bot has no Workspace store" };
+    }
+    if (request.root.userId !== identity.userId) {
+      return { status: "refused", reason: "the root belongs to another User" };
+    }
+    const path = { root: request.root, path: request.path };
+    const existing = await files.stat(path);
+    const outcome = await files.write({
+      path,
+      bytes: request.bytes,
+      writer: { kind: "user", userId: identity.userId },
+      expectedGenerationId:
+        existing.status === "ok"
+          ? existing.entry.generation.generationId
+          : null,
+      ...(request.mediaType ? { mediaType: request.mediaType } : {}),
+    });
+    if (outcome.status === "ok") {
+      return {
+        status: "written",
+        generationId: outcome.generation.generationId,
+      };
+    }
+    return { status: "refused", reason: outcome.reason };
+  }
+
   async writeUserSkill(
     identity: BotIdentity,
     draft: { slug: string; name: string; description: string; body: string },
@@ -1416,6 +1549,21 @@ export class ShellBotBackendContribution {
     // The isolate bindings follow the generation actually being mounted, so a
     // fail-closed fallback loads the last known good's members, not the
     // pinned generation's.
+    // Applet tools route to the Applet Durable Object, which forwards to the
+    // facet. The instance binding is minted once per Turn; the facet stub
+    // itself never leaves that object.
+    const appletInstances = this.env.APPLET_STATES
+      ? createAppletInstanceBindingV1(
+          this.env.APPLET_STATES,
+          input.identity.userId,
+        )
+      : undefined;
+    const appletRouting: ShellAppletMountOptions | undefined = appletInstances
+      ? {
+          invokeTool: (request) =>
+            appletInstances(request.appletId).invokeTool(request),
+        }
+      : undefined;
     const host: CompositionMountHost<ShellMountedComposition> = {
       mount: async (mounting, signal) => {
         const isolate = await this.isolateMountOptions(input.identity, {
@@ -1449,6 +1597,7 @@ export class ShellBotBackendContribution {
               effect,
             ),
           ...(isolate ? { isolate } : {}),
+          ...(appletRouting ? { applets: appletRouting } : {}),
         }).mount(mounting, signal);
         mountedRoot = mounted.root;
         mountedGeneration = mounted.generation;
@@ -1516,10 +1665,14 @@ export class ShellBotBackendContribution {
             "Package UI command does not match the mounted Composition generation",
           );
         }
+        // Artifact-backed, not "not first-party": what makes a Package's page
+        // able to name one of its tools is that the Package is loaded from an
+        // immutable artifact with a manifest, which is exactly what ADR 0022
+        // decision 8 gives a first-party Package too.
         const member = activation.mounted.generation.members.find(
           (candidate) =>
             candidate.packageId === directTool.packageId &&
-            candidate.provenance.kind !== "first-party",
+            candidate.artifact !== undefined,
         );
         if (!member)
           throw new Error("Package UI command names an unavailable Package");
@@ -1690,7 +1843,10 @@ export class ShellBotBackendContribution {
       runId: turn.runId,
       turnId: turn.runId,
       loader,
-      artifacts: createR2PackageArtifactStore(artifacts),
+      artifacts: createR2PackageArtifactStore(
+        artifacts,
+        this.bundledPackageArtifacts,
+      ),
       manifestFor: (member) => this.requireCompositionMemberManifest(member),
       capabilitiesFor: (member) =>
         mintCapabilities({
@@ -1713,6 +1869,7 @@ export class ShellBotBackendContribution {
       bindingDigest: await isolateBindingDigestV1({
         userId: identity.userId,
         botId: identity.botId,
+        runId: turn.runId,
         connections: authority.connections,
         ...(authority.model ? { model: authority.model } : {}),
         compositionGenerationId: turn.generationId,
@@ -2071,6 +2228,322 @@ export class ShellBotBackendContribution {
         },
       }),
     };
+  }
+
+  // --- Applets (ADR 0022) --------------------------------------------------
+
+  /**
+   * `ctx.applets` for one Bot, or `undefined` when this host cannot reach
+   * Applets at all — no instance namespace, no artifact bucket, or no
+   * Workspace. An absent capability is an `unavailable` outcome at the isolate
+   * boundary, never a thrown error inside Bot code.
+   */
+  private appletCapabilityHost(
+    identity: BotIdentity,
+    active?: NonNullable<ShellBotBackendContribution["activeTurn"]>,
+  ): AppletCapabilityHostV1 | undefined {
+    const namespace = this.env.APPLET_STATES;
+    const artifacts = this.env.APPLICATION_ARTIFACTS;
+    const workspace = this.env.WORKSPACE_FILES;
+    if (!namespace || !artifacts || !workspace) return undefined;
+    const bucket = artifacts;
+    return createAppletCapabilityHostV1({
+      userId: identity.userId,
+      botId: identity.botId,
+      storage: {
+        get: (key) => this.ctx.storage.get(key),
+        put: (entries) => this.ctx.storage.put(entries),
+      },
+      directory: this.appletUserDirectory(identity),
+      instanceFor: createAppletInstanceBindingV1(namespace, identity.userId),
+      artifacts: {
+        putPackageArtifact: async (contentHash, module) => {
+          await bucket.put(`packages/${contentHash}.mjs`, module, {
+            httpMetadata: { contentType: "application/javascript" },
+          });
+        },
+        putPackageUiArtifact: async (contentHash, html) => {
+          await bucket.put(`packages/${contentHash}.html`, html, {
+            httpMetadata: { contentType: "text/html; charset=utf-8" },
+          });
+        },
+      },
+      workspace,
+      // A publish reads `dist/` from the store, and `applet build` wrote it on
+      // the Computer moments earlier in this very Turn — before the Turn's own
+      // `turn-end` push. So the one root is reconciled first, through the one
+      // sanctioned extra caller of the Computer's sync. It wakes nothing new: a
+      // User with no Computer assignment has no root to pull, and the Bot that
+      // just built on its Computer has it open already.
+      syncSourceRootNow: active
+        ? async () => {
+            const root = active.mounted.runtime.root as unknown as {
+              computers?: ComputerRegistry;
+              sessions: typeof active.mounted.runtime.root.sessions;
+            };
+            const computerIdentity = { userId: identity.userId };
+            if (!root.computers?.assignment(computerIdentity)) return;
+            const session = root.sessions.get(active.sessionId);
+            const started = session?.events.findLast(
+              (event) => event.type === "step/start",
+            );
+            const turn = started?.type === "step/start" ? started.turn : 0;
+            const computer = await root.computers.open(
+              computerIdentity,
+              { botId: identity.botId },
+              { signal: active.signal },
+            );
+            await syncWorkspaceRootNowV1({
+              computer,
+              sessions: root.sessions,
+              sessionId: active.sessionId,
+              turn,
+              root: appletsSourceRootV1(identity.userId),
+              signal: active.signal,
+            });
+          }
+        : undefined,
+      composition: {
+        current: () => this.authority.composition.current(),
+        lastKnownGood: () => this.authority.composition.lastKnownGood(),
+        propose: (generation, options) =>
+          this.authority.composition.propose(generation, options),
+      },
+    });
+  }
+
+  /** The User Durable Object's Applet directory, decoded on arrival. */
+  private appletUserDirectory(identity: BotIdentity): AppletUserDirectoryV1 {
+    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+    // SAFETY: this namespace is bound to UserConfiguration; generated Worker
+    // types do not expose its Applet directory RPC surface.
+    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      listApplets(input: unknown): Promise<unknown>;
+      readAppletCompositionInput(input: unknown): Promise<unknown>;
+      createApplet(input: unknown): Promise<unknown>;
+      recordAppletGeneration(input: unknown): Promise<unknown>;
+      deleteApplet(input: unknown): Promise<unknown>;
+    };
+    const userId = identity.userId;
+    return {
+      async list() {
+        const answer = rpcJsonSnapshotV1(
+          await rpc.listApplets({ schemaVersion: 1, userId }),
+        ) as { revision?: unknown; applets?: unknown };
+        return {
+          revision: Number(answer.revision ?? 0),
+          applets: Array.isArray(answer.applets)
+            ? answer.applets.map((applet) => decodeAppletSummaryV1(applet))
+            : [],
+        };
+      },
+      async compositionInput() {
+        const answer = rpcJsonSnapshotV1(
+          await rpc.readAppletCompositionInput({ schemaVersion: 1, userId }),
+        ) as { revision?: unknown; applets?: unknown };
+        return {
+          revision: Number(answer.revision ?? 0),
+          applets: (Array.isArray(answer.applets) ? answer.applets : []).map(
+            (applet) => {
+              const entry = applet as Record<string, unknown>;
+              return {
+                appletId: String(entry.appletId),
+                generationId: String(entry.generationId),
+                tools: (Array.isArray(entry.tools) ? entry.tools : []).map(
+                  (tool, index) =>
+                    decodeAppletToolDeclarationV1(
+                      tool,
+                      `Applet tool declaration[${index}]`,
+                    ),
+                ),
+                provenance: decodeAppletProvenanceV1(entry.provenance),
+              };
+            },
+          ),
+        };
+      },
+      async create(input) {
+        return decodeAppletSummaryV1(
+          rpcJsonSnapshotV1(
+            await rpc.createApplet({
+              schemaVersion: 1,
+              userId,
+              displayName: input.displayName,
+              provenance: input.provenance,
+            }),
+          ),
+        );
+      },
+      async recordGeneration(input) {
+        return decodeAppletSummaryV1(
+          rpcJsonSnapshotV1(
+            await rpc.recordAppletGeneration({
+              schemaVersion: 1,
+              userId,
+              appletId: input.appletId,
+              generationId: input.generationId,
+              tools: input.tools,
+            }),
+          ),
+        );
+      },
+      async delete(appletId) {
+        return decodeAppletSummaryV1(
+          rpcJsonSnapshotV1(
+            await rpc.deleteApplet({ schemaVersion: 1, userId, appletId }),
+          ),
+        );
+      },
+    };
+  }
+
+  /**
+   * The Applet capability at the isolate boundary. One RPC with an operation,
+   * because seven near-identical forwarders would say nothing seven times; the
+   * shapes are decoded here and the outcomes are declared, never thrown.
+   */
+  async isolateApplets(
+    input: IsolateCallScopeV1,
+  ): Promise<IsolateAppletsOutcomeV1> {
+    const active = this.activeIsolateTurn(input);
+    if (!active) {
+      return {
+        status: "unavailable",
+        reason: "the Package is not running in this Bot's active Composition",
+      };
+    }
+    const identity = { userId: input.userId, botId: input.botId };
+    const host = this.appletCapabilityHost(identity, active);
+    if (!host) {
+      return { status: "unavailable", reason: "Applets are unavailable" };
+    }
+    const request = decodeIsolateAppletsRequestV1(input.request);
+    const scope = {
+      sessionId: input.sessionId,
+      runId: input.runId,
+      turnId: input.turnId,
+      effectId: `applet:${input.turnId}:${request.op}:${
+        "appletId" in request ? request.appletId : "new"
+      }`,
+    };
+    try {
+      switch (request.op) {
+        case "list":
+          return { status: "available", value: await host.list() };
+        case "create":
+          return {
+            status: "available",
+            value: await host.create(
+              { displayName: request.displayName },
+              scope,
+            ),
+          };
+        case "publish":
+          return {
+            status: "available",
+            value: await host.publish({ appletId: request.appletId }, scope),
+          };
+        case "revert":
+          return {
+            status: "available",
+            value: await host.revert(
+              {
+                appletId: request.appletId,
+                generationId: request.generationId,
+              },
+              scope,
+            ),
+          };
+        case "delete":
+          return {
+            status: "available",
+            value: await host.delete({ appletId: request.appletId }),
+          };
+        case "focus":
+          return {
+            status: "available",
+            value: await host.focus({ appletId: request.appletId }),
+          };
+        case "generations":
+          return {
+            status: "available",
+            value: await host.generations({ appletId: request.appletId }),
+          };
+      }
+    } catch (error) {
+      return {
+        status: "unavailable",
+        reason:
+          error instanceof Error ? error.message : "the Applet call failed",
+      };
+    }
+  }
+
+  /** The Session's focused Applet, as the shell and its route read it. */
+  async readFocusedApplet(identity: BotIdentity): Promise<FocusedAppletV1> {
+    await this.validateIdentity(identity);
+    const stored = await this.ctx.storage.get<unknown>(APPLET_FOCUSED_KEY);
+    return stored === undefined
+      ? {
+          schemaVersion: 1,
+          appletId: null,
+          changedAt: new Date(0).toISOString(),
+        }
+      : decodeFocusedAppletV1(stored);
+  }
+
+  async setFocusedApplet(
+    identity: BotIdentity,
+    appletId: string | null,
+  ): Promise<FocusedAppletV1> {
+    await this.validateIdentity(identity);
+    const focused = decodeFocusedAppletV1({
+      schemaVersion: 1,
+      appletId,
+      changedAt: new Date().toISOString(),
+    });
+    await this.ctx.storage.put({ [APPLET_FOCUSED_KEY]: focused });
+    return focused;
+  }
+
+  /**
+   * Resolve the User's Applet directory into this Bot's next Composition
+   * generation, before a Turn is admitted.
+   *
+   * Outside the admission transaction on purpose: the pin is taken in one
+   * storage transaction, which cannot make a cross-object call. A publish or a
+   * delete therefore activates at the *next* admitted Turn, and an in-flight
+   * Turn keeps the set it pinned — which is exactly what ADR 0022 promises.
+   * A directory that cannot be read leaves the Bot on the generation it has;
+   * an Applet change is never a reason a Turn cannot start.
+   */
+  private async resolveAppletComposition(
+    identity: BotIdentity,
+    command: OwnedBotTurnCommand,
+  ): Promise<void> {
+    if (!this.env.APPLET_STATES) return;
+    try {
+      await resolveAppletCompositionV1({
+        directory: this.appletUserDirectory(identity),
+        composition: {
+          current: () => this.authority.composition.current(),
+          propose: (generation, options) =>
+            this.authority.composition.propose(generation, options),
+        },
+        storage: {
+          get: (key) => this.ctx.storage.get(key),
+          put: (entries) => this.ctx.storage.put(entries),
+        },
+        origin: {
+          kind: "bot-authored",
+          runId: command.runId,
+          sessionId: command.sessionId,
+          turnId: command.runId,
+        },
+      });
+    } catch {
+      // Visible through the Applet's own failure records; never a wedged Turn.
+    }
   }
 
   async isolateWorkspaceRead(
@@ -3659,6 +4132,13 @@ export class ShellBotBackendContribution {
       user,
       packages: packageDefinitions,
     });
+    // The durable roots this User's enabled Packages declare, read from the
+    // same installations and the same compiled manifests the Composition is
+    // resolved from. Handed to the Computer sync below; nothing else reads it.
+    const packageRoots = declaredPackageRootsV1({
+      installations: user.packages,
+      packages: application.packages,
+    });
     const readSecret = (name: string) => {
       // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
       const value = (this.env as unknown as Record<string, unknown>)[name];
@@ -3904,7 +4384,7 @@ export class ShellBotBackendContribution {
         // object storage with an unattributed writer.
         ...(turn
           ? {
-              computerSync: createBotComputerSyncHost(this.env),
+              computerSync: createBotComputerSyncHost(this.env, packageRoots),
               // The same Turn, as the writer a durable Computer write records.
               computerWriter: {
                 sessionId: turn.sessionId,
@@ -5550,3 +6030,26 @@ export function createShellBotBackendPlugin(
 ): Plugin {
   return () => lifecycle.mount(createShellBotBackendContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: the conversation surface and the Bot's Composition, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface ShellBotApplicationHostV1 {
+  shell: ShellBotBackendHost;
+}
+
+/**
+ * The manifest's `backend` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const backendContribution = defineBotBackendContribution<
+  ShellBotApplicationHostV1,
+  ShellBotBackendContribution
+>({
+  specifier: "@frockbot/plugin-shell/backend",
+  create: (host, lifecycle) =>
+    createShellBotBackendPlugin(host.shell, lifecycle),
+});

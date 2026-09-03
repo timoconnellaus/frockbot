@@ -108,6 +108,30 @@ _Avoid_: Version, snapshot, release
 One installable row in a Catalog generation, identified by an opaque immutable catalogId and naming the Package it installs.
 _Avoid_: Listing, item, plugin record
 
+**Applet**:
+A small real-time application a Bot builds for its User and the User opens beside the conversation: one Package's Instance Contribution, one durable instance of it, its UI, and the tools it exposes to every Bot of that User. Its code is a Package; its state is not.
+_Avoid_: App, gadget, application, widget
+
+**Instance Contribution**:
+The part of a Package that runs as a Durable Object facet under a kernel-owned Applet Durable Object: a server class with its own storage, a UI page, and declared tools. Its storage is User product state that survives every code generation.
+_Avoid_: Backend, facet package, stateful plugin
+
+**Applet generation**:
+One immutable, content-addressed publication of an Applet's code. The current generation is a pointer the kernel moves; revert moves it back and is itself recorded. Never a branch.
+_Avoid_: Version number, draft, preview branch
+
+**Canvas**:
+The surface beside the conversation where the Session's focused Applet renders. Closed by default on a phone until opened.
+_Avoid_: Preview pane, right panel (the slot, not the surface)
+
+**Focused Applet**:
+The one Applet a Session is currently building or using; what the Canvas shows and what `applet_*` tools act on when no Applet is named.
+_Avoid_: Active app, selected gadget
+
+**Applets SDK**:
+The package a Bot writes an Applet against on the Computer: the server base class, schema-first tables, the TanStack DB client, the component kit, the linter, the template, and the embedded workerd dev runner.
+_Avoid_: Framework, runtime
+
 **Isolate**:
 A Dynamic Worker the Bot's Durable Object loads to execute non-first-party Package code with only the bindings its User's enabled Packages and Connections grant.
 _Avoid_: Sandbox, container, worker

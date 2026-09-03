@@ -11,6 +11,7 @@ import {
   type PublishPackageCommandV1,
   type RollbackPackageCommandV1,
 } from "./shared.js";
+import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 const STATE_KEY = "package-publisher:state:v1";
 const RECEIPT_PREFIX = "package-publisher:receipt:";
@@ -470,3 +471,26 @@ export function createPackagePublisherUserPlugin(
 ): Plugin {
   return () => lifecycle.mount(createPackagePublisherUserContribution(host));
 }
+
+/**
+ * What an application hands this Contribution: Package publication, under the
+ * Package's own key so one wide host object can satisfy every Package's slice
+ * without their fields colliding.
+ */
+export interface PackagePublisherUserApplicationHostV1 {
+  packagePublisher: PackagePublisherUserHost;
+}
+
+/**
+ * The manifest's `user` entry, resolved by specifier. The
+ * application looks this descriptor up in its Contribution table; it never
+ * branches on which Package it belongs to.
+ */
+export const userContribution = defineUserBackendContribution<
+  PackagePublisherUserApplicationHostV1,
+  PackagePublisherUserContribution
+>({
+  specifier: "@frockbot/plugin-package-publisher/user",
+  create: (host, lifecycle) =>
+    createPackagePublisherUserPlugin(host.packagePublisher, lifecycle),
+});

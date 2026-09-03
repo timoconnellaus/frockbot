@@ -50,10 +50,22 @@ class FlockAiProvider implements LlmProvider {
       request.model,
       this.config.autoRoute,
     );
-    const responseBody = await this.config.runChatCompletion(
-      gatewayModel,
-      body,
-    );
+    // A rejection here happened before a stream existed, so no provider effect
+    // was ever begun. That is definitive rather than uncertain: reported as a
+    // bare failure it would park the run on a reconciliation this Package
+    // cannot perform, and the Bot would stay wedged on a transient gateway
+    // error.
+    let responseBody: ReadableStream<Uint8Array>;
+    try {
+      responseBody = await this.config.runChatCompletion(gatewayModel, body);
+    } catch (error) {
+      signal.throwIfAborted();
+      throw new LlmEffectNotStartedError(
+        error instanceof Error
+          ? error.message
+          : "Flock AI request did not reach the gateway",
+      );
+    }
     try {
       yield* streamOpenAICompatibleBody(responseBody, signal);
     } catch (error) {
