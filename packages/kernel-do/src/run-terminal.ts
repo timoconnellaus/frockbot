@@ -8,6 +8,7 @@ import type {
   StoredRunCodecV1,
   StoredRunV1,
 } from "./run-records.js";
+import { repairedSessionLogV1 } from "./run-recovery.js";
 
 /**
  * The events a terminal settlement commits, with any Turn they were left
@@ -44,9 +45,15 @@ function settledEventsV1(
   } catch {
     repairs = [];
   }
+  const settled = [...latest, ...repairs];
+  // A Turn abandoned earlier in the log cannot be closed by appending, and a
+  // settlement that only appends leaves it open forever. The run's own events
+  // are committed as they stand — that record is this run's account, not the
+  // conversation's — while the forward log is repaired in place so the next
+  // Turn starts on a log that reads as a complete history.
   return {
     events: [...decoded, ...repairs],
-    latestEvents: [...latest, ...repairs],
+    latestEvents: repairedSessionLogV1(sessionId, settled) ?? settled,
   };
 }
 
