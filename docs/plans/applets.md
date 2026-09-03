@@ -174,6 +174,16 @@ interface AppletsCapabilityV1 {
 - Bridge v2: host message `state` name `applets` carries `{ focused, list, viewer: { token, socketUrl, uiUrl } | null }`; page message `focus` `{ appletId | null }` is allowed for pages of the Package that owns the Applets tools (checked server-side like `callTool`).
 - Iframe artifact CSP gains `frame-src <artifactOrigin>` and `connect-src <gateway origin>` so the canvas page can nest the applet UI and the applet UI can open its socket.
 
+### 5a. Canvas states and polish (added 2026-09-03 at the owner's request)
+
+The canvas has two states, modelled on cloudflare-os's gadget editor (`packages/workshop-frontend/src/GadgetUI.tsx`, `GadgetEditor.tsx`, `GadgetCodeInterface.tsx`):
+
+- **Building.** While the focused Applet has no active generation, or a Turn is editing it, the canvas shows the Applet's source as it is written: a file list and the current file's contents, refreshed from the Workspace store (route `GET /api/applets/:appletId/source` returning the files under `applets/<id>/` with their generation ids, ≤ 512 KB total, text only), plus the latest `applet check` / `applet build` outcome the Bot recorded. Nothing here waits on the Computer: the store is read, never the Sprite.
+- **Ready.** When a generation is active the canvas slides the live Applet in over the code view with a real transition (translate + fade, ~240 ms, respecting `prefers-reduced-motion`); a small header carries the Applet name, a "Code" toggle back to the source view, the generation id, and the open-in-new-tab action. A publish that fails leaves the code view up with the failure inline.
+- The panel itself slides out from the right edge on desktop and rises as a full-height sheet on the phone layout; opening and closing animate; the composer chip is the phone's entry.
+
+Before the pull request opens, the integrator (not a lane) runs the UI end to end with the screenshot harness at the GrokBot window size and the 390px phone size, compares against cloudflare-os's canvas, and fixes polish in place: spacing on the tokens, empty states, loading skeletons, focus rings, transition timing, and the code view's typography.
+
 ### 6. Focused Applet
 
 Bot DO key `applets:focused` `{ schemaVersion: 1; appletId: string | null; changedAt: string }`. RPC `readFocusedApplet` / `setFocusedApplet`; route `/api/bots/:botId/applets/focus`; `FrockBotWebData.focusedApplet` + loader. `applet_create` and `applet_publish` set focus by default.
