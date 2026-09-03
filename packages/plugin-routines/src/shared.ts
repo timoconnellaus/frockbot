@@ -711,6 +711,8 @@ export interface RoutineInboxEntryViewV1 {
   acknowledgedAt?: string;
   /** How many firings this entry stands for; absent means one. */
   repeatCount?: number;
+  /** The firing did not work. */
+  failure?: true;
 }
 
 export interface RoutineInboxViewV1 {

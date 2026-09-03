@@ -82,6 +82,8 @@ export interface RoutineTerminalInputV1 {
   /** The Turn's own response text, used when it handed off nothing. */
   responseText?: string;
   now: string;
+  /** The firing did not work; the entry is a complaint, not a completion. */
+  failure?: true;
   read<T>(key: string): Promise<T | undefined>;
 }
 
@@ -129,6 +131,7 @@ export async function routineTerminalRecordsV1(
     createdAt: input.now,
     acknowledged: false,
     ...(input.handoff === undefined ? {} : { wakeId }),
+    ...(input.failure === undefined ? {} : { failure: input.failure }),
   };
   const records: Record<string, unknown> = {
     [routineInboxKeyV1(inbox.nextSeq)]: entry,

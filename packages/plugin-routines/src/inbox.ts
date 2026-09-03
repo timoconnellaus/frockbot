@@ -125,6 +125,13 @@ export interface RoutineInboxEntryV1 {
    */
   repeatCount?: number;
   /**
+   * Set when the entry is a firing that did not work. A completion is routine
+   * and deliberately badges nothing; a failure is the Bot telling its User
+   * that an automation they set up has stopped, which is exactly what the
+   * sidebar badge is for.
+   */
+  failure?: true;
+  /**
    * What produced this entry. Absent means `routine`; `routineId` then carries
    * the task id, because the field names the automation the entry came from
    * and a subagent task is one.
@@ -256,7 +263,7 @@ export function decodeRoutineInboxEntryV1(
       "createdAt",
       "acknowledged",
     ],
-    ["wakeId", "acknowledgedAt", "source", "repeatCount"],
+    ["wakeId", "acknowledgedAt", "source", "repeatCount", "failure"],
     label,
   );
   if (candidate.schemaVersion !== 1) {
@@ -303,6 +310,7 @@ export function decodeRoutineInboxEntryV1(
             `${label} repeatCount`,
           ),
         }),
+    ...(candidate.failure === undefined ? {} : { failure: true as const }),
   };
 }
 

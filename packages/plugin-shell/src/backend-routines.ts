@@ -304,6 +304,7 @@ export function routineInboxEntryViewV1(
     ...(entry.repeatCount === undefined
       ? {}
       : { repeatCount: entry.repeatCount }),
+    ...(entry.failure === undefined ? {} : { failure: entry.failure }),
   };
 }
 

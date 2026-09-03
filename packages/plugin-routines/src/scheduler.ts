@@ -836,6 +836,7 @@ export class RoutineScheduler {
       routineId: fire.routineId,
       routineName: name,
       responseText: text,
+      failure: true,
       now,
       read: (key) => transaction.get(key),
     });

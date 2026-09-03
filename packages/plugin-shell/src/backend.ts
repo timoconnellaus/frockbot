@@ -5271,11 +5271,15 @@ export class ShellBotBackendContribution {
     const index = await this.authority.listRunIndex({
       limit: UNREAD_COUNT_CAP + 1,
     });
+    const failures = (await this.routineInbox.list()).filter(
+      (entry) => entry.failure === true && !entry.acknowledged,
+    ).length;
     return projectBotUnreadViewV1(
       identity.botId,
       state,
       index.map((entry) => entry.cursor),
       preview,
+      failures,
     );
   }
 

@@ -235,6 +235,33 @@ describe("the unread projection", () => {
     expect(view).toMatchObject({ count: 0, capped: false, unread: false });
   });
 
+  // A Routine failing every minute left the badge at zero, because an
+  // automation Turn never advances the activity cursor.
+  test("badges a Bot whose Routine is failing, with nothing else unread", () => {
+    const view = projectBotUnreadViewV1(
+      "alpha",
+      emptyUnreadStateV1(),
+      index(3),
+      undefined,
+      2,
+    );
+    expect(view).toMatchObject({ count: 2, unread: true, capped: false });
+  });
+
+  test("adds Routine failures to the unread chat Turns", () => {
+    const state: UnreadStateV1 = {
+      schemaVersion: 1,
+      lastActivityCursor: cursor(3),
+      lastActivityAt: "2026-08-31T00:03:00.000Z",
+      lastSeenCursor: cursor(1),
+      lastViewedAt: "2026-08-31T00:01:00.000Z",
+      manuallyUnread: false,
+    };
+    expect(
+      projectBotUnreadViewV1("alpha", state, index(4), undefined, 1),
+    ).toMatchObject({ count: 3, unread: true });
+  });
+
   test("carries the already-bounded latest message without deriving it", () => {
     const preview = decodeSidebarMessagePreviewV1({
       schemaVersion: 1,
