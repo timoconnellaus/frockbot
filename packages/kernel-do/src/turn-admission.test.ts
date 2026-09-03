@@ -448,3 +448,41 @@ describe("an admitted Turn re-mounts on its recorded turn type", () => {
     });
   });
 });
+
+// robustness F18. The composer sends `supersedes` on every send and names
+// whichever run it happened to have observed. A retry of the same send names a
+// different one — or none — and used to be refused as a reused idempotency key.
+describe("a retried send is idempotent whatever run it names", () => {
+  const command = {
+    userId: "user-1",
+    botId: "primary",
+    runId: "run-1",
+    sessionId: "user-1:primary",
+    acceptedAt: "2026-08-31T01:00:00.000Z",
+    text: "hello",
+    lane: "user" as const,
+  };
+
+  test("the observed run id is not part of the command's identity", () => {
+    const first = botTurnCommandFingerprintV1({ ...command, supersedes: {} });
+
+    expect(
+      botTurnCommandFingerprintV1({
+        ...command,
+        supersedes: { runId: "run-0" },
+      }),
+    ).toBe(first);
+    expect(
+      botTurnCommandFingerprintV1({
+        ...command,
+        supersedes: { runId: "run-99" },
+      }),
+    ).toBe(first);
+  });
+
+  test("but the intent itself still is, so a replay cannot gain one", () => {
+    expect(botTurnCommandFingerprintV1({ ...command, supersedes: {} })).not.toBe(
+      botTurnCommandFingerprintV1(command),
+    );
+  });
+});
