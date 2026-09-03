@@ -230,6 +230,25 @@ export interface IsolateNotificationRequestV1 {
 export type IsolateNotificationOutcomeV1 =
   { status: "recorded" } | IsolateCapabilityFailureV1;
 
+/**
+ * The Applet capability a Bot isolate calls (ADR 0022, plan §3).
+ *
+ * One tagged request rather than seven methods on the stub: the operations
+ * share a scope, an authority, and an outcome shape, and the wrapper narrows
+ * them back into the seven-verb `ctx.applets` a Bot author writes against.
+ */
+export type IsolateAppletsRequestV1 =
+  | { op: "list" }
+  | { op: "create"; displayName: string }
+  | { op: "publish"; appletId: string }
+  | { op: "revert"; appletId: string; generationId: string }
+  | { op: "delete"; appletId: string }
+  | { op: "focus"; appletId: string | null }
+  | { op: "generations"; appletId: string };
+
+export type IsolateAppletsOutcomeV1 =
+  { status: "available"; value: unknown } | IsolateCapabilityFailureV1;
+
 /** A durable Routine operation attributed to one Package call. */
 export interface IsolateScheduleRequestV1 {
   callId: string;
@@ -303,6 +322,7 @@ export interface BotCapabilitiesStub {
   schedule(
     request: IsolateScheduleRequestV1,
   ): Promise<IsolateScheduleOutcomeV1>;
+  applets(request: IsolateAppletsRequestV1): Promise<IsolateAppletsOutcomeV1>;
 }
 
 /** The model outcome Bot-authored `package.js` receives after wrapper narrowing. */
@@ -362,6 +382,25 @@ export interface BotPackageContextV1 {
     delete(
       request: IsolateWorkspaceDeleteRequestV1,
     ): Promise<IsolateWorkspaceOutcomeV1>;
+  };
+  /**
+   * The User's Applets (ADR 0022). Account-wide: every Bot of this User sees
+   * every Applet. `publish` is a durable effect — it reads the built Applet
+   * from the Applets Package's durable root, verifies its manifest against the
+   * bytes, writes immutable artifacts, records the generation, mounts it, and
+   * proposes a new Composition generation for this Bot.
+   */
+  readonly applets: {
+    list(): Promise<IsolateAppletsOutcomeV1>;
+    create(input: { displayName: string }): Promise<IsolateAppletsOutcomeV1>;
+    publish(input: { appletId: string }): Promise<IsolateAppletsOutcomeV1>;
+    revert(input: {
+      appletId: string;
+      generationId: string;
+    }): Promise<IsolateAppletsOutcomeV1>;
+    delete(input: { appletId: string }): Promise<IsolateAppletsOutcomeV1>;
+    focus(input: { appletId: string | null }): Promise<IsolateAppletsOutcomeV1>;
+    generations(input: { appletId: string }): Promise<IsolateAppletsOutcomeV1>;
   };
   connection(connectionId: string): Promise<IsolateConnectionOutcomeV1>;
   notify(
@@ -997,6 +1036,65 @@ export function decodeIsolateScheduleRequestV1(
     callId: boundedString(value.callId, `${label}.callId`, 256),
     input: value.input,
   };
+}
+
+const APPLET_CAPABILITY_ID = /^[a-z0-9][a-z0-9-]{0,63}\.[a-z0-9-]{1,64}$/;
+
+export function decodeIsolateAppletsRequestV1(
+  input: unknown,
+  label = "isolate Applets request",
+): IsolateAppletsRequestV1 {
+  const value = record(input, label);
+  const appletId = (): string => {
+    const id = boundedString(value.appletId, `${label}.appletId`, 129);
+    if (!APPLET_CAPABILITY_ID.test(id)) {
+      throw new Error(`${label}.appletId is invalid`);
+    }
+    return id;
+  };
+  switch (value.op) {
+    case "list":
+      exactKeys(value, ["op"], label);
+      return { op: "list" };
+    case "create":
+      exactKeys(value, ["op", "displayName"], label);
+      return {
+        op: "create",
+        displayName: boundedString(
+          value.displayName,
+          `${label}.displayName`,
+          128,
+        ),
+      };
+    case "publish":
+      exactKeys(value, ["op", "appletId"], label);
+      return { op: "publish", appletId: appletId() };
+    case "revert":
+      exactKeys(value, ["op", "appletId", "generationId"], label);
+      return {
+        op: "revert",
+        appletId: appletId(),
+        generationId: boundedString(
+          value.generationId,
+          `${label}.generationId`,
+          128,
+        ),
+      };
+    case "delete":
+      exactKeys(value, ["op", "appletId"], label);
+      return { op: "delete", appletId: appletId() };
+    case "focus":
+      exactKeys(value, ["op", "appletId"], label);
+      return {
+        op: "focus",
+        appletId: value.appletId === null ? null : appletId(),
+      };
+    case "generations":
+      exactKeys(value, ["op", "appletId"], label);
+      return { op: "generations", appletId: appletId() };
+    default:
+      throw new Error(`${label}.op is invalid`);
+  }
 }
 
 const MEMORY_SCOPES = ["bot", "user", "project"] as const;

@@ -7,6 +7,7 @@ import type {
   WorkerdBotState,
 } from "./fly-compatibility-worker.ts";
 import type { UserConfiguration } from "../src/user-configuration.ts";
+import type { AppletState } from "../src/applet-state.ts";
 import type { DeploymentPolicy } from "../src/deployment-policy.ts";
 
 interface FlyTestEnv {
@@ -17,6 +18,9 @@ interface FlyTestEnv {
   BOT_STATES: DurableObjectNamespace<WorkerdBotState>;
   CREDENTIAL_KEYRING: string;
   SECRET_TOKEN: string;
+  APPLET_VIEWER_SECRET: string;
+  APPLETS: WorkerLoader;
+  APPLET_STATES: DurableObjectNamespace<AppletState>;
   COMPOSITIONS: DurableObjectNamespace<CompositionProbe>;
   COMPUTER_HOST: Fetcher;
   COMPUTER_HOST_CLIENT: DurableObjectNamespace<ComputerHostClientProbe>;

@@ -12,11 +12,37 @@
 // (`InstanceContributionV1`); the durable authority that writes these records
 // is lane K3.
 
+type AppletJsonScalarV1 = null | boolean | number | string;
+type AppletJsonDepth1V1 =
+  | AppletJsonScalarV1
+  | AppletJsonScalarV1[]
+  | { [key: string]: AppletJsonScalarV1 };
+type AppletJsonDepth2V1 =
+  | AppletJsonScalarV1
+  | AppletJsonDepth1V1[]
+  | { [key: string]: AppletJsonDepth1V1 };
+type AppletJsonDepth3V1 =
+  | AppletJsonScalarV1
+  | AppletJsonDepth2V1[]
+  | { [key: string]: AppletJsonDepth2V1 };
+/**
+ * Plain JSON, spelled out and bounded rather than recursive.
+ *
+ * These records cross a Durable Object RPC boundary, where `unknown` is not
+ * transferable — a record typed with it collapses the whole answer to `never`
+ * at the call site — and a self-referential type makes the serializability
+ * mapper give up instead. A tool's input schema is four levels at the outside.
+ */
+export type AppletJsonValueV1 =
+  | AppletJsonScalarV1
+  | AppletJsonDepth3V1[]
+  | { [key: string]: AppletJsonDepth3V1 };
+
 /** The tool declaration an Applet generation copies from its manifest. */
 export interface AppletToolDeclarationV1 {
   name: string;
   description: string;
-  inputSchema: Record<string, unknown>;
+  inputSchema: { [key: string]: AppletJsonValueV1 };
 }
 
 export interface AppletArtifactRefV1 {
@@ -222,7 +248,11 @@ export function decodeAppletToolDeclarationV1(
       `${label}.description`,
       1_024,
     ),
-    inputSchema: structuredClone(inputSchema),
+    // The round trip is the narrowing: `json` above proved every leaf is a
+    // JSON scalar, array, or object, which is exactly `AppletJsonValueV1`.
+    inputSchema: JSON.parse(JSON.stringify(inputSchema)) as {
+      [key: string]: AppletJsonValueV1;
+    },
   };
 }
 
@@ -326,6 +356,33 @@ function origin(value: unknown, label: string): "publish" | "revert" {
   if (value !== "publish" && value !== "revert")
     throw new Error(`${label} is invalid`);
   return value;
+}
+
+/**
+ * Who created an Applet. A Bot-created one names the Bot, Session, and Turn,
+ * because a Bot-authored change is a durable effect whose provenance names all
+ * three; a User-created one names nothing more, because the User Durable Object
+ * already is the User.
+ */
+export function decodeAppletProvenanceV1(
+  input: unknown,
+  label = "Applet provenance",
+): AppletProvenanceV1 {
+  const provenance = record(input, label);
+  if (provenance.kind === "user") {
+    exactKeys(provenance, ["kind"], [], label);
+    return { kind: "user" };
+  }
+  if (provenance.kind === "bot") {
+    exactKeys(provenance, ["kind", "botId", "sessionId", "turnId"], [], label);
+    return {
+      kind: "bot",
+      botId: boundedString(provenance.botId, `${label}.botId`, 256),
+      sessionId: boundedString(provenance.sessionId, `${label}.sessionId`, 257),
+      turnId: boundedString(provenance.turnId, `${label}.turnId`, 256),
+    };
+  }
+  throw new Error(`${label}.kind is invalid`);
 }
 
 export function decodeAppletDirectoryEntryV1(
