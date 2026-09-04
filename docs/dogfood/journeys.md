@@ -49,10 +49,10 @@ Log every stumble in the **Friction log** at the bottom, including the small one
 
 **Proof**
 
-- There is no **Choose a model** button anywhere on the page, and the workspace subtitle reads `Auto (recommended) · Flock AI`.
-- `GET /api/settings` → `platformModel` is `{ connectionId: "flock-ai-ambient", providerModelId: "@flock/auto" }`, and `packages[]` carries `custom-models` in state `disabled`.
+- There is no **Choose a model** button anywhere on the page, and the workspace subtitle reads `Auto (recommended) · Frock AI`.
+- `GET /api/settings` → `platformModel` is `{ connectionId: "flock-ai-ambient", providerModelId: "@frock/auto" }`, and `packages[]` carries `custom-models` in state `disabled`.
 - `debug.sh bot <userId> <botId> --events` → newest run `status: "completed"` with a non-empty `compositionGenerationId`; events run `turn/start` → `input/admitted` → `composition/pinned` → `user/message` → `model/request` → `assistant/message` → `turn/end`.
-- The `model/request` names the Flock AI connection and model `@flock/auto` — the platform binding, resolved per Turn, never stored on the Bot.
+- The `model/request` names the Frock AI connection and model `@frock/auto` — the platform binding, resolved per Turn, never stored on the Bot.
 - `composition.currentGenerationId === composition.lastKnownGoodGenerationId`, no `failures[]`, no `quarantined: true`.
 
 ---
@@ -75,8 +75,8 @@ Log every stumble in the **Friction log** at the bottom, including the small one
 - The Ollama Cloud card reads `ready · models fresh`.
 - `GET /api/settings` → a `connections[]` entry with `connectionTypeId: "ollama-cloud-account"`, `state: "ready"`, `authorization.kind: "api-key"`, a `credential.generation`, `modelCatalog.state: "fresh"`. **No key material anywhere in the DTO.**
 - The `custom-models` Package's user-scoped `model` setting value names that `connectionId` and `providerModelId`.
-- Step 5's `model/request` names the Ollama connection and model. The journey-1 Turn's `model/request` still names `@flock/auto` — resolution is per Turn and history is not rewritten.
-- Switch **Custom models** off: the next `model/request` is back on `@flock/auto`. Switch it on again: the Ollama binding returns without re-entering the key. The values are inert while disabled, not deleted.
+- Step 5's `model/request` names the Ollama connection and model. The journey-1 Turn's `model/request` still names `@frock/auto` — resolution is per Turn and history is not rewritten.
+- Switch **Custom models** off: the next `model/request` is back on `@frock/auto`. Switch it on again: the Ollama binding returns without re-entering the key. The values are inert while disabled, not deleted.
 
 **Expected to fail today (local dev only).** Local dev has no real Ollama Cloud; the fake provider server exists only inside the Playwright harness (`apps/cloudflare/e2e/harness.ts`). Run this on staging or production with a real key, or point **API base URL** at an Ollama you host.
 
@@ -311,13 +311,13 @@ Journeys **1, 2, 4 and 5** again, against an account created before the account-
 
 **Before anything else**
 
-- The first `GET /api/settings` migrates on read: `platformModel` becomes `{ connectionId: "flock-ai-ambient", providerModelId: "@flock/auto" }`, `provider-workers-ai` is gone from `packages[]`, and `custom-models` appears in state `disabled`. `newBotModelTemplate` and `newBotModelTemplateSource` are dropped, not interpreted.
+- The first `GET /api/settings` migrates on read: `platformModel` becomes `{ connectionId: "flock-ai-ambient", providerModelId: "@frock/auto" }`, `provider-workers-ai` is gone from `packages[]`, and `custom-models` appears in state `disabled`. `newBotModelTemplate` and `newBotModelTemplateSource` are dropped, not interpreted.
 - `GET /api/bots/:botId/settings` no longer carries `model` or `assignments`. The per-Bot override lives in `packageValues` under the Custom models Package id, and only once Custom models is enabled.
 - The composer shows no "Model unavailable" and no model call to action.
 
 **Then**
 
-- **Journey 1** — the Bot's next Turn is admitted on Flock AI and `model/request` names `@flock/auto`. Nothing had to be repaired by hand.
+- **Journey 1** — the Bot's next Turn is admitted on Frock AI and `model/request` names `@frock/auto`. Nothing had to be repaired by hand.
 - **Journey 2** — the pre-existing Ollama Connection is still in `connections[]` with its credential generation intact. Enabling **Custom models** makes it selectable on Models **without re-entering the key**, and the old per-Bot assignment does not resurrect: check `packageValues`, not `assignments`.
 - **Journey 4** — `package_author` produces a Composition generation that mounts and `package_undo` reverts it. The legacy account had no Composition history, so check `lastKnownGoodGenerationId` is set only after a successful mount.
 - **Journey 5** — `package_search` and `package_install` work against the generation this legacy User is pinned to; a legacy account with no recorded pin must land on the current pointer rather than failing.

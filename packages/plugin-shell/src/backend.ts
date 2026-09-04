@@ -475,7 +475,7 @@ import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contrib
  * is the direction this deployment wants to be wrong in.
  *
  * Today: the in-process foundation provider, and nothing else. Ollama Cloud
- * exposes no provider-bound retrieval (ADR 0010) and neither does Flock AI.
+ * exposes no provider-bound retrieval (ADR 0010) and neither does Frock AI.
  */
 const RECONCILING_PROVIDER_IDS_V1: ReadonlySet<string> = new Set([
   "foundation",
@@ -588,8 +588,8 @@ export interface BotStateEnv {
   MEMORY_INDEX: VectorizeIndex;
   /** The native AI binding consumed through the image Package adapter. */
   AI?: NativeAiBindingV1;
-  /** The Flock AI Gateway adapter constructed by the Cloudflare host. */
-  FLOCK_AI?: {
+  /** The Frock AI Gateway adapter constructed by the Cloudflare host. */
+  FROCK_AI?: {
     autoRoute: string;
     runChatCompletion(
       gatewayModel: string,
@@ -4780,11 +4780,11 @@ export class ShellBotBackendContribution {
             bindingPackageId,
             effectId,
           ),
-        ...(this.env.FLOCK_AI
+        ...(this.env.FROCK_AI
           ? {
-              flockAiAutoRoute: this.env.FLOCK_AI.autoRoute,
-              runFlockAiChatCompletion: (gatewayModel, body) =>
-                this.env.FLOCK_AI!.runChatCompletion(gatewayModel, body),
+              frockAiAutoRoute: this.env.FROCK_AI.autoRoute,
+              runFrockAiChatCompletion: (gatewayModel, body) =>
+                this.env.FROCK_AI!.runChatCompletion(gatewayModel, body),
             }
           : {}),
         fetch: this.outboundFetch,

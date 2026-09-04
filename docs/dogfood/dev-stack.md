@@ -94,8 +94,8 @@ it works while a Bot is wedged. See `.claude/skills/frockbot-debug/SKILL.md`.
 
 `provider-flock-ai` is a first-party Package installed by default and its
 Connection is ambient (`flock-ai-ambient`), so no Connection setup is needed —
-`Auto (recommended)` (`@flock/auto`) should be selectable straight away. At the
-Worker seam (`apps/cloudflare/src/flock-ai.ts`) it calls
+`Auto (recommended)` (`@frock/auto`) should be selectable straight away. At the
+Worker seam (`apps/cloudflare/src/frock-ai.ts`) it calls
 `env.AI.gateway("flock").run({ provider: "compat", endpoint:
 "chat/completions" })` with `dynamic/flock-auto`, so a real turn needs:
 

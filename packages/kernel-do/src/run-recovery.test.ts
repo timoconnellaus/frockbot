@@ -35,7 +35,7 @@ const request: UnstampedEvent = {
   request: {
     requestId: "request-1",
     provider: "flock-ai",
-    model: "@flock/auto",
+    model: "@frock/auto",
     system: "Be concise.",
     messages: [{ role: "user", content: "hello" }],
     tools: [],

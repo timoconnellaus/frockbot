@@ -17,11 +17,11 @@ function requiredPort(name: string): number {
 const harness = await startHarness({
   port: requiredPort("FROCKBOT_E2E_PORT"),
   ollamaPort: requiredPort("FROCKBOT_E2E_OLLAMA_PORT"),
-  flockAiPort: requiredPort("FROCKBOT_E2E_FLOCK_AI_PORT"),
+  frockAiPort: requiredPort("FROCKBOT_E2E_FROCK_AI_PORT"),
 });
 
 console.log(
-  `FrockBot e2e harness ready on ${harness.baseUrl} (fake Ollama on ${harness.ollamaUrl}, fake Flock AI on ${harness.flockAiUrl})`,
+  `FrockBot e2e harness ready on ${harness.baseUrl} (fake Ollama on ${harness.ollamaUrl}, fake Frock AI on ${harness.frockAiUrl})`,
 );
 console.log(`Harness and wrangler logs: ${harness.logFile}`);
 
@@ -29,13 +29,13 @@ let stopping = false;
 const shutdown = (): void => {
   if (stopping) return;
   stopping = true;
-  const { worker, flockAi } = harness.restarts();
-  if (worker > 0 || flockAi > 0) {
+  const { worker, frockAi } = harness.restarts();
+  if (worker > 0 || frockAi > 0) {
     // Printed at teardown so a green shard still says the server had to be
     // rescued: a passing run that needed a restart is a run that is still
     // hiding a crash, and the log file names where to look.
     console.log(
-      `The harness restarted wrangler dev ${worker} time(s) and the Flock AI fake ${flockAi} time(s). See ${harness.logFile}.`,
+      `The harness restarted wrangler dev ${worker} time(s) and the Frock AI fake ${frockAi} time(s). See ${harness.logFile}.`,
     );
   }
   void harness.stop().then(

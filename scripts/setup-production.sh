@@ -298,17 +298,17 @@ ask_secret SPRITES_TOKEN "Paste the Fly Sprites token:"
 set_production_secret SPRITES_TOKEN "$SPRITES_TOKEN"
 
 stage "Cloudflare: AI Gateway authorization token"
-say "Provision the bearer the Worker presents to the AI Gateway named by FLOCK_AI_GATEWAY_ID."
-say "Flock AI Auto resolves to a dynamic route, and a dynamic route is only accepted on the"
+say "Provision the bearer the Worker presents to the AI Gateway named by FROCK_AI_GATEWAY_ID."
+say "Frock AI Auto resolves to a dynamic route, and a dynamic route is only accepted on the"
 say "Gateway's compat endpoint (cloudflare/ai#617). Reaching that endpoint needs this token."
 open_url "https://dash.cloudflare.com/?to=/:account/ai/ai-gateway"
 step "Open the 'flock' Gateway, turn on Authenticated Gateway, and create a token."
-step "Leave this blank to skip: Auto then fails and only manual @flock/ models work."
-ask_secret FLOCK_AI_GATEWAY_TOKEN "Paste the AI Gateway authorization token (optional):"
-if [[ -n "$FLOCK_AI_GATEWAY_TOKEN" ]]; then
-  set_production_secret FLOCK_AI_GATEWAY_TOKEN "$FLOCK_AI_GATEWAY_TOKEN"
+step "Leave this blank to skip: Auto then fails and only manual @frock/ models work."
+ask_secret FROCK_AI_GATEWAY_TOKEN "Paste the AI Gateway authorization token (optional):"
+if [[ -n "$FROCK_AI_GATEWAY_TOKEN" ]]; then
+  set_production_secret FROCK_AI_GATEWAY_TOKEN "$FROCK_AI_GATEWAY_TOKEN"
 else
-  note "No AI Gateway token set; Flock AI Auto will not work until one is provided."
+  note "No AI Gateway token set; Frock AI Auto will not work until one is provided."
 fi
 
 stage "FrockBot: per-account credential encryption"

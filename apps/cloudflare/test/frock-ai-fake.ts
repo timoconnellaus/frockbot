@@ -38,9 +38,9 @@ export const FAKE_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 /** The service name both bindings point at. */
-export const FLOCK_AI_FAKE_NAME = "flock-ai-fake";
+export const FROCK_AI_FAKE_NAME = "frock-ai-fake";
 /** The RPC entrypoint the `AI` binding is wired to. */
-export const FLOCK_AI_FAKE_ENTRYPOINT = "FlockAiFake";
+export const FROCK_AI_FAKE_ENTRYPOINT = "FrockAiFake";
 
 // Authored as a module string because miniflare's auxiliary Workers take
 // JavaScript, not a TypeScript path: this file runs in Node at config load,
@@ -60,7 +60,7 @@ class FakeGateway extends RpcTarget {
     const prompt = String(messages.at(-1)?.content ?? "");
     calls.push({ model: String(query.model ?? ""), prompt });
     const payload =
-      'data: {"choices":[{"delta":{"content":"Flock AI reply"}}]}\\n\\n' +
+      'data: {"choices":[{"delta":{"content":"Frock AI reply"}}]}\\n\\n' +
       'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\\n\\n' +
       'data: [DONE]\\n\\n';
     return new Response(new ReadableStream({
@@ -72,7 +72,7 @@ class FakeGateway extends RpcTarget {
   }
 }
 
-export class ${FLOCK_AI_FAKE_ENTRYPOINT} extends WorkerEntrypoint {
+export class ${FROCK_AI_FAKE_ENTRYPOINT} extends WorkerEntrypoint {
   gateway(_gatewayId) {
     return new FakeGateway();
   }
@@ -95,17 +95,17 @@ export class ${FLOCK_AI_FAKE_ENTRYPOINT} extends WorkerEntrypoint {
 
 export default {
   fetch() {
-    return new Response("flock-ai-fake speaks RPC only", { status: 404 });
+    return new Response("frock-ai-fake speaks RPC only", { status: 404 });
   },
 };
 `;
 
 /** The auxiliary Worker definition, for `miniflare.workers`. */
-export function createFlockAiFakeWorker(
+export function createFrockAiFakeWorker(
   compatibilityDate: string,
 ): AuxiliaryWorkerOptionsV1 {
   return {
-    name: FLOCK_AI_FAKE_NAME,
+    name: FROCK_AI_FAKE_NAME,
     modules: true,
     script: SCRIPT,
     compatibilityDate,
@@ -114,7 +114,7 @@ export function createFlockAiFakeWorker(
 }
 
 /** The service designator both `AI` and the suite's probe binding use. */
-export const FLOCK_AI_FAKE_SERVICE = {
-  name: FLOCK_AI_FAKE_NAME,
-  entrypoint: FLOCK_AI_FAKE_ENTRYPOINT,
+export const FROCK_AI_FAKE_SERVICE = {
+  name: FROCK_AI_FAKE_NAME,
+  entrypoint: FROCK_AI_FAKE_ENTRYPOINT,
 } as const;

@@ -19,7 +19,7 @@
 // a fake Ollama HTTP server on a loopback port and each spec points its
 // Connection at it through the Package's own `api-base-url` Connection setting —
 // a shipped product feature (Ollama-compatible endpoints, local Ollama), not a
-// test-only branch. Flock AI is an auxiliary local Wrangler process,
+// test-only branch. Frock AI is an auxiliary local Wrangler process,
 // discovered through Wrangler's dev service registry and bound under `AI` at
 // the Gateway and native-image seams.
 import { spawn, type ChildProcess } from "node:child_process";
@@ -541,18 +541,18 @@ export interface HarnessOptions {
   port: number;
   /** The port the fake Ollama server listens on. */
   ollamaPort: number;
-  /** The port the auxiliary Flock AI RPC Worker listens on. */
-  flockAiPort: number;
+  /** The port the auxiliary Frock AI RPC Worker listens on. */
+  frockAiPort: number;
 }
 
 export interface RunningHarness {
   baseUrl: string;
   ollamaUrl: string;
-  flockAiUrl: string;
+  frockAiUrl: string;
   /** The file both `wrangler dev` processes are teed into. */
   logFile: string;
   /** How many times each supervised server has had to be restarted. */
-  restarts(): { worker: number; flockAi: number };
+  restarts(): { worker: number; frockAi: number };
   stop(): Promise<void>;
 }
 
@@ -636,18 +636,18 @@ export async function startHarness(
   const reservedHere = new Set([
     options.port,
     options.ollamaPort,
-    options.flockAiPort,
+    options.frockAiPort,
   ]);
   const workerInspectorPort = await reserveFreePort({ taken: reservedHere });
-  const flockAiInspectorPort = await reserveFreePort({ taken: reservedHere });
+  const frockAiInspectorPort = await reserveFreePort({ taken: reservedHere });
 
   let ollama: Awaited<ReturnType<typeof startFakeOllama>> | undefined;
-  let flockAi: SupervisedProcess | undefined;
+  let frockAi: SupervisedProcess | undefined;
   let worker: SupervisedProcess | undefined;
 
   const stop = async (): Promise<void> => {
     if (worker) await worker.stop();
-    if (flockAi) await flockAi.stop();
+    if (frockAi) await frockAi.stop();
     if (ollama) await ollama.close();
     await new Promise<void>((closed) => log.end(closed));
     await rm(persistDirectory, { recursive: true, force: true });
@@ -660,22 +660,22 @@ export async function startHarness(
     WRANGLER_LOG_PATH: `${logDirectory}/`,
   };
 
-  const spawnFlockAi = (): ChildProcess =>
+  const spawnFrockAi = (): ChildProcess =>
     spawn(
       "bunx",
       [
         "wrangler",
         "dev",
         "--config",
-        resolve(cloudflareRoot, "e2e/flock-ai-fake.wrangler.jsonc"),
+        resolve(cloudflareRoot, "e2e/frock-ai-fake.wrangler.jsonc"),
         "--env",
         "e2e",
         "--ip",
         "127.0.0.1",
         "--port",
-        String(options.flockAiPort),
+        String(options.frockAiPort),
         "--inspector-port",
-        String(flockAiInspectorPort),
+        String(frockAiInspectorPort),
         // A line per request, times two Workers and seventeen specs, is the
         // bulk of what this harness forwards. Warnings and errors — the only
         // output a failing run is read for — still print.
@@ -772,17 +772,17 @@ export async function startHarness(
 
     ollama = await startFakeOllama(options.ollamaPort);
 
-    const flockAiUrl = `http://127.0.0.1:${options.flockAiPort}`;
-    const supervisedFlockAi = superviseProcess({
-      label: "Flock AI fake wrangler dev",
-      spawnChild: spawnFlockAi,
-      waitUntilReady: () => waitForHttpServer(flockAiUrl),
+    const frockAiUrl = `http://127.0.0.1:${options.frockAiPort}`;
+    const supervisedFrockAi = superviseProcess({
+      label: "Frock AI fake wrangler dev",
+      spawnChild: spawnFrockAi,
+      waitUntilReady: () => waitForHttpServer(frockAiUrl),
       stopChild: stopProcessTree,
       forwardOutput,
       report: note,
     });
-    flockAi = supervisedFlockAi;
-    await supervisedFlockAi.start();
+    frockAi = supervisedFrockAi;
+    await supervisedFrockAi.start();
 
     const baseUrl = `http://127.0.0.1:${options.port}`;
     const supervisedWorker = superviseProcess({
@@ -799,11 +799,11 @@ export async function startHarness(
     return {
       baseUrl,
       ollamaUrl: ollama.url,
-      flockAiUrl,
+      frockAiUrl,
       logFile,
       restarts: () => ({
         worker: supervisedWorker.restarts(),
-        flockAi: supervisedFlockAi.restarts(),
+        frockAi: supervisedFrockAi.restarts(),
       }),
       stop,
     };

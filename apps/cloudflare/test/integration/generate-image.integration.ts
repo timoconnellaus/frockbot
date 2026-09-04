@@ -4,7 +4,7 @@
 // the Worker Loader and the real artifact, then the Bot Durable Object, whose
 // Agent loop runs the Turn. The stubbed model answers with a `generate_image`
 // tool call; `env.AI` is an auxiliary Worker's RPC entrypoint (see
-// `test/flock-ai-fake.ts`), so the production seam — `env.AI.run(model,
+// `test/frock-ai-fake.ts`), so the production seam — `env.AI.run(model,
 // input)` — is the one exercised.
 //
 // Three claims:

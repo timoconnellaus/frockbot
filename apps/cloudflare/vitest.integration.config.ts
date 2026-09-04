@@ -26,9 +26,9 @@ import {
   TEST_CREDENTIAL_KEYRING,
 } from "./test/harness/miniflare.ts";
 import {
-  createFlockAiFakeWorker,
-  FLOCK_AI_FAKE_SERVICE,
-} from "./test/flock-ai-fake.ts";
+  createFrockAiFakeWorker,
+  FROCK_AI_FAKE_SERVICE,
+} from "./test/frock-ai-fake.ts";
 
 // The bytes `test:integration` just built, read here rather than imported with
 // Vite's `?raw` from a test file: `tsc` resolves a relative specifier on disk
@@ -86,10 +86,10 @@ export default defineConfig({
           // The `AI` binding is impersonated at the same Gateway and native
           // image seams production uses. `AI_PROBE` reaches the same RPC
           // entrypoint so tests can inspect its call log.
-          AI: FLOCK_AI_FAKE_SERVICE,
-          AI_PROBE: FLOCK_AI_FAKE_SERVICE,
+          AI: FROCK_AI_FAKE_SERVICE,
+          AI_PROBE: FROCK_AI_FAKE_SERVICE,
         },
-        workers: [createFlockAiFakeWorker("2026-08-27")],
+        workers: [createFrockAiFakeWorker("2026-08-27")],
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
         d1Databases: ["AUTH_DB"],
         durableObjects: {

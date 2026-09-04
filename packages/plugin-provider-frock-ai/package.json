@@ -1,5 +1,5 @@
 {
-  "name": "@frockbot/plugin-provider-flock-ai",
+  "name": "@frockbot/plugin-provider-frock-ai",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -37,6 +37,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/timoconnellaus/frockbot.git",
-    "directory": "packages/plugin-provider-workers-ai"
+    "directory": "packages/plugin-provider-frock-ai"
   }
 }
