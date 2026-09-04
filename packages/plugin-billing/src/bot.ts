@@ -16,6 +16,13 @@ export function usageEntriesFromTurnV1(input: {
   turn: number;
   events: readonly SessionEvent[];
 }): UsageEntryV1[] {
+  if (
+    !input.events.some(
+      (event) => event.type === "turn/end" && event.turn === input.turn,
+    )
+  ) {
+    return [];
+  }
   return input.events.flatMap((event) => {
     if (event.type !== "model/usage" || event.turn !== input.turn) return [];
     const priced = modelCostMicrosV1(event.provider, event.model, event);
@@ -91,34 +98,60 @@ function decodeOutboxV1(value: unknown): StoredUsageOutboxV1 {
 }
 
 export class UsageOutboxV1 {
-  constructor(private readonly storage: UsageOutboxStorageV1) {}
+  private readonly maximum: number;
+
+  constructor(
+    private readonly storage: UsageOutboxStorageV1,
+    options: { maximum?: number } = {},
+  ) {
+    this.maximum = options.maximum ?? USAGE_OUTBOX_MAX_V1;
+  }
+
+  private async read(): Promise<StoredUsageOutboxV1> {
+    return decodeOutboxV1(await this.storage.get<unknown>(USAGE_OUTBOX_KEY_V1));
+  }
+
+  private async write(outbox: StoredUsageOutboxV1): Promise<void> {
+    if (outbox.entries.length === 0 && !outbox.truncated) {
+      await this.storage.delete(USAGE_OUTBOX_KEY_V1);
+      return;
+    }
+    await this.storage.put(USAGE_OUTBOX_KEY_V1, outbox);
+  }
 
   async append(entries: readonly UsageEntryV1[]): Promise<void> {
     if (entries.length === 0) return;
-    const stored = decodeOutboxV1(
-      await this.storage.get<unknown>(USAGE_OUTBOX_KEY_V1),
-    );
-    const merged = [...stored.entries, ...entries.map(decodeUsageEntryV1)];
-    await this.storage.put(USAGE_OUTBOX_KEY_V1, {
-      schemaVersion: 1,
-      entries: merged.slice(-USAGE_OUTBOX_MAX_V1),
-      truncated: stored.truncated || merged.length > USAGE_OUTBOX_MAX_V1,
-    } satisfies StoredUsageOutboxV1);
+    const stored = await this.read();
+    const seen = new Set(stored.entries.map((entry) => entry.entryId));
+    for (const candidate of entries) {
+      const entry = decodeUsageEntryV1(candidate);
+      if (seen.has(entry.entryId)) continue;
+      seen.add(entry.entryId);
+      stored.entries.push(entry);
+    }
+    if (stored.entries.length > this.maximum) {
+      stored.entries = stored.entries.slice(-this.maximum);
+      stored.truncated = true;
+    }
+    await this.write(stored);
   }
 
   async drain(sink: UsageSinkV1): Promise<void> {
-    const stored = decodeOutboxV1(
-      await this.storage.get<unknown>(USAGE_OUTBOX_KEY_V1),
-    );
+    const stored = await this.read();
     if (stored.entries.length === 0) return;
     await sink.recordEntries(stored.entries);
-    await this.storage.delete(USAGE_OUTBOX_KEY_V1);
+    const delivered = new Set(stored.entries.map((entry) => entry.entryId));
+    const current = await this.read();
+    await this.write({
+      schemaVersion: 1,
+      entries: current.entries.filter((entry) => !delivered.has(entry.entryId)),
+      // A successful delivery does not repair an earlier bounded loss.
+      truncated: current.truncated || stored.truncated,
+    });
   }
 
   async state(): Promise<{ pending: number; truncated: boolean }> {
-    const stored = decodeOutboxV1(
-      await this.storage.get<unknown>(USAGE_OUTBOX_KEY_V1),
-    );
+    const stored = await this.read();
     return { pending: stored.entries.length, truncated: stored.truncated };
   }
 }
