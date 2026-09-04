@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   parseVoiceAssistantUpstreamFrameV1,
+  voiceAssistantAnswerV1,
+  voiceAssistantKickoffV1,
   voiceAssistantSetupV1,
   voiceAssistantUpstreamTargetV1,
 } from "./voice-assistant-upstream.js";
@@ -41,6 +43,28 @@ describe("Gemini Live assistant upstream", () => {
           automaticActivityDetection: { disabled: false },
           activityHandling: "START_OF_ACTIVITY_INTERRUPTS",
         },
+      },
+    });
+  });
+
+  test("injects durable Bot answers without asking Gemini to call a tool", () => {
+    const answer = {
+      schemaVersion: 1 as const,
+      answerId: "ask-1",
+      botId: "research",
+      botName: "Research",
+      question: "What changed?",
+      answer: "The release landed.",
+      answeredAt: "2026-09-04T01:02:03.000Z",
+    };
+    expect(voiceAssistantKickoffV1([answer])).toEqual({
+      realtimeInput: {
+        text: expect.stringContaining("Research answered"),
+      },
+    });
+    expect(voiceAssistantAnswerV1(answer)).toEqual({
+      realtimeInput: {
+        text: expect.stringContaining("The release landed."),
       },
     });
   });

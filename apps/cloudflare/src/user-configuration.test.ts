@@ -101,6 +101,7 @@ function identity(userId: string): {
   ctx: (storage: unknown) => DurableObjectState;
   env: {
     USER_CONFIGURATIONS: DurableObjectNamespace;
+    VOICE_SESSIONS: DurableObjectNamespace;
     APPLICATION_ARTIFACTS: R2Bucket;
     USER_APPLICATIONS: WorkerLoader;
     BOT_STATES: DurableObjectNamespace;
@@ -118,6 +119,12 @@ function identity(userId: string): {
     env: {
       USER_CONFIGURATIONS: {
         idFromName: idFor,
+      } as unknown as DurableObjectNamespace,
+      VOICE_SESSIONS: {
+        idFromName: idFor,
+        get: () => {
+          throw new Error("no Voice session in this test");
+        },
       } as unknown as DurableObjectNamespace,
       // Publication bytes and the verification loader are not exercised here;
       // reaching either is a failure, not a fixture.

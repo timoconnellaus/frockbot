@@ -12,8 +12,38 @@ is a first-party, User-scoped **Voice Package**, not a Bot and not another
 Agent loop.
 
 This records decisions D1–D10 from the accepted Voice plan. Slice A landed the
-dictation half, B0 landed the agent lane, and B1 lands the Voice Package core.
-B2 remains the effectful ask-and-deliver workflow.
+dictation half, B0 landed the agent lane, B1 landed the Voice Package core, and
+B2 lands the effectful ask-and-deliver workflow.
+
+## B2 implementation amendment (accepted 2026-09-05)
+
+One ask is a durable event chain in the User Durable Object:
+
+- `voice/ask { askId, sessionId, botId, botName, question, runId, askedAt }`
+  is written before the target Bot is called;
+- `voice/answered { askId, botId, runId, answer, answeredAt }` is projected
+  from the target Turn's first text `send_to_user`; and
+- `voice/briefed { askId, sessionId, briefedAt }` is written after Gemini's
+  speech turn completes, whether the answer was pushed live or supplied in the
+  next connection's kickoff text.
+
+A failed or refused dispatch records the adjacent durable
+`voice/failed { askId, botId, runId, reason, failedAt }` terminal event. The
+stable ask id is derived from User, Voice session, and Gemini call id; the
+target run id is derived from that ask and target Bot. Reissuing the tool call
+therefore replays the same intent and the same Bot admission. The Bot writes a
+bounded local answer outbox after `turn/end` and before calling the User
+authority, so a caller disconnect or either object's eviction cannot turn a
+completed answer into an unrecorded one.
+
+B2 keeps B0's global limits: eight concurrent agent Turns per User and 32
+queued agent Turns per target Bot. It adds one unanswered ask per target Bot
+per Voice session and retains at most 32 unbriefed answers. Refusals are plain
+sentences returned to Gemini. The User object persists an answer before asking
+the socket-only `VoiceSession` to speak it. When durable Voice is off, the
+hosted client delivers the pending answer through `showClientNotificationV1`;
+the pending row remains authoritative until a later Gemini speech turn records
+`voice/briefed`.
 
 ## Authority and durable state
 
@@ -84,16 +114,15 @@ completion, then invokes the ordinary chat send; if a Bot is working, ADR
 The assistant is one live session per User. The newest device wins; observer
 sockets are deferred. An explicit shell-chrome toggle starts and stops it, and
 two minutes of silence takes it offline automatically. A disconnect detaches
-the browser observer without cancelling the live upstream. The B1 kickoff asks
-Gemini to check the durable pending-answer table first. B2 will fill that table
-and add notification plus live-session delivery when a Bot answers.
+the browser observer without cancelling the live upstream. A kickoff carries
+the durable pending answers directly to Gemini so it speaks them first.
 
-The B1 assistant tools are read-only `list_bots`, `bot_activity`,
-`memory_search`, and `pending_answers`. `bot_activity` and Memory reads are
-bounded projections of durable state and wake no Computer. The transport calls
-a table-driven tool seam; B2 extends that table with `ask_bot`, the one
-effectful tool, which writes the User ledger first and may address only a Bot in
-that User's Flock. Routines and Computer captures are deferred.
+The assistant tools are read-only `list_bots`, `bot_activity`,
+`memory_search`, and `pending_answers`, plus effectful `ask_bot`.
+`bot_activity` and Memory reads are bounded projections of durable state and
+wake no Computer. The transport calls a table-driven tool seam; `ask_bot`
+writes the User ledger first and may address only a Bot in that User's Flock.
+Routines and Computer captures are deferred.
 
 The Voice surface renders current-session history, plain-language tool use,
 quota, and visible failures from the User-owned ledger. The Voice Package fills
@@ -105,10 +134,10 @@ browser microphone path.
 
 ## Failure, retry, and recovery
 
-Quota exhaustion, upstream refusal, and failed resumption settle the B1 session
-as durable visible outcomes, not socket logs. In B2, unanswered questions and
-failed answer delivery join that ledger, and a retried `ask_bot` reuses its
-ledger key and deterministic agent run id. Bot
+Quota exhaustion, upstream refusal, and failed resumption settle the session as
+durable visible outcomes, not socket logs. Unanswered questions and failed
+answer delivery join that ledger, and a retried `ask_bot` reuses its ledger key
+and deterministic agent run id. Bot
 execution uses the existing durable cursor, effect admissions, cancellation,
 and reconciliation rules. Agent-lane admission is bounded to eight outstanding
 Turns per User and a FIFO of 32 pending agent Turns per target Bot; the former

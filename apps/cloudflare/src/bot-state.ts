@@ -37,7 +37,12 @@ import {
   MAX_COMPOSITION_GENERATION_PAGE_V1,
   type RevertCompositionCommandV1,
 } from "@frockbot/configuration-core";
-import { BotDurableAuthority } from "@frockbot/kernel-do";
+import {
+  BotDurableAuthority,
+  IDENTITY_KEY,
+  type BotIdentity,
+  type StoredRunOriginV1,
+} from "@frockbot/kernel-do";
 import type {
   BotStateEnv,
   OwnedBotTurnCommand,
@@ -50,6 +55,11 @@ import type {
 import { executeResidentBotTurn } from "@frockbot/plugin-shell/backend-runner";
 import type { FlockBotBackendContribution } from "@frockbot/plugin-flock/bot";
 import type { ComputerBotBackendContribution } from "@frockbot/plugin-computer/bot";
+import {
+  VoiceAnswerOutboxV1,
+  voiceAnswerFromSettledTurnV1,
+  type VoiceAnswerSinkV1,
+} from "@frockbot/plugin-voice/bot";
 import { decodeComputerCommandV1 } from "@frockbot/plugin-computer/protocol";
 import {
   decodeBotLifecycleCommandV1,
@@ -538,6 +548,8 @@ export class BotState extends DurableObject<BotStateEnv> {
                   .get(computerBotContribution)
                   ?.settleScheduledWork() ?? Promise.resolve(),
               recordSettledUsage: (settled) => this.recordSettledUsage(settled),
+              recordSettledAgentOutcome: (settled) =>
+                this.recordSettledVoiceAnswer(settled),
               // An archived Bot admits no configuration command; the Flock
               // Contribution owns that durable lifecycle state.
               assertLifecycleActive: (storage, botId) => {
@@ -1185,6 +1197,52 @@ export class BotState extends DurableObject<BotStateEnv> {
   /** This object's bounded, durable usage delivery outbox. */
   private usageOutbox(): UsageOutboxV1 {
     return new UsageOutboxV1(this.ctx.storage);
+  }
+
+  /** This object's bounded, durable Voice-answer delivery outbox. */
+  private voiceAnswerOutbox(): VoiceAnswerOutboxV1 {
+    return new VoiceAnswerOutboxV1(this.ctx.storage);
+  }
+
+  private voiceAnswerSink(userId: string): VoiceAnswerSinkV1 {
+    const namespace = this.env.USER_CONFIGURATIONS;
+    const rpc = namespace.get(namespace.idFromName(userId)) as unknown as {
+      recordVoiceAnswer(input: unknown): Promise<void>;
+    };
+    return {
+      recordVoiceAnswer: (delivery) =>
+        rpc.recordVoiceAnswer({
+          schemaVersion: 1,
+          userId,
+          delivery,
+        }),
+    };
+  }
+
+  /** Queues a Voice-origin Turn's first text send after `turn/end` is durable. */
+  private async recordSettledVoiceAnswer(input: {
+    userId: string;
+    botId: string;
+    runId: string;
+    turn: number;
+    origin?: StoredRunOriginV1;
+    events: readonly SessionEvent[];
+  }): Promise<void> {
+    const delivery = voiceAnswerFromSettledTurnV1(input);
+    if (!delivery) return;
+    await this.voiceAnswerOutbox().append(delivery);
+    await this.drainVoiceAnswerOutbox(input.userId);
+  }
+
+  private async drainVoiceAnswerOutbox(userId?: string): Promise<void> {
+    const identity =
+      userId ?? (await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY))?.userId;
+    if (!identity) return;
+    try {
+      await this.voiceAnswerOutbox().drain(this.voiceAnswerSink(identity));
+    } catch {
+      // The delivery stays in the durable outbox for this object's next alarm.
+    }
   }
 
   /**
@@ -2305,6 +2363,9 @@ export class BotState extends DurableObject<BotStateEnv> {
           ),
           loggedEntryV1("Bot usage outbox drain", () =>
             this.drainUsageOutbox(),
+          ),
+          loggedEntryV1("Bot Voice answer outbox drain", () =>
+            this.drainVoiceAnswerOutbox(),
           ),
         ]);
       }

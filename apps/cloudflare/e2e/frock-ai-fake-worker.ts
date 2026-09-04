@@ -3,7 +3,8 @@ import {
   E2E_DICTATED_TEXT_V1,
   E2E_DICTATION_FRAMES_PER_WORD_V1,
   E2E_REALTIME_BETA_REMOVED_ERROR_V1,
-  E2E_VOICE_ANSWER_V1,
+  E2E_VOICE_BOT_ANSWER_V1,
+  E2E_VOICE_BOT_QUESTION_V1,
   E2E_VOICE_INPUT_V1,
 } from "./voice-fake-protocol.ts";
 
@@ -171,7 +172,7 @@ function fakeGeminiLiveAssistant(): Response {
   let heardAudio = false;
 
   const pcm = btoa(String.fromCharCode(0, 0, 0, 0));
-  const answer = () => {
+  const answer = (text: string) => {
     server.send(
       JSON.stringify({
         serverContent: {
@@ -185,7 +186,7 @@ function fakeGeminiLiveAssistant(): Response {
               },
             ],
           },
-          outputTranscription: { text: E2E_VOICE_ANSWER_V1 },
+          outputTranscription: { text },
           turnComplete: true,
         },
       }),
@@ -216,9 +217,13 @@ function fakeGeminiLiveAssistant(): Response {
         setup.generationConfig.responseModalities.includes("AUDIO") &&
         setup.realtimeInputConfig?.activityHandling ===
           "START_OF_ACTIVITY_INTERRUPTS" &&
-        ["list_bots", "bot_activity", "memory_search", "pending_answers"].every(
-          (name) => names?.includes(name),
-        );
+        [
+          "list_bots",
+          "bot_activity",
+          "memory_search",
+          "pending_answers",
+          "ask_bot",
+        ].every((name) => names?.includes(name));
       if (!valid) {
         server.send(
           JSON.stringify({ error: { message: "Invalid Gemini setup." } }),
@@ -242,6 +247,13 @@ function fakeGeminiLiveAssistant(): Response {
         text?: unknown;
         audio?: { data?: unknown; mimeType?: unknown };
       };
+      if (
+        typeof input.text === "string" &&
+        input.text.includes("Speak this Bot answer now")
+      ) {
+        answer(E2E_VOICE_BOT_ANSWER_V1);
+        return;
+      }
       if (typeof input.text === "string" && !prompted) {
         prompted = true;
         server.send(
@@ -279,9 +291,35 @@ function fakeGeminiLiveAssistant(): Response {
     }
     if ("toolResponse" in message) {
       const response = message.toolResponse as {
-        functionResponses?: Array<{ name?: unknown }>;
+        functionResponses?: Array<{
+          name?: unknown;
+          response?: { result?: { bots?: Array<{ botId?: unknown }> } };
+        }>;
       };
-      if (response.functionResponses?.[0]?.name === "list_bots") answer();
+      const first = response.functionResponses?.[0];
+      if (first?.name === "list_bots") {
+        const botId = first.response?.result?.bots?.[0]?.botId;
+        if (typeof botId !== "string") {
+          server.send(JSON.stringify({ error: { message: "No Bot to ask." } }));
+          return;
+        }
+        server.send(
+          JSON.stringify({
+            toolCall: {
+              functionCalls: [
+                {
+                  id: "ask-e2e",
+                  name: "ask_bot",
+                  args: {
+                    bot: botId,
+                    question: E2E_VOICE_BOT_QUESTION_V1,
+                  },
+                },
+              ],
+            },
+          }),
+        );
+      }
     }
   });
   return new Response(null, { status: 101, webSocket: client });

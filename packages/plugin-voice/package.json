@@ -5,7 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./ask": "./src/ask.ts",
     "./backend": "./src/backend.ts",
+    "./bot": "./src/bot.ts",
     "./client": "./src/client/index.ts",
     "./frockbot.json": "./frockbot.json",
     "./ledger": "./src/ledger.ts",
@@ -27,6 +29,7 @@
     "@frockbot/client-core": "workspace:*",
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
+    "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
     "@frockbot/protocol": "workspace:*",
     "cordis": "4.0.0-rc.8",

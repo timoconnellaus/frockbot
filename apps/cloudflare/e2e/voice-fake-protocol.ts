@@ -23,5 +23,7 @@ export const E2E_DICTATION_FRAMES_PER_WORD_V1 = 3;
 export const E2E_REALTIME_BETA_REMOVED_ERROR_V1 =
   "The Realtime Beta API is no longer supported. Please use /v1/realtime for the GA API.";
 
-export const E2E_VOICE_INPUT_V1 = "Which Bots do I have?";
-export const E2E_VOICE_ANSWER_V1 = "You have a Bot ready to help.";
+export const E2E_VOICE_INPUT_V1 = "Ask Listener what changed.";
+export const E2E_VOICE_BOT_ANSWER_V1 = "The specialist answer reached Voice.";
+export const E2E_VOICE_BOT_QUESTION_V1 =
+  'frockbot-e2e-tool-call:send_to_user:{"payload":{"type":"text","text":"The specialist answer reached Voice."}}';

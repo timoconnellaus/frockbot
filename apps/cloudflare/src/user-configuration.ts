@@ -100,8 +100,12 @@ import type { BotAuditRpc } from "./audit.js";
 import type {
   VoiceBotActivityV1,
   VoiceMemoryHitV1,
-  VoiceToolHostV1,
 } from "@frockbot/plugin-voice/tools";
+import {
+  decodeVoiceAnswerDeliveryV1,
+  VOICE_MAX_PENDING_ANSWERS_V1,
+  type VoiceAnswerDeliveryV1,
+} from "@frockbot/plugin-voice/shared";
 import type {
   VoiceUserBackendContributionV1,
   VoiceUserBackendHostV1,
@@ -177,6 +181,8 @@ interface UserConfigurationEnv {
    * that the `userId` an RPC carries is the one it *is*.
    */
   USER_CONFIGURATIONS: DurableObjectNamespace;
+  /** Socket-only live projection; all durable Voice state remains here. */
+  VOICE_SESSIONS: DurableObjectNamespace;
   /** Immutable published application source and artifact bytes. */
   APPLICATION_ARTIFACTS: R2Bucket;
   /** The loader that health-checks a candidate artifact before activation. */
@@ -436,9 +442,14 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     };
   }
 
-  private voiceToolHost(): VoiceToolHostV1 & VoiceUserBackendHostV1 {
+  private voiceToolHost(): VoiceUserBackendHostV1 {
     return {
       storage: this.ctx.storage,
+      userId: () => {
+        if (!this.identity)
+          throw new Error("Voice User identity is unavailable");
+        return this.identity;
+      },
       listBots: async () => {
         const flock = await this.flockContribution();
         const [directory, lifecycles] = await Promise.all([
@@ -502,6 +513,21 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         (await this.voiceContribution())
           .view()
           .then((view) => view.pendingAnswers),
+      reserveAgentTurn: (request) =>
+        reserveAgentTurnSlotV1(this.ctx.storage, request),
+      releaseAgentTurn: async (request) => {
+        await releaseAgentTurnSlotV1(this.ctx.storage, request);
+      },
+      runAgent: async (request) => {
+        const id = this.env.BOT_STATES.idFromName(
+          `${request.userId}:${request.botId}`,
+        );
+        const rpc = this.env.BOT_STATES.get(id) as unknown as {
+          runAgent(input: unknown): Promise<unknown>;
+        };
+        return rpc.runAgent(request);
+      },
+      defer: (task) => this.ctx.waitUntil(task),
     };
   }
 
@@ -1000,14 +1026,14 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       sessionId: request.sessionId as string,
     });
     if (quota.status === "refused") return { schemaVersion: 1, quota };
-    const started = await (
-      await this.voiceContribution()
-    ).start({
+    const voice = await this.voiceContribution();
+    const started = await voice.start({
       sessionId: request.sessionId as string,
       deviceId: request.deviceId as string,
       at: request.at as string,
     });
-    return { schemaVersion: 1, quota, ...started };
+    const pendingAnswers = (await voice.view()).pendingAnswers;
+    return { schemaVersion: 1, quota, ...started, pendingAnswers };
   }
 
   async endVoiceAssistant(input: unknown) {
@@ -1110,6 +1136,78 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     });
   }
 
+  /** A target Bot's durable outbox calls this after its Voice Turn settles. */
+  async recordVoiceAnswer(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      delivery: rpcDecoded(decodeVoiceAnswerDeliveryV1),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const delivery = request.delivery as VoiceAnswerDeliveryV1;
+    if (delivery.userId !== userId) {
+      throw new Error("voice answer belongs to a different User");
+    }
+    const voice = await this.voiceContribution();
+    const ask = await voice.ledger.readAsk(delivery.askId);
+    if (!ask) throw new Error("voice ask was not found");
+    const settled = await voice.recordAnswerDelivery(delivery);
+    await releaseAgentTurnSlotV1(this.ctx.storage, {
+      requesterId: `voice-${ask.ask.sessionId}`,
+      runId: ask.ask.runId,
+    });
+    if (delivery.outcome !== "answered" || !("answer" in settled)) return;
+    if (settled.answer.briefedAt) return;
+    const view = await voice.view();
+    const activeSessionId = view.state.activeSessionId;
+    if (!view.state.enabled || !activeSessionId) return;
+    const namespace = this.env.VOICE_SESSIONS;
+    const rpc = namespace.get(namespace.idFromName(userId)) as unknown as {
+      deliverVoiceAnswer(input: unknown): Promise<unknown>;
+    };
+    try {
+      await rpc.deliverVoiceAnswer({
+        schemaVersion: 1,
+        userId,
+        sessionId: activeSessionId,
+        answer: settled.answer,
+      });
+    } catch {
+      // The answer is already durable and remains pending for reconnection.
+    }
+  }
+
+  /** Gemini's completed speech turn durably acknowledges these answers. */
+  async markVoiceAnswersBriefed(input: unknown): Promise<number> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      sessionId: rpcString(128),
+      askIds: rpcDecoded((value) => {
+        if (
+          !Array.isArray(value) ||
+          value.length > VOICE_MAX_PENDING_ANSWERS_V1
+        ) {
+          throw new Error("voice briefing ask ids are invalid");
+        }
+        return value.map((askId) => {
+          if (
+            typeof askId !== "string" ||
+            !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(askId)
+          ) {
+            throw new Error("voice briefing ask id is invalid");
+          }
+          return askId;
+        });
+      }),
+      at: rpcString(64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.voiceContribution()).markBriefed({
+      askIds: request.askIds as string[],
+      sessionId: request.sessionId as string,
+      at: request.at as string,
+    });
+  }
+
   async readVoiceAssistant(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
     await this.assertUserIdentity(request.userId as string);
@@ -1119,6 +1217,18 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       readVoiceAssistantQuotaV1(this.ctx.storage, month),
     ]);
     return { schemaVersion: 1, ledger, quota };
+  }
+
+  /** Internal reconciliation/read seam for one durable Voice ask record. */
+  async readVoiceAsk(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      askId: rpcIdentifier,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.voiceContribution()).ledger.readAsk(
+      request.askId as string,
+    );
   }
 
   /** The durable per-User authoring quota configuration; defaults when unset. */

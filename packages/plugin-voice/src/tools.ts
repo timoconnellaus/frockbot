@@ -35,6 +35,19 @@ export interface VoiceToolHostV1 {
     botId?: string;
   }): Promise<readonly VoiceMemoryHitV1[]>;
   pendingAnswers(): Promise<readonly VoicePendingAnswerV1[]>;
+  askBot(input: {
+    sessionId: string;
+    callId: string;
+    bot: string;
+    question: string;
+    at: string;
+  }): Promise<unknown>;
+}
+
+export interface VoiceToolExecutionContextV1 {
+  sessionId: string;
+  callId: string;
+  at: string;
 }
 
 export interface GeminiFunctionDeclarationV1 {
@@ -49,6 +62,7 @@ export interface VoiceToolSpecV1 {
   execute(
     host: VoiceToolHostV1,
     args: Record<string, unknown>,
+    context: VoiceToolExecutionContextV1,
   ): Promise<unknown>;
 }
 
@@ -88,7 +102,7 @@ function boundedJson(value: unknown): unknown {
   return { truncated: true, summary: json.slice(0, 15_000) };
 }
 
-/** B2 extends this table with `ask_bot`; transport code does not switch on names. */
+/** The transport remains table-driven as Voice adds effectful tools. */
 export const VOICE_TOOL_TABLE_V1: Readonly<
   Record<VoiceToolNameV1, VoiceToolSpecV1>
 > = {
@@ -176,6 +190,36 @@ export const VOICE_TOOL_TABLE_V1: Readonly<
       return { answers: (await host.pendingAnswers()).slice(0, 32) };
     },
   },
+  ask_bot: {
+    declaration: {
+      name: "ask_bot",
+      description:
+        "Ask one active Bot a question on this person's behalf. The Bot answers later; do not wait for it.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          bot: {
+            type: "STRING",
+            description: "The Bot id or exact Bot name.",
+          },
+          question: {
+            type: "STRING",
+            description: "The complete question to send to the Bot.",
+          },
+        },
+        required: ["bot", "question"],
+      },
+    },
+    label: (args) => `Asked ${String(args.bot ?? "a Bot")}`,
+    async execute(host, args, context) {
+      only(args, ["bot", "question"]);
+      return host.askBot({
+        ...context,
+        bot: stringArg(args, "bot", 128)!,
+        question: stringArg(args, "question", 2_000)!,
+      });
+    },
+  },
 };
 
 export const VOICE_FUNCTION_DECLARATIONS_V1 = Object.values(
@@ -184,7 +228,11 @@ export const VOICE_FUNCTION_DECLARATIONS_V1 = Object.values(
 
 export async function executeVoiceToolV1(
   host: VoiceToolHostV1,
-  input: { name: string; args?: unknown },
+  input: {
+    name: string;
+    args?: unknown;
+    context?: VoiceToolExecutionContextV1;
+  },
 ): Promise<{ name: VoiceToolNameV1; label: string; result: unknown }> {
   const tool = VOICE_TOOL_TABLE_V1[input.name as VoiceToolNameV1];
   if (!tool) throw new Error("That Voice tool is unavailable.");
@@ -193,9 +241,14 @@ export async function executeVoiceToolV1(
     throw new Error("tool arguments must be an object");
   }
   const record = args as Record<string, unknown>;
+  const context = input.context ?? {
+    sessionId: "voice-tool",
+    callId: "voice-tool-call",
+    at: new Date(0).toISOString(),
+  };
   return {
     name: input.name as VoiceToolNameV1,
     label: tool.label(record).slice(0, 160),
-    result: await tool.execute(host, record),
+    result: await tool.execute(host, record, context),
   };
 }

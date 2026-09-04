@@ -3,11 +3,11 @@
 import { expect, provisionThroughUi, test } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 import {
-  E2E_VOICE_ANSWER_V1,
+  E2E_VOICE_BOT_ANSWER_V1,
   E2E_VOICE_INPUT_V1,
 } from "./voice-fake-protocol.ts";
 
-test("Voice talks through Gemini Live, uses read-only tools, then goes quiet", async ({
+test("Voice asks a Bot, speaks its answer, and marks the Bot thread", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -31,7 +31,15 @@ test("Voice talks through Gemini Live, uses read-only tools, then goes quiet", a
   await expect(surface.getByText("Checked your Bots")).toBeVisible({
     timeout: 60_000,
   });
-  await expect(surface.getByText(E2E_VOICE_ANSWER_V1)).toBeVisible({
+  await expect(surface.getByText("Asked Listener")).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(surface.getByText(E2E_VOICE_BOT_ANSWER_V1)).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(
+    page.locator(".message-via", { hasText: "via Voice" }),
+  ).toBeVisible({
     timeout: 60_000,
   });
   await expect(surface.getByText(/minutes left this month/)).toBeVisible();
