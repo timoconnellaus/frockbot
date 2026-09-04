@@ -25,13 +25,15 @@ import {
   FlySpriteSyncSurface,
   isWorkspaceSyncIgnoredPathV1,
   WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1,
-  WORKSPACE_SYNC_CHUNK_BYTES_V1,
   WORKSPACE_SYNC_MANIFEST_MAX_BYTES_V1,
   WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1,
   WORKSPACE_SYNC_MAX_FILE_BYTES_V1,
   type WorkspaceSyncReportV1,
 } from "./sync.ts";
-import { WORKSPACE_EMPTY_SHA256 } from "./workspace.ts";
+import {
+  WORKSPACE_CHUNK_BYTES_V1,
+  WORKSPACE_EMPTY_SHA256,
+} from "./workspace.ts";
 
 const USER = "owner";
 const BOT = "health";
@@ -219,7 +221,7 @@ class FakeSyncSprite {
     if (bytes.byteLength > WORKSPACE_SYNC_MAX_FILE_BYTES_V1) {
       return "__TOO_LARGE__\n";
     }
-    const head = bytes.subarray(0, WORKSPACE_SYNC_CHUNK_BYTES_V1);
+    const head = bytes.subarray(0, WORKSPACE_CHUNK_BYTES_V1);
     return `${bytes.byteLength}\t${sha256(bytes)}\n${Buffer.from(head).toString("base64")}\n`;
   }
 

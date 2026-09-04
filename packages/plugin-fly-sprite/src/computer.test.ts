@@ -1,6 +1,7 @@
 /// <reference types="bun" />
 
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import type { ComputerConnectionProgressV1 } from "@frockbot/computer-core";
 import { COMPUTER_UNCONFIGURED_MESSAGE_V1 } from "@frockbot/computer-core";
 import { verifyPluginPackage } from "@frockbot/plugin-testkit";
@@ -63,15 +64,18 @@ function computerRunner(script: string): FakeComputerRunV1 {
   }
   if (script.includes('mv "$TMP" "$TARGET"'))
     return { stdout: "__WRITTEN__\n" };
-  if (script.includes('base64 -w0 "$TARGET"')) {
-    // meta, content hash, size, mtime, bytes — the Workspace file shape.
+  if (script.includes('"$TARGET" | base64 -w0')) {
+    // meta, content hash, size, mtime, first chunk — the Workspace file shape.
+    // The digest is the file's real one, because the read proves the chunks it
+    // stitched are one file against exactly this value.
+    const bytes = Buffer.from("remember");
     return {
       stdout: [
         "",
-        "0".repeat(64),
-        "8",
+        createHash("sha256").update(bytes).digest("hex"),
+        String(bytes.byteLength),
         "1700000000",
-        Buffer.from("remember").toString("base64"),
+        bytes.toString("base64"),
         "",
       ].join("\n"),
     };

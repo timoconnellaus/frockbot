@@ -404,6 +404,7 @@ import {
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
   CLIENT_RUN_PAGE_LIMIT,
+  CLIENT_RUN_SCAN_LIMIT,
   clientRunListWireBytes,
   createClientRunListV1,
   createClientRunStopReceiptV1,
@@ -5833,7 +5834,7 @@ export class ShellBotBackendContribution {
 
     const selected = new Map<string, { cursor?: string; run: ClientRunV1 }>();
     if (activeRunId) {
-      const active = await this.authority.readStoredRun(activeRunId);
+      const active = await this.authority.readStoredRunForDisplay(activeRunId);
       // An automation firing occupies the object like any other run, and is
       // still not part of the conversation: the visible transcript never
       // shows one, running or settled.
@@ -5842,60 +5843,110 @@ export class ShellBotBackendContribution {
           run: projectClientRunOrDegradedV1(active),
         });
     }
-    const available = candidates.slice(0, CLIENT_RUN_PAGE_LIMIT);
+    // The run index is global and the transcript is one conversation, so a
+    // page of candidates is not a page of answers: 33 Turns of another
+    // conversation, or of automation, used to come back as an empty,
+    // *untruncated* page that told the client there was nothing older. The
+    // scan cursor now advances over every candidate this call consumed,
+    // whether or not it was kept, so a filtered-out page still says where to
+    // resume; and the scan keeps reading batches, up to a budget, so the
+    // common case answers in one request rather than making the client walk
+    // the history a page at a time. Filtering reads run records only —
+    // hydrating a Turn's journal is what selection costs, not what the scan
+    // costs.
     let stoppedEarly = false;
-    for (const candidate of available) {
-      if (selected.has(candidate.runId)) {
-        const current = selected.get(candidate.runId)!;
-        selected.set(candidate.runId, { ...current, cursor: candidate.cursor });
-        continue;
-      }
-      const stored = await this.authority.readStoredRun(candidate.runId);
-      if (!stored || !isVisibleRunV1(stored) || !inConversation(stored))
-        continue;
-      const projected = projectClientRunOrDegradedV1(stored);
-      const tentative = [
-        ...selected.values(),
-        { cursor: candidate.cursor, run: projected },
-      ];
-      const ordered = tentative
-        .map((entry) => entry.run)
-        .sort(
-          (left, right) =>
-            left.admittedAt.localeCompare(right.admittedAt) ||
-            left.runId.localeCompare(right.runId),
+    let exhausted = false;
+    let scanCursor: string | undefined;
+    let scanned = 0;
+    let batch = candidates;
+    for (;;) {
+      const available = batch.slice(0, CLIENT_RUN_PAGE_LIMIT);
+      const hasMore = batch.length > CLIENT_RUN_PAGE_LIMIT;
+      for (const candidate of available) {
+        if (selected.has(candidate.runId)) {
+          const current = selected.get(candidate.runId)!;
+          selected.set(candidate.runId, {
+            ...current,
+            cursor: candidate.cursor,
+          });
+          scanCursor = candidate.cursor;
+          continue;
+        }
+        const header = await this.authority.readRunHeader(candidate.runId);
+        if (!header || !isVisibleRunV1(header) || !inConversation(header)) {
+          scanCursor = candidate.cursor;
+          continue;
+        }
+        const stored = await this.authority.readStoredRunForDisplay(
+          candidate.runId,
         );
-      const tentativePage = createClientRunListV1(ordered, {
-        truncated: true,
-        nextCursor: candidate.cursor,
-      });
-      const isNewestTerminal =
-        ![...selected.values()].some(
-          (entry) =>
-            entry.run.status === "completed" || entry.run.status === "failed",
-        ) &&
-        (projected.status === "completed" || projected.status === "failed");
-      if (
-        selected.size >= CLIENT_RUN_PAGE_LIMIT ||
-        (!isNewestTerminal &&
-          clientRunListWireBytes(tentativePage) > CLIENT_RUN_LIST_MAX_BYTES)
-      ) {
-        stoppedEarly = true;
+        if (!stored) {
+          scanCursor = candidate.cursor;
+          continue;
+        }
+        const projected = projectClientRunOrDegradedV1(stored);
+        const tentative = [
+          ...selected.values(),
+          { cursor: candidate.cursor, run: projected },
+        ];
+        const ordered = tentative
+          .map((entry) => entry.run)
+          .sort(
+            (left, right) =>
+              left.admittedAt.localeCompare(right.admittedAt) ||
+              left.runId.localeCompare(right.runId),
+          );
+        const tentativePage = createClientRunListV1(ordered, {
+          truncated: true,
+          nextCursor: candidate.cursor,
+        });
+        const isNewestTerminal =
+          ![...selected.values()].some(
+            (entry) =>
+              entry.run.status === "completed" || entry.run.status === "failed",
+          ) &&
+          (projected.status === "completed" || projected.status === "failed");
+        if (
+          selected.size >= CLIENT_RUN_PAGE_LIMIT ||
+          (!isNewestTerminal &&
+            clientRunListWireBytes(tentativePage) > CLIENT_RUN_LIST_MAX_BYTES)
+        ) {
+          stoppedEarly = true;
+          break;
+        }
+        selected.set(stored.runId, {
+          cursor: candidate.cursor,
+          run: projected,
+        });
+        scanCursor = candidate.cursor;
+      }
+      scanned += available.length;
+      if (stoppedEarly) break;
+      if (!hasMore) {
+        exhausted = true;
         break;
       }
-      selected.set(stored.runId, { cursor: candidate.cursor, run: projected });
+      if (selected.size >= CLIENT_RUN_PAGE_LIMIT) break;
+      if (scanned >= CLIENT_RUN_SCAN_LIMIT || scanCursor === undefined) break;
+      batch = await this.authority.listRunIndex({
+        limit: CLIENT_RUN_PAGE_LIMIT + 1,
+        before: scanCursor,
+      });
+      if (batch.length === 0) {
+        exhausted = true;
+        break;
+      }
     }
     const orderedEntries = [...selected.values()].sort(
       (left, right) =>
         left.run.admittedAt.localeCompare(right.run.admittedAt) ||
         left.run.runId.localeCompare(right.run.runId),
     );
-    const oldestCursor = orderedEntries.find((entry) => entry.cursor)?.cursor;
-    const truncated = stoppedEarly || candidates.length > CLIENT_RUN_PAGE_LIMIT;
+    const truncated = !exhausted;
     const page = createClientRunListV1(
       orderedEntries.map((entry) => entry.run),
-      truncated && oldestCursor
-        ? { truncated: true, nextCursor: oldestCursor }
+      truncated && scanCursor
+        ? { truncated: true, nextCursor: scanCursor }
         : { truncated: false },
       // Announcements belong to the Session, not to a page of Turns, so only
       // the newest page carries them.
