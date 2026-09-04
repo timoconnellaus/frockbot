@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# Structured Output Is a Model Contract
+# Structured Output Is Part of the Model Contract
 
 Several Package policies need a typed model result. Conversation compaction is the first: its summary, decisions, open items, and opaque identifiers are distinct values, but ADR 0030 previously asked for Markdown headings and parsed whatever free text came back. Leaving the schema at each caller would make providers disagree about a request, would omit it from the durable normalized request, and would turn validation failure into ad-hoc parsing errors.
 

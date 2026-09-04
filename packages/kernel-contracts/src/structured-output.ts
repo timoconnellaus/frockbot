@@ -1,4 +1,4 @@
-/** The JSON Schema subset accepted by the model contract (ADR 0033). */
+/** The JSON Schema subset accepted by the model contract (ADR 0034). */
 export type StructuredOutputSchemaV1 =
   | {
       type: "object";
