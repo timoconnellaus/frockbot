@@ -17,7 +17,7 @@ import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
 import { ToolRegistry } from "@frockbot/plugin-tools";
 import { AgentRegistry, type AgentOptions } from "./agent.js";
 import { Context, type Plugin } from "cordis";
-import { AgentLoop } from "./index.js";
+import { AgentLoop, STEP_LIMIT_REASON_V1 } from "./index.js";
 
 const roots: Context[] = [];
 const allowEffect = () => Promise.resolve(true);
@@ -3079,7 +3079,7 @@ describe("AgentLoop", () => {
     expect(handle.agent.session.events.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "interrupted",
-      reason: "stopped after 4 steps",
+      reason: STEP_LIMIT_REASON_V1,
     });
     // Nothing about the model failed, so nothing is reported as if it had.
     expect(errors).toEqual([]);
