@@ -24,6 +24,7 @@ import {
   projectClientRunV1,
   projectClientRunOrDegradedV1,
   projectClientTurnV1,
+  UNRECORDED_TOOL_RESULT_TEXT_V1,
 } from "./run-protocol.js";
 
 const timestamp = "2026-08-29T00:00:00.000Z";
@@ -1061,12 +1062,57 @@ describe("client run protocol v1", () => {
     expect(() => projectClientRunListV1([storedRun([result])])).toThrow(
       'tool result has no matching occurrence "tool:1:1:0"',
     );
-    expect(() => projectClientRunListV1([storedRun([call])])).toThrow(
-      'terminal run has no result for tool call "tool-1"',
-    );
     expect(() =>
       projectClientRunListV1([storedRun([call, call, result])]),
     ).toThrow('tool occurrence "tool:1:1:0" has duplicate intent');
+  });
+
+  // A READ never throws on a record that is already durable. A settled Turn
+  // whose tool call was never settled used to fail the whole transcript
+  // endpoint — a 500 on every later request — so one malformed row bricked the
+  // conversation for ever. It degrades to a row saying nothing was recorded.
+  test("degrades a settled Turn's unsettled tool call instead of throwing", () => {
+    const call = toolEvents(1)[0]!;
+
+    const projected = projectClientRunListV1([storedRun([call])]).runs[0];
+
+    expect(projected?.events).toEqual([
+      { type: "tool/call", call: { id: "tool-1", name: "lookup" } },
+      {
+        type: "tool/result",
+        callId: "tool-1",
+        content: UNRECORDED_TOOL_RESULT_TEXT_V1,
+        isError: true,
+      },
+    ]);
+    // And the degraded row survives the wire decode, which used to refuse it
+    // for the same reason the projection did.
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [projected],
+        page: { truncated: false },
+      })[0]?.events,
+    ).toHaveLength(2);
+  });
+
+  test("accepts a settled Turn on the wire whose call carries no result", () => {
+    const projected = projectClientRunListV1([storedRun([])]).runs[0]!;
+
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [
+          {
+            ...projected,
+            events: [
+              { type: "tool/call", call: { id: "tool-1", name: "lookup" } },
+            ],
+          },
+        ],
+        page: { truncated: false },
+      })[0]?.events,
+    ).toEqual([{ type: "tool/call", call: { id: "tool-1", name: "lookup" } }]);
   });
 
   test("retains pending calls only for nonterminal runs", () => {

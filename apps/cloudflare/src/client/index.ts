@@ -115,7 +115,7 @@ function apiFailure(
   response: Response,
   answer: { value: unknown; text?: string },
   fallback: string,
-): Error & { definitive?: boolean } {
+): Error & { definitive?: boolean; status?: number } {
   const value = answer.value;
   const message =
     typeof value === "object" &&
@@ -127,7 +127,14 @@ function apiFailure(
         `${fallback} (${String(response.status)})`);
   const failure = new Error(message || fallback) as Error & {
     definitive?: boolean;
+    status?: number;
   };
+  // The status rides along because "what went wrong" and "is it settled" are
+  // different questions and only the code answers the second: a 4xx is the
+  // server having read the request and refused it, while a 5xx leaves the send
+  // genuinely uncertain. Flattening both to a message sent an oversized
+  // message — refused 413, never admitted — down the reconciliation path.
+  failure.status = response.status;
   if (
     typeof value === "object" &&
     value !== null &&

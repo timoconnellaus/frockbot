@@ -22,6 +22,12 @@ import {
   E2E_OLLAMA_GOOD_API_KEY,
   e2eToolCallPrompt,
 } from "./harness.ts";
+// The send route's own rule, read from the module that enforces it: a spec
+// that restated the number would keep passing after the limit moved.
+import {
+  TURN_TEXT_MAX_CHARACTERS_V1,
+  TURN_TOO_LONG_MESSAGE_V1,
+} from "../src/request-body.ts";
 
 test("Turns stay ordered, render Markdown, and survive a reload", async ({
   page,
@@ -228,4 +234,131 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
   // test switched on is switched off again: leaving it on made every later
   // spec's Turn fail with a 401 it never asked for.
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+});
+
+// Seam S9 from the other side: what the client does with an answer that is not
+// a Turn. A 4xx is the server having read the request and refused it, so the
+// send is settled — the person's text belongs in the composer they wrote it
+// in, and nothing about it belongs in the thread. The regression was a 120 KB
+// message drawn as though it had been sent, followed by a spinner over a run
+// that was never admitted.
+test("a send the server refuses for size keeps the draft and says why", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+  allowedFailures,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Terse",
+  });
+
+  const composer = composerInput(page);
+  const send = page.getByRole("button", { name: "Send message" });
+
+  // The composer holds the same line the route does, so an oversized message
+  // never leaves the browser: the count appears and the button closes.
+  await composer.fill("x".repeat(TURN_TEXT_MAX_CHARACTERS_V1 + 10));
+  await expect(
+    page.getByText("10 characters over the 32,000 limit"),
+  ).toBeVisible();
+  await expect(send).toBeDisabled();
+  await composer.fill("");
+
+  // A refusal that reaches the client anyway — another tab, an older build, a
+  // proxy of its own — is still a refusal, and the answer already says why.
+  allowedFailures.console.push(/Failed to load resource.*413/);
+  await page.route("**/api/bots/*/turns", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    await route.fulfill({
+      status: 413,
+      contentType: "application/json",
+      body: JSON.stringify({ error: TURN_TOO_LONG_MESSAGE_V1 }),
+    });
+  });
+
+  const prompt = "this one is refused";
+  await composer.fill(prompt);
+  await send.click();
+
+  // The server's own sentence, not "Agent request failed" and not a guess.
+  await expect(page.getByRole("alert")).toContainText(TURN_TOO_LONG_MESSAGE_V1);
+  // The draft is still where it was written.
+  await expect(composer).toHaveValue(prompt);
+  // No optimistic bubble, and nothing checking on a Turn that never existed.
+  await expect(page.locator("article.message-user")).toHaveCount(0);
+  await expect(
+    page.getByText("Checking whether your message went through…"),
+  ).toHaveCount(0);
+});
+
+// The other half of the same question: an answer that never arrives at all.
+// Admission really is unknown there, so the client reconciles — but a bounded
+// number of times, and then it says the one thing no copy in the product used
+// to say, which is that the app could not reach the Bot.
+test("a Bot the client cannot reach settles with a reason and a Retry", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+  allowedFailures,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Unreachable",
+  });
+
+  allowedFailures.requests.push(/\/api\/bots\/[^/]+\/turns/);
+  allowedFailures.console.push(/Failed to load resource/);
+  // The send, and every reconciliation lookup it would make: this tab can
+  // reach nothing about the Turn, which is what a dropped connection looks
+  // like from inside the browser.
+  await page.route("**/api/bots/*/turns", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    await route.abort("connectionfailed");
+  });
+  await page.route("**/api/bots/*/turns/**", (route) =>
+    route.abort("connectionfailed"),
+  );
+
+  const composer = composerInput(page);
+  const prompt = "are you there";
+  await composer.fill(prompt);
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  const thread = page.locator("main");
+  const reason = thread.getByText(
+    "Couldn't reach the Bot. Check your connection and try again.",
+  );
+  // The bound is several seconds of backoff, and then it settles by itself.
+  await expect(reason).toBeVisible({ timeout: 120_000 });
+
+  // The line is under the message it reports on, never above it.
+  await expect
+    .poll(() =>
+      thread
+        .locator("article.message-user, article.message-assistant")
+        .evaluateAll((messages) =>
+          messages.map((message) =>
+            message.classList.contains("message-user") ? "user" : "assistant",
+          ),
+        ),
+    )
+    .toEqual(["user", "assistant"]);
+
+  // The words wrap inside the bubble rather than being cut off by its width.
+  const bubble = page.locator("article.message-assistant .message-bubble");
+  const clipped = await bubble.evaluate(
+    (element) => element.scrollWidth > element.clientWidth + 1,
+  );
+  expect(clipped).toBe(false);
+
+  // Nothing is running, so nothing offers to stop it; the draft is back, and
+  // the Retry beside the reason is what sends it again.
+  await expect(page.getByRole("button", { name: /Stop/ })).toHaveCount(0);
+  await expect(composer).toHaveValue(prompt);
+  await expect(page.getByRole("button", { name: "Retry" })).toBeEnabled();
 });
