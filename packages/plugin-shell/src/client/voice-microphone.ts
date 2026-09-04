@@ -11,17 +11,17 @@ import {
 } from "./voice-worklet.js";
 
 /** What the upstream is told to expect, and therefore what leaves here. */
-export const VOICE_CAPTURE_SAMPLE_RATE_V1 = 16_000;
+export const VOICE_CAPTURE_SAMPLE_RATE_V1 = 24_000;
 
-/** Samples per frame at 16 kHz: 32 ms, small enough to feel live. */
-const FRAME_SAMPLES = 512;
+/** Samples per frame at 24 kHz: 32 ms, small enough to feel live. */
+const FRAME_SAMPLES = 768;
 
 export interface VoiceMicrophoneV1 {
   stop(): Promise<void>;
 }
 
 export interface VoiceMicrophoneOptionsV1 {
-  /** One frame of PCM16, little-endian, mono, 16 kHz. */
+  /** One frame of PCM16, little-endian, mono, 24 kHz. */
   audio(pcm16: ArrayBuffer): void;
   /** Peak amplitude of the frame, 0…1, for the capture animation. */
   level(value: number): void;
