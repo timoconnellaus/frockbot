@@ -126,6 +126,7 @@ import {
   planBotRunRecovery,
   planInterruptedRunRecoveryV1,
 } from "./backend-recovery.js";
+import { COMPOSITION_CURRENT_KEY } from "@frockbot/kernel-do";
 import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
@@ -2736,6 +2737,15 @@ export class ShellBotBackendContribution {
    */
   private async followDeploymentComposition(): Promise<void> {
     try {
+      // A Bot with nothing pinned yet bootstraps from this deployment when
+      // its first Turn is admitted; reading the current generation here would
+      // materialize that bootstrap early, and a refused command must leave
+      // storage exactly as it found it.
+      if (
+        (await this.ctx.storage.get<unknown>(COMPOSITION_CURRENT_KEY)) ===
+        undefined
+      )
+        return;
       await resolveDeploymentCompositionV1({
         plan: await this.compileApplication(),
         composition: {
