@@ -573,7 +573,14 @@ export class ToolRegistry extends Service implements ToolExecution {
       namespaces.length === 1
         ? `namespace "${first}"`
         : `namespaces ${listOrNone(namespaces)} — pick one`;
-    return `Unknown tool: ${name}. It is a dynamic tool in ${where}; call it through ${CALL_DYNAMIC_TOOL_NAME} as {"namespace":"${first}","toolName":"${name}","arguments":{ … the tool's own input … }}. Call ${GET_DYNAMIC_TOOLS_NAME}({"namespace":"${first}","toolName":"${name}"}) first if you do not have its schema.`;
+    // Same rule as the discovery envelope: an external namespace's dispatch
+    // guard refuses a call without `mcpDetails.description`, so a route that
+    // omits it just moves the dead end one step later.
+    const details =
+      this.namespaces.get(first)?.external === true
+        ? `,"mcpDetails":{"description":"<one sentence saying why you are calling this>"}`
+        : "";
+    return `Unknown tool: ${name}. It is a dynamic tool in ${where}; call it through ${CALL_DYNAMIC_TOOL_NAME} as {"namespace":"${first}","toolName":"${name}","arguments":{ … the tool's own input … }${details}}. Call ${GET_DYNAMIC_TOOLS_NAME}({"namespace":"${first}","toolName":"${name}"}) first if you do not have its schema.`;
   }
 
   private async prepareRegistered(
@@ -990,6 +997,20 @@ export class ToolRegistry extends Service implements ToolExecution {
               namespace: namespaceName,
               toolName: registered.definition.name,
               arguments: "<an object matching inputSchema>",
+              // The envelope handed back has to be the envelope accepted. An
+              // external namespace's dispatch guard refuses a call without
+              // `mcpDetails.description`, and a model that copied this
+              // envelope verbatim was denied for a field the envelope never
+              // mentioned.
+              ...(this.namespaces.get(registered.definition.namespace ?? "")
+                ?.external === true
+                ? {
+                    mcpDetails: {
+                      description:
+                        "<one sentence saying why you are calling this>",
+                    },
+                  }
+                : {}),
             },
           },
         }),
