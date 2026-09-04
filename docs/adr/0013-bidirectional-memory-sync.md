@@ -71,6 +71,40 @@ naming the generation it superseded, and a store-side delete removes the file
 and leaves the same record, so neither side ever reads an absence as a file it
 never had.
 
+**Bounded manifests and reproducible trees.** The Sprite storage exec returns
+one buffered response and rejects output above 500 KB. The old scan recursively
+hashed and emitted every file in a durable root, so an Applet-local
+`node_modules` could make the response overflow before the Applet's source row
+was returned. The scan now prunes these directory names at every depth before
+hashing: `node_modules`, `.git`, `dist`, `build`, `out`, `target`, `coverage`,
+`.cache`, `.parcel-cache`, `.turbo`, `.next`, `.nuxt`, `.output`, `.svelte-kit`,
+`.vite`, and `.pnpm-store`. The fixed policy is intentional: a durable root may
+contain several repositories, and discovering and implementing every nested
+Git ignore dialect inside a remote shell scan would itself be unbounded. No
+`.frockbotignore` convention existed when this rule was added.
+
+The manifest has a second, independent ceiling of 2,000 rows or 400,000 bytes,
+whichever comes first. It returns `ignored` and `omitted` counts outside that
+bounded body, stops hashing once the body is saturated, and never reports a
+partial run as `ok`. An excluded directory or omitted row makes the provider
+summary `degraded`; a partial operation failure does too, while every root
+failing remains `unavailable`. The durable `computer/sync` event adds the same
+`degraded` status and `ignored`/`omitted` counts. Those two fields are optional
+only while decoding records written by older releases; every new event writes
+both. The first non-`ok` sync is recorded and projected once per Turn, with its
+plain-language detail beneath the reply, so watcher and turn-end retries do not
+repeat one warning.
+
+Excluded store generations are retained rather than deleted, but are not
+materialized onto a replacement Computer. Ordinary Applet source remains under
+the Applets Package's durable root and round-trips normally. Applet projects do
+not restore their own `node_modules`: the Computer provisioner installs the SDK
+and its dependencies centrally under the non-durable runtime root, and the
+runtime update repairs that installation when absent. The one-root publish seam
+may name exact required paths, so the three `dist` artifacts are scanned first
+and remain subject to the same byte/row bound without a Package-id branch in
+the Computer provider. Every other build output remains excluded.
+
 **Writer attribution and effects.** A file with no valid sidecar is pushed as
 `{ kind: "unattributed" }`, and so is a removal the Computer recorded. This is
 the constitution's own sentence — "A file that reaches a durable root without

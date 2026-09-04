@@ -823,6 +823,43 @@ describe("the durable-root sync, Package-declared roots", () => {
       }),
     ).toMatchObject({ status: "not-found" });
   });
+
+  test("an empty replacement Computer restores source but not legacy project dependencies", async () => {
+    const { sprite, store, sync } = harness({
+      packageRoots: [APPLET_SOURCE_PACKAGE_ROOT],
+    });
+    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    await writeToStore(
+      store,
+      appletSourceRoot,
+      `${appletId}/server.ts`,
+      "export class TodoApplet {}",
+      BOT_WRITER,
+    );
+    // A pre-policy generation stays in object storage for audit/recovery, but
+    // a new Computer must not materialize it back into the project.
+    await writeToStore(
+      store,
+      appletSourceRoot,
+      `${appletId}/node_modules/dependency/package.json`,
+      '{"name":"dependency"}',
+      BOT_WRITER,
+    );
+
+    const report = await sync();
+
+    expect(sprite.text(`${MOUNTS.appletSource}/${appletId}/server.ts`)).toBe(
+      "export class TodoApplet {}",
+    );
+    expect(
+      sprite.text(
+        `${MOUNTS.appletSource}/${appletId}/node_modules/dependency/package.json`,
+      ),
+    ).toBeUndefined();
+    expect(
+      report.roots.find((item) => item.root.kind === "package-declared"),
+    ).toMatchObject({ pulled: [`${appletId}/server.ts`], ignored: 1 });
+  });
 });
 
 describe("the durable-root sync, conflicts", () => {
