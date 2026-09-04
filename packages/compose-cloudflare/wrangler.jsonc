@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "compose-cloudflare-dev",
+  "main": "./dev/worker.ts",
+  "compatibility_date": "2026-05-01",
+  "worker_loaders": [{ "binding": "LOADER" }],
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "compose-cloudflare-test-files" },
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "FACET_TEST", "class_name": "FacetTestObject" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FacetTestObject"] }],
+  // A var the credentials suite reads by name, standing in for a secret. A
+  // real deployment binds a secret, which reaches `env` the same way.
+  "vars": { "MODEL_CREDENTIAL": "binding-value" },
+  // Workers AI. There is no local simulation of it — inference always runs on
+  // Cloudflare — so the routes that use it need a logged-in account, even under
+  // `wrangler dev`. The suite runs against a fake binding and needs neither;
+  // see `vitest.config.ts` for how it keeps the real one out of the way.
+  "ai": { "binding": "AI" },
+}
