@@ -11,6 +11,7 @@ import {
   isPublicIdentifier,
 } from "@frockbot/configuration-core";
 import { decodeDeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
+import { DEPLOYMENT_HEADER_V1 } from "@frockbot/protocol";
 import {
   AppletViewerTokenError,
   verifyAppletViewerTokenV1,
@@ -389,7 +390,13 @@ function preflightResponse(origin: string): Response {
 function withClientOrigin(response: Response, origin: string): Response {
   const shared = new Response(response.body, response);
   shared.headers.set("access-control-allow-origin", origin);
-  shared.headers.set("access-control-expose-headers", "set-auth-token");
+  // The Android shell runs the same client from a `capacitor://` origin, so
+  // the header that names the application has to be exposed or the WebView
+  // cannot read it and the app would never notice a release.
+  shared.headers.set(
+    "access-control-expose-headers",
+    `set-auth-token, ${DEPLOYMENT_HEADER_V1}`,
+  );
   shared.headers.append("vary", "origin");
   return shared;
 }
@@ -589,13 +596,35 @@ async function routeUserApplication(
           : forwardedRequest,
       ),
     );
-  if (!persistDevelopmentIdentity) return response;
-  const persisted = new Response(response.body, response);
+  const named = deploymentAnsweredV1(response, applicationHash);
+  if (!persistDevelopmentIdentity) return named;
+  const persisted = new Response(named.body, named);
   persisted.headers.append(
     "set-cookie",
     `frockbot_dev_user=${userId}; Path=/; HttpOnly; SameSite=Strict`,
   );
   return persisted;
+}
+
+/**
+ * Names the application an answer came from.
+ *
+ * A tab left open across a release keeps running the client bundle it was
+ * served, and that bundle is baked into the application artifact — so the
+ * hash of the artifact that answered is exactly "the client you should be
+ * running". It is already resolved on this path, so saying it costs nothing.
+ *
+ * A WebSocket upgrade is handed back untouched: it carries no headers worth
+ * rewriting, and copying one throws.
+ */
+export function deploymentAnsweredV1(
+  response: Response,
+  applicationHash: string,
+): Response {
+  if (response.status === 101 || response.webSocket) return response;
+  const named = new Response(response.body, response);
+  named.headers.set(DEPLOYMENT_HEADER_V1, applicationHash);
+  return named;
 }
 
 export function createGateway(dependencies: GatewayDependencies) {

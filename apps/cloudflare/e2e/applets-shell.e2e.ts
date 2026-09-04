@@ -264,8 +264,11 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   const canvas = page.getByRole("region", { name: "Applet Todo" });
   await expect(canvas).toBeVisible();
   await expect(canvas.getByText("Todo", { exact: true })).toBeVisible();
-  await expect(canvas.getByText("Not published yet")).toBeVisible();
-  await expect(canvas.getByText("Check passed: no diagnostics")).toBeVisible();
+  // The building view: what the Bot has got to, in words, rather than one
+  // fixed line about the Applet not being live.
+  const progress = canvas.getByTestId("applet-canvas-progress");
+  await expect(progress).toBeVisible();
+  await expect(progress.getByText("The code checks out")).toBeVisible();
   // The code view opens on the most recently changed file.
   await expect(canvas.getByText("export default function App()")).toBeVisible();
   await canvas.getByRole("button", { name: "server.ts" }).click();
@@ -290,6 +293,8 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   // page at all — it is an internal identifier, and the Applet the frame loads
   // is what proves the right generation went live.
   await expect(canvas.getByText(/^Live/)).toBeVisible();
+  // And the building view is gone: there is a running Applet to look at.
+  await expect(canvas.getByTestId("applet-canvas-progress")).toHaveCount(0);
   const appFrame = canvas.locator(".applet-canvas-app iframe").contentFrame();
   await expect(appFrame.getByText("live:generation-2")).toBeVisible();
 
@@ -320,6 +325,10 @@ test("the canvas is a full-height sheet on a phone with a composer chip", async 
   // composer rather than a screen the User did not ask for.
   const chip = page.getByRole("button", { name: /Applet: Todo/ });
   await expect(chip).toBeVisible();
+  // The chip carries the line the canvas would have carried, so the phone and
+  // a wide screen tell the same story without opening anything.
+  await expect(chip.getByText("The code checks out")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Applet Todo" })).toBeHidden();
   await expectNoHorizontalOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath("applets-phone-chip.png"),

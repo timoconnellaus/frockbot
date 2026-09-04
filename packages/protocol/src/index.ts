@@ -4,6 +4,17 @@ export interface PromptRequest {
 }
 
 /**
+ * The header every hosted answer carries, naming the application it came from.
+ *
+ * The value is the application hash the served document also stamps into
+ * `data-frockbot-user-application`, so a page that has been open across a
+ * release can compare what it is running against what just answered it. It
+ * lives here rather than in either end because the Worker writes it and the
+ * client reads it, and neither owns the other.
+ */
+export const DEPLOYMENT_HEADER_V1 = "x-frockbot-application-v1";
+
+/**
  * Version 1 of the Bot-state observer protocol. Frames are invalidations, not
  * authority: a client that receives one re-reads the owning HTTP projection.
  */
