@@ -2918,3 +2918,27 @@ describe("the Workspace seed door", () => {
     expect(writes).toEqual([{ userId: "alice", botId: "bot-1", ...body }]);
   });
 });
+
+test("native compatibility refusal precedes authentication and application routing", async () => {
+  const { gateway } = createTestGateway(() => {
+    throw new Error("must not load the application");
+  });
+  const response = await gateway(
+    new Request("https://bot.example/api/bots/default/turns", {
+      method: "POST",
+      headers: {
+        "x-frockbot-client": JSON.stringify({
+          schemaVersion: 1,
+          protocolVersion: 1,
+          nativeVersion: "1.0.0",
+          catalogs: [],
+        }),
+      },
+      body: "{}",
+    }),
+  );
+  expect(response.status).toBe(426);
+  expect(await response.text()).toBe(
+    "Update the app to continue using FrockBot.",
+  );
+});

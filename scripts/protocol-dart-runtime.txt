@@ -1,0 +1,73 @@
+// JSON Schema 2020-12 subset used by the source. Unsupported keywords are
+// refused by the generator. No remote refs, network, reflection or executable UI.
+bool _equal(Object? a, Object? b) {
+  if (a is Map && b is Map) {
+    return a.length == b.length && a.keys.every((k) => b.containsKey(k) && _equal(a[k], b[k]));
+  }
+  if (a is List && b is List) {
+    return a.length == b.length && List.generate(a.length, (i) => i).every((i) => _equal(a[i], b[i]));
+  }
+  return a == b;
+}
+
+bool _validate(Map<String, dynamic> s, Object? v, int depth) {
+  if (s.containsKey(r'$ref')) {
+    final name = (s[r'$ref'] as String).split('/').last;
+    return _validate(_definitions[name] as Map<String, dynamic>, v, depth + 1);
+  }
+  if (s.containsKey('const') && !_equal(s['const'], v)) return false;
+  if (s.containsKey('enum') && !(s['enum'] as List).any((e) => _equal(e, v))) return false;
+  if (s.containsKey('oneOf') && (s['oneOf'] as List).where((e) => _validate(e as Map<String, dynamic>, v, depth + 1)).length != 1) return false;
+  if (s.containsKey('allOf') && !(s['allOf'] as List).every((e) => _validate(e as Map<String, dynamic>, v, depth + 1))) return false;
+  if (s.containsKey('if') && _validate(s['if'] as Map<String, dynamic>, v, depth + 1) && s.containsKey('then') && !_validate(s['then'] as Map<String, dynamic>, v, depth + 1)) return false;
+  switch (s['type']) {
+    case 'null': if (v != null) return false;
+    case 'boolean': if (v is! bool) return false;
+    case 'string':
+      if (v is! String) return false;
+      final length = v.runes.length;
+      if (s.containsKey('minLength') && length < (s['minLength'] as num)) return false;
+      if (s.containsKey('maxLength') && length > (s['maxLength'] as num)) return false;
+      if (s.containsKey('pattern') && !RegExp(s['pattern'] as String, unicode: true).hasMatch(v)) return false;
+    case 'integer':
+    case 'number':
+      if (v is! num || !v.isFinite) return false;
+      if (s['type'] == 'integer' && v != v.truncateToDouble()) return false;
+      if (s.containsKey('minimum') && v < (s['minimum'] as num)) return false;
+      if (s.containsKey('maximum') && v > (s['maximum'] as num)) return false;
+    case 'array':
+      if (v is! List) return false;
+      if (s.containsKey('minItems') && v.length < (s['minItems'] as num)) return false;
+      if (s.containsKey('maxItems') && v.length > (s['maxItems'] as num)) return false;
+      if (s['uniqueItems'] == true) {
+        for (var i = 0; i < v.length; i++) {
+          for (var j = 0; j < i; j++) { if (_equal(v[i], v[j])) return false; }
+        }
+      }
+      if (!v.every((e) => _validate(s['items'] as Map<String, dynamic>, e, depth + 1))) return false;
+    case 'object':
+      if (v is! Map || !v.keys.every((k) => k is String)) return false;
+      if (s.containsKey('maxProperties') && v.length > (s['maxProperties'] as num)) return false;
+      if (!(s['required'] as List? ?? []).every(v.containsKey)) return false;
+      final props = s['properties'] as Map<String, dynamic>? ?? {};
+      for (final key in v.keys) {
+        if (s.containsKey('propertyNames') && !_validate(s['propertyNames'] as Map<String, dynamic>, key, depth + 1)) return false;
+        final sub = props[key] ?? s['additionalProperties'];
+        if (sub == false) return false;
+        if (sub is Map<String, dynamic> && !_validate(sub, v[key], depth + 1)) return false;
+      }
+  }
+  return true;
+}
+
+bool isProtocolValue(String name, Object? value) {
+  final definition = _definitions[name];
+  if (definition is! Map<String, dynamic>) return false;
+  try { return _validate(definition, value, 0); } catch (_) { return false; }
+}
+
+Object? decodeProtocol(String name, Object? value) {
+  if (!isProtocolValue(name, value)) throw FormatException('Invalid $name');
+  // Detach the DTO from caller-owned mutable state.
+  return jsonDecode(jsonEncode(value));
+}
