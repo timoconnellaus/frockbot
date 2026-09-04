@@ -1341,6 +1341,43 @@ describe("client run protocol v1", () => {
       }),
     ).toThrow("run list.announcement.at is invalid");
   });
+
+  test("announces a compaction without putting its summary on the wire", () => {
+    const announcements = projectClientAnnouncementsV1([
+      { type: "turn/start", seq: 0, timestamp, turn: 1 },
+      {
+        type: "conversation/compacted",
+        seq: 4,
+        timestamp,
+        effectId: "compaction-1",
+        fromTurn: 1,
+        throughTurn: 6,
+        summary: "## Summary\nsomething private to the model",
+        identifiers: ["applet-9f2c"],
+        provider: "ollama-cloud",
+        model: "kimi-k2",
+      },
+    ]);
+    expect(announcements).toEqual([
+      {
+        type: "conversation/compacted",
+        announcementId: "compaction-4",
+        at: timestamp,
+        throughTurn: 6,
+      },
+    ]);
+    const page = createClientRunListV1([], { truncated: false }, announcements);
+    expect(JSON.stringify(page)).not.toContain("something private");
+    expect(decodeClientRunPageV1(structuredClone(page)).announcements).toEqual(
+      announcements,
+    );
+    expect(() =>
+      decodeClientRunPageV1({
+        ...page,
+        announcements: [{ ...announcements[0], throughTurn: 0 }],
+      }),
+    ).toThrow("run list.announcement.throughTurn is invalid");
+  });
 });
 
 describe("dispatched subagents in the run projection", () => {

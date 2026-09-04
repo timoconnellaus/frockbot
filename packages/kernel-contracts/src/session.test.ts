@@ -55,6 +55,54 @@ test("a Bot-isolate hook failure is an exact durable session event", () => {
   );
 });
 
+test("a compaction is an exact durable session event", () => {
+  const intent = {
+    type: "conversation/compaction-intent",
+    effectId: "compaction-1",
+    throughTurn: 6,
+    provider: "ollama-cloud",
+    model: "kimi-k2",
+    seq: 0,
+    timestamp,
+  } as const;
+  expect(decodeSessionEvent(intent)).toEqual(intent);
+  expect(() => decodeSessionEvent({ ...intent, turn: 6 })).toThrow(
+    /invalid fields/,
+  );
+  const compacted = {
+    type: "conversation/compacted",
+    effectId: "compaction-1",
+    fromTurn: 1,
+    throughTurn: 6,
+    summary: "## Summary\nThey shipped it.",
+    identifiers: ["applet-9f2c"],
+    provider: "ollama-cloud",
+    model: "kimi-k2",
+    seq: 1,
+    timestamp,
+  } satisfies SessionEvent;
+  expect(decodeSessionEvent(structuredClone(compacted))).toEqual(compacted);
+  // A range that ends before it starts is not a range.
+  expect(() => decodeSessionEvent({ ...compacted, fromTurn: 9 })).toThrow(
+    /throughTurn is invalid/,
+  );
+  expect(() =>
+    decodeSessionEvent({ ...compacted, summary: "x".repeat(20_000) }),
+  ).toThrow(/summary is too long/);
+  expect(() =>
+    decodeSessionEvent({ ...compacted, identifiers: "applet-9f2c" }),
+  ).toThrow(/bounded array/);
+  const failed = {
+    type: "conversation/compaction-failed",
+    effectId: "compaction-1",
+    throughTurn: 6,
+    reason: "the summariser ran past its deadline",
+    seq: 2,
+    timestamp,
+  } as const;
+  expect(decodeSessionEvent(failed)).toEqual(failed);
+});
+
 describe("SessionStore", () => {
   test("accepts resumable tool crash states only while their step is open", () => {
     const assistant = [
