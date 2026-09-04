@@ -439,6 +439,58 @@ function taskChipsOf(message: WebChatMessage): Array<{
   });
 }
 
+/** Which chips the User has opened. Local, and per chip. */
+const expandedTasks = ref(new Set<string>());
+
+function toggleTask(taskId: string): void {
+  const next = new Set(expandedTasks.value);
+  if (!next.delete(taskId)) next.add(taskId);
+  expandedTasks.value = next;
+}
+
+/** A subagent still live is one the User may stop; a settled one is not. */
+function isTaskLive(status: string): boolean {
+  return status === "queued" || status === "running";
+}
+
+function stopTask(taskId: string): void {
+  void web.value.stopTask(taskId);
+}
+
+function isVisible(message: WebChatMessage): boolean {
+  if (message.role === "user") return message.text.length > 0;
+  if (message.role === "system") return message.text.length > 0;
+  // A Turn the Bot ended with a widget writes no assistant text at all, so a
+  // send is on its own enough to draw the line — and so is a Turn whose only
+  // visible act was dispatching a subagent.
+  return (
+    message.text.length > 0 ||
+    (message.notice?.length ?? 0) > 0 ||
+    message.tools.some((tool) => iframeEntriesFor(tool).length > 0) ||
+    message.sends.length > 0 ||
+    (message.tasks?.length ?? 0) > 0 ||
+    message.status === "streaming"
+  );
+}
+/*
+ * System lines happen between Turns, so the thread orders by when each line
+ * happened. A line with no timestamp is treated as arriving now, so an
+ * incomplete projection can never jump above the durable history.
+ */
+const messages = computed(() => {
+  const missingAt = new Date().toISOString();
+  return state.value.messages
+    .filter(isVisible)
+    .map((message, index) => ({ message, index }))
+    .sort(
+      (left, right) =>
+        (left.message.at ?? missingAt).localeCompare(
+          right.message.at ?? missingAt,
+        ) || left.index - right.index,
+    )
+    .map((entry) => entry.message);
+});
+
 /**
  * The comet trail: what the Turn the User is watching is actually doing.
  *
@@ -524,58 +576,6 @@ function stepTrail(): void {
 
 watch(workingSample, () => {
   stepTrail();
-});
-
-/** Which chips the User has opened. Local, and per chip. */
-const expandedTasks = ref(new Set<string>());
-
-function toggleTask(taskId: string): void {
-  const next = new Set(expandedTasks.value);
-  if (!next.delete(taskId)) next.add(taskId);
-  expandedTasks.value = next;
-}
-
-/** A subagent still live is one the User may stop; a settled one is not. */
-function isTaskLive(status: string): boolean {
-  return status === "queued" || status === "running";
-}
-
-function stopTask(taskId: string): void {
-  void web.value.stopTask(taskId);
-}
-
-function isVisible(message: WebChatMessage): boolean {
-  if (message.role === "user") return message.text.length > 0;
-  if (message.role === "system") return message.text.length > 0;
-  // A Turn the Bot ended with a widget writes no assistant text at all, so a
-  // send is on its own enough to draw the line — and so is a Turn whose only
-  // visible act was dispatching a subagent.
-  return (
-    message.text.length > 0 ||
-    (message.notice?.length ?? 0) > 0 ||
-    message.tools.some((tool) => iframeEntriesFor(tool).length > 0) ||
-    message.sends.length > 0 ||
-    (message.tasks?.length ?? 0) > 0 ||
-    message.status === "streaming"
-  );
-}
-/*
- * System lines happen between Turns, so the thread orders by when each line
- * happened. A line with no timestamp is treated as arriving now, so an
- * incomplete projection can never jump above the durable history.
- */
-const messages = computed(() => {
-  const missingAt = new Date().toISOString();
-  return state.value.messages
-    .filter(isVisible)
-    .map((message, index) => ({ message, index }))
-    .sort(
-      (left, right) =>
-        (left.message.at ?? missingAt).localeCompare(
-          right.message.at ?? missingAt,
-        ) || left.index - right.index,
-    )
-    .map((entry) => entry.message);
 });
 
 /*
