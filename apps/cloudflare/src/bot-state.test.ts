@@ -311,7 +311,10 @@ describe("BotState Ollama execution", () => {
     for (const runId of ["ollama-do-run-1", "ollama-do-run-2"]) {
       const stored = await storage.get<StoredRun>(`run:${runId}`);
       expect(stored).toBeDefined();
-      const run = await hydrateStoredRunEventsV1(storage, stored!);
+      const run = await hydrateStoredRunEventsV1(
+        storage as unknown as DurableObjectStorage,
+        stored!,
+      );
       expect(
         run.events.find((event) => event.type === "model/request"),
       ).toMatchObject({
