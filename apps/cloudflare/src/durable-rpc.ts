@@ -364,3 +364,58 @@ export function decodeBotRunRpcV1(input: unknown): DecodedBotRunRpcV1 {
     command,
   };
 }
+
+export interface DecodedBotAgentRunRpcV1 {
+  schemaVersion: 1;
+  userId: string;
+  botId: string;
+  command: {
+    runId: string;
+    sessionId: string;
+    acceptedAt: string;
+    text: string;
+    source: {
+      kind: "bot";
+      fromBotId: string;
+      fromBotName: string;
+      messageId: string;
+    };
+  };
+}
+
+/** Internal-only Bot-to-Bot admission; the HTTP Turn decoder cannot name it. */
+export function decodeBotAgentRunRpcV1(
+  input: unknown,
+): DecodedBotAgentRunRpcV1 {
+  const source = rpcObject({
+    kind: rpcPattern(/^bot$/, 3),
+    fromBotId: rpcBotId,
+    fromBotName: rpcString(100),
+    messageId: rpcString(256),
+  });
+  const request = decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    botId: rpcBotId,
+    command: rpcObject({
+      runId: rpcString(128),
+      sessionId: rpcString(257),
+      acceptedAt: rpcString(64),
+      text: rpcString(32_000),
+      source,
+    }),
+  });
+  const command = request.command as DecodedBotAgentRunRpcV1["command"];
+  command.runId = decodeRunIdV1(command.runId);
+  if (!Number.isFinite(Date.parse(command.acceptedAt))) {
+    throw new Error("agent RPC request.command.acceptedAt is invalid");
+  }
+  if (new TextEncoder().encode(command.text).byteLength > 32_000) {
+    throw new Error("agent RPC request.command.text is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    userId: request.userId as string,
+    botId: request.botId as string,
+    command,
+  };
+}

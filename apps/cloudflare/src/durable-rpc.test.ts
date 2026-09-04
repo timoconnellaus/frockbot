@@ -4,6 +4,7 @@ import {
   MAX_COMPOSITION_GENERATION_PAGE_V1,
 } from "@frockbot/configuration-core";
 import {
+  decodeBotAgentRunRpcV1,
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
   decodeStartConnectionRpcV1,
@@ -128,7 +129,7 @@ describe("Durable Object RPC boundaries", () => {
       sessionId: "user-1:bot-1",
       acceptedAt: "2026-08-29T00:00:00.000Z",
       text: "hello",
-    };
+    } as const;
 
     for (const extra of [
       { turnType: "automation" },
@@ -151,6 +152,36 @@ describe("Durable Object RPC boundaries", () => {
         }),
       ).toThrow(/RPC request.command/);
     }
+  });
+
+  test("admits agent provenance only through the internal agent RPC", () => {
+    const request = {
+      schemaVersion: 1,
+      userId: "user-1",
+      botId: "researcher",
+      command: {
+        runId: "agent-run-1",
+        sessionId: "user-1:researcher",
+        acceptedAt: "2026-09-04T00:00:00.000Z",
+        text: "What changed?",
+        source: {
+          kind: "bot",
+          fromBotId: "general",
+          fromBotName: "General",
+          messageId: "agent-run-1",
+        },
+      },
+    } as const;
+    expect(decodeBotAgentRunRpcV1(request)).toEqual(request);
+    expect(() =>
+      decodeBotAgentRunRpcV1({
+        ...request,
+        command: {
+          ...request.command,
+          source: { ...request.command.source, extra: true },
+        },
+      }),
+    ).toThrow(/command.source is invalid/);
   });
 
   test("rejects version-skewed Bot runs before Agent admission", () => {

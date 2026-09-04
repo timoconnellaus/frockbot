@@ -1451,6 +1451,33 @@ describe("active durable Turn projection", () => {
     expect(state.messages[1]).toMatchObject({ text: "", status: "streaming" });
   });
 
+  test("keeps the source marker on an agent-origin user bubble", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-agent",
+          input: "What changed?",
+          events: [],
+          status: "completed",
+          responseText: "The answer",
+          via: { kind: "bot", name: "Researcher", botId: "researcher" },
+        },
+      ],
+    );
+
+    expect(state.messages[0]).toMatchObject({
+      role: "user",
+      text: "What changed?",
+      via: { kind: "bot", name: "Researcher" },
+    });
+  });
+
   test("projects dispatched subagents as chips, and skips one it cannot draw", () => {
     const state: Pick<
       FrockBotWebData,

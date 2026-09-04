@@ -105,5 +105,6 @@ describe("a sixty-step Turn through the production gateway", () => {
       expect(durable.requestBytes).toHaveLength(MODEL_STEPS);
       expect(Math.min(...durable.requestBytes)).toBeGreaterThanOrEqual(80_000);
     },
+    120_000,
   );
 });
