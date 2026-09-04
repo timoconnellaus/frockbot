@@ -29,14 +29,19 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(result).toEqual({ content: "tobkcorf", isError: false });
   });
 
-  test("an isolate namespace is external, so a call without metadata is refused", async () => {
+  test("an isolate namespace is not external, so a call needs no call metadata", async () => {
     const stub = probe(`external-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
-    // Same tool, same namespace, same arguments — only `mcpDetails.description`
-    // is missing. A non-first-party namespace is external (ADR 0023), and the
-    // registry refuses the call before the isolate is reached rather than
-    // letting an unexplained invocation through.
+    // `external` is external-*service* status (ADR 0023): it forces a
+    // human-readable reason onto a call that leaves for a third party. An
+    // isolate runs this deployment's own reviewed code with `globalOutbound:
+    // null`, so it is not that — and calling it external had a cost. The
+    // dispatch guard refused every call without `mcpDetails.description`,
+    // while the discovery envelope, the namespace prompt block and the
+    // `call_dynamic_tool` blurb all told the model to omit the field. The
+    // envelope offered was the envelope refused, so the Applets Package (which
+    // mounts here) could not be reached by chat at all.
     const result = await stub.callTool({
       userId: "user-1",
       botId: "bot-1",
@@ -46,9 +51,9 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
       omitDescription: true,
     });
 
-    expect(result.isError).toBe(true);
-    expect(result.content).toContain("requires mcpDetails.description");
-    expect(result.content).not.toContain("tobkcorf");
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("tobkcorf");
+    expect(result.content).not.toContain("requires mcpDetails.description");
   });
 
   test("an isolate tool is reached by the Agent loop in a Turn", async () => {

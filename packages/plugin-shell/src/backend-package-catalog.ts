@@ -520,12 +520,9 @@ export function createPackageCatalogHost(
           index,
           catalogId: provenance.catalogId,
         });
-        // A first-party member pins no bundle, so "the entry still offers
-        // what the target generation recorded" is the two hashes agreeing,
-        // both present or both absent.
         if (
-          !targetEntry ||
-          targetEntry.bundle?.contentHash !== provenance.contentHash
+          !targetEntry?.bundle ||
+          targetEntry.bundle.contentHash !== provenance.contentHash
         ) {
           return undoRefused(
             request,
@@ -541,9 +538,7 @@ export function createPackageCatalogHost(
           version: targetCatalogMember.version,
           catalogId: provenance.catalogId,
           catalogGeneration: provenance.catalogGeneration,
-          ...(provenance.contentHash === undefined
-            ? {}
-            : { contentHash: provenance.contentHash }),
+          contentHash: provenance.contentHash,
         };
       }
       const receipt = await options.user.execute(command);
@@ -596,6 +591,13 @@ export function createPackageCatalogHost(
       let user: UserSettingsViewV1;
       let base: CompositionGenerationV1;
       let intent: PackageCatalogChangeIntentV1;
+      /**
+       * The entry names a compiled-in Package that is already required core in
+       * this Bot's Composition, so installing it is a User settings change and
+       * nothing else. Set on the install path and re-derived on a resumed
+       * intent, which carries no bundle hash precisely when this is true.
+       */
+      let firstParty = false;
       try {
         user = await options.user.read();
         base = await options.composition.lastKnownGood();
@@ -616,6 +618,12 @@ export function createPackageCatalogHost(
             );
           entry = resumed;
           intent = existingIntent;
+          firstParty =
+            existingIntent.action !== "remove" &&
+            !resumed.bundle &&
+            base.members.find(
+              (candidate) => candidate.packageId === resumed.packageId,
+            )?.provenance.kind === "first-party";
         } else if (action === "remove") {
           const packageId = request.change.input.packageId;
           const member = base.members.find(
@@ -697,7 +705,27 @@ export function createPackageCatalogHost(
           const member = base.members.find(
             (candidate) => candidate.packageId === entry.packageId,
           );
-          if (action === "install" && member) {
+          // Installing a first-party entry changes the *User's* settings, not
+          // the Composition: the compiled-in Package is already required core
+          // in the bootstrap generation (every one of them is), and
+          // `assertRequiredCoreSet` refuses any proposal that restates a
+          // first-party member with catalog provenance. So "already a member"
+          // is the normal state here, not a conflict — the guard below is
+          // about a *bundle-backed* entry, whose code really would be added
+          // twice.
+          firstParty =
+            !entry.bundle && member?.provenance.kind === "first-party";
+          if (firstParty) {
+            // The one integrity check left for a member nothing re-hashes at
+            // mount: the entry must name the manifest the application actually
+            // compiled in, or the Catalog has drifted from this deployment.
+            if (member!.manifestHash !== entry.manifestHash) {
+              throw new Error(
+                `Catalog entry "${entry.catalogId}" names manifest "${entry.manifestHash}", but this deployment ships "${member!.manifestHash}"`,
+              );
+            }
+          }
+          if (action === "install" && member && !firstParty) {
             throw new Error(
               `Package "${entry.packageId}" is already in this Bot's Composition`,
             );
@@ -757,9 +785,12 @@ export function createPackageCatalogHost(
         const bundle = entry.bundle;
         await options.storage.put({
           [packageCatalogChangeIntentKey(request.effectId)]: intent,
-          // A bundle-less entry has no manifest document to store; the mount
-          // resolves it from the compiled-in application instead, still
-          // against the `manifestHash` the generation records.
+          // A bundle-less entry stores no manifest document, because it adds
+          // no Composition member to mount one for: the compiled-in Package is
+          // already required core, running the manifest this deployment
+          // shipped. The entry's `manifestHash` was checked against that
+          // member's above, so a Catalog that has drifted from this deployment
+          // is refused rather than silently recorded.
           ...(bundle
             ? {
                 [authorshipManifestKey(intent.manifestHash)]: {
@@ -805,11 +836,35 @@ export function createPackageCatalogHost(
 
       const parent =
         (await options.composition.read(intent.baseGenerationId)) ?? base;
+      // A first-party entry contributes no member: it is already required core
+      // in the bootstrap generation, and restating it with catalog provenance
+      // is exactly what `assertRequiredCoreSet` refuses. The install is the
+      // User settings command above, which is all the Plugins page does too,
+      // so the Composition is left on the generation it was already running.
+      if (firstParty) {
+        const outcome: PackageCatalogChangeOutcomeRecordV1 = {
+          schemaVersion: 1,
+          status: "recorded",
+          effectId: request.effectId,
+          action,
+          packageId: intent.packageId,
+          displayName: intent.displayName,
+          version: intent.version,
+          generationId: parent.generationId,
+          missingConnectionTypes: intent.missingConnectionTypes,
+          recordedAt: intent.recordedAt,
+        };
+        await options.storage.put({
+          [packageCatalogChangeOutcomeKey(request.effectId)]: outcome,
+        });
+        return recordedOutcome(outcome);
+      }
+
       const members = parent.members.filter(
         (member) => member.packageId !== intent.packageId,
       );
       if (action !== "remove") {
-        const bundle = entry.bundle;
+        const bundle = entry.bundle!;
         const member: CompositionMemberV1 = {
           packageId: entry.packageId,
           specifier: `catalog:${entry.catalogId}`,
@@ -821,20 +876,14 @@ export function createPackageCatalogHost(
             version: entry.version,
             catalogId: entry.catalogId,
             catalogGeneration: intent.catalogGeneration,
-            ...(bundle ? { contentHash: bundle.contentHash } : {}),
+            contentHash: bundle.contentHash,
           },
-          // No artifact ⇒ the member mounts in the kernel isolate from the
-          // compiled-in Package, exactly as the UI install records it.
-          ...(bundle
-            ? {
-                artifact: {
-                  contentHash: bundle.contentHash,
-                  size: bundle.size,
-                  mediaType: bundle.mediaType,
-                  bundlerVersion: bundle.bundlerVersion,
-                },
-              }
-            : {}),
+          artifact: {
+            contentHash: bundle.contentHash,
+            size: bundle.size,
+            mediaType: bundle.mediaType,
+            bundlerVersion: bundle.bundlerVersion,
+          },
         };
         members.push(member);
       }
