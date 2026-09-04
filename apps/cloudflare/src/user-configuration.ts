@@ -93,6 +93,10 @@ import {
 } from "@frockbot/plugin-audit";
 import type { BotAuditRpc } from "./audit.js";
 import {
+  USAGE_ENTRY_PAGE_MAX_V1,
+  type UsageReportV1,
+} from "@frockbot/plugin-billing";
+import {
   decodePublishPackageCommandV1,
   decodeRollbackPackageCommandV1,
 } from "@frockbot/plugin-package-publisher/shared";
@@ -291,6 +295,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
                 .then(rpcJsonSnapshotV1);
             },
           },
+          billing: { sql: this.ctx.storage.sql },
           commandBotLifecycle: async (userId, command) => {
             const id = this.env.BOT_STATES.idFromName(
               `${userId}:${command.botId}`,
@@ -814,11 +819,22 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       sessionId: rpcString(128),
       seconds: rpcInteger({ minimum: 0, maximum: 24 * 60 * 60 }),
     });
-    return recordVoiceUsageV1(this.ctx.storage, {
+    await this.assertUserIdentity(request.userId as string);
+    const receipt = await recordVoiceUsageV1(this.ctx.storage, {
       day: request.day as string,
       sessionId: request.sessionId as string,
       seconds: request.seconds as number,
     });
+    if (receipt.recordedSeconds > 0) {
+      (await this.billingContribution()).recordVoice({
+        day: receipt.day,
+        sessionId: receipt.sessionId,
+        sessionSeconds: receipt.sessionSeconds,
+        recordedSeconds: receipt.recordedSeconds,
+        at: new Date().toISOString(),
+      });
+    }
+    return receipt;
   }
 
   /** The durable per-User authoring quota configuration; defaults when unset. */
@@ -1860,6 +1876,49 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     MountedFoundationUserBackend["audit"]
   > {
     return (await this.contributions()).audit;
+  }
+
+  private async billingContribution(): Promise<
+    MountedFoundationUserBackend["billing"]
+  > {
+    return (await this.contributions()).billing;
+  }
+
+  /** Model usage projected by the Bot object after a durable Turn end. */
+  async recordUsageEntries(
+    input: unknown,
+  ): Promise<{ recorded: number; quarantined: number }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      entries: rpcDecodedValue,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    const botId = request.botId as string;
+    if (!(await (await this.flockContribution()).hasBot(botId))) {
+      throw new Error(`Bot "${botId}" is not registered to this User`);
+    }
+    if (!Array.isArray(request.entries)) {
+      throw new Error("RPC request.entries must be an array");
+    }
+    if (request.entries.length > USAGE_ENTRY_PAGE_MAX_V1) {
+      throw new Error("RPC request.entries exceeds its bound");
+    }
+    const foreign = request.entries.find(
+      (entry) =>
+        !entry ||
+        typeof entry !== "object" ||
+        (entry as { botId?: unknown }).botId !== botId,
+    );
+    if (foreign) throw new Error("usage entries name another Bot");
+    return (await this.billingContribution()).recordEntries(request.entries);
+  }
+
+  /** Account-wide totals for the hosted client and operator debug surface. */
+  async readUsage(input: unknown): Promise<UsageReportV1> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.billingContribution()).report();
   }
 
   /**

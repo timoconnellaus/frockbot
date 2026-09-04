@@ -13,6 +13,7 @@ import {
   decodeSkillRefsV1,
   LlmEffectNotStartedError,
   type LlmStreamEvent,
+  type LlmUsageV1,
   type LoopStepContinuationV1,
   type NormalizedModelRequest,
   type Session,
@@ -68,6 +69,31 @@ interface ModelResponse {
   request: NormalizedModelRequest;
   text: string;
   toolCalls: ToolCall[];
+}
+
+const TOKEN_ESTIMATE_BYTES_PER_TOKEN_V1 = 4;
+
+function estimatedTokensV1(value: unknown): number {
+  const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  return Math.ceil(bytes / TOKEN_ESTIMATE_BYTES_PER_TOKEN_V1);
+}
+
+/**
+ * The provider-neutral fallback for transports that return no token counts.
+ * It is intentionally based on the exact normalized request and assembled
+ * response that are journaled, and is always marked estimated at the event.
+ */
+export function estimateModelUsageV1(
+  request: NormalizedModelRequest,
+  response: Pick<ModelResponse, "text" | "toolCalls">,
+): LlmUsageV1 {
+  return {
+    inputTokens: estimatedTokensV1(request),
+    outputTokens: estimatedTokensV1({
+      text: response.text,
+      toolCalls: response.toolCalls,
+    }),
+  };
 }
 
 type ModelReconciliation =
@@ -1114,11 +1140,14 @@ class LoopAgent implements Agent {
   ): Promise<ModelResponse> {
     let text = "";
     const toolCalls: ToolCall[] = [];
+    let usage: LlmUsageV1 | undefined;
     let receivedProviderEvent = false;
+    const startedAt = Date.now();
     try {
       for await (const event of this.#ctx.llm.stream(request, signal)) {
         receivedProviderEvent = true;
         signal.throwIfAborted();
+        if (event.type === "usage") usage = structuredClone(event.usage);
         this.#applyStreamEvent(
           event,
           request.requestId,
@@ -1138,6 +1167,15 @@ class LoopAgent implements Agent {
       }
       throw error;
     }
+    await this.#recordModelUsage(
+      request,
+      turn,
+      step,
+      usage,
+      text,
+      toolCalls,
+      Math.max(0, Date.now() - startedAt),
+    );
     return { request, text, toolCalls };
   }
 
@@ -1184,9 +1222,12 @@ class LoopAgent implements Agent {
     }
     let text = "";
     const toolCalls: ToolCall[] = [];
+    let usage: LlmUsageV1 | undefined;
     let textDeltaIndex = 0;
+    const startedAt = Date.now();
     for (const event of reconciliation.events) {
       signal.throwIfAborted();
+      if (event.type === "usage") usage = structuredClone(event.usage);
       const journalTextDelta =
         event.type !== "text-delta" || textDeltaIndex >= durablePrefix.length;
       this.#applyStreamEvent(
@@ -1202,10 +1243,53 @@ class LoopAgent implements Agent {
       );
       if (event.type === "text-delta") textDeltaIndex += 1;
     }
+    await this.#recordModelUsage(
+      request,
+      turn,
+      step,
+      usage,
+      text,
+      toolCalls,
+      Math.max(0, Date.now() - startedAt),
+    );
     return {
       status: "recovered",
       response: { request, text, toolCalls },
     };
+  }
+
+  async #recordModelUsage(
+    request: NormalizedModelRequest,
+    turn: number,
+    step: number,
+    reported: LlmUsageV1 | undefined,
+    text: string,
+    toolCalls: readonly ToolCall[],
+    latencyMs: number,
+  ): Promise<void> {
+    const existing = this.session.events.some(
+      (event) =>
+        event.type === "model/usage" && event.requestId === request.requestId,
+    );
+    if (existing) return;
+    const usage =
+      reported ??
+      estimateModelUsageV1(request, { text, toolCalls: [...toolCalls] });
+    this.session.append({
+      type: "model/usage",
+      turn,
+      step,
+      requestId: request.requestId,
+      provider: request.provider,
+      model: request.model,
+      ...(request.modelBinding
+        ? { modelBinding: structuredClone(request.modelBinding) }
+        : {}),
+      ...usage,
+      latencyMs,
+      estimated: reported === undefined,
+    });
+    await this.session.flush();
   }
 
   #applyStreamEvent(

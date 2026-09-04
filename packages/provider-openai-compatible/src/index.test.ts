@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { type NormalizedModelRequest } from "@frockbot/kernel-contracts";
 import { LlmRegistry } from "@frockbot/plugin-models";
 import { Context } from "cordis";
-import { OpenAICompatibleProvider, requestToWire } from "./index.js";
+import {
+  OpenAICompatibleProvider,
+  requestToWire,
+  usageFromPayloadV1,
+} from "./index.js";
 
 const request: NormalizedModelRequest = {
   requestId: "request-1",
@@ -38,6 +42,7 @@ describe("OpenAICompatibleProvider", () => {
     expect(requestToWire(request)).toMatchObject({
       model: "test-model",
       stream: true,
+      stream_options: { include_usage: true },
       messages: [
         { role: "system", content: "Be useful." },
         { role: "user", content: "What time is it?" },
@@ -62,12 +67,49 @@ describe("OpenAICompatibleProvider", () => {
     });
   });
 
+  test("normalizes OpenAI token details", () => {
+    expect(
+      usageFromPayloadV1({
+        usage: {
+          prompt_tokens: 80,
+          completion_tokens: 20,
+          prompt_tokens_details: { cached_tokens: 32 },
+          completion_tokens_details: { reasoning_tokens: 7 },
+        },
+      }),
+    ).toEqual({
+      type: "usage",
+      usage: {
+        inputTokens: 80,
+        outputTokens: 20,
+        cachedInputTokens: 32,
+        reasoningTokens: 7,
+      },
+    });
+  });
+
+  test("normalizes Workers AI and Ollama token fields", () => {
+    expect(
+      usageFromPayloadV1({ usage: { input_tokens: 12, output_tokens: 4 } }),
+    ).toEqual({
+      type: "usage",
+      usage: { inputTokens: 12, outputTokens: 4 },
+    });
+    expect(
+      usageFromPayloadV1({ prompt_eval_count: 18, eval_count: 6 }),
+    ).toEqual({
+      type: "usage",
+      usage: { inputTokens: 18, outputTokens: 6 },
+    });
+  });
+
   test("streams text and assembles fragmented tool calls", async () => {
     const encoder = new TextEncoder();
     const payloads = [
       'data: {"choices":[{"delta":{"content":"Checking "}}]}\n\n',
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"current_","arguments":"{\\"zone\\":"}}]}}]}\n\n',
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"time","arguments":"\\"UTC\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":40,"completion_tokens":9,"prompt_tokens_details":{"cached_tokens":10}}}\n\n',
       "data: [DONE]\n\n",
     ];
     let capturedUrl = "";
@@ -113,6 +155,10 @@ describe("OpenAICompatibleProvider", () => {
     expect(capturedIdempotencyKey).toBeNull();
     expect(events).toEqual([
       { type: "text-delta", text: "Checking " },
+      {
+        type: "usage",
+        usage: { inputTokens: 40, outputTokens: 9, cachedInputTokens: 10 },
+      },
       {
         type: "tool-call",
         call: {

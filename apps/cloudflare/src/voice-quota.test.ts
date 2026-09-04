@@ -61,7 +61,11 @@ describe("the durable per-User voice budget", () => {
         sessionId: "one",
         seconds: 30,
       }),
-    ).toMatchObject({ usedSeconds: 30 });
+    ).toMatchObject({
+      usedSeconds: 30,
+      sessionSeconds: 30,
+      recordedSeconds: 30,
+    });
     // The same report again — a retried close, an object that came back — is
     // the same total, not a second thirty seconds.
     expect(
@@ -70,14 +74,14 @@ describe("the durable per-User voice budget", () => {
         sessionId: "one",
         seconds: 30,
       }),
-    ).toMatchObject({ usedSeconds: 30 });
+    ).toMatchObject({ usedSeconds: 30, recordedSeconds: 0 });
     expect(
       await recordVoiceUsageV1(storage, {
         day: DAY,
         sessionId: "one",
         seconds: 45,
       }),
-    ).toMatchObject({ usedSeconds: 45 });
+    ).toMatchObject({ usedSeconds: 45, recordedSeconds: 15 });
   });
 
   test("adds up across sessions and refuses once the day is spent", async () => {

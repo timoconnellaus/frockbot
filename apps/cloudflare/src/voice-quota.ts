@@ -81,6 +81,10 @@ export interface VoiceUsageReceiptV1 {
   day: string;
   sessionId: string;
   usedSeconds: number;
+  /** The greatest running total this session has reported. */
+  sessionSeconds: number;
+  /** Newly charged seconds; zero for a duplicate or out-of-order report. */
+  recordedSeconds: number;
   limitSeconds: number;
 }
 
@@ -205,6 +209,8 @@ export async function recordVoiceUsageV1(
       day: request.day,
       sessionId: request.sessionId,
       usedSeconds: total,
+      sessionSeconds: Math.max(charged, reported),
+      recordedSeconds: delta,
       limitSeconds: VOICE_SECONDS_PER_DAY_V1,
     } satisfies VoiceUsageReceiptV1;
   });

@@ -41,6 +41,7 @@ describe("foundation application", () => {
       "auth",
       "authoring",
       "settings",
+      "billing",
       "bot-template",
       "clock",
       "computer",
@@ -77,6 +78,7 @@ describe("foundation application", () => {
         "flock",
         "audit",
         "settings",
+        "billing",
         "bot-template",
         "computer",
         "credentials",
@@ -125,6 +127,7 @@ describe("foundation application", () => {
         "audit",
         "auth",
         "settings",
+        "billing",
         "bot-template",
         "computer",
         "custom-models",
@@ -328,6 +331,7 @@ describe("foundation application", () => {
     expect(platformOwned("shell")).toBe(true);
     expect(platformOwned("settings")).toBe(true);
     expect(platformOwned("provider-flock-ai")).toBe(true);
+    expect(platformOwned("billing")).toBe(true);
     expect(platformOwned("custom-models")).toBe(false);
     expect(platformOwned("web")).toBe(false);
     expect(platformOwned("provider-ollama-cloud")).toBe(false);
@@ -428,6 +432,7 @@ describe("foundation application", () => {
       rebuildSearchIndex: () =>
         Promise.reject(new Error("not used while composing")),
       readAudit: () => Promise.reject(new Error("not used while composing")),
+      readUsage: () => Promise.reject(new Error("not used while composing")),
       rebuildAuditIndex: () =>
         Promise.reject(new Error("not used while composing")),
       listBotUnread: () =>
@@ -491,6 +496,7 @@ describe("foundation application", () => {
     ).toEqual([
       "admin",
       "audit",
+      "billing",
       "bot-template",
       "computer",
       "flock",
@@ -520,7 +526,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(3);
-    expect(userBackend.contributions).toHaveLength(11);
+    expect(userBackend.contributions).toHaveLength(12);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );
