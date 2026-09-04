@@ -116,6 +116,8 @@
   --frock-control-lg: 36px;
   --frock-avatar-sm: 28px;
   --frock-avatar-md: 38px;
+  /* The pinned sidebar tile: a Bot addressed as a destination, not a row. */
+  --frock-avatar-lg: 56px;
   --frock-icon-sm: 14px;
   --frock-icon-md: 16px;
   --frock-icon-lg: 18px;

@@ -673,6 +673,17 @@ the rows whose status the code moved:
   and each row reads a bounded `shell:preview` written atomically with settled
   unread activity for its latest message and time. Labels remain presentation
   state and are not injected into a Bot's Turn.
+  Pinning matches GrokBot's pinned "General" chat: `BotProfile.pinnedAt` — an
+  ISO 8601 instant beside `label`, `title` and `hiddenFromSidebar`, decoded by
+  the same strict codec and patched the same way, where the empty string unpins
+  — puts the Bot in a wrapping row of large round avatar tiles above the
+  labelled groups, earliest pin first, and takes it out of the list below so it
+  never appears twice. The instant rather than a flag is what keeps that order
+  stable across later edits. A tile carries the Bot's name and, because it has
+  no preview line to go bold, an unread dot wherever the row would have shown
+  one; clicking it selects exactly as the row does. The pin is a layout choice
+  like `hiddenFromSidebar`, so it is presentation state and, like a label, is
+  never part of a Bot's instructions.
 - **5** — **owner decision 2026-09-01: sheep avatars, no image upload.** The
   Flock's generated sheep recipe is the Bot avatar and Tailor sheep is its only
   editor. The former uploaded-image DTO, object-storage route, and client upload

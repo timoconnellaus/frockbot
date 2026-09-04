@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { formatSidebarMessageTimeV1, groupSidebarBotsV1 } from "./sidebar.js";
+import {
+  formatSidebarMessageTimeV1,
+  groupSidebarBotsV1,
+  partitionPinnedSidebarBotsV1,
+} from "./sidebar.js";
 
 const bots = [
   { botId: "alpha" },
@@ -7,6 +11,48 @@ const bots = [
   { botId: "gamma" },
   { botId: "delta" },
 ];
+
+describe("pinned sidebar Bots", () => {
+  test("orders pinned Bots by pin time and leaves the rest in list order", () => {
+    expect(
+      partitionPinnedSidebarBotsV1(bots, {
+        alpha: { pinnedAt: "2026-09-02T09:00:00.000Z" },
+        beta: {},
+        gamma: { pinnedAt: "2026-08-30T09:00:00.000Z" },
+      }),
+    ).toEqual({
+      pinned: [{ botId: "gamma" }, { botId: "alpha" }],
+      rest: [{ botId: "beta" }, { botId: "delta" }],
+    });
+  });
+
+  test("a pinned Bot leaves the labelled groups entirely", () => {
+    const profiles: Record<string, { label?: string; pinnedAt?: string }> = {
+      alpha: { label: "Work", pinnedAt: "2026-09-02T09:00:00.000Z" },
+      beta: { label: "Work" },
+    };
+    const { pinned, rest } = partitionPinnedSidebarBotsV1(
+      bots.slice(0, 2),
+      profiles,
+    );
+    expect(pinned.map((bot) => bot.botId)).toEqual(["alpha"]);
+    expect(
+      groupSidebarBotsV1(rest, profiles).groups.map((group) => ({
+        label: group.label,
+        bots: group.bots.map((bot) => bot.botId),
+      })),
+    ).toEqual([{ label: "Work", bots: ["beta"] }]);
+  });
+
+  test("treats a blank pin instant as unpinned", () => {
+    expect(
+      partitionPinnedSidebarBotsV1(bots.slice(0, 2), {
+        alpha: { pinnedAt: "  " },
+        beta: {},
+      }).pinned,
+    ).toEqual([]);
+  });
+});
 
 describe("sidebar Bot groups", () => {
   test("renders one plain list until a visible Bot has a label", () => {

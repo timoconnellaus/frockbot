@@ -59,6 +59,13 @@ const label = ref("");
 const description = ref("");
 const title = ref("");
 const hiddenFromSidebar = ref(false);
+/*
+ * Pinning is durable as the instant it happened, so the sidebar can order
+ * pinned Bots by pin time. The panel edits the intent; the original instant is
+ * kept across an unrelated save so re-saving never reshuffles the tiles.
+ */
+const pinned = ref(false);
+const pinnedAt = ref("");
 const notifications = ref(false);
 const pendingApprovals = computed(() =>
   web.value.approvals.filter((approval) => approval.decision === "pending"),
@@ -98,6 +105,8 @@ watch(
     description.value = settings.profile.description ?? "";
     title.value = settings.profile.title ?? "";
     hiddenFromSidebar.value = settings.profile.hiddenFromSidebar === true;
+    pinnedAt.value = settings.profile.pinnedAt ?? "";
+    pinned.value = pinnedAt.value !== "";
     notifications.value = settings.notifications.enabled;
   },
   { immediate: true },
@@ -116,6 +125,10 @@ async function save(): Promise<void> {
       description: description.value,
       title: title.value,
       hiddenFromSidebar: hiddenFromSidebar.value,
+      pinnedAt: pinned.value
+        ? pinnedAt.value || new Date().toISOString()
+        : // The empty string unpins, the same way it clears an optional text field.
+          "",
     });
     await web.value.saveBotNotifications({ enabled: notifications.value });
     surfaces.close();
@@ -161,6 +174,23 @@ async function save(): Promise<void> {
           placeholder="Research, marketing, admin"
         />
       </UiField>
+    </UiAnchor>
+    <UiAnchor
+      anchor="bot-pinned"
+      label="Pinned"
+      :href="link('bot-pinned')"
+      class="settings-row"
+    >
+      <label class="notification-setting">
+        <span>
+          <strong>Pinned</strong>
+          <small>
+            Pin this Bot to the top of the sidebar. Unpin it to put it back in
+            the list.
+          </small>
+        </span>
+        <input v-model="pinned" type="checkbox" />
+      </label>
     </UiAnchor>
     <UiAnchor
       anchor="bot-description"
