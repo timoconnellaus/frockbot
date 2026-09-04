@@ -12,7 +12,12 @@ import {
 } from "./shared.js";
 import { UsageStoreV1, type UsageSqlV1 } from "./store.js";
 import { BillingStoreV1 } from "./billing-store.js";
-import type { BillingViewV1, StripeEventV1 } from "./billing.js";
+import type {
+  BillingViewV1,
+  StripeCommandKindV1,
+  StripeCommandPreparationV1,
+  StripeEventV1,
+} from "./billing.js";
 
 export interface BillingUserBackendHostV1 {
   sql: UsageSqlV1;
@@ -117,6 +122,22 @@ export class BillingUserBackendContribution {
 
   applyStripeEvent(event: StripeEventV1): { applied: boolean } {
     return this.billing.applyStripeEvent(event);
+  }
+
+  prepareStripeCommand(input: {
+    commandId: string;
+    kind: StripeCommandKindV1;
+    fingerprint: string;
+  }): StripeCommandPreparationV1 {
+    return this.billing.prepareStripeCommand(input);
+  }
+
+  recordStripeCustomer(customerId: string): void {
+    this.billing.recordStripeCustomer(customerId);
+  }
+
+  completeStripeCommand(commandId: string, resultUrl: string): void {
+    this.billing.completeStripeCommand(commandId, resultUrl);
   }
 }
 

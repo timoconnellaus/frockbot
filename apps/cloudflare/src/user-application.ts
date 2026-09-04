@@ -28,6 +28,7 @@ import {
   decodeClientRunReconciliationCommandV1,
   decodeClientRunStopCommandV1,
   decodeClientTurnCommandV1,
+  BILLING_TURN_REFUSAL_MESSAGE_V1,
   type ClientRunLookupQueryV1,
   type ClientRunStopCommandV1,
   type ClientTurnCommandV1,
@@ -1148,6 +1149,18 @@ function createUserApplicationRoute() {
     }
 
     try {
+      const billing = await env.BOT_STATE.readBilling({ schemaVersion: 1 });
+      if (!billing.canStartTurn) {
+        return Response.json(
+          {
+            schemaVersion: 1,
+            status: "refused",
+            reason: "billing-required",
+            error: BILLING_TURN_REFUSAL_MESSAGE_V1,
+          } satisfies ClientTurnRefusalV1,
+          { status: 409 },
+        );
+      }
       return Response.json(
         // Every Turn a client asks for is admitted as `chat`. The turn type is
         // never carried here: `decodeClientTurnCommandV1` accepts exact keys,

@@ -32,3 +32,7 @@ OPENAI_API_KEY=replace-with-an-openai-api-key
 # Read the same way by the app-wide voice assistant in slice B. Nothing reads
 # it yet; it is here so a local .dev.vars is ready when that lands.
 GEMINI_API_KEY=replace-with-a-google-ai-studio-api-key
+# Stripe Checkout, Billing Portal, and signed webhook delivery. Both are
+# Worker secrets and are carried in every --secrets-file deployment.
+STRIPE_SECRET_KEY=sk_test_replace-with-a-stripe-test-secret-key
+STRIPE_WEBHOOK_SECRET=whsec_replace-with-a-stripe-webhook-secret

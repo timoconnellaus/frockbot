@@ -14,6 +14,7 @@
     "./package.json": "./package.json",
     "./pricing": "./src/pricing.ts",
     "./shared": "./src/shared.ts",
+    "./stripe": "./src/stripe.ts",
     "./store": "./src/store.ts",
     "./user": "./src/user.ts"
   },

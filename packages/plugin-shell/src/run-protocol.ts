@@ -64,6 +64,8 @@ const SUPERSEDED_RUN_MESSAGE = "Interrupted by your next message.";
 /** What a Turn waiting on a person's "Try again" says while it waits. */
 export const RESUMABLE_RUN_MESSAGE_V1 =
   "This reply stopped partway. Try again to continue it.";
+export const BILLING_TURN_REFUSAL_MESSAGE_V1 =
+  "You need an active plan or credit balance to send a message. Open Billing to continue.";
 
 /**
  * Why the Bot declined to admit a Turn. A refusal is an ordinary answer — the
@@ -73,7 +75,11 @@ export const RESUMABLE_RUN_MESSAGE_V1 =
  * treating it as a failure of the send.
  */
 export type ClientTurnRefusalReasonV1 =
-  "busy" | "reconciliation-required" | "fenced" | "duplicate";
+  | "busy"
+  | "reconciliation-required"
+  | "fenced"
+  | "duplicate"
+  | "billing-required";
 
 /** The versioned body a refused Turn answers with, decoded by the client. */
 export interface ClientTurnRefusalV1 {
@@ -88,6 +94,7 @@ const TURN_REFUSAL_REASONS_V1: readonly ClientTurnRefusalReasonV1[] = [
   "reconciliation-required",
   "fenced",
   "duplicate",
+  "billing-required",
 ];
 
 /** The refusal a response body carries, or `undefined` when it carries none. */

@@ -538,6 +538,8 @@ jobs:
           # Carried now so the secret survives the deploys before that lands —
           # `--secrets-file` replaces the whole set every time.
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-production.env"
@@ -568,6 +570,8 @@ jobs:
             'FROCK_AI_GATEWAY_TOKEN',
             'OPENAI_API_KEY',
             'GEMINI_API_KEY',
+            'STRIPE_SECRET_KEY',
+            'STRIPE_WEBHOOK_SECRET',
           ].filter((name) => process.env[name]);
           console.log(
             JSON.stringify(

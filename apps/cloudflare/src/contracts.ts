@@ -229,6 +229,9 @@ export type ClientWorkspaceFileV1 =
 
 export interface UserBotStateBinding {
   assertRegistered(input: { schemaVersion: 1; botId: string }): Promise<void>;
+  readBilling(input: {
+    schemaVersion: 1;
+  }): Promise<import("@frockbot/plugin-billing/billing").BillingViewV1>;
   run(input: {
     schemaVersion: 1;
     botId: string;

@@ -612,6 +612,8 @@ jobs:
           # replaces the Worker's whole secret set on every deploy.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-staging.env"
@@ -636,6 +638,8 @@ jobs:
             'DEBUG_TOKEN',
             'OPENAI_API_KEY',
             'GEMINI_API_KEY',
+            'STRIPE_SECRET_KEY',
+            'STRIPE_WEBHOOK_SECRET',
           ].filter((name) => process.env[name]);
           console.log(
             JSON.stringify(

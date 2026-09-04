@@ -2,6 +2,8 @@ import {
   BASIC_ALLOWANCE_MICROS_V1,
   BILLING_HISTORY_MAX_ROWS_V1,
   type BillingViewV1,
+  type StripeCommandKindV1,
+  type StripeCommandPreparationV1,
   type StripeEventV1,
 } from "./billing.js";
 import type { UsageSqlV1 } from "./store.js";
@@ -70,6 +72,11 @@ export class BillingStoreV1 {
         "payment_intent_id TEXT PRIMARY KEY, checkout_session_id TEXT NOT NULL, " +
         "credited_micros INTEGER NOT NULL, refunded_micros INTEGER NOT NULL, " +
         "applied_micros INTEGER NOT NULL)",
+    );
+    this.sql.exec(
+      "CREATE TABLE IF NOT EXISTS billing_commands (" +
+        "command_id TEXT PRIMARY KEY, kind TEXT NOT NULL, fingerprint TEXT NOT NULL, " +
+        "status TEXT NOT NULL, result_url TEXT, created_at TEXT NOT NULL)",
     );
     this.opened = true;
   }
@@ -247,6 +254,73 @@ export class BillingStoreV1 {
       canStartTurn: availableMicros > 0,
       history,
     };
+  }
+
+  prepareStripeCommand(input: {
+    commandId: string;
+    kind: StripeCommandKindV1;
+    fingerprint: string;
+  }): StripeCommandPreparationV1 {
+    this.open();
+    return this.transactionSync(() => {
+      const existing = this.sql
+        .exec<{
+          kind: string;
+          fingerprint: string;
+          status: string;
+          result_url: string | null;
+        }>(
+          "SELECT kind, fingerprint, status, result_url FROM billing_commands WHERE command_id = ?",
+          input.commandId,
+        )
+        .toArray()[0];
+      if (existing) {
+        if (
+          existing.kind !== input.kind ||
+          existing.fingerprint !== input.fingerprint
+        ) {
+          throw new Error("Billing command id was already used.");
+        }
+        return {
+          status: existing.status === "complete" ? "complete" : "pending",
+          ...(existing.result_url
+            ? { resultUrl: String(existing.result_url) }
+            : {}),
+          ...this.customerProjection(),
+        };
+      }
+      this.sql.exec(
+        "INSERT INTO billing_commands (command_id, kind, fingerprint, status, result_url, created_at) " +
+          "VALUES (?, ?, ?, 'pending', NULL, ?)",
+        input.commandId,
+        input.kind,
+        input.fingerprint,
+        new Date(this.now()).toISOString(),
+      );
+      return { status: "pending", ...this.customerProjection() };
+    });
+  }
+
+  recordStripeCustomer(customerId: string): void {
+    this.open();
+    this.sql.exec(
+      "UPDATE billing_account SET stripe_customer_id = COALESCE(stripe_customer_id, ?) WHERE id = 1",
+      this.identifier(customerId, "Customer id"),
+    );
+  }
+
+  completeStripeCommand(commandId: string, resultUrl: string): void {
+    this.open();
+    this.sql.exec(
+      "UPDATE billing_commands SET status = 'complete', result_url = ? WHERE command_id = ?",
+      this.identifier(resultUrl, "result URL"),
+      this.identifier(commandId, "command id"),
+    );
+  }
+
+  private customerProjection(): { customerId?: string } {
+    const customerId = this.account().stripe_customer_id;
+    return customerId ? { customerId: String(customerId) } : {};
   }
 
   private account(): BillingAccountRow {

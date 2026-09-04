@@ -110,6 +110,14 @@ import {
   type UsageReportV1,
 } from "@frockbot/plugin-billing";
 import {
+  decodeBillingViewV1,
+  decodeStripeCommandPreparationV1,
+  type BillingViewV1,
+  type StripeCommandKindV1,
+  type StripeCommandPreparationV1,
+  type StripeEventV1,
+} from "@frockbot/plugin-billing/billing";
+import {
   decodeMcpLifecycleReceiptV1,
   decodeMcpServerStatusViewV1,
 } from "@frockbot/plugin-mcp/records";
@@ -259,6 +267,10 @@ interface Env {
    * release workflow can carry it before the code that uses it lands.
    */
   GEMINI_API_KEY?: string;
+  /** Stripe API key. Optional: without it Checkout and Portal fail closed. */
+  STRIPE_SECRET_KEY?: string;
+  /** Verifies the exact bytes Stripe posts to the public webhook route. */
+  STRIPE_WEBHOOK_SECRET?: string;
   /** Local dictation stand-in; set by the end-to-end harness only. */
   VOICE_UPSTREAM_URL?: string;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
@@ -688,6 +700,11 @@ interface UserAuditRpc {
 
 interface UserUsageRpc {
   readUsage(input: unknown): Promise<unknown>;
+  readBilling(input: unknown): Promise<unknown>;
+  applyStripeEvent(input: unknown): Promise<unknown>;
+  prepareStripeCommand(input: unknown): Promise<unknown>;
+  recordStripeCustomer(input: unknown): Promise<void>;
+  completeStripeCommand(input: unknown): Promise<void>;
 }
 
 function userAuditStub(env: Env, userId: string): UserAuditRpc {
@@ -735,6 +752,18 @@ function decodeUserBotRunLookupRpcV1(input: unknown): {
 }
 
 export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
+  async readBilling(input: unknown): Promise<BillingViewV1> {
+    decodeRpcEnvelopeV1(input, {});
+    return decodeBillingViewV1(
+      rpcJsonSnapshot(
+        await userUsageStub(this.env, this.ctx.props.userId).readBilling({
+          schemaVersion: 1,
+          userId: this.ctx.props.userId,
+        }),
+      ),
+    );
+  }
+
   async assertRegistered(input: unknown): Promise<void> {
     const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
     const botId = request.botId as string;
@@ -1691,6 +1720,68 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             }),
           ),
         ),
+      readBilling: async (userId: string): Promise<BillingViewV1> =>
+        decodeBillingViewV1(
+          rpcJsonSnapshot(
+            await userUsageStub(env, userId).readBilling({
+              schemaVersion: 1,
+              userId,
+            }),
+          ),
+        ),
+      applyStripeEvent: async (userId: string, event: StripeEventV1) => {
+        const value = rpcJsonSnapshot(
+          await userUsageStub(env, userId).applyStripeEvent({
+            schemaVersion: 1,
+            userId,
+            event,
+          }),
+        ) as { applied?: unknown };
+        if (typeof value.applied !== "boolean") {
+          throw new Error("Stripe event receipt is invalid");
+        }
+        return { applied: value.applied };
+      },
+      prepareStripeCommand: async (
+        userId: string,
+        input: {
+          commandId: string;
+          kind: StripeCommandKindV1;
+          fingerprint: string;
+        },
+      ): Promise<StripeCommandPreparationV1> =>
+        decodeStripeCommandPreparationV1(
+          rpcJsonSnapshot(
+            await userUsageStub(env, userId).prepareStripeCommand({
+              schemaVersion: 1,
+              userId,
+              ...input,
+            }),
+          ),
+        ),
+      recordStripeCustomer: (userId: string, customerId: string) =>
+        userUsageStub(env, userId).recordStripeCustomer({
+          schemaVersion: 1,
+          userId,
+          customerId,
+        }),
+      completeStripeCommand: (
+        userId: string,
+        commandId: string,
+        resultUrl: string,
+      ) =>
+        userUsageStub(env, userId).completeStripeCommand({
+          schemaVersion: 1,
+          userId,
+          commandId,
+          resultUrl,
+        }),
+      ...(env.STRIPE_SECRET_KEY
+        ? { stripeSecretKey: env.STRIPE_SECRET_KEY }
+        : {}),
+      ...(env.STRIPE_WEBHOOK_SECRET
+        ? { stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET }
+        : {}),
       rebuildAuditIndex: async (userId: string) =>
         decodeAuditRebuildReceiptV1(
           rpcJsonSnapshot(

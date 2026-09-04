@@ -288,6 +288,8 @@ function turnRefusalCopyV1(reason: ClientTurnRefusalReasonV1): string {
   if (reason === "reconciliation-required")
     return "This Bot's last reply stopped partway. Try again to continue it.";
   if (reason === "duplicate") return "That message was already sent.";
+  if (reason === "billing-required")
+    return "You need an active plan or credit balance to send a message. Open Billing to continue.";
   return "That message didn't go through. Try sending it again.";
 }
 

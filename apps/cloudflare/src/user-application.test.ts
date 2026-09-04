@@ -14,6 +14,19 @@ import { BotTurnRefusedError } from "@frockbot/kernel-do";
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
     assertRegistered: () => Promise.resolve(),
+    readBilling: () =>
+      Promise.resolve({
+        schemaVersion: 1,
+        plan: "none",
+        subscriptionStatus: "none",
+        allowanceMicros: 0,
+        allowanceUsedMicros: 0,
+        allowanceRemainingMicros: 0,
+        creditBalanceMicros: 1,
+        availableMicros: 1,
+        canStartTurn: true,
+        history: [],
+      }),
     listApplets: () =>
       Promise.resolve({ schemaVersion: 1, revision: 0, applets: [] }),
     mintAppletViewerToken: () =>
@@ -324,6 +337,54 @@ describe("user application Bot seam", () => {
     expect(response.status).toBe(200);
     expect((await response.json()) as BotTurnResult).toEqual(result);
     expect(calls).toEqual([{ botId: "primary", text: "hello" }]);
+  });
+
+  test("refuses a new Turn when the User has no allowance or credits", async () => {
+    let ran = false;
+    const botState = rpcBindingFor({
+      run: () => {
+        ran = true;
+        return Promise.reject(new Error("must not run"));
+      },
+    } as unknown as BotStateBinding);
+    botState.readBilling = () =>
+      Promise.resolve({
+        schemaVersion: 1,
+        plan: "none",
+        subscriptionStatus: "none",
+        allowanceMicros: 0,
+        allowanceUsedMicros: 0,
+        allowanceRemainingMicros: 0,
+        creditBalanceMicros: 0,
+        availableMicros: 0,
+        canStartTurn: false,
+        history: [],
+      });
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/turns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          text: "hello",
+          commandId: "command-unfunded",
+        }),
+      }),
+      {
+        BOT_STATE: botState,
+        DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+      },
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json<unknown>()).toEqual({
+      schemaVersion: 1,
+      status: "refused",
+      reason: "billing-required",
+      error:
+        "You need an active plan or credit balance to send a message. Open Billing to continue.",
+    });
+    expect(ran).toBe(false);
   });
 
   test("answers a refused admission 409, and a real fault 500", async () => {

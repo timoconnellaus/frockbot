@@ -97,6 +97,12 @@ import {
   type UsageReportV1,
 } from "@frockbot/plugin-billing";
 import {
+  decodeStripeEventV1,
+  type BillingViewV1,
+  type StripeCommandKindV1,
+  type StripeCommandPreparationV1,
+} from "@frockbot/plugin-billing/billing";
+import {
   decodePublishPackageCommandV1,
   decodeRollbackPackageCommandV1,
 } from "@frockbot/plugin-package-publisher/shared";
@@ -1926,6 +1932,71 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
     await this.assertFlockIdentity(request.userId as string);
     return (await this.billingContribution()).report();
+  }
+
+  /** The User-owned balance and subscription projection. */
+  async readBilling(input: unknown): Promise<BillingViewV1> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.billingContribution()).readBilling();
+  }
+
+  /** A verified Stripe event, idempotent on its Stripe event id. */
+  async applyStripeEvent(input: unknown): Promise<{ applied: boolean }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      event: rpcDecoded(decodeStripeEventV1),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.billingContribution()).applyStripeEvent(
+      request.event as ReturnType<typeof decodeStripeEventV1>,
+    );
+  }
+
+  /** Persist an external Stripe effect before the gateway starts it. */
+  async prepareStripeCommand(
+    input: unknown,
+  ): Promise<StripeCommandPreparationV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      commandId: rpcPattern(/^[A-Za-z0-9_-]+$/u, 128),
+      kind: rpcEnum([
+        "checkout-subscription",
+        "checkout-credit",
+        "portal",
+      ] as const),
+      fingerprint: rpcString(256),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.billingContribution()).prepareStripeCommand({
+      commandId: request.commandId as string,
+      kind: request.kind as StripeCommandKindV1,
+      fingerprint: request.fingerprint as string,
+    });
+  }
+
+  async recordStripeCustomer(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      customerId: rpcPattern(/^cus_[A-Za-z0-9_]+$/u, 128),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    (await this.billingContribution()).recordStripeCustomer(
+      request.customerId as string,
+    );
+  }
+
+  async completeStripeCommand(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      commandId: rpcPattern(/^[A-Za-z0-9_-]+$/u, 128),
+      resultUrl: rpcPattern(/^https:\/\//u, 2_048),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    (await this.billingContribution()).completeStripeCommand(
+      request.commandId as string,
+      request.resultUrl as string,
+    );
   }
 
   /**
