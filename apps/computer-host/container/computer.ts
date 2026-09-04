@@ -153,6 +153,15 @@ export interface SpriteServiceStreamHandle extends AsyncIterable<unknown> {}
 export interface SpriteHandle {
   readonly name: string;
   readonly url?: string;
+  /**
+   * How the platform gates the Sprite's public hostname.
+   *
+   * The viewer is an anonymous `<iframe>` on that hostname, so anything but
+   * `public` redirects the frame to the Sprites sign-in page — which the app's
+   * `frame-src https://*.sprites.app` refuses to load. Reading the setting is
+   * what lets the host re-assert it without paying a write on every open.
+   */
+  readonly urlSettings?: { auth?: string };
   spawn(
     command: string,
     args?: string[],
@@ -1259,6 +1268,7 @@ export class ComputerHost {
     const sprite = await this.findOrCreate(spriteName);
     const inspection = await this.inspectAdoption(sprite);
     if (inspection.state) {
+      await this.ensureViewerReachable(sprite);
       return {
         spriteName,
         generation: inspection.state.generation,
@@ -1433,6 +1443,34 @@ export class ComputerHost {
    * Computer with no viewer, which is worth reporting through box-doctor and is
    * not worth failing an open over.
    */
+  /**
+   * Re-asserts that the Sprite's public hostname is anonymously reachable, on a
+   * Computer this host *adopts* rather than provisions.
+   *
+   * Provisioning turns the URL public exactly once. Adoption used to assert
+   * nothing: a Computer that already carried a state file was handed back
+   * untouched, so a Sprite provisioned before that call existed — or one whose
+   * settings were later flipped back — kept a gated hostname for good. The
+   * viewer is an anonymous `<iframe>`, so a gated hostname answers it with a
+   * redirect to the Sprites sign-in page that the app's
+   * `frame-src https://*.sprites.app` then refuses: a viewer that fails outside
+   * the box, with a gateway inside it that is perfectly healthy. Nothing done
+   * to a process inside the box can fix how the platform gates the route.
+   *
+   * The write is skipped when the handle already reports `public`, so an
+   * adoption of a healthy Computer costs nothing, and a failure is soft: a
+   * hostname that could not be opened up is worth reporting through box-doctor,
+   * not worth failing an open over.
+   */
+  private async ensureViewerReachable(sprite: SpriteHandle): Promise<void> {
+    if (sprite.urlSettings?.auth === "public") return;
+    try {
+      await sprite.updateURLSettings({ auth: "public" });
+    } catch {
+      // box-doctor is where a Computer whose viewer is still gated shows up.
+    }
+  }
+
   private async declareGateway(
     sprite: SpriteHandle,
     restart: boolean,

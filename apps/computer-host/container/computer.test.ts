@@ -779,6 +779,45 @@ describe("open", () => {
     ).toBe(false);
   });
 
+  test("opens the public hostname of an adopted Computer that was left gated", async () => {
+    const { host, sprite } = provisioned();
+    // A Sprite provisioned before the host turned URLs public — or one whose
+    // settings were flipped back — answers the viewer iframe with a redirect to
+    // the Sprites sign-in page, which the app's frame-src refuses.
+    sprite.urlSettings = { auth: "sprite" };
+
+    expect((await host.handle(request({ kind: "open" }))).status).toBe(200);
+
+    expect(sprite.urlSettings).toEqual({ auth: "public" });
+  });
+
+  test("pays no URL write adopting a Computer that is already public", async () => {
+    const { host, sprite } = provisioned();
+    sprite.urlSettings = { auth: "public" };
+    let writes = 0;
+    sprite.updateURLSettings = async (settings) => {
+      writes += 1;
+      sprite.urlSettings = settings;
+    };
+
+    expect((await host.handle(request({ kind: "open" }))).status).toBe(200);
+
+    expect(writes).toBe(0);
+    expect(sprite.urlSettings).toEqual({ auth: "public" });
+  });
+
+  test("opens a Computer whose public hostname refuses to be opened up", async () => {
+    const { host, sprite } = provisioned();
+    sprite.urlSettings = { auth: "sprite" };
+    sprite.updateURLSettings = async () => {
+      throw new Error("url settings are not writable");
+    };
+
+    // A viewer that cannot be repaired is box-doctor's to report, not a reason
+    // to refuse the Computer.
+    expect((await host.handle(request({ kind: "open" }))).status).toBe(200);
+  });
+
   test("adopts a Computer with the matching digest without an update", async () => {
     const { host, sprite } = provisioned();
 
@@ -1735,6 +1774,34 @@ describe("viewer", () => {
     expect(sprite.commands).toHaveLength(commandCount + 1);
     expect(sprite.fileReads).toHaveLength(readCount);
     expect(client.lookups).toHaveLength(lookupCount);
+  });
+
+  test("serves the viewer from the hostname the platform issued, not the Sprite name", async () => {
+    const { host, sprite } = provisioned();
+    // A Sprite's public hostname carries an organization suffix, so
+    // `https://<sprite name>.sprites.app` belongs to no Sprite at all and
+    // answers with the platform's own 404 page. Only the URL the API hands back
+    // routes to the Computer.
+    sprite.url = "https://frockbot-7e935317b60e-ezkh.sprites.app";
+    const botKey = `bot-1-${digest("bot-1").slice(0, 12)}`;
+    for (const [name, value] of [
+      ["viewer-token", "opaque-token\n"],
+      ["vnc-password", "secret\n"],
+    ]) {
+      sprite.files.set(`/home/box/.frockbot/bots/${botKey}/${name}`, {
+        bytes: Buffer.from(value!),
+        mode: 0o600,
+        mtime: new Date(),
+      });
+    }
+    await host.handle(request({ kind: "open" }));
+
+    const body = (await (
+      await host.handle(request({ kind: "viewer", action: "open" }))
+    ).json()) as { session?: { url: string } };
+
+    expect(new URL(body.session!.url).origin).toBe(sprite.url);
+    expect(new URL(body.session!.url).pathname).toBe("/index.html");
   });
 
   test("renewing a known viewer touches last-seen and returns the same session", async () => {

@@ -141,17 +141,27 @@ It reports the two quiet failures by name rather than waiting them out: a pull r
 
 Releases publish to npm through GitHub OIDC. There is no `NPM_TOKEN`, and no registry credential exists in this repository at all: each package names `timoconnellaus/frockbot` and the workflow file `release.yml` as its trusted publisher, and npm exchanges the job's OIDC identity for a credential that expires with the job. Provenance attestation comes with it, so `--provenance` is never passed.
 
-Trusted publishing cannot bootstrap itself. npm will only attach a trusted publisher to a package that already exists, so the very first publication of a name cannot come from a workflow that holds no token. `scripts/bootstrap-npm-trust.ts` breaks that loop once, from a maintainer's own npm session:
+Trusted publishing cannot bootstrap itself. npm will only attach a trusted publisher to a package that already exists, so the very first publication of a name cannot come from a workflow that holds no token. **Every new Package needs this once**, not just the first one: add a workspace under `packages/`, and the next tag's publish step fails on that name alone until it has been bootstrapped. Run it from a terminal, before the tag:
 
 ```
-npm login                                     # a 2FA session; npm trust rejects tokens
-bun scripts/bootstrap-npm-trust.ts            # show the plan, change nothing
-bun scripts/bootstrap-npm-trust.ts --confirm  # publish placeholders, then trust each
+bun run bootstrap:npm-trust
 ```
 
-It publishes a deprecated `0.0.0` placeholder under any name the registry does not have yet, then configures that package's trusted publisher. It is idempotent, so a name that already exists is never republished and a package that is already trusted is skipped. It needs npm 11.15.0 or later, which is what `npm trust` requires; the workflow itself only needs 11.5.1 and checks that before publishing.
+It publishes a deprecated `0.0.0` placeholder under any name the registry does not have yet, then configures that package's trusted publisher, showing the plan and asking before it changes anything.
 
-Once it has run, nothing about a release is manual again. A failure in the publish step reporting a 404 from the token exchange means the trusted publisher for that package is missing or misconfigured, not that the package is absent — re-run the bootstrap to reconcile it.
+It touches only the packages npm is missing, which is usually one or two, and asks npm nothing at all about the rest. That matters more than it looks: the session behind an npm password expires in minutes, and a pass that interrogated all sixty-odd packages spent it answering prompts about packages that needed nothing, then died before reaching the ones that did. Whether an existing package is trusted is not asked, because a package the registry already has was published by the release workflow, which is only possible if it is.
+
+The exception is a run that published a placeholder and then failed before trusting it. That leaves a package npm has and the workflow still cannot publish, which the default pass now skips. Name it to bootstrap it anyway — the failure says so when it happens:
+
+```
+bun run bootstrap:npm-trust @frockbot/plugin-applets
+```
+
+`scripts/bootstrap-npm-trust.sh` wraps `scripts/bootstrap-npm-trust.ts` with the two things that are easy to get wrong by hand. It provisions npm 11.15.0 or later into `node_modules/.cache` when the installed npm is older, because that is the version `npm trust` requires — the workflow itself needs only 11.5.1 and checks that before publishing. And it signs in, then leaves the terminal to npm for every call that changes the registry.
+
+That second part is the one worth knowing about. npm demands a one-time password **per operation, not per session**, so signing in once does not settle it: a run that bootstraps five packages asks for a browser confirmation several times over. npm asks by printing an authentication URL and waiting. Capture that output and the question disappears — npm waits on a prompt nobody was shown, and the eventual failure reads as `EOTP` with the URL redacted, which looks like a rejected credential rather than an unanswered question. So publishing, deprecating and trusting inherit the terminal, and only the read-only probes whose output the script parses are captured. It follows that this cannot be run through a pipe or an agent session; it needs a real terminal.
+
+A failure in the publish step reporting a 404 from the token exchange means the trusted publisher for that package is missing or misconfigured, not that the package is absent — run the bootstrap to reconcile it, then re-run the release.
 
 ## Staging deployment
 
