@@ -193,3 +193,96 @@ export const run = () => ai.text({ prompt: 'hello' })
     await expect(client.callSource("echo", "run")).resolves.toBe("hello");
   });
 });
+
+describe("the in-process HTTP grant boundary", () => {
+  const boundaryClient = (doFetch: typeof fetch, source: string) =>
+    createClient({
+      hosts: {
+        "in-process": createInProcessHost({
+          grants: createInProcessGrants({
+            services,
+            fetch: doFetch,
+            timeoutMs: 50,
+            maxResponseBytes: 4,
+          }),
+        }),
+      },
+      plugins: [
+        {
+          id: "caller",
+          source: `
+let http
+export default ({ stubs }) => { http = stubs.http }
+${source}
+`,
+          host: "in-process",
+          stubs: [httpStub],
+        },
+      ],
+    });
+
+  it("does not forward a credential through a cross-origin redirect", async () => {
+    const seen: Array<{ origin: string; credential: string | null }> = [];
+    const client = boundaryClient(
+      ((input: Request) => {
+        seen.push({
+          origin: new URL(input.url).origin,
+          credential: input.headers.get("authorization"),
+        });
+        return Promise.resolve(
+          Response.redirect("https://attacker.example/stolen", 302),
+        );
+      }) as unknown as typeof fetch,
+      `export const rates = () => http.fetch('currency', '/rates')`,
+    );
+    await client.settled();
+
+    await expect(client.callSource("caller", "rates")).rejects.toThrow(
+      /redirect/,
+    );
+    expect(seen).toEqual([
+      { origin: "https://currency.showcase.test", credential: "Bearer hidden" },
+    ]);
+  });
+
+  it("rejects RequestInit fields outside the wire whitelist", async () => {
+    let called = false;
+    const client = boundaryClient(
+      (() => {
+        called = true;
+        return Promise.resolve(new Response("ok"));
+      }) as unknown as typeof fetch,
+      `export const rates = () => http.fetch('currency', '/rates', { redirect: 'follow' })`,
+    );
+    await client.settled();
+
+    await expect(client.callSource("caller", "rates")).rejects.toThrow(
+      /field "redirect" is not allowed/,
+    );
+    expect(called).toBe(false);
+  });
+
+  it("enforces a wall-clock deadline", async () => {
+    const client = boundaryClient(
+      (() => new Promise<Response>(() => undefined)) as unknown as typeof fetch,
+      `export const rates = () => http.fetch('currency', '/rates')`,
+    );
+    await client.settled();
+
+    await expect(client.callSource("caller", "rates")).rejects.toThrow(
+      /exceeded 50 ms/,
+    );
+  });
+
+  it("refuses a response body past the configured limit", async () => {
+    const client = boundaryClient(
+      (() => Promise.resolve(new Response("12345"))) as unknown as typeof fetch,
+      `export const rates = () => http.fetch('currency', '/rates')`,
+    );
+    await client.settled();
+
+    await expect(client.callSource("caller", "rates")).rejects.toThrow(
+      /exceeds 4 bytes/,
+    );
+  });
+});

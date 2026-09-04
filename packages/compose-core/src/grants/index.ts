@@ -8,6 +8,14 @@ export {
   storageStub,
 } from "./definitions";
 export { createInProcessGrants } from "./in-process";
+export {
+  boundedResponseText,
+  decodeHttpRequestOptions,
+  defaultHttpMaxResponseBytes,
+  defaultHttpTimeoutMs,
+  executeHttpGrantFetch,
+} from "./http";
+export type { HttpGrantExecution, HttpGrantLimits } from "./http";
 export type {
   AiTextInput,
   FilesOperation,

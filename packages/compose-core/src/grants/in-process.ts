@@ -4,20 +4,20 @@ import type {
   InProcessGrantInstance,
 } from "../host";
 import type { GrantMethodCall } from "../base";
+import { executeHttpGrantFetch, type HttpGrantLimits } from "./http";
 import type {
   AiTextInput,
   FileValue,
   FilesOperation,
   HttpGrantResponse,
   HttpOperation,
-  HttpRequestOptions,
   HttpServices,
   ScheduleOperation,
   StorageOperation,
 } from "./definitions";
 
 /** Options for the standard grants' in-process reference implementation. */
-export interface InProcessGrantsOptions {
+export interface InProcessGrantsOptions extends HttpGrantLimits {
   services?: HttpServices;
   respond?: (input: AiTextInput) => string | Promise<string>;
   fetch?: typeof fetch;
@@ -222,6 +222,7 @@ const scheduleGrant = (): InProcessGrant => {
 const httpGrant = (
   services: HttpServices,
   doFetch: typeof fetch,
+  limits: HttpGrantLimits,
 ): InProcessGrant => ({
   start(context) {
     return {
@@ -238,26 +239,17 @@ const httpGrant = (
             }),
           );
           const [approvedService, approvedPath, approvedInit] = input.args;
-          const name = string(approvedService, "HTTP service");
-          const policy = services[name];
-          if (!policy) throw new Error(`no service named "${name}" is granted`);
-          const base = new URL(policy.origin);
-          const url = new URL(string(approvedPath, "HTTP path"), base);
-          if (url.origin !== base.origin) {
-            throw new Error(`HTTP path leaves the granted "${name}" origin`);
-          }
-          const request = (approvedInit ?? {}) as HttpRequestOptions;
-          const headers = new Headers(request.headers);
-          if (policy.credential) {
-            headers.set(policy.credential.header, policy.credential.value);
-          }
-          const response = await doFetch(url, { ...request, headers });
-          return {
-            status: response.status,
-            ok: response.ok,
-            headers: Object.fromEntries(response.headers),
-            body: await response.text(),
-          };
+          return await executeHttpGrantFetch(
+            {
+              services,
+              prefix: "@frockbot/compose-core",
+              ...limits,
+              send: (request) => doFetch(request),
+            },
+            approvedService,
+            approvedPath,
+            approvedInit,
+          );
         },
       }),
     };
@@ -376,7 +368,14 @@ export function createInProcessGrants(
   return {
     storage: storageGrant(),
     schedule: scheduleGrant(),
-    http: httpGrant(options.services ?? {}, options.fetch ?? fetch),
+    http: httpGrant(options.services ?? {}, options.fetch ?? fetch, {
+      ...(options.timeoutMs === undefined
+        ? {}
+        : { timeoutMs: options.timeoutMs }),
+      ...(options.maxResponseBytes === undefined
+        ? {}
+        : { maxResponseBytes: options.maxResponseBytes }),
+    }),
     ai: aiGrant(options.respond ?? ((input) => input.prompt)),
     files: filesGrant(),
   };
