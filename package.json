@@ -27,7 +27,7 @@
     "dev": "bun run build:webui && bun run --filter @frockbot/desktop dev",
     "build": "bun run build:webui && bun run --filter @frockbot/desktop build && bun run build:cloudflare && bun run build:marketing",
     "proof:cordis": "bun run --filter @frockbot/cordis-poc typecheck && bun run --filter @frockbot/cordis-poc test && bun run --filter @frockbot/agent-runtime build && bun run --filter @frockbot/cordis-poc smoke",
-    "typecheck": "bun scripts/check-kernel-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/build-applets-package.ts --check && bun scripts/typecheck.ts",
+    "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/check-kernel-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/build-applets-package.ts --check && bun scripts/typecheck.ts",
     "lint:ui-styles": "bun scripts/check-ui-styles.ts",
     "lint:kernel-imports": "bun scripts/check-kernel-imports.ts",
     "lint:computer-host-imports": "bun scripts/check-computer-host-imports.ts",
@@ -35,7 +35,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint-staged": "lint-staged",
-    "prepare": "husky"
+    "prepare": "husky",
+    "generate:protocol": "bun scripts/generate-typescript-protocol.ts && bun scripts/generate-dart-protocol.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",
@@ -47,6 +48,7 @@
     "lint-staged": "^17.4.1",
     "prettier": "^3.9.6",
     "prettier-plugin-sh": "^0.19.0",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "ajv": "8.18.0"
   }
 }

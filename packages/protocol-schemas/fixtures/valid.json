@@ -1,0 +1,850 @@
+[
+  {
+    "name": "Identifier valid",
+    "schema": "Identifier",
+    "value": "command-1"
+  },
+  {
+    "name": "BotId valid",
+    "schema": "BotId",
+    "value": "default"
+  },
+  {
+    "name": "Digest valid",
+    "schema": "Digest",
+    "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "name": "Instant valid",
+    "schema": "Instant",
+    "value": "2026-09-05T00:00:00.000Z"
+  },
+  {
+    "name": "HttpsUrl valid",
+    "schema": "HttpsUrl",
+    "value": "https://bot.frockbot.com/return"
+  },
+  {
+    "name": "Json valid",
+    "schema": "Json",
+    "value": null
+  },
+  {
+    "name": "CatalogRef valid",
+    "schema": "CatalogRef",
+    "value": {
+      "id": "command-1",
+      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "ClientHello valid",
+    "schema": "ClientHello",
+    "value": {
+      "schemaVersion": 1,
+      "protocolVersion": 1,
+      "nativeVersion": "1.1.0",
+      "catalogs": []
+    }
+  },
+  {
+    "name": "CompatibilityView valid",
+    "schema": "CompatibilityView",
+    "value": {
+      "schemaVersion": 1,
+      "protocolMin": 1,
+      "protocolMax": 1,
+      "minimumNativeVersion": "1.1.0",
+      "catalogs": []
+    }
+  },
+  {
+    "name": "UpdateRequired valid",
+    "schema": "UpdateRequired",
+    "value": {
+      "schemaVersion": 1,
+      "status": "update-required",
+      "message": "Update the app to continue using FrockBot."
+    }
+  },
+  {
+    "name": "AuthIdentity valid",
+    "schema": "AuthIdentity",
+    "value": {
+      "schemaVersion": 1,
+      "userId": "command-1",
+      "isAdmin": false
+    }
+  },
+  {
+    "name": "AuthStartCommand valid",
+    "schema": "AuthStartCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "codeChallenge": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "codeChallengeMethod": "S256",
+      "state": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "returnUri": "https://bot.frockbot.com/return"
+    }
+  },
+  {
+    "name": "AuthStartView valid",
+    "schema": "AuthStartView",
+    "value": {
+      "schemaVersion": 1,
+      "authorizationUrl": "https://bot.frockbot.com/return",
+      "expiresAt": "2026-09-05T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "AuthExchangeCommand valid",
+    "schema": "AuthExchangeCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "code": "1.1.0",
+      "codeVerifier": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "state": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "returnUri": "https://bot.frockbot.com/return"
+    }
+  },
+  {
+    "name": "AuthSessionView valid",
+    "schema": "AuthSessionView",
+    "value": {
+      "schemaVersion": 1,
+      "sessionId": "command-1",
+      "userId": "command-1",
+      "expiresAt": "2026-09-05T00:00:00.000Z",
+      "sessionToken": "1.1.0"
+    }
+  },
+  {
+    "name": "SessionRevokeCommand valid",
+    "schema": "SessionRevokeCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "action": "sign-out",
+      "sessionId": "command-1"
+    }
+  },
+  {
+    "name": "SheepRecipe valid",
+    "schema": "SheepRecipe",
+    "value": {
+      "schemaVersion": 1,
+      "background": "1.1.0",
+      "upper": "1.1.0",
+      "middle": "1.1.0",
+      "lower": "1.1.0"
+    }
+  },
+  {
+    "name": "BotRegistration valid",
+    "schema": "BotRegistration",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "registeredAt": "2026-09-05T00:00:00.000Z",
+      "initialName": "1.1.0",
+      "sheep": {
+        "schemaVersion": 1,
+        "background": "1.1.0",
+        "upper": "1.1.0",
+        "middle": "1.1.0",
+        "lower": "1.1.0"
+      }
+    }
+  },
+  {
+    "name": "BotDirectory valid",
+    "schema": "BotDirectory",
+    "value": {
+      "schemaVersion": 1,
+      "revision": 0,
+      "bots": []
+    }
+  },
+  {
+    "name": "BotLifecycle valid",
+    "schema": "BotLifecycle",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "status": "active",
+      "revision": 0
+    }
+  },
+  {
+    "name": "BotLifecycleCommand valid",
+    "schema": "BotLifecycleCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/archive",
+      "commandId": "command-1",
+      "botId": "default"
+    }
+  },
+  {
+    "name": "BotCreateCommand valid",
+    "schema": "BotCreateCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/create",
+      "commandId": "command-1",
+      "expectedRevision": 0,
+      "botId": "default",
+      "name": "1.1.0"
+    }
+  },
+  {
+    "name": "BotLifecycleReceipt valid",
+    "schema": "BotLifecycleReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "botId": "default",
+      "status": "pending",
+      "lifecycle": {
+        "schemaVersion": 1,
+        "botId": "default",
+        "status": "active",
+        "revision": 0
+      }
+    }
+  },
+  {
+    "name": "SkillRef valid",
+    "schema": "SkillRef",
+    "value": {
+      "schemaVersion": 1,
+      "source": "bot",
+      "slug": "default"
+    }
+  },
+  {
+    "name": "TurnCommand valid",
+    "schema": "TurnCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "text": "1.1.0"
+    }
+  },
+  {
+    "name": "StopCommand valid",
+    "schema": "StopCommand",
+    "value": {
+      "schemaVersion": 1,
+      "action": "stop",
+      "commandId": "command-1",
+      "runId": "command-1"
+    }
+  },
+  {
+    "name": "RunFenceCommand valid",
+    "schema": "RunFenceCommand",
+    "value": {
+      "schemaVersion": 1,
+      "action": "fence-admission"
+    }
+  },
+  {
+    "name": "ReconcileCommand valid",
+    "schema": "ReconcileCommand",
+    "value": {
+      "schemaVersion": 1,
+      "action": "resume"
+    }
+  },
+  {
+    "name": "DurableReceipt valid",
+    "schema": "DurableReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "owner": {
+        "kind": "user",
+        "id": "command-1"
+      },
+      "status": "accepted",
+      "recordedAt": "2026-09-05T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "TurnRefusal valid",
+    "schema": "TurnRefusal",
+    "value": {
+      "schemaVersion": 1,
+      "status": "refused",
+      "reason": "busy",
+      "error": "1.1.0"
+    }
+  },
+  {
+    "name": "RunCursor valid",
+    "schema": "RunCursor",
+    "value": "run-index:2026-09-05T00:00:00.000Z:run-1"
+  },
+  {
+    "name": "Page valid",
+    "schema": "Page",
+    "value": {
+      "truncated": false
+    }
+  },
+  {
+    "name": "Conversation valid",
+    "schema": "Conversation",
+    "value": {
+      "schemaVersion": 1,
+      "conversationId": "1.1.0",
+      "ordinal": 1,
+      "startedAt": "2026-09-05T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "ConversationList valid",
+    "schema": "ConversationList",
+    "value": {
+      "schemaVersion": 1,
+      "conversations": []
+    }
+  },
+  {
+    "name": "ConversationStartCommand valid",
+    "schema": "ConversationStartCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1"
+    }
+  },
+  {
+    "name": "ConversationQuery valid",
+    "schema": "ConversationQuery",
+    "value": {
+      "schemaVersion": 1
+    }
+  },
+  {
+    "name": "SendPayload valid",
+    "schema": "SendPayload",
+    "value": {
+      "type": "text",
+      "text": "1.1.0"
+    }
+  },
+  {
+    "name": "RunEvent valid",
+    "schema": "RunEvent",
+    "value": {
+      "type": "send/to-user",
+      "payload": {
+        "type": "text",
+        "text": "1.1.0"
+      }
+    }
+  },
+  {
+    "name": "RunOutcome valid",
+    "schema": "RunOutcome",
+    "value": {
+      "type": "completed",
+      "text": "1.1.0"
+    }
+  },
+  {
+    "name": "Run valid",
+    "schema": "Run",
+    "value": {
+      "schemaVersion": 1,
+      "runId": "command-1",
+      "admittedAt": "2026-09-05T00:00:00.000Z",
+      "input": "1.1.0",
+      "status": "running",
+      "events": []
+    }
+  },
+  {
+    "name": "Announcement valid",
+    "schema": "Announcement",
+    "value": {
+      "type": "bot/renamed",
+      "announcementId": "1.1.0",
+      "at": "2026-09-05T00:00:00.000Z",
+      "from": "1.1.0",
+      "to": "1.1.0",
+      "namedBy": "user"
+    }
+  },
+  {
+    "name": "ConversationProjection valid",
+    "schema": "ConversationProjection",
+    "value": {
+      "schemaVersion": 1,
+      "runs": [],
+      "page": {
+        "truncated": false
+      }
+    }
+  },
+  {
+    "name": "StopReceipt valid",
+    "schema": "StopReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "status": "accepted",
+      "commandId": "command-1",
+      "runId": "command-1",
+      "run": {
+        "schemaVersion": 1,
+        "runId": "command-1",
+        "admittedAt": "2026-09-05T00:00:00.000Z",
+        "input": "1.1.0",
+        "status": "running",
+        "events": []
+      }
+    }
+  },
+  {
+    "name": "ObserverCursor valid",
+    "schema": "ObserverCursor",
+    "value": "0"
+  },
+  {
+    "name": "StateFrame valid",
+    "schema": "StateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "state/event",
+      "cursor": "0",
+      "topic": "computer"
+    }
+  },
+  {
+    "name": "ObserverState valid",
+    "schema": "ObserverState",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "cursor": "0",
+      "status": "connecting"
+    }
+  },
+  {
+    "name": "Notification valid",
+    "schema": "Notification",
+    "value": {
+      "notificationId": "1.1.0",
+      "runId": "command-1",
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "title": "1.1.0",
+      "body": "1.1.0"
+    }
+  },
+  {
+    "name": "NotificationList valid",
+    "schema": "NotificationList",
+    "value": {
+      "schemaVersion": 1,
+      "notifications": []
+    }
+  },
+  {
+    "name": "NotificationAck valid",
+    "schema": "NotificationAck",
+    "value": {
+      "schemaVersion": 1,
+      "action": "acknowledge",
+      "notificationId": "1.1.0"
+    }
+  },
+  {
+    "name": "Acknowledgement valid",
+    "schema": "Acknowledgement",
+    "value": {
+      "schemaVersion": 1,
+      "status": "acknowledged"
+    }
+  },
+  {
+    "name": "UnreadView valid",
+    "schema": "UnreadView",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "count": 0,
+      "capped": false,
+      "unread": false,
+      "manuallyUnread": false
+    }
+  },
+  {
+    "name": "MarkReadCommand valid",
+    "schema": "MarkReadCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/mark-read",
+      "commandId": "command-1",
+      "botId": "default",
+      "upToCursor": "run-index:2026-09-05T00:00:00.000Z:run-1"
+    }
+  },
+  {
+    "name": "SettingField valid",
+    "schema": "SettingField",
+    "value": {
+      "id": "command-1",
+      "label": "1.1.0",
+      "kind": "text",
+      "value": null,
+      "editable": false
+    }
+  },
+  {
+    "name": "SettingsFrame valid",
+    "schema": "SettingsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "home": "models",
+      "revision": 0,
+      "ownerId": "command-1",
+      "title": "1.1.0",
+      "sections": []
+    }
+  },
+  {
+    "name": "AppletViewerToken valid",
+    "schema": "AppletViewerToken",
+    "value": {
+      "token": "1.1.0",
+      "expiresAt": "2026-09-05T00:00:00.000Z",
+      "socketUrl": "wss://bot.frockbot.com/view"
+    }
+  },
+  {
+    "name": "ImmutableArtifact valid",
+    "schema": "ImmutableArtifact",
+    "value": {
+      "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size": 1,
+      "mediaType": "application/json"
+    }
+  },
+  {
+    "name": "WebArtifact valid",
+    "schema": "WebArtifact",
+    "value": {
+      "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size": 1,
+      "mediaType": "text/html",
+      "bundlerVersion": "1.1.0"
+    }
+  },
+  {
+    "name": "FallbackBootstrap valid",
+    "schema": "FallbackBootstrap",
+    "value": {
+      "schemaVersion": 1,
+      "appletId": "user.applet",
+      "userId": "command-1",
+      "generationId": "command-1",
+      "navigationEpoch": "command-1",
+      "bootstrapUrl": "https://bot.frockbot.com/return",
+      "artifactOrigin": "https://bot.frockbot.com/return",
+      "artifact": {
+        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 1,
+        "mediaType": "text/html",
+        "bundlerVersion": "1.1.0"
+      },
+      "viewer": {
+        "token": "1.1.0",
+        "expiresAt": "2026-09-05T00:00:00.000Z",
+        "socketUrl": "wss://bot.frockbot.com/view"
+      }
+    }
+  },
+  {
+    "name": "ActionValueSchema valid",
+    "schema": "ActionValueSchema",
+    "value": {
+      "type": "string",
+      "maxLength": 1
+    }
+  },
+  {
+    "name": "ActionSchema valid",
+    "schema": "ActionSchema",
+    "value": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "A2uiContribution valid",
+    "schema": "A2uiContribution",
+    "value": {
+      "schemaVersion": 1,
+      "kind": "a2ui",
+      "slot": "frockbot.application-settings-sections",
+      "artifact": {
+        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 1,
+        "mediaType": "application/json"
+      },
+      "protocolVersion": "0.9.1",
+      "catalog": {
+        "id": "command-1",
+        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "actions": []
+    }
+  },
+  {
+    "name": "A2uiSurface valid",
+    "schema": "A2uiSurface",
+    "value": {
+      "schemaVersion": 1,
+      "surfaceId": "command-1",
+      "userId": "command-1",
+      "botId": "default",
+      "packageId": "command-1",
+      "generationId": "command-1",
+      "revision": 0,
+      "cursor": "0",
+      "contribution": {
+        "schemaVersion": 1,
+        "kind": "a2ui",
+        "slot": "frockbot.application-settings-sections",
+        "artifact": {
+          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1,
+          "mediaType": "application/json"
+        },
+        "protocolVersion": "0.9.1",
+        "catalog": {
+          "id": "command-1",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "actions": []
+      },
+      "snapshot": {
+        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 1,
+        "mediaType": "application/json"
+      }
+    }
+  },
+  {
+    "name": "A2uiActionCommand valid",
+    "schema": "A2uiActionCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "surfaceId": "command-1",
+      "packageId": "command-1",
+      "generationId": "command-1",
+      "revision": 0,
+      "actionId": "command-1",
+      "input": {}
+    }
+  },
+  {
+    "name": "SurfaceUnavailable valid",
+    "schema": "SurfaceUnavailable",
+    "value": {
+      "schemaVersion": 1,
+      "surfaceId": "command-1",
+      "reason": "unsupported-protocol",
+      "message": "1.1.0"
+    }
+  },
+  {
+    "name": "UnreadDirectory valid",
+    "schema": "UnreadDirectory",
+    "value": {
+      "schemaVersion": 1,
+      "unread": []
+    }
+  },
+  {
+    "name": "RunLookup valid",
+    "schema": "RunLookup",
+    "value": {
+      "schemaVersion": 1,
+      "state": "not-admitted"
+    }
+  },
+  {
+    "name": "BotIdentity valid",
+    "schema": "BotIdentity",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "name": "1.1.0",
+      "namedBy": "user",
+      "hiddenFromSidebar": false
+    }
+  },
+  {
+    "name": "cursor boundary 1",
+    "schema": "StateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "state/ready",
+      "cursor": "1"
+    }
+  },
+  {
+    "name": "cursor boundary 9007199254740991",
+    "schema": "StateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "state/ready",
+      "cursor": "9007199254740991"
+    }
+  },
+  {
+    "name": "cursor boundary 8999999999999999",
+    "schema": "StateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "state/ready",
+      "cursor": "8999999999999999"
+    }
+  },
+  {
+    "name": "cursor boundary 9007199254740990",
+    "schema": "StateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "state/ready",
+      "cursor": "9007199254740990"
+    }
+  },
+  {
+    "name": "event invalidation",
+    "schema": "StateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "state/event",
+      "cursor": "12",
+      "topic": "runs"
+    }
+  },
+  {
+    "name": "gap reset",
+    "schema": "StateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "state/reset",
+      "cursor": "12",
+      "reason": "gap"
+    }
+  },
+  {
+    "name": "explicit supersede",
+    "schema": "TurnCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "text": "Use this instead",
+      "supersedes": {}
+    }
+  },
+  {
+    "name": "unicode turn",
+    "schema": "TurnCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "text": "Hello 🐑 こんにちは"
+    }
+  },
+  {
+    "name": "three skills",
+    "schema": "TurnCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "text": "1.1.0",
+      "skills": [
+        {
+          "schemaVersion": 1,
+          "source": "bot",
+          "slug": "research"
+        },
+        {
+          "schemaVersion": 1,
+          "source": "user",
+          "slug": "style"
+        },
+        {
+          "schemaVersion": 1,
+          "source": "plugin",
+          "slug": "test",
+          "packageId": "example"
+        }
+      ]
+    }
+  },
+  {
+    "name": "valid completed conversation",
+    "schema": "ConversationProjection",
+    "value": {
+      "schemaVersion": 1,
+      "runs": [
+        {
+          "schemaVersion": 1,
+          "runId": "command-1",
+          "admittedAt": "2026-09-05T00:00:00.000Z",
+          "input": "1.1.0",
+          "status": "completed",
+          "events": [
+            {
+              "type": "send/to-user",
+              "payload": {
+                "type": "text",
+                "text": "Done"
+              }
+            }
+          ],
+          "outcome": {
+            "type": "completed",
+            "text": "Done"
+          }
+        }
+      ],
+      "page": {
+        "truncated": false
+      }
+    }
+  },
+  {
+    "name": "history next page",
+    "schema": "ConversationProjection",
+    "value": {
+      "schemaVersion": 1,
+      "runs": [],
+      "page": {
+        "truncated": true,
+        "nextCursor": "run-index:2026-09-05T00:00:00.000Z:run-1"
+      }
+    }
+  },
+  {
+    "name": "BotWriter valid",
+    "schema": "BotWriter",
+    "value": {
+      "kind": "bot",
+      "botId": "author",
+      "sessionId": "user:author",
+      "turnId": "turn-1"
+    }
+  }
+]
