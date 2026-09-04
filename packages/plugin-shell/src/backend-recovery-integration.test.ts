@@ -19,6 +19,7 @@ import { planBotRunRecovery } from "./backend-recovery.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
   CLIENT_RUN_PAGE_LIMIT,
+  CLIENT_RUN_SCAN_LIMIT,
   clientRunListWireBytes,
 } from "./run-protocol.js";
 
@@ -1473,6 +1474,139 @@ describe("Bot recovery", () => {
     expect(
       storage.listRequests.some((request) => request.prefix === "run:"),
     ).toBe(false);
+  });
+
+  /**
+   * The run index is global; the transcript is one conversation. These cover
+   * the shape that used to answer "this conversation is empty" whenever the
+   * newest page of the index happened to hold nothing the reader could see.
+   */
+  async function writeRunHistory(
+    storage: MemoryStorage,
+    runs: Array<{
+      runId: string;
+      sessionId: string;
+      turnType?: "chat" | "automation";
+    }>,
+  ): Promise<void> {
+    const baseTime = Date.parse("2026-09-01T00:00:00.000Z");
+    for (const [index, entry] of runs.entries()) {
+      const acceptedAt = new Date(baseTime + index * 1_000).toISOString();
+      const run = {
+        runId: entry.runId,
+        commandFingerprint: `fingerprint-${index}`,
+        sessionId: entry.sessionId,
+        acceptedAt,
+        input: "hello",
+        events: [],
+        effectAdmissions: [],
+        status: "completed",
+        phase: "executing",
+        compositionGenerationId: "test-composition-generation",
+        configurationSnapshot: initializeBotSettingsV1("primary"),
+        previousEventCount: 0,
+        responseText: "answer",
+        ...(entry.turnType && entry.turnType !== "chat"
+          ? { admission: { schemaVersion: 1, turnType: entry.turnType } }
+          : {}),
+      } satisfies StoredRun;
+      await storage.put({
+        [`run:${entry.runId}`]: run,
+        [`run-index:${acceptedAt}:${entry.runId}`]: entry.runId,
+      });
+    }
+  }
+
+  test("reaches an older conversation buried under newer Turns", async () => {
+    const storage = new MemoryStorage();
+    await writeRunHistory(storage, [
+      { runId: "run-older", sessionId: "user:primary:older" },
+      ...Array.from({ length: CLIENT_RUN_PAGE_LIMIT + 2 }, (_value, index) => ({
+        runId: `run-newer-${index.toString().padStart(3, "0")}`,
+        sessionId: "user:primary:newer",
+      })),
+    ]);
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    const page = await contribution.listRuns({
+      schemaVersion: 1,
+      conversationId: "user:primary:older",
+    });
+
+    expect(page.runs.map((run) => run.runId)).toEqual(["run-older"]);
+    expect(page.page.truncated).toBe(false);
+  });
+
+  test("keeps the visible chat reachable behind a page of automation", async () => {
+    const storage = new MemoryStorage();
+    await writeRunHistory(storage, [
+      { runId: "run-chat", sessionId: "user:primary" },
+      ...Array.from({ length: CLIENT_RUN_PAGE_LIMIT + 2 }, (_value, index) => ({
+        runId: `run-automation-${index.toString().padStart(3, "0")}`,
+        sessionId: "user:primary",
+        turnType: "automation" as const,
+      })),
+    ]);
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    const page = await contribution.listRuns({
+      schemaVersion: 1,
+      conversationId: "user:primary",
+    });
+
+    expect(page.runs.map((run) => run.runId)).toEqual(["run-chat"]);
+  });
+
+  test("offers a continuation when a scanned page selects nothing", async () => {
+    const storage = new MemoryStorage();
+    const buried = CLIENT_RUN_SCAN_LIMIT + CLIENT_RUN_PAGE_LIMIT;
+    await writeRunHistory(storage, [
+      { runId: "run-older", sessionId: "user:primary:older" },
+      ...Array.from({ length: buried }, (_value, index) => ({
+        runId: `run-newer-${index.toString().padStart(4, "0")}`,
+        sessionId: "user:primary:newer",
+      })),
+    ]);
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    let page = await contribution.listRuns({
+      schemaVersion: 1,
+      conversationId: "user:primary:older",
+    });
+    // The budget stops the scan short of the match, so the page must be empty
+    // *and* say where to resume. Answering `truncated: false` here is the
+    // defect: it told the client the conversation had nothing in it.
+    expect(page.runs).toEqual([]);
+    expect(page.page.truncated).toBe(true);
+    expect(page.page.nextCursor).toBeDefined();
+
+    const seen = new Set<string>();
+    let requests = 0;
+    while (page.runs.length === 0 && page.page.nextCursor) {
+      if (seen.has(page.page.nextCursor)) {
+        throw new Error("run list cursor stopped advancing");
+      }
+      seen.add(page.page.nextCursor);
+      requests += 1;
+      if (requests > 20) throw new Error("run list did not converge");
+      page = await contribution.listRuns({
+        schemaVersion: 1,
+        conversationId: "user:primary:older",
+        before: page.page.nextCursor,
+      });
+    }
+
+    expect(page.runs.map((run) => run.runId)).toEqual(["run-older"]);
+    expect(page.page.truncated).toBe(false);
   });
 
   test("pages large run history with bounded indexed reads and wire bytes", async () => {
