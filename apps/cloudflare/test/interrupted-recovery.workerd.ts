@@ -21,6 +21,19 @@ import {
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
 
+/**
+ * How far ahead a test arms an alarm it is about to fire by hand.
+ *
+ * A deadline already in the past can be delivered by the runtime before
+ * `runDurableObjectAlarm` asks for it; that helper then finds nothing
+ * scheduled, returns without running anything, and does not await the handler
+ * already in flight — so the assertions below could read the record
+ * mid-settlement. `runDurableObjectAlarm` fires whatever alarm is scheduled
+ * whether or not it is due, so a deadline out of the runtime's reach makes the
+ * hand-fired run the only delivery, and an awaited one.
+ */
+const HAND_FIRED_ALARM_DELAY_MS = 60_000;
+
 function bot(userId: string, botId: string) {
   return env.BOT_STATES.getByName(`${userId}:${botId}`);
 }
@@ -111,11 +124,13 @@ async function fireRecoveryAlarm(identity: {
 }): Promise<void> {
   await runInDurableObject(
     bot(identity.userId, identity.botId),
-    (_instance, state) => state.storage.setAlarm(Date.now()),
+    (_instance, state) =>
+      state.storage.setAlarm(Date.now() + HAND_FIRED_ALARM_DELAY_MS),
   );
-  // A deadline in the past may already have been delivered by the time this
-  // asks for it, so the return is not the claim — what the alarm left behind
-  // is. Either way this must not reject.
+  // The deadline is out of the runtime's own reach, so this hand-fired run is
+  // the only delivery of it and its handler is awaited here — whatever the
+  // alarm leaves behind is settled by the time this returns. It must not
+  // reject.
   await runDurableObjectAlarm(bot(identity.userId, identity.botId));
 }
 
