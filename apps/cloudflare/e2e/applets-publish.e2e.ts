@@ -276,6 +276,17 @@ test("a Bot publishes an Applet, it goes live in the canvas, and its tool reache
   );
   await expect(secondUi.getByText("Call mum")).toBeVisible({ timeout: 60_000 });
   await expect(ui.getByText("Call mum")).toBeVisible({ timeout: 60_000 });
+  // That Turn wrote no source, so the canvas stayed where the User was. A Turn
+  // that only calls an Applet's tool must not throw either page back to the
+  // code view — which is what the canvas did while it followed the store's
+  // re-reads instead of the files.
+  for (const open of [page, second]) {
+    await expect(
+      open
+        .getByRole("region", { name: /Applet Weekly Todos/ })
+        .getByRole("tab", { name: "App" }),
+    ).toHaveAttribute("aria-selected", "true");
+  }
   await shot(page, "canvas-live");
 
   // The code view is still there behind the Applet, one toggle away.
