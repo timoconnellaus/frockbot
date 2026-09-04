@@ -221,19 +221,14 @@ test("the shell is usable on a phone", async ({
    * This is the finding that made the phone unusable rather than cramped: the
    * gear lived in the right panel's header, the right panel is a closed drawer
    * at this width, and so Name, Label, Description, Routines, the audit log
-   * and template import had no route at all on a phone. The one control that
-   * did survive into the header collapsed a panel that was already collapsed.
-   * So: the gear is reachable with nothing else open, and that control is not
-   * here to be pressed instead.
+   * and template import had no route at all on a phone. Only the panel's own
+   * toggle survived into the header, which is why the pair read wrongly. The
+   * toggle stays — it is how the panel opens at this width — and the gear is
+   * now beside it, reachable with nothing else open.
    */
   await expect(
     page.getByRole("button", { name: "Bot settings" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /side panel/u }),
-    "the collapse control is still on the phone header",
-  ).toHaveCount(0);
-
   await page.getByRole("button", { name: "Bot settings" }).click();
   await expect(page.getByRole("region", { name: "Settings" })).toBeVisible();
   await shot(page, "06-bot-settings-panel");
@@ -269,6 +264,12 @@ test("the shell is usable on a phone", async ({
     .first()
     .click();
   await expect(page.getByRole("region", { name: "Search" })).toBeVisible();
+  // The scrim dims what the surface covers and takes no clicks of its own, so
+  // the workspace behind it stays live while it is open.
+  await expect(page.locator(".ui-sidebar-overlay__scrim")).toHaveCSS(
+    "pointer-events",
+    "none",
+  );
   await page.keyboard.press("Escape");
   await expect(page.getByRole("region", { name: "Search" })).toBeHidden();
   await expect(page.locator(".ui-sidebar-overlay__scrim")).toHaveCount(0);

@@ -912,7 +912,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             desktop width. The panel keeps them at every other size, so they
             are never drawn twice.
           -->
-          <div v-if="phoneLayout" class="topbar-bot-actions">
+          <div v-if="phoneLayout && !rightPanelOpen" class="topbar-bot-actions">
             <k-slot name="frockbot.bot-actions" />
           </div>
         </header>
@@ -1357,7 +1357,18 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               -->
               <AppletCanvas v-if="appletCanvasOpen" />
               <template v-else>
-                <header class="right-panel-header">
+                <!--
+                  The Bot's own controls sit wherever they can actually be
+                  pressed, and in exactly one place: here at desktop widths and
+                  whenever the panel is over the conversation, in the topbar on
+                  a phone with the panel closed. Two gears with the same name
+                  is two answers to "where is Bot settings", and one of them is
+                  always the one behind the open drawer.
+                -->
+                <header
+                  v-if="!phoneLayout || rightPanelOpen"
+                  class="right-panel-header"
+                >
                   <k-slot name="frockbot.bot-actions" />
                 </header>
                 <div class="right-panel-body">
@@ -1390,12 +1401,14 @@ function handleComposerKeydown(event: KeyboardEvent): void {
       </aside>
 
       <!--
-        Collapsing the side panel is a desktop gesture: on a phone the panel
-        is a drawer that is already closed, so the control said "hide" about
-        something that was not there, while the gear it shared a row with had
-        nowhere to be at all (it is in the topbar above).
+        The panel's own toggle. It stays at every width: on a phone the panel
+        is a drawer, and this is the only way to open it — the Bot's own
+        controls moved to the topbar (above), but the panel holds more than
+        they do. What made it read wrongly on a phone was being the *only*
+        survivor of that pair, saying "hide" beside a gear that had nowhere
+        to be.
       -->
-      <div v-if="!phoneLayout" class="window-actions">
+      <div class="window-actions">
         <UiIconButton
           class="panel-toggle"
           :icon="rightPanelOpen ? 'chevrons-right' : 'chevrons-left'"

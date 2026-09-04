@@ -1193,11 +1193,15 @@
     padding-left: 0;
   }
 
-  /* No window chrome and no collapse control at this width, so the row ends
-     where the Bot's own actions do. */
+  /* No window chrome to clear, but the panel toggle still sits at the
+     trailing edge, so the row ends before it rather than under it. */
   .topbar {
     gap: 8px;
-    padding: 0 4px;
+    padding: 0 52px 0 4px;
+  }
+
+  .window-actions {
+    padding: 0 8px;
   }
 
   .brand-mark {

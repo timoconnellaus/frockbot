@@ -47,24 +47,17 @@ onBeforeUnmount(() => restoreFocus?.focus());
     the two was the live one. Dimming what the panel is over says it, and gives
     the pointer the dismissal every other overlay in the product has.
 
-    It is a pointer shortcut, not a second control: the panel's own Close
-    button and Escape are the announced ways out, so it stays out of the
-    accessibility tree rather than becoming a duplicate "Close panel".
+    It dims and nothing else: these surfaces are not modal. The workspace
+    behind one stays live — the composer takes a message while Plugins is
+    open, a Package page runs beside its own surface — so a layer that ate the
+    pointer would change what the app is, not just how it looks. Escape and
+    the panel's own Close button are the ways out, and they are enough.
 
-    And it is not transitioned. A scrim that fades out is a scrim that is still
-    over the window while it fades; one whose leave never completed sat there
-    for the rest of the session, swallowing every click on the Bot list
-    underneath it. A layer that intercepts the pointer leaves the moment it
-    stops meaning anything.
+    It is a `v-if` rather than a transition for the same reason a fade would be
+    wrong: an element that outlives its panel is one nobody can see and
+    everybody's clicks land on.
   -->
-  <button
-    v-if="open"
-    type="button"
-    class="ui-sidebar-overlay__scrim"
-    tabindex="-1"
-    aria-hidden="true"
-    @click="emit('close')"
-  />
+  <div v-if="open" class="ui-sidebar-overlay__scrim" aria-hidden="true"></div>
   <Transition name="ui-surface">
     <aside
       v-if="open"
@@ -95,10 +88,9 @@ onBeforeUnmount(() => restoreFocus?.focus());
   position: absolute;
   z-index: var(--frock-layer-surface);
   inset: 0;
-  border: 0;
-  padding: 0;
   background: var(--frock-overlay-tint);
-  cursor: pointer;
+  /* Decoration, not a control: the workspace underneath stays usable. */
+  pointer-events: none;
 }
 
 .ui-sidebar-overlay {
