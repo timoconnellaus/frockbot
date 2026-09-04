@@ -1,10 +1,13 @@
 import {
+  boundedModelProviderReasonV1,
   type LlmMessage,
   type LlmProvider,
   type LlmStreamEvent,
   MODEL_REQUEST_DEADLINES_V1,
   type ModelRequestDeadlinesV1,
   ModelRequestDeadlineError,
+  ModelProviderFailureError,
+  type ModelProviderFailureClassV1,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
@@ -17,11 +20,110 @@ export type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-export class OpenAICompatibleHttpError extends Error {
-  constructor(readonly status: number) {
-    super(`Model request failed (${status})`);
+export class OpenAICompatibleHttpError extends ModelProviderFailureError {
+  constructor(
+    readonly status: number,
+    reason = `Model request failed (${status})`,
+    retryAfterMs?: number,
+    errorCode?: string,
+  ) {
+    super({
+      classification: classifyOpenAICompatibleFailureV1(status, errorCode),
+      reason,
+      ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+    });
     this.name = "OpenAICompatibleHttpError";
   }
+}
+
+const CONTENT_POLICY_CODES = new Set([
+  "content_filter",
+  "content_policy_violation",
+  "moderation_blocked",
+  "safety_violation",
+]);
+
+export function classifyOpenAICompatibleFailureV1(
+  status: number,
+  errorCode?: string,
+): ModelProviderFailureClassV1 {
+  if (errorCode && CONTENT_POLICY_CODES.has(errorCode.toLowerCase())) {
+    return "permanent";
+  }
+  if (status === 408 || status === 429 || status >= 500) return "transient";
+  if ([400, 401, 403, 404, 413].includes(status)) return "permanent";
+  return "unknown";
+}
+
+export function retryAfterMillisecondsV1(
+  value: string | null,
+  now = Date.now(),
+): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.ceil(seconds * 1000);
+  }
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
+}
+
+function openAIErrorDetailV1(text: string): {
+  reason?: string;
+  code?: string;
+} {
+  if (!text.trim()) return {};
+  try {
+    const payload = JSON.parse(text) as unknown;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return { reason: text };
+    }
+    const error = (payload as Record<string, unknown>).error;
+    if (typeof error === "string") return { reason: error };
+    if (!error || typeof error !== "object" || Array.isArray(error)) return {};
+    const record = error as Record<string, unknown>;
+    return {
+      ...(typeof record.message === "string" ? { reason: record.message } : {}),
+      ...(typeof record.code === "string"
+        ? { code: record.code }
+        : typeof record.type === "string"
+          ? { code: record.type }
+          : {}),
+    };
+  } catch {
+    return { reason: text };
+  }
+}
+
+function networkFailureV1(error: unknown): ModelProviderFailureError {
+  const message = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error ? error.name : "";
+  const transient =
+    error instanceof TypeError ||
+    ["NetworkError", "TimeoutError"].includes(name) ||
+    /\b(?:ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|network|socket|gateway timeout)\b/i.test(
+      message,
+    );
+  return new ModelProviderFailureError({
+    classification: transient ? "transient" : "unknown",
+    reason: message,
+  });
+}
+
+async function httpFailureV1(response: Response): Promise<never> {
+  const text = (await response.text().catch(() => "")).slice(0, 2_000);
+  const detail = openAIErrorDetailV1(text);
+  const reason = boundedModelProviderReasonV1(
+    detail.reason
+      ? `Model request failed (${response.status}): ${detail.reason}`
+      : `Model request failed (${response.status})`,
+  );
+  throw new OpenAICompatibleHttpError(
+    response.status,
+    reason,
+    retryAfterMillisecondsV1(response.headers.get("retry-after")),
+    detail.code,
+  );
 }
 
 export interface OpenAICompatibleConfig {
@@ -548,37 +650,50 @@ export class OpenAICompatibleProvider implements LlmProvider {
     // request and then went quiet held the Turn open for as long as the socket
     // stayed up — seventeen minutes, in the incident this exists for, with
     // nothing on the person's screen the whole time.
-    yield* streamWithModelRequestDeadlinesV1(
-      async (deadlineSignal) => {
-        const response = await fetcher(
-          `${this.config.baseUrl}/chat/completions`,
-          {
-            method: "POST",
-            headers,
-            body: JSON.stringify(
-              requestToWire(request, {
-                ...(this.config.acceptsImages === undefined
-                  ? {}
-                  : { acceptsImages: this.config.acceptsImages }),
-              }),
-            ),
-            signal: deadlineSignal,
-          },
-        );
-        if (!response.ok) {
-          await response.body?.cancel();
-          throw new OpenAICompatibleHttpError(response.status);
-        }
-        if (!response.body)
-          throw new Error("Model response did not include a stream");
-        return response.body;
-      },
-      signal,
-      {
-        ...(this.config.deadlines ? { deadlines: this.config.deadlines } : {}),
-        ...(this.config.schedule ? { schedule: this.config.schedule } : {}),
-      },
-    );
+    try {
+      yield* streamWithModelRequestDeadlinesV1(
+        async (deadlineSignal) => {
+          const response = await fetcher(
+            `${this.config.baseUrl}/chat/completions`,
+            {
+              method: "POST",
+              headers,
+              body: JSON.stringify(
+                requestToWire(request, {
+                  ...(this.config.acceptsImages === undefined
+                    ? {}
+                    : { acceptsImages: this.config.acceptsImages }),
+                }),
+              ),
+              signal: deadlineSignal,
+            },
+          );
+          if (!response.ok) await httpFailureV1(response);
+          if (!response.body)
+            throw new Error("Model response did not include a stream");
+          return response.body;
+        },
+        signal,
+        {
+          ...(this.config.deadlines
+            ? { deadlines: this.config.deadlines }
+            : {}),
+          ...(this.config.schedule ? { schedule: this.config.schedule } : {}),
+        },
+      );
+    } catch (error) {
+      if (signal.aborted || error instanceof ModelProviderFailureError) {
+        throw error;
+      }
+      if (error instanceof ModelRequestDeadlineError) {
+        if (error.phase === "idle") throw error;
+        throw new ModelProviderFailureError({
+          classification: "transient",
+          reason: error.message,
+        });
+      }
+      throw networkFailureV1(error);
+    }
   }
 }
 

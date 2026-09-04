@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
+  ModelProviderFailureError,
   ModelRequestDeadlineError,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
@@ -86,8 +87,10 @@ describe("a model request that produces nothing", () => {
       () => undefined,
       (error: unknown) => error,
     );
-    expect(failure).toBeInstanceOf(ModelRequestDeadlineError);
-    expect((failure as ModelRequestDeadlineError).phase).toBe("first-byte");
+    expect(failure).toBeInstanceOf(ModelProviderFailureError);
+    expect((failure as ModelProviderFailureError).classification).toBe(
+      "transient",
+    );
     expect((failure as Error).message).toBe(
       MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
     );

@@ -1,7 +1,7 @@
 import {
-  LlmEffectNotStartedError,
   type LlmProvider,
   type LlmReconciliationCapability,
+  ModelProviderFailureError,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import { type Agent } from "@frockbot/kernel-agent-loop/agent";
@@ -94,16 +94,18 @@ class OllamaCloudProvider implements LlmProvider {
       !expectedGeneration ||
       binding.connectionId !== this.config.connectionId
     ) {
-      throw new LlmEffectNotStartedError(
-        "Ollama Cloud request has invalid Connection authority",
-      );
+      throw new ModelProviderFailureError({
+        classification: "permanent",
+        reason: "Ollama Cloud request has invalid Connection authority",
+      });
     }
     const existing = this.authorized.get(request.requestId);
     if (existing) {
       if (existing.lease.credentialGeneration !== expectedGeneration) {
-        throw new LlmEffectNotStartedError(
-          "Ollama Cloud request generation changed",
-        );
+        throw new ModelProviderFailureError({
+          classification: "permanent",
+          reason: "Ollama Cloud request generation changed",
+        });
       }
       return;
     }
@@ -135,11 +137,13 @@ class OllamaCloudProvider implements LlmProvider {
           .settleCredential(request.requestId)
           .catch(() => undefined);
       }
-      throw new LlmEffectNotStartedError(
-        error instanceof Error
-          ? error.message
-          : "Ollama Cloud credential is unavailable",
-      );
+      throw new ModelProviderFailureError({
+        classification: "unknown",
+        reason:
+          error instanceof Error
+            ? error.message
+            : "Ollama Cloud credential is unavailable",
+      });
     }
   }
 
@@ -168,9 +172,10 @@ class OllamaCloudProvider implements LlmProvider {
     await this.authorize(request);
     const authorization = this.authorized.get(request.requestId);
     if (!authorization) {
-      throw new LlmEffectNotStartedError(
-        "Ollama Cloud request authorization is unavailable",
-      );
+      throw new ModelProviderFailureError({
+        classification: "permanent",
+        reason: "Ollama Cloud request authorization is unavailable",
+      });
     }
     const provider = new OpenAICompatibleProvider({
       baseUrl: this.config.chatBaseUrl ?? ollamaChatBaseUrl(),
@@ -197,11 +202,14 @@ class OllamaCloudProvider implements LlmProvider {
       }
     } catch (error) {
       if (started || signal.aborted) throw error;
-      throw new LlmEffectNotStartedError(
-        error instanceof OpenAICompatibleHttpError || error instanceof Error
-          ? error.message
-          : "Ollama Cloud request did not reach the provider",
-      );
+      if (error instanceof ModelProviderFailureError) throw error;
+      throw new ModelProviderFailureError({
+        classification: "unknown",
+        reason:
+          error instanceof OpenAICompatibleHttpError || error instanceof Error
+            ? error.message
+            : "Ollama Cloud request did not reach the provider",
+      });
     }
   }
 }

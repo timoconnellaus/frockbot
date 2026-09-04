@@ -1,5 +1,6 @@
 import { MODEL_FIRST_BYTE_DEADLINE_MS_V1 } from "@frockbot/kernel-contracts";
 import { FROCK_AI_DEFAULT_AUTO_ROUTE } from "@frockbot/plugin-provider-frock-ai/catalog";
+import { FrockAiTransportErrorV1 } from "@frockbot/plugin-provider-frock-ai/runtime";
 
 export const DEFAULT_FROCK_AI_GATEWAY_ID_V1 = "flock";
 
@@ -58,6 +59,15 @@ export function compatChatCompletionsUrlV1(
   return `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/compat/chat/completions`;
 }
 
+function retryAfterMillisecondsV1(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0)
+    return Math.ceil(seconds * 1000);
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : undefined;
+}
+
 /**
  * A rejected request answers with a JSON error body rather than an SSE stream.
  * Left unchecked it decodes as a stream that ends before its terminal marker,
@@ -69,10 +79,34 @@ async function streamOrThrowV1(
 ): Promise<ReadableStream<Uint8Array>> {
   if (!response.ok) {
     const detail = (await response.text().catch(() => "")).slice(0, 512);
-    throw new Error(
+    let reason = detail;
+    let code: string | number | undefined;
+    try {
+      const payload = JSON.parse(detail) as unknown;
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        const error = (payload as Record<string, unknown>).error;
+        if (typeof error === "string") reason = error;
+        else if (error && typeof error === "object" && !Array.isArray(error)) {
+          const envelope = error as Record<string, unknown>;
+          if (typeof envelope.message === "string") reason = envelope.message;
+          if (
+            typeof envelope.code === "string" ||
+            typeof envelope.code === "number"
+          ) {
+            code = envelope.code;
+          }
+        }
+      }
+    } catch {
+      // The bounded non-JSON provider text is still a useful diagnostic.
+    }
+    throw new FrockAiTransportErrorV1(
       `AI Gateway rejected the request (${response.status})${
-        detail ? `: ${detail}` : ""
+        reason ? `: ${reason}` : ""
       }`,
+      response.status,
+      retryAfterMillisecondsV1(response.headers.get("retry-after")),
+      code,
     );
   }
   if (!response.body) {

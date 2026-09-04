@@ -1,21 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import {
-  LlmEffectNotStartedError,
   MODEL_FIRST_BYTE_DEADLINE_MS_V1,
   MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
   MODEL_IDLE_DEADLINE_MS_V1,
   MODEL_IDLE_DEADLINE_REASON_V1,
   ModelRequestDeadlineError,
+  ModelProviderFailureError,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import { LlmRegistry } from "@frockbot/plugin-models";
+import type { Agent } from "@frockbot/kernel-agent-loop/agent";
 import { Context } from "cordis";
 import {
   FROCK_AI_CONNECTION_GENERATION,
   FROCK_AI_CONNECTION_ID,
   FROCK_AI_DEFAULT_MODEL,
 } from "./catalog.js";
-import { createFrockAiRuntimePlugin } from "./runtime.js";
+import {
+  classifyFrockAiFailureV1,
+  createFrockAiRuntimePlugin,
+  FrockAiTransportErrorV1,
+} from "./runtime.js";
 
 const request: NormalizedModelRequest = {
   requestId: "effect-1",
@@ -105,6 +110,135 @@ function pushableSse(): {
 }
 
 describe("Frock AI runtime Contribution", () => {
+  test("maps AI Gateway and Workers AI error envelopes", () => {
+    expect(
+      classifyFrockAiFailureV1(new FrockAiTransportErrorV1("busy", 503, 2_000)),
+    ).toMatchObject({
+      classification: "transient",
+      providerReason: "busy",
+      retryAfterMs: 2_000,
+    });
+    expect(
+      classifyFrockAiFailureV1({
+        error: { message: "model not found", code: "invalid_model" },
+      }),
+    ).toMatchObject({
+      classification: "permanent",
+      providerReason: "model not found",
+    });
+    expect(
+      classifyFrockAiFailureV1({ error: { message: "opaque", code: 7999 } }),
+    ).toMatchObject({ classification: "unknown", providerReason: "opaque" });
+  });
+
+  test("falls from a permanently rejected manual model to Auto immediately", async () => {
+    const calls: string[] = [];
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await root.plugin(
+      createFrockAiRuntimePlugin(
+        runtimeConfig((gatewayModel) => {
+          calls.push(gatewayModel);
+          return gatewayModel.startsWith("workers-ai/")
+            ? Promise.reject(new FrockAiTransportErrorV1("model missing", 404))
+            : Promise.resolve(
+                sse(
+                  'data: {"choices":[{"delta":{"content":"auto"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+                ),
+              );
+        }),
+      ),
+    );
+    const agent = {} as Agent;
+    const manual = {
+      ...request,
+      model: "@frock/deepseek-ai/deepseek-v4-flash-0731",
+    };
+    let failure: unknown;
+    try {
+      for await (const event of root.llm.stream(
+        manual,
+        new AbortController().signal,
+      )) {
+        void event;
+      }
+    } catch (error) {
+      failure = error;
+    }
+
+    const action = await root.waterfall(
+      "agent/request-error",
+      agent,
+      failure,
+      new AbortController().signal,
+      () => Promise.resolve({ kind: "fail" as const }),
+    );
+    expect(action).toEqual({ kind: "fallback" });
+    const fallback = await root.waterfall(
+      "agent/request",
+      agent,
+      manual,
+      new AbortController().signal,
+      () => Promise.resolve(manual),
+    );
+    expect(fallback.model).toBe(FROCK_AI_DEFAULT_MODEL);
+    for await (const event of root.llm.stream(
+      fallback,
+      new AbortController().signal,
+    )) {
+      void event;
+    }
+    expect(calls).toEqual([
+      "workers-ai/@cf/deepseek-ai/deepseek-v4-flash-0731",
+      "dynamic/configured-auto",
+    ]);
+    await root.fiber.dispose();
+  });
+
+  test("leaves a transient manual-model failure on the retry path", async () => {
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await root.plugin(
+      createFrockAiRuntimePlugin(
+        runtimeConfig(() =>
+          Promise.reject(new FrockAiTransportErrorV1("busy", 503)),
+        ),
+      ),
+    );
+    const agent = {} as Agent;
+    const manual = {
+      ...request,
+      model: "@frock/deepseek-ai/deepseek-v4-flash-0731",
+    };
+    let failure: unknown;
+    try {
+      for await (const event of root.llm.stream(
+        manual,
+        new AbortController().signal,
+      )) {
+        void event;
+      }
+    } catch (error) {
+      failure = error;
+    }
+    const action = await root.waterfall(
+      "agent/request-error",
+      agent,
+      failure,
+      new AbortController().signal,
+      () => Promise.resolve({ kind: "retry" as const }),
+    );
+    expect(action).toEqual({ kind: "retry" });
+    const retried = await root.waterfall(
+      "agent/request",
+      agent,
+      manual,
+      new AbortController().signal,
+      () => Promise.resolve(manual),
+    );
+    expect(retried.model).toBe(manual.model);
+    await root.fiber.dispose();
+  });
   test.each([
     [FROCK_AI_DEFAULT_MODEL, "dynamic/configured-auto"],
     [
@@ -241,7 +375,7 @@ describe("Frock AI runtime Contribution", () => {
           void event;
         }
       })(),
-    ).rejects.toBeInstanceOf(LlmEffectNotStartedError);
+    ).rejects.toBeInstanceOf(ModelProviderFailureError);
     expect(calls).toBe(0);
     await root.fiber.dispose();
   });
@@ -273,7 +407,7 @@ describe("Frock AI runtime Contribution", () => {
 
     // Uncertain here would park the run on a reconciliation this Package
     // cannot perform, wedging the Bot on a transient gateway error.
-    expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+    expect(failure).toBeInstanceOf(ModelProviderFailureError);
     expect((failure as Error).message).toBe(
       "AI Gateway rejected the request (429): slow down",
     );
@@ -399,8 +533,10 @@ describe("Frock AI deadlines", () => {
       () => undefined,
       (error: unknown) => error,
     );
-    expect(failure).toBeInstanceOf(ModelRequestDeadlineError);
-    expect((failure as ModelRequestDeadlineError).phase).toBe("first-byte");
+    expect(failure).toBeInstanceOf(ModelProviderFailureError);
+    expect((failure as ModelProviderFailureError).classification).toBe(
+      "transient",
+    );
     expect((failure as Error).message).toBe(
       MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
     );
