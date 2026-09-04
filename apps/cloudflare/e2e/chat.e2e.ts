@@ -178,14 +178,20 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   await expect(bubbles.first()).toHaveText("pong");
 
   // The bubble is wider than the word it holds, so the text is on one line.
-  const fits = await bubbles.first().evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    const text = range.getBoundingClientRect();
-    return { box: element.getBoundingClientRect().width, text: text.width };
-  });
+  // Measured once the text has actually been laid out: a range measured in the
+  // frame the bubble mounts reports a width of zero and fails on nothing.
+  const measure = async (): Promise<{ box: number; text: number }> =>
+    bubbles.first().evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const text = range.getBoundingClientRect();
+      return { box: element.getBoundingClientRect().width, text: text.width };
+    });
+  await expect
+    .poll(async () => (await measure()).text, { timeout: 10_000 })
+    .toBeGreaterThan(10);
+  const fits = await measure();
   expect(fits.box).toBeGreaterThanOrEqual(fits.text);
-  expect(fits.text).toBeGreaterThan(10);
 
   // The chip says what the tool was in words, and a Turn that finished says so.
   const chip = reply.locator(".tool-chip");

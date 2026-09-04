@@ -46,22 +46,25 @@ onBeforeUnmount(() => restoreFocus?.focus());
     and left the chat behind it fully lit, so nothing on screen said which of
     the two was the live one. Dimming what the panel is over says it, and gives
     the pointer the dismissal every other overlay in the product has.
+
+    It is a pointer shortcut, not a second control: the panel's own Close
+    button and Escape are the announced ways out, so it stays out of the
+    accessibility tree rather than becoming a duplicate "Close panel".
+
+    And it is not transitioned. A scrim that fades out is a scrim that is still
+    over the window while it fades; one whose leave never completed sat there
+    for the rest of the session, swallowing every click on the Bot list
+    underneath it. A layer that intercepts the pointer leaves the moment it
+    stops meaning anything.
   -->
-  <Transition name="ui-scrim">
-    <!--
-      A pointer shortcut, not a second control: the panel's own Close button
-      and Escape are the announced ways out, so this one stays out of the
-      accessibility tree rather than becoming a duplicate "Close panel".
-    -->
-    <button
-      v-if="open"
-      type="button"
-      class="ui-sidebar-overlay__scrim"
-      tabindex="-1"
-      aria-hidden="true"
-      @click="emit('close')"
-    />
-  </Transition>
+  <button
+    v-if="open"
+    type="button"
+    class="ui-sidebar-overlay__scrim"
+    tabindex="-1"
+    aria-hidden="true"
+    @click="emit('close')"
+  />
   <Transition name="ui-surface">
     <aside
       v-if="open"
@@ -140,16 +143,6 @@ onBeforeUnmount(() => restoreFocus?.focus());
   overflow-y: auto;
   scrollbar-color: var(--frock-scrollbar) transparent;
   scrollbar-width: thin;
-}
-
-.ui-scrim-enter-active,
-.ui-scrim-leave-active {
-  transition: opacity var(--frock-motion-panel);
-}
-
-.ui-scrim-enter-from,
-.ui-scrim-leave-to {
-  opacity: 0;
 }
 
 .ui-surface-enter-active,

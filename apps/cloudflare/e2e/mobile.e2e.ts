@@ -252,6 +252,36 @@ test("the shell is usable on a phone", async ({
   // And Escape gives the conversation the whole window back.
   await page.keyboard.press("Escape");
   await expect(page.locator(".right-panel")).toBeHidden();
+
+  /*
+   * A closed overlay leaves nothing over the window.
+   *
+   * The scrim behind a hosted surface is a full-window element, so a scrim
+   * that outlives its panel is invisible and total: every later click lands on
+   * it instead of on what the person aimed at, and the only symptom is a test
+   * — or a User — waiting on a control that is plainly there. Opening a
+   * surface, closing it, and then using the Bot list is the cheapest proof
+   * that the layer went away.
+   */
+  await openNavigation(page);
+  await page
+    .getByRole("button", { name: /Search/u })
+    .first()
+    .click();
+  await expect(page.getByRole("region", { name: "Search" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("region", { name: "Search" })).toBeHidden();
+  await expect(page.locator(".ui-sidebar-overlay__scrim")).toHaveCount(0);
+
+  // The proof is that the click lands at all: a surviving scrim swallows it
+  // and the row simply never answers.
+  await openNavigation(page);
+  await page
+    .getByRole("button", { name: /Pocket/u })
+    .first()
+    .click({ timeout: 15_000 });
+  await closeNavigation(page);
+  await expect(composerInput(page)).toBeEnabled();
 });
 
 /** Open the navigation drawer and prove it arrived. */
