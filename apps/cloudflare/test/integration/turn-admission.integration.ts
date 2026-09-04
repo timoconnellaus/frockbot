@@ -233,6 +233,43 @@ describe("turn admission through the gateway and the Bot", () => {
     expect(requests).toBe(1);
   });
 
+  it("keeps every send of one Turn, in order, in the durable transcript", async () => {
+    const userId = freshUserId("admission-stack");
+    const botId = "admission-stack-bot";
+    await provisionThroughGateway({ userId, botId });
+
+    // The shape a person actually sees: an acknowledgement, then a beat, then
+    // the result — three messages from the Bot inside one Turn, with the
+    // model's own reply written after them.
+    await chatTurn(
+      userId,
+      botId,
+      toolCallTriggerPrompt(
+        ["send_to_user", { payload: { type: "text", text: "On it." } }],
+        ["send_to_user", { payload: { type: "text", text: "Looking now." } }],
+        ["send_to_user", { payload: { type: "text", text: "Booked." } }],
+      ),
+      "admission-stack-1",
+    );
+
+    // Read back the way the thread reads it, not out of the reply this test
+    // is holding: a refresh has to draw the same three messages in the same
+    // order, because durable order is display order.
+    const run = (await listRuns(userId, botId)).find(
+      (candidate) => candidate.runId === "admission-stack-1",
+    );
+    expect(run).toMatchObject({ status: "completed" });
+    expect(
+      run?.events
+        .filter((event) => event.type === "send/to-user")
+        .map((event) => event.payload?.text),
+    ).toEqual(["On it.", "Looking now.", "Booked."]);
+    // The Turn's own line is the model's reply, kept whole beside the sends
+    // rather than replacing them — the last send does not become the Turn's
+    // text, and no send is dropped for the one after it.
+    expect(run?.outcome?.text).toContain("Ollama reply");
+  });
+
   it("falls back to the last text send when the Turn wrote no assistant message", async () => {
     const userId = freshUserId("admission-text");
     const botId = "admission-text-bot";

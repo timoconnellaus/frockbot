@@ -452,7 +452,15 @@ export function assistantMessages(page: Page): Locator {
   return page.locator("article.message-assistant");
 }
 
-export async function sendMessage(page: Page, text: string): Promise<void> {
+export async function sendMessage(
+  page: Page,
+  text: string,
+  // How many messages the Bot is expected to send back. A Turn is not one
+  // bubble: the Bot acknowledges, works, and reports back, and each of those
+  // is its own message, so a caller scripting several sends says how many to
+  // wait for.
+  options: { replies?: number } = {},
+): Promise<void> {
   const composer = composerInput(page);
   const send = page.getByRole("button", { name: "Send message" });
   // Counted before the send, because "settled" means one *more* reply than the
@@ -473,7 +481,9 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
   });
   // There is no SSE: the client POSTs the Turn and polls the run. The Turn has
   // settled when its own reply exists and has stopped streaming.
-  await expect(replies).toHaveCount(before + 1, { timeout: 120_000 });
+  await expect(replies).toHaveCount(before + (options.replies ?? 1), {
+    timeout: 120_000,
+  });
   await expect(replies.last().locator(".bot-avatar-live")).toHaveCount(0, {
     timeout: 120_000,
   });
