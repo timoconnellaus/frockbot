@@ -76,6 +76,47 @@ export const SYNC_CONFLICTS_DIR = "conflicts";
  * is moved into place, under `WORKSPACE_SYNC_DIR`.
  */
 export const SYNC_STAGING_DIR = "staging";
+/**
+ * The most file bytes one storage command carries, in either direction.
+ *
+ * A command's answer travels as base64, so a chunk this size comes back as
+ * roughly 350 KB — inside the half megabyte an answer may be — and goes out
+ * inside a script well inside the megabyte a script may be. A file larger than
+ * one chunk travels as several commands rather than as one command that would
+ * be refused for its size, so the Workspace's own per-file rule is what bounds
+ * a file and the shape of the commands never is.
+ */
+export const WORKSPACE_CHUNK_BYTES_V1 = 256 * 1024;
+
+/** Every chunk offset after the first, in bytes, for a file of this size. */
+export function workspaceChunkOffsetsV1(size: number): number[] {
+  const offsets: number[] = [];
+  for (
+    let offset = WORKSPACE_CHUNK_BYTES_V1;
+    offset < size;
+    offset += WORKSPACE_CHUNK_BYTES_V1
+  ) {
+    offsets.push(offset);
+  }
+  return offsets;
+}
+
+/** A staging file name that is one path segment whatever the id looks like. */
+export function workspaceStagingNameV1(
+  generationId: string,
+  kind: string,
+): string {
+  const safe = generationId.replaceAll(/[^A-Za-z0-9._-]/g, "-").slice(0, 128);
+  return `${safe}.${kind}`;
+}
+
+/**
+ * The Workspace's per-file limit as a person reads it. Derived, so it cannot
+ * drift from the rule it describes, and stated in the refusal instead of a
+ * byte count nobody outside this code recognizes.
+ */
+const MAX_FILE_LABEL = `${Math.round(WORKSPACE_MAX_FILE_BYTES / (1024 * 1024))} MB`;
+
 const GENERATIONS_DIR = WORKSPACE_GENERATIONS_DIR;
 const LOCKS_DIR = ".frockbot-locks";
 /** The sha-256 of no bytes; a deletion tombstone's content address. */
@@ -402,10 +443,13 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
     const relative = this.path(path);
     if (typeof relative !== "string") return relative;
     const mount = this.mount(path.root);
-    const script = [
+    const prelude = [
       `ROOT=${shellQuote(mount)}`,
       `REL=${shellQuote(relative)}`,
       'TARGET="$ROOT/$REL"',
+    ];
+    const script = [
+      ...prelude,
       `META="$ROOT/${GENERATIONS_DIR}/$REL"`,
       'if [ ! -f "$TARGET" ]; then echo __MISSING__; exit 0; fi',
       'SIZE=$(stat -c %s "$TARGET")',
@@ -414,7 +458,15 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       'sha256sum "$TARGET" | cut -d" " -f1',
       'printf "%s\\n" "$SIZE"',
       'stat -c %Y "$TARGET"',
-      withBytes ? 'base64 -w0 "$TARGET"; echo' : "",
+      // The size and the digest come back before any bytes do, so the rest of
+      // the file can be asked for one bounded chunk at a time and the pieces
+      // proven to be one file. A whole file as one base64 answer stopped
+      // working long before a file got large: half a megabyte of built Applet
+      // page is two thirds of a megabyte of answer, which the storage surface
+      // refuses outright rather than truncating.
+      withBytes
+        ? `head -c ${WORKSPACE_CHUNK_BYTES_V1} "$TARGET" | base64 -w0; echo`
+        : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -425,10 +477,7 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       return failure("not-found", `No such Workspace file: ${relative}`);
     }
     if (lines[0]?.trim() === "__TOO_LARGE__") {
-      return failure(
-        "refused",
-        `Workspace file exceeds ${WORKSPACE_MAX_FILE_BYTES} bytes`,
-      );
+      return this.tooLarge(relative);
     }
     const [
       meta = "",
@@ -446,13 +495,48 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       size: Number(size.trim()),
       modifiedSeconds: Number(modified.trim()),
     };
-    const generation = await this.generationOf(path.root, relative, raw);
+    if (!Number.isSafeInteger(raw.size) || raw.size < 0) {
+      return failure("unavailable", "Invalid Fly Workspace file response");
+    }
+    if (!withBytes) {
+      return { generation: await this.generationOf(path.root, relative, raw) };
+    }
+    const chunks = [Buffer.from(encoded.trim(), "base64")];
+    for (const offset of workspaceChunkOffsetsV1(raw.size)) {
+      const next = await this.run(
+        [
+          ...prelude,
+          // `tail -c +N` counts from one, so the offset is one past the bytes
+          // already carried.
+          `tail -c +${offset + 1} "$TARGET" | head -c ${WORKSPACE_CHUNK_BYTES_V1} | base64 -w0; echo`,
+        ].join("\n"),
+        signal,
+      );
+      if (typeof next !== "string") return next;
+      chunks.push(Buffer.from(next.trim(), "base64"));
+    }
+    const bytes = Buffer.concat(chunks);
+    // The digest is the proof the chunks are one file. A file rewritten
+    // between two commands is reported, never stitched together out of two
+    // different versions of itself.
+    if (bytes.byteLength !== raw.size || digest(bytes) !== raw.contentHash) {
+      return failure(
+        "unavailable",
+        `"${relative}" changed on the Computer while it was being read`,
+      );
+    }
     return {
-      generation,
-      ...(withBytes
-        ? { bytes: Uint8Array.from(Buffer.from(encoded.trim(), "base64")) }
-        : {}),
+      generation: await this.generationOf(path.root, relative, raw),
+      bytes: Uint8Array.from(bytes),
     };
+  }
+
+  /** The one refusal for a file past the Workspace's own per-file rule. */
+  private tooLarge(relative: string): WorkspaceFailureV1 {
+    return failure(
+      "refused",
+      `"${relative}" is past the ${MAX_FILE_LABEL} limit on a Workspace file`,
+    );
   }
 
   async read(path: WorkspacePathV1): Promise<WorkspaceReadOutcomeV1> {
@@ -559,6 +643,50 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
     };
   }
 
+  /**
+   * Puts bytes past one command on the Computer under a staging file, chunk by
+   * chunk, and answers where they landed.
+   *
+   * Bytes that fit in one command take no staging file at all — the caller
+   * writes them inline, which is one command and the overwhelmingly common
+   * case. Anything larger is appended chunk by chunk with no lock held, and
+   * the caller's own locked command moves it into place, so a file only ever
+   * appears at its real path complete.
+   */
+  private async stage(
+    mount: string,
+    name: string,
+    bytes: Uint8Array,
+  ): Promise<string | WorkspaceFailureV1 | undefined> {
+    if (bytes.byteLength <= WORKSPACE_CHUNK_BYTES_V1) return undefined;
+    const staged = `${mount}/${WORKSPACE_SYNC_DIR}/${SYNC_STAGING_DIR}/${name}`;
+    for (
+      let offset = 0;
+      offset < bytes.byteLength;
+      offset += WORKSPACE_CHUNK_BYTES_V1
+    ) {
+      const chunk = bytes.subarray(offset, offset + WORKSPACE_CHUNK_BYTES_V1);
+      const output = await this.run(
+        [
+          "set -eu",
+          `STAGE=${shellQuote(staged)}`,
+          'mkdir -p "$(dirname "$STAGE")"',
+          // A staging name is this write's own, so a leftover file under it is
+          // a previous attempt's and never another writer's.
+          ...(offset === 0 ? ['rm -f "$STAGE"'] : []),
+          `printf %s ${shellQuote(Buffer.from(chunk).toString("base64"))} | base64 -d >> "$STAGE"`,
+          'chmod 600 "$STAGE"',
+          "echo __STAGED__",
+        ].join("\n"),
+      );
+      if (typeof output !== "string") return output;
+      if (!output.includes("__STAGED__")) {
+        return failure("unavailable", "Invalid Fly Workspace write response");
+      }
+    }
+    return staged;
+  }
+
   async write(
     request: WorkspaceWriteRequestV1,
   ): Promise<WorkspaceWriteOutcomeV1> {
@@ -567,10 +695,7 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
     const relative = this.path(request.path);
     if (typeof relative !== "string") return relative;
     if (request.bytes.byteLength > WORKSPACE_MAX_FILE_BYTES) {
-      return failure(
-        "refused",
-        `Workspace file exceeds ${WORKSPACE_MAX_FILE_BYTES} bytes`,
-      );
+      return this.tooLarge(relative);
     }
     const writtenAt = new Date();
     // The ledger mints when there is one, so the id this write records is the
@@ -595,12 +720,26 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       writtenAt: writtenAt.toISOString(),
     };
     const mount = this.mount(request.path.root);
+    // Bytes past one command are staged first, outside the lock: the file
+    // takes several commands to carry, and holding the lock across all of them
+    // would keep one writer's file open for as long as its bytes take to
+    // arrive. The staging name is this write's own minted generation, so two
+    // writers of the same path never share a staging file, and the lock is
+    // taken only for the last command — the one that checks the generation the
+    // writer expected, proves the staged bytes, and renames them into place.
+    const staged = await this.stage(
+      mount,
+      workspaceStagingNameV1(generationId, "write"),
+      request.bytes,
+    );
+    if (staged !== undefined && typeof staged !== "string") return staged;
     const script = [
       "set -eu",
       `ROOT=${shellQuote(mount)}`,
       `REL=${shellQuote(relative)}`,
       'TARGET="$ROOT/$REL"',
       `META="$ROOT/${GENERATIONS_DIR}/$REL"`,
+      ...(staged ? [`STAGE=${shellQuote(staged)}`] : []),
       `mkdir -p "$(dirname "$TARGET")" "$(dirname "$META")" "$ROOT/${LOCKS_DIR}"`,
       'LOCK=$(printf %s "$REL" | sha256sum | cut -d" " -f1)',
       `exec 9>"$ROOT/${LOCKS_DIR}/$LOCK"`,
@@ -608,9 +747,20 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       "CURRENT=",
       'if [ -f "$TARGET" ] && [ -f "$META" ]; then CURRENT=$(sed -n 1p "$META"); fi',
       'if [ -f "$TARGET" ] && [ ! -f "$META" ]; then CURRENT=__UNRECORDED__; fi',
-      `if [ "$CURRENT" != ${shellQuote(request.expectedGenerationId ?? "")} ]; then echo __CONFLICT__; exit 0; fi`,
+      `if [ "$CURRENT" != ${shellQuote(request.expectedGenerationId ?? "")} ]; then ${staged ? 'rm -f "$STAGE"; ' : ""}echo __CONFLICT__; exit 0; fi`,
+      // A half-written staging file must never become a durable-root file, so
+      // the staged bytes answer for themselves before anything is renamed.
+      ...(staged
+        ? [
+            `if [ "$(sha256sum "$STAGE" | cut -d" " -f1)" != ${shellQuote(generation.contentHash)} ]; then rm -f "$STAGE"; echo __CORRUPT__; exit 0; fi`,
+          ]
+        : []),
       'TMP=$(mktemp "${TARGET}.XXXXXX")',
-      `printf %s ${shellQuote(Buffer.from(request.bytes).toString("base64"))} | base64 -d > "$TMP"`,
+      ...(staged
+        ? ['mv "$STAGE" "$TMP"']
+        : [
+            `printf %s ${shellQuote(Buffer.from(request.bytes).toString("base64"))} | base64 -d > "$TMP"`,
+          ]),
       'chmod 600 "$TMP"',
       'mv "$TMP" "$TARGET"',
       'MTMP=$(mktemp "${META}.XXXXXX")',
@@ -625,6 +775,12 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
       return failure(
         "conflict",
         `Workspace file changed since the writer last saw it: ${relative}`,
+      );
+    }
+    if (output.includes("__CORRUPT__")) {
+      return failure(
+        "unavailable",
+        `"${relative}" did not reach the Computer intact`,
       );
     }
     if (!output.includes("__WRITTEN__")) {
