@@ -112,12 +112,20 @@ describe("user application security headers", () => {
 
     for (const mode of [undefined, "desktop", "development,better-auth"]) {
       const headers = mode ? { "x-frockbot-auth-session-v1": mode } : undefined;
-      await expect(
-        fetchUserApplication(
-          new Request("https://app.example/", { headers }),
-          securityEnv,
-        ),
-      ).rejects.toThrow("hosted auth session projection is invalid");
+      // Fail closed, and stay alive doing it. The refusal used to escape the
+      // Worker's own `fetch`, which is an entry point with no caller: the
+      // isolate died rather than answering. What matters is that no shell is
+      // ever built from a projection the gateway did not write, and the
+      // refusal now says so with its own reason instead of taking the
+      // isolate down.
+      const refused = await fetchUserApplication(
+        new Request("https://app.example/", { headers }),
+        securityEnv,
+      );
+      expect(refused.status).toBe(500);
+      expect(await refused.json()).toMatchObject({
+        error: expect.stringContaining("hosted auth session projection"),
+      });
     }
   });
 

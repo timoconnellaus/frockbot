@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   LlmEffectNotStartedError,
+  MODEL_FIRST_BYTE_DEADLINE_MS_V1,
+  MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
+  MODEL_IDLE_DEADLINE_MS_V1,
+  MODEL_IDLE_DEADLINE_REASON_V1,
+  ModelRequestDeadlineError,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import { type Agent } from "@frockbot/kernel-agent-loop/agent";
@@ -539,6 +544,275 @@ describe("Ollama Cloud runtime Contribution", () => {
     );
 
     expect(outcome.status).toBe("not-retrievable");
+    await root.fiber.dispose();
+  });
+});
+
+/** A clock the test advances by hand, so a deadline costs no real seconds. */
+function manualClock() {
+  const pending = new Map<number, { run: () => void; due: number }>();
+  let next = 1;
+  let now = 0;
+  return {
+    schedule(run: () => void, milliseconds: number): () => void {
+      const id = next++;
+      pending.set(id, { run, due: now + milliseconds });
+      return () => pending.delete(id);
+    },
+    advance(milliseconds: number): void {
+      now += milliseconds;
+      for (const [id, timer] of [...pending]) {
+        if (timer.due <= now) {
+          pending.delete(id);
+          timer.run();
+        }
+      }
+    },
+    get armed(): number {
+      return pending.size;
+    },
+  };
+}
+
+/** Let the stream's own pump run: the clock is manual, the event loop is not. */
+async function settle(): Promise<void> {
+  for (let tick = 0; tick < 10; tick += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+/** An endpoint body the test feeds one chunk at a time. */
+function pushableSse(): {
+  body: ReadableStream<Uint8Array>;
+  push: (text: string) => void;
+} {
+  let enqueue: ((text: string) => void) | undefined;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      enqueue = (text) => controller.enqueue(new TextEncoder().encode(text));
+    },
+  });
+  return { body, push: (text) => enqueue?.(text) };
+}
+
+/** Mount the Package against `fetch`, with its deadlines on a manual clock. */
+async function mountWithClock(
+  root: Context,
+  clock: ReturnType<typeof manualClock>,
+  fetch: (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => Promise<Response>,
+): Promise<void> {
+  const keyringText = serializedKeyring();
+  const envelope = await sealCredentialV1({
+    keyring: parseCredentialKeyringV1(keyringText),
+    context: {
+      accountId: "account-1",
+      connectionId: "connection-1",
+      packageId: "provider-ollama-cloud",
+      credentialGeneration: "generation-1",
+    },
+    plaintext: "account-secret",
+  });
+  await root.plugin(LlmRegistry);
+  await mountCredentialRuntime(root, keyringText);
+  await root.plugin(
+    createOllamaCloudRuntimePlugin({
+      accountId: "account-1",
+      connectionId: "connection-1",
+      packageId: "provider-ollama-cloud",
+      now: () => Date.parse("2026-08-30T00:00:00.000Z"),
+      leaseCredential: (effectId) =>
+        Promise.resolve({
+          schemaVersion: 1,
+          leaseId: "lease-1",
+          effectId,
+          connectionId: "connection-1",
+          credentialGeneration: "generation-1",
+          expiresAt: "2026-08-30T01:00:00.000Z",
+          envelope,
+        }),
+      settleCredential: () => Promise.resolve(),
+      fetch,
+      deadlines: { schedule: clock.schedule },
+    }),
+  );
+}
+
+// A Stop must end one request and nothing else. The provider is registered once
+// and serves every Turn, and it keeps a per-request credential map, so a
+// cancelled request that tore down anything shared would take the next Turn
+// with it.
+describe("Ollama Cloud request isolation", () => {
+  test("leaves the next request working after one is cancelled", async () => {
+    const clock = manualClock();
+    const { body } = pushableSse();
+    let calls = 0;
+    const root = new Context();
+    await mountWithClock(root, clock, () => {
+      calls += 1;
+      return Promise.resolve(
+        calls === 1
+          ? new Response(body, { status: 200 })
+          : new Response(
+              'data: {"choices":[{"delta":{"content":"second"},"finish_reason":"stop"}]}\n\n' +
+                "data: [DONE]\n\n",
+              { status: 200 },
+            ),
+      );
+    });
+
+    const cancelled = new AbortController();
+    const abandoned = (async () => {
+      for await (const event of root.llm.stream(request, cancelled.signal)) {
+        void event;
+      }
+    })().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await settle();
+    cancelled.abort(new Error("Turn cancelled"));
+    expect((await abandoned) as Error).toBeInstanceOf(Error);
+
+    const events: unknown[] = [];
+    for await (const event of root.llm.stream(
+      { ...request, requestId: "effect-2" },
+      new AbortController().signal,
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "text-delta", text: "second" },
+      { type: "finish", reason: "completed" },
+    ]);
+    await root.fiber.dispose();
+  });
+});
+
+// An endpoint that accepts the request and then says nothing used to be bounded
+// only by the fifteen-minute Turn deadline: an empty bubble for a quarter of an
+// hour, saying nothing about why.
+describe("Ollama Cloud deadlines", () => {
+  test("fails the step when the endpoint produces no first byte", async () => {
+    const clock = manualClock();
+    const root = new Context();
+    await mountWithClock(
+      root,
+      clock,
+      (_input, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new Error("aborted")),
+          );
+        }),
+    );
+
+    const outcome = (async () => {
+      for await (const event of root.llm.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        void event;
+      }
+    })().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await settle();
+    clock.advance(MODEL_FIRST_BYTE_DEADLINE_MS_V1);
+
+    const failure = await outcome;
+    // Reported as "not started", not as a bare deadline: nothing was streamed,
+    // so no provider effect exists, and this Package classifies every failure
+    // before the first event as definitive. That matters more than the class
+    // name — a deadline reported as uncertain would park the run on a
+    // retrieval nobody can perform. The reason still reaches the person.
+    expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+    expect((failure as Error).message).toBe(
+      MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
+    );
+    await root.fiber.dispose();
+  });
+
+  test("fails the step when the endpoint starts an answer and then stalls", async () => {
+    const clock = manualClock();
+    const { body, push } = pushableSse();
+    const root = new Context();
+    await mountWithClock(root, clock, () =>
+      Promise.resolve(new Response(body, { status: 200 })),
+    );
+
+    const events: unknown[] = [];
+    // The outcome is watched from the moment the stream starts: a failure this
+    // test only looked at later would be an unobserved rejection first.
+    const outcome = (async () => {
+      for await (const event of root.llm.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+    })().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    push('data: {"choices":[{"delta":{"content":"Half a "}}]}\n\n');
+    await settle();
+    // The answer has started, so the clock now running is the idle one — well
+    // short of the first-byte allowance this never reaches.
+    clock.advance(MODEL_IDLE_DEADLINE_MS_V1);
+
+    const failure = await outcome;
+    expect(failure).toBeInstanceOf(ModelRequestDeadlineError);
+    expect((failure as ModelRequestDeadlineError).phase).toBe("idle");
+    expect((failure as Error).message).toBe(MODEL_IDLE_DEADLINE_REASON_V1);
+    expect(events).toEqual([{ type: "text-delta", text: "Half a " }]);
+    await root.fiber.dispose();
+  });
+
+  test("lets a stream that keeps producing chunks finish, leaving no timer armed", async () => {
+    const clock = manualClock();
+    const { body, push } = pushableSse();
+    const root = new Context();
+    await mountWithClock(root, clock, () =>
+      Promise.resolve(new Response(body, { status: 200 })),
+    );
+
+    const events: unknown[] = [];
+    const consume = (async () => {
+      for await (const event of root.llm.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+    })();
+    for (const chunk of ["one", "two", "three"]) {
+      push(`data: {"choices":[{"delta":{"content":"${chunk}"}}]}\n\n`);
+      await settle();
+      // Each chunk lands inside the idle allowance, so the clock rearms rather
+      // than firing.
+      clock.advance(MODEL_IDLE_DEADLINE_MS_V1 - 1);
+      await settle();
+    }
+    push(
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+    );
+    await settle();
+    await consume;
+
+    expect(events).toEqual([
+      { type: "text-delta", text: "one" },
+      { type: "text-delta", text: "two" },
+      { type: "text-delta", text: "three" },
+      { type: "finish", reason: "completed" },
+    ]);
+    // A live timer in a Worker isolate holds the request open long after
+    // anybody is listening for it.
+    expect(clock.armed).toBe(0);
     await root.fiber.dispose();
   });
 });
