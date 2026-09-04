@@ -5,6 +5,7 @@ import {
   type ClientSurfaceRegistry,
 } from "@frockbot/client-core";
 import { computed, ref } from "vue";
+import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { voiceClientPlugin } from "./index.js";
 import { voiceClientStateKey, type VoiceClientStateV1 } from "./state.js";
 
@@ -26,9 +27,22 @@ function surfaceRegistry(): ClientSurfaceRegistry {
 
 function mount(
   hostedRequest: NonNullable<ClientPluginContext["transport"]["hostedRequest"]>,
-): { calls: string[]; state: { value: VoiceClientStateV1 } } {
+): {
+  calls: string[];
+  state: { value: VoiceClientStateV1 };
+  reloadHolds: () => number;
+} {
   const calls: string[] = [];
   const surfaces = surfaceRegistry();
+  const web = ref({
+    reloadHolds: 0,
+    holdReload: () => {
+      web.value.reloadHolds += 1;
+      return () => {
+        web.value.reloadHolds -= 1;
+      };
+    },
+  });
   let state: unknown;
   const context: ClientPluginContext = {
     transport: {
@@ -40,6 +54,7 @@ function mount(
     },
     inject: (key) => {
       if (key === clientSurfaceRegistryKey) return surfaces as never;
+      if (key === frockBotWebDataKey) return web as never;
       throw new Error("unexpected client provider");
     },
     provide: (key, value) => {
@@ -52,10 +67,23 @@ function mount(
   return {
     calls,
     state: state as { value: VoiceClientStateV1 },
+    reloadHolds: () => web.value.reloadHolds,
   };
 }
 
 describe("Voice client contribution", () => {
+  test("holds the shell's reload while a session is live", () => {
+    const mounted = mount(() => Promise.reject(new Error("unauthenticated")));
+
+    expect(mounted.reloadHolds()).toBe(0);
+    mounted.state.value.status = "listening";
+    expect(mounted.reloadHolds()).toBe(1);
+    mounted.state.value.status = "speaking";
+    expect(mounted.reloadHolds()).toBe(1);
+    mounted.state.value.status = "offline";
+    expect(mounted.reloadHolds()).toBe(0);
+  });
+
   test("does not read User voice state before authenticated chrome mounts", () => {
     const mounted = mount(() => Promise.reject(new Error("unauthenticated")));
 

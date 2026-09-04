@@ -228,6 +228,18 @@ export interface AgentTransport {
   /** False when this platform cannot complete external Connection authorization. */
   readonly connectionsAvailable?: boolean;
   /**
+   * The application this client was served from. Absent when the page does not
+   * name one — the vite development document — and then nothing can be stale.
+   */
+  readonly servedDeployment?: string;
+  /**
+   * Reports the application each answer came from, so the shell can tell that
+   * the code answering is no longer the code it is running. Optional: a
+   * platform whose transport cannot see response headers, such as the desktop
+   * bridge, simply never reports one.
+   */
+  observeDeployment?(observer: (deployment: string) => void): () => void;
+  /**
    * Opens the composer's dictation socket (voice plan D2). Optional: a
    * platform that cannot open one simply offers no microphone, and the
    * composer's send button never changes shape.
