@@ -18,16 +18,14 @@ useApplicationArtifact();
 
 const HISTORY_TEXT_BYTES = 29_000;
 const MODEL_STEPS = 60;
-// Sixty real model steps through workerd take about 45 s on a laptop and have
-// crossed the suite's 60 s default under a loaded CI runner three times in one
-// morning (PRs 229, 231, 235). The bound this test exists to prove is on
-// storage, not wall clock, so it gets the budget its own work needs.
-const SIXTY_STEP_TIMEOUT_MS = 240_000;
+// This proves a storage bound, not a latency bound. Sixty real model steps
+// finish in about 40 seconds locally but can cross Vitest's 60-second default
+// on a loaded CI runner.
+const SIXTY_STEP_TIMEOUT_MS = 120_000;
 
 describe("a sixty-step Turn through the production gateway", () => {
   it(
     "completes with bounded run state and a readable transcript",
-    { timeout: SIXTY_STEP_TIMEOUT_MS },
     async () => {
       const userId = freshUserId("session-log-size");
       const botId = "session-log-size-bot";
@@ -105,6 +103,6 @@ describe("a sixty-step Turn through the production gateway", () => {
       expect(durable.requestBytes).toHaveLength(MODEL_STEPS);
       expect(Math.min(...durable.requestBytes)).toBeGreaterThanOrEqual(80_000);
     },
-    120_000,
+    SIXTY_STEP_TIMEOUT_MS,
   );
 });

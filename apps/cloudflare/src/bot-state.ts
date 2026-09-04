@@ -94,6 +94,7 @@ import type {
   AppletBuildViewV1,
   AppletSourceViewV1,
   NormalizedModelRequest,
+  SessionEvent,
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
   WorkspacePathV1,
@@ -178,10 +179,16 @@ import {
   type AuditSinkV1,
 } from "@frockbot/plugin-audit";
 import {
+  UsageOutboxV1,
+  usageEntriesFromTurnV1,
+  type UsageSinkV1,
+} from "@frockbot/plugin-billing";
+import {
   createBotAuditEntryPageV1,
   createUserAuditSinkV1,
   type UserAuditRpc,
 } from "./audit.js";
+import { createUserUsageSinkV1, type UserUsageRpcV1 } from "./usage.js";
 import {
   createRoutedWorkspaceGenerationsV1,
   createUserMemoryProjectsV1,
@@ -356,6 +363,8 @@ export class BotState extends DurableObject<BotStateEnv> {
     SEARCH_SINK?: SearchSinkV1;
     /** The User-scoped audit table this object's outbox drains into. */
     AUDIT_SINK?: AuditSinkV1;
+    /** The authoritative User spend ledger this object's outbox drains into. */
+    USAGE_SINK?: UsageSinkV1;
   };
   /** The identity the Workspace and Memory surfaces above were built for. */
   private surfacesFor: string | undefined;
@@ -516,6 +525,7 @@ export class BotState extends DurableObject<BotStateEnv> {
                 mountedContributions
                   .get(computerBotContribution)
                   ?.settleScheduledWork() ?? Promise.resolve(),
+              recordSettledUsage: (settled) => this.recordSettledUsage(settled),
               // An archived Bot admits no configuration command; the Flock
               // Contribution owns that durable lifecycle state.
               assertLifecycleActive: (storage, botId) => {
@@ -719,6 +729,10 @@ export class BotState extends DurableObject<BotStateEnv> {
     // completeness is the parity item (register row 30b).
     this.backendEnv.AUDIT_SINK = createUserAuditSinkV1(
       rpc as unknown as UserAuditRpc,
+      identity,
+    );
+    this.backendEnv.USAGE_SINK = createUserUsageSinkV1(
+      rpc as unknown as UserUsageRpcV1,
       identity,
     );
     this.surfacesFor = key;
@@ -1154,6 +1168,40 @@ export class BotState extends DurableObject<BotStateEnv> {
   /** This object's bounded, durable audit outbox. */
   private auditOutbox(): AuditOutboxV1 {
     return new AuditOutboxV1(this.ctx.storage);
+  }
+
+  /** This object's bounded, durable usage delivery outbox. */
+  private usageOutbox(): UsageOutboxV1 {
+    return new UsageOutboxV1(this.ctx.storage);
+  }
+
+  /**
+   * Queues the exact `model/usage` events from one just-settled Turn.
+   *
+   * This callback runs for chat, Routine, recovery, Subagent, and agent-lane
+   * Turns at the Shell's common loop boundary. Queueing precedes the
+   * cross-object call; ledger ids make every retry idempotent.
+   */
+  private async recordSettledUsage(input: {
+    botId: string;
+    runId: string;
+    turn: number;
+    events: readonly SessionEvent[];
+  }): Promise<void> {
+    const sink = this.backendEnv.USAGE_SINK;
+    if (!sink) return;
+    await this.usageOutbox().append(usageEntriesFromTurnV1(input));
+    await this.drainUsageOutbox();
+  }
+
+  private async drainUsageOutbox(): Promise<void> {
+    const sink = this.backendEnv.USAGE_SINK;
+    if (!sink) return;
+    try {
+      await this.usageOutbox().drain(sink);
+    } catch {
+      // Still durable and retried by this object's next alarm.
+    }
   }
 
   /**
@@ -2152,9 +2200,14 @@ export class BotState extends DurableObject<BotStateEnv> {
         // The alarm the Bot already has is also the audit outbox's second
         // chance: entries a settlement could not deliver leave on the next
         // firing rather than waiting for the Bot to be spoken to again.
-        await loggedEntryV1("Bot audit outbox drain", () =>
-          this.drainAuditOutbox(),
-        );
+        await Promise.all([
+          loggedEntryV1("Bot audit outbox drain", () =>
+            this.drainAuditOutbox(),
+          ),
+          loggedEntryV1("Bot usage outbox drain", () =>
+            this.drainUsageOutbox(),
+          ),
+        ]);
       }
     });
   }

@@ -4,6 +4,10 @@ import {
   type AuditUserBackendHost,
 } from "@frockbot/plugin-audit/user";
 import {
+  type BillingUserBackendContribution,
+  type BillingUserBackendHostV1,
+} from "@frockbot/plugin-billing/user";
+import {
   decodeMcpConnectionSettingsV1,
   mcpServerSlugV1,
 } from "@frockbot/plugin-mcp/agent";
@@ -48,6 +52,7 @@ import {
 import { isPlatformOwnedPackageV1 } from "./runtime.js";
 import {
   auditUserContribution,
+  billingUserContribution,
   botTemplateUserContribution,
   createFoundationBackendContributions,
   createFoundationMountedContributionsV1,
@@ -147,6 +152,8 @@ export interface MountedFoundationUserBackend {
    * is a projection: every row is rebuildable from the Bots' own stored runs.
    */
   audit: AuditUserBackendContribution;
+  /** Account-wide model and voice usage, priced when each entry is written. */
+  billing: BillingUserBackendContribution;
   /**
    * The User's registered machines (parity register rows 48, 49, 57g): the
    * registry, the pairing offers, the command queue and its results. A machine
@@ -263,6 +270,7 @@ export async function createFoundationUserBackendContributions(
       maxRows?: number;
       maxAgeMs?: number;
     };
+    billing: BillingUserBackendHostV1;
   },
 ): Promise<MountedFoundationUserBackend> {
   const defaultPackageIds = foundationDefaultPackageIds(plan);
@@ -436,6 +444,9 @@ export async function createFoundationUserBackendContributions(
         },
       };
     },
+    get billing() {
+      return host.billing;
+    },
     get flock() {
       return {
         storage: host.storage,
@@ -456,6 +467,7 @@ export async function createFoundationUserBackendContributions(
     | PackagePublisherUserContribution
     | SearchUserBackendContribution
     | AuditUserBackendContribution
+    | BillingUserBackendContribution
     | MachineUserBackendContribution
   >(plan, applicationHost);
 
@@ -469,6 +481,7 @@ export async function createFoundationUserBackendContributions(
   const publisher = mounted.get(packagePublisherUserContribution);
   const search = mounted.get(searchUserContribution);
   const audit = mounted.get(auditUserContribution);
+  const billing = mounted.get(billingUserContribution);
   const machines = mounted.get(machineUserContribution);
   if (
     !settings ||
@@ -481,11 +494,12 @@ export async function createFoundationUserBackendContributions(
     !publisher ||
     !search ||
     !audit ||
+    !billing ||
     !machines
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Frock AI, MCP, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Frock AI, MCP, Flock, Bot Templates, Search, Audit, Billing, Machines, and Package Publisher User Contributions",
     );
   }
 
@@ -515,6 +529,7 @@ export async function createFoundationUserBackendContributions(
     publisher,
     search,
     audit,
+    billing,
     machines,
     async dispose() {
       for (const undo of unregister) undo();

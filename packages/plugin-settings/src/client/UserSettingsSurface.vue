@@ -95,6 +95,9 @@ async function save(): Promise<void> {
         Open Plugins
       </UiButton>
     </UiAnchor>
+    <div class="primary-contributions">
+      <k-slot name="frockbot.user-settings-primary-sections" />
+    </div>
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}
     </p>
@@ -186,6 +189,12 @@ async function save(): Promise<void> {
 .settings-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.primary-contributions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--frock-radius-control);
 }
 
 .advanced {

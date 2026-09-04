@@ -31,6 +31,7 @@
     "@frockbot/plugin-admin": "workspace:*",
     "@frockbot/plugin-applets": "workspace:*",
     "@frockbot/plugin-audit": "workspace:*",
+    "@frockbot/plugin-billing": "workspace:*",
     "@frockbot/plugin-auth": "workspace:*",
     "@frockbot/plugin-authoring": "workspace:*",
     "@frockbot/plugin-bot-template": "workspace:*",

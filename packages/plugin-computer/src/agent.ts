@@ -438,9 +438,11 @@ export async function syncWorkspaceRootNowV1(request: {
   sessionId: string;
   turn: number;
   root: WorkspaceRootV1;
+  requiredPaths?: readonly string[];
   signal?: AbortSignal;
 }): Promise<ComputerSyncSummaryV1> {
-  const { computer, sessions, sessionId, turn, root, signal } = request;
+  const { computer, sessions, sessionId, turn, root, requiredPaths, signal } =
+    request;
   const sync = computer.sync;
   let summary: ComputerSyncSummaryV1;
   if (!sync?.reconcileRoot) {
@@ -453,7 +455,12 @@ export async function syncWorkspaceRootNowV1(request: {
       summary = await sync.reconcileRoot(
         root,
         "publish",
-        signal ? { signal } : undefined,
+        signal || requiredPaths
+          ? {
+              ...(signal ? { signal } : {}),
+              ...(requiredPaths ? { requiredPaths } : {}),
+            }
+          : undefined,
       );
     } catch (error) {
       summary = computerSyncSummaryV1(

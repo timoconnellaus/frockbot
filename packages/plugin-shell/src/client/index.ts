@@ -363,6 +363,13 @@ function assistantMessage(
   run: ClientRun,
   notification: ClientNotificationIntent | undefined,
 ): WebChatMessage {
+  const syncNotice = run.events.find(
+    (event) => event.type === "computer/sync" && event.message,
+  )?.message;
+  const notice = (primary?: string): string | undefined =>
+    [primary, syncNotice]
+      .filter((part): part is string => Boolean(part))
+      .join(" ") || undefined;
   if (run.status === "running") {
     // A streaming Turn carries only the text the model has produced. Until
     // there is any, the thread shows the animated avatar and no bubble.
@@ -375,6 +382,7 @@ function assistantMessage(
       // A Turn that has not started shows nothing of its own: the greyed user
       // message is the whole of what the thread says about it.
       ...(run.queued ? { pending: true } : {}),
+      ...(syncNotice ? { notice: syncNotice } : {}),
       tools: toolsFrom(run.events),
       sends: [],
       tasks: tasksFrom(run.events),
@@ -391,6 +399,7 @@ function assistantMessage(
       role: "assistant",
       text: visibleAssistantText(run),
       status: "aborted",
+      ...(syncNotice ? { notice: syncNotice } : {}),
       tools: toolsFrom(run.events),
       sends: [],
       tasks: tasksFrom(run.events),
@@ -409,7 +418,7 @@ function assistantMessage(
        * exactly like the Bot speaking.
        */
       text: visibleAssistantText(run),
-      notice: "This reply stopped partway. Try again to continue it.",
+      notice: notice("This reply stopped partway. Try again to continue it."),
       status: "reconciliation-required",
       tools: toolsFrom(run.events),
       sends: [],
@@ -422,7 +431,7 @@ function assistantMessage(
       runId: run.runId,
       role: "assistant",
       text: visibleAssistantText(run),
-      notice: "You stopped this.",
+      notice: notice("You stopped this."),
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: [],
@@ -447,7 +456,7 @@ function assistantMessage(
       // wire, so this keeps whatever that chose — the model-deadline copy says
       // something the outcome alone cannot — and falls back to the same line a
       // reply-less failure gets.
-      notice: knownFailureCopyV1(run.failure),
+      notice: notice(knownFailureCopyV1(run.failure)),
       status: "error",
       tools: toolsFrom(run.events),
       sends: [],
@@ -465,8 +474,10 @@ function assistantMessage(
     // Why the Turn ends there, under whatever it had already said — never as
     // the bubble's own text, which reads as the Bot saying it.
     ...(run.status === "failed"
-      ? { notice: knownFailureCopyV1(run.failure) }
-      : {}),
+      ? { notice: notice(knownFailureCopyV1(run.failure)) }
+      : syncNotice
+        ? { notice: syncNotice }
+        : {}),
     status: run.status === "failed" ? "error" : "completed",
     tools: toolsFrom(run.events),
     sends: [],
