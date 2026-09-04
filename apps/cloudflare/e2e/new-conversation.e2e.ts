@@ -77,7 +77,14 @@ test("a new conversation is refused while a Turn is still running", async ({
   page,
   userId,
   ollamaBaseUrl,
+  allowedFailures,
 }) => {
+  // This test races a Turn against the request, and a refusal is one of the
+  // two outcomes it accepts. Chromium logs every 4xx it sees, so the refusal
+  // the test is here to provoke arrives as a console error too — whether it
+  // does depends on which side of the race wins, which is not the product's
+  // behaviour and must not decide whether the suite passes.
+  allowedFailures.console.push(/Failed to load resource.*409/);
   await provisionThroughUi(page, {
     userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,

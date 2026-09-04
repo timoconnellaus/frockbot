@@ -13,6 +13,7 @@ import {
   optionalUnreadStateV1,
   projectBotUnreadViewV1,
   sidebarMessagePreviewForTurnV1,
+  sidebarMessagePreviewFromRunsV1,
   UNREAD_COUNT_CAP,
   type UnreadStateV1,
 } from "./unread.js";
@@ -235,6 +236,33 @@ describe("the unread projection", () => {
     expect(view).toMatchObject({ count: 0, capped: false, unread: false });
   });
 
+  // A Routine failing every minute left the badge at zero, because an
+  // automation Turn never advances the activity cursor.
+  test("badges a Bot whose Routine is failing, with nothing else unread", () => {
+    const view = projectBotUnreadViewV1(
+      "alpha",
+      emptyUnreadStateV1(),
+      index(3),
+      undefined,
+      2,
+    );
+    expect(view).toMatchObject({ count: 2, unread: true, capped: false });
+  });
+
+  test("adds Routine failures to the unread chat Turns", () => {
+    const state: UnreadStateV1 = {
+      schemaVersion: 1,
+      lastActivityCursor: cursor(3),
+      lastActivityAt: "2026-08-31T00:03:00.000Z",
+      lastSeenCursor: cursor(1),
+      lastViewedAt: "2026-08-31T00:01:00.000Z",
+      manuallyUnread: false,
+    };
+    expect(
+      projectBotUnreadViewV1("alpha", state, index(4), undefined, 1),
+    ).toMatchObject({ count: 3, unread: true });
+  });
+
   test("carries the already-bounded latest message without deriving it", () => {
     const preview = decodeSidebarMessagePreviewV1({
       schemaVersion: 1,
@@ -260,6 +288,73 @@ describe("the unread projection", () => {
         unread: [{ ...projected, lastMessage: { ...preview, extra: true } }],
       }),
     ).toThrow();
+  });
+});
+
+// The record is written at settlement, so a Bot whose Turns settled before
+// that projection existed has a full transcript and no preview — and its
+// sidebar row said "No messages yet" over six messages. A read derives it.
+describe("the sidebar preview derived from stored runs", () => {
+  const run = (over: Record<string, unknown> = {}) => ({
+    acceptedAt: "2026-08-31T00:02:00.000Z",
+    input: "What is the plan?",
+    responseText: "Here is the plan.",
+    status: "completed",
+    events: [{ timestamp: "2026-08-31T00:02:05.000Z" }],
+    ...over,
+  });
+
+  test("takes the newest settled chat Turn's reply, stamped when it settled", () => {
+    expect(sidebarMessagePreviewFromRunsV1([run()])).toEqual({
+      schemaVersion: 1,
+      text: "Here is the plan.",
+      at: "2026-08-31T00:02:05.000Z",
+      role: "assistant",
+    });
+  });
+
+  test("walks past a running Turn and an automation to the newest chat reply", () => {
+    expect(
+      sidebarMessagePreviewFromRunsV1([
+        run({ status: "running", responseText: undefined }),
+        run({
+          admission: { turnType: "automation" },
+          responseText: "Routine ran.",
+        }),
+        run({ responseText: "The older answer." }),
+      ]),
+    ).toMatchObject({ text: "The older answer.", role: "assistant" });
+  });
+
+  test("falls back to the User's own words when the reply was empty", () => {
+    expect(
+      sidebarMessagePreviewFromRunsV1([run({ responseText: "" })]),
+    ).toEqual({
+      schemaVersion: 1,
+      text: "What is the plan?",
+      at: "2026-08-31T00:02:00.000Z",
+      role: "user",
+    });
+  });
+
+  test("a Bot with no settled chat Turn still has no preview", () => {
+    expect(sidebarMessagePreviewFromRunsV1([])).toBeUndefined();
+    expect(
+      sidebarMessagePreviewFromRunsV1([
+        run({ status: "running", responseText: undefined, input: "" }),
+      ]),
+    ).toBeUndefined();
+  });
+
+  // A read of durable data never throws: a run whose stamps are unreadable
+  // costs the row, not the whole sidebar.
+  test("skips a run whose stored timestamps cannot be read", () => {
+    expect(
+      sidebarMessagePreviewFromRunsV1([
+        run({ acceptedAt: "not a time", events: [] }),
+        run({ responseText: "The readable one." }),
+      ]),
+    ).toMatchObject({ text: "The readable one." });
   });
 });
 

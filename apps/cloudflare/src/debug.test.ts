@@ -130,6 +130,44 @@ describe("debug route", () => {
     });
   });
 
+  // `--limit 100` used to answer 500 and log an uncaught error in the isolate:
+  // the cap was enforced inside the Bot, past the point that could answer for
+  // it. A bad query is the caller's, and the answer says what would be right.
+  test("400s on a limit outside the allowed range, and never reaches the Bot", async () => {
+    const target = surface();
+    const route = createDebugRoute(target);
+    const request = get(
+      "/api/debug/bots/primary?userId=user-1&limit=100&events=true",
+      authorized,
+    );
+
+    const response = await route(request, new URL(request.url));
+
+    expect(response?.status).toBe(400);
+    const body = (await response?.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      error: "debug query limit must be a whole number from 1 to 20",
+    });
+    // No stack: the 500 path carries one for the operator, but a caller's own
+    // mistake must not hand back the build's file layout and line numbers.
+    expect(body.stack).toBeUndefined();
+    expect(target.snapshots).toEqual([]);
+  });
+
+  test("400s on a limit that is not a whole number at all", async () => {
+    const target = surface();
+    const route = createDebugRoute(target);
+    const request = get(
+      "/api/debug/bots/primary?userId=user-1&limit=nonsense",
+      authorized,
+    );
+
+    const response = await route(request, new URL(request.url));
+
+    expect(response?.status).toBe(400);
+    expect(target.snapshots).toEqual([]);
+  });
+
   test("reports a failed read to the operator rather than swallowing it", async () => {
     const route = createDebugRoute(
       surface({

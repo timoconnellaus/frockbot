@@ -260,6 +260,59 @@ export function sidebarMessagePreviewForTurnV1(
   });
 }
 
+/** The little a settled run has to expose for a preview to be derived from it. */
+export interface SidebarPreviewRunV1 {
+  acceptedAt: string;
+  input: string;
+  responseText?: string;
+  status: string;
+  /** Only the timestamps are read: the newest one is when the Turn settled. */
+  events?: readonly { timestamp?: string }[];
+  /** Absent means the Turn was admitted as `chat`, as everywhere else. */
+  admission?: { turnType?: string };
+}
+
+/**
+ * The preview for a Bot that has a transcript but no preview record.
+ *
+ * The record is written at settlement, so every Turn that settled before that
+ * projection existed left one behind — and the row then claimed "No messages
+ * yet" over a full conversation. A read cannot write the record it is missing,
+ * so it derives the same line from the runs that are already durable. Runs
+ * arrive newest-first and the walk stops at the first settled chat Turn with
+ * text, which is exactly the line the settlement would have stored.
+ */
+export function sidebarMessagePreviewFromRunsV1(
+  runs: readonly SidebarPreviewRunV1[],
+): SidebarMessagePreviewV1 | undefined {
+  for (const run of runs) {
+    if (run.status === "running") continue;
+    // An automation Turn reaches the User through its own inbox entry and
+    // never became this row at settlement either.
+    if ((run.admission?.turnType ?? "chat") !== "chat") continue;
+    const settledAt = settlementTimestampV1(run);
+    try {
+      const preview = sidebarMessagePreviewForTurnV1(run, settledAt);
+      if (preview) return preview;
+    } catch {
+      // A run whose stored timestamps cannot be read is not worth the row —
+      // and a read of durable data never throws over one bad record.
+      continue;
+    }
+  }
+  return undefined;
+}
+
+/** When a stored run settled: its newest event's stamp, else its admission. */
+function settlementTimestampV1(run: SidebarPreviewRunV1): string {
+  for (let index = (run.events?.length ?? 0) - 1; index >= 0; index -= 1) {
+    const timestamp = run.events?.[index]?.timestamp;
+    if (typeof timestamp === "string" && Number.isFinite(Date.parse(timestamp)))
+      return timestamp;
+  }
+  return run.acceptedAt;
+}
+
 /**
  * Records a settled chat Turn. Monotonic: a cursor that is not newer than the
  * one already recorded leaves the record byte-for-byte unchanged, so a
@@ -353,9 +406,17 @@ export function projectBotUnreadViewV1(
   state: UnreadStateV1,
   cursors: readonly string[],
   lastMessage?: SidebarMessagePreviewV1,
+  /**
+   * Unacknowledged Routine failures. An automation Turn deliberately does not
+   * advance the activity cursor, so a Routine failing every minute badged
+   * nothing at all — the one Bot the User most needed to look at was the one
+   * the sidebar stayed quiet about. A failure is the Bot addressing its User,
+   * so it counts here even though the firing that produced it does not.
+   */
+  automationFailures = 0,
 ): BotUnreadViewV1 {
   const ceiling = state.lastActivityCursor;
-  let counted = 0;
+  let counted = Math.max(0, automationFailures);
   if (ceiling !== undefined) {
     for (const cursor of cursors) {
       if (cursor > ceiling) continue;

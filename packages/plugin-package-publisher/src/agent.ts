@@ -27,6 +27,17 @@ export interface PackagePublisherAgentHost {
 export interface PackagePublisherAgentConfig {
   userId: string;
   defaultProviderId: string;
+  /**
+   * Whether this deployment has a Computer at all.
+   *
+   * The Package Publisher's workspace lives on the Computer, so on a host with
+   * no Computer there is nothing true to say about editing a setup there. A
+   * prompt that promises a Computer the host does not have sends the model
+   * hunting for one and inventing a sandbox. `undefined` keeps the sentence,
+   * so a host that does not know either way behaves as before — the same
+   * convention `plugin-computer`'s `configured` uses.
+   */
+  configured?: boolean;
 }
 
 async function executeText(
@@ -96,6 +107,7 @@ export function createPackagePublisherAgentPlugin(
   if (!defaultProviderId) {
     throw new Error("Package Publisher provider id must be non-empty");
   }
+  const computerConfigured = config.configured !== false;
   const plugin: Plugin.Function = (ctx) => {
     const list: ToolDefinition = {
       name: "list_setup_revisions",
@@ -257,7 +269,11 @@ export function createPackagePublisherAgentPlugin(
         render: () =>
           [
             "## Editable setup",
-            `Edit and test the User's shared setup in ${SETUP_DIRECTORY} using the Computer.`,
+            ...(computerConfigured
+              ? [
+                  `Edit and test the User's shared setup in ${SETUP_DIRECTORY} using the Computer.`,
+                ]
+              : []),
             `Publishing archives the current Git HEAD and reads ${SETUP_APPLICATION_FILE} from that fixed folder; file editing itself is not owned by the Package Publisher.`,
             "Commit the intended source, run the setup's required checks, and call publish_setup only after they pass.",
           ].join("\n"),

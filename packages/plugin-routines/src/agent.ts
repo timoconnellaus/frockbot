@@ -102,10 +102,22 @@ const ROUTINE_MANAGE_INPUT_SCHEMA = {
       description:
         "IANA time zone the schedule is read in, such as Australia/Sydney.",
     },
+    userAsked: {
+      type: "boolean",
+      description:
+        "Set true only when the User asked you, in this conversation, to pause, edit, or delete this Routine. Required for those three actions on a Routine the User created. Never set it because a Routine looks wrong to you, is failing, or is no longer useful: say so and let the User decide.",
+    },
   },
   required: ["action"],
   additionalProperties: false,
 } as const;
+
+/** The actions that switch off or overwrite something already running. */
+const DESTRUCTIVE_ROUTINE_ACTIONS = new Set<RoutineManageActionV1>([
+  "pause",
+  "update",
+  "delete",
+]);
 
 interface RoutineManageInputV1 {
   action: RoutineManageActionV1;
@@ -115,6 +127,7 @@ interface RoutineManageInputV1 {
   schedule?: string;
   trigger?: "webhook";
   timezone?: string;
+  userAsked?: boolean;
 }
 
 function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
@@ -130,6 +143,7 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
     "schedule",
     "trigger",
     "timezone",
+    "userAsked",
   ]);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
@@ -153,6 +167,9 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
   if (value.trigger !== undefined && value.trigger !== "webhook") {
     throw new RoutineDecodeError('routine_manage trigger must be "webhook"');
   }
+  if (value.userAsked !== undefined && typeof value.userAsked !== "boolean") {
+    throw new RoutineDecodeError("routine_manage userAsked must be a boolean");
+  }
   return {
     action,
     ...(optional("routineId") === undefined
@@ -169,6 +186,9 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
     ...(optional("timezone") === undefined
       ? {}
       : { timezone: optional("timezone")! }),
+    ...(value.userAsked === undefined
+      ? {}
+      : { userAsked: value.userAsked as boolean }),
   };
 }
 
@@ -239,6 +259,28 @@ export function routineManageCommandV1(
   });
 }
 
+/**
+ * Whether the User, rather than this Bot, created the Routine.
+ *
+ * A listing that cannot be read answers `true`: not knowing who owns a Routine
+ * is a reason to ask, not a reason to switch it off. A Routine that is not in
+ * the listing at all is gone, and the command below will say so properly.
+ */
+async function userAuthoredRoutineV1(
+  host: RoutinesRuntimeHostV1,
+  routineId: string,
+): Promise<boolean> {
+  try {
+    const listing = await host.list();
+    const routine = listing.routines.find(
+      (candidate) => candidate.routineId === routineId,
+    );
+    return routine === undefined ? false : routine.createdBy.kind === "user";
+  } catch {
+    return true;
+  }
+}
+
 function refusal(reason: string): { content: string; isError: boolean } {
   return { content: `routine_manage was refused: ${reason}`, isError: true };
 }
@@ -257,6 +299,10 @@ export function createRoutineManageTool(
       "A Routine is a standing instruction that fires on a schedule or on a delivered webhook,",
       `as its own Turn rather than inside this conversation. Names are at most ${ROUTINE_NAME_MAX_LENGTH}`,
       `characters and prompts at most ${ROUTINE_PROMPT_MAX_LENGTH}.`,
+      "Pausing, editing, or deleting a Routine the User created switches off something they set up,",
+      "so do it only when the User asked you to in this conversation, and pass userAsked: true when they did.",
+      "If a Routine of theirs is failing or looks wrong, tell them and let them decide — do not switch it off yourself.",
+      "Say in your reply whatever you changed.",
     ].join(" "),
     inputSchema: ROUTINE_MANAGE_INPUT_SCHEMA as unknown as Record<
       string,
@@ -272,14 +318,31 @@ export function createRoutineManageTool(
       }
     },
     execute: async (input: unknown, context: ToolExecutionContext) => {
+      let decoded: RoutineManageInputV1;
       let command: RoutineCommandV1;
       try {
-        command = routineManageCommandV1(decodeRoutineManageInputV1(input), {
+        decoded = decodeRoutineManageInputV1(input);
+        command = routineManageCommandV1(decoded, {
           botId: host.botId,
           commandId: routineToolCommandIdV1(context.effectId),
         });
       } catch (error) {
         return refusal(error instanceof Error ? error.message : String(error));
+      }
+      // A Bot paused a User's Routine in a Turn about sheep farming, with no
+      // approval, no confirmation, and nothing in the transcript saying so.
+      // The User's own Routines are theirs: switching one off, or rewriting
+      // it, needs the User to have asked for it in this conversation. The
+      // Bot's own Routines it may manage freely — those are its housekeeping.
+      if (
+        DESTRUCTIVE_ROUTINE_ACTIONS.has(decoded.action) &&
+        decoded.userAsked !== true &&
+        decoded.routineId !== undefined &&
+        (await userAuthoredRoutineV1(host, decoded.routineId))
+      ) {
+        return refusal(
+          `Routine ${decoded.routineId} was created by the User. Ask them before you ${decoded.action === "update" ? "change" : decoded.action} it, and call this again with userAsked: true once they say so.`,
+        );
       }
       const writer: RoutineWriterV1 = {
         kind: "bot",

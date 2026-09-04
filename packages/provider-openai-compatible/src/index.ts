@@ -41,7 +41,24 @@ export interface OpenAICompatibleConfig {
    * Timer seam, so a deadline test does not have to wait two minutes for one.
    * Defaults to `setTimeout`.
    */
-  schedule?: (run: () => void, milliseconds: number) => () => void;
+  schedule?: ModelRequestScheduleV1;
+}
+
+/**
+ * How a deadline arms its timer: run `run` after `milliseconds`, and return
+ * the cancel. Injected so a test can drive the deadlines by hand.
+ */
+export type ModelRequestScheduleV1 = (
+  run: () => void,
+  milliseconds: number,
+) => () => void;
+
+/** The deadline seam every transport's stream is wrapped in. */
+export interface ModelRequestDeadlineOptionsV1 {
+  /** Overrides {@link MODEL_REQUEST_DEADLINES_V1}. */
+  deadlines?: Partial<ModelRequestDeadlinesV1>;
+  /** Timer seam. Defaults to `setTimeout`. */
+  schedule?: ModelRequestScheduleV1;
 }
 
 /**
@@ -415,6 +432,91 @@ export async function* streamOpenAICompatibleBody(
   };
 }
 
+/**
+ * Wait for `opening`, but give up when the deadline clock does.
+ *
+ * A transport that cannot be handed a signal — a native binding, say — keeps
+ * running after we stop waiting for it, so whatever it eventually produces is
+ * cancelled rather than left holding a socket nobody reads.
+ */
+async function openWithinDeadlineV1(
+  opening: Promise<ReadableStream<Uint8Array>>,
+  signal: AbortSignal,
+): Promise<ReadableStream<Uint8Array>> {
+  let abandon: (() => void) | undefined;
+  try {
+    return await new Promise<ReadableStream<Uint8Array>>((resolve, reject) => {
+      if (signal.aborted) {
+        reject(signal.reason as Error);
+        return;
+      }
+      abandon = () => {
+        reject(signal.reason as Error);
+        void opening.then(
+          async (body) => {
+            // Only a body nobody is reading is ours to cancel; once the decoder
+            // holds the lock, its own abort handling closes the stream.
+            if (body.locked) return;
+            try {
+              await body.cancel(signal.reason);
+            } catch {
+              // A body already closed or errored needs no cancelling.
+            }
+          },
+          () => undefined,
+        );
+      };
+      signal.addEventListener("abort", abandon, { once: true });
+      opening.then(resolve, reject);
+    });
+  } finally {
+    // The listener goes with the wait it belonged to. Left attached, a later
+    // abort — the idle deadline, a Stop — would reject a promise nobody is
+    // waiting on any more, which every runtime reports as a crash.
+    if (abandon) signal.removeEventListener("abort", abandon);
+  }
+}
+
+/**
+ * Run one model request under the first-byte and idle deadlines.
+ *
+ * The single seam every transport goes through, HTTP or native binding: it
+ * owns the clock, so a Package supplying its own transport cannot forget the
+ * deadlines, and there is one place to change what they are. `open` is handed
+ * the deadline-aware signal and returns the response body to decode.
+ */
+export async function* streamWithModelRequestDeadlinesV1(
+  open: (signal: AbortSignal) => Promise<ReadableStream<Uint8Array>>,
+  signal: AbortSignal,
+  options: ModelRequestDeadlineOptionsV1 = {},
+): AsyncIterable<LlmStreamEvent> {
+  const clock = new ModelRequestClockV1(
+    signal,
+    { ...MODEL_REQUEST_DEADLINES_V1, ...options.deadlines },
+    options.schedule ?? defaultScheduleV1,
+  );
+  try {
+    const body = await openWithinDeadlineV1(open(clock.signal), clock.signal);
+    for await (const event of streamOpenAICompatibleBody(body, clock.signal)) {
+      clock.progressed();
+      yield event;
+    }
+  } catch (error) {
+    // The abort reason is the real failure; `AbortError` is only how it
+    // reached us. Without this the Turn reports a cancellation nobody asked
+    // for instead of the deadline it actually hit.
+    if (
+      clock.signal.reason instanceof ModelRequestDeadlineError &&
+      !signal.aborted
+    ) {
+      throw clock.signal.reason;
+    }
+    throw error;
+  } finally {
+    clock.disarm();
+  }
+}
+
 export class OpenAICompatibleProvider implements LlmProvider {
   readonly id: string;
   private config: OpenAICompatibleConfig;
@@ -446,55 +548,37 @@ export class OpenAICompatibleProvider implements LlmProvider {
     // request and then went quiet held the Turn open for as long as the socket
     // stayed up — seventeen minutes, in the incident this exists for, with
     // nothing on the person's screen the whole time.
-    const clock = new ModelRequestClockV1(
+    yield* streamWithModelRequestDeadlinesV1(
+      async (deadlineSignal) => {
+        const response = await fetcher(
+          `${this.config.baseUrl}/chat/completions`,
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify(
+              requestToWire(request, {
+                ...(this.config.acceptsImages === undefined
+                  ? {}
+                  : { acceptsImages: this.config.acceptsImages }),
+              }),
+            ),
+            signal: deadlineSignal,
+          },
+        );
+        if (!response.ok) {
+          await response.body?.cancel();
+          throw new OpenAICompatibleHttpError(response.status);
+        }
+        if (!response.body)
+          throw new Error("Model response did not include a stream");
+        return response.body;
+      },
       signal,
-      { ...MODEL_REQUEST_DEADLINES_V1, ...this.config.deadlines },
-      this.config.schedule ?? defaultScheduleV1,
+      {
+        ...(this.config.deadlines ? { deadlines: this.config.deadlines } : {}),
+        ...(this.config.schedule ? { schedule: this.config.schedule } : {}),
+      },
     );
-    try {
-      const response = await fetcher(
-        `${this.config.baseUrl}/chat/completions`,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify(
-            requestToWire(request, {
-              ...(this.config.acceptsImages === undefined
-                ? {}
-                : { acceptsImages: this.config.acceptsImages }),
-            }),
-          ),
-          signal: clock.signal,
-        },
-      );
-      if (!response.ok) {
-        await response.body?.cancel();
-        throw new OpenAICompatibleHttpError(response.status);
-      }
-      if (!response.body)
-        throw new Error("Model response did not include a stream");
-
-      for await (const event of streamOpenAICompatibleBody(
-        response.body,
-        clock.signal,
-      )) {
-        clock.progressed();
-        yield event;
-      }
-    } catch (error) {
-      // The abort reason is the real failure; `AbortError` is only how it
-      // reached us. Without this the Turn reports a cancellation nobody asked
-      // for instead of the deadline it actually hit.
-      if (
-        clock.signal.reason instanceof ModelRequestDeadlineError &&
-        !signal.aborted
-      ) {
-        throw clock.signal.reason;
-      }
-      throw error;
-    } finally {
-      clock.disarm();
-    }
   }
 }
 

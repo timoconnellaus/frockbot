@@ -12,6 +12,7 @@ import type { CompositionGenerationV1 } from "@frockbot/kernel-composition/gener
 import { DurableCompositionStore } from "./composition-store.js";
 import { DurableCompositionFailureLog } from "./composition-failures.js";
 import {
+  boundedRunFailureV1,
   botTurnCommandFingerprintV1,
   defaultRunLaneV1,
   storedRunAdmissionV1,
@@ -174,6 +175,16 @@ export const SUPERSEDED_TURN_REASON_V1 = "superseded by a new user message";
 
 /** How many times a queued Turn retries the object before giving up. */
 const MAX_QUEUED_RUN_START_ATTEMPTS = 8;
+
+/**
+ * The failure a discarded Turn is settled with when recovery finds it.
+ *
+ * It is never read by anybody: `failStoredRun` routes a run carrying a Stop or
+ * supersede intent to `cancelStoredRun`/`supersedeStoredRun`, and both drop the
+ * failure — the User's own intent is the outcome, not an error.
+ */
+const DISCARDED_RUN_RECOVERY_FAILURE_V1 =
+  "Turn was discarded before recovery could resume it";
 
 /**
  * True when this object has already durably decided to throw the Turn away.
@@ -477,8 +488,41 @@ export class BotDurableAuthority<Snapshot> {
           `Reconciliation was explicitly abandoned: ${failure}`,
         );
       }
+      // "Try again" that ends in a settled run is a *successful* abandon, not a
+      // failed request. Rethrowing here made the button answer 409 and left the
+      // browser reading a run it thought had not moved — and the read that
+      // followed 500'd on the half-repaired record. The run is durable and
+      // terminal by this point, and its own record says why it ended, so the
+      // caller is handed that record and reads the reason from the transcript.
+      const settled = await this.settledReconciliationResult(runId);
+      if (settled) return settled;
       throw error;
     }
+  }
+
+  /**
+   * The completion an abandoned reconciliation reports once the run it was
+   * resolving has reached a terminal state — whatever that state turned out to
+   * be. Anything still open is not this method's to answer for.
+   */
+  private async settledReconciliationResult(
+    runId: string,
+  ): Promise<BotTurnCompletion | undefined> {
+    const run = this.codec.optional(
+      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
+    );
+    if (
+      run?.status !== "failed" &&
+      run?.status !== "cancelled" &&
+      run?.status !== "superseded"
+    ) {
+      return undefined;
+    }
+    return {
+      runId,
+      text: run.responseText ?? "",
+      events: structuredClone(run.events),
+    };
   }
 
   private withNotification(
@@ -572,7 +616,7 @@ export class BotDurableAuthority<Snapshot> {
         throw new Error(message);
       }
       await this.failRun(command.runId, previous, events, message);
-      const settled = await this.supersededRunResult(command.runId);
+      const settled = await this.discardedRunResult(command.runId);
       if (settled) return settled;
       throw new Error(message);
     } finally {
@@ -583,17 +627,25 @@ export class BotDurableAuthority<Snapshot> {
   }
 
   /**
-   * The completion a Turn another user message replaced reports. It is not a
-   * failure: the Turn settled durably, keeping everything it had already sent,
-   * and its caller reads the rest of the conversation from durable state.
+   * The completion a discarded Turn reports — one the User stopped, or one a
+   * later message replaced. Neither is a failure: the Turn settled durably,
+   * keeping everything it had already sent, and its caller reads the rest of
+   * the conversation from durable state.
+   *
+   * Stop used to be missing from here, so the long-lived `POST /turns` the
+   * composer was still holding open answered 500 the instant Stop was pressed:
+   * the UI said "You stopped this." and the console said the send had failed.
+   * A Turn the person stopped on purpose is the most ordinary outcome there is.
    */
-  private async supersededRunResult(
+  private async discardedRunResult(
     runId: string,
   ): Promise<BotTurnCompletion | undefined> {
     const run = this.codec.optional(
       await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
     );
-    if (run?.status !== "superseded") return undefined;
+    if (run?.status !== "superseded" && run?.status !== "cancelled") {
+      return undefined;
+    }
     return { runId, text: "", events: structuredClone(run.events) };
   }
 
@@ -608,7 +660,7 @@ export class BotDurableAuthority<Snapshot> {
     const run = this.codec.optional(
       await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
     );
-    if (run?.status === "superseded") {
+    if (run?.status === "superseded" || run?.status === "cancelled") {
       return { runId, text: "", events: structuredClone(run.events) };
     }
     if (run?.status !== "completed") return undefined;
@@ -705,7 +757,7 @@ export class BotDurableAuthority<Snapshot> {
         throw new Error(message);
       }
       await this.failRun(run.runId, previous, events, message);
-      const settled = await this.supersededRunResult(run.runId);
+      const settled = await this.discardedRunResult(run.runId);
       if (settled) return settled;
       throw new Error(message);
     } finally {
@@ -743,10 +795,11 @@ export class BotDurableAuthority<Snapshot> {
         `Turn idempotency key "${runId}" was reused for a different command`,
       );
     }
-    // A Turn another user message took the place of is an ordinary outcome,
-    // not a failure: it settled durably, said whatever it had already said,
-    // and the caller reads the rest from durable state.
-    if (run.status === "superseded") {
+    // A Turn the User stopped, or one another user message took the place of,
+    // is an ordinary outcome and not a failure: it settled durably, said
+    // whatever it had already said, and the caller reads the rest from durable
+    // state. A retry of either replays that settlement rather than refusing.
+    if (run.status === "superseded" || run.status === "cancelled") {
       return {
         runId,
         text: "",
@@ -881,7 +934,30 @@ export class BotDurableAuthority<Snapshot> {
         return;
       }
     }
-    await this.recoverActiveRun();
+    // An alarm has no caller. A rejection here is an uncaught exception in the
+    // object, and in the dev Worker it took the whole process down: a Stop left
+    // a run whose model outcome was uncertain, recovery re-entered it,
+    // `executeAdmittedRun` rethrew after recording the failure durably, and
+    // wrangler exited mid-run for every agent sharing the stack.
+    //
+    // Nothing about that throw is actionable here. Recovery has already written
+    // whatever it decided to durable storage before it rethrew, so the only
+    // thing left to do is record the reason and make sure the object still has
+    // a deadline — the re-arm is deliberately in a `finally`, because a failed
+    // recovery is exactly the case where the *next* firing matters most.
+    try {
+      await this.recoverActiveRun();
+    } catch (error) {
+      console.error(
+        `Bot run recovery alarm failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    } finally {
+      await this.ctx.storage
+        .transaction((transaction) => this.refreshRecoveryAlarm(transaction))
+        .catch(() => undefined);
+    }
   }
 
   /** Active run id, for Package projections of durable run state. */
@@ -1518,6 +1594,20 @@ export class BotDurableAuthority<Snapshot> {
     });
   }
 
+  /**
+   * Settles a run `failed` on a reason the authority composed from an error.
+   *
+   * The reason is bounded on the way in because nothing upstream bounds an
+   * error's `message`: a provider that echoes the request back produced one far
+   * past what the record allows, the settlement wrote it anyway, and every
+   * later read of that run threw — so a Turn that failed once went on to 500
+   * the transcript endpoint for ever. A reason a person reads loses nothing by
+   * being cut; a transcript nobody can read loses everything.
+   *
+   * Recovery's own `failStoredRun` is deliberately not routed through here: a
+   * failure derived from a malformed durable history is the one case where
+   * refusing to settle, and keeping the work active, is the right answer.
+   */
   private async failRun(
     runId: string,
     previous: SessionEvent[],
@@ -1532,13 +1622,14 @@ export class BotDurableAuthority<Snapshot> {
         runId,
         previous,
         events,
-        failure,
+        boundedRunFailureV1(failure),
         this.supersededPackageRecords(),
       );
       await this.refreshRecoveryAlarm(transaction);
     });
   }
 
+  /** Parks a run on a reason the authority composed, bounded as `failRun`'s is. */
   private async requireRunReconciliation(
     runId: string,
     previous: SessionEvent[],
@@ -1553,7 +1644,7 @@ export class BotDurableAuthority<Snapshot> {
         runId,
         previous,
         events,
-        failure,
+        boundedRunFailureV1(failure),
       );
       await this.refreshRecoveryAlarm(transaction);
     });
@@ -1631,6 +1722,30 @@ export class BotDurableAuthority<Snapshot> {
       const latest = (
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
       ).map(decodeSessionEvent);
+      // A Turn the User stopped, or one a later message replaced, is terminal
+      // in intent before recovery ever looks at it. There is nothing to
+      // recover: no answer is owed, and the provider outcome cannot change what
+      // it settles as. Re-entering it is how the Worker died — the run resumed,
+      // reached "Model response outcome is uncertain after cancellation", and
+      // the alarm had nothing to hand the rejection to.
+      //
+      // `failStoredRun` routes a discarded run to `cancelStoredRun` or
+      // `supersedeStoredRun` on the intent that is already durable, and closes
+      // the open turn on the way, so the settled log is a complete account.
+      if (runWasDiscardedV1(run)) {
+        await failStoredRun(
+          this.codec,
+          transaction,
+          this.terminalKeys(run.runId),
+          run.runId,
+          latest.slice(0, run.previousEventCount),
+          run.events,
+          DISCARDED_RUN_RECOVERY_FAILURE_V1,
+          this.supersededPackageRecords(),
+        );
+        await this.refreshRecoveryAlarm(transaction);
+        return undefined;
+      }
       const plan = planBotRunRecovery(
         run,
         latest,
@@ -1706,22 +1821,6 @@ export class BotDurableAuthority<Snapshot> {
         } satisfies StoredRunV1<Snapshot>);
         await this.refreshRecoveryAlarm(transaction);
         return { kind: "resume" as const, run, latest, settings };
-      }
-      if (runWasDiscardedV1(run)) {
-        // Recovery of a Turn Stop or supersede already discarded settles it on
-        // that intent rather than parking it: nothing is owed the answer.
-        await failStoredRun(
-          this.codec,
-          transaction,
-          this.terminalKeys(run.runId),
-          run.runId,
-          latest.slice(0, run.previousEventCount),
-          [...run.events, ...plan.repairs],
-          "Execution outcome requires reconciliation before it can resume",
-          this.supersededPackageRecords(),
-        );
-        await this.refreshRecoveryAlarm(transaction);
-        return undefined;
       }
       await transaction.put({
         [key]: {

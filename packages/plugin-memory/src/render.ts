@@ -225,7 +225,9 @@ function injected(
     // prefix inside the text. The marker on the recorded text is what the
     // tier was; the file it sits in is not.
     tier: parseMemoryMarkerV1(fact.text).marker === "note" ? "note" : tier,
-    via: withVia ? fact.via : "",
+    // `via` is a name or nothing: a Bot with no name known to this store is
+    // uncredited rather than credited by its id.
+    via: withVia ? (fact.via ?? "") : "",
     learnedAt: fact.date,
     text: fact.text,
   }));
