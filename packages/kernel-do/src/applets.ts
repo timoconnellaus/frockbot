@@ -65,6 +65,17 @@ export const APPLET_FAILURE_PREFIX = "applet:failure:";
  * at mount time.
  */
 export const APPLET_MOUNT_INPUT_KEY = "applet:mount-input";
+/**
+ * Applet Durable Object: the open activation trial, if one is in flight.
+ *
+ * An activation is a commit boundary the kernel owns, not a mount the candidate
+ * is trusted to survive (ADR 0038). While this key exists the facet's storage is
+ * provisional: a byte copy of it is parked in the rollback facet, and whatever
+ * reads the Applet next either finds the trial committed — the key deleted — or
+ * rolls it back before answering. That is what makes an interrupted publish
+ * recoverable rather than half-migrated.
+ */
+export const APPLET_TRIAL_KEY = "applet:trial";
 /** Bot Durable Object: the Session's focused Applet. */
 export const APPLET_FOCUSED_KEY = "applets:focused";
 
@@ -72,6 +83,15 @@ export const APPLET_FOCUSED_KEY = "applets:focused";
 export const APPLET_FAILURE_ATTEMPT_DIGITS = 4;
 /** The one facet name the kernel mounts under an `AppletState` object. */
 export const APPLET_FACET_NAME_V1 = "applet";
+/**
+ * The second facet name an `AppletState` object uses, and it holds no code.
+ *
+ * `ctx.facets.clone(src, dst)` copies a facet's whole storage, so the kernel
+ * parks a byte copy of the live Applet here for the length of one activation
+ * trial and clones it back if the candidate fails. Nothing is ever mounted
+ * against it; it exists only to be copied from.
+ */
+export const APPLET_ROLLBACK_FACET_NAME_V1 = "applet-rollback";
 /** The Instance Contract version this kernel speaks. */
 export const APPLET_CONTRACT_V1 = 1;
 /** Most generations one Applet retains before the oldest are pruned. */
@@ -164,6 +184,20 @@ export interface AppletMountInputV1 {
   loaderId: string;
   serverHash: string;
   contract: 1;
+}
+
+/**
+ * One activation in flight: which generation is being tried over the Applet's
+ * live storage, and which one the rollback facet holds the storage of.
+ *
+ * `previous` is absent for an Applet's first generation, where there is no data
+ * to protect and a failure discards the candidate's storage instead of
+ * restoring anything.
+ */
+export interface AppletTrialV1 {
+  schemaVersion: 1;
+  candidate: AppletMountInputV1;
+  previous?: AppletMountInputV1;
 }
 
 /** One Session's focused Applet. `null` closes the canvas. */
@@ -349,6 +383,29 @@ export function decodeAppletMountInputV1(
     loaderId: hashString(value.loaderId, `${label}.loaderId`),
     serverHash: hashString(value.serverHash, `${label}.serverHash`),
     contract: 1,
+  };
+}
+
+export function decodeAppletTrialV1(
+  input: unknown,
+  label = "Applet trial",
+): AppletTrialV1 {
+  const value = record(input, label);
+  exactKeys(value, ["schemaVersion", "candidate"], ["previous"], label);
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  return {
+    schemaVersion: 1,
+    candidate: decodeAppletMountInputV1(value.candidate, `${label}.candidate`),
+    ...(value.previous === undefined
+      ? {}
+      : {
+          previous: decodeAppletMountInputV1(
+            value.previous,
+            `${label}.previous`,
+          ),
+        }),
   };
 }
 
