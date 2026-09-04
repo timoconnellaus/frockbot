@@ -102,7 +102,30 @@ describe("adaptFrockBotManifestV1", () => {
       ["loop-hook", "agent/pre-step", "bot-isolate"],
       ["client-entry", "open-notes", "hosted-shell"],
     ]);
-    expect(projected.keys.map((key) => key.name)).toContain("schedule");
+    expect(projected.keys).toEqual(
+      expect.arrayContaining([
+        {
+          name: "botId",
+          readonly: true,
+          source: "turn-invocation",
+        },
+        {
+          name: "packageId",
+          readonly: true,
+          source: "isolate-environment",
+        },
+        {
+          name: "bindings",
+          readonly: true,
+          source: "isolate-environment",
+        },
+        {
+          name: "schedule",
+          readonly: true,
+          source: "kernel-capability",
+        },
+      ]),
+    );
     expect(projected.grants).toEqual([
       {
         name: "storage",

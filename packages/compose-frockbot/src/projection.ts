@@ -62,7 +62,7 @@ export type FrockBotComposeActionV1 =
 export interface FrockBotComposeContextKeyV1 {
   name: ContextKeyNameV1;
   readonly: true;
-  source: "turn-invocation" | "kernel-capability";
+  source: "turn-invocation" | "isolate-environment" | "kernel-capability";
 }
 
 export type FrockBotComposeGrantV1 =
@@ -200,6 +200,10 @@ const CAPABILITY_CONTEXT_KEYS_V1 = new Set<ContextKeyNameV1>([
   "notify",
   "schedule",
 ]);
+const ENVIRONMENT_CONTEXT_KEYS_V1 = new Set<ContextKeyNameV1>([
+  "packageId",
+  "bindings",
+]);
 
 function contextKeysV1(): FrockBotComposeContextKeyV1[] {
   return BOT_ISOLATE_CONTEXT_KEYS_V1.map((name) => ({
@@ -207,7 +211,9 @@ function contextKeysV1(): FrockBotComposeContextKeyV1[] {
     readonly: true,
     source: CAPABILITY_CONTEXT_KEYS_V1.has(name)
       ? "kernel-capability"
-      : "turn-invocation",
+      : ENVIRONMENT_CONTEXT_KEYS_V1.has(name)
+        ? "isolate-environment"
+        : "turn-invocation",
   }));
 }
 

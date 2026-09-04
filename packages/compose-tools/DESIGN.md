@@ -38,8 +38,11 @@ path `client.setPluginList(next)` and wait for settlement before reporting.
 
 The caller supplies the closed **plugin catalog**, protected ids, the grants
 given to written source, and an optional host name. None is changeable by a
-tool call. The composer's own adapter id is not special to this package; the
-adapter includes it in `protected` like every other policy-owned entry.
+tool call. Omitting the host keeps catalog and existing-entry tools usable but
+makes source writing and rewriting fail before activation; it never selects an
+in-process default. The composer's own adapter id is not special to this
+package; the adapter includes it in `protected` like every other policy-owned
+entry.
 
 Catalog options and configuration are validated with each plugin's own
 Standard Schema. A plugin without a validator refuses a non-empty options

@@ -124,6 +124,7 @@ export function createComposerTools(
   const catalog = { ...given.catalog };
   const protectedIds = [...(given.protected ?? [])];
   const stubs = [...(given.stubs ?? [])];
+  const sourceHost = given.host;
   const observed = new Map<string, string>();
   const written = new Set<string>();
 
@@ -493,6 +494,12 @@ export function createComposerTools(
           id,
         ]);
       }
+      if (!sourceHost) {
+        return failure(
+          "source editing is unavailable because the composer was not given a host",
+          [id],
+        );
+      }
       const wrong = await check(id, source);
       if (wrong) {
         return failure(said(wrong), [id], {
@@ -506,7 +513,7 @@ export function createComposerTools(
           id,
           source,
           stubs,
-          host: given.host ?? "",
+          host: sourceHost,
         },
       ]);
       if (failed) return failure(failed, [id]);
@@ -556,6 +563,12 @@ export function createComposerTools(
       if (entry.source === undefined) {
         return failure(`the entry "${id}" is not a source entry`, [id]);
       }
+      if (!sourceHost) {
+        return failure(
+          "source editing is unavailable because the composer was not given a host",
+          [id],
+        );
+      }
       if (!written.has(id)) {
         return failure(
           `the entry "${id}" was not written by this agent, so it cannot be rewritten`,
@@ -593,7 +606,7 @@ export function createComposerTools(
                 options: item.options,
                 enabled: item.enabled,
                 stubs,
-                host: given.host ?? "",
+                host: sourceHost,
               }
             : item,
         ),

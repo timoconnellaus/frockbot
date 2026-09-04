@@ -244,6 +244,22 @@ describe("the framework-neutral composer definitions", () => {
     await client.destroy();
   });
 
+  it("refuses source editing before activation when no host was configured", async () => {
+    const client = createClient({ checker: markerChecker });
+    const result = await run(createComposerTools({ client }), "write_plugin", {
+      id: "written",
+      source: "export default function () {}",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error:
+        "source editing is unavailable because the composer was not given a host",
+    });
+    expect(client.pluginList.state).toEqual([]);
+    await client.destroy();
+  });
+
   it("describes live protected ids and catalog names in the prompt", () => {
     const text = composerPrompt({
       protected: ["loop"],
