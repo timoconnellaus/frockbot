@@ -122,6 +122,43 @@ interface WireMessage {
   content?: unknown;
 }
 
+/**
+ * The sentinel a conversation puts in its own Turns to make the ADR 0030
+ * summariser hang. It has to travel in the *conversation*, because the
+ * summariser's request is composed by the product and carries the covered
+ * Turns verbatim — which is exactly how the stub recognises one.
+ */
+export const STALLED_SUMMARISER_SENTINEL = "STALL-SUMMARISER";
+
+/** How long this request should hang for, or 0 when it should not. */
+function summariserStallMs(body: unknown): number {
+  if (!body || typeof body !== "object") return 0;
+  const messages = (body as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) return 0;
+  const system = (messages as WireMessage[]).find(
+    (message) => message.role === "system",
+  );
+  const instruction = typeof system?.content === "string" ? system.content : "";
+  if (!instruction.startsWith("You are compressing the earlier part")) return 0;
+  return JSON.stringify(messages).includes(STALLED_SUMMARISER_SENTINEL)
+    ? 5_000
+    : 0;
+}
+
+function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason ?? new Error("aborted"));
+      },
+      { once: true },
+    );
+  });
+}
+
 /** The scripted tool calls one request asks for, empty when it asks for none. */
 function scriptedToolCalls(
   body: unknown,
@@ -437,6 +474,8 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     } catch {
       body = undefined;
     }
+    const stall = summariserStallMs(body);
+    if (stall > 0) await sleep(stall, request.signal);
     const calls = scriptedToolCalls(body);
     if (calls.length > 0) return toolCallStream(calls);
     return new Response(

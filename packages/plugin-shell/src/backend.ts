@@ -52,6 +52,8 @@ import {
   RUN_ADMISSION_FENCE_PREFIX,
   RUN_INDEX_PREFIX,
   RUN_PREFIX,
+  CONVERSATION_BUSY_MESSAGE_V1,
+  isConversationBusyV1,
   type BotIdentity,
   type BotDurableAuthorityOptions,
   type BotTurnExecutionInput,
@@ -389,6 +391,7 @@ import {
   projectPackageIframeCompositionV1,
 } from "./composition-views.js";
 import { executeBotTurn, executeDirectToolTurn } from "./backend-runner.js";
+import { yieldCompactionWorkV1 } from "./compaction-scheduler.js";
 import {
   shellTerminalRecordsV1,
   supersededTurnRecordsV1,
@@ -410,6 +413,7 @@ import {
   projectClientTurnV1,
   type ClientRunLookupV1,
   type ClientConversationListV1,
+  type ClientConversationOutcomeV1,
   type ClientRunListV1,
   type ClientRunStopReceiptV1,
   type ClientRunV1,
@@ -1161,6 +1165,19 @@ export class ShellBotBackendContribution {
       .slice(-BOT_ANNOUNCEMENT_RETENTION);
   }
 
+  /**
+   * The announcements as the transcript reads them, each already carrying the
+   * timestamp of the place it belongs rather than the moment it was written.
+   */
+  private async projectAnnouncementPage() {
+    const session =
+      (await this.ctx.storage.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+    return projectClientAnnouncementsV1(
+      await this.listAnnouncements(),
+      session,
+    );
+  }
+
   private async refreshRecoveryAlarm(
     transaction: DurableObjectTransaction,
   ): Promise<void> {
@@ -1174,6 +1191,9 @@ export class ShellBotBackendContribution {
   }
 
   async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
+    // Before the authority reads the session log, so a compaction detached
+    // from the previous Turn has already handed the log back (ADR 0030).
+    await yieldCompactionWorkV1(command.sessionId);
     // Before admission, so the pin this Turn takes already carries whatever the
     // User's Applet directory says now.
     await this.resolveAppletComposition(
@@ -1609,6 +1629,10 @@ export class ShellBotBackendContribution {
   private async executeTurn(
     input: BotTurnExecutionInput<BotSettingsViewV1>,
   ): Promise<BotTurnCompletion> {
+    // ADR 0030: a compaction detached from the previous Turn yields to this
+    // one rather than holding it. Free when none is running, and an abort when
+    // one is, so this Turn is the only writer of the session log.
+    await yieldCompactionWorkV1(input.command.sessionId);
     const settings = input.configurationSnapshot;
     const turn = {
       runId: input.command.runId,
@@ -5735,9 +5759,7 @@ export class ShellBotBackendContribution {
         : { truncated: false },
       // Announcements belong to the Session, not to a page of Turns, so only
       // the newest page carries them.
-      query.before
-        ? []
-        : projectClientAnnouncementsV1(await this.listAnnouncements()),
+      query.before ? [] : await this.projectAnnouncementPage(),
     );
     if (clientRunListWireBytes(page) > CLIENT_RUN_LIST_MAX_BYTES) {
       throw new Error("required run projections exceed the wire byte limit");
@@ -5768,10 +5790,26 @@ export class ShellBotBackendContribution {
    */
   async startConversation(
     identity: BotIdentity,
-  ): Promise<ClientConversationListV1> {
+  ): Promise<ClientConversationOutcomeV1> {
     await this.validateIdentity(identity);
-    await this.authority.startConversation(identity);
-    return this.listConversations();
+    try {
+      await this.authority.startConversation(identity);
+    } catch (error) {
+      // The one refusal this can give travels as data. Everything else is a
+      // genuine failure and still throws, so the boundary above answers 500.
+      if (isConversationBusyV1(error)) {
+        return {
+          status: "refused",
+          schemaVersion: 1,
+          reason:
+            error instanceof Error
+              ? error.message
+              : CONVERSATION_BUSY_MESSAGE_V1,
+        };
+      }
+      throw error;
+    }
+    return { status: "started", ...(await this.listConversations()) };
   }
 
   async lookupRun(input: unknown): Promise<ClientRunLookupV1> {
