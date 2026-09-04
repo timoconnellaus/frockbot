@@ -126,12 +126,14 @@ import {
   planBotRunRecovery,
   planInterruptedRunRecoveryV1,
 } from "./backend-recovery.js";
+import { COMPOSITION_CURRENT_KEY } from "@frockbot/kernel-do";
 import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
   type ShellAppletMountOptions,
   type ShellIsolateMountOptions,
   type ShellMountedComposition,
+  resolveDeploymentCompositionV1,
 } from "./backend-composition.js";
 import {
   createAppletCapabilityHostV1,
@@ -404,6 +406,7 @@ import {
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
   CLIENT_RUN_PAGE_LIMIT,
+  CLIENT_RUN_SCAN_LIMIT,
   clientRunListWireBytes,
   createClientRunListV1,
   createClientRunStopReceiptV1,
@@ -1229,7 +1232,8 @@ export class ShellBotBackendContribution {
     // from the previous Turn has already handed the log back (ADR 0030).
     await yieldCompactionWorkV1(command.sessionId);
     // Before admission, so the pin this Turn takes already carries whatever the
-    // User's Applet directory says now.
+    // deployment ships and whatever the User's Applet directory says now.
+    await this.followDeploymentComposition();
     await this.resolveAppletComposition(
       { userId: command.userId, botId: command.botId },
       command,
@@ -1244,6 +1248,7 @@ export class ShellBotBackendContribution {
     await this.validateIdentity(identity);
     const catalog = await this.listPackageUi(identity);
     const contribution = requirePackageUiToolDeclarationV1(catalog, command);
+    await this.followDeploymentComposition();
     return projectClientTurnV1(
       await this.authority.run({
         ...identity,
@@ -2723,6 +2728,39 @@ export class ShellBotBackendContribution {
   }
 
   /**
+   * Bring this Bot's built-in members up to the deployment before a Turn is
+   * admitted, so a release that changed a first-party manifest or artifact is
+   * a new generation rather than a Bot that cannot mount (2026-09-05, when
+   * every Bot failed every Turn after the Applets list page changed). Outside
+   * the admission transaction like the Applet resolve below; a failure here
+   * leaves the Bot on the generation it has and is visible where that
+   * generation fails to mount.
+   */
+  private async followDeploymentComposition(): Promise<void> {
+    try {
+      // A Bot with nothing pinned yet bootstraps from this deployment when
+      // its first Turn is admitted; reading the current generation here would
+      // materialize that bootstrap early, and a refused command must leave
+      // storage exactly as it found it.
+      if (
+        (await this.ctx.storage.get<unknown>(COMPOSITION_CURRENT_KEY)) ===
+        undefined
+      )
+        return;
+      await resolveDeploymentCompositionV1({
+        plan: await this.compileApplication(),
+        composition: {
+          current: () => this.authority.composition.current(),
+          propose: (generation, options) =>
+            this.authority.composition.propose(generation, options),
+        },
+      });
+    } catch {
+      // The mount records why; never a wedged Turn on its own.
+    }
+  }
+
+  /**
    * Resolve the User's Applet directory into this Bot's next Composition
    * generation, before a Turn is admitted.
    *
@@ -3261,6 +3299,7 @@ export class ShellBotBackendContribution {
     fire: RoutineFireV1,
   ): Promise<RoutineFireOutcomeV1> {
     try {
+      await this.followDeploymentComposition();
       await this.authority.run(
         routineTurnCommandV1(identity, fire, new Date().toISOString()),
       );
@@ -4196,6 +4235,7 @@ export class ShellBotBackendContribution {
       await this.ctx.storage.put(key, { ...context, status: "running" });
       let outcome: TaskOutcomeV1;
       try {
+        await this.followDeploymentComposition();
         await this.authority.run({
           ...identity,
           runId: context.taskId,
@@ -5833,7 +5873,7 @@ export class ShellBotBackendContribution {
 
     const selected = new Map<string, { cursor?: string; run: ClientRunV1 }>();
     if (activeRunId) {
-      const active = await this.authority.readStoredRun(activeRunId);
+      const active = await this.authority.readStoredRunForDisplay(activeRunId);
       // An automation firing occupies the object like any other run, and is
       // still not part of the conversation: the visible transcript never
       // shows one, running or settled.
@@ -5842,60 +5882,110 @@ export class ShellBotBackendContribution {
           run: projectClientRunOrDegradedV1(active),
         });
     }
-    const available = candidates.slice(0, CLIENT_RUN_PAGE_LIMIT);
+    // The run index is global and the transcript is one conversation, so a
+    // page of candidates is not a page of answers: 33 Turns of another
+    // conversation, or of automation, used to come back as an empty,
+    // *untruncated* page that told the client there was nothing older. The
+    // scan cursor now advances over every candidate this call consumed,
+    // whether or not it was kept, so a filtered-out page still says where to
+    // resume; and the scan keeps reading batches, up to a budget, so the
+    // common case answers in one request rather than making the client walk
+    // the history a page at a time. Filtering reads run records only —
+    // hydrating a Turn's journal is what selection costs, not what the scan
+    // costs.
     let stoppedEarly = false;
-    for (const candidate of available) {
-      if (selected.has(candidate.runId)) {
-        const current = selected.get(candidate.runId)!;
-        selected.set(candidate.runId, { ...current, cursor: candidate.cursor });
-        continue;
-      }
-      const stored = await this.authority.readStoredRun(candidate.runId);
-      if (!stored || !isVisibleRunV1(stored) || !inConversation(stored))
-        continue;
-      const projected = projectClientRunOrDegradedV1(stored);
-      const tentative = [
-        ...selected.values(),
-        { cursor: candidate.cursor, run: projected },
-      ];
-      const ordered = tentative
-        .map((entry) => entry.run)
-        .sort(
-          (left, right) =>
-            left.admittedAt.localeCompare(right.admittedAt) ||
-            left.runId.localeCompare(right.runId),
+    let exhausted = false;
+    let scanCursor: string | undefined;
+    let scanned = 0;
+    let batch = candidates;
+    for (;;) {
+      const available = batch.slice(0, CLIENT_RUN_PAGE_LIMIT);
+      const hasMore = batch.length > CLIENT_RUN_PAGE_LIMIT;
+      for (const candidate of available) {
+        if (selected.has(candidate.runId)) {
+          const current = selected.get(candidate.runId)!;
+          selected.set(candidate.runId, {
+            ...current,
+            cursor: candidate.cursor,
+          });
+          scanCursor = candidate.cursor;
+          continue;
+        }
+        const header = await this.authority.readRunHeader(candidate.runId);
+        if (!header || !isVisibleRunV1(header) || !inConversation(header)) {
+          scanCursor = candidate.cursor;
+          continue;
+        }
+        const stored = await this.authority.readStoredRunForDisplay(
+          candidate.runId,
         );
-      const tentativePage = createClientRunListV1(ordered, {
-        truncated: true,
-        nextCursor: candidate.cursor,
-      });
-      const isNewestTerminal =
-        ![...selected.values()].some(
-          (entry) =>
-            entry.run.status === "completed" || entry.run.status === "failed",
-        ) &&
-        (projected.status === "completed" || projected.status === "failed");
-      if (
-        selected.size >= CLIENT_RUN_PAGE_LIMIT ||
-        (!isNewestTerminal &&
-          clientRunListWireBytes(tentativePage) > CLIENT_RUN_LIST_MAX_BYTES)
-      ) {
-        stoppedEarly = true;
+        if (!stored) {
+          scanCursor = candidate.cursor;
+          continue;
+        }
+        const projected = projectClientRunOrDegradedV1(stored);
+        const tentative = [
+          ...selected.values(),
+          { cursor: candidate.cursor, run: projected },
+        ];
+        const ordered = tentative
+          .map((entry) => entry.run)
+          .sort(
+            (left, right) =>
+              left.admittedAt.localeCompare(right.admittedAt) ||
+              left.runId.localeCompare(right.runId),
+          );
+        const tentativePage = createClientRunListV1(ordered, {
+          truncated: true,
+          nextCursor: candidate.cursor,
+        });
+        const isNewestTerminal =
+          ![...selected.values()].some(
+            (entry) =>
+              entry.run.status === "completed" || entry.run.status === "failed",
+          ) &&
+          (projected.status === "completed" || projected.status === "failed");
+        if (
+          selected.size >= CLIENT_RUN_PAGE_LIMIT ||
+          (!isNewestTerminal &&
+            clientRunListWireBytes(tentativePage) > CLIENT_RUN_LIST_MAX_BYTES)
+        ) {
+          stoppedEarly = true;
+          break;
+        }
+        selected.set(stored.runId, {
+          cursor: candidate.cursor,
+          run: projected,
+        });
+        scanCursor = candidate.cursor;
+      }
+      scanned += available.length;
+      if (stoppedEarly) break;
+      if (!hasMore) {
+        exhausted = true;
         break;
       }
-      selected.set(stored.runId, { cursor: candidate.cursor, run: projected });
+      if (selected.size >= CLIENT_RUN_PAGE_LIMIT) break;
+      if (scanned >= CLIENT_RUN_SCAN_LIMIT || scanCursor === undefined) break;
+      batch = await this.authority.listRunIndex({
+        limit: CLIENT_RUN_PAGE_LIMIT + 1,
+        before: scanCursor,
+      });
+      if (batch.length === 0) {
+        exhausted = true;
+        break;
+      }
     }
     const orderedEntries = [...selected.values()].sort(
       (left, right) =>
         left.run.admittedAt.localeCompare(right.run.admittedAt) ||
         left.run.runId.localeCompare(right.run.runId),
     );
-    const oldestCursor = orderedEntries.find((entry) => entry.cursor)?.cursor;
-    const truncated = stoppedEarly || candidates.length > CLIENT_RUN_PAGE_LIMIT;
+    const truncated = !exhausted;
     const page = createClientRunListV1(
       orderedEntries.map((entry) => entry.run),
-      truncated && oldestCursor
-        ? { truncated: true, nextCursor: oldestCursor }
+      truncated && scanCursor
+        ? { truncated: true, nextCursor: scanCursor }
         : { truncated: false },
       // Announcements belong to the Session, not to a page of Turns, so only
       // the newest page carries them.

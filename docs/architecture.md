@@ -4,7 +4,7 @@
 
 Current implemented system shape. The custom durable Agent loop, resident Bot runtime, Cordis WebUI/Vue product, and thin hosted desktop and mobile shells pass through the same backend path.
 
-The accepted native/base boundary in [ADR 0038](adr/0038-a-first-class-native-base-with-declared-extension-seams.md) supersedes the packaging and thin-shell requirements below. The following describes the implementation still running, not the target or a second constitution. See [client renderers](architecture/client-renderers.md) and [native rollout](plans/native-app.md).
+The accepted native/base boundary in [ADR 0039](adr/0039-a-first-class-native-base-with-declared-extension-seams.md) supersedes the packaging and thin-shell requirements below. The following describes the implementation still running, not the target or a second constitution. See [client renderers](architecture/client-renderers.md) and [native rollout](plans/native-app.md).
 
 ## Decision summary
 

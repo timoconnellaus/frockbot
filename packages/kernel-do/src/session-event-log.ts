@@ -338,10 +338,47 @@ export class SessionEventLog {
     return events;
   }
 
+  /**
+   * The exact events of one half-open range.
+   *
+   * A range read seeks to the pages that cover it and hydrates only the
+   * payloads those pages reference. Reading the whole conversation to slice
+   * three events out of it made a transcript read cost one storage operation
+   * per retained model request — a Bot with a hundred 80 KiB requests paid for
+   * all of them to draw one Turn.
+   */
   async readRange(
     sessionId: string,
     startSeq: number,
     endSeq: number,
+  ): Promise<SessionEvent[]> {
+    return this.rangeEvents(sessionId, startSeq, endSeq, "exact");
+  }
+
+  /**
+   * The same range at display fidelity: every event the conversation shows,
+   * with each exact model request left on the audit path.
+   *
+   * The transcript projection reads tool calls, tool results, sends and
+   * assistant chunks; it has never rendered a normalized model request. ADR
+   * 0033 keeps a bounded projection of that request beside its chunked exact
+   * payload precisely so a reader that does not need the exact bytes need not
+   * pay for them, and this is that reader. Recovery, compaction, audit, and
+   * model-history derivation stay on {@link readRange}.
+   */
+  async readDisplayRange(
+    sessionId: string,
+    startSeq: number,
+    endSeq: number,
+  ): Promise<SessionEvent[]> {
+    return this.rangeEvents(sessionId, startSeq, endSeq, "display");
+  }
+
+  private async rangeEvents(
+    sessionId: string,
+    startSeq: number,
+    endSeq: number,
+    fidelity: "exact" | "display",
   ): Promise<SessionEvent[]> {
     if (
       !Number.isSafeInteger(startSeq) ||
@@ -351,7 +388,88 @@ export class SessionEventLog {
     ) {
       throw new Error("Session event range is invalid");
     }
-    return (await this.read(sessionId)).slice(startSeq, endSeq);
+    const index = requireIndex(
+      await this.storage.get<SessionEventLogIndexV1>(
+        sessionEventLogIndexKeyV1(sessionId),
+      ),
+      sessionId,
+    );
+    if (!index) return (await this.read(sessionId)).slice(startSeq, endSeq);
+    const last = Math.min(endSeq, index.eventCount);
+    if (startSeq >= last) return [];
+    const located = await this.pageContaining(sessionId, index, startSeq);
+    if (!located) {
+      throw new Error(
+        `Session event pages for "${sessionId}" are not contiguous`,
+      );
+    }
+    const events: SessionEvent[] = [];
+    for (let page = located.page; page < index.pageCount; page += 1) {
+      const stored =
+        page === located.page
+          ? located.stored
+          : requirePage(
+              await this.storage.get<StoredSessionEventPageV1>(
+                sessionEventLogPageKey(sessionId, page),
+              ),
+              sessionId,
+              page,
+            );
+      for (const entry of stored.entries) {
+        const seq = storedEventSeq(entry);
+        if (seq < startSeq) continue;
+        if (seq >= last) return events;
+        if (seq !== startSeq + events.length) {
+          throw new Error(
+            `Session event log for "${sessionId}" is not contiguous`,
+          );
+        }
+        events.push(
+          fidelity === "display"
+            ? await this.displayEvent(sessionId, entry)
+            : await this.exactEvent(sessionId, entry),
+        );
+      }
+      if (events.length === last - startSeq) break;
+    }
+    if (events.length !== last - startSeq) {
+      throw new Error(`Session event log for "${sessionId}" is not contiguous`);
+    }
+    return events;
+  }
+
+  /**
+   * The page holding `seq`, found by bisecting the page keys.
+   *
+   * Pages carry their own `startSeq` and are written in sequence order, so the
+   * accessor can seek without an extra durable page directory to keep
+   * consistent with the pages themselves.
+   */
+  private async pageContaining(
+    sessionId: string,
+    index: SessionEventLogIndexV1,
+    seq: number,
+  ): Promise<{ page: number; stored: StoredSessionEventPageV1 } | undefined> {
+    let low = 0;
+    let high = index.pageCount - 1;
+    let found: { page: number; stored: StoredSessionEventPageV1 } | undefined;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const stored = requirePage(
+        await this.storage.get<StoredSessionEventPageV1>(
+          sessionEventLogPageKey(sessionId, middle),
+        ),
+        sessionId,
+        middle,
+      );
+      if (stored.startSeq <= seq) {
+        found = { page: middle, stored };
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return found;
   }
 
   async readProjections(
@@ -520,6 +638,23 @@ export class SessionEventLog {
       projection: await cutProjection(event, serialized, digest),
       payload: { chunks: chunks.length, bytes, sha256: digest },
     };
+  }
+
+  /**
+   * One stored entry at display fidelity.
+   *
+   * Only a cut `model/request` is answered from its durable projection: every
+   * other cut event carries content the conversation renders, so it is
+   * hydrated exactly and costs storage in proportion to what is shown.
+   */
+  private async displayEvent(
+    sessionId: string,
+    entry: StoredSessionEventV1,
+  ): Promise<SessionEvent> {
+    if (entry.storage === "cut" && entry.projection.type === "model/request") {
+      return decodeSessionEvent(displayModelRequest(entry.projection));
+    }
+    return this.exactEvent(sessionId, entry);
   }
 
   private async exactEvent(
@@ -715,6 +850,42 @@ export class SessionEventLog {
       });
     }
   }
+}
+
+function storedEventSeq(entry: StoredSessionEventV1): number {
+  return entry.storage === "inline" ? entry.event.seq : entry.projection.seq;
+}
+
+/**
+ * A `model/request` event rebuilt from its durable projection.
+ *
+ * The system prompt is the projection's excerpt and carries its own cut
+ * marker; messages and tools are empty because their counts, not their
+ * contents, are what the projection retained. This is deliberately not the
+ * request the model ran on, and it never reaches recovery, compaction, or
+ * audit — only the transcript, which does not render model requests at all.
+ */
+function displayModelRequest(
+  projection: StoredSessionEventCutV1["projection"],
+): Record<string, unknown> {
+  const request = (projection.request ?? {}) as Record<string, unknown>;
+  const excerpt = (request.excerpt ?? {}) as Record<string, unknown>;
+  return {
+    type: "model/request",
+    seq: projection.seq,
+    timestamp: projection.timestamp,
+    turn: typeof projection.turn === "number" ? projection.turn : 0,
+    step: typeof projection.step === "number" ? projection.step : 0,
+    request: {
+      requestId: typeof request.requestId === "string" ? request.requestId : "",
+      provider: typeof request.provider === "string" ? request.provider : "",
+      model: typeof request.model === "string" ? request.model : "",
+      system: typeof excerpt.system === "string" ? excerpt.system : "",
+      messages: [],
+      tools: [],
+      ...(request.modelBinding ? { modelBinding: request.modelBinding } : {}),
+    },
+  };
 }
 
 function isEventRange(
