@@ -13,23 +13,25 @@ const root = new URL("..", import.meta.url).pathname;
 /** A stub npm whose answers are scripted per subcommand. */
 function stubNpm(options: {
   existing?: Set<string>;
-  trusted?: Set<string>;
   calls: string[][];
+  /** Records which calls were given the terminal, keyed by subcommand. */
+  interactive?: Map<string, boolean>;
 }): CommandRunner {
-  return async (command, args) => {
+  return async (command, args, runOptions) => {
     options.calls.push([command, ...args]);
+    // `trust` is keyed by its subcommand, because reading a trusted
+    // publisher and setting one are opposite cases here.
+    const subcommand = args[0] === "trust" ? `trust ${args[1]}` : args[0];
+    options.interactive?.set(
+      String(subcommand),
+      runOptions?.interactive === true,
+    );
     const ok = { exitCode: 0, stdout: "", stderr: "" };
     if (args[0] === "view") {
       const name = args[1] ?? "";
       return options.existing?.has(name)
         ? { ...ok, stdout: "0.0.0" }
         : { exitCode: 1, stdout: "", stderr: "E404" };
-    }
-    if (args[0] === "trust" && args[1] === "list") {
-      const name = args[2] ?? "";
-      return options.trusted?.has(name)
-        ? { ...ok, stdout: "github timoconnellaus/frockbot release.yml" }
-        : { ...ok, stdout: "" };
     }
     return ok;
   };
@@ -85,21 +87,32 @@ describe("npm trusted publishing bootstrap", () => {
     expect(lines.join("\n")).toContain("Dry run");
   });
 
-  test("an already trusted package is left alone", async () => {
-    const packages = readWorkspacePackages(root);
-    const every = new Set(packages.map((entry) => entry.name));
+  test("npm is given the terminal for the calls that need a password", async () => {
+    // npm demands a one-time password for every operation that changes the
+    // registry, and asks for it by printing a URL and waiting on a browser.
+    // Capturing that output hides the question and the run dies with EOTP
+    // partway through, so publishing and trusting must inherit the terminal.
+    // The probes are captured instead, because their output is parsed.
     const calls: string[][] = [];
-    const result = await bootstrap({
+    const interactive = new Map<string, boolean>();
+    await bootstrap({
       root,
       confirm: true,
-      run: stubNpm({ existing: every, trusted: every, calls }),
+      run: stubNpm({ calls, interactive }),
       log: () => {},
     });
-    expect(result).toMatchObject({ publishedCount: 0, trustedCount: 0 });
-    expect(calls.some((call) => call.includes("publish"))).toBe(false);
+
+    expect(interactive.get("publish")).toBe(true);
+    expect(interactive.get("deprecate")).toBe(true);
+    expect(interactive.get("trust github")).toBe(true);
+    expect(interactive.get("view")).toBe(false);
   });
 
-  test("a package that exists but is untrusted is trusted, not republished", async () => {
+  test("a package npm already has costs no authenticated call", async () => {
+    // The session behind those calls expires in minutes and each one asks
+    // for a password, so a package that needs nothing must not be asked
+    // about. A package the registry has was published by the workflow,
+    // which is only possible if it is already trusted.
     const packages = readWorkspacePackages(root);
     const every = new Set(packages.map((entry) => entry.name));
     const calls: string[][] = [];
@@ -109,9 +122,65 @@ describe("npm trusted publishing bootstrap", () => {
       run: stubNpm({ existing: every, calls }),
       log: () => {},
     });
-    expect(result.publishedCount).toBe(0);
-    expect(result.trustedCount).toBe(packages.length);
+    expect(result).toMatchObject({ publishedCount: 0, trustedCount: 0 });
+    // `npm view` is public. Everything else would have needed a password.
+    expect(calls.every((call) => call[1] === "view")).toBe(true);
+  });
+
+  test("only the packages npm is missing are bootstrapped", async () => {
+    const packages = readWorkspacePackages(root);
+    const missing = packages[0]!.name;
+    const existing = new Set(
+      packages.map((entry) => entry.name).filter((name) => name !== missing),
+    );
+    const calls: string[][] = [];
+    const result = await bootstrap({
+      root,
+      confirm: true,
+      run: stubNpm({ existing, calls }),
+      log: () => {},
+    });
+    expect(result).toMatchObject({ publishedCount: 1, trustedCount: 1 });
+    const trusted = calls.filter(
+      (call) => call[1] === "trust" && call[2] === "github",
+    );
+    expect(trusted).toHaveLength(1);
+    expect(trusted[0]).toContain(missing);
+  });
+
+  test("a named package is trusted even when npm already has it", async () => {
+    // The way back from a run that published a placeholder and then failed
+    // before trusting it: the package exists, so the default pass skips it,
+    // and it still cannot be published by the workflow.
+    const packages = readWorkspacePackages(root);
+    const stranded = packages[0]!.name;
+    const calls: string[][] = [];
+    const result = await bootstrap({
+      root,
+      confirm: true,
+      only: [stranded],
+      run: stubNpm({ existing: new Set([stranded]), calls }),
+      log: () => {},
+    });
+    expect(result).toMatchObject({ publishedCount: 0, trustedCount: 1 });
     expect(calls.some((call) => call.includes("publish"))).toBe(false);
+    const trusted = calls.filter(
+      (call) => call[1] === "trust" && call[2] === "github",
+    );
+    expect(trusted).toHaveLength(1);
+    expect(trusted[0]).toContain(stranded);
+  });
+
+  test("a name that is not a workspace is refused", async () => {
+    expect(
+      bootstrap({
+        root,
+        confirm: true,
+        only: ["@frockbot/not-a-package"],
+        run: stubNpm({ calls: [] }),
+        log: () => {},
+      }),
+    ).rejects.toThrow("no workspace under packages/ is named");
   });
 
   test("an absent package is published once, then trusted", async () => {
