@@ -21,6 +21,7 @@ const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 export interface VoiceLedgerTransactionV1 {
   get<T>(key: string): Promise<T | undefined>;
   put(key: string, value: unknown): Promise<void>;
+  delete(key: string): Promise<boolean>;
   list<T>(options: {
     prefix: string;
     limit?: number;
@@ -112,6 +113,18 @@ export class VoiceLedgerV1 {
           transcript: [],
           toolCalls: [],
         } satisfies VoiceSessionRecordV1);
+      }
+      const sessions = await transaction.list<VoiceSessionRecordV1>({
+        prefix: VOICE_SESSION_PREFIX_V1,
+        limit: VOICE_MAX_SESSIONS_V1 + 1,
+      });
+      const expired = [...sessions.entries()]
+        .sort((left, right) =>
+          right[1].startedAt.localeCompare(left[1].startedAt),
+        )
+        .slice(VOICE_MAX_SESSIONS_V1);
+      for (const [expiredKey] of expired) {
+        await transaction.delete(expiredKey);
       }
       const state: VoiceStateV1 = {
         schemaVersion: 1,
@@ -234,9 +247,23 @@ export class VoiceLedgerV1 {
   /** B2 writes through this idempotent seam after a Bot answers. */
   async recordPendingAnswer(answer: VoicePendingAnswerV1): Promise<void> {
     const key = pendingKey(answer.answerId);
-    if ((await this.storage.get(key)) === undefined) {
-      await this.storage.put(key, answer);
-    }
+    await this.storage.transaction(async (transaction) => {
+      if ((await transaction.get(key)) === undefined) {
+        await transaction.put(key, answer);
+      }
+      const answers = await transaction.list<VoicePendingAnswerV1>({
+        prefix: VOICE_PENDING_PREFIX_V1,
+        limit: VOICE_MAX_PENDING_ANSWERS_V1 + 1,
+      });
+      const expired = [...answers.entries()]
+        .sort((left, right) =>
+          right[1].answeredAt.localeCompare(left[1].answeredAt),
+        )
+        .slice(VOICE_MAX_PENDING_ANSWERS_V1);
+      for (const [expiredKey] of expired) {
+        await transaction.delete(expiredKey);
+      }
+    });
   }
 
   async view(at = new Date().toISOString()): Promise<VoiceLedgerViewV1> {

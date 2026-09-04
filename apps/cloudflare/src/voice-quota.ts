@@ -295,7 +295,6 @@ export async function reserveVoiceAssistantV1(
   request: { month: string; sessionId: string },
 ): Promise<VoiceAssistantQuotaReceiptV1> {
   const quotaKey = voiceAssistantQuotaKeyV1(request.month);
-  const usageKey = voiceAssistantUsageKeyV1(request.month, request.sessionId);
   return storage.transaction(async (transaction) => {
     const used = storedSeconds(
       await transaction.get<StoredVoiceDayV1>(quotaKey),
@@ -312,14 +311,8 @@ export async function reserveVoiceAssistantV1(
       };
     }
     await sweepOldAssistantMonthsV1(transaction, request.month);
-    if ((await transaction.get(usageKey)) === undefined) {
-      await transaction.put(usageKey, {
-        schemaVersion: 1,
-        day: request.month,
-        sessionId: request.sessionId,
-        seconds: 0,
-      } satisfies StoredVoiceSessionV1);
-    }
+    // Do not retain a session key until it reports positive usage. A refused
+    // or failed zero-second setup must not grow authoritative state forever.
     return {
       schemaVersion: 1,
       status: "reserved",

@@ -10,6 +10,9 @@ function memoryStorage(): VoiceLedgerStorageV1 {
     async put(key: string, value: unknown) {
       values.set(key, value);
     },
+    async delete(key: string) {
+      return values.delete(key);
+    },
     async list<T>({ prefix, limit }: { prefix: string; limit?: number }) {
       return new Map(
         [...values]
@@ -88,5 +91,32 @@ describe("VoiceLedgerV1", () => {
     });
     expect(state.activeSessionId).toBe("second");
     expect(state.enabled).toBe(true);
+  });
+
+  test("bounds retained sessions and pending answers", async () => {
+    const ledger = new VoiceLedgerV1(memoryStorage());
+    for (let index = 0; index < 40; index += 1) {
+      const suffix = String(index).padStart(2, "0");
+      await ledger.start({
+        sessionId: `session-${suffix}`,
+        deviceId: "phone",
+        at: `2026-09-04T01:${suffix}:00.000Z`,
+      });
+      await ledger.recordPendingAnswer({
+        schemaVersion: 1,
+        answerId: `answer-${suffix}`,
+        botId: "research",
+        botName: "Research",
+        question: "What changed?",
+        answer: `Answer ${suffix}`,
+        answeredAt: `2026-09-04T01:${suffix}:30.000Z`,
+      });
+    }
+
+    const view = await ledger.view();
+    expect(view.sessions).toHaveLength(24);
+    expect(view.sessions.at(-1)?.sessionId).toBe("session-16");
+    expect(view.pendingAnswers).toHaveLength(32);
+    expect(view.pendingAnswers[0]?.answerId).toBe("answer-08");
   });
 });

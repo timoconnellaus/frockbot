@@ -160,6 +160,8 @@ function rpcSnapshotV1<T>(value: T): T {
 export class VoiceSession extends DurableObject<VoiceSessionBindings> {
   #capture: LiveCapture | undefined;
   #assistant: LiveAssistant | undefined;
+  /** Invalidates any slower socket setup as soon as a newer device arrives. */
+  #voiceEpoch = 0;
 
   /**
    * This object's one HTTP door, and it exists for the socket alone: a 101
@@ -205,6 +207,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
       return this.#openAssistant(request, url, userId);
     }
 
+    const voiceEpoch = ++this.#voiceEpoch;
     // Newest capture wins (D10's rule, one session per User): a second tab
     // takes the microphone rather than fighting the first for the budget.
     if (this.#assistant) {
@@ -212,6 +215,12 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
         this.#assistant,
         "replaced",
         "Voice moved to dictation on your newer device.",
+      );
+    }
+    if (voiceEpoch !== this.#voiceEpoch) {
+      return Response.json(
+        { error: "a newer Voice session is already opening" },
+        { status: 409 },
       );
     }
     this.#endCapture("a newer dictation session took over");
@@ -228,7 +237,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     // upstream shows as a composer waiting for `ready` rather than as a
     // handshake that never completes.
     void loggedEntryV1("voice dictation start", () =>
-      this.#start(server, userId),
+      this.#start(server, userId, voiceEpoch),
     );
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -242,11 +251,18 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(deviceId)) {
       return Response.json({ error: "invalid Voice device" }, { status: 400 });
     }
+    const voiceEpoch = ++this.#voiceEpoch;
     if (this.#assistant) {
       await this.#settleAssistant(
         this.#assistant,
         "replaced",
         "Voice moved to your newer device.",
+      );
+    }
+    if (voiceEpoch !== this.#voiceEpoch) {
+      return Response.json(
+        { error: "a newer Voice session is already opening" },
+        { status: 409 },
       );
     }
     this.#endCapture("Voice assistant started");
@@ -257,7 +273,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     server.binaryType = "arraybuffer";
     this.ctx.acceptWebSocket(server, ["assistant"]);
     void loggedEntryV1("voice assistant start", () =>
-      this.#startAssistant(server, userId, deviceId),
+      this.#startAssistant(server, userId, deviceId, voiceEpoch),
     );
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -266,6 +282,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     client: WebSocket,
     userId: string,
     deviceId: string,
+    voiceEpoch: number,
   ): Promise<void> {
     const sessionId = crypto.randomUUID();
     const month = voiceQuotaMonthV1();
@@ -298,6 +315,9 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
         start.quota.reason ?? "Voice is unavailable until next month.",
       );
     }
+    if (voiceEpoch !== this.#voiceEpoch) {
+      return this.#discardAssistantStart(client, userId, month, sessionId);
+    }
     const target = voiceAssistantUpstreamTargetV1(this.env);
     if (target.path === "unconfigured") {
       await this.#user(userId).endVoiceAssistant({
@@ -329,6 +349,15 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
         client,
         "error",
         VOICE_ASSISTANT_UPSTREAM_ERROR_V1,
+      );
+    }
+    if (voiceEpoch !== this.#voiceEpoch) {
+      return this.#discardAssistantStart(
+        client,
+        userId,
+        month,
+        sessionId,
+        upstream,
       );
     }
     const assistant: LiveAssistant = {
@@ -792,7 +821,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
 
   #refuseAssistant(
     client: WebSocket,
-    reason: "quota" | "error",
+    reason: "quota" | "error" | "replaced",
     message: string,
   ): void {
     try {
@@ -807,6 +836,34 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     } finally {
       this.#close(client, "Voice unavailable");
     }
+  }
+
+  async #discardAssistantStart(
+    client: WebSocket,
+    userId: string,
+    month: string,
+    sessionId: string,
+    upstream?: WebSocket,
+  ): Promise<void> {
+    if (upstream) this.#close(upstream, "Voice moved to a newer device");
+    try {
+      await this.#user(userId).endVoiceAssistant({
+        schemaVersion: 1,
+        userId,
+        month,
+        sessionId,
+        at: new Date().toISOString(),
+        reason: "replaced",
+        seconds: 0,
+      });
+    } catch (error) {
+      console.error("Replaced Voice assistant session was not settled", error);
+    }
+    this.#refuseAssistant(
+      client,
+      "replaced",
+      "Voice moved to your newer device.",
+    );
   }
 
   #sendAssistant(
@@ -832,7 +889,11 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     }
   }
 
-  async #start(client: WebSocket, userId: string): Promise<void> {
+  async #start(
+    client: WebSocket,
+    userId: string,
+    voiceEpoch: number,
+  ): Promise<void> {
     const sessionId = crypto.randomUUID();
     const day = voiceQuotaDayV1();
     let receipt: VoiceQuotaReceiptV1;
@@ -861,6 +922,10 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
         receipt.reason ?? "You've used up today's dictation.",
       );
     }
+    if (voiceEpoch !== this.#voiceEpoch) {
+      this.#close(client, "Voice moved to a newer device");
+      return;
+    }
 
     const target = voiceUpstreamTargetV1(this.env);
     if (target.path === "unconfigured") {
@@ -879,6 +944,11 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
         }),
       );
       return this.#refuse(client, VOICE_UPSTREAM_REFUSAL_MESSAGE_V1);
+    }
+    if (voiceEpoch !== this.#voiceEpoch) {
+      this.#close(upstream, "Voice moved to a newer device");
+      this.#close(client, "Voice moved to a newer device");
+      return;
     }
 
     const capture: LiveCapture = {

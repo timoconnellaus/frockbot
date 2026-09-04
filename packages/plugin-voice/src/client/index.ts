@@ -57,8 +57,13 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
   let playback: VoicePlaybackV1 | undefined;
   let session: VoiceAssistantSessionV1 | undefined;
   let serverEnded = false;
+  /** Invalidates a permission prompt or socket callback from an older toggle. */
+  let attempt = 0;
+  let quotaTicker: ReturnType<typeof setInterval> | undefined;
 
   const releaseMedia = async (): Promise<void> => {
+    if (quotaTicker !== undefined) clearInterval(quotaTicker);
+    quotaTicker = undefined;
     const heldMicrophone = microphone;
     const heldPlayback = playback;
     microphone = undefined;
@@ -87,10 +92,13 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
     async toggle() {
       state.value.open();
       if (state.value.status !== "offline") {
+        attempt += 1;
         state.value.enabled = false;
         state.value.status = "offline";
         state.value.message = "Voice is off.";
-        session?.stop();
+        const stopping = session;
+        session = undefined;
+        stopping?.stop();
         await releaseMedia();
         return;
       }
@@ -102,19 +110,31 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
       state.value.message = undefined;
       state.value.enabled = true;
       serverEnded = false;
+      const currentAttempt = ++attempt;
+      let openingSession: VoiceAssistantSessionV1 | undefined;
+      let openedMicrophone: VoiceMicrophoneV1 | undefined;
+      let openedPlayback: VoicePlaybackV1 | undefined;
       try {
-        microphone = await startVoiceMicrophoneV1({
+        openedMicrophone = await startVoiceMicrophoneV1({
           sampleRate: VOICE_ASSISTANT_INPUT_SAMPLE_RATE_V1,
           audio(audio) {
-            session?.sendAudio(audio);
+            openingSession?.sendAudio(audio);
           },
           level(level) {
+            if (currentAttempt !== attempt) return;
             state.value.level = level;
           },
         });
-        playback = createVoicePlaybackV1();
-        session = openAssistant(deviceIdV1(), {
+        if (currentAttempt !== attempt) {
+          await openedMicrophone.stop();
+          return;
+        }
+        openedPlayback = createVoicePlaybackV1();
+        openingSession = openAssistant(deviceIdV1(), {
           ready(sessionId, quotaRemainingSeconds) {
+            if (currentAttempt !== attempt) return;
+            if (quotaTicker !== undefined) clearInterval(quotaTicker);
+            const quotaStartedAt = Date.now();
             state.value.session = {
               sessionId,
               startedAt: new Date().toISOString(),
@@ -123,17 +143,28 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
             state.value.tools = [];
             state.value.quotaRemainingSeconds = quotaRemainingSeconds;
             state.value.status = "listening";
+            quotaTicker = setInterval(() => {
+              if (currentAttempt !== attempt) return;
+              const elapsed = Math.floor((Date.now() - quotaStartedAt) / 1_000);
+              state.value.quotaRemainingSeconds = Math.max(
+                0,
+                quotaRemainingSeconds - elapsed,
+              );
+            }, 1_000);
           },
           state(liveState) {
+            if (currentAttempt !== attempt) return;
             state.value.status = liveState;
           },
           transcript(entry) {
+            if (currentAttempt !== attempt) return;
             state.value.transcript = [
               ...state.value.transcript,
               { schemaVersion: 1 as const, ...entry },
             ].slice(-VOICE_MAX_TRANSCRIPT_ENTRIES_V1);
           },
           tool(entry) {
+            if (currentAttempt !== attempt) return;
             if (!TOOL_NAMES.includes(entry.name as VoiceToolNameV1)) return;
             state.value.tools = [
               ...state.value.tools,
@@ -145,14 +176,19 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
             ].slice(-VOICE_MAX_TOOL_CALLS_V1);
           },
           audio(audio) {
-            playback?.play(audio);
+            if (currentAttempt !== attempt) return;
+            openedPlayback?.play(audio);
           },
           interrupted() {
-            playback?.interrupt();
+            if (currentAttempt !== attempt) return;
+            openedPlayback?.interrupt();
             state.value.status = "listening";
           },
           offline(reason, message) {
+            if (currentAttempt !== attempt) return;
+            attempt += 1;
             serverEnded = true;
+            session = undefined;
             state.value.enabled = false;
             state.value.status = "offline";
             state.value.message = message;
@@ -162,8 +198,10 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
             }
           },
           failed(message) {
-            if (serverEnded) return;
+            if (currentAttempt !== attempt || serverEnded) return;
+            attempt += 1;
             serverEnded = true;
+            session = undefined;
             state.value.enabled = false;
             state.value.status = "offline";
             state.value.message = message;
@@ -171,6 +209,8 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
             void notifyOffline(message);
           },
           closed() {
+            if (currentAttempt !== attempt) return;
+            attempt += 1;
             session = undefined;
             if (serverEnded || state.value.status === "offline") return;
             state.value.status = "offline";
@@ -179,13 +219,30 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
             void releaseMedia();
           },
         });
+        if (currentAttempt !== attempt) {
+          openingSession.close();
+          await Promise.all([openedMicrophone.stop(), openedPlayback.close()]);
+          return;
+        }
+        microphone = openedMicrophone;
+        playback = openedPlayback;
+        session = openingSession;
       } catch (error) {
+        if (currentAttempt !== attempt) {
+          openingSession?.close();
+          await Promise.all([
+            openedMicrophone?.stop(),
+            openedPlayback?.close(),
+          ]);
+          return;
+        }
+        attempt += 1;
         state.value.enabled = false;
         state.value.status = "offline";
         state.value.message = voiceMicrophoneRefusalV1(error);
-        session?.stop();
+        openingSession?.stop();
         session = undefined;
-        await releaseMedia();
+        await Promise.all([openedMicrophone?.stop(), openedPlayback?.close()]);
       }
     },
   });
@@ -231,6 +288,7 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
       component: VoiceToggle,
     }),
     () => {
+      attempt += 1;
       session?.close();
       session = undefined;
       void releaseMedia();
