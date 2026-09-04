@@ -62,7 +62,13 @@ describe("Voice ask coordinator", () => {
     };
 
     const first = await askBotFromVoiceV1(ledger, host, input);
-    const replay = await askBotFromVoiceV1(ledger, host, input);
+    const replay = await askBotFromVoiceV1(ledger, host, {
+      ...input,
+      // Gemini can redeliver the same function-call id in a later frame. The
+      // original durable ask time is retained while target admission reuses
+      // the same run id.
+      at: "2026-09-04T01:02:04.000Z",
+    });
     await Promise.all(deferred);
 
     expect(first).toEqual(replay);

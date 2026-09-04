@@ -273,7 +273,13 @@ export class VoiceLedgerV1 {
       const held = await transaction.get<unknown>(key);
       if (held !== undefined) {
         const existing = decodeVoiceAskRecordV1(held);
-        if (JSON.stringify(existing.ask) !== JSON.stringify(record.ask)) {
+        if (
+          existing.ask.sessionId !== record.ask.sessionId ||
+          existing.ask.botId !== record.ask.botId ||
+          existing.ask.botName !== record.ask.botName ||
+          existing.ask.question !== record.ask.question ||
+          existing.ask.runId !== record.ask.runId
+        ) {
           throw new Error("voice ask id was reused for different content");
         }
         return { status: "replayed" as const, record: existing };
