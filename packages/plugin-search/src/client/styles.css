@@ -55,10 +55,16 @@
   }
 }
 
+/*
+ * The surface's own gutter. Only the overlay's heading had one, so the query
+ * field, the filters and every result ran edge to edge under a padded title,
+ * and the per-Bot count on the right was cut off by the panel boundary.
+ */
 .search-surface {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 16px 24px 24px;
 }
 
 .search-input-row {
@@ -182,7 +188,9 @@
 }
 
 .search-group-count {
+  flex: 0 0 auto;
   margin-left: auto;
+  padding-left: 8px;
   font-size: var(--frock-text-xs);
   color: var(--frock-text-subtle);
 }

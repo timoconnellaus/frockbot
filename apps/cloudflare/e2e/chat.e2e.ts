@@ -260,16 +260,22 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   await expect(bubbles.first()).toHaveText("pong");
 
   // The bubble is wider than the word it holds, so the text is on one line.
-  const fits = await bubbles.first().evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    const text = range.getBoundingClientRect();
-    return { box: element.getBoundingClientRect().width, text: text.width };
-  });
+  // Measured once the text has actually been laid out: a range measured in the
+  // frame the bubble mounts reports a width of zero and fails on nothing.
+  const measure = async (): Promise<{ box: number; text: number }> =>
+    bubbles.first().evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const text = range.getBoundingClientRect();
+      return { box: element.getBoundingClientRect().width, text: text.width };
+    });
+  await expect
+    .poll(async () => (await measure()).text, { timeout: 10_000 })
+    .toBeGreaterThan(10);
+  const fits = await measure();
   expect(fits.box).toBeGreaterThanOrEqual(fits.text);
-  expect(fits.text).toBeGreaterThan(10);
 
-  // The Turn's tool call is not in the transcript in words. The ring on the
+  // The Turn's tool call is not in the transcript in words. The trail off the
   // avatar was the whole of what the conversation said about it, and a settled
   // Turn keeps none.
   await expect(reply.getByRole("status", { name: "Working" })).toHaveCount(0, {
@@ -282,6 +288,7 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   // Bot, so a sheep beside each one named nobody; the column starts at the
   // transcript's own left edge instead, with no gutter left behind.
   await expect(reply.locator(".bot-avatar")).toHaveCount(0);
+  await expect(reply.locator(".ui-activity-trail")).toHaveCount(0);
   const edges = await reply.evaluate((element) => {
     const column = element.querySelector(".message-column");
     return {
@@ -293,10 +300,10 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
 });
 
 // The owner's ask, from the other side: a Turn that spends its time making
-// tool calls has to look like it is working without naming one. The ring on
-// the Bot's avatar is that — present and labelled "Working" while the Turn
-// runs, gone once it settles, and never a word about a tool.
-test("a working Bot shows an activity ring on its avatar, and no tool names", async ({
+// tool calls has to look like it is working without naming one. The comet
+// trail off the Bot's avatar is that — a working row labelled "Working" while
+// the Turn runs, gone once it settles, and never a word about a tool.
+test("a working Bot shows a comet trail beside its avatar, and no tool names", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -315,19 +322,24 @@ test("a working Bot shows an activity ring on its avatar, and no tool names", as
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(composer).toHaveValue("", { timeout: 120_000 });
 
-  // Latched the way the streaming assertion above is: the ring is on screen at
-  // some point while the Turn runs, never necessarily when a poll happens to
-  // look.
-  let sawRing = false;
+  // Latched the way the streaming assertion above is: the trail is on screen
+  // at some point while the Turn runs, never necessarily when a poll happens
+  // to look.
+  let sawTrail = false;
   await expect
     .poll(
       async () => {
         const last = assistantMessages(page).last();
         if ((await last.count()) === 0) return false;
-        if ((await last.getByRole("status", { name: "Working" }).count()) > 0) {
-          sawRing = true;
+        const working = last.getByRole("status", { name: "Working" });
+        if (
+          (await working
+            .locator('.ui-activity-trail[data-state="running"]')
+            .count()) > 0
+        ) {
+          sawTrail = true;
         }
-        return sawRing;
+        return sawTrail;
       },
       { timeout: 60_000 },
     )
@@ -337,8 +349,8 @@ test("a working Bot shows an activity ring on its avatar, and no tool names", as
     "Reply from the local Ollama stub.",
     { timeout: 120_000 },
   );
-  // The Turn settled, so the ring completed and went. The words "tool" and
-  // "tool calls" were never in the thread at all.
+  // The Turn settled, so the working row and its trail went. The words "tool"
+  // and "tool calls" were never in the thread at all.
   await expect(
     assistantMessages(page).last().getByRole("status", { name: "Working" }),
   ).toHaveCount(0, { timeout: 120_000 });
@@ -373,9 +385,22 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
 
   await sendMessage(page, "will not work");
 
-  await expect(page.locator(".message-assistant").last()).toContainText(
+  /*
+   * A failed Turn is a notice, not the Bot speaking.
+   *
+   * The thread used to render the durable failure verbatim in an assistant
+   * bubble — `Bot turn ended with outcome model-error`, a provider status
+   * code, and on one occasion a run UUID and the words "no durable provider
+   * outcome" — styled exactly like something the Bot had said. The reason is
+   * still on the run for `/api/debug` and the console; what the User is shown
+   * is one line, in the product's own words.
+   */
+  await expect(page.locator(".message-notice").last()).toHaveText(
     "This Bot couldn't finish its reply. Try again.",
   );
+  await expect(page.locator(".thread")).not.toContainText("model-error");
+  await expect(page.locator(".thread")).not.toContainText("outcome");
+  await expect(page.locator(".thread")).not.toContainText("401");
 
   // The fake endpoint is shared by every spec in the run, so the refusal this
   // test switched on is switched off again: leaving it on made every later

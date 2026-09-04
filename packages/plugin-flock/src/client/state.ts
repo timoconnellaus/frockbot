@@ -24,8 +24,10 @@ export interface FlockWebData {
    * Whether a directory read has ever completed.
    *
    * "No Bots yet." is a fact about the User's account, and it can only be
-   * stated once the account has been read. Before that — the first paint, and
-   * the reload after a Bot is created — the list is unknown, not empty.
+   * stated once the account has been read. Before that — the first paint, the
+   * reload after a Bot is created, and every read that failed — the list is
+   * unknown, not empty, and offering to create a first Bot to someone who
+   * already has several is the worst thing this column can say.
    */
   loaded: boolean;
   error?: string;

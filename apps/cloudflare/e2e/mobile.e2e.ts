@@ -215,25 +215,74 @@ test("the shell is usable on a phone", async ({
   // A bubble may be narrower than the thread, never wider than the window.
   await expectWithinViewport(page, ".message-user .message-bubble", "a bubble");
 
-  // The right panel is the third column a phone has no room for. It opens over
-  // the conversation, full width, and closes again.
-  await page.getByRole("button", { name: "Show side panel" }).click();
-  await shot(page, "06-right-panel");
+  /*
+   * Bot settings, from the conversation, in one tap.
+   *
+   * This is the finding that made the phone unusable rather than cramped: the
+   * gear lived in the right panel's header, the right panel is a closed drawer
+   * at this width, and so Name, Label, Description, Routines, the audit log
+   * and template import had no route at all on a phone. Only the panel's own
+   * toggle survived into the header, which is why the pair read wrongly. The
+   * toggle stays — it is how the panel opens at this width — and the gear is
+   * now beside it, reachable with nothing else open.
+   */
+  await expect(
+    page.getByRole("button", { name: "Bot settings" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Bot settings" }).click();
+  await expect(page.getByRole("region", { name: "Settings" })).toBeVisible();
+  await shot(page, "06-bot-settings-panel");
+  await expectNoHorizontalOverflow(page);
+  await expectWithinViewport(page, ".panel-surface-view", "the panel surface");
+  // Named, so the User can tell whose settings these are.
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Pocket");
+
+  // The panel the surface took the place of is where its own back control
+  // leads: the third column, full width over the conversation.
+  await page.getByRole("button", { name: "Back to Bot panel" }).click();
+  await shot(page, "07-right-panel");
   await expectNoHorizontalOverflow(page);
   await expectWithinViewport(page, ".right-panel", "the right panel");
 
-  // And closes again, giving the conversation the whole window back.
-  await page.getByRole("button", { name: "Hide side panel" }).click();
+  // And Escape gives the conversation the whole window back.
+  await page.keyboard.press("Escape");
   await expect(page.locator(".right-panel")).toBeHidden();
 
-  // Settings is reached from the panel's own header and takes the panel's
-  // place, so on a phone it is the whole window rather than a 360px column.
-  await page.getByRole("button", { name: "Show side panel" }).click();
-  await page.getByRole("button", { name: "Bot settings" }).click();
-  await expect(page.getByRole("region", { name: "Settings" })).toBeVisible();
-  await shot(page, "07-bot-settings-panel");
-  await expectNoHorizontalOverflow(page);
-  await expectWithinViewport(page, ".panel-surface-view", "the panel surface");
+  /*
+   * A closed overlay leaves nothing over the window.
+   *
+   * The scrim behind a hosted surface is a full-window element, so a scrim
+   * that outlives its panel is invisible and total: every later click lands on
+   * it instead of on what the person aimed at, and the only symptom is a test
+   * — or a User — waiting on a control that is plainly there. Opening a
+   * surface, closing it, and then using the Bot list is the cheapest proof
+   * that the layer went away.
+   */
+  await openNavigation(page);
+  await page
+    .getByRole("button", { name: /Search/u })
+    .first()
+    .click();
+  await expect(page.getByRole("region", { name: "Search" })).toBeVisible();
+  // The scrim dims what the surface covers and takes no clicks of its own, so
+  // the workspace behind it stays live while it is open.
+  await expect(page.locator(".ui-sidebar-overlay__scrim")).toHaveCSS(
+    "pointer-events",
+    "none",
+  );
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("region", { name: "Search" })).toBeHidden();
+  await expect(page.locator(".ui-sidebar-overlay__scrim")).toHaveCount(0);
+
+  // The proof is that the click lands at all: a surviving scrim swallows it
+  // and the row simply never answers.
+  await openNavigation(page);
+  await page
+    .getByRole("button", { name: /Pocket/u })
+    .first()
+    .click({ timeout: 15_000 });
+  await closeNavigation(page);
+  await expect(composerInput(page)).toBeEnabled();
 });
 
 /** Open the navigation drawer and prove it arrived. */
