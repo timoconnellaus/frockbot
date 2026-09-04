@@ -13,13 +13,19 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import {
   BOTS_ROOT,
+  BROWSER_LIVE_MARKER,
+  BROWSER_SERVICE,
   DESKTOP_LIVE_MARKER,
   DESKTOP_SLOT_PREFIX,
-  DESKTOP_TENANT_SERVICE_PREFIX,
   ENSURE_AGENT_SCRIPT,
+  ENSURE_WINDOW_SCRIPT,
+  FOCUS_WINDOW_SCRIPT,
   LEASE_MAX_AGE_SECONDS,
   PROVISION_DIGEST,
   runtimeDocumentDigestV1,
+  TARGET_ID_FILE,
+  VIEW_TENANT_SERVICE_PREFIX,
+  WINDOW_LIVE_MARKER,
 } from "@frockbot/computer-host-runtime";
 import type {
   SpriteCommandHandle,
@@ -146,8 +152,21 @@ export class FakeSprite implements SpriteHandle {
   >();
   /** Every `createService`, in order, so a test can count declarations. */
   readonly serviceCreates: string[] = [];
+  /** Every `restartService`, in order. A restart is not a declaration. */
+  readonly serviceRestarts: string[] = [];
+  /** Every `stopService`, in order. */
+  readonly serviceStops: string[] = [];
+  /** Every `deleteService`, in order. */
+  readonly serviceDeletes: string[] = [];
   /** Lets a test refuse one service the way a real Sprite would. */
   onCreateService?: (name: string) => void;
+  /** What the window helpers answer with; non-zero is a window that failed. */
+  windowExitCode = 0;
+  /** Lets a test refuse a restart, stop, or delete the same way. */
+  onServiceOperation?: (
+    operation: "restart" | "stop" | "delete",
+    name: string,
+  ) => void;
   readonly commands: RecordedCommand[] = [];
   /** Every direct filesystem read, so hot-path tests can hold round trips down. */
   readonly fileReads: string[] = [];
@@ -189,21 +208,48 @@ export class FakeSprite implements SpriteHandle {
         exitCode: 0,
       };
     }
+    // The window helpers are their own commands, not part of a test's scripted
+    // queue: they run beside an open or a takeover and answer for themselves.
+    if (
+      stdin.includes(ENSURE_WINDOW_SCRIPT) ||
+      stdin.includes(FOCUS_WINDOW_SCRIPT)
+    ) {
+      const key = /\/(?:ensure|focus)-window\.sh '([^']+)'/.exec(stdin)?.[1];
+      if (key && stdin.includes(ENSURE_WINDOW_SCRIPT)) {
+        this.files.set(`${BOTS_ROOT}/${key}/${TARGET_ID_FILE}`, {
+          bytes: Buffer.from(`window-${key}\n`),
+          mode: 0o600,
+          mtime: new Date("2026-08-31T00:00:00.000Z"),
+        });
+      }
+      return { exitCode: this.windowExitCode };
+    }
     const selected =
       this.scripts.length > 1 ? this.scripts.shift()! : (this.scripts[0] ?? {});
     // The attach probe asks the box whether the tenant's VNC port answers. On
     // a real Computer the only thing that opens that port is the tenant's own
     // desktop service, so a running one is what the fake answers from.
     if (stdin.includes(ENSURE_AGENT_SCRIPT)) {
-      const slot = [...this.files.entries()].find(
-        ([path]) => path.startsWith(`${BOTS_ROOT}/`) && path.endsWith("/slot"),
-      )?.[1].bytes;
+      const key = new RegExp(`${ENSURE_AGENT_SCRIPT} '([^']+)'`).exec(
+        stdin,
+      )?.[1];
+      const slot = key
+        ? this.files.get(`${BOTS_ROOT}/${key}/slot`)?.bytes
+        : undefined;
       return {
         ...selected,
         stdout: [
           ...(selected.stdout ?? []),
           `${DESKTOP_SLOT_PREFIX}${slot?.toString().trim() ?? ""}\n`,
-          ...(this.desktopIsRunning() ? [`${DESKTOP_LIVE_MARKER}\n`] : []),
+          ...(key && this.viewIsRunning(key)
+            ? [`${DESKTOP_LIVE_MARKER}\n`]
+            : []),
+          ...(this.services.get(BROWSER_SERVICE) === "running"
+            ? [`${BROWSER_LIVE_MARKER}\n`]
+            : []),
+          ...(key && this.files.has(`${BOTS_ROOT}/${key}/${TARGET_ID_FILE}`)
+            ? [`${WINDOW_LIVE_MARKER}\n`]
+            : []),
         ],
       };
     }
@@ -248,12 +294,11 @@ export class FakeSprite implements SpriteHandle {
     return selected;
   }
 
-  private desktopIsRunning(): boolean {
-    for (const [name, state] of this.services) {
-      if (name.startsWith(DESKTOP_TENANT_SERVICE_PREFIX) && state === "running")
-        return true;
-    }
-    return false;
+  /** This tenant's own `x11vnc`: the only thing that opens its VNC port. */
+  private viewIsRunning(botKey: string): boolean {
+    return (
+      this.services.get(`${VIEW_TENANT_SERVICE_PREFIX}${botKey}`) === "running"
+    );
   }
 
   filesystem(): SpriteFilesystemHandle {
@@ -335,6 +380,40 @@ export class FakeSprite implements SpriteHandle {
       throw new FakeApiError(404, `no such service: ${name}`);
     }
     return serviceStream([{ type: "exit", exitCode: 0 }]);
+  }
+
+  async restartService(name: string): Promise<SpriteServiceStreamHandle> {
+    if (!this.services.has(name)) {
+      throw new FakeApiError(404, `no such service: ${name}`);
+    }
+    this.onServiceOperation?.("restart", name);
+    this.serviceRestarts.push(name);
+    this.services.set(name, "running");
+    return serviceStream([{ type: "exit", exitCode: 0 }]);
+  }
+
+  async stopService(name: string): Promise<SpriteServiceStreamHandle> {
+    if (!this.services.has(name)) {
+      throw new FakeApiError(404, `no such service: ${name}`);
+    }
+    this.onServiceOperation?.("stop", name);
+    this.serviceStops.push(name);
+    this.services.set(name, "failed");
+    return serviceStream([{ type: "exit", exitCode: 0 }]);
+  }
+
+  async deleteService(name: string): Promise<void> {
+    if (!this.services.has(name)) {
+      throw new FakeApiError(404, `no such service: ${name}`);
+    }
+    this.onServiceOperation?.("delete", name);
+    this.serviceDeletes.push(name);
+    this.services.delete(name);
+    this.serviceConfigs.delete(name);
+  }
+
+  async listServices(): Promise<{ name: string }[]> {
+    return [...this.services.keys()].map((name) => ({ name }));
   }
 
   async updateURLSettings(settings: { auth: string }): Promise<void> {

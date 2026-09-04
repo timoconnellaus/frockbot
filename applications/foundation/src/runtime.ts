@@ -110,8 +110,8 @@ import {
   createOllamaCloudRuntimePlugin,
   ollamaChatBaseUrl,
 } from "@frockbot/plugin-provider-ollama-cloud/runtime";
-import flockAiManifest from "@frockbot/plugin-provider-flock-ai/manifest";
-import { createFlockAiRuntimePlugin } from "@frockbot/plugin-provider-flock-ai/runtime";
+import frockAiManifest from "@frockbot/plugin-provider-frock-ai/manifest";
+import { createFrockAiRuntimePlugin } from "@frockbot/plugin-provider-frock-ai/runtime";
 import routinesManifest from "@frockbot/plugin-routines/manifest";
 import {
   createRoutinesRuntimePlugin,
@@ -182,7 +182,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-custom-models", customModelsManifest],
   ["@frockbot/plugin-web", webManifest],
   ["@frockbot/plugin-provider-ollama-cloud", ollamaCloudManifest],
-  ["@frockbot/plugin-provider-flock-ai", flockAiManifest],
+  ["@frockbot/plugin-provider-frock-ai", frockAiManifest],
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
   ["@frockbot/plugin-flock", flockManifest],
@@ -343,8 +343,8 @@ interface ModelRuntimeContributionConfig {
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
   settleCredential?(effectId: string): Promise<void>;
-  flockAiAutoRoute?: string;
-  runFlockAiChatCompletion?: (
+  frockAiAutoRoute?: string;
+  runFrockAiChatCompletion?: (
     gatewayModel: string,
     body: Record<string, unknown>,
   ) => Promise<ReadableStream<Uint8Array>>;
@@ -389,27 +389,27 @@ const modelRuntimeContributionFactories = new Map<
     },
   ],
   [
-    "@frockbot/plugin-provider-flock-ai/runtime",
+    "@frockbot/plugin-provider-frock-ai/runtime",
     {
       providerType: "flock-ai",
       create: ({
         connectionId,
         connectionGeneration,
-        flockAiAutoRoute,
-        runFlockAiChatCompletion,
+        frockAiAutoRoute,
+        runFrockAiChatCompletion,
       }) => {
         if (
           !connectionGeneration ||
-          !flockAiAutoRoute ||
-          !runFlockAiChatCompletion
+          !frockAiAutoRoute ||
+          !runFrockAiChatCompletion
         ) {
-          throw new Error("Flock AI gateway host is unavailable");
+          throw new Error("Frock AI gateway host is unavailable");
         }
-        return createFlockAiRuntimePlugin({
+        return createFrockAiRuntimePlugin({
           connectionId,
           connectionGeneration,
-          autoRoute: flockAiAutoRoute,
-          runChatCompletion: runFlockAiChatCompletion,
+          autoRoute: frockAiAutoRoute,
+          runChatCompletion: runFrockAiChatCompletion,
         });
       },
     },

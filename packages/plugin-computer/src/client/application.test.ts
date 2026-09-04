@@ -345,6 +345,34 @@ describe("hosted Computer provider", () => {
     mounted.dispose();
   });
 
+  test("a held card preview keeps the same session alive, and a hidden tab drops it", async () => {
+    const mounted = mountHostedProvider();
+    await flush();
+    await mounted.state.connect();
+    await flush();
+    // A minted session that nobody is watching is not renewed.
+    expect(mounted.runtime.count(VIEWER_REFRESH_INTERVAL_MS)).toBe(0);
+
+    mounted.state.holdLivePreview?.(true);
+    expect(mounted.runtime.count(VIEWER_REFRESH_INTERVAL_MS)).toBe(1);
+    mounted.runtime.tick(VIEWER_REFRESH_INTERVAL_MS);
+    await flush();
+    expect(postedTypes(mounted.calls)).toEqual(["connect", "refreshViewer"]);
+    // The card never expands and never asks for control to watch a Bot work.
+    expect(mounted.state.expanded).toBe(false);
+    expect(mounted.state.takingControl).toBe(false);
+
+    mounted.runtime.setVisible(false);
+    expect(mounted.runtime.count(VIEWER_REFRESH_INTERVAL_MS)).toBe(0);
+    mounted.runtime.setVisible(true);
+    await flush();
+    expect(mounted.runtime.count(VIEWER_REFRESH_INTERVAL_MS)).toBe(1);
+
+    mounted.state.holdLivePreview?.(false);
+    expect(mounted.runtime.count(VIEWER_REFRESH_INTERVAL_MS)).toBe(0);
+    mounted.dispose();
+  });
+
   test("an updating card click rejoins the update and lands on ready when it finishes", async () => {
     const mounted = mountHostedProvider();
     await flush();

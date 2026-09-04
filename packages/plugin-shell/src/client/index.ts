@@ -11,6 +11,8 @@ import {
   type ClientTurnEvent,
 } from "@frockbot/client-core";
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
+import { COMPACTED_ANNOUNCEMENT_TEXT_V1 } from "../compaction.js";
+import { readViewerFocusV1, shouldNotifyForBotV1 } from "../focus.js";
 // Connection mutations use the provider-neutral hosted command contract.
 import type {
   ConnectionCommandReceiptV1,
@@ -86,6 +88,7 @@ import {
   type WebTaskChip,
   type WebToolActivity,
 } from "../shared.js";
+import { TranscriptCache } from "./transcript-cache.js";
 import FrockBotApp from "./FrockBotApp.vue";
 import PackageEntryTrigger from "./PackageEntryTrigger.vue";
 import PackageIframeSettings from "./PackageIframeSettings.vue";
@@ -411,7 +414,10 @@ export function projectAnnouncements(
       id: announcement.announcementId,
       runId: announcement.announcementId,
       role: "system",
-      text: `Renamed to ${announcement.to} by ${announcement.namedBy}`,
+      text:
+        announcement.type === "conversation/compacted"
+          ? COMPACTED_ANNOUNCEMENT_TEXT_V1
+          : `Renamed to ${announcement.to} by ${announcement.namedBy}`,
       at: announcement.at,
       status: "completed",
       tools: [],
@@ -420,9 +426,32 @@ export function projectAnnouncements(
     const index = messages.findIndex(
       (candidate) => candidate.id === announcement.announcementId,
     );
-    if (index >= 0) messages[index] = message;
-    else messages.push(message);
+    // Removed before it is placed, so a marker that already sits in the thread
+    // is re-seated rather than frozen wherever the first poll put it.
+    if (index >= 0) messages.splice(index, 1);
+    messages.splice(announcementIndex(messages, message.at ?? ""), 0, message);
   }
+}
+
+/**
+ * Where a system line belongs among the Turns.
+ *
+ * Only the user message of a Turn carries a timestamp; everything the Bot
+ * wrote for that Turn follows it untimed. So an untimed message inherits the
+ * last timestamp seen, and the line is placed before the first message that is
+ * genuinely later than it. A marker for a range that has scrolled out of the
+ * transcript sorts before everything, which puts it at the top of what remains.
+ */
+function announcementIndex(
+  messages: readonly WebChatMessage[],
+  at: string,
+): number {
+  let seen = "";
+  for (const [index, candidate] of messages.entries()) {
+    if (candidate.at) seen = candidate.at;
+    if (seen > at) return index;
+  }
+  return messages.length;
 }
 
 export function projectDurableRuns(
@@ -885,6 +914,26 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
    * epoch is bumped at the boundary so those answers are dropped.
    */
   let conversationGeneration = 0;
+  /*
+   * The conversations this client is still holding.
+   *
+   * Switching Bots used to be a blank thread and a read; the last few are now
+   * redrawn from memory and read back behind the paint. `transcriptEpochs`
+   * names the conversation each entry belongs to: the backend does not tell a
+   * client its Session id, but the client is the one that ends a conversation,
+   * so counting that action locally is the same boundary (ADR 0027).
+   */
+  const transcripts = new TranscriptCache();
+  const transcriptEpochs = new Map<string, number>();
+  const conversationKeyFor = (botId: string): string =>
+    `${botId}#${transcriptEpochs.get(botId) ?? 0}`;
+  /*
+   * The Bot whose first channel reset is already answered by the cache. A
+   * socket opening emits an untopiced invalidation meaning "read everything";
+   * for a transcript restored moments ago that read is the reload the User
+   * asked us to stop doing. A real `runs` notice is never suppressed.
+   */
+  let restoredWithoutRead: string | undefined;
   let userSettingsGeneration = 0;
   let pluginCatalogGeneration = 0;
   let packageCatalogGeneration = 0;
@@ -1141,7 +1190,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         web.value.settingsError = "A completed Bot result is waiting to load";
         continue;
       }
-      if (document.hidden) {
+      // The open Bot is only *read* while the tab is visible and the window
+      // holds focus; `document.hidden` alone called a visible tab behind
+      // another window "open", and the reply that landed there was never
+      // heard about. One definition, shared with the sidebar's badge.
+      if (
+        shouldNotifyForBotV1(readViewerFocusV1(web.value.activeBotId), botId)
+      ) {
         // One seam: the desktop or mobile notifications Package when the shell
         // exposes it, the web API when it does not.
         const delivery = await showClientNotificationV1({
@@ -1295,6 +1350,16 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     connectionsAvailable: ctx.transport.connectionsAvailable !== false,
     activeBotId: undefined,
     composerContext: undefined,
+    transcripts: {
+      rememberViewport: (botId, viewport) =>
+        transcripts.rememberViewport(botId, viewport),
+      viewportFor: (botId) => transcripts.viewportFor(botId),
+      forget: (botId) => {
+        transcripts.forget(botId);
+        if (botId === undefined || botId === restoredWithoutRead)
+          restoredWithoutRead = undefined;
+      },
+    },
     messages: [],
     pluginCatalog: [],
     packageCatalog: [],
@@ -1326,14 +1391,33 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       admissionObserver?.abort();
       runObserver?.abort();
       selectionGeneration += 1;
+      // The conversation being left is kept, so coming back to it is a paint
+      // and not a reload. The thread writes its scroll position onto this
+      // entry once Vue has flushed, while the DOM still holds it.
+      const leaving = web.value.activeBotId;
+      if (leaving) {
+        transcripts.save(leaving, {
+          conversationKey: conversationKeyFor(leaving),
+          messages: web.value.messages.map((message) => toRaw(message)),
+          ...(web.value.activeRun ? { activeRun: web.value.activeRun } : {}),
+          ...(web.value.activeRunId
+            ? { activeRunId: web.value.activeRunId }
+            : {}),
+          ...(web.value.runningRunId
+            ? { runningRunId: web.value.runningRunId }
+            : {}),
+        });
+      }
+      const restored = transcripts.take(botId, conversationKeyFor(botId));
+      restoredWithoutRead = restored && !restored.stale ? botId : undefined;
       web.value.activeBotId = botId;
       web.value.composerContext = botId;
       web.value.botSettings = undefined;
       web.value.modelReady = false;
-      web.value.messages = [];
-      web.value.activeRun = undefined;
-      web.value.activeRunId = undefined;
-      web.value.runningRunId = undefined;
+      web.value.messages = restored?.messages ?? [];
+      web.value.activeRun = restored?.activeRun;
+      web.value.activeRunId = restored?.activeRunId;
+      web.value.runningRunId = restored?.runningRunId;
       web.value.skillCatalog = [];
       web.value.approvals = [];
       web.value.tasks = [];
@@ -1380,6 +1464,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       // Reads already in flight answer with the conversation that just ended;
       // the epoch drops them instead of letting them redraw it.
       conversationGeneration += 1;
+      // The conversation just ended keeps none of this Bot's cache: its key
+      // moves with it, and the transcript behind it is not this one.
+      transcriptEpochs.set(botId, (transcriptEpochs.get(botId) ?? 0) + 1);
+      transcripts.forget(botId);
+      restoredWithoutRead = undefined;
       runObserver?.abort();
       runObserver = undefined;
       web.value.messages = [];
@@ -2873,6 +2962,14 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             web.value.activeBotId !== botId
           )
             return;
+          // An untopiced reset on a transcript this switch restored from
+          // memory is the reload the cache exists to avoid. It is answered
+          // once and only once: the next reset reads like any other.
+          if (topic === undefined && restoredWithoutRead === botId) {
+            restoredWithoutRead = undefined;
+            return;
+          }
+          restoredWithoutRead = undefined;
           await deliverNotifications(botId, generation);
         },
         status() {

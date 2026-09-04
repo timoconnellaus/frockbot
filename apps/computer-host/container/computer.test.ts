@@ -30,12 +30,19 @@ import {
 } from "@frockbot/computer-host-protocol";
 import {
   BOTS_ROOT,
+  BROWSER_SERVICE,
+  CHROME_PROFILE,
+  COMPUTER_DISPLAY,
   CONTROL_SCRIPT,
   controlScript,
   DESKTOP_GUI_LEASE_KEY,
   DESKTOP_SERVICE,
+  DESKTOP_SLOTS,
+  DESKTOP_TENANT_SERVICE_PREFIX,
   desktopServiceNameV1,
   ENSURE_AGENT_SCRIPT,
+  ENSURE_WINDOW_SCRIPT,
+  FOCUS_WINDOW_SCRIPT,
   NO_SLOTS_MARKER,
   PROVISION_DIGEST,
   PROVISION_MARKERS,
@@ -45,7 +52,9 @@ import {
   provisionScript,
   RUNTIME_ROOT,
   runtimeDocumentDigestV1,
+  SCREEN_SERVICE,
   UPDATE_PHASES,
+  viewServiceNameV1,
   WORKSPACE_SYNC_SERVICE,
 } from "@frockbot/computer-host-runtime";
 import {
@@ -190,7 +199,7 @@ function provisioned(userId = "user-1"): {
   writeFile(
     sprite,
     `/home/box/.frockbot/bots/bot-1-${digest("bot-1").slice(0, 12)}/slot`,
-    "7\n",
+    "3\n",
   );
   return { client, host, sprite };
 }
@@ -548,57 +557,160 @@ describe("open", () => {
     const response = await host.handle(request({ kind: "open" }));
     const result = decodeComputerHostOpenResultV1(await response.json());
     expect(result.generation).toBe(4);
-    expect(result.display).toBe(":107");
+    // One screen per Computer (ADR 0031): every Bot's window is on it, and a
+    // slot is a rectangle of it rather than a display number of its own.
+    expect(result.display).toBe(COMPUTER_DISPLAY);
     expect(result.directory).toBe(
       `/home/box/agent-data/agents/bot-1-${digest("bot-1").slice(0, 12)}`,
     );
-    expect(sprite.commands.at(-1)?.stdin).toContain(ENSURE_AGENT_SCRIPT);
+    expect(
+      sprite.commands.some((command) =>
+        command.stdin.includes(ENSURE_AGENT_SCRIPT),
+      ),
+    ).toBe(true);
   });
 
-  test("starts the tenant's own desktop, so the viewer has a screen to reach", async () => {
-    // The defect this is the fix for: `start-desktop.sh` was installed on every
-    // Computer and launched on none. The gateway served noVNC and the token
-    // resolved, so the viewer opened — onto a loopback VNC port with nothing
-    // listening, which noVNC reports as "Failed to connect to server".
+  test("starts one screen, one browser, and this tenant's own viewer", async () => {
+    // The defect this is the fix for: every slot got its own Xvfb and its own
+    // browser launch against the one shared profile. Chromium's singleton lock
+    // is per profile, so only the first launch ever became a browser; the rest
+    // printed "Opening in existing browser session", exited, and left their
+    // Bots black screens with dead CDP ports.
     const { host, sprite } = provisioned();
-    const service = desktopServiceNameV1(
-      `bot-1-${digest("bot-1").slice(0, 12)}`,
-    );
+    const botKey = `bot-1-${digest("bot-1").slice(0, 12)}`;
+    const view = viewServiceNameV1(botKey);
 
     const response = await host.handle(request({ kind: "open" }));
 
     expect(decodeComputerHostOpenResultV1(await response.json()).display).toBe(
-      ":107",
+      COMPUTER_DISPLAY,
     );
-    expect(sprite.services.get(service)).toBe("running");
-    expect(sprite.serviceConfigs.get(service)).toEqual({
-      cmd: `${RUNTIME_ROOT}/start-desktop.sh`,
-      args: [`bot-1-${digest("bot-1").slice(0, 12)}`],
+    expect(sprite.serviceConfigs.get(SCREEN_SERVICE)).toEqual({
+      cmd: `${RUNTIME_ROOT}/start-screen.sh`,
     });
+    expect(sprite.serviceConfigs.get(BROWSER_SERVICE)).toEqual({
+      cmd: `${RUNTIME_ROOT}/start-browser.sh`,
+    });
+    expect(sprite.serviceConfigs.get(view)).toEqual({
+      cmd: `${RUNTIME_ROOT}/start-view.sh`,
+      args: [botKey],
+    });
+    // One browser for the Computer, and one Xvfb: never one of either per Bot.
+    expect(
+      sprite.serviceCreates.filter((name) =>
+        name.startsWith(DESKTOP_TENANT_SERVICE_PREFIX),
+      ),
+    ).toEqual([]);
+    expect(
+      sprite.commands
+        .at(-1)
+        ?.stdin.includes(`${ENSURE_WINDOW_SCRIPT} '${botKey}'`),
+    ).toBe(true);
   });
 
-  test("leaves a desktop that is already listening alone", async () => {
-    // `createService` is a create-*or-update*: declaring it on every open would
-    // restart Xvfb, and with it the browser and every page the Bot had open.
+  test("gives a second Bot its own window without a second browser", async () => {
+    // The requirement the shared browser exists for: a login Bot A makes is a
+    // login Bot B has. That means one profile, and one profile means one
+    // browser process — so Bot B's open declares a viewer and creates a window,
+    // and declares neither a screen nor a browser again.
     const { host, sprite } = provisioned();
-    const service = desktopServiceNameV1(
-      `bot-1-${digest("bot-1").slice(0, 12)}`,
+    const botB = `bot-2-${digest("bot-2").slice(0, 12)}`;
+    writeFile(sprite, `${BOTS_ROOT}/${botB}/slot`, "1\n");
+
+    await host.handle(request({ kind: "open" }));
+    const before = sprite.serviceCreates.length;
+    const response = await host.handle(
+      request(
+        { kind: "open" },
+        { effectId: "open-2", tenant: { botId: "bot-2" } },
+      ),
     );
+
+    expect(decodeComputerHostOpenResultV1(await response.json()).display).toBe(
+      COMPUTER_DISPLAY,
+    );
+    expect(sprite.serviceCreates.slice(before)).toEqual([
+      viewServiceNameV1(botB),
+    ]);
+  });
+
+  test("leaves a screen, a browser, and a viewer that are already up alone", async () => {
+    // `createService` is a create-*or-update*: declaring the screen on every
+    // open would restart Xvfb, and with it the browser and every window on it.
+    const { host, sprite } = provisioned();
+    const view = viewServiceNameV1(`bot-1-${digest("bot-1").slice(0, 12)}`);
 
     await host.handle(request({ kind: "open" }));
     await host.handle(request({ kind: "open" }, { effectId: "open-2" }));
 
-    expect(
-      sprite.serviceCreates.filter((name) => name === service),
-    ).toHaveLength(1);
+    for (const name of [SCREEN_SERVICE, BROWSER_SERVICE, view]) {
+      expect(
+        sprite.serviceCreates.filter((candidate) => candidate === name),
+      ).toHaveLength(1);
+    }
   });
 
-  test("reports no display when the tenant's desktop will not start", async () => {
+  test("retires the superseded per-slot desktop services, and never the profile", async () => {
+    // The migration (ADR 0031). An existing Computer carries one
+    // `frockbot-desktop-<botKey>` per tenant, and one of their browsers is
+    // holding the shared profile's singleton lock right now: the new browser
+    // service cannot take the profile until they are stopped. What must survive
+    // is the profile itself — it is the User's login state.
+    const { host, sprite } = provisioned();
+    const legacy = [
+      desktopServiceNameV1(`bot-1-${digest("bot-1").slice(0, 12)}`),
+      desktopServiceNameV1("another-tenant-0123456789ab"),
+    ];
+    for (const name of legacy) {
+      await sprite.createService(name, {
+        cmd: `${RUNTIME_ROOT}/start-desktop.sh`,
+        args: ["whoever"],
+      });
+    }
+    writeFile(sprite, `${CHROME_PROFILE}/Default/Cookies`, "a login");
+
+    await host.handle(request({ kind: "open" }));
+
+    expect(sprite.serviceStops).toEqual(legacy);
+    expect(sprite.serviceDeletes).toEqual(legacy);
+    for (const name of legacy) expect(sprite.services.has(name)).toBe(false);
+    expect(sprite.services.get(BROWSER_SERVICE)).toBe("running");
+    expect(
+      sprite.files.get(`${CHROME_PROFILE}/Default/Cookies`)?.bytes.toString(),
+    ).toBe("a login");
+  });
+
+  test("the migration runs once per Computer and survives a platform that refuses it", async () => {
+    // Defensive and idempotent: a Computer with nothing to retire does nothing,
+    // a stop or delete that fails does not cost the Bot its Computer, and a
+    // second open does not walk the service list again.
+    const { host, sprite } = provisioned();
+    const legacy = desktopServiceNameV1("stuck-0123456789ab");
+    await sprite.createService(legacy, {
+      cmd: `${RUNTIME_ROOT}/start-desktop.sh`,
+      args: ["stuck"],
+    });
+    sprite.onServiceOperation = (operation) => {
+      if (operation === "stop") throw new FakeApiError(500, "will not stop");
+    };
+
+    const first = await host.handle(request({ kind: "open" }));
+    const deletes = sprite.serviceDeletes.length;
+    await host.handle(request({ kind: "open" }, { effectId: "open-2" }));
+
+    expect(decodeComputerHostOpenResultV1(await first.json()).display).toBe(
+      COMPUTER_DISPLAY,
+    );
+    expect(sprite.serviceDeletes).toEqual([legacy]);
+    expect(sprite.serviceDeletes).toHaveLength(deletes);
+  });
+
+  test("reports no display when the tenant's screen will not start", async () => {
     // A display is optional, and a screen that failed to start is absent —
     // never a display the viewer would open onto and find nothing.
     const { host, sprite } = provisioned();
     sprite.onCreateService = (name) => {
-      if (name.startsWith("frockbot-desktop-")) {
+      if (name === SCREEN_SERVICE) {
         throw new FakeApiError(500, "no capacity for another display");
       }
     };
@@ -609,6 +721,37 @@ describe("open", () => {
     expect(
       decodeComputerHostOpenResultV1(await response.json()).display,
     ).toBeUndefined();
+  });
+
+  test("reports no display when the tenant could not be given a window", async () => {
+    const { host, sprite } = provisioned();
+    sprite.windowExitCode = 69;
+
+    const response = await host.handle(request({ kind: "open" }));
+
+    expect(response.status).toBe(200);
+    expect(
+      decodeComputerHostOpenResultV1(await response.json()).display,
+    ).toBeUndefined();
+  });
+
+  test("refuses a slot from the superseded hundred-display layout", async () => {
+    // A slot past the edge of the one screen is a window nobody can see and a
+    // clip rectangle x11vnc refuses. Only a Computer that allocated slots under
+    // the old layout can carry one.
+    const { host, sprite } = provisioned();
+    writeFile(
+      sprite,
+      `${BOTS_ROOT}/bot-1-${digest("bot-1").slice(0, 12)}/slot`,
+      `${DESKTOP_SLOTS}\n`,
+    );
+
+    const response = await host.handle(request({ kind: "open" }));
+
+    expect(
+      decodeComputerHostOpenResultV1(await response.json()).display,
+    ).toBeUndefined();
+    expect(sprite.serviceCreates).toEqual([]);
   });
 
   test("does not turn an absent slot marker value into display zero", async () => {
@@ -695,6 +838,51 @@ describe("open", () => {
       cmd: `${RUNTIME_ROOT}/start-gateway.sh`,
       httpPort: 6080,
     });
+    // The defect this closes: the gateway's *definition* never changes — an
+    // update rewrites the contents of `start-gateway.sh`, not the service that
+    // runs it — so re-declaring it is a no-op the platform correctly ignores.
+    // A Computer went on serving noVNC's stock page for days that way. Picking
+    // up a rewritten launcher takes a restart.
+    expect(sprite.serviceRestarts).toEqual([DESKTOP_SERVICE]);
+  });
+
+  test("a gateway that will not restart does not fail the open", async () => {
+    // A Computer with no viewer is worth reporting through box-doctor; it is
+    // not worth refusing the exec and file surfaces over.
+    const { host, sprite } = provisioned();
+    writeFile(sprite, PROVISION_DIGEST, "stale\n");
+    sprite.scripts = [
+      report("running", updatingRuntime, "update"),
+      report("stopped", updateReady, "update"),
+    ];
+    sprite.onServiceOperation = (operation, name) => {
+      if (operation === "restart" && name === DESKTOP_SERVICE) {
+        throw new FakeApiError(500, "the gateway would not come back");
+      }
+    };
+
+    const response = await host.handle(request({ kind: "open" }));
+
+    expect(response.status).toBe(200);
+    expect(sprite.services.get(DESKTOP_SERVICE)).toBe("running");
+  });
+
+  test("provisioning a Computer starts the gateway rather than restarting it", async () => {
+    // Nothing is running yet, so the declaration is the start. A restart here
+    // would be a second process launch on a Computer that has had none.
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    client.onCreate = (sprite) => {
+      sprite.scripts = [
+        report("running", installing),
+        report("stopped", ready),
+      ];
+    };
+
+    await host.handle(request({ kind: "open" }));
+
+    expect(client.only().serviceCreates).toContain(DESKTOP_SERVICE);
+    expect(client.only().serviceRestarts).toEqual([]);
   });
 
   test("reconciles the gateway before clearing a completed runtime-update intent", async () => {
@@ -719,6 +907,9 @@ describe("open", () => {
     expect(
       sprite.serviceCreates.filter((name) => name === DESKTOP_SERVICE),
     ).toHaveLength(1);
+    // The reconciliation replays the update's last effect, and that effect is
+    // the restart: the definition it re-declares has not changed.
+    expect(sprite.serviceRestarts).toEqual([DESKTOP_SERVICE]);
     expect(
       JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
     ).toEqual({ version: 1, generation: 4 });
@@ -819,7 +1010,7 @@ describe("open", () => {
     writeFile(
       sprite,
       `/home/box/.frockbot/bots/bot-1-${digest("bot-1").slice(0, 12)}/slot`,
-      "7\n",
+      "3\n",
     );
     sprite.scripts = [
       report("running", updatingRuntime, "update"),
@@ -1325,11 +1516,17 @@ describe("control", () => {
     );
     expect(result.action).toBe("acquire");
     expect(result.expiresAt).toBe("2026-08-31T00:01:30.000Z");
-    expect(sprite.commands.at(-1)?.stdin).toContain(CONTROL_SCRIPT);
-    expect(sprite.commands.at(-1)?.stdin).toContain(
-      `'${DESKTOP_GUI_LEASE_KEY}'`,
+    expect(
+      sprite.commands.some((command) => command.stdin.includes(CONTROL_SCRIPT)),
+    ).toBe(true);
+    // Every Bot's window is on one screen now (ADR 0031), so a takeover that
+    // raised nothing hands the human whichever window Chromium last focused.
+    expect(sprite.commands.at(-1)?.stdin).toContain(FOCUS_WINDOW_SCRIPT);
+    const controlCommand = sprite.commands.find((command) =>
+      command.stdin.includes(CONTROL_SCRIPT),
     );
-    expect(sprite.commands.at(-1)?.stdin).toContain("'owner-1'");
+    expect(controlCommand?.stdin).toContain(`'${DESKTOP_GUI_LEASE_KEY}'`);
+    expect(controlCommand?.stdin).toContain("'owner-1'");
   });
 
   test("Bot B's guarded exec is refused by Bot A's User-wide lease until release", async () => {

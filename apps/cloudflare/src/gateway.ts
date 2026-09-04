@@ -26,6 +26,7 @@ import type {
 import { createDebugRoute } from "./debug.js";
 import {
   drainedAnswerV1,
+  forwardingBodyV1,
   TURN_TOO_LONG_MESSAGE_V1,
   turnBodyIsOversizedV1,
 } from "./request-body.js";
@@ -443,10 +444,11 @@ async function routeAppletSocket(
   forwarded.searchParams.set("a", claims.a);
   forwarded.searchParams.set("g", claims.g);
   // `fetch`, not an RPC method: a 101 response with its WebSocket only
-  // crosses the stub boundary on the object's HTTP door.
+  // crosses the stub boundary on the object's HTTP door. The body goes with
+  // it, so the outer drain must not reach for it afterwards.
   return dependencies
     .appletStateFor(claims.u, claims.a)
-    .fetch(new Request(forwarded, request));
+    .fetch(forwardingBodyV1(request, new Request(forwarded, request)));
 }
 
 const WORKSPACE_SEED_PATH = /^\/api\/workspace-seed\/([^/]+)\/([^/]+)$/;
@@ -848,12 +850,18 @@ export function createGateway(dependencies: GatewayDependencies) {
     const forwardedRequest = new Request(request, {
       headers: forwardedHeaders,
     });
+    // The loaded application is a separate isolate and this hands it the body.
+    // Recorded before the await: once it has answered, the gateway's own
+    // `request.body` is a stream the isolate will refuse to be touched.
     const response = await worker
       .getEntrypoint()
       .fetch(
-        development.persist
-          ? new Request(forwardedUrl, forwardedRequest)
-          : forwardedRequest,
+        forwardingBodyV1(
+          request,
+          development.persist
+            ? new Request(forwardedUrl, forwardedRequest)
+            : forwardedRequest,
+        ),
       );
     if (!development.persist) return response;
     const persisted = new Response(response.body, response);

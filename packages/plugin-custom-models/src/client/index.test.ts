@@ -124,7 +124,7 @@ describe("Custom models client Contribution", () => {
     const mounted = fixture();
     const model: ModelBindingV1 = {
       connectionId: "flock-ai",
-      providerModelId: "@flock/manual",
+      providerModelId: "@frock/manual",
     };
 
     await mounted.state.setAccountModel(model);

@@ -98,9 +98,9 @@ import {
   type OllamaCloudUserApplicationHostV1,
 } from "@frockbot/plugin-provider-ollama-cloud/user";
 import {
-  userContribution as flockAiUserContribution,
-  type FlockAiUserApplicationHostV1,
-} from "@frockbot/plugin-provider-flock-ai/user";
+  userContribution as frockAiUserContribution,
+  type FrockAiUserApplicationHostV1,
+} from "@frockbot/plugin-provider-frock-ai/user";
 import {
   userContribution as mcpUserContribution,
   type McpUserApplicationHostV1,
@@ -159,7 +159,7 @@ export {
   settingsUserContribution,
   credentialsUserContribution,
   ollamaCloudUserContribution,
-  flockAiUserContribution,
+  frockAiUserContribution,
   mcpUserContribution,
   botTemplateUserContribution,
   packagePublisherUserContribution,
@@ -259,7 +259,7 @@ export type FoundationUserBackendHostV1 = {
 } & SettingsUserApplicationHostV1 &
   CredentialsUserApplicationHostV1 &
   OllamaCloudUserApplicationHostV1 &
-  FlockAiUserApplicationHostV1 &
+  FrockAiUserApplicationHostV1 &
   McpUserApplicationHostV1 &
   BotTemplateUserApplicationHostV1 &
   PackagePublisherUserApplicationHostV1 &
@@ -332,7 +332,7 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     settingsUserContribution,
     credentialsUserContribution,
     ollamaCloudUserContribution,
-    flockAiUserContribution,
+    frockAiUserContribution,
     mcpUserContribution,
     botTemplateUserContribution,
     packagePublisherUserContribution,

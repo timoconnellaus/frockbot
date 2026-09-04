@@ -99,6 +99,24 @@ function boundedText(value: unknown, label: string, maximum: number): string {
   return normalized;
 }
 
+/**
+ * The built-in provider was named Flock AI before it was named Frock AI, and
+ * its model ids carried the provider's name. Bindings written before the
+ * rename are still in production storage, so a stored `@flock/…` id is read as
+ * the `@frock/…` id it has always meant. This is the one place that
+ * translation happens: every binding crosses this decoder, so resolution,
+ * catalog lookup, presentation and the provider request all see one spelling,
+ * and nothing writes the old one back.
+ */
+const LEGACY_FROCK_MODEL_PREFIX = "@flock/";
+const FROCK_MODEL_PREFIX = "@frock/";
+
+function normalizedProviderModelId(id: string): string {
+  return id.startsWith(LEGACY_FROCK_MODEL_PREFIX)
+    ? `${FROCK_MODEL_PREFIX}${id.slice(LEGACY_FROCK_MODEL_PREFIX.length)}`
+    : id;
+}
+
 /** The exact model binding DTO, decoded wherever it crosses a durable seam. */
 export function decodeModelBindingV1(value: unknown): ModelBindingV1 {
   const binding = record(value, "model");
@@ -115,10 +133,8 @@ export function decodeModelBindingV1(value: unknown): ModelBindingV1 {
   }
   return {
     connectionId: binding.connectionId,
-    providerModelId: boundedText(
-      binding.providerModelId,
-      "model.providerModelId",
-      256,
+    providerModelId: normalizedProviderModelId(
+      boundedText(binding.providerModelId, "model.providerModelId", 256),
     ),
   };
 }

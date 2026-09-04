@@ -10,9 +10,9 @@ import {
   TEST_CREDENTIAL_KEYRING,
 } from "./test/harness/miniflare.ts";
 import {
-  createFlockAiFakeWorker,
-  FLOCK_AI_FAKE_SERVICE,
-} from "./test/flock-ai-fake.ts";
+  createFrockAiFakeWorker,
+  FROCK_AI_FAKE_SERVICE,
+} from "./test/frock-ai-fake.ts";
 
 // One instance for the whole project. It runs in Node, so the suites reach its
 // state over the same binding, under `/__fake/*`.
@@ -36,9 +36,9 @@ export default defineConfig({
         // a service binding, decoding the real v1 protocol.
         serviceBindings: {
           COMPUTER_HOST: (request: Request) => computerHost.fetch(request),
-          AI: FLOCK_AI_FAKE_SERVICE,
+          AI: FROCK_AI_FAKE_SERVICE,
         },
-        workers: [createFlockAiFakeWorker("2026-08-27")],
+        workers: [createFrockAiFakeWorker("2026-08-27")],
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
         durableObjects: {
           AUTHORING: "AuthoringProbe",
