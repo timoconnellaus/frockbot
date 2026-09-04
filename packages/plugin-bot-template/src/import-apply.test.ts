@@ -35,6 +35,14 @@ const sheep = {
 
 class MemoryStorage implements UserSettingsStorage {
   readonly values = new Map<string, unknown>();
+  /**
+   * The order durable writes and alarm arming happened in. An import that is
+   * mid-apply has to be recoverable from the alarm alone, so "the deadline was
+   * recorded before the record said `applying`" is the claim, not merely "an
+   * alarm was set at some point".
+   */
+  readonly trace: string[] = [];
+  alarm: number | null = null;
   get<T>(key: string): Promise<T | undefined> {
     return Promise.resolve(this.values.get(key) as T | undefined);
   }
@@ -44,13 +52,34 @@ class MemoryStorage implements UserSettingsStorage {
     keyOrEntries: string | Record<string, unknown>,
     value?: T,
   ): Promise<void> {
-    if (typeof keyOrEntries === "string") this.values.set(keyOrEntries, value);
+    if (typeof keyOrEntries === "string") this.record(keyOrEntries, value);
     else {
       for (const [key, entry] of Object.entries(keyOrEntries)) {
-        this.values.set(key, entry);
+        this.record(key, entry);
       }
     }
     return Promise.resolve();
+  }
+  getAlarm(): Promise<number | null> {
+    return Promise.resolve(this.alarm);
+  }
+  setAlarm(scheduledTime: number | Date): Promise<void> {
+    this.alarm =
+      typeof scheduledTime === "number"
+        ? scheduledTime
+        : scheduledTime.getTime();
+    this.trace.push("alarm:set");
+    return Promise.resolve();
+  }
+  private record(key: string, value: unknown): void {
+    this.values.set(key, value);
+    if (key === "bot-template:import-recovery-at") {
+      this.trace.push(value ? "recovery:owed" : "recovery:clear");
+    }
+    const status = (value as { status?: unknown } | undefined)?.status;
+    if (key.startsWith("bot-template:import:") && typeof status === "string") {
+      this.trace.push(`import:${status}`);
+    }
   }
   async transaction<T>(
     callback: (storage: UserSettingsTransaction) => Promise<T>,
@@ -436,6 +465,75 @@ describe("failure is a visible, repairable record", () => {
     expect(
       recording.calls.filter((call) => call === "install:example-connector"),
     ).toHaveLength(1);
+  });
+
+  it("records the recovery deadline before the record says applying", async () => {
+    const { contribution, storage } = await harness();
+    await plan(contribution);
+    storage.trace.length = 0;
+    await apply(contribution);
+
+    // The deadline and the alarm are both in place before the record enters
+    // `applying`, so an eviction at any point after that leaves an object
+    // scheduled to finish the walk.
+    expect(storage.trace[0]).toBe("recovery:owed");
+    expect(storage.trace.indexOf("alarm:set")).toBeLessThan(
+      storage.trace.indexOf("import:applying"),
+    );
+  });
+
+  it("clears the recovery debt once the import is terminal", async () => {
+    const { contribution, storage } = await harness();
+    await plan(contribution);
+    await apply(contribution);
+    expect(storage.values.get("bot-template:import-recovery-at")).toBe(0);
+  });
+
+  it("records a visible failure and clears the debt when a step fails", async () => {
+    const failures: Record<string, string> = {};
+    const { contribution, storage } = await harness({ failures });
+    const record = await plan(contribution);
+    // The state an eviction mid-walk leaves: `applying`, with no process to
+    // finish it. This pass cannot finish it either, because the writer throws.
+    failures.install = "the Catalog is unreachable";
+    await storage.put(`bot-template:import:${record.importId}`, {
+      ...record,
+      status: "applying",
+      steps: record.steps.map((step) =>
+        step.kind === "bot/create" ? { ...step, status: "done" } : step,
+      ),
+    });
+    await contribution.recoverImports(USER);
+
+    // Failed is terminal and repairable — the card names the step and the
+    // reason — so nothing is owed a further recovery.
+    const listed = (await contribution.listImports(USER)).imports[0]!;
+    expect(listed.status).toBe("failed");
+    expect(listed.failure).toContain("the Catalog is unreachable");
+    expect(storage.values.get("bot-template:import-recovery-at")).toBe(0);
+  });
+
+  it("re-arms the alarm when a recovery pass leaves the import applying", async () => {
+    const { contribution, storage } = await harness();
+    const record = await plan(contribution);
+    await storage.put(`bot-template:import:${record.importId}`, {
+      ...record,
+      status: "applying",
+    });
+    // The plan the walk needs is unreadable, so the pass throws before any
+    // step runs and the record stays `applying`.
+    storage.values.delete(`bot-template:import:plan:${record.importId}`);
+    storage.alarm = null;
+    await contribution.recoverImports(USER);
+
+    const listed = (await contribution.listImports(USER)).imports[0]!;
+    expect(listed.status).toBe("applying");
+    // Still owed, and still scheduled: the next alarm tries again rather than
+    // the import waiting for unrelated work to wake the object.
+    expect(
+      storage.values.get("bot-template:import-recovery-at"),
+    ).toBeGreaterThan(0);
+    expect(storage.alarm).not.toBeNull();
   });
 
   it("resumes an import left mid-apply from the recovery pass", async () => {

@@ -96,6 +96,23 @@ export class AppletTransport {
   #closed = false;
   #resyncQueued = false;
   #txnSeq = 0;
+  /**
+   * Every socket this transport has opened gets a number, and only the newest
+   * one owns the shared connection state. `error` and `close` both fire for a
+   * single failure, and a socket the transport has already given up on can
+   * still call back later, so a callback carrying a superseded identity is
+   * dropped instead of reconnecting or clearing state a live socket owns.
+   */
+  #socketSeq = 0;
+  #currentSocketId = 0;
+  /**
+   * At most one reconnect is outstanding. The scheduler seam cannot cancel a
+   * timer, so a retry carries an identity too: `#pendingRetryId` is cleared or
+   * replaced whenever the retry is superseded, and a closure that fires with a
+   * stale identity does nothing.
+   */
+  #retrySeq = 0;
+  #pendingRetryId = 0;
 
   constructor(options: AppletTransportOptions = {}) {
     this.#options = {
@@ -116,23 +133,54 @@ export class AppletTransport {
     return () => this.#listeners.delete(listener);
   }
 
-  /** Open the socket. Called by the dev runner, the tests, and the `init` bridge. */
+  /**
+   * Open the socket. Called by the dev runner, the tests, and the `init`
+   * bridge. Calling it again — a fresh viewer token after the old one expired,
+   * say — supersedes whatever socket or pending reconnect is outstanding, so a
+   * reconnect never races the connection the caller just asked for.
+   */
   connect(init: AppletInitV1): void {
     this.#init = init;
     this.#closed = false;
+    this.#reset();
+    this.#attempt = 0;
     this.#open();
   }
 
   close(): void {
     this.#closed = true;
-    this.#socket?.close(1000, "closed");
-    this.#socket = undefined;
+    this.#reset(1000, "closed");
     this.#failPending(new Error("The Applet connection was closed"));
     this.#setState({ status: "closed" });
   }
 
+  /**
+   * Give up the current socket and any pending reconnect. The socket is closed
+   * rather than merely forgotten, so a superseded connection cannot keep
+   * receiving frames, and its late `close` arrives with a stale identity.
+   */
+  #reset(code = 1000, reason = "superseded"): void {
+    this.#pendingRetryId = 0;
+    const socket = this.#socket;
+    this.#socket = undefined;
+    this.#currentSocketId = 0;
+    this.#synced = false;
+    if (socket) {
+      try {
+        socket.close(code, reason);
+      } catch {
+        // A socket that is already gone needs no closing.
+      }
+    }
+  }
+
   #open(): void {
     if (!this.#init || this.#closed) return;
+    // Never open while another attempt is current.
+    if (this.#socket) return;
+    this.#pendingRetryId = 0;
+    const id = ++this.#socketSeq;
+    this.#currentSocketId = id;
     this.#setState({
       status: this.#attempt === 0 ? "connecting" : "reconnecting",
     });
@@ -140,10 +188,14 @@ export class AppletTransport {
     url.searchParams.set("token", this.#init.token);
     const socket = this.#options.socketFactory(url.toString());
     this.#socket = socket;
-    socket.onopen = () => this.#handshake();
-    socket.onmessage = (event) => this.#receive(event.data);
-    socket.onclose = () => this.#dropped();
-    socket.onerror = () => this.#dropped();
+    socket.onopen = () => {
+      if (this.#currentSocketId === id) this.#handshake();
+    };
+    socket.onmessage = (event) => {
+      if (this.#currentSocketId === id) this.#receive(event.data);
+    };
+    socket.onclose = () => this.#dropped(id);
+    socket.onerror = () => this.#dropped(id);
   }
 
   #handshake(): void {
@@ -156,11 +208,18 @@ export class AppletTransport {
     });
   }
 
-  #dropped(): void {
+  /**
+   * One failure reaches here twice — `error` then `close` — and a socket the
+   * transport already replaced can reach here at any time. Only the socket that
+   * still owns the connection schedules a replacement.
+   */
+  #dropped(id: number): void {
+    if (id !== this.#currentSocketId) return;
     if (this.#closed) return;
-    this.#socket = undefined;
-    this.#synced = false;
+    this.#reset(1000, "dropped");
     this.#failPending(new Error("The Applet connection dropped"));
+    const retryId = ++this.#retrySeq;
+    this.#pendingRetryId = retryId;
     const delay = Math.min(
       this.#options.maximumBackoffMs,
       this.#options.minimumBackoffMs * 2 ** this.#attempt,
@@ -168,7 +227,11 @@ export class AppletTransport {
     this.#attempt += 1;
     this.#setState({ status: "reconnecting" });
     this.#options.schedule(
-      () => this.#open(),
+      () => {
+        if (this.#pendingRetryId !== retryId) return;
+        this.#pendingRetryId = 0;
+        this.#open();
+      },
       delay * (0.5 + Math.random() / 2),
     );
   }
