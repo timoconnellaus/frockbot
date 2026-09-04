@@ -394,6 +394,9 @@ function withClientOrigin(response: Response, origin: string): Response {
   return shared;
 }
 
+/** The composer's dictation socket. One per User; the gateway authenticates it. */
+export const VOICE_DICTATION_PATH = "/api/voice/dictation";
+
 const APPLET_SOCKET_PATH = /^\/api\/applets\/([^/]+)\/socket$/;
 
 /**
@@ -600,6 +603,20 @@ export function createGateway(dependencies: GatewayDependencies) {
     }
     if (request.method === "GET" && url.pathname === "/api/identity") {
       return Response.json({ schemaVersion: 1, userId, isAdmin });
+    }
+
+    // Dictation rides the authenticated session, not a minted token: the
+    // composer is a first-party surface on this very origin, so the cookie
+    // already in the request is the whole of the decision.
+    if (url.pathname === VOICE_DICTATION_PATH) {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      if (!dependencies.openVoiceDictation) {
+        return jsonError(503, "Dictation is not configured");
+      }
+      if (userId === PUBLIC_APPLICATION_USER_ID) {
+        return jsonError(401, "authentication required");
+      }
+      return dependencies.openVoiceDictation(userId, request);
     }
 
     const stateChannelMatch = url.pathname.match(

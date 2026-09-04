@@ -285,3 +285,5 @@ export function decodeExternalAuthorizationUrl(value: unknown): string {
   }
   return value;
 }
+
+export * from "./voice-dictation.js";

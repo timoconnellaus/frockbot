@@ -751,6 +751,50 @@
   color: var(--frock-danger-text);
 }
 
+/*
+ * Dictation.
+ *
+ * The capture line sits under the draft it is writing, inside the composer,
+ * because the text arriving in the textarea is the thing it is describing. It
+ * is a status line rather than an overlay: nothing about the composer moves
+ * when it appears beyond the row it adds.
+ */
+.voice-capture {
+  display: flex;
+  margin: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+}
+
+.voice-wave {
+  display: flex;
+  height: 14px;
+  align-items: center;
+  gap: 2px;
+}
+
+/*
+ * Each bar is scaled from the microphone's own level, so the animation stops
+ * when the room does. `transform` rather than `height`: it is the one property
+ * that animates without a layout pass, and this runs at frame rate.
+ */
+.voice-wave-bar {
+  width: 2px;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--frock-action-primary);
+  transform-origin: center;
+  transition: transform var(--frock-motion-fast);
+}
+
+.voice-error {
+  margin: 0;
+  color: var(--frock-danger-text);
+  font-size: var(--frock-text-xs);
+}
+
 .skill-chips {
   display: flex;
   margin: 0;

@@ -27,6 +27,7 @@
     "./client/FrockBotApp.vue": "./src/client/FrockBotApp.vue",
     "./client/notify": "./src/client/notify.ts",
     "./client/styles.css": "./src/client/styles.css",
+    "./client/voice-worklet": "./src/client/voice-worklet.ts",
     "./focus": "./src/focus.ts",
     "./frockbot.json": "./frockbot.json",
     "./host": "./src/host.ts",

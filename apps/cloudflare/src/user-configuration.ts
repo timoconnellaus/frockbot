@@ -101,6 +101,13 @@ import type {
   McpAuthorizationCompletionRequestV1,
   McpAuthorizationStartRequestV1,
 } from "@frockbot/plugin-mcp/backend";
+import {
+  recordVoiceUsageV1,
+  reserveVoiceCaptureV1,
+  VOICE_QUOTA_DAY,
+  type VoiceQuotaReceiptV1,
+  type VoiceUsageReceiptV1,
+} from "./voice-quota.js";
 import type { WorkerLoader } from "./contracts.js";
 import { createPackagePublicationHost } from "./package-publication.js";
 import { R2PackageCatalog } from "./package-catalog.js";
@@ -777,6 +784,40 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return releaseSubagentSlotV1(this.ctx.storage, {
       botId: request.botId as string,
       taskId: request.taskId as string,
+    });
+  }
+
+  /**
+   * The durable per-User voice budget (voice plan D1).
+   *
+   * The `VoiceSession` Durable Object holds the sockets and no authority, so
+   * it asks here before it opens a microphone and reports here when it closes
+   * one — the same seam `reserveSubagentSlot` gives the Bot object, and for
+   * the same reason: a User's budget is not countable anywhere else.
+   */
+  async reserveVoiceCapture(input: unknown): Promise<VoiceQuotaReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      day: rpcPattern(VOICE_QUOTA_DAY, 10),
+      sessionId: rpcString(128),
+    });
+    return reserveVoiceCaptureV1(this.ctx.storage, {
+      day: request.day as string,
+      sessionId: request.sessionId as string,
+    });
+  }
+
+  async recordVoiceUsage(input: unknown): Promise<VoiceUsageReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      day: rpcPattern(VOICE_QUOTA_DAY, 10),
+      sessionId: rpcString(128),
+      seconds: rpcInteger({ minimum: 0, maximum: 24 * 60 * 60 }),
+    });
+    return recordVoiceUsageV1(this.ctx.storage, {
+      day: request.day as string,
+      sessionId: request.sessionId as string,
+      seconds: request.seconds as number,
     });
   }
 

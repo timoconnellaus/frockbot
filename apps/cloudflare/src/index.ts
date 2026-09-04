@@ -178,10 +178,15 @@ import {
   decodeAppletSummaryV1,
 } from "@frockbot/kernel-contracts";
 import type { AppletState } from "./applet-state.js";
+import type { VoiceSession } from "./voice-session.js";
+import { VOICE_DICTATION_INTERNAL_PATH } from "./voice-session.js";
 export { BotCapabilities } from "./bot-capabilities.js";
 // The Applet authority (ADR 0022): the Durable Object that owns one Applet
 // instance, and the loopback `CAPABILITIES` entrypoint its facet is handed.
 export { AppletCapabilities, AppletState } from "./applet-state.js";
+// The composer's dictation transport (voice plan D2): one object per User,
+// holding the browser leg and the provider leg and no authority at all.
+export { VoiceSession } from "./voice-session.js";
 export { BotState, DeploymentPolicy, UserConfiguration };
 
 interface Env {
@@ -235,6 +240,22 @@ interface Env {
   FLOCK_AI_GATEWAY_TOKEN?: string;
   BOT_STATES: DurableObjectNamespace<BotState>;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
+  /** One voice transport per User, `idFromName(userId)` (voice plan D2). */
+  VOICE_SESSIONS: DurableObjectNamespace<VoiceSession>;
+  /**
+   * The direct OpenAI realtime key. Present, dictation takes the direct path;
+   * absent, it takes the AI Gateway's BYOK key. A Worker secret, so the
+   * release workflow's `--secrets-file` list carries the name or a deploy
+   * would delete it (ADR 0025).
+   */
+  OPENAI_API_KEY?: string;
+  /**
+   * The Gemini key slice B will read the same way. Declared here so the
+   * release workflow can carry it before the code that uses it lands.
+   */
+  GEMINI_API_KEY?: string;
+  /** Local dictation stand-in; set by the end-to-end harness only. */
+  VOICE_UPSTREAM_URL?: string;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
   COMPUTER_HOST: Fetcher;
   /** Shared secret presented on every Computer host call. */
@@ -1385,6 +1406,32 @@ async function openOwnedBotStateChannel(
 }
 
 /**
+ * The composer's dictation socket, handed to this User's `VoiceSession`.
+ *
+ * The identity travels as a header rather than in the URL for the same reason
+ * the Bot-state channel's does: the object trusts what the gateway
+ * authenticated and nothing a caller could have written for itself.
+ */
+function openVoiceDictation(
+  env: Env,
+  userId: string,
+  request: Request,
+): Promise<Response> {
+  const incoming = new URL(request.url);
+  const internal = new URL(
+    `${VOICE_DICTATION_INTERNAL_PATH}${incoming.search}`,
+    "https://voice-session.internal",
+  );
+  const headers = new Headers(request.headers);
+  headers.delete("x-frockbot-user-id");
+  headers.set("x-frockbot-user-id", userId);
+  const namespace = env.VOICE_SESSIONS;
+  return namespace
+    .get(namespace.idFromName(userId))
+    .fetch(new Request(internal, { method: "GET", headers }));
+}
+
+/**
  * One published template, for the unauthenticated `GET /templates/v1/:shareId`.
  *
  * The share id names its owner, so the route needs no index and no lookup
@@ -2033,6 +2080,8 @@ export default {
           env.APPLET_STATES.get(
             env.APPLET_STATES.idFromName(appletStateNameV1(userId, appletId)),
           ),
+        openVoiceDictation: (userId, request) =>
+          openVoiceDictation(env, userId, request),
         openBotStateChannel: (userId, botId, request, context) =>
           openOwnedBotStateChannel(env, userId, botId, request, context),
         ...(env.PACKAGE_CATALOG

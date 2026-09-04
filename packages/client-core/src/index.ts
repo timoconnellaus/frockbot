@@ -161,9 +161,45 @@ export interface ClientRun {
   recovery?: { action: "resume"; message: string };
 }
 
+/**
+ * What the composer is told while a person dictates.
+ *
+ * Deltas are appended as they are heard; a `transcript` replaces the deltas
+ * that built the segment it finishes, because the provider's own segment is
+ * punctuated and the deltas are not. `final` says everything captured has been
+ * transcribed and the message may be sent.
+ */
+export interface VoiceDictationObserverV1 {
+  ready(): void;
+  delta(text: string): void;
+  transcript(text: string): void;
+  final(): void;
+  /** Plain English, already fit to show a person. */
+  failed(message: string): void;
+  closed(): void;
+}
+
+/** The handle the composer drives. Audio is PCM16, 16 kHz, mono. */
+export interface VoiceDictationSessionV1 {
+  sendAudio(pcm16: ArrayBuffer): void;
+  /** Stop capturing and transcribe the rest; `final` follows. */
+  commit(): void;
+  /** Throw the capture away. */
+  cancel(): void;
+  close(): void;
+}
+
 export interface AgentTransport {
   /** False when this platform cannot complete external Connection authorization. */
   readonly connectionsAvailable?: boolean;
+  /**
+   * Opens the composer's dictation socket (voice plan D2). Optional: a
+   * platform that cannot open one simply offers no microphone, and the
+   * composer's send button never changes shape.
+   */
+  openVoiceDictation?(
+    observer: VoiceDictationObserverV1,
+  ): VoiceDictationSessionV1;
   turn(
     botId: string,
     text: string,
