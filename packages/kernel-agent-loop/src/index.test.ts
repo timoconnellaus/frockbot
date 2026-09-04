@@ -3261,6 +3261,7 @@ describe("AgentLoop", () => {
     root.on("agent/assistant-text", async (_agent, text, position) => {
       order.push("assistant-text");
       seen.push(`${position.turn}:${position.step}:${text}`);
+      seen.push(`tools:${(position.toolNames ?? []).join(",")}`);
     });
     const handle = await root.agents.create({
       ...allowEffectOptions,
@@ -3274,6 +3275,7 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(seen[0]).toBe("1:1:On it — building it now.");
+    expect(seen[1]).toBe("tools:build");
     expect(order[0]).toBe("assistant-text");
     expect(order).toContain("tool");
   });

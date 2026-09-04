@@ -126,7 +126,17 @@ declare module "cordis" {
     "agent/assistant-text": (
       agent: Agent,
       text: string,
-      position: { turn: number; step: number; requestId: string },
+      position: {
+        turn: number;
+        step: number;
+        requestId: string;
+        /**
+         * The tools the same step is about to call, by name, so a listener
+         * can tell an acknowledgement the model *only* narrated from one it
+         * is also delivering through its own send tool.
+         */
+        toolNames?: readonly string[];
+      },
     ) => Promise<void>;
   }
 }

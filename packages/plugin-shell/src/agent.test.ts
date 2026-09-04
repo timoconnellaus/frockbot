@@ -501,6 +501,44 @@ describe("the acknowledgement reaches the user", () => {
     }
   });
 
+  test("a step that is about to call send_to_user is not promoted", async () => {
+    const mounted = await mount();
+    try {
+      // Bob on production, 2026-09-04: the model wrote the acknowledgement as
+      // plain text and passed the same line to `send_to_user` in one step, and
+      // the person saw two identical bubbles.
+      await mounted.root.serial(
+        "agent/assistant-text",
+        { session: mounted.session } as never,
+        "On it — building your to-do applet now.",
+        {
+          turn: 3,
+          step: 1,
+          requestId: "request-1",
+          toolNames: [SEND_TO_USER_TOOL_V1, "applet_create"],
+        },
+      );
+      await mounted.root.serial(
+        "agent/assistant-text",
+        { session: mounted.session } as never,
+        "Sending it another way.",
+        {
+          turn: 3,
+          step: 2,
+          requestId: "request-2",
+          toolNames: [SEND_MESSAGE_ALIAS_V1],
+        },
+      );
+
+      const sends = mounted.session.events.filter(
+        (event) => event.type === "send/to-user",
+      );
+      expect(sends).toHaveLength(0);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
   test("the last steps of a reply tell the model to send a status", async () => {
     const mounted = await mount();
     try {
