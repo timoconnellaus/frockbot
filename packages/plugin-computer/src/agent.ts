@@ -256,6 +256,46 @@ function decodeProcessId(input: unknown): string | undefined {
   return isComputerProcessIdV1(value) ? value : undefined;
 }
 
+/**
+ * What each `computer_browser` action needs, in the words the refusal uses.
+ *
+ * Bob on production (2026-09-04) clicked a button with `{name}`, then
+ * `{label}`, then `{label, role}` before landing on `{role, name}` — three
+ * wasted steps per click, because the loop's generic "Invalid input for tool"
+ * names no field. The snapshot lists elements as `button "Add"` and
+ * `checkbox "Mark done"`, so a click takes that role and that accessible name;
+ * `label` is accepted as a synonym for `name` (and `name` for `label` on
+ * `fill`) since the model reaches for both.
+ */
+export const BROWSER_ACTION_SHAPES_V1: Readonly<Record<string, string>> = {
+  snapshot: '{"action":"snapshot"}',
+  navigate: '{"action":"navigate","url":"http://127.0.0.1:8944/"}',
+  click:
+    '{"action":"click","role":"button","name":"Add"} — role and name are both required; take them from the snapshot line (button "Add" → role "button", name "Add"; a checkbox line → role "checkbox")',
+  fill: '{"action":"fill","label":"New todo","text":"Buy milk"} — label is the field\'s accessible label from the snapshot',
+  press: '{"action":"press","key":"Enter"}',
+  wait: '{"action":"wait","milliseconds":500} (0 to 30000)',
+};
+
+/** Why a `computer_browser` input could not be used, and what to send. */
+export function browserInputRefusalV1(input: unknown): string {
+  const value = record(input);
+  const action = typeof value?.action === "string" ? value.action : undefined;
+  const shape = action ? BROWSER_ACTION_SHAPES_V1[action] : undefined;
+  if (!shape) {
+    return `computer_browser input is invalid: "action" must be one of ${Object.keys(
+      BROWSER_ACTION_SHAPES_V1,
+    )
+      .map((name) => `"${name}"`)
+      .join(", ")}. For example ${BROWSER_ACTION_SHAPES_V1.click}.`;
+  }
+  return `computer_browser input is invalid for "${action}". Expected ${shape}.`;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function decodeBrowser(input: unknown): ComputerBrowserAction | undefined {
   const value = record(input);
   switch (value?.action) {
@@ -265,24 +305,28 @@ function decodeBrowser(input: unknown): ComputerBrowserAction | undefined {
       return typeof value.url === "string" && value.url
         ? { type: "navigate", url: value.url }
         : undefined;
-    case "click":
-      return typeof value.role === "string" && typeof value.name === "string"
+    case "click": {
+      const name = optionalString(value.name) ?? optionalString(value.label);
+      return typeof value.role === "string" && name !== undefined
         ? {
             type: "click",
             role: value.role,
-            name: value.name,
+            name,
             exact: typeof value.exact === "boolean" ? value.exact : undefined,
           }
         : undefined;
-    case "fill":
-      return typeof value.label === "string" && typeof value.text === "string"
+    }
+    case "fill": {
+      const label = optionalString(value.label) ?? optionalString(value.name);
+      return label !== undefined && typeof value.text === "string"
         ? {
             type: "fill",
-            label: value.label,
+            label,
             text: value.text,
             exact: typeof value.exact === "boolean" ? value.exact : undefined,
           }
         : undefined;
+    }
     case "press":
       return typeof value.key === "string"
         ? { type: "press", key: value.key }
@@ -1492,7 +1536,7 @@ export function createComputerAgentPlugin(
       },
       idempotent: config.idempotentEffects === true,
       description:
-        "Control the browser in the Bot's selected Computer and return an accessibility snapshot.",
+        'Control the browser in the Bot\'s selected Computer and return an accessibility snapshot. Shapes: {"action":"snapshot"}; {"action":"navigate","url":...}; {"action":"click","role":"button","name":"Add"} (role AND name, both from the snapshot line, e.g. checkbox "Mark done"); {"action":"fill","label":"New todo","text":...}; {"action":"press","key":"Enter"}; {"action":"wait","milliseconds":500}.',
       inputSchema: {
         type: "object",
         properties: {
@@ -1501,9 +1545,20 @@ export function createComputerAgentPlugin(
             enum: ["snapshot", "navigate", "click", "fill", "press", "wait"],
           },
           url: { type: "string" },
-          role: { type: "string" },
-          name: { type: "string" },
-          label: { type: "string" },
+          role: {
+            type: "string",
+            description:
+              "click: the element's role from the snapshot (button, checkbox, link, textbox…)",
+          },
+          name: {
+            type: "string",
+            description:
+              "click: the element's accessible name from the snapshot",
+          },
+          label: {
+            type: "string",
+            description: "fill: the field's accessible label from the snapshot",
+          },
           text: { type: "string" },
           key: { type: "string" },
           exact: { type: "boolean" },
@@ -1512,11 +1567,15 @@ export function createComputerAgentPlugin(
         required: ["action"],
         additionalProperties: false,
       },
-      validate: (input) => decodeBrowser(input) !== undefined,
+      // Deliberately permissive: a wrong shape reaches `execute`, which says
+      // which field is missing and shows the shape. A bare `false` here becomes
+      // the loop's generic "Invalid input for tool", which cost Bob three
+      // steps per click. Same reasoning as `skill_load`.
+      validate: (input) => !!record(input),
       execute: async (input, context) => {
         const action = decodeBrowser(input);
         if (!action)
-          return { content: "Invalid browser action", isError: true };
+          return { content: browserInputRefusalV1(input), isError: true };
         try {
           return await useComputer(
             await open(context.botId, context.sessionId, context.signal),
