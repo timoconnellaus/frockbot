@@ -3,6 +3,7 @@ import {
   compatChatCompletionsUrlV1,
   createFrockAiGatewayHostV1,
 } from "./frock-ai.js";
+import { FrockAiTransportErrorV1 } from "@frockbot/plugin-provider-frock-ai/runtime";
 
 const ACCOUNT_ID = "account-under-test";
 const TOKEN = "gateway-token";
@@ -94,8 +95,10 @@ describe("Frock AI Gateway host, compat transport", () => {
         (error: unknown) => error,
       );
 
+    expect(failure).toBeInstanceOf(FrockAiTransportErrorV1);
+    expect((failure as FrockAiTransportErrorV1).status).toBe(400);
     expect((failure as Error).message).toBe(
-      'AI Gateway rejected the request (400): {"error":"upstream said no"}',
+      "AI Gateway rejected the request (400): upstream said no",
     );
   });
 
@@ -151,9 +154,10 @@ describe("Frock AI Gateway host, binding transport", () => {
           (error: unknown) => error,
         );
 
-      expect(failure).toBeInstanceOf(Error);
+      expect(failure).toBeInstanceOf(FrockAiTransportErrorV1);
+      expect((failure as FrockAiTransportErrorV1).status).toBe(status);
       expect((failure as Error).message).toBe(
-        `AI Gateway rejected the request (${status}): {"error":"upstream said no"}`,
+        `AI Gateway rejected the request (${status}): upstream said no`,
       );
     },
   );
@@ -187,9 +191,11 @@ describe("Frock AI Gateway host, binding transport", () => {
         (error: unknown) => error,
       );
 
-    expect((failure as Error).message).toBe(
-      `AI Gateway rejected the request (500): ${"x".repeat(512)}`,
+    expect(failure).toBeInstanceOf(FrockAiTransportErrorV1);
+    expect((failure as Error).message).toStartWith(
+      "AI Gateway rejected the request (500): ",
     );
+    expect((failure as Error).message).toHaveLength(500);
   });
 });
 
