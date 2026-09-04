@@ -37,6 +37,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/timoconnellaus/frockbot.git",
-    "directory": "packages/plugin-provider-workers-ai"
+    "directory": "packages/plugin-provider-frock-ai"
   }
 }

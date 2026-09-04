@@ -75,4 +75,7 @@ every environment names them `FROCK_AI_*`.
   the GitHub repository secret `FLOCK_AI_GATEWAY_TOKEN`. Renaming a Cloudflare
   resource means updating the matching value in `wrangler.jsonc`; renaming a
   secret means adding it under the new name, after which the `FLOCK_AI_*`
-  fallback and the workflow's `||` expression can go.
+  fallback and the workflow's `||` expression can go. The e2e Worker's name is
+  set in two places that must move together: the `AI` service binding in
+  `wrangler.jsonc`'s `e2e` environment, and the `name` field in
+  `apps/cloudflare/e2e/frock-ai-fake.wrangler.jsonc` that produces it.

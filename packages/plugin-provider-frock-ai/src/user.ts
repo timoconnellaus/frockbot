@@ -22,6 +22,8 @@ import {
 } from "./catalog.js";
 import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
+// Durable storage keys. They read `flock-` because they are already written in
+// every existing User's Durable Object; see the note in `catalog.ts`.
 const BOOTSTRAP_KEY = "provider-flock-ai:bootstrap-v1";
 const COMMAND_PREFIX = "provider-flock-ai:command:";
 const PACKAGE_VERSION = "0.0.1";

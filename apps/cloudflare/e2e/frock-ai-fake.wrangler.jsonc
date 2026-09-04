@@ -1,6 +1,10 @@
 {
   "$schema": "../node_modules/wrangler/config-schema.json",
-  "name": "frockbot-frock-ai",
+  // The Worker's *name*, not the provider's. Under `--env e2e` wrangler
+  // registers and deploys it as `frockbot-flock-ai-e2e`, which is the service
+  // the app Worker's `e2e` environment binds. That Cloudflare resource is
+  // still named `flock`; renaming it is a separate manual step.
+  "name": "frockbot-flock-ai",
   "main": "frock-ai-fake-worker.ts",
   "compatibility_date": "2026-08-27",
   "compatibility_flags": ["nodejs_compat"],
