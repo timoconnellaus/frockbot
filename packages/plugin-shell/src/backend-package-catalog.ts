@@ -320,7 +320,7 @@ export function createPackageCatalogHost(
           change.action === "remove"
             ? change.input.packageId
             : change.input.catalogId,
-        ...(change.action === "remove"
+        ...(change.action === "remove" || change.input.contentHash === undefined
           ? {}
           : { contentHash: change.input.contentHash }),
       }),
@@ -520,9 +520,12 @@ export function createPackageCatalogHost(
           index,
           catalogId: provenance.catalogId,
         });
+        // A first-party member pins no bundle, so "the entry still offers
+        // what the target generation recorded" is the two hashes agreeing,
+        // both present or both absent.
         if (
-          !targetEntry?.bundle ||
-          targetEntry.bundle.contentHash !== provenance.contentHash
+          !targetEntry ||
+          targetEntry.bundle?.contentHash !== provenance.contentHash
         ) {
           return undoRefused(
             request,
@@ -538,7 +541,9 @@ export function createPackageCatalogHost(
           version: targetCatalogMember.version,
           catalogId: provenance.catalogId,
           catalogGeneration: provenance.catalogGeneration,
-          contentHash: provenance.contentHash,
+          ...(provenance.contentHash === undefined
+            ? {}
+            : { contentHash: provenance.contentHash }),
         };
       }
       const receipt = await options.user.execute(command);
@@ -673,17 +678,22 @@ export function createPackageCatalogHost(
           const resolved = await pinnedEntry(request.change.input.catalogId);
           user = resolved.user;
           entry = resolved.entry;
-          if (!entry.bundle) {
+          // A first-party entry names reviewed compiled-in code and publishes
+          // no bundle: there is no artifact to verify and no hash to pin. The
+          // Plugins page has always installed such an entry; refusing it here
+          // is what made `package_install` by chat disagree with the UI (F4).
+          if (entry.bundle) {
+            if (entry.bundle.contentHash !== request.change.input.contentHash) {
+              throw new Error(
+                `Catalog entry "${entry.catalogId}" has content hash "${entry.bundle.contentHash}", not "${request.change.input.contentHash}"`,
+              );
+            }
+            await verifyArtifact(entry);
+          } else if (request.change.input.contentHash !== undefined) {
             throw new Error(
-              `Catalog entry "${entry.catalogId}" does not carry installable code`,
+              `Catalog entry "${entry.catalogId}" does not carry a Package bundle`,
             );
           }
-          if (entry.bundle.contentHash !== request.change.input.contentHash) {
-            throw new Error(
-              `Catalog entry "${entry.catalogId}" has content hash "${entry.bundle.contentHash}", not "${request.change.input.contentHash}"`,
-            );
-          }
-          await verifyArtifact(entry);
           const member = base.members.find(
             (candidate) => candidate.packageId === entry.packageId,
           );
@@ -716,7 +726,7 @@ export function createPackageCatalogHost(
             version: entry.version,
             catalogId: entry.catalogId,
             catalogGeneration: resolved.generation,
-            contentHash: entry.bundle.contentHash,
+            ...(entry.bundle ? { contentHash: entry.bundle.contentHash } : {}),
             manifestHash: entry.manifestHash,
             summary:
               request.change.input.summary ??
@@ -744,16 +754,24 @@ export function createPackageCatalogHost(
       // Intent and manifest before the User settings effect. The manifest key
       // is the existing isolate loader seam used by authored Packages.
       if (!existingIntent) {
+        const bundle = entry.bundle;
         await options.storage.put({
           [packageCatalogChangeIntentKey(request.effectId)]: intent,
-          [authorshipManifestKey(intent.manifestHash)]: {
-            schemaVersion: 1,
-            manifestHash: intent.manifestHash,
-            packageId: intent.packageId,
-            version: intent.version,
-            manifest: entry.bundle!.manifest,
-            createdAt: intent.recordedAt,
-          } satisfies AuthoredManifestRecordV1,
+          // A bundle-less entry has no manifest document to store; the mount
+          // resolves it from the compiled-in application instead, still
+          // against the `manifestHash` the generation records.
+          ...(bundle
+            ? {
+                [authorshipManifestKey(intent.manifestHash)]: {
+                  schemaVersion: 1,
+                  manifestHash: intent.manifestHash,
+                  packageId: intent.packageId,
+                  version: intent.version,
+                  manifest: bundle.manifest,
+                  createdAt: intent.recordedAt,
+                } satisfies AuthoredManifestRecordV1,
+              }
+            : {}),
         });
         existingIntent = intent;
       }
@@ -776,7 +794,9 @@ export function createPackageCatalogHost(
               version: intent.version,
               catalogId: intent.catalogId,
               catalogGeneration: intent.catalogGeneration,
-              contentHash: intent.contentHash,
+              ...(intent.contentHash === undefined
+                ? {}
+                : { contentHash: intent.contentHash }),
             };
       const receipt = await options.user.execute(command);
       if (receipt.status === "rejected") {
@@ -789,7 +809,7 @@ export function createPackageCatalogHost(
         (member) => member.packageId !== intent.packageId,
       );
       if (action !== "remove") {
-        const bundle = entry.bundle!;
+        const bundle = entry.bundle;
         const member: CompositionMemberV1 = {
           packageId: entry.packageId,
           specifier: `catalog:${entry.catalogId}`,
@@ -801,14 +821,20 @@ export function createPackageCatalogHost(
             version: entry.version,
             catalogId: entry.catalogId,
             catalogGeneration: intent.catalogGeneration,
-            contentHash: bundle.contentHash,
+            ...(bundle ? { contentHash: bundle.contentHash } : {}),
           },
-          artifact: {
-            contentHash: bundle.contentHash,
-            size: bundle.size,
-            mediaType: bundle.mediaType,
-            bundlerVersion: bundle.bundlerVersion,
-          },
+          // No artifact ⇒ the member mounts in the kernel isolate from the
+          // compiled-in Package, exactly as the UI install records it.
+          ...(bundle
+            ? {
+                artifact: {
+                  contentHash: bundle.contentHash,
+                  size: bundle.size,
+                  mediaType: bundle.mediaType,
+                  bundlerVersion: bundle.bundlerVersion,
+                },
+              }
+            : {}),
         };
         members.push(member);
       }
@@ -850,7 +876,9 @@ export function createPackageCatalogHost(
         packageId: intent.packageId,
         displayName: intent.displayName,
         ...(action === "remove" ? {} : { version: intent.version }),
-        ...(action === "remove" ? {} : { contentHash: intent.contentHash }),
+        ...(action === "remove" || intent.contentHash === undefined
+          ? {}
+          : { contentHash: intent.contentHash }),
         generationId: generation.generationId,
         missingConnectionTypes: intent.missingConnectionTypes,
         recordedAt: intent.recordedAt,

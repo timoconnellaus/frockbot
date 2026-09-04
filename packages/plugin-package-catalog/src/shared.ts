@@ -19,7 +19,13 @@ export interface PackageInspectInputV1 {
 
 export interface PackageInstallInputV1 {
   catalogId: string;
-  contentHash: string;
+  /**
+   * Absent for a first-party entry, which names reviewed compiled-in code and
+   * publishes no bundle to pin. The UI install has always accepted such an
+   * entry; requiring a hash here refused by chat what the same entry installs
+   * from the Plugins page.
+   */
+  contentHash?: string;
   /** Optional Bot-authored audit line; the host supplies a plain fallback. */
   summary?: string;
 }
@@ -172,13 +178,16 @@ function decodeInstallLike(
   label: "package_install input" | "package_update input",
 ): PackageInstallInputV1 {
   const value = record(input, label);
-  exactWithOptional(value, ["catalogId", "contentHash"], ["summary"], label);
-  const contentHash = bounded(value.contentHash, `${label}.contentHash`, 64);
-  if (!SHA256.test(contentHash))
-    throw new Error(`${label}.contentHash is invalid`);
+  exactWithOptional(value, ["catalogId"], ["contentHash", "summary"], label);
+  let contentHash: string | undefined;
+  if (value.contentHash !== undefined) {
+    contentHash = bounded(value.contentHash, `${label}.contentHash`, 64);
+    if (!SHA256.test(contentHash))
+      throw new Error(`${label}.contentHash is invalid`);
+  }
   return {
     catalogId: identifier(value.catalogId, `${label}.catalogId`, CATALOG_ID),
-    contentHash,
+    ...(contentHash === undefined ? {} : { contentHash }),
     ...(value.summary === undefined
       ? {}
       : { summary: auditSummary(value.summary, `${label}.summary`) }),
@@ -235,10 +244,15 @@ export const PACKAGE_INSPECT_INPUT_SCHEMA_V1 = {
 export const PACKAGE_INSTALL_INPUT_SCHEMA_V1 = {
   type: "object",
   additionalProperties: false,
-  required: ["catalogId", "contentHash"],
+  required: ["catalogId"],
   properties: {
     catalogId: { type: "string" },
-    contentHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    contentHash: {
+      type: "string",
+      pattern: "^[0-9a-f]{64}$",
+      description:
+        "The bundle hash package_search or package_inspect reported for this entry. Omit it entirely when the entry carries none.",
+    },
     summary: {
       type: "string",
       maxLength: PACKAGE_CHANGE_SUMMARY_MAX_V1,

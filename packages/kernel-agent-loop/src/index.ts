@@ -685,20 +685,32 @@ class LoopAgent implements Agent {
       }
       throw new StepLimitReachedError(this.#maxSteps);
     } catch (error) {
-      if (
+      if (this.#turnDeadlineReached) {
+        // Ahead of both the reconciliation and the cancellation branch on
+        // purpose. Cancellation, because the deadline aborts the same
+        // controller Stop does and a Turn the clock ended must not be reported
+        // to the person as one they stopped. Reconciliation, because the
+        // reconciliation branch writes no `turn/end` on the promise that the
+        // run may still resume — and a run the deadline stopped never will.
+        // Deferring to it left `model/reconciliation-required` as the last
+        // event of an open Turn, and every later Turn on that Bot refused with
+        // `409` for the life of the Bot.
+        //
+        // The uncertainty is still recorded: whatever the model request wrote
+        // before the clock ran out stays in the journal. What changes is that
+        // the Turn is settled here — the open step's tool occurrences closed
+        // as `interrupted`, then `step/end` and `turn/end` — exactly as
+        // `kernel-do`'s `settledEventsV1` settles a Stop or a supersede.
+        turnOutcome = "interrupted";
+        turnReason = turnEndReason(TURN_DEADLINE_REASON_V1);
+        this.#ctx.emit("agent/error", this, error);
+      } else if (
         error instanceof ModelEffectReconciliationRequiredError ||
         error instanceof ToolEffectReconciliationRequiredError ||
         error instanceof ModelOutcomeSettlementRequiredError ||
         (signal.aborted && hasUnsettledExternalEffect(this.session.events))
       ) {
         reconciliationRequired = true;
-        this.#ctx.emit("agent/error", this, error);
-      } else if (this.#turnDeadlineReached) {
-        // Ahead of the cancellation branch on purpose: the deadline aborts the
-        // same controller Stop does, and a Turn the clock ended must not be
-        // reported to the person as one they stopped.
-        turnOutcome = "interrupted";
-        turnReason = turnEndReason(TURN_DEADLINE_REASON_V1);
         this.#ctx.emit("agent/error", this, error);
       } else if (
         error instanceof EffectAdmissionFencedError ||
@@ -724,7 +736,13 @@ class LoopAgent implements Agent {
       // `kernel-do`'s `settledEventsV1`. Closing it here instead would either
       // lie about an outcome or make the run unresumable (ADR 0028).
       if (!reconciliationRequired) {
-        if (openStep !== undefined && turnOutcome === "cancelled") {
+        // A deadline settles the same way a Stop does: an open tool
+        // occurrence gets an `interrupted` result before the step closes,
+        // so the journal never carries a `turn/end` over an open call.
+        if (
+          openStep !== undefined &&
+          (turnOutcome === "cancelled" || this.#turnDeadlineReached)
+        ) {
           await this.#settleCancelledStep(openTurn, openStep);
         }
         if (openStep !== undefined) {
@@ -867,20 +885,32 @@ class LoopAgent implements Agent {
       }
       throw new StepLimitReachedError(this.#maxSteps);
     } catch (error) {
-      if (
+      if (this.#turnDeadlineReached) {
+        // Ahead of both the reconciliation and the cancellation branch on
+        // purpose. Cancellation, because the deadline aborts the same
+        // controller Stop does and a Turn the clock ended must not be reported
+        // to the person as one they stopped. Reconciliation, because the
+        // reconciliation branch writes no `turn/end` on the promise that the
+        // run may still resume — and a run the deadline stopped never will.
+        // Deferring to it left `model/reconciliation-required` as the last
+        // event of an open Turn, and every later Turn on that Bot refused with
+        // `409` for the life of the Bot.
+        //
+        // The uncertainty is still recorded: whatever the model request wrote
+        // before the clock ran out stays in the journal. What changes is that
+        // the Turn is settled here — the open step's tool occurrences closed
+        // as `interrupted`, then `step/end` and `turn/end` — exactly as
+        // `kernel-do`'s `settledEventsV1` settles a Stop or a supersede.
+        turnOutcome = "interrupted";
+        turnReason = turnEndReason(TURN_DEADLINE_REASON_V1);
+        this.#ctx.emit("agent/error", this, error);
+      } else if (
         error instanceof ModelEffectReconciliationRequiredError ||
         error instanceof ToolEffectReconciliationRequiredError ||
         error instanceof ModelOutcomeSettlementRequiredError ||
         (signal.aborted && hasUnsettledExternalEffect(this.session.events))
       ) {
         reconciliationRequired = true;
-        this.#ctx.emit("agent/error", this, error);
-      } else if (this.#turnDeadlineReached) {
-        // Ahead of the cancellation branch on purpose: the deadline aborts the
-        // same controller Stop does, and a Turn the clock ended must not be
-        // reported to the person as one they stopped.
-        turnOutcome = "interrupted";
-        turnReason = turnEndReason(TURN_DEADLINE_REASON_V1);
         this.#ctx.emit("agent/error", this, error);
       } else if (
         error instanceof EffectAdmissionFencedError ||
@@ -906,7 +936,13 @@ class LoopAgent implements Agent {
       // `kernel-do`'s `settledEventsV1`. Closing it here instead would either
       // lie about an outcome or make the run unresumable (ADR 0028).
       if (!reconciliationRequired) {
-        if (openStep !== undefined && turnOutcome === "cancelled") {
+        // A deadline settles the same way a Stop does: an open tool
+        // occurrence gets an `interrupted` result before the step closes,
+        // so the journal never carries a `turn/end` over an open call.
+        if (
+          openStep !== undefined &&
+          (turnOutcome === "cancelled" || this.#turnDeadlineReached)
+        ) {
           await this.#settleCancelledStep(turn, openStep);
         }
         if (openStep !== undefined) {

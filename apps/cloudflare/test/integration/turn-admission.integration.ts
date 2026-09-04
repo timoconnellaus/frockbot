@@ -7,6 +7,7 @@
 // artifact, and the Bot Durable Object runs the Turn.
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import type { FakeExecScript } from "../computer-host-fake.ts";
 import {
   asUser,
   expectOkJson,
@@ -19,6 +20,9 @@ import {
 
 useApplicationArtifact();
 
+/** `plugin-fly-sprite` reads the inner command's exit code off this marker. */
+const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
+
 interface TurnView {
   runId: string;
   text: string;
@@ -27,7 +31,8 @@ interface TurnView {
     call?: { id: string; name: string };
     content?: string;
     isError?: boolean;
-    payload?: { type: string };
+    callId?: string;
+    payload?: { type: string; text?: string };
   }>;
 }
 
@@ -37,6 +42,18 @@ interface RunView {
   status: string;
   events: TurnView["events"];
   outcome?: { type: string; text?: string };
+}
+
+/** Teaches the shared fake Computer host how to answer one exec. */
+async function scriptExec(rule: FakeExecScript): Promise<void> {
+  const response = await env.COMPUTER_HOST.fetch(
+    new Request("http://computer-host.internal/__fake/exec", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(rule),
+    }),
+  );
+  expect(response.status).toBe(200);
 }
 
 function botStub(userId: string, botId: string) {
@@ -248,5 +265,52 @@ describe("turn admission through the gateway and the Bot", () => {
         .map((event) => event.payload?.type),
     ).toEqual(["text", "widget"]);
     expect(turn.text).toBe("Booked.");
+  });
+
+  // The conversational contract, proved where it is observable: the short
+  // "On it." reaches the durable log before the slow work does, so the person
+  // is not left watching a spinner while the Bot runs a command.
+  it("records the acknowledgement before the work it acknowledges", async () => {
+    const userId = freshUserId("admission-ack");
+    const botId = "admission-ack-bot";
+    const marker = `frockbot-ack-${crypto.randomUUID()}`;
+    await scriptExec({ match: marker, stdout: `done\n${EXEC_EXIT_MARKER}0\n` });
+    await provisionThroughGateway({ userId, botId });
+
+    const turn = await chatTurn(
+      userId,
+      botId,
+      toolCallTriggerPrompt(
+        ["send_to_user", { payload: { type: "text", text: "On it." } }],
+        ["computer_exec", { command: `echo ${marker}` }],
+      ),
+      "admission-ack-1",
+    );
+
+    const acknowledgement = turn.events.findIndex(
+      (event) => event.type === "send/to-user",
+    );
+    expect(acknowledgement).toBeGreaterThanOrEqual(0);
+    expect(turn.events[acknowledgement]?.payload).toMatchObject({
+      type: "text",
+      text: "On it.",
+    });
+
+    // The work itself: its result is matched back to the call by id, the way
+    // the transcript draws it.
+    const exec = turn.events.find(
+      (event) =>
+        event.type === "tool/call" && event.call?.name === "computer_exec",
+    );
+    expect(exec?.call?.id).toBeDefined();
+    const execResult = turn.events.findIndex(
+      (event) =>
+        event.type === "tool/result" && event.callId === exec?.call?.id,
+    );
+    // Recorded before the work, so it is delivered before it: a send is
+    // flushed to the durable log as its own event the moment the tool
+    // returns, not held back until the Turn settles.
+    expect(execResult).toBeGreaterThan(acknowledgement);
+    expect(turn.events[execResult]?.isError).toBe(false);
   });
 });

@@ -1504,10 +1504,12 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
           (event.packageId === undefined ||
             event.catalogId !== undefined ||
             event.contentHash !== undefined)) ||
+        // An install or update names a Catalog entry and never a bare package
+        // id. `contentHash` is optional there: a first-party entry names
+        // reviewed compiled-in code, publishes no bundle, and so pins no
+        // artifact hash.
         (event.action !== "remove" &&
-          (event.catalogId === undefined ||
-            event.contentHash === undefined ||
-            event.packageId !== undefined))
+          (event.catalogId === undefined || event.packageId !== undefined))
       ) {
         throw new Error("session Catalog change intent identity is invalid");
       }

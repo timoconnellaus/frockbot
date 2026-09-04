@@ -600,8 +600,10 @@ describe("generic per-Turn model resolution", () => {
     });
     await expect(contribution.listNotifications()).resolves.toEqual([
       expect.objectContaining({
+        // Colons would fail the acknowledge decoder, so the mint replaces
+        // them; a notification nobody can acknowledge 400s forever.
         notificationId:
-          "package-connection-unavailable:run-1:bot-authored:flock-ai-ambient",
+          "package-connection-unavailable-run-1-bot-authored-flock-ai-ambient",
         title: "Connection unavailable",
       }),
     ]);

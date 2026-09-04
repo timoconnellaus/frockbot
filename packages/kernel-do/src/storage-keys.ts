@@ -109,6 +109,19 @@ export function compositionFailureCountKey(generationId: string): string {
   return `${COMPOSITION_FAILURE_COUNT_PREFIX}${generationId}`;
 }
 
+/**
+ * The Bot's own consecutive-failure streak, across generations.
+ *
+ * The per-generation counter alone left quarantine as dead code in the path a
+ * real user takes: the model's natural repair is to *author a new generation*,
+ * which supersedes the failed one at attempt 1, so no generation ever reached
+ * three. Every repair attempt then added one more dead generation, forever.
+ * This key counts the Bot's consecutive activation failures however many
+ * generations they are spread over, and a generation that finally activates
+ * clears it.
+ */
+export const COMPOSITION_FAILURE_STREAK_KEY = "composition:failure-streak";
+
 export function compositionQuarantineKey(generationId: string): string {
   return `${COMPOSITION_QUARANTINE_PREFIX}${generationId}`;
 }

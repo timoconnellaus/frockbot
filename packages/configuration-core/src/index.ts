@@ -99,6 +99,12 @@ export interface BotProfile {
   namedBy?: BotNameProvenanceV1;
   /** Keeps the Bot out of the default sidebar list without archiving it. */
   hiddenFromSidebar?: boolean;
+  /**
+   * When the User pinned this Bot, as an ISO 8601 instant. Absent means not
+   * pinned. The instant rather than a flag, so the pinned row keeps a stable
+   * order — earliest pin first — without a second ordering field.
+   */
+  pinnedAt?: string;
 }
 
 /**
@@ -112,6 +118,8 @@ export interface BotProfilePatchV1 {
   description?: string;
   title?: string;
   hiddenFromSidebar?: boolean;
+  /** An ISO 8601 instant pins the Bot; the empty string unpins it. */
+  pinnedAt?: string;
 }
 
 export interface BotNotificationPolicy {
@@ -604,6 +612,17 @@ export interface EffectiveBotModelV1 {
   source: "bot" | "account" | "platform" | "none";
   model?: ModelBindingV1;
   binding?: ResolvedModelBindingV1;
+  /**
+   * Set when a Bot or account choice was present but could not bind — its
+   * provider Package was switched off, or its Connection is gone — and the
+   * platform bootstrap answered in its place. The chosen scope and the reason
+   * it failed survive so the client can say the Bot is running on the default.
+   */
+  fallback?: {
+    from: "bot" | "account";
+    model: ModelBindingV1;
+    failure: string;
+  };
 }
 
 /**
@@ -684,23 +703,68 @@ export function resolveEffectiveBotModelV1(input: {
     };
   };
 
+  /**
+   * A chosen model whose provider Package has been switched off, or whose
+   * Connection is gone, must not stop the Bot answering: the platform
+   * bootstrap stands in for it. Only a binding failure degrades this way — a
+   * scope conflict is the User's own contradiction and still fails closed,
+   * because there is no single choice to stand in for.
+   */
+  const platformStandIn = (
+    from: "bot" | "account",
+    model: ModelBindingV1,
+    binding: ResolvedModelBindingV1,
+  ): EffectiveBotModelV1 | undefined => {
+    const platform = input.user.platformModel;
+    if (!platform) return undefined;
+    if (
+      platform.connectionId === model.connectionId &&
+      platform.providerModelId === model.providerModelId
+    ) {
+      return undefined;
+    }
+    const platformBinding = resolveBotModelBindingV1({
+      model: platform,
+      user: input.user,
+      packages: input.packages,
+    });
+    if (platformBinding.state === "unavailable") return undefined;
+    return {
+      source: "platform",
+      model: structuredClone(platform),
+      binding: platformBinding,
+      fallback: {
+        from,
+        model: structuredClone(model),
+        failure:
+          binding.failure ?? "This Bot's model isn't available right now.",
+      },
+    };
+  };
+
   for (const scope of ["bot", "user"] as const) {
     const resolved = fromScope(scope);
+    const source = scope === "bot" ? "bot" : "account";
     if (resolved?.conflict) {
       return {
-        source: scope === "bot" ? "bot" : "account",
+        source,
         binding: { state: "unavailable", failure: resolved.conflict },
       };
     }
     if (resolved?.model) {
+      const binding = resolveBotModelBindingV1({
+        model: resolved.model,
+        user: input.user,
+        packages: input.packages,
+      });
+      if (binding.state === "unavailable") {
+        const standIn = platformStandIn(source, resolved.model, binding);
+        if (standIn) return standIn;
+      }
       return {
-        source: scope === "bot" ? "bot" : "account",
+        source,
         model: structuredClone(resolved.model),
-        binding: resolveBotModelBindingV1({
-          model: resolved.model,
-          user: input.user,
-          packages: input.packages,
-        }),
+        binding,
       };
     }
   }
@@ -1009,6 +1073,7 @@ const BOT_PROFILE_OPTIONAL_FIELDS = [
   "title",
   "namedBy",
   "hiddenFromSidebar",
+  "pinnedAt",
 ] as const;
 
 function botProfile(value: unknown): BotProfile {
@@ -1040,7 +1105,19 @@ function botProfile(value: unknown): BotProfile {
             "profile.hiddenFromSidebar",
           ),
         }),
+    ...(profile.pinnedAt === undefined
+      ? {}
+      : { pinnedAt: profileTimestamp(profile.pinnedAt, "profile.pinnedAt") }),
   };
+}
+
+/** An ISO 8601 instant a profile field carries. Never a duration or a count. */
+function profileTimestamp(value: unknown, label: string): string {
+  const candidate = text(value, label, 64);
+  if (!Number.isFinite(Date.parse(candidate))) {
+    throw new ConfigurationDecodeError(`${label} is invalid`);
+  }
+  return candidate;
 }
 
 /**
@@ -1067,7 +1144,7 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
     value,
     "profile",
     [],
-    ["name", "label", "description", "title", "hiddenFromSidebar"],
+    ["name", "label", "description", "title", "hiddenFromSidebar", "pinnedAt"],
   );
   if (Reflect.ownKeys(patch).length === 0) {
     throw new ConfigurationDecodeError("profile has invalid fields");
@@ -1092,6 +1169,15 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
             "profile.hiddenFromSidebar",
           ),
         }),
+    // An instant pins; the empty string unpins, the same way text clears.
+    ...(patch.pinnedAt === undefined
+      ? {}
+      : {
+          pinnedAt:
+            patchText(patch.pinnedAt, "profile.pinnedAt", 64) === ""
+              ? ""
+              : profileTimestamp(patch.pinnedAt, "profile.pinnedAt"),
+        }),
   };
 }
 
@@ -1111,7 +1197,7 @@ export function applyBotProfilePatchV1(
     next.name = patch.name;
     next.namedBy = namedBy;
   }
-  for (const key of ["label", "description", "title"] as const) {
+  for (const key of ["label", "description", "title", "pinnedAt"] as const) {
     const value = patch[key];
     if (value === undefined) continue;
     if (value === "") delete next[key];

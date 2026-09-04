@@ -221,7 +221,9 @@ function createChangeTool(input: {
           ? { packageId: change.input.packageId }
           : {
               catalogId: change.input.catalogId,
-              contentHash: change.input.contentHash,
+              ...(change.input.contentHash === undefined
+                ? {}
+                : { contentHash: change.input.contentHash }),
             }),
       });
       await session.flush();
@@ -273,7 +275,7 @@ export function createPackageInstallTool(
     action: "install",
     name: "package_install",
     description:
-      "Install the exact inspected Catalog bundle by catalogId and contentHash. Supply a short summary for the setup audit when useful. It activates on the next Turn; never ask the User to make a Connection.",
+      "Install the inspected Catalog entry by catalogId. Pass contentHash only when the entry reported one; a first-party entry publishes no bundle and must be installed by catalogId alone. Supply a short summary for the setup audit when useful. It activates on the next Turn; never ask the User to make a Connection.",
     inputSchema: PACKAGE_INSTALL_INPUT_SCHEMA_V1,
     decode: decodePackageInstallInputV1,
   });
@@ -313,7 +315,7 @@ export function createPackageCatalogRuntimePlugin(
           action: "update",
           name: "package_update",
           description:
-            "Update an installed Catalog Package to the exact inspected contentHash. Supply a short summary for the setup audit when useful. It activates on the next Turn.",
+            "Update an installed Catalog Package to the inspected entry. Pass contentHash only when the entry reported one. Supply a short summary for the setup audit when useful. It activates on the next Turn.",
           inputSchema: PACKAGE_UPDATE_INPUT_SCHEMA_V1,
           decode: decodePackageUpdateInputV1,
         }),

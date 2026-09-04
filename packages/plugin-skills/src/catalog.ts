@@ -604,7 +604,7 @@ export function renderSkillCatalogPromptV1(catalog: SkillCatalogV1): string {
     ...entries,
     "</agent_skills>",
     "These are your Skills: recipes you wrote, or your User wrote, for you; the managed ones ship with FrockBot; the plugin ones came with a Package your User installed.",
-    "Only names, refs, paths and descriptions are listed above. Call skill_load with a ref to read a Skill's full instructions before you follow it.",
+    'Only names, refs, paths and descriptions are listed above. Call skill_load with the ref in its "path" field to read a Skill\'s full instructions before you follow it.',
     "Mentioning a Skill is not running it.",
   ].join("\n");
 }
