@@ -2,11 +2,12 @@
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import {
   announceUiAnchor,
-  UiActivityRing,
+  UiActivityTrail,
   UiIcon,
   UiIconButton,
   UiMarkdown,
   UiSidebarOverlay,
+  type ActivityTrailBurstEventV1,
 } from "@frockbot/client-ui";
 import {
   computed,
@@ -27,7 +28,13 @@ import {
   type WebToolActivity,
 } from "../shared.js";
 import { ComposerDraftStore } from "./composer-draft.js";
-import { activityRingV1 } from "./activity-ring.js";
+import {
+  activityTrailBeginV1,
+  activityTrailSampleV1,
+  activityTrailStepV1,
+  type ActivityTrailMemoryV1,
+  type ActivityTrailStateV1,
+} from "./activity-trail.js";
 import {
   TURN_TEXT_MAX_CHARACTERS_V1,
   turnTextCounterVisibleV1,
@@ -432,25 +439,6 @@ function taskChipsOf(message: WebChatMessage): Array<{
   });
 }
 
-/**
- * The activity ring for one assistant line.
- *
- * A Turn that spends a minute making tool calls used to show the User nothing
- * but a breathing avatar, and then — briefly — a list of tool names, which put
- * the model's plumbing into a conversation. The ring is neither: it pulses
- * while the Turn runs and ticks forward for every step that settles, so the
- * account of an ordinary tool call is a segment of a stroke and no words at
- * all. The rule lives in `activity-ring.ts`; this only reads the message.
- */
-function activityRingOf(
-  message: WebChatMessage,
-): ReturnType<typeof activityRingV1> {
-  return activityRingV1({
-    toolStatuses: message.tools.map((tool) => tool.status),
-    status: message.status,
-  });
-}
-
 /** Which chips the User has opened. Local, and per chip. */
 const expandedTasks = ref(new Set<string>());
 
@@ -501,6 +489,93 @@ const messages = computed(() => {
         ) || left.index - right.index,
     )
     .map((entry) => entry.message);
+});
+
+/**
+ * The comet trail: what the Turn the User is watching is actually doing.
+ *
+ * A Turn that spends a minute making tool calls used to show the User nothing
+ * but a breathing avatar, and then — briefly — a list of tool names, which put
+ * the model's plumbing into a conversation. The trail is neither. Particles
+ * stream off the right of the working Bot's avatar at the rate text is
+ * arriving, burst when a tool call starts or settles, flash when a reply
+ * lands, and trickle while the Turn waits on the model. Nobody is told which
+ * tool ran; the transcript stays a conversation.
+ *
+ * The mapping is `activity-trail.ts`, which is pure. This is the part that
+ * cannot be: reading the open Turn out of the projection, and keeping a slow
+ * tick so the trickle can start when a Turn goes quiet without anything
+ * arriving to notice it.
+ */
+
+/** How often the trail is re-read when nothing has changed. */
+const TRAIL_TICK_MS = 400;
+
+/** Bursts kept in the log handed to the canvas. Older ones have long fired. */
+const TRAIL_BURST_LOG = 24;
+
+const trailRate = ref(0);
+const trailState = ref<ActivityTrailStateV1>("ended");
+const trailBursts = ref<ActivityTrailBurstEventV1[]>([]);
+let trailMemory: ActivityTrailMemoryV1 | null = null;
+let trailRunId: string | undefined;
+let trailSeq = 0;
+let trailTick = 0;
+
+/** The one Turn still going, if any. Only one runs at a time. */
+const workingMessage = computed(() =>
+  messages.value.find(
+    (message) => message.role === "assistant" && message.status === "streaming",
+  ),
+);
+
+function isWorking(message: WebChatMessage): boolean {
+  return message.id === workingMessage.value?.id;
+}
+
+const workingSample = computed(() => {
+  const message = workingMessage.value;
+  if (message === undefined) return undefined;
+  return activityTrailSampleV1({
+    text: message.text,
+    toolStatuses: message.tools.map((tool) => tool.status),
+    sends: message.sends.length,
+    status: message.status,
+  });
+});
+
+function stepTrail(): void {
+  const sample = workingSample.value;
+  const message = workingMessage.value;
+  const now = Date.now();
+  if (sample === undefined || message === undefined) {
+    trailMemory = null;
+    trailRunId = undefined;
+    trailRate.value = 0;
+    trailState.value = "ended";
+    return;
+  }
+  // A second Turn starts from nothing rather than inheriting the first one's
+  // character count, which would otherwise read as a huge negative delta.
+  if (trailMemory === null || trailRunId !== message.runId) {
+    trailRunId = message.runId;
+    trailMemory = activityTrailBeginV1(sample, now);
+  }
+  const stepped = activityTrailStepV1(trailMemory, sample, now);
+  trailMemory = stepped.memory;
+  trailRate.value = stepped.plan.rate;
+  trailState.value = stepped.plan.state;
+  if (stepped.plan.bursts.length === 0) return;
+  const log = [...trailBursts.value];
+  for (const burst of stepped.plan.bursts) {
+    trailSeq += 1;
+    log.push({ seq: trailSeq, ...burst });
+  }
+  trailBursts.value = log.slice(-TRAIL_BURST_LOG);
+}
+
+watch(workingSample, () => {
+  stepTrail();
 });
 
 /*
@@ -699,9 +774,13 @@ onMounted(() => {
   window.addEventListener("hashchange", applySettingsDeepLink);
   phoneLayoutMedia?.addEventListener("change", onPhoneLayoutChange);
   window.addEventListener("keydown", onRootKeydown);
+  // The trail is event-driven, but "nothing has arrived for a second and a
+  // half" is not an event: this slow tick is what notices it.
+  trailTick = window.setInterval(stepTrail, TRAIL_TICK_MS);
 });
 
 onBeforeUnmount(() => {
+  window.clearInterval(trailTick);
   threadResize?.disconnect();
   threadResize = undefined;
   window.removeEventListener("popstate", applySettingsDeepLink);
@@ -1020,47 +1099,6 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               {{ message.text }}
             </p>
             <template v-else-if="message.role === 'assistant'">
-              <!--
-                The Bot's own avatar, which appears only while it is working.
-                Every line in this transcript is from the same Bot — there are
-                no group conversations yet (issue 152) — so a sheep beside a
-                settled reply named nobody the reader did not already know. The
-                one beside a running Turn carries the ring, which is the whole
-                point of drawing it.
-
-                The art comes from whichever Package owns Bot identity; when no
-                Package fills the slot the sparkle tile is the only child and
-                shows through.
-              -->
-              <Transition name="activity-ring">
-                <div
-                  v-if="activityRingOf(message).active"
-                  class="bot-avatar bot-avatar-live"
-                  :class="{ 'bot-avatar-waiting': !message.text }"
-                >
-                  <span class="bot-avatar-fallback" aria-hidden="true"
-                    ><UiIcon name="sparkle" size="sm"
-                  /></span>
-                  <k-slot name="frockbot.bot-avatar" />
-                  <!--
-                    What the Bot is doing, while it is doing it — a stroke round
-                    the sheep that pulses and ticks a segment for every step the
-                    Turn settles. It completes and fades with the avatar when
-                    the Turn settles, and it never names a tool: the transcript
-                    stays a conversation.
-                  -->
-                  <UiActivityRing
-                    :progress="activityRingOf(message).progress"
-                    :running="activityRingOf(message).running"
-                    :laps="activityRingOf(message).laps"
-                  />
-                </div>
-              </Transition>
-              <!--
-                Everything the Turn produced stacks in one column. While the Bot
-                is working the avatar is beside it; once the Turn settles the
-                column is the whole row and starts at the transcript's edge.
-              -->
               <div class="message-column">
                 <div v-if="message.text" class="message-bubble">
                   <UiMarkdown :text="message.text" />
@@ -1189,6 +1227,46 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                   </button>
                 </div>
               </div>
+              <!--
+                The working row: the Bot's own avatar on its own line at the
+                end of the thread, with the comet trail streaming off to its
+                right. It appears only while the Turn is running. Every line in
+                this transcript is from the same Bot — there are no group
+                conversations yet (issue 152) — so a sheep beside a settled
+                reply named nobody the reader did not already know; the one
+                under a running Turn is the whole account of what the Bot is
+                doing.
+
+                The art comes from whichever Package owns Bot identity; when no
+                Package fills the slot the sparkle tile is the only child and
+                shows through. The row carries the status role, and the canvas
+                beside it is hidden from assistive technology: the trail is a
+                picture of a fact the label already states.
+              -->
+              <Transition name="bot-working">
+                <div
+                  v-if="isWorking(message)"
+                  class="bot-working"
+                  role="status"
+                  aria-label="Working"
+                >
+                  <div
+                    class="bot-avatar bot-avatar-live"
+                    :class="{ 'bot-avatar-waiting': !message.text }"
+                  >
+                    <span class="bot-avatar-fallback" aria-hidden="true"
+                      ><UiIcon name="sparkle" size="sm"
+                    /></span>
+                    <k-slot name="frockbot.bot-avatar" />
+                  </div>
+                  <UiActivityTrail
+                    class="bot-working-indicator"
+                    :rate="trailRate"
+                    :bursts="trailBursts"
+                    :state="trailState"
+                  />
+                </div>
+              </Transition>
             </template>
             <div v-else class="message-bubble">{{ message.text }}</div>
           </article>
