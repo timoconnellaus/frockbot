@@ -1,8 +1,10 @@
 // Seams S5 (application Worker → Bot Durable Object turns and runs), S7 (the
 // provider) and S9 (the client's HTTP error decoding).
 //
-// There is no SSE or WebSocket here: the client POSTs the Turn and polls the
-// run, so every assertion is on the settled reply rather than on a stream.
+// The client never holds a transcript stream open: it POSTs the Turn and reads
+// the run back, woken by the Bot-state channel and by its own poll. A reply
+// still arrives as it is written, because the words the model has produced are
+// durable on the run record before the Turn settles.
 //
 // Incident 5 is the second half: a Connection that reached `ready` stops
 // working when the key is revoked upstream. The failure has to survive as
@@ -148,6 +150,65 @@ test("a Turn that is running when the page reloads still delivers its reply", as
 
   // The fake provider is one server for the whole worker, so a spec that
   // slowed it down puts it back before the next one runs.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+});
+
+// The reply is drawn as it is written, not only when the Turn settles. The
+// provider sends half the answer, waits, then sends the rest; the half the
+// person can read has to reach the thread while the Turn is still running.
+test("a reply appears while the Bot is still writing it", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Streamer",
+  });
+
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
+
+  const prompt = "Say it as you think of it";
+  const composer = composerInput(page);
+  await composer.fill(prompt);
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(composer).toHaveValue("", { timeout: 120_000 });
+
+  // Latched rather than asserted at one instant: the Turn settles on its own
+  // schedule, and the claim is that the partial answer was drawn at some point
+  // before it did — never that it is still partial when the poll runs.
+  let sawPartialWhileRunning = false;
+  await expect
+    .poll(
+      async () => {
+        const last = assistantMessages(page).last();
+        if ((await last.count()) === 0) return false;
+        const text = (await last.textContent()) ?? "";
+        const live = await last.locator(".bot-avatar-live").count();
+        if (
+          live > 0 &&
+          text.includes("Reply from the") &&
+          !text.includes("Ollama stub")
+        ) {
+          sawPartialWhileRunning = true;
+        }
+        return sawPartialWhileRunning;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+
+  // And the settled answer replaces the partial one in the same bubble.
+  await expect(assistantMessages(page).last()).toContainText(
+    "Reply from the local Ollama stub.",
+    { timeout: 120_000 },
+  );
+  await expect(
+    assistantMessages(page).last().locator(".bot-avatar-live"),
+  ).toHaveCount(0, { timeout: 120_000 });
+
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 

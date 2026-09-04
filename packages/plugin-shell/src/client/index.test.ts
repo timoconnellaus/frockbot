@@ -1631,6 +1631,79 @@ describe("active durable Turn projection", () => {
     });
   });
 
+  test("a running Turn's partial text fills the bubble it will settle into", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-9",
+          input: "Explain",
+          events: [],
+          status: "running",
+          partialText: "Because it",
+        },
+      ],
+    );
+    expect(state.messages[1]).toMatchObject({
+      text: "Because it",
+      status: "streaming",
+    });
+
+    // One bubble: the settled answer replaces the partial one in place.
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-9",
+          input: "Explain",
+          events: [],
+          status: "completed",
+          responseText: "Because it is.",
+        },
+      ],
+    );
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1]).toMatchObject({
+      text: "Because it is.",
+      status: "completed",
+    });
+  });
+
+  test("a Turn that has already delivered a send streams nothing beside it", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-10",
+          input: "Explain",
+          events: [
+            {
+              type: "send/to-user",
+              payload: { type: "text", text: "Here you go." },
+            },
+          ],
+          status: "running",
+          partialText: "private scratch space",
+        },
+      ],
+    );
+    expect(state.messages[1]).toMatchObject({ text: "", status: "streaming" });
+    expect(state.messages[1]?.sends).toHaveLength(1);
+  });
+
   test("projects reconciliation-required recovery state", () => {
     const reconciliation: Pick<
       FrockBotWebData,
