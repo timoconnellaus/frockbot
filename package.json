@@ -47,6 +47,7 @@
     "esbuild": "0.28.2",
     "husky": "^9.1.7",
     "lint-staged": "^17.4.1",
+    "playwright": "1.62.1",
     "prettier": "^3.9.6",
     "prettier-plugin-sh": "^0.19.0",
     "typescript": "5.9.3",

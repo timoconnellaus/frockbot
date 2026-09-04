@@ -16,8 +16,9 @@
 //     `scheduleAlarm` on `CAPABILITIES`, and persists the mount input on the
 //     synchronous key/value surface so `alarm()` can remount after eviction;
 //  3. `facets.get` is lazy and synchronous, so mount and `health()` are one
-//     guarded phase and a failure re-`get`s the previous class over the same,
-//     untouched storage (§3);
+//     guarded phase; `facets.clone(src, dst)` copies a facet's whole storage,
+//     which is what makes that phase a commit boundary the kernel can undo
+//     (ADR 0038) rather than a mount the candidate is trusted to survive;
 //  4. a facet stub is not serializable (§8), so `invokeTool` and `connect`
 //     forward through this object. Only the 101 `Response` and its `webSocket`
 //     travel.
@@ -36,16 +37,20 @@ import {
   APPLET_LAST_KNOWN_GOOD_KEY,
   APPLET_MAX_GENERATIONS_V1,
   APPLET_MOUNT_INPUT_KEY,
+  APPLET_ROLLBACK_FACET_NAME_V1,
+  APPLET_TRIAL_KEY,
   decodeAppletFailureV1,
   decodeAppletGenerationV1,
   decodeAppletHealthV1,
   decodeAppletMountInputV1,
   decodeAppletPointerV1,
+  decodeAppletTrialV1,
   type AppletFailurePhaseV1,
   type AppletFailureV1,
   type AppletGenerationV1,
   type AppletMountInputV1,
   type AppletPointerV1,
+  type AppletTrialV1,
 } from "@frockbot/kernel-do";
 import { BOT_ISOLATE_COMPATIBILITY_DATE } from "@frockbot/plugin-shell/backend-isolate";
 import {
@@ -349,11 +354,72 @@ export class AppletState extends DurableObject<AppletStateEnv> {
   }
 
   /**
-   * The guarded phase: abort the resident facet, mount the candidate, and ask
-   * it `health()`. A failure re-`get`s the previous class over the same,
-   * untouched storage, so a broken publish leaves the prior Applet resident and
-   * working — the constitution's "a generation whose health check fails leaves
-   * the prior facet resident".
+   * The open activation trial, if this object was interrupted inside one.
+   *
+   * Read before anything else touches the Applet: an eviction between the
+   * snapshot and the commit leaves the candidate's mount input durable and its
+   * storage half-migrated, and the fix is to roll the whole trial back rather
+   * than to let the next caller find code that never passed a health check.
+   */
+  #settleInterruptedTrial(): void {
+    const stored = this.ctx.storage.kv.get<unknown>(APPLET_TRIAL_KEY);
+    if (stored === undefined) return;
+    let trial: AppletTrialV1;
+    try {
+      trial = decodeAppletTrialV1(stored);
+    } catch {
+      // An undecodable marker is still evidence of an interrupted trial, and
+      // the rollback facet is the only thing that can be trusted after one.
+      this.ctx.storage.kv.delete(APPLET_TRIAL_KEY);
+      return;
+    }
+    this.#rollBackTrial(trial);
+  }
+
+  /**
+   * Undo one activation trial: the storage first, then the code.
+   *
+   * The candidate is aborted before the clone, so nothing it still had running
+   * can write behind the restore — that is what makes a timed-out activation
+   * recoverable rather than merely abandoned.
+   */
+  #rollBackTrial(trial: AppletTrialV1): void {
+    this.ctx.facets.abort(
+      APPLET_FACET_NAME_V1,
+      new Error(
+        `rolling back the activation of generation "${trial.candidate.generationId}"`,
+      ),
+    );
+    if (trial.previous) {
+      this.ctx.facets.clone(
+        APPLET_ROLLBACK_FACET_NAME_V1,
+        APPLET_FACET_NAME_V1,
+      );
+      this.ctx.storage.kv.put(APPLET_MOUNT_INPUT_KEY, trial.previous);
+    } else {
+      // The Applet's first generation: there is no data of anyone's to
+      // restore, so the candidate's own storage goes with it.
+      this.ctx.facets.delete(APPLET_FACET_NAME_V1);
+      this.ctx.storage.kv.delete(APPLET_MOUNT_INPUT_KEY);
+    }
+    this.ctx.facets.delete(APPLET_ROLLBACK_FACET_NAME_V1);
+    this.ctx.storage.kv.delete(APPLET_TRIAL_KEY);
+  }
+
+  /**
+   * The guarded phase, as a commit boundary the kernel owns (ADR 0038).
+   *
+   * A candidate generation is never handed the Applet's live storage on the
+   * promise that it will fail cleanly: its constructor, the SDK's migrations,
+   * and its own `health()` may all write, and a health failure afterwards is
+   * not a rollback of what they wrote. So the kernel takes a byte copy of the
+   * facet into the rollback facet first, records the trial durably, and only
+   * then lets the candidate mount. A failure — a throwing constructor, a
+   * throwing migration, a health answer that contradicts the manifest, or a
+   * deadline the facet blew through — clones the copy back and re-`get`s the
+   * previous class over it, so the constitution's "a generation whose health
+   * check fails leaves the prior facet resident" means the prior facet *and its
+   * data*, not just its generation id.
    */
   async #activate(
     input: AppletMountInputV1,
@@ -363,13 +429,25 @@ export class AppletState extends DurableObject<AppletStateEnv> {
     | { status: "failed"; failure: AppletMountFailureReasonV1 }
   > {
     const resident = this.#residentMountInput();
+    const trial: AppletTrialV1 = {
+      schemaVersion: 1,
+      candidate: input,
+      ...(resident ? { previous: resident } : {}),
+    };
+    // Intent before effect: from here until the commit below, this Applet's
+    // storage is provisional and any reader settles the trial first.
+    this.ctx.storage.kv.put(APPLET_TRIAL_KEY, trial);
+    if (resident) {
+      this.ctx.facets.abort(
+        APPLET_FACET_NAME_V1,
+        new Error(`remounting generation "${input.generationId}"`),
+      );
+      this.ctx.facets.clone(
+        APPLET_FACET_NAME_V1,
+        APPLET_ROLLBACK_FACET_NAME_V1,
+      );
+    }
     try {
-      if (resident) {
-        this.ctx.facets.abort(
-          APPLET_FACET_NAME_V1,
-          new Error(`remounting generation "${input.generationId}"`),
-        );
-      }
       const facet = await this.#facet(input);
       const health = decodeAppletHealthV1(
         await raceDeadline(() => facet.health(), APPLET_HEALTH_DEADLINE_MS),
@@ -386,23 +464,23 @@ export class AppletState extends DurableObject<AppletStateEnv> {
           [`declared:${declared.join(",")}`, `reported:${reported.join(",")}`],
         );
       }
+      // Commit: the candidate is the Applet, and the copy is no longer owed to
+      // anyone. Deleting the marker is what ends the boundary.
+      this.ctx.facets.delete(APPLET_ROLLBACK_FACET_NAME_V1);
+      this.ctx.storage.kv.delete(APPLET_TRIAL_KEY);
       return { status: "active", tools: reported };
     } catch (error) {
-      // Fail closed onto the previous generation, over the same storage.
-      if (resident && resident.generationId !== input.generationId) {
+      // Fail closed onto the previous generation, over the storage it had
+      // before the candidate ran.
+      this.#rollBackTrial(trial);
+      if (resident) {
         try {
-          this.ctx.facets.abort(
-            APPLET_FACET_NAME_V1,
-            new Error("restoring the previous Applet generation"),
-          );
           await this.#facet(resident);
         } catch {
           // The previous generation is itself unmountable. The failure record
           // below is still written; the Applet is visibly broken, not silently.
           this.ctx.storage.kv.delete(APPLET_MOUNT_INPUT_KEY);
         }
-      } else if (!resident) {
-        this.ctx.storage.kv.delete(APPLET_MOUNT_INPUT_KEY);
       }
       return {
         status: "failed",
@@ -547,6 +625,7 @@ export class AppletState extends DurableObject<AppletStateEnv> {
     setLastKnownGood: boolean;
   }): Promise<AppletActivationV1> {
     this.#assertIdentity(input.userId, input.appletId);
+    this.#settleInterruptedTrial();
     const now = new Date().toISOString();
     const generationId = input.generation.generationId;
     // Intent first: the record exists before the artifact is loaded, so an
@@ -611,6 +690,13 @@ export class AppletState extends DurableObject<AppletStateEnv> {
    * Route one Applet tool call to the facet. The facet stub never leaves this
    * object (`DOMDataCloneError: Stubs pointing to Durable Object facets are not
    * serializable`), and the call is bounded exactly like an isolate tool's.
+   *
+   * The caller names the generation its Turn pinned, and this object runs that
+   * generation or none (ADR 0038). A Turn's Composition advertises one Applet
+   * generation's tools, schemas, and provenance to the model; executing a
+   * different generation behind that description would make the Turn
+   * unreconstructable, so a mismatch is a plain refusal the Turn can read and
+   * the model can act on, not a silent upgrade.
    */
   async invokeTool(input: unknown): Promise<{
     status: "ok" | "error";
@@ -619,15 +705,27 @@ export class AppletState extends DurableObject<AppletStateEnv> {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
       appletId: rpcString(129),
+      generationId: rpcString(128),
       tool: rpcString(64),
       toolInput: rpcDecodedValue,
     });
     this.#assertIdentity(request.userId as string, request.appletId as string);
+    this.#settleInterruptedTrial();
     const resident = this.#residentMountInput();
     if (!resident) {
       return {
         status: "error",
         content: `Applet "${request.appletId}" has no active generation`,
+      };
+    }
+    if (resident.generationId !== request.generationId) {
+      return {
+        status: "error",
+        content:
+          `This Turn is pinned to generation "${request.generationId}" of Applet ` +
+          `"${request.appletId}", and generation "${resident.generationId}" is now ` +
+          `the one that is published. The tool was not run, and nothing changed. ` +
+          `The next Turn picks up the new generation; retry there.`,
       };
     }
     try {
@@ -683,6 +781,7 @@ export class AppletState extends DurableObject<AppletStateEnv> {
     } catch {
       return new Response("forbidden", { status: 403 });
     }
+    this.#settleInterruptedTrial();
     const resident = this.#residentMountInput();
     if (!resident) {
       return new Response("this Applet has no active generation", {
@@ -722,6 +821,7 @@ export class AppletState extends DurableObject<AppletStateEnv> {
   }
 
   async #alarm(): Promise<void> {
+    this.#settleInterruptedTrial();
     const resident = this.#residentMountInput();
     if (!resident) return;
     try {
@@ -759,6 +859,9 @@ export class AppletState extends DurableObject<AppletStateEnv> {
     });
     this.#assertIdentity(request.userId as string, request.appletId as string);
     this.ctx.facets.delete(APPLET_FACET_NAME_V1);
+    // Including any copy an interrupted activation parked here: deleting an
+    // Applet deletes its storage, and a rollback copy is its storage.
+    this.ctx.facets.delete(APPLET_ROLLBACK_FACET_NAME_V1);
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     return { status: "deleted" };

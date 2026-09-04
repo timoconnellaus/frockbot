@@ -50,7 +50,19 @@ function appletModule(options: {
   tools: string[];
   healthTools?: string[];
   throwOnConstruct?: boolean;
+  /**
+   * Where this generation wipes the todos it inherited before it fails. Each
+   * value is a real place an Applet's code runs against live storage before
+   * the kernel has admitted it: the constructor, the SDK's migration step
+   * inside `ready()`, and `health()` itself.
+   */
+  wipeIn?: "construct" | "migrate" | "health";
+  /** `health()` never resolves: the activation deadline is the only way out. */
+  hangOnHealth?: boolean;
+  /** The migration throws after it has already written. */
+  throwOnMigrate?: boolean;
 }): string {
+  const wipe = `this.ctx.storage.sql.exec("DELETE FROM todos");`;
   return `import { DurableObject } from "cloudflare:workers";
 
 const VERSION = ${JSON.stringify(options.version)};
@@ -60,13 +72,24 @@ const HEALTH_TOOLS = ${JSON.stringify(options.healthTools ?? options.tools)};
 export class Applet extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    ${options.throwOnConstruct ? 'throw new Error("this generation is broken");' : ""}
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL)",
     );
+    ${options.wipeIn === "construct" ? wipe : ""}
+    ${options.throwOnConstruct ? 'throw new Error("this generation is broken");' : ""}
   }
 
-  health() {
+  // What the SDK's \`ready()\` does before it answers health: schema work, then
+  // the Applet's own migration. Both run against live storage.
+  async migrate() {
+    ${options.wipeIn === "migrate" ? wipe : ""}
+    ${options.throwOnMigrate ? 'throw new Error("this migration is broken");' : ""}
+  }
+
+  async health() {
+    await this.migrate();
+    ${options.wipeIn === "health" ? wipe : ""}
+    ${options.hangOnHealth ? "await new Promise(() => {});" : ""}
     return { contract: 1, tools: HEALTH_TOOLS, schemaRevision: 1 };
   }
 
@@ -140,6 +163,9 @@ async function publishGeneration(
     tools: string[];
     healthTools?: string[];
     throwOnConstruct?: boolean;
+    wipeIn?: "construct" | "migrate" | "health";
+    hangOnHealth?: boolean;
+    throwOnMigrate?: boolean;
     origin?: "publish" | "revert";
     generationId?: string;
   },
@@ -189,11 +215,31 @@ async function publishGeneration(
   return { outcome, generation, serverHash, uiHash };
 }
 
-async function invoke(applet: string, tool: string, input: unknown) {
+/** The generation the object says is current, as a Turn's Composition pins it. */
+async function currentGenerationId(applet: string): Promise<string> {
+  const view = await stateFor(applet).read({
+    schemaVersion: 1,
+    userId: OWNER,
+    appletId: applet,
+  });
+  return view.current?.generationId ?? "none";
+}
+
+/**
+ * One Applet tool call. `generationId` is the pin the caller's Turn carries;
+ * it defaults to whatever is current, which is what an uneventful Turn does.
+ */
+async function invoke(
+  applet: string,
+  tool: string,
+  input: unknown,
+  generationId?: string,
+) {
   return stateFor(applet).invokeTool({
     schemaVersion: 1,
     userId: OWNER,
     appletId: applet,
+    generationId: generationId ?? (await currentGenerationId(applet)),
     tool,
     toolInput: input,
   });
@@ -455,6 +501,189 @@ describe("Applet authority", () => {
       refusal = error;
     }
     expect(String(refusal)).toMatch(/different Applet/);
+  });
+});
+
+// The counterexample the 2026-09-05 review reproduced, and its three siblings.
+//
+// Before ADR 0038 the kernel mounted a candidate generation against the live
+// facet and treated a health failure as a rollback. It was not one: the
+// candidate's constructor, the SDK's migration step, and `health()` itself all
+// run against the Applet's real rows first, so a generation could delete the
+// previous generation's data and *then* fail, leaving the host reporting the
+// previous generation resident over storage it no longer recognised.
+//
+// Each test here fails at a different place in that window and asserts the same
+// thing: the previous generation's data *and* behaviour are usable afterwards,
+// not merely its generation id resident.
+describe("an activation trial cannot change the previous generation's data", () => {
+  async function seededApplet(suffix: string) {
+    const applet = appletId(suffix);
+    const { generation } = await publishGeneration(applet, {
+      version: "A",
+      tools: ["add_todo", "list_todos"],
+    });
+    expect(
+      await invoke(applet, "add_todo", { title: "keep-me" }),
+    ).toMatchObject({ status: "ok" });
+    return { applet, generation };
+  }
+
+  /** The previous generation still answers, on its own code, with its own rows. */
+  async function expectIntact(applet: string, generationId: string) {
+    expect(await invoke(applet, "list_todos", {})).toMatchObject({
+      status: "ok",
+      content: "A:keep-me",
+    });
+    // And it can still be written to: a restored facet is a working facet.
+    expect(await invoke(applet, "add_todo", { title: "after" })).toMatchObject({
+      status: "ok",
+      content: "A:added:after",
+    });
+    expect(await invoke(applet, "list_todos", {})).toMatchObject({
+      content: "A:keep-me,after",
+    });
+    const view = await stateFor(applet).read({
+      schemaVersion: 1,
+      userId: OWNER,
+      appletId: applet,
+    });
+    expect(view.current?.generationId).toBe(generationId);
+    expect(view.lastKnownGood?.generationId).toBe(generationId);
+  }
+
+  test("a failed health check cannot change the previous generation's data", async () => {
+    const { applet, generation } = await seededApplet("trial-health");
+    const broken = await publishGeneration(applet, {
+      version: "B",
+      tools: ["add_todo", "list_todos"],
+      wipeIn: "health",
+      healthTools: ["add_todo"],
+    });
+    expect(broken.outcome).toMatchObject({
+      status: "failed",
+      residentGenerationId: generation.generationId,
+    });
+    await expectIntact(applet, generation.generationId);
+  });
+
+  test("a failed constructor cannot change the previous generation's data", async () => {
+    const { applet, generation } = await seededApplet("trial-construct");
+    const broken = await publishGeneration(applet, {
+      version: "B",
+      tools: ["add_todo", "list_todos"],
+      wipeIn: "construct",
+      throwOnConstruct: true,
+    });
+    expect(broken.outcome.status).toBe("failed");
+    await expectIntact(applet, generation.generationId);
+  });
+
+  test("a failed migration cannot change the previous generation's data", async () => {
+    const { applet, generation } = await seededApplet("trial-migrate");
+    const broken = await publishGeneration(applet, {
+      version: "B",
+      tools: ["add_todo", "list_todos"],
+      wipeIn: "migrate",
+      throwOnMigrate: true,
+    });
+    expect(broken.outcome.status).toBe("failed");
+    await expectIntact(applet, generation.generationId);
+  });
+
+  test("a timed-out activation cannot change the previous generation's data", async () => {
+    const { applet, generation } = await seededApplet("trial-deadline");
+    const broken = await publishGeneration(applet, {
+      version: "B",
+      tools: ["add_todo", "list_todos"],
+      wipeIn: "health",
+      hangOnHealth: true,
+    });
+    expect(broken.outcome.status).toBe("failed");
+    expect(broken.outcome.status === "failed" && broken.outcome.reason).toMatch(
+      /exceeded/,
+    );
+    await expectIntact(applet, generation.generationId);
+  });
+
+  test("a first generation that fails leaves no storage behind for the next one", async () => {
+    const applet = appletId("trial-first");
+    const broken = await publishGeneration(applet, {
+      version: "A",
+      tools: ["add_todo", "list_todos"],
+      healthTools: ["add_todo"],
+    });
+    expect(broken.outcome.status).toBe("failed");
+    // Nothing to restore and nothing to keep: the next generation starts on
+    // empty storage rather than on whatever the refused one wrote.
+    await publishGeneration(applet, {
+      version: "B",
+      tools: ["add_todo", "list_todos"],
+    });
+    expect(await invoke(applet, "list_todos", {})).toMatchObject({
+      content: "B:",
+    });
+  });
+});
+
+// ADR 0038's second half. A Turn's Composition advertises one Applet generation
+// to the model — its tools, their schemas, and its provenance — and the call it
+// makes names that generation. The instance runs it or refuses.
+describe("Applet tool calls execute the generation the Turn pinned", () => {
+  test("a call pinned to a superseded generation is refused, and nothing runs", async () => {
+    const applet = appletId("pinned");
+    const first = await publishGeneration(applet, {
+      version: "A",
+      tools: ["add_todo", "list_todos"],
+    });
+    await invoke(
+      applet,
+      "add_todo",
+      { title: "milk" },
+      first.generation.generationId,
+    );
+
+    // A publish lands while the Turn pinned to A is still running.
+    const second = await publishGeneration(applet, {
+      version: "B",
+      tools: ["add_todo", "list_todos"],
+    });
+    expect(second.outcome).toMatchObject({ status: "active" });
+
+    const refused = await invoke(
+      applet,
+      "add_todo",
+      { title: "written-by-the-wrong-version" },
+      first.generation.generationId,
+    );
+    expect(refused.status).toBe("error");
+    expect(refused.content).toContain(first.generation.generationId);
+    expect(refused.content).toContain(second.generation.generationId);
+
+    // The refusal really is a refusal: B never ran the tool.
+    expect(
+      await invoke(applet, "list_todos", {}, second.generation.generationId),
+    ).toMatchObject({ status: "ok", content: "B:milk" });
+  });
+
+  test("the next Turn, pinned to the new generation, runs it", async () => {
+    const applet = appletId("pinned-next");
+    await publishGeneration(applet, {
+      version: "A",
+      tools: ["add_todo", "list_todos"],
+    });
+    const second = await publishGeneration(applet, {
+      version: "B",
+      tools: ["add_todo", "list_todos"],
+    });
+    expect(
+      await invoke(
+        applet,
+        "add_todo",
+        { title: "eggs" },
+        second.generation.generationId,
+      ),
+    ).toMatchObject({ status: "ok", content: "B:added:eggs" });
   });
 });
 

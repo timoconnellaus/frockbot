@@ -18,7 +18,10 @@ import {
   decodeAppletHealthV1,
   decodeAppletMountInputV1,
   decodeAppletPointerV1,
+  decodeAppletTrialV1,
   decodeFocusedAppletV1,
+  APPLET_ROLLBACK_FACET_NAME_V1,
+  APPLET_TRIAL_KEY,
   mintAppletViewerTokenV1,
   newAppletIdV1,
   verifyAppletViewerTokenV1,
@@ -187,6 +190,36 @@ describe("Applet durable records", () => {
     expect(() =>
       decodeAppletMountInputV1({ ...input, loaderId: "no" }),
     ).toThrow();
+  });
+
+  test("a trial names the candidate, and the previous generation only when there is one", () => {
+    const mountInput = {
+      schemaVersion: 1 as const,
+      userId: "user-42",
+      appletId: APPLET,
+      generationId: "g2",
+      loaderId: HASH_A,
+      serverHash: HASH_B,
+      contract: 1,
+    };
+    const first = { schemaVersion: 1 as const, candidate: mountInput };
+    expect(decodeAppletTrialV1(first)).toEqual(first as never);
+    const over = {
+      schemaVersion: 1 as const,
+      candidate: mountInput,
+      previous: { ...mountInput, generationId: "g1" },
+    };
+    expect(decodeAppletTrialV1(over)).toEqual(over as never);
+    expect(() =>
+      decodeAppletTrialV1({
+        ...first,
+        candidate: { ...mountInput, contract: 2 },
+      }),
+    ).toThrow();
+    // The rollback facet is a facet name, not a storage key: they must not
+    // collide with the live one.
+    expect(APPLET_ROLLBACK_FACET_NAME_V1).toBe("applet-rollback");
+    expect(APPLET_TRIAL_KEY).toBe("applet:trial");
   });
 
   test("a focused Applet may be null", () => {
