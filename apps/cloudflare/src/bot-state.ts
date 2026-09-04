@@ -685,6 +685,13 @@ export class BotState extends DurableObject<BotStateEnv> {
     userId: string;
     botId: string;
   }): Promise<void> {
+    // The channel is silenced before either, and for the same reason the alarm
+    // goes first: a `runs` notice is deferred behind its throttle, so a delete
+    // can land while one is still waiting to write. Left running, that notice
+    // finished after `deleteAll()` and put `bot-state-channel:meta:v1` and an
+    // event back into a tombstoned object — storage the teardown had just
+    // removed, describing runs that no longer exist.
+    this.stateChannel.silence();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     await deleteBotWorkspaceRootsV1(this.env, identity);
