@@ -518,9 +518,115 @@ async function routeWorkspaceSeed(
   }
 }
 
+/**
+ * The one door into a User's loaded application.
+ *
+ * Both a signed-in browser request and the owner-only debug send use this
+ * helper. Keeping the latter on this path means its command is decoded by the
+ * same application artifact and admitted by the same User/Bot Durable Object
+ * bindings as a message from the composer.
+ */
+async function routeUserApplication(
+  dependencies: GatewayDependencies,
+  compatibilityDate: string,
+  request: Request,
+  userId: string,
+  authMode: string,
+  isAdmin: boolean,
+  persistDevelopmentIdentity: boolean,
+): Promise<Response> {
+  let applicationHash: string;
+  let workerId: string;
+  try {
+    applicationHash = await dependencies.applicationHashFor(userId);
+    workerId = applicationDeploymentId({ userId, applicationHash });
+  } catch (error) {
+    return jsonError(
+      400,
+      error instanceof Error ? error.message : "invalid deployment",
+    );
+  }
+
+  const identity = { userId, applicationHash };
+  const worker = dependencies.loader.get(workerId, async () => {
+    const source = await dependencies.artifacts.load(applicationHash);
+    const code: WorkerCode = {
+      compatibilityDate,
+      mainModule: "index.js",
+      modules: { "index.js": { js: source } },
+      env: {
+        BOT_STATE: dependencies.botStateFor(userId),
+        DEPLOYMENT: identity,
+      },
+      limits: { cpuMs: 30_000, subRequests: 1_000 },
+    };
+    return code;
+  });
+
+  const forwardedHeaders = new Headers(request.headers);
+  forwardedHeaders.delete("x-frockbot-user-id");
+  forwardedHeaders.set("x-frockbot-deployment", workerId);
+  forwardedHeaders.set("x-frockbot-auth-session-v1", authMode);
+  forwardedHeaders.set("x-frockbot-is-admin-v1", String(isAdmin));
+  const forwardedUrl = URL.parse(request.url);
+  if (!forwardedUrl) return jsonError(400, "invalid request URL");
+  if (persistDevelopmentIdentity) {
+    forwardedUrl.searchParams.delete("as_user");
+  }
+  const forwardedRequest = new Request(request, {
+    headers: forwardedHeaders,
+  });
+  // The loaded application is a separate isolate and this hands it the body.
+  // Recorded before the await: once it has answered, the gateway's own
+  // `request.body` is a stream the isolate will refuse to be touched.
+  const response = await worker
+    .getEntrypoint()
+    .fetch(
+      forwardingBodyV1(
+        request,
+        persistDevelopmentIdentity
+          ? new Request(forwardedUrl, forwardedRequest)
+          : forwardedRequest,
+      ),
+    );
+  if (!persistDevelopmentIdentity) return response;
+  const persisted = new Response(response.body, response);
+  persisted.headers.append(
+    "set-cookie",
+    `frockbot_dev_user=${userId}; Path=/; HttpOnly; SameSite=Strict`,
+  );
+  return persisted;
+}
+
 export function createGateway(dependencies: GatewayDependencies) {
   const compatibilityDate = dependencies.compatibilityDate ?? "2026-08-27";
-  const debugRoute = createDebugRoute(dependencies.debug);
+  const debugRoute = createDebugRoute(
+    dependencies.debug,
+    async (userId, botId, text) => {
+      const url = new URL(
+        `/api/bots/${encodeURIComponent(botId)}/turns`,
+        "https://frockbot.internal",
+      );
+      const request = new Request(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          commandId: crypto.randomUUID(),
+          text,
+        }),
+      });
+      return routeUserApplication(
+        dependencies,
+        compatibilityDate,
+        request,
+        userId,
+        "better-auth",
+        true,
+        false,
+      );
+    },
+  );
 
   const route = async (request: Request, url: URL): Promise<Response> => {
     if (url.pathname.startsWith("/api/auth/")) {
@@ -828,65 +934,15 @@ export function createGateway(dependencies: GatewayDependencies) {
       }
     }
 
-    let applicationHash: string;
-    let workerId: string;
-    try {
-      applicationHash = await dependencies.applicationHashFor(userId);
-      workerId = applicationDeploymentId({ userId, applicationHash });
-    } catch (error) {
-      return jsonError(
-        400,
-        error instanceof Error ? error.message : "invalid deployment",
-      );
-    }
-
-    const identity = { userId, applicationHash };
-    const worker = dependencies.loader.get(workerId, async () => {
-      const source = await dependencies.artifacts.load(applicationHash);
-      const code: WorkerCode = {
-        compatibilityDate,
-        mainModule: "index.js",
-        modules: { "index.js": { js: source } },
-        env: {
-          BOT_STATE: dependencies.botStateFor(userId),
-          DEPLOYMENT: identity,
-        },
-        limits: { cpuMs: 30_000, subRequests: 1_000 },
-      };
-      return code;
-    });
-
-    const forwardedHeaders = new Headers(request.headers);
-    forwardedHeaders.delete("x-frockbot-user-id");
-    forwardedHeaders.set("x-frockbot-deployment", workerId);
-    forwardedHeaders.set("x-frockbot-auth-session-v1", authMode);
-    forwardedHeaders.set("x-frockbot-is-admin-v1", String(isAdmin));
-    const forwardedUrl = URL.parse(request.url);
-    if (!forwardedUrl) return jsonError(400, "invalid request URL");
-    if (development.persist) forwardedUrl.searchParams.delete("as_user");
-    const forwardedRequest = new Request(request, {
-      headers: forwardedHeaders,
-    });
-    // The loaded application is a separate isolate and this hands it the body.
-    // Recorded before the await: once it has answered, the gateway's own
-    // `request.body` is a stream the isolate will refuse to be touched.
-    const response = await worker
-      .getEntrypoint()
-      .fetch(
-        forwardingBodyV1(
-          request,
-          development.persist
-            ? new Request(forwardedUrl, forwardedRequest)
-            : forwardedRequest,
-        ),
-      );
-    if (!development.persist) return response;
-    const persisted = new Response(response.body, response);
-    persisted.headers.append(
-      "set-cookie",
-      `frockbot_dev_user=${userId}; Path=/; HttpOnly; SameSite=Strict`,
+    return routeUserApplication(
+      dependencies,
+      compatibilityDate,
+      request,
+      userId,
+      authMode,
+      isAdmin,
+      development.persist,
     );
-    return persisted;
   };
 
   const handle = async (request: Request): Promise<Response> => {

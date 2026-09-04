@@ -16,11 +16,10 @@ export const VOICE_TRANSCRIPTION_MODEL_V1 = "gpt-live-transcribe";
 export interface VoiceSessionEnvV1 {
   /**
    * The direct OpenAI path. Present, it is the one that runs: the AI Gateway's
-   * realtime path is documented for `gpt-4o-realtime` models and has not been
-   * proved to accept a transcription-only session (the plan's "Verify before
-   * slice A"). Deployed as a Worker secret, so the release workflow's
-   * `--secrets-file` list must carry the name or a deploy would delete it
-   * (ADR 0025).
+   * realtime path has not yet been exercised with a transcription-only
+   * session. Deployed as a Worker secret, so the release workflow's
+   * `--secrets-file` list must carry the name or a deploy would delete it (ADR
+   * 0025).
    */
   OPENAI_API_KEY?: string;
   /** `cf-aig-authorization` bearer for the `flock` AI Gateway. */
@@ -62,10 +61,9 @@ export function voiceUpstreamTargetV1(
   if (env.OPENAI_API_KEY) {
     return {
       path: "openai",
-      url: `wss://api.openai.com/v1/realtime?intent=transcription&model=${model}`,
+      url: `wss://api.openai.com/v1/realtime?model=${model}`,
       headers: {
         authorization: `Bearer ${env.OPENAI_API_KEY}`,
-        "openai-beta": "realtime=v1",
       },
     };
   }
@@ -78,10 +76,9 @@ export function voiceUpstreamTargetV1(
       path: "gateway",
       url:
         `wss://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/openai` +
-        `?intent=transcription&model=${model}`,
+        `?model=${model}`,
       headers: {
         "cf-aig-authorization": `Bearer ${token}`,
-        "openai-beta": "realtime=v1",
       },
     };
   }
@@ -95,20 +92,28 @@ export function voiceUpstreamTargetV1(
 /**
  * The one thing said to the upstream before audio starts.
  *
- * `pcm16` at 16 kHz is what the browser worklet resamples to, and server-side
- * turn detection is what produces the `.completed` segments the composer
- * replaces its deltas with.
+ * The GA API accepts PCM16 as `audio/pcm` at 24 kHz. Server-side turn
+ * detection produces the `.completed` segments the composer replaces its
+ * deltas with.
  */
 export function voiceUpstreamSessionUpdateV1(): Record<string, unknown> {
   return {
-    type: "transcription_session.update",
+    type: "session.update",
     session: {
-      input_audio_format: "pcm16",
-      input_audio_transcription: { model: VOICE_TRANSCRIPTION_MODEL_V1 },
-      turn_detection: { type: "server_vad", silence_duration_ms: 500 },
+      type: "transcription",
+      audio: {
+        input: {
+          format: { type: "audio/pcm", rate: 24_000 },
+          transcription: { model: VOICE_TRANSCRIPTION_MODEL_V1 },
+          turn_detection: { type: "server_vad", silence_duration_ms: 500 },
+        },
+      },
     },
   };
 }
+
+export const VOICE_UPSTREAM_REFUSAL_MESSAGE_V1 =
+  "Dictation stopped: the speech service refused the connection. Try again.";
 
 /**
  * Translate one upstream frame into what the browser is told, or nothing.
@@ -117,9 +122,13 @@ export function voiceUpstreamSessionUpdateV1(): Record<string, unknown> {
  * signal that everything captured has been transcribed and the message may
  * go.
  */
-export function translateVoiceUpstreamFrameV1(
-  raw: string,
-): { frame: VoiceDictationServerFrameV1; completed?: true } | undefined {
+export function translateVoiceUpstreamFrameV1(raw: string):
+  | {
+      frame: VoiceDictationServerFrameV1;
+      completed?: true;
+      upstreamError?: string;
+    }
+  | undefined {
   let value: unknown;
   try {
     value = JSON.parse(raw) as unknown;
@@ -153,8 +162,9 @@ export function translateVoiceUpstreamFrameV1(
       frame: {
         schemaVersion: 1,
         type: "error",
-        message: `Dictation stopped: ${message}`,
+        message: VOICE_UPSTREAM_REFUSAL_MESSAGE_V1,
       },
+      upstreamError: message,
     };
   }
   return undefined;
