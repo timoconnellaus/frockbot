@@ -44,6 +44,8 @@ import {
 
 export interface ClientTurnEvent {
   type: string;
+  /** A standalone event status, such as a projected Computer sync outcome. */
+  status?: string;
   call?: { id: string; name: string; input?: unknown };
   callId?: string;
   content?: string;

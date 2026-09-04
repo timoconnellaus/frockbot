@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 4,
+  "id": "billing",
+  "displayName": "Usage",
+  "version": "0.0.1",
+  "defaultEnablement": "enabled",
+  "compatibility": { "frockbot": ">=0.0.1" },
+  "dependencies": {
+    "flock": ">=0.0.1",
+    "settings": ">=0.0.1",
+    "ui-theme": ">=0.0.1"
+  },
+  "contributions": {
+    "backend": [
+      { "entry": "./user", "host": "user" },
+      { "entry": "./backend", "host": "gateway" }
+    ],
+    "client": {
+      "entry": "./client",
+      "mounts": [
+        { "slot": "frockbot.user-settings-primary-sections", "order": 20 },
+        { "slot": "frockbot.bot-settings-primary-sections", "order": 30 }
+      ],
+      "outlets": []
+    }
+  },
+  "permissions": []
+}

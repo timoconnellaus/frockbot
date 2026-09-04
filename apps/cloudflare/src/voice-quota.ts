@@ -123,6 +123,10 @@ export interface VoiceAssistantUsageReceiptV1 {
   month: string;
   sessionId: string;
   usedSeconds: number;
+  /** The greatest running total this assistant session has reported. */
+  sessionSeconds: number;
+  /** Newly charged seconds; zero for a duplicate or out-of-order report. */
+  recordedSeconds: number;
   limitSeconds: number;
 }
 
@@ -144,6 +148,10 @@ export interface VoiceUsageReceiptV1 {
   day: string;
   sessionId: string;
   usedSeconds: number;
+  /** The greatest running total this session has reported. */
+  sessionSeconds: number;
+  /** Newly charged seconds; zero for a duplicate or out-of-order report. */
+  recordedSeconds: number;
   limitSeconds: number;
 }
 
@@ -172,6 +180,12 @@ export interface VoiceQuotaStorage extends VoiceQuotaTransaction {
   transaction<T>(
     callback: (storage: VoiceQuotaTransaction) => Promise<T>,
   ): Promise<T>;
+}
+
+/** SQLite-backed Durable Objects expose this synchronous KV surface. */
+export interface VoiceQuotaSyncStorage {
+  get<T>(key: string): T | undefined;
+  put<T>(key: string, value: T): void;
 }
 
 function storedSeconds(value: unknown): number {
@@ -268,6 +282,8 @@ export async function recordVoiceUsageV1(
       day: request.day,
       sessionId: request.sessionId,
       usedSeconds: total,
+      sessionSeconds: Math.max(charged, reported),
+      recordedSeconds: delta,
       limitSeconds: VOICE_SECONDS_PER_DAY_V1,
     } satisfies VoiceUsageReceiptV1;
   });
@@ -352,9 +368,55 @@ export async function recordVoiceAssistantUsageV1(
       month: request.month,
       sessionId: request.sessionId,
       usedSeconds: total,
+      sessionSeconds: Math.max(charged, reported),
+      recordedSeconds: delta,
       limitSeconds: VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
     };
   });
+}
+
+/**
+ * Commits assistant quota beside the Billing SQL row in one User-DO
+ * `transactionSync`. Gemini reports audio tokens rather than a duration price,
+ * so the paired Billing entry records exact elapsed seconds with unknown cost.
+ */
+export function recordVoiceAssistantUsageSyncV1(
+  storage: VoiceQuotaSyncStorage,
+  request: { month: string; sessionId: string; seconds: number },
+): VoiceAssistantUsageReceiptV1 {
+  const quotaKey = voiceAssistantQuotaKeyV1(request.month);
+  const usageKey = voiceAssistantUsageKeyV1(request.month, request.sessionId);
+  const reported = Number.isSafeInteger(request.seconds)
+    ? Math.max(0, request.seconds)
+    : 0;
+  const session = storage.get<StoredVoiceSessionV1>(usageKey);
+  const charged = storedSeconds(session);
+  const delta = Math.max(0, reported - charged);
+  const used = storedSeconds(storage.get<StoredVoiceDayV1>(quotaKey));
+  const total = used + delta;
+  if (delta > 0) {
+    storage.put(quotaKey, {
+      schemaVersion: 1,
+      day: request.month,
+      seconds: total,
+    } satisfies StoredVoiceDayV1);
+    storage.put(usageKey, {
+      schemaVersion: 1,
+      day: request.month,
+      sessionId: request.sessionId,
+      seconds: reported,
+    } satisfies StoredVoiceSessionV1);
+  }
+  return {
+    schemaVersion: 1,
+    status: "recorded",
+    month: request.month,
+    sessionId: request.sessionId,
+    usedSeconds: total,
+    sessionSeconds: Math.max(charged, reported),
+    recordedSeconds: delta,
+    limitSeconds: VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
+  };
 }
 
 export async function readVoiceAssistantQuotaV1(
@@ -399,6 +461,48 @@ async function sweepOldAssistantMonthsV1(
   }
 }
 
+/**
+ * The synchronous form used to commit voice quota and priced ledger rows in
+ * one `DurableObjectStorage.transactionSync` callback.
+ */
+export function recordVoiceUsageSyncV1(
+  storage: VoiceQuotaSyncStorage,
+  request: { day: string; sessionId: string; seconds: number },
+): VoiceUsageReceiptV1 {
+  const dayKey = voiceQuotaKeyV1(request.day);
+  const sessionKey = voiceSessionKeyV1(request.day, request.sessionId);
+  const reported = Number.isSafeInteger(request.seconds)
+    ? Math.max(0, request.seconds)
+    : 0;
+  const session = storage.get<StoredVoiceSessionV1>(sessionKey);
+  const charged = storedSeconds(session);
+  const delta = Math.max(0, reported - charged);
+  const used = storedSeconds(storage.get<StoredVoiceDayV1>(dayKey));
+  const total = used + delta;
+  if (delta > 0) {
+    storage.put(dayKey, {
+      schemaVersion: 1,
+      day: request.day,
+      seconds: total,
+    } satisfies StoredVoiceDayV1);
+    storage.put(sessionKey, {
+      schemaVersion: 1,
+      day: request.day,
+      sessionId: request.sessionId,
+      seconds: reported,
+    } satisfies StoredVoiceSessionV1);
+  }
+  return {
+    schemaVersion: 1,
+    status: "recorded",
+    day: request.day,
+    sessionId: request.sessionId,
+    usedSeconds: total,
+    sessionSeconds: Math.max(charged, reported),
+    recordedSeconds: delta,
+    limitSeconds: VOICE_SECONDS_PER_DAY_V1,
+  };
+}
 /** Drops every day counter and session record that is not today's. */
 async function sweepOldDaysV1(
   transaction: VoiceQuotaTransaction,

@@ -106,6 +106,10 @@ import {
   type AuditQueryV1,
 } from "@frockbot/plugin-audit";
 import {
+  decodeUsageReportV1,
+  type UsageReportV1,
+} from "@frockbot/plugin-billing";
+import {
   decodeMcpLifecycleReceiptV1,
   decodeMcpServerStatusViewV1,
 } from "@frockbot/plugin-mcp/records";
@@ -313,6 +317,8 @@ function debugSurface(env: Env): DebugGatewaySurface {
     },
     listBots: (userId) =>
       userConfigurationStub(env, userId).listBots({ schemaVersion: 1, userId }),
+    readUsage: (userId) =>
+      userUsageStub(env, userId).readUsage({ schemaVersion: 1, userId }),
     snapshot: (userId, botId, query) =>
       botStateStub(env, userId, botId).debugSnapshot(query),
     isAdminUser: async (userId) => {
@@ -690,10 +696,20 @@ interface UserAuditRpc {
   rebuildAuditIndex(input: unknown): Promise<unknown>;
 }
 
+interface UserUsageRpc {
+  readUsage(input: unknown): Promise<unknown>;
+}
+
 function userAuditStub(env: Env, userId: string): UserAuditRpc {
   const id = env.USER_CONFIGURATIONS.idFromName(userId);
   // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated Audit RPC surface.
   return env.USER_CONFIGURATIONS.get(id) as unknown as UserAuditRpc;
+}
+
+function userUsageStub(env: Env, userId: string): UserUsageRpc {
+  const id = env.USER_CONFIGURATIONS.idFromName(userId);
+  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated Usage RPC surface.
+  return env.USER_CONFIGURATIONS.get(id) as unknown as UserUsageRpc;
 }
 
 /** The User Durable Object's Applet directory, addressed by User. */
@@ -1692,6 +1708,15 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
               ...(query.target === undefined ? {} : { target: query.target }),
               ...(query.before === undefined ? {} : { before: query.before }),
               ...(query.limit === undefined ? {} : { limit: query.limit }),
+            }),
+          ),
+        ),
+      readUsage: async (userId: string): Promise<UsageReportV1> =>
+        decodeUsageReportV1(
+          rpcJsonSnapshot(
+            await userUsageStub(env, userId).readUsage({
+              schemaVersion: 1,
+              userId,
             }),
           ),
         ),

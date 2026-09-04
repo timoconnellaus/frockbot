@@ -45,6 +45,10 @@ import {
   type AuditGatewayHost,
 } from "@frockbot/plugin-audit/backend";
 import {
+  backendContribution as billingGatewayContribution,
+  type BillingGatewayHostV1,
+} from "@frockbot/plugin-billing/backend";
+import {
   backendContribution as botTemplateGatewayContribution,
   type BotTemplateGatewayHostV1,
 } from "@frockbot/plugin-bot-template/backend";
@@ -130,6 +134,10 @@ import {
   type AuditUserApplicationHostV1,
 } from "@frockbot/plugin-audit/user";
 import {
+  userContribution as billingUserContribution,
+  type BillingUserApplicationHostV1,
+} from "@frockbot/plugin-billing/user";
+import {
   userContribution as flockUserContribution,
   type FlockUserApplicationHostV1,
 } from "@frockbot/plugin-flock/user";
@@ -154,6 +162,7 @@ import {
 export {
   adminGatewayContribution,
   auditGatewayContribution,
+  billingGatewayContribution,
   botTemplateGatewayContribution,
   computerGatewayContribution,
   flockGatewayContribution,
@@ -175,6 +184,7 @@ export {
   machineUserContribution,
   searchUserContribution,
   auditUserContribution,
+  billingUserContribution,
   flockUserContribution,
   voiceUserContribution,
   shellBotContribution,
@@ -253,6 +263,7 @@ export type FoundationGatewayHost = {
   MachineGatewayHostV1 &
   SearchGatewayHost &
   AuditGatewayHost &
+  BillingGatewayHostV1 &
   PackagePublisherGatewayHost &
   VoiceGatewayHostV1;
 
@@ -277,6 +288,7 @@ export type FoundationUserBackendHostV1 = {
   MachineUserApplicationHostV1 &
   SearchUserApplicationHostV1 &
   AuditUserApplicationHostV1 &
+  BillingUserApplicationHostV1 &
   FlockUserApplicationHostV1 &
   VoiceUserApplicationHostV1;
 
@@ -331,6 +343,7 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
   return [
     adminGatewayContribution,
     auditGatewayContribution,
+    billingGatewayContribution,
     botTemplateGatewayContribution,
     computerGatewayContribution,
     flockGatewayContribution,
@@ -352,6 +365,7 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     machineUserContribution,
     searchUserContribution,
     auditUserContribution,
+    billingUserContribution,
     flockUserContribution,
     voiceUserContribution,
     shellBotContribution,

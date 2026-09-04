@@ -135,6 +135,7 @@ import {
 import {
   createAppletCapabilityHostV1,
   createAppletInstanceBindingV1,
+  APPLET_DIST_FILES_V1,
   appletRpcSnapshotV1 as rpcJsonSnapshotV1,
   resolveAppletCompositionV1,
   type AppletCapabilityHostV1,
@@ -670,6 +671,16 @@ export interface ShellBotBackendHost {
   scheduledWorkInFlight?(): boolean;
   deferScheduledWork?(transaction: DurableObjectTransaction): Promise<void>;
   settleScheduledWork?(): Promise<void>;
+  /**
+   * A derived accounting projection after `turn/end` is durable. The host
+   * queues it before delivery, so failure never changes the Turn's outcome.
+   */
+  recordSettledUsage?(input: {
+    botId: string;
+    runId: string;
+    turn: number;
+    events: readonly SessionEvent[];
+  }): Promise<void>;
 }
 
 /** The narrow storage seam the Bot's announcement log is written through. */
@@ -772,6 +783,7 @@ export class ShellBotBackendContribution {
   private readonly hostScheduledWorkInFlight?: ShellBotBackendHost["scheduledWorkInFlight"];
   private readonly hostDeferScheduledWork?: ShellBotBackendHost["deferScheduledWork"];
   private readonly hostSettleScheduledWork?: ShellBotBackendHost["settleScheduledWork"];
+  private readonly recordSettledUsage?: ShellBotBackendHost["recordSettledUsage"];
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
@@ -787,6 +799,7 @@ export class ShellBotBackendContribution {
     this.hostScheduledWorkInFlight = host.scheduledWorkInFlight;
     this.hostDeferScheduledWork = host.deferScheduledWork;
     this.hostSettleScheduledWork = host.settleScheduledWork;
+    this.recordSettledUsage = host.recordSettledUsage;
     const routines = createBotRoutines(
       host.state.storage,
       createBotRoutineHookMinter(
@@ -1746,6 +1759,16 @@ export class ShellBotBackendContribution {
               input.command.sessionId,
               effect,
             ),
+          ...(this.recordSettledUsage
+            ? {
+                onTurnStopping: (settled) =>
+                  this.recordSettledUsage!({
+                    botId: input.identity.botId,
+                    runId: input.command.runId,
+                    ...settled,
+                  }),
+              }
+            : {}),
           ...(isolate ? { isolate } : {}),
           ...(appletRouting ? { applets: appletRouting } : {}),
         }).mount(mounting, signal);
@@ -2431,7 +2454,7 @@ export class ShellBotBackendContribution {
       // User with no Computer assignment has no root to pull, and the Bot that
       // just built on its Computer has it open already.
       syncSourceRootNow: active
-        ? async () => {
+        ? async (appletId) => {
             const root = active.mounted.runtime.root as unknown as {
               computers?: ComputerRegistry;
               sessions: typeof active.mounted.runtime.root.sessions;
@@ -2454,6 +2477,9 @@ export class ShellBotBackendContribution {
               sessionId: active.sessionId,
               turn,
               root: appletsSourceRootV1(identity.userId),
+              requiredPaths: APPLET_DIST_FILES_V1.map(
+                (path) => `${appletId}/${path}`,
+              ),
               signal: active.signal,
             });
           }

@@ -3,8 +3,10 @@ import {
   decodeVoiceAssistantQuotaReceiptV1,
   decodeVoiceQuotaReceiptV1,
   recordVoiceAssistantUsageV1,
+  recordVoiceAssistantUsageSyncV1,
   recordVoiceUsageV1,
   reserveVoiceAssistantV1,
+  recordVoiceUsageSyncV1,
   reserveVoiceCaptureV1,
   VOICE_ASSISTANT_MINUTES_PER_MONTH_V1,
   VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
@@ -16,6 +18,7 @@ import {
   voiceSessionKeyV1,
   type VoiceQuotaStorage,
   type VoiceQuotaTransaction,
+  type VoiceQuotaSyncStorage,
 } from "./voice-quota.js";
 
 /**
@@ -67,7 +70,11 @@ describe("the durable per-User voice budget", () => {
         sessionId: "one",
         seconds: 30,
       }),
-    ).toMatchObject({ usedSeconds: 30 });
+    ).toMatchObject({
+      usedSeconds: 30,
+      sessionSeconds: 30,
+      recordedSeconds: 30,
+    });
     // The same report again — a retried close, an object that came back — is
     // the same total, not a second thirty seconds.
     expect(
@@ -76,14 +83,36 @@ describe("the durable per-User voice budget", () => {
         sessionId: "one",
         seconds: 30,
       }),
-    ).toMatchObject({ usedSeconds: 30 });
+    ).toMatchObject({ usedSeconds: 30, recordedSeconds: 0 });
     expect(
       await recordVoiceUsageV1(storage, {
         day: DAY,
         sessionId: "one",
         seconds: 45,
       }),
-    ).toMatchObject({ usedSeconds: 45 });
+    ).toMatchObject({ usedSeconds: 45, recordedSeconds: 15 });
+  });
+
+  test("the synchronous receipt has the same cumulative idempotency", () => {
+    const values = new Map<string, unknown>();
+    const storage: VoiceQuotaSyncStorage = {
+      get: <T>(key: string) => values.get(key) as T | undefined,
+      put: <T>(key: string, value: T) => void values.set(key, value),
+    };
+    expect(
+      recordVoiceUsageSyncV1(storage, {
+        day: DAY,
+        sessionId: "sync-one",
+        seconds: 30,
+      }),
+    ).toMatchObject({ usedSeconds: 30, recordedSeconds: 30 });
+    expect(
+      recordVoiceUsageSyncV1(storage, {
+        day: DAY,
+        sessionId: "sync-one",
+        seconds: 30,
+      }),
+    ).toMatchObject({ usedSeconds: 30, recordedSeconds: 0 });
   });
 
   test("adds up across sessions and refuses once the day is spent", async () => {
@@ -196,6 +225,39 @@ describe("the durable monthly Voice assistant budget", () => {
     );
     expect(refused.reason).toContain("next month");
     expect(decodeVoiceAssistantQuotaReceiptV1(refused)).toEqual(refused);
+  });
+
+  test("the synchronous assistant receipt reports only newly charged seconds", () => {
+    const values = new Map<string, unknown>();
+    const storage: VoiceQuotaSyncStorage = {
+      get: <T>(key: string) => values.get(key) as T | undefined,
+      put: <T>(key: string, value: T) => void values.set(key, value),
+    };
+    expect(
+      recordVoiceAssistantUsageSyncV1(storage, {
+        month: MONTH,
+        sessionId: "sync-one",
+        seconds: 30,
+      }),
+    ).toMatchObject({
+      usedSeconds: 30,
+      sessionSeconds: 30,
+      recordedSeconds: 30,
+    });
+    expect(
+      recordVoiceAssistantUsageSyncV1(storage, {
+        month: MONTH,
+        sessionId: "sync-one",
+        seconds: 30,
+      }),
+    ).toMatchObject({ usedSeconds: 30, recordedSeconds: 0 });
+    expect(
+      recordVoiceAssistantUsageSyncV1(storage, {
+        month: MONTH,
+        sessionId: "sync-one",
+        seconds: 45,
+      }),
+    ).toMatchObject({ usedSeconds: 45, recordedSeconds: 15 });
   });
 
   test("uses a UTC month key", () => {

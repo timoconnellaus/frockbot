@@ -88,6 +88,9 @@ export function createCapacitorConfig(
     appId: "com.frockbot.mobile",
     appName: "FrockBot",
     webDir: "dist",
+    // Match the hosted application's window surface before its first paint so
+    // the WebView never flashes white while the remote document is loading.
+    backgroundColor: "#1f1e24",
     // The shell bundles no native plugins of its own; platform capabilities
     // are progressive enhancements declared by Packages.
     includePlugins: [],
@@ -103,6 +106,9 @@ export function createCapacitorConfig(
     plugins: {
       SystemBars: {
         insetsHandling: "css",
+        // FrockBot is dark regardless of the Android system theme. Capacitor's
+        // DARK style means light foreground icons on dark content.
+        style: "DARK",
       },
       ...(googleWebClientId
         ? {

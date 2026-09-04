@@ -424,16 +424,18 @@ export function planOpenAICompatibleRequestV1(
       messages.unshift({ role: "system", content: instruction });
     }
   }
+  const stream = !(
+    format &&
+    support !== "none" &&
+    options.responseFormatDialect === "workers-ai"
+  );
   return {
     body: {
       model: request.model,
       // Workers AI documents JSON mode as non-streaming. The decoder accepts
       // both response shapes while the contract remains an event stream.
-      stream: !(
-        format &&
-        support !== "none" &&
-        options.responseFormatDialect === "workers-ai"
-      ),
+      stream,
+      ...(stream ? { stream_options: { include_usage: true } } : {}),
       messages,
       ...(responseFormat ? { response_format: responseFormat } : {}),
       ...(request.tools.length > 0
@@ -514,6 +516,76 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function usageIntegerV1(value: unknown, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error(`Model returned invalid ${label}`);
+  }
+  return value as number;
+}
+
+/**
+ * Normalizes token accounting returned by OpenAI-shaped, Workers AI/Gateway,
+ * and Ollama streams. Unknown payloads are ignored so the Agent loop can use
+ * its durable byte-size estimate.
+ */
+export function usageFromPayloadV1(
+  value: unknown,
+): Extract<LlmStreamEvent, { type: "usage" }> | undefined {
+  const payload = asRecord(value);
+  if (!payload) return undefined;
+  const usage = asRecord(payload.usage) ?? payload;
+  const inputTokens = usageIntegerV1(
+    usage.prompt_tokens ??
+      usage.input_tokens ??
+      usage.prompt_eval_count ??
+      payload.prompt_eval_count,
+    "input token count",
+  );
+  const outputTokens = usageIntegerV1(
+    usage.completion_tokens ??
+      usage.output_tokens ??
+      usage.eval_count ??
+      payload.eval_count,
+    "output token count",
+  );
+  if (inputTokens === undefined || outputTokens === undefined) return undefined;
+
+  const inputDetails =
+    asRecord(usage.prompt_tokens_details) ??
+    asRecord(usage.input_tokens_details);
+  const outputDetails =
+    asRecord(usage.completion_tokens_details) ??
+    asRecord(usage.output_tokens_details);
+  const cachedInputTokens = usageIntegerV1(
+    inputDetails?.cached_tokens ?? usage.cached_input_tokens,
+    "cached input token count",
+  );
+  const reasoningTokens = usageIntegerV1(
+    outputDetails?.reasoning_tokens ?? usage.reasoning_tokens,
+    "reasoning token count",
+  );
+  if (cachedInputTokens !== undefined && cachedInputTokens > inputTokens) {
+    throw new Error(
+      "Model returned cached input tokens above total input tokens",
+    );
+  }
+  if (reasoningTokens !== undefined && reasoningTokens > outputTokens) {
+    throw new Error(
+      "Model returned reasoning tokens above total output tokens",
+    );
+  }
+  return {
+    type: "usage",
+    usage: {
+      inputTokens,
+      outputTokens,
+      ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
+      ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    },
+  };
 }
 
 function applyToolDeltas(
@@ -598,6 +670,8 @@ export async function* streamOpenAICompatibleBody(
     const payload = asRecord(
       parseJson(data, "Model returned an invalid stream event"),
     );
+    const usage = usageFromPayloadV1(payload);
+    if (usage) yield usage;
     const choices = payload?.choices;
     const choice = Array.isArray(choices) ? asRecord(choices[0]) : undefined;
     const delta = asRecord(choice?.delta);
@@ -682,6 +756,8 @@ async function* readOpenAICompatibleJsonV1(
   if (!choice || !message) {
     throw new Error("Model response did not include a valid choice");
   }
+  const usage = usageFromPayloadV1(payload);
+  if (usage) yield usage;
   if (typeof message.content === "string" && message.content) {
     yield { type: "text-delta", text: message.content };
   }

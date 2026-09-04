@@ -106,6 +106,11 @@ import type {
   VoiceUserBackendContributionV1,
   VoiceUserBackendHostV1,
 } from "@frockbot/plugin-voice/user";
+import { VOICE_GEMINI_MODEL_V1 } from "@frockbot/plugin-voice/prompt";
+import {
+  USAGE_ENTRY_PAGE_MAX_V1,
+  type UsageReportV1,
+} from "@frockbot/plugin-billing";
 import {
   decodePublishPackageCommandV1,
   decodeRollbackPackageCommandV1,
@@ -117,9 +122,9 @@ import type {
 } from "@frockbot/plugin-mcp/backend";
 import {
   readVoiceAssistantQuotaV1,
-  recordVoiceAssistantUsageV1,
-  recordVoiceUsageV1,
+  recordVoiceAssistantUsageSyncV1,
   reserveVoiceAssistantV1,
+  recordVoiceUsageSyncV1,
   reserveVoiceCaptureV1,
   VOICE_QUOTA_MONTH,
   VOICE_QUOTA_DAY,
@@ -310,6 +315,11 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
                 })
                 .then(rpcJsonSnapshotV1);
             },
+          },
+          billing: {
+            sql: this.ctx.storage.sql,
+            transactionSync: (closure) =>
+              this.ctx.storage.transactionSync(closure),
           },
           commandBotLifecycle: async (userId, command) => {
             const id = this.env.BOT_STATES.idFromName(
@@ -956,10 +966,23 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       seconds: rpcInteger({ minimum: 0, maximum: 24 * 60 * 60 }),
     });
     await this.assertUserIdentity(request.userId as string);
-    return recordVoiceUsageV1(this.ctx.storage, {
-      day: request.day as string,
-      sessionId: request.sessionId as string,
-      seconds: request.seconds as number,
+    const billing = await this.billingContribution();
+    return this.ctx.storage.transactionSync(() => {
+      const receipt = recordVoiceUsageSyncV1(this.ctx.storage.kv, {
+        day: request.day as string,
+        sessionId: request.sessionId as string,
+        seconds: request.seconds as number,
+      });
+      if (receipt.recordedSeconds > 0) {
+        billing.recordVoiceInCurrentTransaction({
+          day: receipt.day,
+          sessionId: receipt.sessionId,
+          sessionSeconds: receipt.sessionSeconds,
+          recordedSeconds: receipt.recordedSeconds,
+          at: new Date().toISOString(),
+        });
+      }
+      return receipt;
     });
   }
 
@@ -997,10 +1020,26 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       seconds: rpcInteger({ minimum: 0, maximum: 31 * 24 * 60 * 60 }),
     });
     await this.assertUserIdentity(request.userId as string);
-    const usage = await recordVoiceAssistantUsageV1(this.ctx.storage, {
-      month: request.month as string,
-      sessionId: request.sessionId as string,
-      seconds: request.seconds as number,
+    const billing = await this.billingContribution();
+    const usage = this.ctx.storage.transactionSync(() => {
+      const receipt = recordVoiceAssistantUsageSyncV1(this.ctx.storage.kv, {
+        month: request.month as string,
+        sessionId: request.sessionId as string,
+        seconds: request.seconds as number,
+      });
+      if (receipt.recordedSeconds > 0) {
+        billing.recordVoiceInCurrentTransaction({
+          day: (request.at as string).slice(0, 10),
+          sessionId: receipt.sessionId,
+          sessionSeconds: receipt.sessionSeconds,
+          recordedSeconds: receipt.recordedSeconds,
+          at: request.at as string,
+          provider: "google-ai-studio",
+          model: VOICE_GEMINI_MODEL_V1,
+          pricing: "unpriced",
+        });
+      }
+      return receipt;
     });
     const state = await (
       await this.voiceContribution()
@@ -2121,6 +2160,49 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     MountedFoundationUserBackend["audit"]
   > {
     return (await this.contributions()).audit;
+  }
+
+  private async billingContribution(): Promise<
+    MountedFoundationUserBackend["billing"]
+  > {
+    return (await this.contributions()).billing;
+  }
+
+  /** Model usage projected by the Bot object after a durable Turn end. */
+  async recordUsageEntries(
+    input: unknown,
+  ): Promise<{ recorded: number; quarantined: number }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      entries: rpcDecodedValue,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    const botId = request.botId as string;
+    if (!(await (await this.flockContribution()).hasBot(botId))) {
+      throw new Error(`Bot "${botId}" is not registered to this User`);
+    }
+    if (!Array.isArray(request.entries)) {
+      throw new Error("RPC request.entries must be an array");
+    }
+    if (request.entries.length > USAGE_ENTRY_PAGE_MAX_V1) {
+      throw new Error("RPC request.entries exceeds its bound");
+    }
+    const foreign = request.entries.find(
+      (entry) =>
+        !entry ||
+        typeof entry !== "object" ||
+        (entry as { botId?: unknown }).botId !== botId,
+    );
+    if (foreign) throw new Error("usage entries name another Bot");
+    return (await this.billingContribution()).recordEntries(request.entries);
+  }
+
+  /** Account-wide totals for the hosted client and operator debug surface. */
+  async readUsage(input: unknown): Promise<UsageReportV1> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.billingContribution()).report();
   }
 
   /**

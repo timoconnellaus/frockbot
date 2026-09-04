@@ -95,13 +95,18 @@
    * `--frock-viewport-height` is `100dvh` on a phone: a browser whose toolbar
    * collapses on scroll changes the visible height without changing the layout
    * viewport, and a composer pinned to `100%` of the latter ends up under the
-   * toolbar. `--frock-safe-bottom` clears the home indicator, and is zero on
-   * every device that has none.
+   * toolbar. The native Android shell's Capacitor 8 SystemBars bridge injects
+   * corrected `--safe-area-inset-*` properties (including its IME workaround),
+   * while ordinary browsers fall back to their standard `env()` values. Both
+   * are zero on devices that have no inset.
    */
   --frock-viewport-height: 100%;
   --frock-drawer-width: min(300px, 84vw);
-  --frock-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --frock-safe-top: env(safe-area-inset-top, 0px);
+  --frock-safe-bottom: var(
+    --safe-area-inset-bottom,
+    env(safe-area-inset-bottom, 0px)
+  );
+  --frock-safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
 
   /*
    * The size text is entered at. Mobile Safari zooms the page in on a focused

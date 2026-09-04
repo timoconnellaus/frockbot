@@ -1350,10 +1350,14 @@ ordinary file tools, then use \`applet\` — it is on your PATH:
 | \`applet dev\` | run it locally on this Computer and print a URL to open in the browser |
 
 The SDK and its runtime live under \`${APPLETS_ROOT}\`, installed when this
-Computer was provisioned. An Applet **never runs for real here**: \`applet dev\`
-is a preview, and publishing hands the built artifact to the kernel, which runs
-it. If \`applet\` says the SDK is not installed, run the self-check and read the
-\`applets-sdk\` line.
+Computer was provisioned and repaired by a runtime update when missing. Applet
+projects have no durable \`node_modules\`: dependency, cache, VCS, and ordinary
+build directories are excluded from Workspace sync, and the SDK resolves
+imports from this shared installation. The three files a publish explicitly
+requests from \`dist/\` are the only build-output exception. An Applet **never
+runs for real here**: \`applet dev\` is a preview, and publishing hands the
+built artifact to the kernel, which runs it. If \`applet\` says the SDK is not
+installed, run the self-check and read the \`applets-sdk\` line.
 `,
   },
   {

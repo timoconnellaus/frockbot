@@ -199,7 +199,12 @@ class ProbeComputerSurface implements ComputerSyncSurfaceV1 {
     });
     return {
       status: "ok",
-      scan: { entries, removed: [...removals.values()] },
+      scan: {
+        entries,
+        removed: [...removals.values()],
+        ignored: 0,
+        omitted: 0,
+      },
     };
   }
 
@@ -582,6 +587,8 @@ export class WorkerdBotState extends BotState {
     pushed: string[];
     pulled: string[];
     adopted: string[];
+    ignored: number;
+    omitted: number;
     failures: string[];
   }> {
     const identity = { userId: input.userId, botId: input.botId };
@@ -619,6 +626,8 @@ export class WorkerdBotState extends BotState {
       pushed: root?.pushed ?? [],
       pulled: root?.pulled ?? [],
       adopted: root?.adopted ?? [],
+      ignored: root?.ignored ?? 0,
+      omitted: root?.omitted ?? 0,
       failures: report.failures.map((failure) => failure.reason),
     };
   }

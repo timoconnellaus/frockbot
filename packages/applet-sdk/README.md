@@ -32,12 +32,14 @@ applet dev                # Miniflare on a local port; prints a URL, opens nothi
 kernel asks the facet before it admits a generation, so the manifest cannot
 disagree with the code.
 
-**The CLI runs under Bun.** Every entry point in this package is TypeScript and
-resolves sibling modules through `.js` specifiers, which Bun and esbuild handle
-and plain Node does not. The `applets` provisioning phase on the Computer
-(lane C1) must therefore put Bun on the image, or this package must gain a
-prepublish step that bundles `src/cli/bin.ts` to `dist/cli.mjs` and points `bin`
-there. Nothing else in the SDK depends on which of those is chosen.
+**The published CLI runs under Node.** `prepublishOnly` bundles
+`src/cli/main.ts` to `dist/cli.mjs`, and the package's `bin` points there. The
+Computer's `applets` provisioning phase installs this package and its runtime
+once under the shared Computer runtime; an in-place runtime update repairs that
+installation when it is missing. An Applet project deliberately has no
+`node_modules` of its own. The checker and bundler resolve SDK, React, and
+TanStack imports from the shared installation, while project dependency trees
+remain reproducible scratch and never enter the durable-root sync.
 
 ## What runs where
 
