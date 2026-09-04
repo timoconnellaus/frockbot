@@ -62,10 +62,16 @@ describe("settings link scheme", () => {
     });
   });
 
-  test("drops a fragment belonging to another surface", () => {
+  test("a fragment belonging to another surface opens that surface", () => {
+    // The row is the specific request; the query parameter is where the link
+    // was written from, and rows move between surfaces.
     expect(
       decodeSettingsLinkV1("/?settings=bot-settings#bot-info-computer"),
-    ).toEqual({ surface: "bot-settings" });
+    ).toEqual({ surface: "bot-panel", anchor: "bot-info-computer" });
+    expect(decodeSettingsLinkV1("/?settings=bot-panel#bot-routines")).toEqual({
+      surface: "bot-settings",
+      anchor: "bot-routines",
+    });
   });
 
   test("drops an anchor nobody registered", () => {

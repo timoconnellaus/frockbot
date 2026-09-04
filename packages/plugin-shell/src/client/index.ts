@@ -1,7 +1,10 @@
 /// <reference path="../env.d.ts" />
 
 import {
+  clientFailureDetailV1,
   decodeExternalAuthorizationUrl,
+  presentClientFailureV1,
+  serverRefusalMessageV1,
   type AgentTransport,
   type ClientAnnouncement,
   type ClientNotificationIntent,
@@ -254,6 +257,11 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
     return {
       runId: run.runId,
       status: run.status,
+      // Never the backend's own sentence. What arrived here read
+      // `Model request "1c7dd68e-…" has no durable provider outcome:` — a
+      // UUID and two internal nouns, in the one place a User is told what
+      // happened to their reply. The raw text stays on the run for the
+      // console; the banner says what it means and offers the one action.
       message: run.stopRequestedAt
         ? "Stopping…"
         : "Something went wrong mid-reply. Try again to pick it up.",
@@ -348,7 +356,15 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: "This reply stopped partway. Try again to continue it.",
+      /*
+       * A failure is not something the Bot said. The bubble holds the text
+       * the model actually produced — often none — and the notice under it
+       * says why the Turn ends there: what arrived here read `Model request
+       * "1c7dd68e-…" has no durable provider outcome`, in a bubble styled
+       * exactly like the Bot speaking.
+       */
+      text: visibleAssistantText(run),
+      notice: "This reply stopped partway. Try again to continue it.",
       status: "reconciliation-required",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -378,7 +394,11 @@ function assistantMessage(
       runId: run.runId,
       role: "assistant",
       text: run.responseText,
-      notice: run.failure ?? "Agent request failed.",
+      // The same sentence the reply-less failure gets. The durable failure
+      // text is a provider's, not the product's — `Bot turn ended with
+      // outcome model-error`, a status code, once a run UUID — and under a
+      // bubble it reads as part of what the Bot was saying.
+      notice: "This Bot couldn't finish its reply. Try again.",
       status: "error",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -391,8 +411,13 @@ function assistantMessage(
     role: "assistant",
     text:
       run.status === "failed"
-        ? "This Bot couldn't finish its reply. Try again."
+        ? visibleAssistantText(run)
         : visibleAssistantText(run, notification?.body ?? ""),
+    // Why the Turn ends there, under whatever it had already said — never as
+    // the bubble's own text, which reads as the Bot saying it.
+    ...(run.status === "failed"
+      ? { notice: "This Bot couldn't finish its reply. Try again." }
+      : {}),
     status: run.status === "failed" ? "error" : "completed",
     tools: toolsFrom(run.events),
     sends: sendsFrom(run.events),
@@ -1077,11 +1102,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         if (isTerminalRun(run)) return "admitted";
       } catch (error) {
         if (signal.aborted) return "detached";
-        reconciliationError = `${
-          error instanceof Error
-            ? error.message
-            : "Couldn't check on your message."
-        } Retrying…`;
+        reconciliationError = `${presentClientFailureV1(
+          error,
+          "check on your message",
+        )} Retrying…`;
         web.value.settingsError = reconciliationError;
       }
       const delayMs = uncertainAdmissionDelayMsV1(attempt);
@@ -1133,9 +1157,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         if (isTerminalRun(run)) return;
       } catch (error) {
         if (signal.aborted) return;
-        observationError = `${
-          error instanceof Error ? error.message : "Couldn't load that reply."
-        } Retrying…`;
+        observationError = `${presentClientFailureV1(
+          error,
+          "load that reply",
+        )} Retrying…`;
         web.value.settingsError = observationError;
       }
       await waitForRunLookup(delayMs, signal);
@@ -1882,8 +1907,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           return;
         updateSettingsLoadError(
           "bot",
-          error instanceof Error ? error.message : "Could not load settings",
+          presentClientFailureV1(error, "load this Bot's settings"),
         );
+        console.debug("bot settings load failed", clientFailureDetailV1(error));
       }
     },
     async saveBotProfile(profile: BotProfile): Promise<void> {
@@ -1998,7 +2024,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         if (generation !== userSettingsGeneration) return;
         updateSettingsLoadError(
           "user",
-          error instanceof Error ? error.message : "Could not load settings",
+          presentClientFailureV1(error, "load your settings"),
+        );
+        console.debug(
+          "user settings load failed",
+          clientFailureDetailV1(error),
         );
       }
     },
@@ -2060,7 +2090,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         if (catalogGeneration !== pluginCatalogGeneration) return;
         updateSettingsLoadError(
           "catalog",
-          error instanceof Error ? error.message : "Could not load Plugins",
+          presentClientFailureV1(error, "load your plugins"),
+        );
+        console.debug(
+          "plugin catalog load failed",
+          clientFailureDetailV1(error),
         );
       }
     },
@@ -2177,18 +2211,21 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         // fault, and the raw server sentence means nothing to a person — so it
         // is translated here and the surface renders it instead of the
         // "nothing matched your search" empty state.
-        const raw =
-          error instanceof Error ? error.message : "Could not load the Catalog";
+        // The one server sentence worth reading is the one that says there is
+        // nothing to read: everything else becomes the shared failure line,
+        // because a raw fault text means nothing to the person looking at it.
+        const detail = clientFailureDetailV1(error);
         web.value.packageCatalog = [];
         web.value.packageCatalogGeneration = undefined;
         updateSettingsLoadError(
           "package-catalog",
           /catalog generation was not found|Package Catalog is not configured/.test(
-            raw,
+            detail,
           )
             ? "No plugins are published for this deployment yet."
-            : `Plugins could not be loaded: ${raw}`,
+            : presentClientFailureV1(error, "load the plugin catalog"),
         );
+        console.debug("package catalog load failed", detail);
       }
     },
     async loadCatalogEntry(
@@ -2621,10 +2658,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             generation === selectionGeneration &&
             web.value.activeBotId === botId
           )
-            web.value.settingsError =
-              error instanceof Error
-                ? error.message
-                : "Notification delivery failed";
+            web.value.settingsError = presentClientFailureV1(
+              error,
+              "show this Bot's notification",
+            );
         }
         return { accepted: true, runId: result.runId };
       } catch (error) {
@@ -2651,10 +2688,12 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         // draft back rather than the thread pretending it was sent.
         if (isCertainSendRefusalV1(error)) {
           removeMessages(web.value.messages, pendingRunId);
+          // A refusal's own sentence is the one the person needs — the send
+          // that was over the size limit is answered with the limit. Only a
+          // refusal carries one; anything else falls back to the shared line.
           const refusal =
-            error instanceof Error && error.message
-              ? error.message
-              : "That message didn't go through. Try sending it again.";
+            serverRefusalMessageV1(error) ??
+            presentClientFailureV1(error, "send that message");
           web.value.error = refusal;
           return { accepted: false, error: refusal };
         }
@@ -2727,22 +2766,28 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           return { accepted: false, error: UNREACHABLE_BOT_MESSAGE_V1 };
         }
         if (disposition === "not-admitted") {
+          // One affordance, not two. This used to be an assistant bubble
+          // *and* a banner, both reading "Turn was not admitted." — the Bot
+          // appearing to say a word the product does not use to a User whose
+          // typing had already been thrown away. The draft comes back to the
+          // composer (`FrockBotApp.sendMessage`), so sending again is the
+          // retry, and one system line says so.
+          const notAdmitted =
+            "Your message didn't go through. Try sending it again.";
           replaceMessage(web.value.messages, pendingRunId, {
             id: `${pendingRunId}:assistant`,
             runId: pendingRunId,
-            role: "assistant",
-            text: "Your message didn't go through. Try sending it again.",
+            role: "system",
+            text: notAdmitted,
             at: placeholderAt,
             status: "error",
+            // The same affordance an unreachable send gets: the draft is back
+            // in the composer, and this sends it again.
+            retry: "resend",
             tools: [],
             sends: [],
           });
-          web.value.error =
-            "Your message didn't go through. Try sending it again.";
-          return {
-            accepted: false,
-            error: "Your message didn't go through. Try sending it again.",
-          };
+          return { accepted: false, error: notAdmitted };
         }
         return { accepted: true, runId: pendingRunId };
       } finally {
@@ -2780,16 +2825,18 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       try {
         await ctx.transport.reconcileRun(botId, runId);
       } catch (error) {
-        web.value.settingsError =
-          error instanceof Error ? error.message : "Couldn't retry that.";
+        web.value.settingsError = presentClientFailureV1(
+          error,
+          "pick that reply back up",
+        );
       }
       try {
         await deliverNotifications(botId);
       } catch (error) {
-        web.value.settingsError =
-          error instanceof Error
-            ? error.message
-            : "Couldn't refresh this reply.";
+        web.value.settingsError = presentClientFailureV1(
+          error,
+          "refresh that reply",
+        );
       }
     },
     async stopRun(): Promise<void> {

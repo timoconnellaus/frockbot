@@ -260,14 +260,20 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   await expect(bubbles.first()).toHaveText("pong");
 
   // The bubble is wider than the word it holds, so the text is on one line.
-  const fits = await bubbles.first().evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    const text = range.getBoundingClientRect();
-    return { box: element.getBoundingClientRect().width, text: text.width };
-  });
+  // Measured once the text has actually been laid out: a range measured in the
+  // frame the bubble mounts reports a width of zero and fails on nothing.
+  const measure = async (): Promise<{ box: number; text: number }> =>
+    bubbles.first().evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const text = range.getBoundingClientRect();
+      return { box: element.getBoundingClientRect().width, text: text.width };
+    });
+  await expect
+    .poll(async () => (await measure()).text, { timeout: 10_000 })
+    .toBeGreaterThan(10);
+  const fits = await measure();
   expect(fits.box).toBeGreaterThanOrEqual(fits.text);
-  expect(fits.text).toBeGreaterThan(10);
 
   // The Turn's tool call is not in the transcript in words. The trail off the
   // avatar was the whole of what the conversation said about it, and a settled
@@ -379,9 +385,22 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
 
   await sendMessage(page, "will not work");
 
-  await expect(page.locator(".message-assistant").last()).toContainText(
+  /*
+   * A failed Turn is a notice, not the Bot speaking.
+   *
+   * The thread used to render the durable failure verbatim in an assistant
+   * bubble — `Bot turn ended with outcome model-error`, a provider status
+   * code, and on one occasion a run UUID and the words "no durable provider
+   * outcome" — styled exactly like something the Bot had said. The reason is
+   * still on the run for `/api/debug` and the console; what the User is shown
+   * is one line, in the product's own words.
+   */
+  await expect(page.locator(".message-notice").last()).toHaveText(
     "This Bot couldn't finish its reply. Try again.",
   );
+  await expect(page.locator(".thread")).not.toContainText("model-error");
+  await expect(page.locator(".thread")).not.toContainText("outcome");
+  await expect(page.locator(".thread")).not.toContainText("401");
 
   // The fake endpoint is shared by every spec in the run, so the refusal this
   // test switched on is switched off again: leaving it on made every later

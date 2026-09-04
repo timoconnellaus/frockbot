@@ -201,6 +201,18 @@
   -webkit-app-region: no-drag;
 }
 
+/*
+ * The Bot's own header controls on a phone, where the right panel that
+ * usually carries them is a closed drawer.
+ */
+.topbar-bot-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
 /* Thread */
 
 .thread {
@@ -446,6 +458,62 @@
 
   50% {
     transform: scale(1.07);
+  }
+}
+
+@keyframes frock-halo {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+
+/*
+ * The bubble a Turn has before it has words: three dots that say the Bot is
+ * working, where the reply itself will appear.
+ */
+.message-working {
+  display: flex;
+  align-items: center;
+  min-height: 20px;
+}
+
+.working-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.working-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--frock-text-muted);
+  animation: frock-working-dot 1.2s ease-in-out infinite;
+}
+
+.working-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.working-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes frock-working-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+  }
+
+  30% {
+    opacity: 1;
   }
 }
 
@@ -1123,17 +1191,19 @@
     padding-left: 0;
   }
 
+  /* No window chrome to clear, but the panel toggle still sits at the
+     trailing edge, so the row ends before it rather than under it. */
   .topbar {
     gap: 8px;
-    padding: 0 100px 0 4px;
-  }
-
-  .brand-mark {
-    font-size: var(--frock-text-lg);
+    padding: 0 52px 0 4px;
   }
 
   .window-actions {
     padding: 0 8px;
+  }
+
+  .brand-mark {
+    font-size: var(--frock-text-lg);
   }
 
   .nav-toggle {

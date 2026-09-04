@@ -38,6 +38,26 @@ onBeforeUnmount(() => restoreFocus?.focus());
 </script>
 
 <template>
+  <!--
+    The layer under the panel.
+
+    A surface with no scrim read as a rendering glitch: it covered the sidebar
+    and half the conversation, cut the composer's rounded pill clean in two,
+    and left the chat behind it fully lit, so nothing on screen said which of
+    the two was the live one. Dimming what the panel is over says it, and gives
+    the pointer the dismissal every other overlay in the product has.
+
+    It dims and nothing else: these surfaces are not modal. The workspace
+    behind one stays live — the composer takes a message while Plugins is
+    open, a Package page runs beside its own surface — so a layer that ate the
+    pointer would change what the app is, not just how it looks. Escape and
+    the panel's own Close button are the ways out, and they are enough.
+
+    It is a `v-if` rather than a transition for the same reason a fade would be
+    wrong: an element that outlives its panel is one nobody can see and
+    everybody's clicks land on.
+  -->
+  <div v-if="open" class="ui-sidebar-overlay__scrim" aria-hidden="true"></div>
   <Transition name="ui-surface">
     <aside
       v-if="open"
@@ -64,6 +84,15 @@ onBeforeUnmount(() => restoreFocus?.focus());
 </template>
 
 <style scoped>
+.ui-sidebar-overlay__scrim {
+  position: absolute;
+  z-index: var(--frock-layer-surface);
+  inset: 0;
+  background: var(--frock-overlay-tint);
+  /* Decoration, not a control: the workspace underneath stays usable. */
+  pointer-events: none;
+}
+
 .ui-sidebar-overlay {
   position: absolute;
   z-index: var(--frock-layer-surface);

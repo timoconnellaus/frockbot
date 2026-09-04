@@ -365,10 +365,16 @@ async function save(): Promise<void> {
 
 .bot-members {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 12px;
+}
+
+.bot-members > div {
+  min-width: 0;
+  flex: 1 1 14rem;
 }
 
 .bot-members strong,
@@ -389,10 +395,19 @@ async function save(): Promise<void> {
   font-size: var(--frock-text-sm);
 }
 
+/*
+ * A status, not a button. It sat in the slot every other section fills with an
+ * action, ragged-right over three lines at 120px, and read as a broken
+ * control; a single-line pill is what it is.
+ */
 .bot-members > span {
-  max-width: 120px;
   flex: 0 0 auto;
-  text-align: right;
+  align-self: center;
+  border: 1px solid var(--frock-border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  margin-top: 0;
+  white-space: nowrap;
 }
 
 .notification-setting {
