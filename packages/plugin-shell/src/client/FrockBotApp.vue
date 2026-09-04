@@ -56,6 +56,7 @@ import {
 } from "./turn-limits.js";
 import SendPayloadView from "./SendPayloadView.vue";
 import AppletCanvas from "./AppletCanvas.vue";
+import { appletProgressToolsV1, appletProgressV1 } from "./applet-progress.js";
 import PackageIframeHost from "./PackageIframeHost.vue";
 import type { ClientSkillCatalogEntryV1 } from "../skill-protocol.js";
 import {
@@ -264,6 +265,25 @@ const appletChip = computed(() =>
     ? (state.value.focusedApplet?.displayName ?? "Applet")
     : undefined,
 );
+/*
+ * What the Bot is doing to it, on the phone.
+ *
+ * There is no room beside the conversation here, so the chip carries the line
+ * the canvas would have shown and opens the canvas over the whole screen. It
+ * is the same projection and the same words: a person who moves between their
+ * phone and a laptop reads one story, not two.
+ */
+const appletChipStatus = computed(() => {
+  if (!appletChip.value) return undefined;
+  const progress = appletProgressV1({
+    applet: state.value.focusedApplet ?? null,
+    source: state.value.appletSource,
+    build: state.value.appletBuild,
+    tools: appletProgressToolsV1(state.value.messages),
+    running: Boolean(state.value.activeRunId),
+  });
+  return progress && progress.stage !== "published" ? progress : undefined;
+});
 /*
  * Skill invocation. `/` or `@` at a word boundary opens a popover over the
  * Bot's catalog; choosing one attaches a ref chip and removes the trigger from
@@ -1618,11 +1638,24 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             v-if="appletChip"
             type="button"
             class="applet-chip"
+            data-testid="applet-chip"
             @click="toggleRightPanel"
           >
             <UiIcon name="applets" size="sm" />
-            <span class="applet-chip-name">Applet: {{ appletChip }}</span>
-            <span class="applet-chip-action">Open</span>
+            <span class="applet-chip-text">
+              <span class="applet-chip-name">Applet: {{ appletChip }}</span>
+              <span v-if="appletChipStatus" class="applet-chip-status">
+                <span
+                  v-if="appletChipStatus.working"
+                  class="applet-chip-dot"
+                  aria-hidden="true"
+                />
+                {{ appletChipStatus.failure ?? appletChipStatus.label }}
+              </span>
+            </span>
+            <span class="applet-chip-action">{{
+              appletChipStatus ? "Watch" : "Open"
+            }}</span>
           </button>
           <div class="composer-body">
             <ul v-if="attachedSkills.length > 0" class="skill-chips">

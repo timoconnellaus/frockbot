@@ -22,6 +22,11 @@ import {
   appletSourceFingerprintV1,
   mostRecentlyChangedFileV1,
 } from "./applets-client.js";
+import {
+  appletIsBeingBuiltV1,
+  appletProgressToolsV1,
+  appletProgressV1,
+} from "./applet-progress.js";
 import { packageIframePagesForSlotV1 } from "./package-iframe-entries.js";
 import PackageIframeHost from "./PackageIframeHost.vue";
 
@@ -45,6 +50,26 @@ const build = computed(() => web.value.appletBuild);
 const isRunning = computed(() => Boolean(web.value.activeRunId));
 const canvasState = computed(() => web.value.appletCanvas);
 const failure = computed(() => web.value.appletCanvasError);
+
+/*
+ * What the Bot is doing to this Applet, in one line.
+ *
+ * A publish is minutes away from a create, and for all of it there is nothing
+ * to run. The panel used to answer that with one fixed line about the Applet
+ * not being live and a file list, which never changed and never said whether
+ * anything was happening. This is the sentence in between, projected from what
+ * the thread already shows: no new read, no new durable state.
+ */
+const progress = computed(() =>
+  appletProgressV1({
+    applet: applet.value ?? null,
+    source: source.value,
+    build: build.value,
+    tools: appletProgressToolsV1(web.value.messages),
+    running: isRunning.value,
+  }),
+);
+const beingBuilt = computed(() => appletIsBeingBuiltV1(progress.value));
 
 /** The Applets Package's right-panel page, when its Composition carries one. */
 const panelPage = computed(
@@ -212,8 +237,11 @@ async function clearFocus(): Promise<void> {
       /></span>
       <div class="applet-canvas-title">
         <strong>{{ applet?.displayName ?? "Applet" }}</strong>
+        <!--
+          While it is being built the line under the name is the pinned
+          building view below, not a copy of it here.
+        -->
         <small v-if="viewer">{{ generationLabel(viewer.generationId) }}</small>
-        <small v-else>Not published yet</small>
       </div>
       <div
         v-if="canShowApp"
@@ -254,6 +282,39 @@ async function clearFocus(): Promise<void> {
         @click="clearFocus"
       />
     </header>
+
+    <!--
+      Where the work has got to, pinned under the header while the Applet is
+      still being built: one line a person can read, the reason it stopped when
+      it stopped, and the tail of whatever the check or the build printed —
+      which is the only thing that helps when the Bot is going round in circles
+      on a type error. It sits outside the scrolling column deliberately: a
+      person reading the source still wants to know what is happening to it.
+    -->
+    <section
+      v-if="applet && !loading && progress && beingBuilt"
+      class="applet-canvas-progress"
+      :class="{ 'applet-canvas-progress-wrong': Boolean(progress.failure) }"
+      data-testid="applet-canvas-progress"
+      role="status"
+    >
+      <p class="applet-canvas-progress-line">
+        <span
+          v-if="progress.working"
+          class="applet-canvas-progress-dot"
+          aria-hidden="true"
+        />
+        <UiIcon v-else-if="progress.failure" name="close" size="sm" />
+        <span>{{ progress.label }}</span>
+      </p>
+      <p v-if="progress.failure" class="applet-canvas-progress-failure">
+        {{ progress.failure }}
+      </p>
+      <pre
+        v-if="progress.output"
+        class="applet-canvas-progress-output"
+      ><code>{{ progress.output.join("\n") }}</code></pre>
+    </section>
 
     <div class="applet-canvas-body">
       <!-- Loading: the shape of what is coming, with a caption that says so. -->
@@ -297,21 +358,6 @@ async function clearFocus(): Promise<void> {
             <span>This is taking longer than it should.</span>
             <button type="button" @click="retry">Try again</button>
           </div>
-          <p
-            v-if="build && build.status !== 'unknown'"
-            class="applet-canvas-build"
-            :class="`applet-canvas-build-${build.status}`"
-          >
-            <UiIcon
-              :name="build.status === 'passed' ? 'check' : 'close'"
-              size="sm"
-            />
-            <span
-              >{{ build.command === "build" ? "Build" : "Check" }}
-              {{ build.status
-              }}{{ build.summary ? `: ${build.summary}` : "" }}</span
-            >
-          </p>
           <div v-if="sortedFiles.length > 0" class="applet-canvas-files">
             <button
               v-for="file in sortedFiles"
@@ -573,28 +619,76 @@ async function clearFocus(): Promise<void> {
   white-space: pre;
 }
 
-.applet-canvas-build {
+/* Where the work has got to: the panel's own header for the building state. */
+.applet-canvas-progress {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--frock-border);
+  background: var(--frock-surface-subtle);
+}
+
+.applet-canvas-progress-wrong {
+  border-bottom-color: var(--frock-danger-border);
+  background: var(--frock-danger-surface);
+}
+
+.applet-canvas-progress-line {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   margin: 0;
-  padding: 6px 10px;
+  color: var(--frock-text);
+  font-size: var(--frock-text-sm);
+  font-weight: 600;
+}
+
+.applet-canvas-progress-wrong .applet-canvas-progress-line {
+  color: var(--frock-danger-text);
+}
+
+/* The same "something is happening" the thread uses, at the size of a word. */
+.applet-canvas-progress-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--frock-action-primary);
+  animation: applet-progress-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes applet-progress-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+.applet-canvas-progress-failure {
+  margin: 0;
+  color: var(--frock-danger-text);
+  font-size: var(--frock-text-sm);
+}
+
+.applet-canvas-progress-output {
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  padding: 8px 10px;
   border: 1px solid var(--frock-border);
   border-radius: var(--frock-radius-control);
   color: var(--frock-text-muted);
+  background: var(--frock-surface);
+  font-family: var(--frock-font-mono);
   font-size: var(--frock-text-xs);
-}
-
-.applet-canvas-build-passed {
-  border-color: var(--frock-success-border);
-  color: var(--frock-success);
-  background: var(--frock-success-surface);
-}
-
-.applet-canvas-build-failed {
-  border-color: var(--frock-danger-border);
-  color: var(--frock-danger-text);
-  background: var(--frock-danger-surface);
+  line-height: var(--frock-leading-snug);
+  white-space: pre;
 }
 
 .applet-canvas-failure {
@@ -685,6 +779,10 @@ async function clearFocus(): Promise<void> {
   .applet-app-enter-active,
   .applet-app-leave-active {
     transition: none;
+  }
+
+  .applet-canvas-progress-dot {
+    animation: none;
   }
 }
 </style>
