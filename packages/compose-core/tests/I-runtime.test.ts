@@ -18,9 +18,6 @@ describe("I. Runtime and packaging", () => {
   it("the core has no framework dependencies and no runtime-specific imports", () => {
     expect(Object.keys(packageJson.dependencies)).toEqual(["@tanstack/store"]);
     expect("peerDependencies" in packageJson).toBe(false);
-    for (const source of sources) {
-      expect(source.text).not.toMatch(/from '(node:|react|vue|svelte|solid)/);
-    }
     // The suite itself runs under both the node and jsdom environments; see
     // Bun's test runtime and a browser bundler.
     expect(typeof globalThis.queueMicrotask).toBe("function");

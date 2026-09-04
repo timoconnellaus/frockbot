@@ -144,6 +144,7 @@ describe("adaptFrockBotManifestV1", () => {
       compile: "outside-durable-objects",
       activate: "next-admitted-turn",
       runtime: "cloudflare-dynamic-worker",
+      backend: [],
       instance: "cloudflare-applet-facet",
       ambientState: false,
       ambientTimers: false,
@@ -182,6 +183,33 @@ describe("adaptFrockBotManifestV1", () => {
     expect(projected.keys).toEqual([]);
     expect(projected.grants).toEqual([]);
     expect(projected.execution.runtime).toBe("first-party-backend-runtime");
+  });
+
+  test("projects backend Contributions with their Durable Object hosts", () => {
+    const projected = adaptFrockBotManifestV1({
+      schemaVersion: 3,
+      id: "records",
+      displayName: "Records",
+      version: "2.0.0",
+      compatibility: { frockbot: "*" },
+      dependencies: {},
+      contributions: {
+        backend: [
+          { entry: "./server.js", host: "bot" },
+          { entry: "./edge.js", host: "gateway" },
+        ],
+      },
+      permissions: [],
+    });
+
+    expect(projected.execution.backend).toEqual([
+      { entry: "./server.js", host: "bot" },
+      { entry: "./edge.js", host: "gateway" },
+    ]);
+    expect(projected.execution.runtime).toBe("none");
+    expect(projected.execution.instance).toBe("none");
+    expect(projected.actions).toEqual([]);
+    expect(projected.grants).toEqual([]);
   });
 
   test("uses the Package manifest decoder at the boundary", () => {

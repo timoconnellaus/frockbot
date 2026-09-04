@@ -6,6 +6,7 @@ export {
 export type {
   FrockBotComposeActionV1,
   FrockBotComposeAuthorityV1,
+  FrockBotComposeBackendEntryV1,
   FrockBotComposeContextKeyV1,
   FrockBotComposeGenerationV1,
   FrockBotComposeGrantV1,

@@ -20,6 +20,10 @@ const surface = adaptFrockBotManifestV1(untrustedManifest);
 const authority = adaptFrockBotAuthorityV1(untrustedCapabilityList);
 ```
 
+`execution` reports each first-party backend Contribution alongside the
+Durable Object host that runs it, so a Package that contributes only backend
+entries is never projected as executing nothing.
+
 Both inputs cross existing exact decoders before they are projected. Applet
 storage is exposed only for a declared Instance Contribution. Scheduling is a
 command routed to the Bot's durable owner, never an ambient timer. Generation

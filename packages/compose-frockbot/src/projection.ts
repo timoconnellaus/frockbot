@@ -116,6 +116,15 @@ export type FrockBotComposeGrantV1 =
       generation: string;
     };
 
+/**
+ * One first-party backend Contribution, preserved with the Durable Object host
+ * that runs it. A Package that contributes only backend entries still executes.
+ */
+export interface FrockBotComposeBackendEntryV1 {
+  entry: string;
+  host: "gateway" | "bot" | "user";
+}
+
 export interface FrockBotComposeManifestV1 {
   schemaVersion: 1;
   packageId: string;
@@ -148,6 +157,7 @@ export interface FrockBotComposeManifestV1 {
     activate: "next-admitted-turn";
     runtime:
       "none" | "first-party-backend-runtime" | "cloudflare-dynamic-worker";
+    backend: FrockBotComposeBackendEntryV1[];
     instance: "none" | "cloudflare-applet-facet";
     ambientState: false;
     ambientTimers: false;
@@ -371,6 +381,10 @@ export function adaptFrockBotManifestV1(
           : runtime.host === "bot-isolate"
             ? "cloudflare-dynamic-worker"
             : "first-party-backend-runtime",
+      backend: (manifest.contributions.backend ?? []).map((contribution) => ({
+        entry: contribution.entry,
+        host: contribution.host,
+      })),
       instance: instance ? "cloudflare-applet-facet" : "none",
       ambientState: false,
       ambientTimers: false,
