@@ -309,6 +309,14 @@ export interface SessionEventMap {
     requestId: string;
     reason: string;
   };
+  /** One small durable explanation for why the next model attempt waited. */
+  "model/retry": {
+    turn: number;
+    step: number;
+    attempt: number;
+    classification: "transient" | "permanent" | "unknown";
+    delayMs: number;
+  };
   "model/reconciliation-required": {
     turn: number;
     step: number;
@@ -1272,6 +1280,24 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       step();
       requestId();
       eventString(event.reason, "session event.reason");
+      break;
+    case "model/retry":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "attempt", "classification", "delayMs"),
+        "session event",
+      );
+      turn();
+      step();
+      eventInteger(event.attempt, "session event.attempt", 2);
+      if (
+        event.classification !== "transient" &&
+        event.classification !== "permanent" &&
+        event.classification !== "unknown"
+      ) {
+        throw new Error("session event.classification is invalid");
+      }
+      eventInteger(event.delayMs, "session event.delayMs", 0);
       break;
     case "assistant/chunk":
       requireEventKeys(

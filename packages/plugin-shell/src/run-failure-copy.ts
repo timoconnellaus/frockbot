@@ -1,4 +1,8 @@
-import type { SessionEvent, TurnOutcome } from "@frockbot/kernel-contracts";
+import type {
+  ModelProviderFailureClassV1,
+  SessionEvent,
+  TurnOutcome,
+} from "@frockbot/kernel-contracts";
 import {
   MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
   MODEL_IDLE_DEADLINE_REASON_V1,
@@ -57,6 +61,16 @@ export const RUN_FAILURE_COPY_V1: Record<TurnOutcome, string> = {
   interrupted: "This reply stopped before it finished. Try again.",
   "model-error": "The model couldn't finish its reply. Try again.",
   "tool-error": "Something the Bot was using didn't work. Try again.",
+};
+
+/** Every provider class reaches the same intentionally plain model-error copy. */
+export const MODEL_PROVIDER_FAILURE_COPY_V1: Record<
+  ModelProviderFailureClassV1,
+  string
+> = {
+  transient: RUN_FAILURE_COPY_V1["model-error"],
+  permanent: RUN_FAILURE_COPY_V1["model-error"],
+  unknown: RUN_FAILURE_COPY_V1["model-error"],
 };
 
 /** What a Turn says when nothing more specific is known about how it ended. */

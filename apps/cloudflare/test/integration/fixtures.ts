@@ -18,7 +18,10 @@ import {
 } from "../harness/miniflare.ts";
 
 export { OLLAMA_BAD_API_KEY, OLLAMA_GOOD_API_KEY };
-export { OLLAMA_REVOKED_API_KEY } from "../harness/miniflare.ts";
+export {
+  OLLAMA_FLAKY_API_KEY,
+  OLLAMA_REVOKED_API_KEY,
+} from "../harness/miniflare.ts";
 /**
  * The prompt that makes the stubbed model call exact tools — one entry per
  * call it should make in one response. The stub owns the wire shape; a test
