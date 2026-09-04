@@ -53,6 +53,11 @@ import {
   reserveSubagentSlotV1,
   type SubagentSlotReceiptV1,
 } from "@frockbot/plugin-subagents/quota";
+import {
+  releaseAgentTurnSlotV1,
+  reserveAgentTurnSlotV1,
+  type AgentTurnSlotReceiptV1,
+} from "@frockbot/plugin-flock/quota";
 import { machineTokenClaimsV1 } from "@frockbot/machine-protocol";
 import {
   appletStateNameV1,
@@ -93,6 +98,10 @@ import {
 } from "@frockbot/plugin-audit";
 import type { BotAuditRpc } from "./audit.js";
 import {
+  USAGE_ENTRY_PAGE_MAX_V1,
+  type UsageReportV1,
+} from "@frockbot/plugin-billing";
+import {
   decodePublishPackageCommandV1,
   decodeRollbackPackageCommandV1,
 } from "@frockbot/plugin-package-publisher/shared";
@@ -102,7 +111,7 @@ import type {
   McpAuthorizationStartRequestV1,
 } from "@frockbot/plugin-mcp/backend";
 import {
-  recordVoiceUsageV1,
+  recordVoiceUsageSyncV1,
   reserveVoiceCaptureV1,
   VOICE_QUOTA_DAY,
   type VoiceQuotaReceiptV1,
@@ -290,6 +299,11 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
                 })
                 .then(rpcJsonSnapshotV1);
             },
+          },
+          billing: {
+            sql: this.ctx.storage.sql,
+            transactionSync: (closure) =>
+              this.ctx.storage.transactionSync(closure),
           },
           commandBotLifecycle: async (userId, command) => {
             const id = this.env.BOT_STATES.idFromName(
@@ -787,6 +801,39 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     });
   }
 
+  /** User-wide agent-lane budget shared by every Bot and Voice session. */
+  async reserveAgentTurnSlot(input: unknown): Promise<AgentTurnSlotReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      requesterId: rpcString(256),
+      runId: rpcString(256),
+      reservedAt: rpcString(64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return reserveAgentTurnSlotV1(this.ctx.storage, {
+      schemaVersion: 1,
+      userId: request.userId as string,
+      requesterId: request.requesterId as string,
+      runId: request.runId as string,
+      reservedAt: request.reservedAt as string,
+    });
+  }
+
+  async releaseAgentTurnSlot(
+    input: unknown,
+  ): Promise<{ schemaVersion: 1; status: "released"; held: number }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      requesterId: rpcString(256),
+      runId: rpcString(256),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return releaseAgentTurnSlotV1(this.ctx.storage, {
+      requesterId: request.requesterId as string,
+      runId: request.runId as string,
+    });
+  }
+
   /**
    * The durable per-User voice budget (voice plan D1).
    *
@@ -814,10 +861,24 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       sessionId: rpcString(128),
       seconds: rpcInteger({ minimum: 0, maximum: 24 * 60 * 60 }),
     });
-    return recordVoiceUsageV1(this.ctx.storage, {
-      day: request.day as string,
-      sessionId: request.sessionId as string,
-      seconds: request.seconds as number,
+    await this.assertUserIdentity(request.userId as string);
+    const billing = await this.billingContribution();
+    return this.ctx.storage.transactionSync(() => {
+      const receipt = recordVoiceUsageSyncV1(this.ctx.storage.kv, {
+        day: request.day as string,
+        sessionId: request.sessionId as string,
+        seconds: request.seconds as number,
+      });
+      if (receipt.recordedSeconds > 0) {
+        billing.recordVoiceInCurrentTransaction({
+          day: receipt.day,
+          sessionId: receipt.sessionId,
+          sessionSeconds: receipt.sessionSeconds,
+          recordedSeconds: receipt.recordedSeconds,
+          at: new Date().toISOString(),
+        });
+      }
+      return receipt;
     });
   }
 
@@ -1860,6 +1921,49 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     MountedFoundationUserBackend["audit"]
   > {
     return (await this.contributions()).audit;
+  }
+
+  private async billingContribution(): Promise<
+    MountedFoundationUserBackend["billing"]
+  > {
+    return (await this.contributions()).billing;
+  }
+
+  /** Model usage projected by the Bot object after a durable Turn end. */
+  async recordUsageEntries(
+    input: unknown,
+  ): Promise<{ recorded: number; quarantined: number }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      entries: rpcDecodedValue,
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    const botId = request.botId as string;
+    if (!(await (await this.flockContribution()).hasBot(botId))) {
+      throw new Error(`Bot "${botId}" is not registered to this User`);
+    }
+    if (!Array.isArray(request.entries)) {
+      throw new Error("RPC request.entries must be an array");
+    }
+    if (request.entries.length > USAGE_ENTRY_PAGE_MAX_V1) {
+      throw new Error("RPC request.entries exceeds its bound");
+    }
+    const foreign = request.entries.find(
+      (entry) =>
+        !entry ||
+        typeof entry !== "object" ||
+        (entry as { botId?: unknown }).botId !== botId,
+    );
+    if (foreign) throw new Error("usage entries name another Bot");
+    return (await this.billingContribution()).recordEntries(request.entries);
+  }
+
+  /** Account-wide totals for the hosted client and operator debug surface. */
+  async readUsage(input: unknown): Promise<UsageReportV1> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.billingContribution()).report();
   }
 
   /**

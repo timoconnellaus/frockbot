@@ -34,8 +34,32 @@ import type { Page } from "@playwright/test";
 
 /** A 2019-and-later iPhone in portrait: the narrowest viewport worth serving. */
 const PHONE = { width: 390, height: 844 } as const;
+const SAFE_TOP = 32;
+const SAFE_BOTTOM = 24;
 
 test.use({ viewport: PHONE, deviceScaleFactor: 2, hasTouch: true });
+
+async function emulateNativeSafeArea(page: Page): Promise<void> {
+  await page.addInitScript(
+    ({ top, bottom }) => {
+      document.addEventListener(
+        "DOMContentLoaded",
+        () => {
+          document.documentElement.style.setProperty(
+            "--safe-area-inset-top",
+            `${top}px`,
+          );
+          document.documentElement.style.setProperty(
+            "--safe-area-inset-bottom",
+            `${bottom}px`,
+          );
+        },
+        { once: true },
+      );
+    },
+    { top: SAFE_TOP, bottom: SAFE_BOTTOM },
+  );
+}
 
 const shotDirectory = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -156,6 +180,7 @@ test("the shell is usable on a phone", async ({
   userId,
   ollamaBaseUrl,
 }) => {
+  await emulateNativeSafeArea(page);
   await openApplication(page, userId);
   await shot(page, "01-first-run-dialog");
   await expectNoHorizontalOverflow(page);
@@ -197,6 +222,26 @@ test("the shell is usable on a phone", async ({
   await expectNoHorizontalOverflow(page);
   await expectWithinViewport(page, ".composer", "the composer");
   await expectWithinViewport(page, ".topbar", "the topbar");
+  const safeLayout = await page.evaluate(() => {
+    const topbar = document.querySelector(".topbar")!.getBoundingClientRect();
+    const menu = document.querySelector(".nav-toggle")!.getBoundingClientRect();
+    const thread = document.querySelector(".thread")!.getBoundingClientRect();
+    const composer = document
+      .querySelector(".composer")!
+      .getBoundingClientRect();
+    return {
+      topbarHeight: topbar.height,
+      menuTop: menu.top,
+      threadTop: thread.top,
+      composerBottom: composer.bottom,
+    };
+  });
+  expect(safeLayout.topbarHeight).toBe(52 + SAFE_TOP);
+  expect(safeLayout.menuTop).toBeGreaterThanOrEqual(SAFE_TOP);
+  expect(safeLayout.threadTop).toBe(52 + SAFE_TOP);
+  expect(safeLayout.composerBottom).toBeLessThanOrEqual(
+    PHONE.height - SAFE_BOTTOM,
+  );
 
   // Choosing a Bot is what the drawer is for, so it closes behind the choice
   // rather than covering the conversation it just opened.
@@ -234,6 +279,11 @@ test("the shell is usable on a phone", async ({
   await shot(page, "06-bot-settings-panel");
   await expectNoHorizontalOverflow(page);
   await expectWithinViewport(page, ".panel-surface-view", "the panel surface");
+  const settingsHeader = await page
+    .locator(".panel-surface-header")
+    .boundingBox();
+  expect(settingsHeader).not.toBeNull();
+  expect(settingsHeader!.height).toBe(52 + SAFE_TOP);
   // Named, so the User can tell whose settings these are.
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Pocket");
 
@@ -283,6 +333,33 @@ test("the shell is usable on a phone", async ({
     .click({ timeout: 15_000 });
   await closeNavigation(page);
   await expect(composerInput(page)).toBeEnabled();
+});
+
+test("the sign-in page clears the native system bars", async ({ page }) => {
+  // This is a layout test for the public shell. Keep it independent of the
+  // e2e harness's Better Auth upstream, which is deliberately not configured.
+  await page.route("**/api/auth/get-session", (route) =>
+    route.fulfill({ json: null }),
+  );
+  await emulateNativeSafeArea(page);
+  await page.goto("/");
+  await expect(page.locator(".auth-screen")).toBeVisible();
+  await expect(page.locator('meta[name="viewport"]')).toHaveAttribute(
+    "content",
+    /viewport-fit=cover/,
+  );
+
+  const padding = await page.locator(".auth-screen").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      top: Number.parseFloat(style.paddingTop),
+      bottom: Number.parseFloat(style.paddingBottom),
+      background: style.backgroundColor,
+    };
+  });
+  expect(padding.top).toBe(32 + SAFE_TOP);
+  expect(padding.bottom).toBe(32 + SAFE_BOTTOM);
+  expect(padding.background).not.toBe("rgba(0, 0, 0, 0)");
 });
 
 /** Open the navigation drawer and prove it arrived. */

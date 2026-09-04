@@ -165,6 +165,11 @@ export type ClientRunEventV1 =
       type: "wake/parent";
       message: string;
     }
+  | {
+      type: "computer/sync";
+      status: "degraded" | "unavailable" | "refused" | "skipped";
+      message: string;
+    }
   /**
    * A subagent this Turn dispatched (ADR 0017). The child's Session never
    * enters the visible transcript, so this chip is the whole of what the
@@ -212,12 +217,12 @@ export interface ClientRunRecoveryV1 {
 }
 
 /**
- * The run projection. Version 2 adds `send/to-user` and `wake/parent` to
- * `events`; a version 1 body is a version 2 body that carries neither, so the
- * decoder accepts both and the projection emits 2.
+ * The run projection. Version 2 added structured `send/to-user` and
+ * `wake/parent` events; version 3 adds the bounded `via` marker for agent and
+ * Voice Turns without exposing the internal origin record.
  */
 export interface ClientRunV1 {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   runId: string;
   admittedAt: string;
   input: string;
@@ -241,6 +246,10 @@ export interface ClientRunV1 {
   partialText?: string;
   outcome?: ClientRunOutcomeV1;
   recovery?: ClientRunRecoveryV1;
+  /** Where an agent-lane question entered this Bot's transcript. */
+  via?:
+    | { kind: "bot"; name: string; botId: string }
+    | { kind: "voice"; name: "Voice" };
 }
 
 export interface ClientRunPageV1 {
@@ -624,6 +633,7 @@ function projectionUnits(
   const units: ProjectionUnitV1[] = [];
   const byOccurrence = new Map<string, ProjectionUnitV1>();
   let callCount = 0;
+  let projectedIncompleteSync = false;
   for (const event of events) {
     if (event.type === "tool/call") {
       if (byOccurrence.has(event.occurrenceId)) {
@@ -694,6 +704,22 @@ function projectionUnits(
         ],
         droppable: true,
       });
+    } else if (
+      event.type === "computer/sync" &&
+      event.status !== "ok" &&
+      !projectedIncompleteSync
+    ) {
+      projectedIncompleteSync = true;
+      units.push({
+        events: [
+          {
+            type: "computer/sync",
+            status: event.status,
+            message: computerSyncCopyV1(event),
+          },
+        ],
+        droppable: true,
+      });
     } else if (event.type === "task/dispatched") {
       units.push({
         events: [
@@ -734,6 +760,24 @@ function projectionUnits(
     }
   }
   return units;
+}
+
+function computerSyncCopyV1(
+  event: Extract<SessionEvent, { type: "computer/sync" }>,
+): string {
+  if (event.status === "degraded") {
+    return (
+      event.detail.trim() ||
+      "Some Workspace files did not sync during this turn."
+    );
+  }
+  if (event.status === "unavailable") {
+    return "Workspace files could not sync during this turn. Sync will retry the next time the Computer is used.";
+  }
+  if (event.status === "refused") {
+    return "Workspace sync could not run for this turn.";
+  }
+  return "Workspace sync was skipped for this turn.";
 }
 
 function visibleEvents(
@@ -876,10 +920,20 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
           message: RESUMABLE_RUN_MESSAGE_V1,
         } satisfies ClientRunRecoveryV1)
       : undefined;
+  const origin = run.admission?.origin;
+  const via =
+    origin?.kind === "bot"
+      ? {
+          kind: "bot" as const,
+          name: truncateWireString(origin.fromBotName, 100),
+          botId: truncate(origin.fromBotId, 128),
+        }
+      : origin?.kind === "voice"
+        ? { kind: "voice" as const, name: "Voice" as const }
+        : undefined;
   return {
-    // Version 2: the projection may now carry `send/to-user` and
-    // `wake/parent`. A client pinned to 1 keeps decoding a stored list.
-    schemaVersion: 2,
+    // Version 3 adds the origin marker for an agent-lane message.
+    schemaVersion: 3,
     runId: truncate(run.runId, MAX_RUN_ID_LENGTH),
     admittedAt: truncate(run.acceptedAt, MAX_TIMESTAMP_LENGTH),
     input: truncateWireString(run.input, MAX_INPUT_BYTES),
@@ -896,6 +950,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
       : {}),
     ...(outcome ? { outcome } : {}),
     ...(recovery ? { recovery } : {}),
+    ...(via ? { via } : {}),
   };
 }
 
@@ -921,7 +976,8 @@ function lookupState(
 export function isVisibleRunV1(run: {
   admission?: { turnType?: string };
 }): boolean {
-  return (run.admission?.turnType ?? "chat") === "chat";
+  const type = run.admission?.turnType ?? "chat";
+  return type === "chat" || type === "agent";
 }
 
 export function projectClientRunLookupV1(
@@ -1248,6 +1304,27 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
       ),
     };
   }
+  if (event.type === "computer/sync") {
+    exactKeys(event, ["type", "status", "message"], "run event");
+    if (
+      event.status !== "degraded" &&
+      event.status !== "unavailable" &&
+      event.status !== "refused" &&
+      event.status !== "skipped"
+    ) {
+      throw new Error("run event.status is invalid");
+    }
+    return {
+      type: "computer/sync",
+      status: event.status,
+      message: wireString(
+        event,
+        "message",
+        MAX_EVENT_CONTENT_BYTES,
+        "run event",
+      ),
+    };
+  }
   if (event.type === "task/dispatched") {
     exactKeys(
       event,
@@ -1299,12 +1376,13 @@ function decodeEvents(values: unknown[]): ClientTurnEvent[] {
   const callIds = new Set<string>();
   while (index < events.length) {
     const call = events[index];
-    // A send and a hand-off stand alone: they pair with nothing, so the
-    // call/result walk steps straight over them.
+    // Sends, hand-offs, task chips, and sync notices stand alone: they pair
+    // with nothing, so the call/result walk steps straight over them.
     if (
       call?.type === "send/to-user" ||
       call?.type === "wake/parent" ||
-      call?.type === "task/dispatched"
+      call?.type === "task/dispatched" ||
+      call?.type === "computer/sync"
     ) {
       index += 1;
       continue;
@@ -1429,13 +1507,40 @@ function decodeRun(value: unknown): ClientRun {
       "partialText",
       "outcome",
       "recovery",
+      "via",
     ],
     "run",
   );
   // 1 and 2 differ only by the event types a version 2 body may carry, and a
   // version 1 body carries a subset of them, so one walk decodes both.
-  if (run.schemaVersion !== 1 && run.schemaVersion !== 2) {
+  if (
+    run.schemaVersion !== 1 &&
+    run.schemaVersion !== 2 &&
+    run.schemaVersion !== 3
+  ) {
     throw new Error("run.schemaVersion is invalid");
+  }
+  let via: ClientRunV1["via"];
+  if (run.via !== undefined) {
+    if (run.schemaVersion !== 3) {
+      throw new Error("run.via requires schemaVersion 3");
+    }
+    const candidate = record(run.via, "run.via");
+    if (candidate.kind === "bot") {
+      exactKeys(candidate, ["kind", "name", "botId"], "run.via");
+      via = {
+        kind: "bot",
+        name: wireString(candidate, "name", 100, "run.via"),
+        botId: string(candidate, "botId", 128, "run.via"),
+      };
+    } else if (candidate.kind === "voice") {
+      exactKeys(candidate, ["kind", "name"], "run.via");
+      if (candidate.name !== "Voice")
+        throw new Error("run.via.name is invalid");
+      via = { kind: "voice", name: "Voice" };
+    } else {
+      throw new Error("run.via.kind is invalid");
+    }
   }
   let runId: string;
   try {
@@ -1507,6 +1612,7 @@ function decodeRun(value: unknown): ClientRun {
         }
       : {}),
     ...(recovery ? { failure: recovery.message, recovery } : {}),
+    ...(via ? { via } : {}),
   };
 }
 

@@ -116,6 +116,44 @@ const EFFECT_NOTE_KIND = "effects";
 const MAX_STORE_PAGES = 100;
 const STORE_PAGE_LIMIT = 500;
 
+/**
+ * Reproducible dependency, cache, VCS, and build trees never enter a durable
+ * Workspace manifest. Names are matched as path segments at any depth, so one
+ * policy covers a project nested inside a Package-declared root.
+ */
+export const WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1 = [
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  "out",
+  "target",
+  "coverage",
+  ".cache",
+  ".parcel-cache",
+  ".turbo",
+  ".next",
+  ".nuxt",
+  ".output",
+  ".svelte-kit",
+  ".vite",
+  ".pnpm-store",
+] as const;
+
+/** Leaves headroom below `runStorageForAgent`'s 500 KB response ceiling. */
+export const WORKSPACE_SYNC_MANIFEST_MAX_BYTES_V1 = 400_000;
+/** Bounds work and rows even when unusually short paths fit under the bytes. */
+export const WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1 = 2_000;
+
+const ignoredDirectoryNames = new Set<string>(
+  WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1,
+);
+
+/** True when a Workspace-relative path belongs to a reproducible tree. */
+export function isWorkspaceSyncIgnoredPathV1(path: string): boolean {
+  return path.split("/").some((segment) => ignoredDirectoryNames.has(segment));
+}
+
 function failure(
   status: WorkspaceFailureV1["status"],
   reason: string,
@@ -162,6 +200,10 @@ export interface ComputerSyncRemovalV1 {
 export interface ComputerSyncScanV1 {
   entries: ComputerSyncEntryV1[];
   removed: ComputerSyncRemovalV1[];
+  /** Reproducible directories or already-stored paths excluded by policy. */
+  ignored: number;
+  /** Rows omitted after the manifest hit its entry or byte ceiling. */
+  omitted: number;
 }
 
 export type ComputerSyncOutcomeV1 = { status: "ok" } | WorkspaceFailureV1;
@@ -183,7 +225,10 @@ export type ComputerSyncNoteOutcomeV1 =
  */
 export interface ComputerSyncSurfaceV1 {
   /** Every file and every recorded removal under one durable root. */
-  scan(root: WorkspaceRootV1): Promise<ComputerSyncScanOutcomeV1>;
+  scan(
+    root: WorkspaceRootV1,
+    requiredPaths?: readonly string[],
+  ): Promise<ComputerSyncScanOutcomeV1>;
   read(
     root: WorkspaceRootV1,
     path: string,
@@ -261,6 +306,10 @@ export interface WorkspaceSyncRootReportV1 {
   removedInStore: string[];
   /** Pushes a previous run had already applied, adopted rather than repeated. */
   adopted: string[];
+  /** Reproducible directories and store entries excluded by policy. */
+  ignored: number;
+  /** Computer manifest rows omitted at the hard bound. */
+  omitted: number;
   conflicts: WorkspaceSyncConflictV1[];
   failures: WorkspaceSyncFailureV1[];
 }
@@ -293,7 +342,10 @@ export interface WorkspaceRootSyncOptionsV1 {
 export interface WorkspaceRootSyncV1 {
   /** Reconciles every declared root. */
   sync(): Promise<WorkspaceSyncReportV1>;
-  syncRoot(root: WorkspaceRootV1): Promise<WorkspaceSyncRootReportV1>;
+  syncRoot(
+    root: WorkspaceRootV1,
+    requiredPaths?: readonly string[],
+  ): Promise<WorkspaceSyncRootReportV1>;
   /**
    * The on-Sprite watcher's change signal. A caller runs the sync on wake and
    * whenever this changes, rather than scanning every root every Turn.
@@ -332,6 +384,8 @@ function emptyReport(root: WorkspaceRootV1): WorkspaceSyncRootReportV1 {
     removedOnComputer: [],
     removedInStore: [],
     adopted: [],
+    ignored: 0,
+    omitted: 0,
     conflicts: [],
     failures: [],
   };
@@ -363,18 +417,24 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     };
   }
 
-  async syncRoot(root: WorkspaceRootV1): Promise<WorkspaceSyncRootReportV1> {
+  async syncRoot(
+    root: WorkspaceRootV1,
+    requiredPaths: readonly string[] = [],
+  ): Promise<WorkspaceSyncRootReportV1> {
     const report = emptyReport(root);
-    const scanned = await this.options.computer.scan(root);
+    const scanned = await this.options.computer.scan(root, requiredPaths);
     if (isFailure(scanned)) {
       report.failures.push({ ...scanned, root });
       return report;
     }
-    const stored = await this.listStore(root);
+    report.ignored = scanned.scan.ignored;
+    report.omitted = scanned.scan.omitted;
+    const stored = await this.listStore(root, requiredPaths);
     if (isFailure(stored)) {
       report.failures.push({ ...stored, root });
       return report;
     }
+    report.ignored += stored.ignored;
     const local = new Map(
       scanned.scan.entries.map((entry) => [entry.path, entry] as const),
     );
@@ -458,11 +518,18 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
 
   private async listStore(
     root: WorkspaceRootV1,
+    requiredPaths: readonly string[],
   ): Promise<
-    | { status: "ok"; generations: Map<string, WorkspaceGenerationV1> }
+    | {
+        status: "ok";
+        generations: Map<string, WorkspaceGenerationV1>;
+        ignored: number;
+      }
     | WorkspaceFailureV1
   > {
     const generations = new Map<string, WorkspaceGenerationV1>();
+    const required = new Set(requiredPaths);
+    let ignored = 0;
     let cursor: string | undefined;
     for (let page = 0; page < MAX_STORE_PAGES; page += 1) {
       const listed = await this.options.store.list({
@@ -472,9 +539,16 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
       });
       if (listed.status !== "ok") return listed;
       for (const entry of listed.entries) {
+        if (
+          isWorkspaceSyncIgnoredPathV1(entry.path.path) &&
+          !required.has(entry.path.path)
+        ) {
+          ignored += 1;
+          continue;
+        }
         generations.set(entry.path.path, entry.generation);
       }
-      if (!listed.cursor) return { status: "ok", generations };
+      if (!listed.cursor) return { status: "ok", generations, ignored };
       cursor = listed.cursor;
     }
     return failure("unavailable", "Durable root listing did not terminate");
@@ -888,38 +962,137 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     ).toString("base64");
   }
 
-  async scan(root: WorkspaceRootV1): Promise<ComputerSyncScanOutcomeV1> {
+  async scan(
+    root: WorkspaceRootV1,
+    requiredPaths: readonly string[] = [],
+  ): Promise<ComputerSyncScanOutcomeV1> {
     const mount = this.mount(root);
     if (typeof mount !== "string") return mount;
+    const requiredIgnoredPaths: string[] = [];
+    for (const path of requiredPaths) {
+      const relative = this.relative(path);
+      if (typeof relative !== "string") return relative;
+      if (
+        isWorkspaceSyncIgnoredPathV1(relative) &&
+        !requiredIgnoredPaths.includes(relative)
+      ) {
+        requiredIgnoredPaths.push(relative);
+      }
+    }
+    const requiredIgnoredRoots = [
+      ...new Set(
+        requiredIgnoredPaths.map((path) => {
+          const segments = path.split("/");
+          const index = segments.findIndex((segment) =>
+            ignoredDirectoryNames.has(segment),
+          );
+          return segments.slice(0, index + 1).join("/");
+        }),
+      ),
+    ];
+    const ignoredExpression = WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1.map(
+      (name) => `-name ${shellQuote(name)}`,
+    ).join(" -o ");
     const script = [
+      "set -eu",
       `ROOT=${shellQuote(mount)}`,
+      `REQUIRED_PATHS=${shellQuote(Buffer.from(requiredIgnoredPaths.join("\n")).toString("base64"))}`,
       `mkdir -p "$ROOT" "$ROOT/${WORKSPACE_GENERATIONS_DIR}" "$ROOT/${WORKSPACE_SYNC_DIR}/${SYNC_TOMBSTONES_DIR}"`,
-      `find "$ROOT" -type f ! -path "$ROOT/${WORKSPACE_GENERATIONS_DIR}/*" ! -path "$ROOT/${WORKSPACE_SYNC_DIR}/*" ! -path "$ROOT/.frockbot-locks/*" -print0 | sort -z | while IFS= read -r -d "" FILE; do`,
-      '  REL=${FILE#"$ROOT"/}',
+      "MANIFEST=$(mktemp)",
+      "trap 'rm -f \"$MANIFEST\"' EXIT",
+      "MANIFEST_BYTES=0",
+      "MANIFEST_ENTRIES=0",
+      "OMITTED=0",
+      "IGNORED=0",
+      "SATURATED=0",
+      "append_manifest() {",
+      "  ROW=$1",
+      "  ROW_BYTES=$((${#ROW} + 1))",
+      `  if [ "$MANIFEST_ENTRIES" -ge ${WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1} ] || [ $((MANIFEST_BYTES + ROW_BYTES)) -gt ${WORKSPACE_SYNC_MANIFEST_MAX_BYTES_V1} ]; then`,
+      "    OMITTED=$((OMITTED + 1))",
+      "    SATURATED=1",
+      "    return",
+      "  fi",
+      '  printf \'%s\\n\' "$ROW" >> "$MANIFEST"',
+      "  MANIFEST_BYTES=$((MANIFEST_BYTES + ROW_BYTES))",
+      "  MANIFEST_ENTRIES=$((MANIFEST_ENTRIES + 1))",
+      "}",
+      "ignored_relative() {",
+      '  included_relative "$1" && return 1',
+      '  IFS=/ read -r -a PARTS <<< "$1"',
+      '  for PART in "${PARTS[@]}"; do',
+      `    case "$PART" in ${WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1.map((name) => shellQuote(name)).join("|")}) return 0 ;; esac`,
+      "  done",
+      "  return 1",
+      "}",
+      "included_relative() {",
+      requiredIgnoredPaths.length > 0
+        ? `  case "$1" in ${requiredIgnoredPaths.map((path) => shellQuote(path)).join("|")}) return 0 ;; esac`
+        : "  :",
+      "  return 1",
+      "}",
+      "required_directory() {",
+      requiredIgnoredRoots.length > 0
+        ? `  case "$1" in ${requiredIgnoredRoots.map((path) => shellQuote(path)).join("|")}) return 0 ;; esac`
+        : "  :",
+      "  return 1",
+      "}",
+      // Required artifact files go first: the source manifest may be full,
+      // but an explicit one-root publisher must still receive the exact bytes
+      // it named. They remain subject to the same byte and entry bounds.
+      "while IFS= read -r REL; do",
+      '  [ -n "$REL" ] || continue',
+      '  FILE="$ROOT/$REL"',
+      '  if [ -f "$FILE" ]; then',
       `  META="$ROOT/${WORKSPACE_GENERATIONS_DIR}/$REL"`,
-      '  printf "F\\t%s\\t%s\\t%s\\t%s\\n" "$(printf %s "$REL" | base64 -w0)" "$({ cat "$META" 2>/dev/null || printf \'\'; } | base64 -w0)" "$(sha256sum "$FILE" | cut -d" " -f1)" "$(stat -c %s "$FILE")"',
-      "done",
+      '  printf -v ROW "F\\t%s\\t%s\\t%s\\t%s" "$(printf %s "$REL" | base64 -w0)" "$({ cat "$META" 2>/dev/null || printf \'\'; } | base64 -w0)" "$(sha256sum "$FILE" | cut -d" " -f1)" "$(stat -c %s "$FILE")"',
+      '  append_manifest "$ROW"',
+      "  fi",
+      'done < <(printf %s "$REQUIRED_PATHS" | base64 -d)',
+      // Count pruned directory roots, not every file below them: the count is
+      // useful and bounded work even when a dependency tree holds millions.
+      `while IFS= read -r -d "" DIR; do REL=\${DIR#"$ROOT"/}; required_directory "$REL" || IGNORED=$((IGNORED + 1)); done < <(find "$ROOT" \\( -path "$ROOT/${WORKSPACE_GENERATIONS_DIR}" -o -path "$ROOT/${WORKSPACE_SYNC_DIR}" -o -path "$ROOT/.frockbot-locks" \\) -prune -o -type d \\( ${ignoredExpression} \\) -print0 -prune)`,
       `GRAVES="$ROOT/${WORKSPACE_SYNC_DIR}/${SYNC_TOMBSTONES_DIR}"`,
-      'find "$GRAVES" -type f -print0 | sort -z | while IFS= read -r -d "" FILE; do',
+      'while IFS= read -r -d "" FILE; do',
       '  REL=${FILE#"$GRAVES"/}',
-      '  printf "T\\t%s\\t%s\\n" "$(printf %s "$REL" | base64 -w0)" "$(base64 -w0 "$FILE")"',
-      "done",
+      '  if ignored_relative "$REL"; then IGNORED=$((IGNORED + 1)); continue; fi',
+      '  printf -v ROW "T\\t%s\\t%s" "$(printf %s "$REL" | base64 -w0)" "$(base64 -w0 "$FILE")"',
+      '  append_manifest "$ROW"',
+      'done < <(find "$GRAVES" -type f -print0 | sort -z)',
       `METAS="$ROOT/${WORKSPACE_GENERATIONS_DIR}"`,
-      'find "$METAS" -type f -print0 | sort -z | while IFS= read -r -d "" FILE; do',
+      'while IFS= read -r -d "" FILE; do',
       '  REL=${FILE#"$METAS"/}',
+      '  if ignored_relative "$REL"; then IGNORED=$((IGNORED + 1)); continue; fi',
       '  if [ -f "$ROOT/$REL" ]; then continue; fi',
-      '  printf "S\\t%s\\t%s\\n" "$(printf %s "$REL" | base64 -w0)" "$(base64 -w0 "$FILE")"',
-      "done",
+      '  printf -v ROW "S\\t%s\\t%s" "$(printf %s "$REL" | base64 -w0)" "$(base64 -w0 "$FILE")"',
+      '  append_manifest "$ROW"',
+      'done < <(find "$METAS" -type f -print0 | sort -z)',
+      `while IFS= read -r -d "" FILE; do`,
+      '  REL=${FILE#"$ROOT"/}',
+      '  if [ "$SATURATED" -eq 1 ]; then OMITTED=$((OMITTED + 1)); continue; fi',
+      `  META="$ROOT/${WORKSPACE_GENERATIONS_DIR}/$REL"`,
+      '  printf -v ROW "F\\t%s\\t%s\\t%s\\t%s" "$(printf %s "$REL" | base64 -w0)" "$({ cat "$META" 2>/dev/null || printf \'\'; } | base64 -w0)" "$(sha256sum "$FILE" | cut -d" " -f1)" "$(stat -c %s "$FILE")"',
+      '  append_manifest "$ROW"',
+      `done < <(find "$ROOT" \\( -path "$ROOT/${WORKSPACE_GENERATIONS_DIR}" -o -path "$ROOT/${WORKSPACE_SYNC_DIR}" -o -path "$ROOT/.frockbot-locks" -o -type d \\( ${ignoredExpression} \\) \\) -prune -o -type f -print0 | sort -z)`,
+      'cat "$MANIFEST"',
+      'printf "X\\t%s\\t%s\\n" "$IGNORED" "$OMITTED"',
     ].join("\n");
     const output = await this.run(script);
     if (typeof output !== "string") return output;
     const entries: ComputerSyncEntryV1[] = [];
     const removed = new Map<string, ComputerSyncRemovalV1>();
+    let ignored = 0;
+    let omitted = 0;
     for (const row of output.split("\n")) {
       if (!row.trim()) continue;
       const [tag, encodedPath, second = "", third = "", fourth = ""] =
         row.split("\t");
       if (!encodedPath) continue;
+      if (tag === "X") {
+        ignored = Number(encodedPath);
+        omitted = Number(second);
+        continue;
+      }
       const path = Buffer.from(encodedPath, "base64").toString("utf8");
       const relative = this.relative(path);
       if (typeof relative !== "string") continue;
@@ -955,7 +1128,7 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     }
     return {
       status: "ok",
-      scan: { entries, removed: [...removed.values()] },
+      scan: { entries, removed: [...removed.values()], ignored, omitted },
     };
   }
 

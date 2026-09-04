@@ -38,9 +38,9 @@ export type StoredRunStatus =
  * decision to interrupt is made in the admission transaction and has to
  * survive eviction alongside the run it interrupted.
  */
-export type RunLaneV1 = "user" | "background";
+export type RunLaneV1 = "user" | "agent" | "background";
 
-const RUN_LANES_V1: readonly RunLaneV1[] = ["user", "background"];
+const RUN_LANES_V1: readonly RunLaneV1[] = ["user", "agent", "background"];
 
 /**
  * The lane a turn type belongs to when its record names none. Chat is the
@@ -48,7 +48,8 @@ const RUN_LANES_V1: readonly RunLaneV1[] = ["user", "background"];
  * Bot started for itself.
  */
 export function defaultRunLaneV1(turnType: TurnTypeV1): RunLaneV1 {
-  return turnType === "chat" ? "user" : "background";
+  if (turnType === "chat") return "user";
+  return turnType === "agent" ? "agent" : "background";
 }
 
 export type StoredEffectAdmissionOutcome = "admitted" | "fenced";
@@ -85,9 +86,26 @@ export interface StoredRunSubagentOriginV1 {
   parentRunId: string;
 }
 
+/** A same-User Bot asking this Bot a question. */
+export interface StoredRunBotOriginV1 {
+  kind: "bot";
+  fromBotId: string;
+  fromBotName: string;
+  messageId: string;
+}
+
+/** The Voice Package asking this Bot on behalf of its User. */
+export interface StoredRunVoiceOriginV1 {
+  kind: "voice";
+  messageId: string;
+}
+
 /** What produced a Turn, when it was not a person speaking to the Bot. */
 export type StoredRunOriginV1 =
-  StoredRunRoutineOriginV1 | StoredRunSubagentOriginV1;
+  | StoredRunRoutineOriginV1
+  | StoredRunSubagentOriginV1
+  | StoredRunBotOriginV1
+  | StoredRunVoiceOriginV1;
 
 const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunTriggerV1[] = [
   "cron",
@@ -435,6 +453,33 @@ function decodeStoredRunOrigin(
       taskId: candidate.taskId,
       parentRunId: candidate.parentRunId,
     };
+  }
+  if (candidate.kind === "bot") {
+    requireExactOriginFields(
+      candidate,
+      ["kind", "fromBotId", "fromBotName", "messageId"],
+      runId,
+    );
+    if (
+      !boundedString(candidate.fromBotId, 128) ||
+      !boundedString(candidate.fromBotName, 100) ||
+      !boundedString(candidate.messageId, 256)
+    ) {
+      throw new Error(`run "${runId}" has an invalid admission origin`);
+    }
+    return {
+      kind: "bot",
+      fromBotId: candidate.fromBotId,
+      fromBotName: candidate.fromBotName,
+      messageId: candidate.messageId,
+    };
+  }
+  if (candidate.kind === "voice") {
+    requireExactOriginFields(candidate, ["kind", "messageId"], runId);
+    if (!boundedString(candidate.messageId, 256)) {
+      throw new Error(`run "${runId}" has an invalid admission origin id`);
+    }
+    return { kind: "voice", messageId: candidate.messageId };
   }
   if (candidate.kind !== "routine") {
     throw new Error(`run "${runId}" has an invalid admission origin kind`);
