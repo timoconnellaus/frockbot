@@ -5,6 +5,7 @@
     "": {
       "name": "frockbot",
       "devDependencies": {
+        "@playwright/test": "1.62.1",
         "@types/bun": "1.4.0",
         "@types/css-tree": "2.3.11",
         "@vue/compiler-sfc": "3.5.41",
