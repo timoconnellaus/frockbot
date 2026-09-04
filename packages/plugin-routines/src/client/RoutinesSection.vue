@@ -12,6 +12,10 @@ import {
   UiField,
   UiIcon,
 } from "@frockbot/client-ui";
+import {
+  presentClientFailureV1,
+  serverRefusalMessageV1,
+} from "@frockbot/client-core";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { computed, inject, reactive, ref, watch } from "vue";
@@ -173,10 +177,15 @@ async function submit(): Promise<void> {
     // The form stays open and holds the reason itself, beside the field that
     // caused it. The section header keeps its copy for the reader who scrolls
     // back up, but the form no longer refuses in silence.
+    //
+    // A refused save is the deployment explaining a rule it holds — which
+    // field is wrong and why — so its own sentence is what belongs here. A
+    // fault carries no such sentence, and the classified failure's short one
+    // is what a person can act on instead of a stack's worth of plumbing.
     saveError.value =
-      error instanceof Error
-        ? error.message
-        : (routines.value.error ?? "Could not save the Routine");
+      serverRefusalMessageV1(error) ??
+      routines.value.error ??
+      presentClientFailureV1(error, "save the Routine");
   }
 }
 
@@ -523,10 +532,22 @@ async function toggleLog(routineId: string): Promise<void> {
   gap: 12px;
 }
 
+/*
+ * The section head wraps rather than squeezing its own description. With the
+ * action fixed at its intrinsic width, the sentence was folded into a ~180px
+ * ribbon while a quarter of the panel sat empty beside it; below that basis
+ * the action takes its own line instead.
+ */
 .routines__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.routines__header > :deep(.ui-button),
+.routines__header > button {
+  margin-left: auto;
 }
 
 .routines__icon {
@@ -544,7 +565,7 @@ async function toggleLog(routineId: string): Promise<void> {
 .routines__intro {
   display: flex;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1 1 14rem;
   flex-direction: column;
 }
 

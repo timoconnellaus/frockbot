@@ -83,3 +83,28 @@ export function runFailureCopyV1(input: {
   const outcome = terminalTurnOutcomeV1(input.events ?? []);
   return outcome ? RUN_FAILURE_COPY_V1[outcome] : RUN_FAILURE_FALLBACK_COPY_V1;
 }
+
+/**
+ * The product's own sentences, as a set a client can check a string against.
+ *
+ * The projection maps every failure through {@link runFailureCopyV1} on the way
+ * to the wire, so what reaches a client is already copy. The client still must
+ * not *trust* that: a `ClientRun` can arrive from an older backend that
+ * forwarded the raw diagnostic, and a provider's words under a bubble read as
+ * part of what the Bot was saying. So the thread accepts a failure only when it
+ * recognises it as something the product wrote, and otherwise says the generic
+ * line — which keeps the specific sentences (the model deadlines say something
+ * the outcome alone cannot) without ever letting an unknown string through.
+ */
+const KNOWN_FAILURE_COPY_V1 = new Set<string>([
+  ...Object.values(RUN_FAILURE_COPY_V1),
+  ...USER_FACING_FAILURE_REASONS_V1,
+  RUN_FAILURE_FALLBACK_COPY_V1,
+]);
+
+/** The failure if the product wrote it, else the line every failure can use. */
+export function knownFailureCopyV1(failure: string | undefined): string {
+  return failure && KNOWN_FAILURE_COPY_V1.has(failure)
+    ? failure
+    : RUN_FAILURE_FALLBACK_COPY_V1;
+}

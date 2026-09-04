@@ -65,13 +65,36 @@ async function signOut(): Promise<void> {
   }
 }
 
-onMounted(() => window.addEventListener("pointerdown", closeMenu));
-onBeforeUnmount(() => window.removeEventListener("pointerdown", closeMenu));
+/*
+ * Escape closes this menu, as it closes every other overlay in the product.
+ * It is bound on the window rather than on the element because the menu can
+ * be open while focus is still on the trigger, and because a menu that only
+ * an outside click dismisses is a trap for anyone not using a mouse. Focus
+ * goes back to the trigger, which is where it came from.
+ */
+const trigger = ref<HTMLButtonElement>();
+
+function onWindowKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Escape" || !menuOpen.value) return;
+  event.preventDefault();
+  closeMenu();
+  trigger.value?.focus();
+}
+
+onMounted(() => {
+  window.addEventListener("pointerdown", closeMenu);
+  window.addEventListener("keydown", onWindowKeydown);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("pointerdown", closeMenu);
+  window.removeEventListener("keydown", onWindowKeydown);
+});
 </script>
 
 <template>
   <div class="profile-area" @pointerdown.stop>
     <button
+      ref="trigger"
       class="profile-trigger"
       type="button"
       :aria-expanded="menuOpen"

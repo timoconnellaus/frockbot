@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/kernel-contracts";
 import { MODEL_FIRST_BYTE_DEADLINE_REASON_V1 } from "@frockbot/kernel-contracts";
 import {
+  knownFailureCopyV1,
   RUN_FAILURE_COPY_V1,
   RUN_FAILURE_FALLBACK_COPY_V1,
   runFailureCopyV1,
@@ -101,6 +102,29 @@ describe("runFailureCopyV1", () => {
     expect(runFailureCopyV1({ failure: "boom" })).toBe(
       RUN_FAILURE_FALLBACK_COPY_V1,
     );
+  });
+
+  // The client's own guard, because a `ClientRun` can arrive from an older
+  // backend that forwarded the raw diagnostic, and the thread must not render
+  // a provider's words as though the Bot said them.
+  test("the thread accepts only sentences the product wrote", () => {
+    for (const written of [
+      ...Object.values(RUN_FAILURE_COPY_V1),
+      ...USER_FACING_FAILURE_REASONS_V1,
+    ]) {
+      expect(knownFailureCopyV1(written)).toBe(written);
+    }
+    for (const diagnostic of [
+      undefined,
+      "",
+      "Provider reconciliation is required",
+      "Bot turn ended with outcome model-error: Model request failed (401)",
+      'Skill "bot/no-such-skill" is unknown',
+    ]) {
+      const copy = knownFailureCopyV1(diagnostic);
+      expect(copy).toBe(RUN_FAILURE_FALLBACK_COPY_V1);
+      assertPlainV1(copy);
+    }
   });
 
   test("the projection sends the copy, not the diagnostic", () => {

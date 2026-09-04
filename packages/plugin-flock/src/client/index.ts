@@ -50,6 +50,10 @@ import { flockWebDataKey, type FlockWebData } from "./state.js";
 import "../../assets/layers.css";
 import "./styles.css";
 import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import {
+  clientFailureDetailV1,
+  presentClientFailureV1,
+} from "@frockbot/client-core";
 
 function slug(name: string): string {
   const base =
@@ -270,6 +274,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         authenticatedUserId = userId;
         state.value.directory = directory;
         state.value.loaded = true;
+        if (shell) shell.value.botsUnavailable = false;
         state.value.lifecycles = Object.fromEntries(
           lifecycleDirectory.lifecycles.map((item) => [
             item.botId,
@@ -361,8 +366,14 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         else if (!selected && state.value.directory.bots.length === 0)
           state.value.openCreate();
       } catch (error) {
-        state.value.error =
-          error instanceof Error ? error.message : "Could not load your flock";
+        // The list already on screen is the last thing known to be true, so a
+        // failed refresh leaves it alone and says so instead. A transport
+        // failure that emptied the sidebar would read as data loss.
+        state.value.error = presentClientFailureV1(error, "load your Bots");
+        console.debug("flock load failed", clientFailureDetailV1(error));
+        // Tell the workspace the list is unknown, so it stops offering the
+        // first-run empty state to a User who may already have Bots.
+        if (shell && !state.value.loaded) shell.value.botsUnavailable = true;
       } finally {
         if (generation === loadGeneration) state.value.loading = false;
       }
@@ -544,8 +555,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         shell?.value.transcripts.forget(botId);
         await state.value.load();
       } catch (error) {
-        state.value.error =
-          error instanceof Error ? error.message : "Could not archive Bot";
+        state.value.error = presentClientFailureV1(error, "archive this Bot");
+        console.debug("bot archive failed", clientFailureDetailV1(error));
       }
     },
     async restore(botId) {
@@ -571,8 +582,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         shell?.value.transcripts.forget(botId);
         await state.value.load();
       } catch (error) {
-        state.value.error =
-          error instanceof Error ? error.message : "Could not restore Bot";
+        state.value.error = presentClientFailureV1(error, "restore this Bot");
+        console.debug("bot restore failed", clientFailureDetailV1(error));
       }
     },
     async openEdit() {
@@ -612,10 +623,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           );
           state.value.identities[botId] = identity;
         } catch (error) {
-          state.value.error =
-            error instanceof Error
-              ? error.message
-              : "Couldn't finish saving your last change.";
+          state.value.error = presentClientFailureV1(error, "load this sheep");
+          console.debug("sheep refresh failed", clientFailureDetailV1(error));
           return;
         }
       }
@@ -666,8 +675,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       } catch (error) {
         if (isDefinitiveFlockFailure(error) && authenticatedUserId)
           clearPendingCreate(authenticatedUserId);
-        state.value.error =
-          error instanceof Error ? error.message : "Could not create Bot";
+        state.value.error = presentClientFailureV1(error, "create the Bot");
+        console.debug("bot creation failed", clientFailureDetailV1(error));
       }
     },
     async saveSheep() {
@@ -728,8 +737,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
             /* Keep the exact pending command when reconciliation is uncertain. */
           }
         }
-        state.value.error =
-          error instanceof Error ? error.message : "Could not save sheep";
+        state.value.error = presentClientFailureV1(error, "save the sheep");
+        console.debug("sheep save failed", clientFailureDetailV1(error));
       }
     },
   });

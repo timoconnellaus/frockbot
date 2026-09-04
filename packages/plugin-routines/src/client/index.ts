@@ -6,7 +6,10 @@
 // become an alternate authority." Every write here is one `POST` of one
 // versioned command with its own idempotency key, and every read is decoded at
 // the seam before a component sees it.
-import type { ClientPlugin } from "@frockbot/client-core";
+import {
+  serverRefusalMessageV1,
+  type ClientPlugin,
+} from "@frockbot/client-core";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { ref, watch } from "vue";
 import {
@@ -27,7 +30,17 @@ import {
 } from "./state.js";
 import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
 
+/*
+ * A refusal's own sentence first, then a presentable one.
+ *
+ * A validator that rejects a schedule says why in words meant for the person
+ * writing it — "cron expression ... must have five fields". That sentence is
+ * the answer, so it goes on screen unchanged. Anything else is plumbing, and
+ * `.message` on a classified failure is already the short sentence for it.
+ */
 function message(error: unknown, fallback: string): string {
+  const refusal = serverRefusalMessageV1(error);
+  if (refusal !== undefined) return refusal;
   return error instanceof Error ? error.message : fallback;
 }
 

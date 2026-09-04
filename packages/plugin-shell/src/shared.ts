@@ -272,6 +272,14 @@ export interface FrockBotWebData {
   runningRunId?: string;
   activeRun?: WebActiveRun;
   error?: string;
+  /**
+   * The Bot list could not be read, so "no Bot is open" means "we do not know
+   * yet" rather than "this account has none". Set by whichever Package owns
+   * the list. Without it a transport failure reads as data loss: the
+   * first-run empty state offering to add a first Bot to a User who has
+   * several is the worst thing this surface can say.
+   */
+  botsUnavailable?: boolean;
   botSettings?: BotSettingsViewV1;
   userSettings?: UserSettingsViewV1;
   pluginCatalog: PluginCatalogItem[];
