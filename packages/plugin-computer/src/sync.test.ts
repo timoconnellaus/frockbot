@@ -254,6 +254,34 @@ describe("the Computer Package as the sync's caller", () => {
     ]);
     expect(syncEvents(events)[0]?.detail).toContain("paused");
   });
+
+  test("records every incomplete sync operation in one Turn", async () => {
+    const { provider, signal } = fixture(() => ({
+      ...computerSyncSummaryV1(
+        "degraded",
+        "Excluded 1 reproducible Workspace item from sync.",
+      ),
+      ignored: 1,
+    }));
+    const model = modelRunning(["first", "second"], (step) => {
+      if (step === 2) signal.value = "signal-2";
+    });
+
+    const events = await runTurn(provider, model);
+
+    expect(
+      syncEvents(events).map((event) => ({
+        reason: event.reason,
+        status: event.status,
+        ignored: event.ignored,
+        omitted: event.omitted,
+      })),
+    ).toEqual([
+      { reason: "open", status: "degraded", ignored: 1, omitted: 0 },
+      { reason: "signal", status: "degraded", ignored: 1, omitted: 0 },
+      { reason: "turn-end", status: "degraded", ignored: 1, omitted: 0 },
+    ]);
+  });
 });
 
 /**
@@ -298,8 +326,9 @@ describe("syncWorkspaceRootNowV1", () => {
         calls.push("reconcile");
         return Promise.resolve(computerSyncSummaryV1("ok"));
       },
-      reconcileRoot: (asked, reason) => {
+      reconcileRoot: (asked, reason, options) => {
         calls.push(`reconcileRoot:${reason}:${asked.kind}`);
+        calls.push(`required:${options?.requiredPaths?.join(",") ?? ""}`);
         return Promise.resolve({ ...computerSyncSummaryV1("ok"), pushed: 1 });
       },
       signal: () => Promise.resolve(undefined),
@@ -312,12 +341,16 @@ describe("syncWorkspaceRootNowV1", () => {
       sessionId: "session-1",
       turn: 3,
       root: appletsRoot,
+      requiredPaths: ["todo/dist/server.js", "todo/dist/ui.html"],
     });
 
     expect(summary.status).toBe("ok");
     // One root, never the whole Workspace: the Turn's own policy still owns
     // `open`, `signal`, and `turn-end`, and this borrows none of them.
-    expect(calls).toEqual(["reconcileRoot:publish:package-declared"]);
+    expect(calls).toEqual([
+      "reconcileRoot:publish:package-declared",
+      "required:todo/dist/server.js,todo/dist/ui.html",
+    ]);
     const recorded = syncEvents([...harness.session.events]);
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({

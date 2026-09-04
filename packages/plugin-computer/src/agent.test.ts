@@ -108,6 +108,78 @@ describe("computer agent contribution", () => {
     await harness.dispose();
   });
 
+  test("computer_browser says which field a click is missing and takes label as name", async () => {
+    const calls: string[] = [];
+    const provider: ComputerProvider = {
+      id: "fixture",
+      open: async (identity, tenant, assignment) => ({
+        assignment,
+        identity,
+        tenant,
+        exec: {
+          execute: async () => ({
+            exitCode: 0,
+            stdout: new Uint8Array(),
+            stderr: new Uint8Array(),
+            outputTruncated: false,
+          }),
+        },
+        browser: {
+          perform: async (action) => {
+            calls.push(JSON.stringify(action));
+            return { accessibilitySnapshot: 'checkbox "Mark done"' };
+          },
+        },
+        close: () => Promise.resolve(),
+      }),
+    };
+    const harness = await createPluginHarness([
+      ComputerRegistry,
+      ToolRegistry,
+      SystemPromptRegistry,
+      SessionStore,
+    ]);
+    harness.root.computers.register(provider);
+    await harness.mount(
+      createComputerAgentPlugin({
+        userId: "user-1",
+        defaultProviderId: "fixture",
+      }),
+    );
+
+    // Bob's first three attempts on production, in order.
+    const onlyName = await execute(harness, "computer_browser", {
+      action: "click",
+      name: "Add",
+    });
+    expect(onlyName.isError).toBe(true);
+    expect(onlyName.content).toContain("role and name are both required");
+    expect(onlyName.content).toContain('"role":"button"');
+
+    const onlyLabel = await execute(harness, "computer_browser", {
+      action: "click",
+      label: "Add",
+    });
+    expect(onlyLabel.isError).toBe(true);
+
+    const labelWithRole = await execute(harness, "computer_browser", {
+      action: "click",
+      label: "Mark done",
+      role: "checkbox",
+    });
+    expect(labelWithRole.isError).toBe(false);
+    expect(calls).toEqual([
+      JSON.stringify({ type: "click", role: "checkbox", name: "Mark done" }),
+    ]);
+
+    const unknown = await execute(harness, "computer_browser", {
+      action: "hover",
+    });
+    expect(unknown.isError).toBe(true);
+    expect(unknown.content).toContain('"action" must be one of');
+    await harness.dispose();
+  });
+
   test("computer_exec during an update returns an actionable tool failure", async () => {
     const provider: ComputerProvider = {
       id: "fixture",

@@ -573,6 +573,7 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     return new Response(
       'data: {"choices":[{"delta":{"content":"Ollama reply"}}]}\n\n' +
         'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
+        'data: {"choices":[],"prompt_eval_count":20,"eval_count":6}\n\n' +
         "data: [DONE]\n\n",
       { status: 200, headers: { "content-type": "text/event-stream" } },
     );

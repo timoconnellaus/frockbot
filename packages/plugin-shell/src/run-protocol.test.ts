@@ -24,6 +24,7 @@ import {
   projectClientRunLookupV1,
   projectClientRunListV1,
   projectClientRunV1,
+  isVisibleRunV1,
   projectClientRunOrDegradedV1,
   projectClientTurnV1,
   UNRECORDED_TOOL_RESULT_TEXT_V1,
@@ -88,6 +89,37 @@ function storedRun(
 }
 
 describe("client run protocol v1", () => {
+  test("projects an agent Turn with its Bot origin marker", () => {
+    const agent = {
+      ...storedRun([]),
+      admission: {
+        schemaVersion: 1 as const,
+        turnType: "agent" as const,
+        origin: {
+          kind: "bot" as const,
+          fromBotId: "researcher",
+          fromBotName: "Researcher",
+          messageId: "message-1",
+        },
+      },
+    };
+
+    expect(isVisibleRunV1(agent)).toBe(true);
+    const projected = projectClientRunV1(agent);
+    expect(projected).toMatchObject({
+      schemaVersion: 3,
+      input: "continue",
+      via: { kind: "bot", name: "Researcher", botId: "researcher" },
+    });
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [projected],
+        page: { truncated: false },
+      })[0]?.via,
+    ).toEqual(projected.via);
+  });
+
   test("rejects durable runs missing current admission fields", () => {
     const complete = storedRun([], "running");
     for (const field of [
@@ -728,7 +760,7 @@ describe("client run protocol v1", () => {
       schemaVersion: 1,
       runs: [
         {
-          schemaVersion: 2,
+          schemaVersion: 3,
           runId: "run-1",
           admittedAt: timestamp,
           input: "continue",
@@ -977,9 +1009,8 @@ describe("client run protocol v1", () => {
       ]),
     );
 
-    // Version 2 is what carries the two new event types; a client pinned to 1
-    // still decodes the body it produces.
-    expect(projected.schemaVersion).toBe(2);
+    // Version 3 carries agent-origin markers; older bodies still decode.
+    expect(projected.schemaVersion).toBe(3);
     expect(projected.events).toEqual([
       { type: "send/to-user", payload: { type: "text", text: "On it." } },
       { type: "tool/call", call: { id: "tool-1", name: "lookup" } },
@@ -1612,5 +1643,43 @@ describe("dispatched subagents in the run projection", () => {
     expect(() => decodeClientRunPageV1(tampered)).toThrow(
       "run event.background must be a boolean",
     );
+  });
+});
+
+describe("Computer sync degradation in the run projection", () => {
+  const degraded: SessionEvent = {
+    type: "computer/sync",
+    seq: 4,
+    timestamp,
+    turn: 1,
+    reason: "open",
+    status: "degraded",
+    detail: "Excluded 2 reproducible Workspace items from sync.",
+    pulled: 0,
+    pushed: 1,
+    restored: 0,
+    removed: 0,
+    adopted: 0,
+    conflicts: 0,
+    failures: 0,
+    ignored: 2,
+    omitted: 0,
+  };
+
+  test("projects one plain-language event and round-trips it", () => {
+    const projected = projectClientRunV1(
+      storedRun([degraded, { ...degraded, seq: 5, reason: "turn-end" }]),
+    );
+    expect(projected.events).toEqual([
+      {
+        type: "computer/sync",
+        status: "degraded",
+        message: "Excluded 2 reproducible Workspace items from sync.",
+      },
+    ]);
+    const page = createClientRunListV1([projected], { truncated: false });
+    expect(
+      decodeClientRunPageV1(structuredClone(page)).runs[0]?.events,
+    ).toEqual(projected.events);
   });
 });

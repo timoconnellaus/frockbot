@@ -294,6 +294,7 @@ describe("Frock AI runtime Contribution", () => {
             sse(
               'data: {"choices":[{"delta":{"content":"Working"}}]}\n\n' +
                 'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"weather","arguments":"{\\"city\\":\\"Sydney\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n' +
+                'data: {"choices":[],"usage":{"input_tokens":18,"output_tokens":6,"input_tokens_details":{"cached_tokens":4},"output_tokens_details":{"reasoning_tokens":2}}}\n\n' +
                 "data: [DONE]\n\n",
             ),
           );
@@ -314,6 +315,7 @@ describe("Frock AI runtime Contribution", () => {
         gatewayModel: "dynamic/configured-auto",
         body: {
           stream: true,
+          stream_options: { include_usage: true },
           messages: [
             { role: "system", content: "Be concise." },
             { role: "user", content: "hello" },
@@ -333,6 +335,15 @@ describe("Frock AI runtime Contribution", () => {
     ]);
     expect(events).toEqual([
       { type: "text-delta", text: "Working" },
+      {
+        type: "usage",
+        usage: {
+          inputTokens: 18,
+          outputTokens: 6,
+          cachedInputTokens: 4,
+          reasoningTokens: 2,
+        },
+      },
       {
         type: "tool-call",
         call: {

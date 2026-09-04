@@ -112,6 +112,11 @@ export interface ShellCompositionMountOptions {
   agentPackages?: readonly FoundationAgentPackage[];
   modelSelection?: RuntimeModelSelection;
   systemPromptSection?: string;
+  /** Called after the loop has flushed `turn/end`; errors are non-fatal. */
+  onTurnStopping?(input: {
+    turn: number;
+    events: readonly SessionEvent[];
+  }): Promise<void>;
   /**
    * Durably linearizes each provider or tool effect against Stop immediately
    * before it is used. The Bot Durable Object owns the transaction; the mounted
@@ -180,6 +185,20 @@ export function createShellCompositionHost(
         ...(options.turnType ? { turnType: options.turnType } : {}),
         ...(options.subagentRole ? { subagentRole: options.subagentRole } : {}),
       });
+      const disposeTurnStopping = options.onTurnStopping
+        ? runtime.root.on("agent/turn-stopping", async (agent, turn) => {
+            try {
+              await options.onTurnStopping!({
+                turn,
+                events: structuredClone(agent.session.events),
+              });
+            } catch {
+              // Accounting is a durable projection. Its own outbox exposes a
+              // gap; it can never turn a completed model response into a
+              // failed conversation Turn.
+            }
+          })
+        : undefined;
 
       const isolateMembers = generation.members.filter(
         (member) => member.artifact !== undefined,
@@ -290,6 +309,7 @@ export function createShellCompositionHost(
       }
 
       const dispose = async () => {
+        disposeTurnStopping?.();
         for (const unregister of unregisterApplets.toReversed()) unregister();
         for (const contribution of active.toReversed()) {
           await contribution.dispose();

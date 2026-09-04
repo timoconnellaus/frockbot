@@ -27,6 +27,8 @@ function surface(
         },
       ]),
     listBots: (userId) => Promise.resolve({ schemaVersion: 1, userId }),
+    readUsage: (userId) =>
+      Promise.resolve({ schemaVersion: 1, userId, costMicros: 42 }),
     snapshot: (userId, botId, query) => {
       snapshots.push({ userId, botId, query });
       return Promise.resolve({ schemaVersion: 1, botId });
@@ -176,6 +178,20 @@ describe("debug route", () => {
         query: { schemaVersion: 1, limit: 3, events: true },
       },
     ]);
+  });
+
+  test("reads the User spend ledger", async () => {
+    const route = createDebugRoute(surface());
+    const request = get("/api/debug/usage?userId=user-1", authorized);
+
+    const response = await route(request, new URL(request.url));
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({
+      schemaVersion: 1,
+      userId: "user-1",
+      costMicros: 42,
+    });
   });
 
   test("reads one run by id", async () => {

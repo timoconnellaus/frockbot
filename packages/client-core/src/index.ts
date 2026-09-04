@@ -44,6 +44,8 @@ import {
 
 export interface ClientTurnEvent {
   type: string;
+  /** A standalone event status, such as a projected Computer sync outcome. */
+  status?: string;
   call?: { id: string; name: string; input?: unknown };
   callId?: string;
   content?: string;
@@ -159,6 +161,10 @@ export interface ClientRun {
    */
   partialText?: string;
   recovery?: { action: "resume"; message: string };
+  /** Source marker for a message admitted on the agent lane. */
+  via?:
+    | { kind: "bot"; name: string; botId: string }
+    | { kind: "voice"; name: "Voice" };
 }
 
 /**

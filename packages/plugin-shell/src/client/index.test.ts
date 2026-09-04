@@ -95,6 +95,40 @@ afterEach(() => {
   }
 });
 
+test("a degraded Computer sync is a notice beneath the Turn once", () => {
+  const state: Pick<
+    FrockBotWebData,
+    "messages" | "activeRunId" | "runningRunId" | "activeRun"
+  > = { messages: [] };
+
+  projectDurableRuns(
+    state,
+    [],
+    [
+      {
+        runId: "run-sync",
+        input: "build the applet",
+        status: "completed",
+        responseText: "The Applet is ready.",
+        events: [
+          {
+            type: "computer/sync",
+            status: "degraded",
+            message: "Excluded 1 reproducible Workspace item from sync.",
+          },
+        ],
+      },
+    ],
+  );
+
+  expect(state.messages).toHaveLength(2);
+  expect(state.messages[1]).toMatchObject({
+    role: "assistant",
+    text: "The Applet is ready.",
+    notice: "Excluded 1 reproducible Workspace item from sync.",
+  });
+});
+
 describe("application manifest protocol", () => {
   const emptyManifest = {
     schemaVersion: 1,
@@ -1449,6 +1483,33 @@ describe("active durable Turn projection", () => {
     expect(state.activeRun).toBeUndefined();
     expect(state.messages).toHaveLength(2);
     expect(state.messages[1]).toMatchObject({ text: "", status: "streaming" });
+  });
+
+  test("keeps the source marker on an agent-origin user bubble", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-agent",
+          input: "What changed?",
+          events: [],
+          status: "completed",
+          responseText: "The answer",
+          via: { kind: "bot", name: "Researcher", botId: "researcher" },
+        },
+      ],
+    );
+
+    expect(state.messages[0]).toMatchObject({
+      role: "user",
+      text: "What changed?",
+      via: { kind: "bot", name: "Researcher" },
+    });
   });
 
   test("projects dispatched subagents as chips, and skips one it cannot draw", () => {
