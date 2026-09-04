@@ -6,6 +6,7 @@ import {
 import { type Agent } from "@frockbot/kernel-agent-loop/agent";
 import type { CredentialLeaseV1 } from "@frockbot/connection-core";
 import {
+  type ModelRequestDeadlineOptionsV1,
   OpenAICompatibleHttpError,
   OpenAICompatibleProvider,
 } from "@frockbot/provider-openai-compatible";
@@ -58,6 +59,12 @@ export interface OllamaCloudRuntimeConfig {
   chatBaseUrl?: string;
   fetch?: OllamaFetch;
   now?: () => number;
+  /**
+   * Deadline overrides and the timer seam behind them, forwarded to the shared
+   * OpenAI-compatible transport. Without forwarding, the deadlines are real but
+   * only reachable by waiting two minutes for one.
+   */
+  deadlines?: ModelRequestDeadlineOptionsV1;
 }
 
 /** Compose the OpenAI-compatible chat root from a Connection endpoint root. */
@@ -156,6 +163,12 @@ class OllamaCloudProvider implements LlmProvider {
       apiKey: authorization.apiKey,
       providerId: this.id,
       fetch: this.config.fetch,
+      ...(this.config.deadlines?.deadlines
+        ? { deadlines: this.config.deadlines.deadlines }
+        : {}),
+      ...(this.config.deadlines?.schedule
+        ? { schedule: this.config.deadlines.schedule }
+        : {}),
     });
     try {
       yield* provider.stream(request, signal);

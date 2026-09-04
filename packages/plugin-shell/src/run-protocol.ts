@@ -422,6 +422,14 @@ interface ProjectionUnitV1 {
   droppable: boolean;
 }
 
+/**
+ * What a settled Turn's tool call shows when the durable record holds no
+ * result for it. Same register as the rest of the transcript copy: it tells
+ * the person what is missing rather than naming an occurrence id.
+ */
+export const UNRECORDED_TOOL_RESULT_TEXT_V1 =
+  "No result was recorded for this tool call.";
+
 function dynamicToolCallInput(
   value: unknown,
 ): ClientDynamicToolCallInputV1 | undefined {
@@ -580,12 +588,23 @@ function projectionUnits(
     }
   }
   if (isTerminalRunStatus(status)) {
-    const orphaned = units.find((unit) => !unit.droppable);
-    if (orphaned) {
-      const call = orphaned.events[0] as ClientToolCallV1;
-      throw new Error(
-        `terminal run has no result for tool call "${call.call.id}"`,
-      );
+    for (const unit of units) {
+      if (unit.droppable) continue;
+      // A settled Turn owes every tool call a result, and `Session`'s
+      // interruption repairs now write one. Records already durable from
+      // before that do not have it, and a READ must never throw on them: one
+      // malformed row used to brick the whole transcript endpoint for ever.
+      // The row degrades instead, and says exactly what is missing — not
+      // through `projectClientRunOrDegradedV1`, which throws the whole Turn
+      // away for an unreadable record. Everything else here is readable.
+      const call = unit.events[0] as ClientToolCallV1;
+      unit.events.push({
+        type: "tool/result",
+        callId: call.call.id,
+        content: UNRECORDED_TOOL_RESULT_TEXT_V1,
+        isError: true,
+      });
+      unit.droppable = true;
     }
   }
   return units;
@@ -1059,10 +1078,12 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
   throw new Error("run event.type is invalid");
 }
 
-function decodeEvents(
-  values: unknown[],
-  runStatus: ClientRunStatusV1,
-): ClientTurnEvent[] {
+/**
+ * The event walk a wire run is decoded through. It no longer takes the run's
+ * status: a settled Turn's tool call with no result is a row the projection
+ * has already degraded, not a message to refuse.
+ */
+function decodeEvents(values: unknown[]): ClientTurnEvent[] {
   const events = values.map(decodeEvent);
   let index = 0;
   if (events[0]?.type === "run/events-truncated") index = 1;
@@ -1100,9 +1121,10 @@ function decodeEvents(
       index += 2;
       continue;
     }
-    if (isTerminalRunStatus(runStatus)) {
-      throw new Error(`terminal run has no result for tool call "${id}"`);
-    }
+    // A settled Turn whose call has no result is a degraded row, not a bad
+    // wire message: the projection above already renders it as "no result
+    // recorded", and refusing it here would put the whole transcript behind
+    // one durable record nobody can now repair.
     index += 1;
   }
   return events;
@@ -1252,7 +1274,7 @@ function decodeRun(value: unknown): ClientRun {
     admittedAt,
     input: wireString(run, "input", MAX_INPUT_BYTES, "run"),
     status: runStatus,
-    events: decodeEvents(run.events, runStatus),
+    events: decodeEvents(run.events),
     ...(stopRequestedAt ? { stopRequestedAt } : {}),
     ...(run.queued === true ? { queued: true as const } : {}),
     ...(outcome?.type === "completed" ? { responseText: outcome.text } : {}),
@@ -1376,7 +1398,7 @@ export function decodeClientTurnV1(input: unknown): ClientTurnResponse {
   return {
     runId,
     text: wireString(turn, "text", MAX_OUTCOME_BYTES, "turn"),
-    events: decodeEvents(turn.events, "completed"),
+    events: decodeEvents(turn.events),
     ...(notification ? { notification } : {}),
   };
 }

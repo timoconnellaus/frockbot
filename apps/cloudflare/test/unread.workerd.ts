@@ -30,7 +30,12 @@ interface UnreadRpc {
   }>;
   executeUnreadCommand(input: unknown): Promise<{
     status: string;
-    unread: { count: number; unread: boolean; manuallyUnread: boolean };
+    unread: {
+      count: number;
+      unread: boolean;
+      manuallyUnread: boolean;
+      lastMessage?: { text: string; at: string; role: "assistant" | "user" };
+    };
   }>;
   listRuns(input: unknown): Promise<{ runs: unknown[] }>;
 }
@@ -145,6 +150,62 @@ describe("per-Bot unread in Workerd", () => {
       count: 0,
       unread: true,
       manuallyUnread: true,
+    });
+  });
+
+  // The preview record is written at settlement, so a Bot whose Turns settled
+  // before that projection existed has a transcript and no record — and its
+  // sidebar row read "No messages yet" over a full conversation. The read
+  // derives the line from the runs instead. The open Bot is the one that gets
+  // marked read, so its receipt is the row the sidebar renders, and it owes
+  // the same preview the fan-out gives every other Bot.
+  test("a Bot with a transcript and no preview record still shows its latest message", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `unread-legacy-user-${suffix}`,
+      botId: `unread-legacy-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const name = `${identity.userId}:${identity.botId}`;
+    const stub = bot(name);
+
+    await stub.run({
+      ...identity,
+      command: {
+        runId: "run-1",
+        sessionId: name,
+        acceptedAt: "2026-08-31T00:00:00.000Z",
+        text: "hello",
+      },
+    });
+
+    // A Bot as the durable store held it before the preview projection: the
+    // runs and the unread cursors are there, the preview key is not.
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.delete("shell:preview");
+    });
+    await evictDurableObject(stub);
+
+    const derived = await unreadRpc(name).readUnread(identity);
+    expect(derived.lastMessage).toMatchObject({
+      text: "Ollama reply",
+      role: "assistant",
+    });
+
+    const receipt = await unreadRpc(name).executeUnreadCommand({
+      ...identity,
+      command: {
+        schemaVersion: 1,
+        type: "bot/mark-read",
+        commandId: `mark-legacy-${suffix}`,
+        botId: identity.botId,
+        upToCursor: derived.lastActivityCursor,
+      },
+    });
+    expect(receipt.unread.lastMessage).toMatchObject({
+      text: "Ollama reply",
+      role: "assistant",
     });
   });
 

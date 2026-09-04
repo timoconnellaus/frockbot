@@ -15,6 +15,38 @@ export class LlmEffectNotStartedError extends Error {
 }
 
 /**
+ * What a person is told when a model request produced nothing at all.
+ *
+ * The same register as the Turn deadline copy: what happened, and what to do
+ * about it. The phase, the provider and the millisecond count are diagnostics
+ * and belong in the log, not on a person's screen.
+ */
+export const MODEL_FIRST_BYTE_DEADLINE_REASON_V1 =
+  "The model did not start replying within 2 minutes and the request was stopped. Try sending it again.";
+
+/** What a person is told when a reply started and then went silent. */
+export const MODEL_IDLE_DEADLINE_REASON_V1 =
+  "The model stopped part-way through its reply and went quiet for a minute, so the request was stopped. Try sending it again.";
+
+/**
+ * Time allowed from sending a model request to its first stream event.
+ *
+ * Two minutes to say anything at all is generous for a chat completion and
+ * still far inside the fifteen-minute Turn deadline, which before this was the
+ * only bound anywhere and far too long to read as an answer.
+ */
+export const MODEL_FIRST_BYTE_DEADLINE_MS_V1 = 120_000;
+
+/**
+ * Time allowed between two stream events once the answer has started.
+ *
+ * Shorter than the first-byte allowance on purpose: a stream that has already
+ * produced a chunk has proved the model is generating, so a minute of silence
+ * after that is a dead socket rather than a slow start.
+ */
+export const MODEL_IDLE_DEADLINE_MS_V1 = 60_000;
+
+/**
  * A model request that ran out of time.
  *
  * Two deadlines, because they fail differently. `first-byte` is a provider that
@@ -24,7 +56,8 @@ export class LlmEffectNotStartedError extends Error {
  * later, with words already on screen.
  *
  * Either is a real answer where before there was none: a Turn with no deadline
- * anywhere hung for seventeen minutes showing nothing at all.
+ * anywhere hung for seventeen minutes showing nothing at all. The message is
+ * the copy a person reads, so it says nothing the caller could vary.
  */
 export class ModelRequestDeadlineError extends Error {
   constructor(
@@ -33,8 +66,8 @@ export class ModelRequestDeadlineError extends Error {
   ) {
     super(
       phase === "first-byte"
-        ? `Model request produced nothing within ${Math.round(milliseconds / 1000)}s`
-        : `Model response stalled for ${Math.round(milliseconds / 1000)}s`,
+        ? MODEL_FIRST_BYTE_DEADLINE_REASON_V1
+        : MODEL_IDLE_DEADLINE_REASON_V1,
     );
     this.name = "ModelRequestDeadlineError";
   }
@@ -48,17 +81,10 @@ export interface ModelRequestDeadlinesV1 {
   idleMs: number;
 }
 
-/**
- * The defaults every provider gets unless its Package names others.
- *
- * Two minutes to say anything at all is generous for a chat completion and
- * still an order of magnitude inside the wall-clock a person will wait; the
- * same allowance between chunks tolerates a slow tool-call assembly without
- * tolerating a dead socket.
- */
+/** The defaults every provider gets unless its Package names others. */
 export const MODEL_REQUEST_DEADLINES_V1: ModelRequestDeadlinesV1 = {
-  firstByteMs: 120_000,
-  idleMs: 120_000,
+  firstByteMs: MODEL_FIRST_BYTE_DEADLINE_MS_V1,
+  idleMs: MODEL_IDLE_DEADLINE_MS_V1,
 };
 
 export type LlmReconciliationOutcome =

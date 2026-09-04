@@ -107,6 +107,13 @@ export interface WebChatMessage {
    * Bot had already said, which it keeps (ADR 0024).
    */
   notice?: string;
+  /**
+   * The line offers to send the draft again. Set only where the client gave
+   * up on its own — it could not reach the backend — because that is the one
+   * ending the person cannot act on from the thread otherwise: their text is
+   * back in the composer, and this is the button that sends it.
+   */
+  retry?: "resend";
   tools: WebToolActivity[];
   /** The typed payloads this Turn sent to the user, oldest first. */
   sends: WebSendPayload[];

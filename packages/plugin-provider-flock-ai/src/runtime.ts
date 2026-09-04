@@ -4,8 +4,9 @@ import {
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import {
+  type ModelRequestDeadlineOptionsV1,
   requestToWire,
-  streamOpenAICompatibleBody,
+  streamWithModelRequestDeadlinesV1,
 } from "@frockbot/provider-openai-compatible";
 import type { Plugin } from "cordis";
 import { FLOCK_AI_PROVIDER_TYPE, gatewayModelForFlockIdV1 } from "./catalog.js";
@@ -26,6 +27,12 @@ export interface FlockAiRuntimeConfig {
   connectionGeneration: string;
   autoRoute: string;
   runChatCompletion: FlockAiChatCompletionV1;
+  /**
+   * Deadline overrides and the timer seam behind them. The gateway binding
+   * takes no signal of its own, so this is the only bound on a gateway call
+   * that accepts the request and then says nothing.
+   */
+  deadlines?: ModelRequestDeadlineOptionsV1;
 }
 
 class FlockAiProvider implements LlmProvider {
@@ -55,25 +62,26 @@ class FlockAiProvider implements LlmProvider {
     // bare failure it would park the run on a reconciliation this Package
     // cannot perform, and the Bot would stay wedged on a transient gateway
     // error.
-    let responseBody: ReadableStream<Uint8Array>;
-    try {
-      responseBody = await this.config.runChatCompletion(gatewayModel, body);
-    } catch (error) {
-      signal.throwIfAborted();
-      throw new LlmEffectNotStartedError(
-        error instanceof Error
-          ? error.message
-          : "Flock AI request did not reach the gateway",
-      );
-    }
-    try {
-      yield* streamOpenAICompatibleBody(responseBody, signal);
-    } catch (error) {
-      if (signal.aborted) {
-        await responseBody.cancel(signal.reason).catch(() => undefined);
-      }
-      throw error;
-    }
+    // The deadlines live in the shared seam rather than here: this transport
+    // is a native binding with no signal of its own, so without it a gateway
+    // that accepted the request and went quiet was bounded by nothing short of
+    // the fifteen-minute Turn deadline.
+    yield* streamWithModelRequestDeadlinesV1(
+      async (deadlineSignal) => {
+        try {
+          return await this.config.runChatCompletion(gatewayModel, body);
+        } catch (error) {
+          deadlineSignal.throwIfAborted();
+          throw new LlmEffectNotStartedError(
+            error instanceof Error
+              ? error.message
+              : "Flock AI request did not reach the gateway",
+          );
+        }
+      },
+      signal,
+      this.config.deadlines ?? {},
+    );
   }
 }
 

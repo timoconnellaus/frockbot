@@ -12,6 +12,7 @@ import type { CompositionGenerationV1 } from "@frockbot/kernel-composition/gener
 import { DurableCompositionStore } from "./composition-store.js";
 import { DurableCompositionFailureLog } from "./composition-failures.js";
 import {
+  boundedRunFailureV1,
   botTurnCommandFingerprintV1,
   defaultRunLaneV1,
   storedRunAdmissionV1,
@@ -1408,6 +1409,20 @@ export class BotDurableAuthority<Snapshot> {
     });
   }
 
+  /**
+   * Settles a run `failed` on a reason the authority composed from an error.
+   *
+   * The reason is bounded on the way in because nothing upstream bounds an
+   * error's `message`: a provider that echoes the request back produced one far
+   * past what the record allows, the settlement wrote it anyway, and every
+   * later read of that run threw — so a Turn that failed once went on to 500
+   * the transcript endpoint for ever. A reason a person reads loses nothing by
+   * being cut; a transcript nobody can read loses everything.
+   *
+   * Recovery's own `failStoredRun` is deliberately not routed through here: a
+   * failure derived from a malformed durable history is the one case where
+   * refusing to settle, and keeping the work active, is the right answer.
+   */
   private async failRun(
     runId: string,
     previous: SessionEvent[],
@@ -1422,13 +1437,14 @@ export class BotDurableAuthority<Snapshot> {
         runId,
         previous,
         events,
-        failure,
+        boundedRunFailureV1(failure),
         this.supersededPackageRecords(),
       );
       await this.refreshRecoveryAlarm(transaction);
     });
   }
 
+  /** Parks a run on a reason the authority composed, bounded as `failRun`'s is. */
   private async requireRunReconciliation(
     runId: string,
     previous: SessionEvent[],
@@ -1443,7 +1459,7 @@ export class BotDurableAuthority<Snapshot> {
         runId,
         previous,
         events,
-        failure,
+        boundedRunFailureV1(failure),
       );
       await this.refreshRecoveryAlarm(transaction);
     });

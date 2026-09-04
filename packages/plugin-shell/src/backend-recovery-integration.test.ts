@@ -362,12 +362,24 @@ describe("Bot recovery", () => {
     expect(
       await storage.get<StoredRun>("run:ollama-run-uncertain"),
     ).toMatchObject({ status: "reconciliation-required" });
-    await expect(
-      host().reconcileRun(
-        { userId: "user-1", botId: "primary" },
-        "ollama-run-uncertain",
-      ),
-    ).rejects.toThrow();
+    // "Try again" that ends in a settled run is a successful abandon, not a
+    // failed request: it used to rethrow, which the gateway turned into a 409
+    // and the browser followed with a transcript read that 500'd. The run is
+    // durable and terminal by now, and its own record says why it ended.
+    const abandoned = await host().reconcileRun(
+      { userId: "user-1", botId: "primary" },
+      "ollama-run-uncertain",
+    );
+    expect(abandoned).toMatchObject({ runId: "ollama-run-uncertain" });
+    // The read the browser makes straight afterwards answers, rather than
+    // 500ing on the record the abandon just settled. It comes before the
+    // assertions below because `storage.get` hands back the live object and an
+    // asymmetric matcher run against it leaves itself behind on the property.
+    const read = await host().lookupRun({
+      schemaVersion: 1,
+      runId: "ollama-run-uncertain",
+    });
+    expect(read).toMatchObject({ run: { runId: "ollama-run-uncertain" } });
     expect(
       await storage.get<StoredRun>("run:ollama-run-uncertain"),
     ).toMatchObject({

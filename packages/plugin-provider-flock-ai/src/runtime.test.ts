@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   LlmEffectNotStartedError,
+  MODEL_FIRST_BYTE_DEADLINE_MS_V1,
+  MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
+  MODEL_IDLE_DEADLINE_MS_V1,
+  MODEL_IDLE_DEADLINE_REASON_V1,
+  ModelRequestDeadlineError,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import { LlmRegistry } from "@frockbot/plugin-models";
@@ -41,13 +46,62 @@ function runtimeConfig(
   runChatCompletion: Parameters<
     typeof createFlockAiRuntimePlugin
   >[0]["runChatCompletion"],
+  deadlines?: Parameters<typeof createFlockAiRuntimePlugin>[0]["deadlines"],
 ) {
   return {
     connectionId: FLOCK_AI_CONNECTION_ID,
     connectionGeneration: FLOCK_AI_CONNECTION_GENERATION,
     autoRoute: "configured-auto",
     runChatCompletion,
+    ...(deadlines ? { deadlines } : {}),
   };
+}
+
+/** A clock the test advances by hand, so a deadline costs no real seconds. */
+function manualClock() {
+  const pending = new Map<number, { run: () => void; due: number }>();
+  let next = 1;
+  let now = 0;
+  return {
+    schedule(run: () => void, milliseconds: number): () => void {
+      const id = next++;
+      pending.set(id, { run, due: now + milliseconds });
+      return () => pending.delete(id);
+    },
+    advance(milliseconds: number): void {
+      now += milliseconds;
+      for (const [id, timer] of [...pending]) {
+        if (timer.due <= now) {
+          pending.delete(id);
+          timer.run();
+        }
+      }
+    },
+    get armed(): number {
+      return pending.size;
+    },
+  };
+}
+
+/** Let the stream's own pump run: the clock is manual, the event loop is not. */
+async function settle(): Promise<void> {
+  for (let tick = 0; tick < 10; tick += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+/** A gateway body the test feeds one chunk at a time. */
+function pushableSse(): {
+  body: ReadableStream<Uint8Array>;
+  push: (text: string) => void;
+} {
+  let enqueue: ((text: string) => void) | undefined;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      enqueue = (text) => controller.enqueue(new TextEncoder().encode(text));
+    },
+  });
+  return { body, push: (text) => enqueue?.(text) };
 }
 
 describe("Flock AI runtime Contribution", () => {
@@ -254,6 +308,191 @@ describe("Flock AI runtime Contribution", () => {
     controller.abort(new Error("Turn cancelled"));
     await expect(consume).rejects.toThrow("Turn cancelled");
     expect(cancelled).toBe(true);
+    await root.fiber.dispose();
+  });
+});
+
+// A Stop must end one request and nothing else. The provider is registered
+// once and serves every Turn, so anything request-scoped it kept on itself — an
+// abort scope, a client, a stream — would let a cancelled Turn take the next
+// one down with it.
+describe("Flock AI request isolation", () => {
+  test("leaves the next request working after one is cancelled", async () => {
+    const bodies: Array<ReadableStream<Uint8Array>> = [];
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await root.plugin(
+      createFlockAiRuntimePlugin(
+        runtimeConfig(() => {
+          const body =
+            bodies.length === 0
+              ? pushableSse().body
+              : sse(
+                  'data: {"choices":[{"delta":{"content":"second"},"finish_reason":"stop"}]}\n\n' +
+                    "data: [DONE]\n\n",
+                );
+          bodies.push(body);
+          return Promise.resolve(body);
+        }),
+      ),
+    );
+
+    const cancelled = new AbortController();
+    const abandoned = (async () => {
+      for await (const event of root.llm.stream(request, cancelled.signal)) {
+        void event;
+      }
+    })().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await settle();
+    cancelled.abort(new Error("Turn cancelled"));
+    expect((await abandoned) as Error).toBeInstanceOf(Error);
+
+    const events: unknown[] = [];
+    for await (const event of root.llm.stream(
+      { ...request, requestId: "effect-2" },
+      new AbortController().signal,
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "text-delta", text: "second" },
+      { type: "finish", reason: "completed" },
+    ]);
+    await root.fiber.dispose();
+  });
+});
+
+// The gateway binding takes no signal of its own, so before the shared
+// deadline seam a gateway that accepted the request and then went quiet was
+// bounded by nothing short of the fifteen-minute Turn deadline: an empty
+// bubble, for a quarter of an hour, saying nothing about why.
+describe("Flock AI deadlines", () => {
+  test("fails the step when the gateway produces no first byte", async () => {
+    const clock = manualClock();
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await root.plugin(
+      createFlockAiRuntimePlugin(
+        runtimeConfig(
+          () => new Promise<ReadableStream<Uint8Array>>(() => undefined),
+          { schedule: clock.schedule },
+        ),
+      ),
+    );
+
+    const consume = (async () => {
+      for await (const event of root.llm.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        void event;
+      }
+    })();
+    await settle();
+    clock.advance(MODEL_FIRST_BYTE_DEADLINE_MS_V1);
+
+    const failure = await consume.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(ModelRequestDeadlineError);
+    expect((failure as ModelRequestDeadlineError).phase).toBe("first-byte");
+    expect((failure as Error).message).toBe(
+      MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
+    );
+    await root.fiber.dispose();
+  });
+
+  test("fails the step when the gateway starts an answer and then stalls", async () => {
+    const clock = manualClock();
+    const { body, push } = pushableSse();
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await root.plugin(
+      createFlockAiRuntimePlugin(
+        runtimeConfig(() => Promise.resolve(body), {
+          schedule: clock.schedule,
+        }),
+      ),
+    );
+
+    const events: unknown[] = [];
+    // The outcome is watched from the moment the stream starts: a failure this
+    // test only looked at later would be an unobserved rejection first.
+    const outcome = (async () => {
+      for await (const event of root.llm.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+    })().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    push('data: {"choices":[{"delta":{"content":"Half a "}}]}\n\n');
+    await settle();
+    // The answer has started, so the clock now running is the idle one — well
+    // short of the first-byte allowance this never reaches.
+    clock.advance(MODEL_IDLE_DEADLINE_MS_V1);
+
+    const failure = await outcome;
+    expect(failure).toBeInstanceOf(ModelRequestDeadlineError);
+    expect((failure as ModelRequestDeadlineError).phase).toBe("idle");
+    expect((failure as Error).message).toBe(MODEL_IDLE_DEADLINE_REASON_V1);
+    expect(events).toEqual([{ type: "text-delta", text: "Half a " }]);
+    await root.fiber.dispose();
+  });
+
+  test("lets a stream that keeps producing chunks finish, leaving no timer armed", async () => {
+    const clock = manualClock();
+    const { body, push } = pushableSse();
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await root.plugin(
+      createFlockAiRuntimePlugin(
+        runtimeConfig(() => Promise.resolve(body), {
+          schedule: clock.schedule,
+        }),
+      ),
+    );
+
+    const events: unknown[] = [];
+    const consume = (async () => {
+      for await (const event of root.llm.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+    })();
+    for (const chunk of ["one", "two", "three"]) {
+      push(`data: {"choices":[{"delta":{"content":"${chunk}"}}]}\n\n`);
+      await settle();
+      // Each chunk lands inside the idle allowance, so the clock rearms rather
+      // than firing.
+      clock.advance(MODEL_IDLE_DEADLINE_MS_V1 - 1);
+      await settle();
+    }
+    push(
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+    );
+    await settle();
+    await consume;
+
+    expect(events).toEqual([
+      { type: "text-delta", text: "one" },
+      { type: "text-delta", text: "two" },
+      { type: "text-delta", text: "three" },
+      { type: "finish", reason: "completed" },
+    ]);
+    // A live timer in a Worker isolate holds the request open long after
+    // anybody is listening for it.
+    expect(clock.armed).toBe(0);
     await root.fiber.dispose();
   });
 });
