@@ -9,7 +9,7 @@
 // can hand stable addresses to the harness and the specs.
 import { defineConfig, devices } from "@playwright/test";
 import { fileURLToPath } from "node:url";
-import { reserveFreePort } from "./harness.ts";
+import { reserveFreePort } from "./ports.ts";
 import type { E2EOptions } from "./fixtures.ts";
 
 const cloudflareRoot = fileURLToPath(new URL("..", import.meta.url));

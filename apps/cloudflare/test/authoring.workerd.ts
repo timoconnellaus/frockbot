@@ -175,7 +175,7 @@ describe("a Bot authoring a Package", () => {
     const active = await evicted.generation(used.pinnedGenerationId!);
     expect(active.status).toBe("active");
     expect(active.members.map((member) => member.packageId).toSorted()).toEqual(
-      ["greeter", "shell"],
+      ["clock", "greeter", "shell"],
     );
   });
 
@@ -248,6 +248,7 @@ describe("a Bot authoring a Package", () => {
       runId: `run-undo-${id}`,
     });
     expect(reverted.members.map((member) => member.packageId)).toEqual([
+      "clock",
       "shell",
     ]);
     expect(good.generationId).not.toBe(reverted.generationId);

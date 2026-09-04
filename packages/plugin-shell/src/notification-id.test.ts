@@ -50,6 +50,16 @@ describe("notificationIdV1", () => {
     expect(notificationIdV1(...parts)).toBe(notificationIdV1(...parts));
   });
 
+  test("parts the sanitiser would flatten together stay distinct", () => {
+    // Well under the length ceiling, so nothing else separates them: `a:b` and
+    // `a-b` both sanitise to `a-b`, and one notification silently overwrote
+    // the other.
+    expect(notificationIdV1("package", "a:b")).not.toBe(
+      notificationIdV1("package", "a-b"),
+    );
+    expect(notificationIdV1("a", "b")).not.toBe(notificationIdV1("a-b"));
+  });
+
   test("distinct parts stay distinct, even past the length ceiling", () => {
     const long = "x".repeat(400);
     const a = notificationIdV1("package", long, "one");
@@ -58,6 +68,22 @@ describe("notificationIdV1", () => {
     expect(a.length).toBeLessThanOrEqual(128);
     expect(acknowledge(a)).toBe(a);
     expect(acknowledge(b)).toBe(b);
+  });
+
+  test("a legacy colon id already in the field can still be acknowledged", () => {
+    // Bots that failed a generation before this fix are holding notifications
+    // whose ids were interpolated by hand. If those stay unacknowledgeable the
+    // client retries them forever, so the decoder admits the older shape even
+    // though nothing mints it any more.
+    const legacy =
+      "composition-failure:2026-09-03T23:49:00.416Z:dc03a32d9b717619:1";
+    expect(acknowledge(legacy)).toBe(legacy);
+  });
+
+  test("an id is still bounded, whatever shape it arrives in", () => {
+    expect(() => acknowledge("a".repeat(200))).toThrow();
+    expect(() => acknowledge("../../escape")).toThrow();
+    expect(() => acknowledge("")).toThrow();
   });
 
   test("parts that sanitize to nothing still mint an acknowledgeable id", () => {

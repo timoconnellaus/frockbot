@@ -8,6 +8,7 @@ import {
 } from "@frockbot/catalog-core";
 import { canonicalJson, sha256 } from "@frockbot/kernel-composition/compiler";
 import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
+import { PROBE_FIRST_PARTY_MANIFEST } from "./authoring-probe.ts";
 
 const MODULE = `export const tools = [
   { name: "track_parcel", description: "Tracks a parcel", inputSchema: { type: "object" }, idempotent: true },
@@ -206,7 +207,7 @@ describe("a Bot installing a Package from the Catalog", () => {
       (await probe.currentGeneration()).members.map(
         (member) => member.packageId,
       ),
-    ).toEqual(["shell"]);
+    ).toEqual(["clock", "shell"]);
   });
 
   test("installs a first-party entry that publishes no bundle, the way the Plugins page does", async () => {
@@ -230,6 +231,13 @@ describe("a Bot installing a Package from the Catalog", () => {
         .catalogGeneration,
     ).toBe(generation);
     const probe = env.AUTHORING.getByName(`first-party-probe-${id}`);
+    // The entry names a Package the bootstrap already carries as required
+    // core, exactly as every one of the 37 seeded entries does in production.
+    const before = await probe.currentGeneration();
+    expect(
+      before.members.find((candidate) => candidate.packageId === "clock")
+        ?.provenance.kind,
+    ).toBe("first-party");
 
     // No `contentHash`: there is none to send, and the tool no longer demands
     // one.
@@ -243,39 +251,62 @@ describe("a Bot installing a Package from the Catalog", () => {
 
     expect(installed.text).toContain('ok:Installed Package "Clock"');
     expect(installed.text).not.toContain("does not carry installable code");
+    expect(installed.text).not.toContain("already in this Bot's Composition");
     const settings = await user.readConfiguration({ schemaVersion: 1, userId });
-    expect(settings.packages.some((pkg) => pkg.packageId === "clock")).toBe(
-      true,
-    );
+    expect(
+      settings.packages.find((pkg) => pkg.packageId === "clock"),
+    ).toMatchObject({ state: "installed", provenance: "catalog" });
+
+    // The Composition is untouched. The compiled-in Package was already
+    // required core in the bootstrap generation, so there is no member to add
+    // — and restating it with catalog provenance is exactly what
+    // `assertRequiredCoreSet` refuses.
     const current = await probe.currentGeneration();
-    expect(current.summary).toBe("Added the clock");
+    expect(current.generationId).toBe(before.generationId);
     const member = current.members.find(
       (candidate) => candidate.packageId === "clock",
     );
-    expect(member).toBeDefined();
-    // No artifact and no pinned hash: the member mounts from the compiled-in
-    // application, which is what makes it first-party.
+    expect(member?.provenance.kind).toBe("first-party");
     expect(member?.artifact).toBeUndefined();
-    expect(
-      (member?.provenance as { contentHash?: string } | undefined)?.contentHash,
-    ).toBeUndefined();
+  });
+
+  test("refuses a first-party entry whose manifest is not the one this deployment ships", async () => {
+    // The only integrity check left for a member nothing re-hashes at mount:
+    // a Catalog generation built from a different build of the application
+    // must not be recorded as if it named this one.
+    const id = suffix();
+    const userId = `drifted-user-${id}`;
+    const generation = `drifted-${id}`;
+    await publishBundlelessCatalog(generation, { drift: true });
+    const user = env.USER_CONFIGURATIONS.getByName(userId) as unknown as {
+      readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
+    };
+    await user.readConfiguration({ schemaVersion: 1, userId });
+    const probe = env.AUTHORING.getByName(`drifted-probe-${id}`);
+
+    const refused = await probe.runTurn({
+      runId: `drifted-install-${id}`,
+      userId,
+      botId: `drifted-bot-${id}`,
+      tool: "package_install",
+      input: { catalogId: "clock", summary: "Added the clock" },
+    });
+
+    expect(refused.text).toContain("but this deployment ships");
   });
 });
 
-/** A Catalog generation shaped like the real seed: entries, no bundles. */
-async function publishBundlelessCatalog(generation: string) {
-  const manifest = {
-    schemaVersion: 3 as const,
-    id: "clock",
-    displayName: "Clock",
-    version: "0.0.1",
-    compatibility: { frockbot: "*" },
-    dependencies: {},
-    contributions: { backend: { entry: "./backend.js" } },
-    configuration: { settings: [], connectionTypes: [], capabilities: [] },
-    tools: [],
-    permissions: [],
-  };
+/**
+ * A Catalog generation shaped like the real seed: entries, no bundles, and a
+ * `manifestHash` taken over the manifest the probe's bootstrap compiled in.
+ */
+async function publishBundlelessCatalog(
+  generation: string,
+  options: { drift?: boolean } = {},
+) {
+  const manifest = options.drift
+    ? { ...PROBE_FIRST_PARTY_MANIFEST, version: "9.9.9" }
+    : PROBE_FIRST_PARTY_MANIFEST;
   const manifestHash = await sha256(canonicalJson(manifest));
   const entry = {
     schemaVersion: 1,

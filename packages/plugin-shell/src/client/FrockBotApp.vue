@@ -2,6 +2,7 @@
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import {
   announceUiAnchor,
+  UiActivityRing,
   UiIcon,
   UiIconButton,
   UiMarkdown,
@@ -26,6 +27,7 @@ import {
   type WebToolActivity,
 } from "../shared.js";
 import { ComposerDraftStore } from "./composer-draft.js";
+import { activityRingV1 } from "./activity-ring.js";
 import {
   TURN_TEXT_MAX_CHARACTERS_V1,
   turnTextCounterVisibleV1,
@@ -431,66 +433,22 @@ function taskChipsOf(message: WebChatMessage): Array<{
 }
 
 /**
- * The tools this Turn ran, as the thread draws them.
+ * The activity ring for one assistant line.
  *
- * A tool whose Package draws its own surface is shown by that surface; every
- * other one is a chip, because a Turn that spends a minute making tool calls
- * used to show the User nothing at all but a spinning avatar.
+ * A Turn that spends a minute making tool calls used to show the User nothing
+ * but a breathing avatar, and then — briefly — a list of tool names, which put
+ * the model's plumbing into a conversation. The ring is neither: it pulses
+ * while the Turn runs and ticks forward for every step that settles, so the
+ * account of an ordinary tool call is a segment of a stroke and no words at
+ * all. The rule lives in `activity-ring.ts`; this only reads the message.
  */
-function toolChipsOf(message: WebChatMessage): WebToolActivity[] {
-  return message.tools.filter((tool) => iframeEntriesFor(tool).length === 0);
-}
-
-/**
- * What a chip calls a tool, in the User's words rather than the model's.
- *
- * A tool name is an identifier — `send_to_user`, `user-Github--acme/search_issues`
- * — and the transcript is a conversation, so the chip drops the namespace,
- * un-snakes the rest and capitalises it.
- */
-function toolChipLabel(tool: WebToolActivity): string {
-  const bare = tool.name.split("/").pop() ?? tool.name;
-  const words = bare.replace(/[_.-]+/g, " ").trim();
-  if (words.length === 0) return tool.name;
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
-/**
- * Whether a chip is drawn as a failure.
- *
- * A tool call the model recovered from is not a failure the User has anything
- * to do with: a refused call followed by a Turn that went on to finish is the
- * Bot correcting itself, and colouring it red reports a broken Turn that
- * worked. Only a Turn that itself ended badly keeps the failed state.
- */
-function toolChipState(
-  tool: WebToolActivity,
+function activityRingOf(
   message: WebChatMessage,
-): "running" | "completed" | "failed" | "retried" {
-  if (tool.status !== "failed") return tool.status;
-  return message.status === "completed" || message.status === "streaming"
-    ? "retried"
-    : "failed";
-}
-
-/** What a chip says a tool is doing. Its status, in the User's words. */
-function toolChipStatus(
-  tool: WebToolActivity,
-  message: WebChatMessage,
-): string {
-  const state = toolChipState(tool, message);
-  if (state === "running") return "running";
-  if (state === "retried") return "retried";
-  return state === "failed" ? "failed" : "done";
-}
-
-/** Which tool chips the User has opened. Local, and per chip. */
-const expandedTools = ref(new Set<string>());
-
-function toggleTool(toolId: string): void {
-  const next = new Set(expandedTools.value);
-  if (!next.delete(toolId)) next.add(toolId);
-  expandedTools.value = next;
+): ReturnType<typeof activityRingV1> {
+  return activityRingV1({
+    toolStatuses: message.tools.map((tool) => tool.status),
+    status: message.status,
+  });
 }
 
 /** Which chips the User has opened. Local, and per chip. */
@@ -928,28 +886,45 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             </p>
             <template v-else-if="message.role === 'assistant'">
               <!--
-                The Bot's own avatar comes from whichever Package owns Bot
-                identity. When no Package fills the slot the sparkle tile is
-                the only child and shows through.
+                The Bot's own avatar, which appears only while it is working.
+                Every line in this transcript is from the same Bot — there are
+                no group conversations yet (issue 152) — so a sheep beside a
+                settled reply named nobody the reader did not already know. The
+                one beside a running Turn carries the ring, which is the whole
+                point of drawing it.
+
+                The art comes from whichever Package owns Bot identity; when no
+                Package fills the slot the sparkle tile is the only child and
+                shows through.
               -->
-              <div
-                class="bot-avatar"
-                :class="{
-                  'bot-avatar-live': message.status === 'streaming',
-                  'bot-avatar-waiting':
-                    message.status === 'streaming' && !message.text,
-                }"
-              >
-                <span class="bot-avatar-fallback" aria-hidden="true"
-                  ><UiIcon name="sparkle" size="sm"
-                /></span>
-                <k-slot name="frockbot.bot-avatar" />
-              </div>
+              <Transition name="activity-ring">
+                <div
+                  v-if="activityRingOf(message).active"
+                  class="bot-avatar bot-avatar-live"
+                  :class="{ 'bot-avatar-waiting': !message.text }"
+                >
+                  <span class="bot-avatar-fallback" aria-hidden="true"
+                    ><UiIcon name="sparkle" size="sm"
+                  /></span>
+                  <k-slot name="frockbot.bot-avatar" />
+                  <!--
+                    What the Bot is doing, while it is doing it — a stroke round
+                    the sheep that pulses and ticks a segment for every step the
+                    Turn settles. It completes and fades with the avatar when
+                    the Turn settles, and it never names a tool: the transcript
+                    stays a conversation.
+                  -->
+                  <UiActivityRing
+                    :progress="activityRingOf(message).progress"
+                    :running="activityRingOf(message).running"
+                    :laps="activityRingOf(message).laps"
+                  />
+                </div>
+              </Transition>
               <!--
-                Everything the Turn produced stacks in one column beside the
-                avatar. The row holds exactly two children — avatar, column —
-                so a bubble, a notice and a chip are stacked lines rather than
-                side-by-side columns squeezing the reply to a few pixels.
+                Everything the Turn produced stacks in one column. While the Bot
+                is working the avatar is beside it; once the Turn settles the
+                column is the whole row and starts at the transcript's edge.
               -->
               <div class="message-column">
                 <div v-if="message.text" class="message-bubble">
@@ -1022,40 +997,6 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                     :key="sendIndex"
                     :send="send"
                   />
-                </div>
-                <!--
-                What the Bot did, while it is doing it. The chip is the
-                conversation's whole account of an ordinary tool call: its
-                name, whether it is running, and — when the User opens it —
-                what it returned.
-              -->
-                <div
-                  v-if="toolChipsOf(message).length > 0"
-                  class="message-tools"
-                >
-                  <button
-                    v-for="tool in toolChipsOf(message)"
-                    :key="tool.id"
-                    type="button"
-                    class="tool-chip"
-                    :class="`tool-chip-${toolChipState(tool, message)}`"
-                    :aria-expanded="expandedTools.has(tool.id)"
-                    @click="toggleTool(tool.id)"
-                  >
-                    <span class="tool-chip-name">{{
-                      toolChipLabel(tool)
-                    }}</span>
-                    <span class="tool-chip-status">{{
-                      toolChipStatus(tool, message)
-                    }}</span>
-                    <span
-                      v-if="
-                        expandedTools.has(tool.id) && tool.text !== undefined
-                      "
-                      class="tool-chip-result"
-                      >{{ tool.text }}</span
-                    >
-                  </button>
                 </div>
                 <!--
                 The subagents this Turn dispatched. The child's own Session is

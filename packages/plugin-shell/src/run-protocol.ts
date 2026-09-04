@@ -5,7 +5,10 @@ import {
   type SessionEvent,
   type SkillRefV1,
 } from "@frockbot/kernel-contracts";
-import { isPublicIdentifier } from "@frockbot/configuration-core";
+import {
+  isPublicIdentifier,
+  isRpcIdentifier,
+} from "@frockbot/configuration-core";
 import { decodeRunCursorV1, RUN_CURSOR_PATTERN } from "./run-cursor.js";
 export { decodeRunCursorV1, RUN_CURSOR_PATTERN };
 import type {
@@ -1681,7 +1684,15 @@ export function decodeClientNotificationAcknowledgementCommandV1(
     MAX_RUN_ID_LENGTH,
     "notification acknowledgement command",
   );
-  if (!isPublicIdentifier(notificationId)) {
+  // `isRpcIdentifier`, not `isPublicIdentifier`: the same bounded alphabet
+  // plus `:` and `@`. New ids are minted through `notificationIdV1` and carry
+  // neither, but Bots in the field are already holding notifications whose ids
+  // were interpolated by hand — `composition-failure:<generationId>:<attempt>`
+  // and three more like it. Under the stricter pattern those could never be
+  // acknowledged, so the client retried them forever and the Bot answered 400
+  // on every poll for the rest of its life. Accepting them here is what lets
+  // an already-wedged Bot recover without a storage sweep.
+  if (!isRpcIdentifier(notificationId)) {
     throw new Error(
       "notification acknowledgement command.notificationId is invalid",
     );

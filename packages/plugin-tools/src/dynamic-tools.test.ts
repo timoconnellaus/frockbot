@@ -591,6 +591,64 @@ describe("progressive tool disclosure", () => {
   });
 });
 
+describe("the envelope discovery hands back", () => {
+  test("is the envelope dispatch accepts, for a non-external namespace", async () => {
+    // The Applets Package mounts through the isolate host, whose namespaces
+    // used to register `external: true`. The dispatch guard then refused every
+    // call without `mcpDetails.description`, while discovery's `callWith`
+    // never mentioned the field — so the envelope offered was the envelope
+    // refused, and no Applet could be created by chat at all.
+    const root = await rootWithTools();
+    root.tools.register(dynamicTool("applets", "applet_create"));
+    root.tools.registerNamespace({ name: "applets", status: "ready" });
+
+    const discovered = await invoke(root, GET_DYNAMIC_TOOLS_NAME, {
+      namespace: "applets",
+      toolName: "applet_create",
+    });
+    const envelope = JSON.parse(discovered.content as string).callWith as {
+      tool: string;
+      input: Record<string, unknown>;
+    };
+    expect(envelope.tool).toBe(CALL_DYNAMIC_TOOL_NAME);
+    expect(envelope.input.mcpDetails).toBeUndefined();
+
+    // The exact envelope, with only the placeholder arguments made real.
+    const dispatched = await invoke(root, CALL_DYNAMIC_TOOL_NAME, {
+      ...envelope.input,
+      arguments: { value: "a todo list" },
+    });
+
+    expect(dispatched.isError).toBe(false);
+    expect(dispatched.content).toContain("a todo list");
+  });
+
+  test("carries mcpDetails when the namespace really is external", async () => {
+    const root = await rootWithTools();
+    root.tools.register(dynamicTool("linear", "issue_create"));
+    root.tools.registerNamespace({ name: "linear", external: true });
+
+    const discovered = await invoke(root, GET_DYNAMIC_TOOLS_NAME, {
+      namespace: "linear",
+      toolName: "issue_create",
+    });
+    const envelope = JSON.parse(discovered.content as string).callWith as {
+      input: Record<string, unknown>;
+    };
+    expect(envelope.input.mcpDetails).toEqual({
+      description: "<one sentence saying why you are calling this>",
+    });
+
+    const dispatched = await invoke(root, CALL_DYNAMIC_TOOL_NAME, {
+      ...envelope.input,
+      arguments: { value: "an issue" },
+      mcpDetails: { description: "Filing the bug the User just described." },
+    });
+
+    expect(dispatched.isError).toBe(false);
+  });
+});
+
 describe("a dynamic tool called by its bare name", () => {
   test("is answered with the envelope, not a dead-end Unknown tool", async () => {
     // `applet_list` is listed to the model by bare name in
@@ -621,6 +679,17 @@ describe("a dynamic tool called by its bare name", () => {
     expect(result.isError).toBe(true);
     expect(result.content).toContain("mail-one");
     expect(result.content).toContain("mail-two");
+  });
+
+  test("routes an external namespace with the mcpDetails its guard demands", async () => {
+    const root = await rootWithTools();
+    root.tools.register(dynamicTool("linear", "issue_create"));
+    root.tools.registerNamespace({ name: "linear", external: true });
+
+    const result = await invoke(root, "issue_create", {});
+
+    expect(result.content).toContain("mcpDetails");
+    expect(result.content).toContain("description");
   });
 
   test("a name in no namespace still says only that it is unknown", async () => {
