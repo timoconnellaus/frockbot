@@ -2521,7 +2521,11 @@ export class ShellBotBackendContribution {
               ),
               signal: active.signal,
             });
-            return { status: summary.status, detail: summary.detail };
+            return {
+              status: summary.status,
+              detail: summary.detail,
+              ...(summary.required ? { required: summary.required } : {}),
+            };
           }
         : undefined,
       composition: {

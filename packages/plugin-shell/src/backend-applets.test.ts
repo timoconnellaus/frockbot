@@ -526,6 +526,65 @@ describe("ctx.applets", () => {
     );
   });
 
+  // Production, 2026-09-04, run 76b4f8d9: `applet build` printed
+  // `dist/manifest.json 2 tool(s)`, the publish sync reported `ok` and moved
+  // nothing, and the publish then said "run `applet build` … first" about a
+  // file that was sitting on the Computer. A sync that reported `ok` is not a
+  // reason to blame the build when the sync itself says it saw the file.
+  test("publish names the hash the Computer held when the Workspace answers not-found", async () => {
+    const { host: capability } = host({
+      files: {
+        [`${APPLET}/dist/server.js`]: "export class Applet {}",
+        [`${APPLET}/dist/ui.html`]: "<h1>hi</h1>",
+      },
+      synced: {
+        status: "ok",
+        detail: "",
+        required: [
+          {
+            path: `${APPLET}/dist/server.js`,
+            contentHash: "a".repeat(64),
+            durable: true,
+          },
+          {
+            path: `${APPLET}/dist/ui.html`,
+            contentHash: "b".repeat(64),
+            durable: true,
+          },
+          {
+            path: `${APPLET}/dist/manifest.json`,
+            contentHash: "e0e3ce78fabf".padEnd(64, "0"),
+            durable: false,
+          },
+        ],
+      },
+    });
+
+    const outcome = await capability.publish({ appletId: APPLET }, scope);
+
+    expect(outcome.status).toBe("failed");
+    const reason = outcome.status === "failed" ? outcome.reason : "";
+    expect(reason).toBe(
+      '"dist/manifest.json" is on the Computer (sha256 e0e3ce78fabf) but the Workspace answered not-found: the publish sync reported ok and did not carry it',
+    );
+    expect(reason).not.toMatch(/applet build/);
+  });
+
+  test("publish still blames the build when the sync saw no such file", async () => {
+    const { host: capability } = host({
+      files: {},
+      synced: {
+        status: "ok",
+        detail: "",
+        required: [{ path: `${APPLET}/dist/server.js`, durable: false }],
+      },
+    });
+    const outcome = await capability.publish({ appletId: APPLET }, scope);
+    expect(outcome.status === "failed" && outcome.reason).toMatch(
+      /applet build/,
+    );
+  });
+
   test("publish refuses a manifest whose hashes do not match the bytes", async () => {
     const { host: capability } = host({
       files: {
