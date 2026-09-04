@@ -16,6 +16,8 @@ export const CATALOG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   auth: "Sign in and stay signed in across the web app and your desktop.",
   authoring:
     "Let the Bot write and revise its own tools when no existing tool does the job.",
+  billing:
+    "See what your Bots and models have cost this month and over the last 30 days.",
   "bot-template":
     "Export a Bot as a shareable template so someone else can start from your setup.",
   clock:
