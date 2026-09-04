@@ -27,7 +27,10 @@ import {
   type OwnedBotTurnCommand,
 } from "./authority.ts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
-import { BotTurnReconciliationRequiredError } from "./turn-errors.ts";
+import {
+  BotTurnExecutionError,
+  BotTurnReconciliationRequiredError,
+} from "./turn-errors.ts";
 import { createStoredRunCodecV1, type StoredRunV1 } from "./run-records.ts";
 
 const codec = createStoredRunCodecV1<undefined>({
@@ -74,7 +77,7 @@ function command(runId: string, text: string): OwnedBotTurnCommand {
 function createAuthority(
   storage: MemoryStorage,
   provider: string,
-  options: { providerReconciles?: boolean } = {},
+  options: { providerReconciles?: boolean; refuseWith?: string } = {},
 ): BotDurableAuthority<undefined> {
   const hooks: BotDurableAuthorityHooks<undefined> = {
     resolveAdmissionSnapshot: () => Promise.resolve(undefined),
@@ -131,6 +134,36 @@ function createAuthority(
           text: "On it — building it now.",
         } as never,
       );
+      // A provider that refused definitively — a revoked key answering 401 —
+      // reaches a real `turn/end`, the way the Agent loop settles a model
+      // error it never has to reconcile.
+      if (options.refuseWith) {
+        await persist(
+          {
+            type: "model/effect-not-started",
+            turn: 1,
+            step: 1,
+            requestId: "request-1",
+            reason: options.refuseWith,
+          } as never,
+          {
+            type: "step/end",
+            turn: 1,
+            step: 1,
+            outcome: "model-error",
+          } as never,
+          {
+            type: "turn/end",
+            turn: 1,
+            outcome: "model-error",
+            reason: options.refuseWith,
+          } as never,
+        );
+        throw new BotTurnExecutionError(
+          `Bot turn ended with outcome model-error: ${options.refuseWith}`,
+          appended,
+        );
+      }
       const reason = `Model response outcome is uncertain: ${MODEL_FIRST_BYTE_DEADLINE_REASON_V1}`;
       await persist({
         type: "model/reconciliation-required",
@@ -203,5 +236,30 @@ describe("a model request that ran out of time", () => {
     const run = storedRun(storage, "run-1");
     expect(run.status).toBe("reconciliation-required");
     expect(run.events.some((event) => event.type === "turn/end")).toBe(false);
+  });
+
+  // The same leak, one layer over: a Turn that reached a real `turn/end` and a
+  // durable `failed` record was *still* rethrown, so the Worker logged
+  // `Uncaught Error: Bot turn ended with outcome model-error: Model request
+  // failed (401)` and the route answered 500 over a settlement that had
+  // already happened.
+  test("a provider that refused settles and answers, with no uncaught error", async () => {
+    const storage = new MemoryStorage();
+    const authority = createAuthority(storage, "flock-ai", {
+      refuseWith: "Model request failed (401)",
+    });
+
+    const completion = await authority.run(command("run-1", "hello"));
+
+    expect(completion.runId).toBe("run-1");
+    const run = storedRun(storage, "run-1");
+    expect(run.status).toBe("failed");
+    expect(
+      run.events.findLast((event) => event.type === "turn/end"),
+    ).toMatchObject({ outcome: "model-error" });
+    // The provider's own words stay on the record for the debug surface; the
+    // client maps the outcome to a sentence (`runFailureCopyV1`).
+    expect(run.failure).toContain("401");
+    expect(storage.values.get("active-run")).toBeUndefined();
   });
 });

@@ -293,27 +293,21 @@ function turnRefusalCopyV1(reason: ClientTurnRefusalReasonV1): string {
  * both: a Turn that has already delivered a bubble streams nothing into a
  * second one.
  *
- * The one thing the gate must not do is swallow a *different* answer. A Turn
- * that acknowledges the request and then answers in its own text has said two
- * things, and the rule is against saying the same thing twice, not against
- * saying a second one — so a settled answer that matches nothing the Turn sent
- * is still drawn. Mid-Turn the gate stays absolute: a running Turn's text is
- * unfinished, and half a sentence is not yet distinguishable from the send it
- * may be about to become.
+ * The gate is absolute, and it has to be. Relaxing it to "suppress only text
+ * that duplicates a send" looked safer and was not: the model's *last* step
+ * routinely writes something of its own after the step that spoke — the e2e
+ * that pins this sends "pong" through the tool and then answers again in text —
+ * and comparing the two drew both. Two bubbles for one reply is the exact
+ * regression issue 153 named.
+ *
+ * So a Turn that sent anything is drawn entirely from its sends, and text the
+ * model wrote beside them is scratch space. That is what makes the promotion in
+ * `promoteAssistantTextToSendV1` the right shape: an acknowledgement reaches
+ * the person by *becoming* a send, not by being drawn as text next to one.
  */
 function visibleAssistantText(run: ClientRun, fallback = ""): string {
-  const sends = sendsFrom(run.events);
-  if (sends.length === 0)
-    return run.responseText ?? run.partialText ?? fallback;
-  const settled = run.responseText;
-  if (settled === undefined) return "";
-  const delivered = sends.some(
-    (send) =>
-      send.kind === "payload" &&
-      send.payload.type === "text" &&
-      send.payload.text.trim() === settled.trim(),
-  );
-  return delivered ? "" : settled;
+  if (sendsFrom(run.events).length > 0) return "";
+  return run.responseText ?? run.partialText ?? fallback;
 }
 
 function isTerminalRun(run: ClientRun): boolean {

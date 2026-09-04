@@ -22,10 +22,17 @@ function user(name: string) {
  * A Bot receives model authority through account-wide Package and Connection
  * enablement, so this is the shortest path that is still the product's own.
  */
-export async function provisionBot(identity: {
-  userId: string;
-  botId: string;
-}): Promise<void> {
+export async function provisionBot(
+  identity: {
+    userId: string;
+    botId: string;
+  },
+  /**
+   * The Connection's key. Defaults to the one the Ollama Cloud stub accepts; a
+   * suite that needs the provider to refuse passes the revoked one.
+   */
+  apiKey = "workerd-test-key",
+): Promise<void> {
   const configuration = user(identity.userId);
   const suffix = identity.botId;
   // SAFETY: the generated stub type for `readConfiguration` is too deep for the
@@ -77,7 +84,7 @@ export async function provisionBot(identity: {
       packageId: "provider-ollama-cloud",
       connectionTypeId: "ollama-cloud-account",
       label: "Workerd",
-      apiKey: "workerd-test-key",
+      apiKey,
     },
   })) as unknown as { status: string; connectionId: string };
   expect(connection).toMatchObject({ status: "applied" });

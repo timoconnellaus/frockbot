@@ -701,16 +701,18 @@ describe("generic per-Turn model resolution", () => {
     };
     for (const bot of bots) {
       const runId = `${bot.botId}-disabled-package`;
-      await expect(
-        bot.contribution.run({
-          userId: "user-1",
-          botId: bot.botId,
-          runId,
-          sessionId: `user-1:${bot.botId}`,
-          acceptedAt: "2026-09-02T00:01:00.000Z",
-          text: "must fail",
-        }),
-      ).rejects.toThrow("Turn this model's plugin back on in Plugins");
+      // "Closed" is the durable record, not a rejected call. The Turn settles
+      // itself and the caller is handed that settlement: rethrowing over the
+      // top of it is what answered 500 and logged an uncaught error for a
+      // failure the Bot had already recorded properly.
+      await bot.contribution.run({
+        userId: "user-1",
+        botId: bot.botId,
+        runId,
+        sessionId: `user-1:${bot.botId}`,
+        acceptedAt: "2026-09-02T00:01:00.000Z",
+        text: "must fail",
+      });
       expect(await bot.storage.get(`run:${runId}`)).toMatchObject({
         status: "failed",
         failure: expect.stringContaining(
@@ -723,16 +725,14 @@ describe("generic per-Turn model resolution", () => {
     user.connections[0] = { ...user.connections[0]!, state: "revoked" };
     for (const bot of bots) {
       const runId = `${bot.botId}-revoked-connection`;
-      await expect(
-        bot.contribution.run({
-          userId: "user-1",
-          botId: bot.botId,
-          runId,
-          sessionId: `user-1:${bot.botId}`,
-          acceptedAt: "2026-09-02T00:02:00.000Z",
-          text: "must fail",
-        }),
-      ).rejects.toThrow("needs reconnecting");
+      await bot.contribution.run({
+        userId: "user-1",
+        botId: bot.botId,
+        runId,
+        sessionId: `user-1:${bot.botId}`,
+        acceptedAt: "2026-09-02T00:02:00.000Z",
+        text: "must fail",
+      });
       expect(await bot.storage.get(`run:${runId}`)).toMatchObject({
         status: "failed",
         failure: expect.stringContaining("needs reconnecting"),

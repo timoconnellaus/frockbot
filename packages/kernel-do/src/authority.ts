@@ -256,7 +256,7 @@ export class BotDurableAuthority<Snapshot> {
     // Turn is durable either way and the alarm retries it; admission now
     // refuses or supersedes on its own terms.
     await this.recoverActiveRun().catch(() => undefined);
-    const replay = await this.settledRunResult(command);
+    const replay = await this.settledReplayResult(command);
     if (replay) return replay;
     const admission = await this.acceptRun(command);
     if (admission.kind === "queued") {
@@ -496,7 +496,7 @@ export class BotDurableAuthority<Snapshot> {
       // followed 500'd on the half-repaired record. The run is durable and
       // terminal by this point, and its own record says why it ended, so the
       // caller is handed that record and reads the reason from the transcript.
-      const settled = await this.settledReconciliationResult(runId);
+      const settled = await this.settledTerminalRunResult(runId);
       if (settled) return settled;
       throw error;
     }
@@ -507,7 +507,7 @@ export class BotDurableAuthority<Snapshot> {
    * resolving has reached a terminal state — whatever that state turned out to
    * be. Anything still open is not this method's to answer for.
    */
-  private async settledReconciliationResult(
+  private async settledTerminalRunResult(
     runId: string,
   ): Promise<BotTurnCompletion | undefined> {
     const run = this.codec.optional(
@@ -619,7 +619,15 @@ export class BotDurableAuthority<Snapshot> {
         throw new Error(message);
       }
       await this.failRun(command.runId, previous, events, message);
-      const settled = await this.discardedRunResult(command.runId);
+      // `settledTerminalRunResult`, not `discardedRunResult`: a Turn the Package failed
+      // outright — a provider 401, a step limit — reaches a `turn/end` and a
+      // durable `failed` record just as surely as a stopped one does, and
+      // rethrowing over the top of that settlement is what made the Worker log
+      // `Uncaught Error: Bot turn ended with outcome model-error: Model request
+      // failed (401)` and answer 500. The run is terminal by this point and its
+      // record says why; the caller is handed that record and the client reads
+      // the sentence for the outcome off it.
+      const settled = await this.settledTerminalRunResult(command.runId);
       if (settled) return settled;
       throw new Error(message);
     } finally {
@@ -761,7 +769,7 @@ export class BotDurableAuthority<Snapshot> {
         throw new Error(message);
       }
       await this.failRun(run.runId, previous, events, message);
-      const settled = await this.discardedRunResult(run.runId);
+      const settled = await this.settledTerminalRunResult(run.runId);
       if (settled) return settled;
       throw new Error(message);
     } finally {
@@ -785,7 +793,7 @@ export class BotDurableAuthority<Snapshot> {
     });
   }
 
-  private async settledRunResult(
+  private async settledReplayResult(
     command: OwnedBotTurnCommand,
   ): Promise<BotTurnCompletion | undefined> {
     const { runId } = command;
@@ -1768,7 +1776,7 @@ export class BotDurableAuthority<Snapshot> {
     // reason. The reason is a diagnostic for the debug surface — what the
     // person reads is the client's own copy for the outcome.
     await this.failRun(runId, previous, events, reason);
-    return this.settledReconciliationResult(runId);
+    return this.settledTerminalRunResult(runId);
   }
 
   /**
