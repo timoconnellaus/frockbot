@@ -116,6 +116,42 @@ describe("VoiceLedgerV1", () => {
     expect((await ledger.readAsk("ask-offline"))?.briefed).toBeUndefined();
   });
 
+  test("counts unanswered asks against the pending-answer bound", async () => {
+    const ledger = new VoiceLedgerV1(memoryStorage());
+    for (let index = 0; index < 32; index += 1) {
+      await expect(
+        ledger.recordAsk({
+          schemaVersion: 1,
+          type: "voice/ask",
+          askId: `ask-${index}`,
+          sessionId: `session-${index}`,
+          botId: "research",
+          botName: "Research",
+          question: "What changed?",
+          runId: `agent-${index}`,
+          askedAt: AT,
+        }),
+      ).resolves.toMatchObject({ status: "recorded" });
+    }
+
+    await expect(
+      ledger.recordAsk({
+        schemaVersion: 1,
+        type: "voice/ask",
+        askId: "ask-over-cap",
+        sessionId: "session-over-cap",
+        botId: "research",
+        botName: "Research",
+        question: "One more?",
+        runId: "agent-over-cap",
+        askedAt: AT,
+      }),
+    ).resolves.toEqual({
+      status: "refused",
+      reason: "Voice already has 32 Bot answers waiting or on the way.",
+    });
+  });
+
   test("the newest device wins and the previous session ends durably", async () => {
     const ledger = new VoiceLedgerV1(memoryStorage());
     await ledger.start({ sessionId: "first", deviceId: "phone", at: AT });

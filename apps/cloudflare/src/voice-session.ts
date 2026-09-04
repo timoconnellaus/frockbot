@@ -130,6 +130,7 @@ interface LiveAssistant {
   outputTranscript: string;
   kickoffAnswers: VoicePendingAnswerV1[];
   briefingAnswerIds: string[];
+  briefingSpeechObserved: boolean;
   idleGuard?: ReturnType<typeof setTimeout>;
   quotaGuard?: ReturnType<typeof setTimeout>;
 }
@@ -397,6 +398,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
         decodeVoicePendingAnswerV1,
       ),
       briefingAnswerIds: [],
+      briefingSpeechObserved: false,
     };
     this.#assistant = assistant;
     client.serializeAttachment({
@@ -543,6 +545,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
         decodeVoicePendingAnswerV1,
       ),
       briefingAnswerIds: [],
+      briefingSpeechObserved: false,
     };
     this.#assistant = assistant;
     this.#attachAssistantUpstream(assistant, upstream);
@@ -631,6 +634,9 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     }
     if (frame.outputTranscript) {
       assistant.outputTranscript += frame.outputTranscript;
+      if (assistant.briefingAnswerIds.length > 0) {
+        assistant.briefingSpeechObserved = true;
+      }
     }
     if (frame.resumptionHandle) {
       await this.#user(assistant.userId).saveVoiceResumptionHandle({
@@ -718,7 +724,10 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
         type: "state",
         state: "listening",
       });
-      if (assistant.briefingAnswerIds.length > 0) {
+      if (
+        assistant.briefingAnswerIds.length > 0 &&
+        assistant.briefingSpeechObserved
+      ) {
         const askIds = [...new Set(assistant.briefingAnswerIds)];
         try {
           await this.#user(assistant.userId).markVoiceAnswersBriefed({
@@ -731,6 +740,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
           assistant.briefingAnswerIds = assistant.briefingAnswerIds.filter(
             (askId) => !askIds.includes(askId),
           );
+          assistant.briefingSpeechObserved = false;
         } catch {
           // The speech happened; a later provider turn retries the durable ack.
         }
@@ -826,6 +836,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     if (!assistant.briefingAnswerIds.includes(answer.answerId)) {
       assistant.briefingAnswerIds.push(answer.answerId);
     }
+    assistant.briefingSpeechObserved = false;
     try {
       assistant.upstream.send(JSON.stringify(voiceAssistantAnswerV1(answer)));
       this.#resetAssistantIdle(

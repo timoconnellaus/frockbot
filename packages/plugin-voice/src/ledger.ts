@@ -315,10 +315,13 @@ export class VoiceLedgerV1 {
       const unbriefed = [...storedAnswers.values()].filter(
         (answer) => !answer.briefedAt,
       ).length;
-      if (unbriefed >= VOICE_MAX_PENDING_ANSWERS_V1) {
+      const unanswered = asks.filter(
+        ([, candidate]) => !candidate.answered && !candidate.failed,
+      ).length;
+      if (unbriefed + unanswered >= VOICE_MAX_PENDING_ANSWERS_V1) {
         return {
           status: "refused" as const,
-          reason: "Voice already has 32 Bot answers waiting to be heard.",
+          reason: "Voice already has 32 Bot answers waiting or on the way.",
         };
       }
       if (asks.length >= VOICE_MAX_ASK_RECORDS_V1) {

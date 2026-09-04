@@ -1147,7 +1147,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     if (delivery.userId !== userId) {
       throw new Error("voice answer belongs to a different User");
     }
-    await this.assertVoiceBot(delivery.botId);
     const voice = await this.voiceContribution();
     const ask = await voice.ledger.readAsk(delivery.askId);
     if (!ask) throw new Error("voice ask was not found");
