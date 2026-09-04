@@ -771,23 +771,71 @@
   left: 0;
   display: inline-flex;
   max-width: 100%;
-  height: var(--frock-control-md);
+  min-height: var(--frock-control-md);
   align-items: center;
-  gap: 6px;
-  padding: 0 10px;
+  gap: 8px;
+  padding: 6px 10px;
   border: 1px solid var(--frock-border-strong);
-  border-radius: 999px;
+  border-radius: var(--frock-radius-card);
   color: var(--frock-text);
   background: var(--frock-surface-raised);
   box-shadow: var(--frock-shadow-control);
   font-size: var(--frock-text-sm);
+  text-align: left;
   cursor: pointer;
+}
+
+.applet-chip-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
 }
 
 .applet-chip-name {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/*
+ * What the Bot is doing to it, so the phone says the same thing the canvas
+ * beside a wide conversation says without opening anything.
+ */
+.applet-chip-status {
+  display: flex;
+  overflow: hidden;
+  align-items: center;
+  gap: 6px;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.applet-chip-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--frock-action-primary);
+  animation: applet-chip-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes applet-chip-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .applet-chip-dot {
+    animation: none;
+  }
 }
 
 .applet-chip-action {
