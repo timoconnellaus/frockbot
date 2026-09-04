@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createCapacitorConfig } from "./capacitor.config.ts";
 import { resolveAndroidDevelopmentTarget } from "./dev-target.ts";
 
 const oneDevice = `List of devices attached
@@ -17,16 +18,29 @@ describe("resolveAndroidDevelopmentTarget", () => {
   });
 
   test("uses the active ADB device and Tailscale IPv4 address", () => {
-    expect(
-      resolveAndroidDevelopmentTarget({
-        adbDevices: oneDevice,
-        tailscaleIpv4: "100.119.164.113\nfd7a:115c:a1e0::4b3a:a471\n",
-      }),
-    ).toEqual({
+    const target = resolveAndroidDevelopmentTarget({
+      adbDevices: oneDevice,
+      tailscaleIpv4: "100.119.164.113\nfd7a:115c:a1e0::4b3a:a471\n",
+    });
+
+    expect(target).toEqual({
       deviceSerial: "54261JEBF09176",
       tailscaleHost: "100.119.164.113",
       gatewayUrl: "http://100.119.164.113:8787",
       rendererUrl: "http://100.119.164.113:5174",
+    });
+
+    const config = createCapacitorConfig({
+      FROCKBOT_MOBILE_DEV_SERVER_URL: target?.rendererUrl,
+      FROCKBOT_GOOGLE_WEB_CLIENT_ID: "123-example.apps.googleusercontent.com",
+    });
+    expect(config.server).toEqual({
+      androidScheme: "frockbot",
+      url: "http://100.119.164.113:5174",
+      cleartext: true,
+    });
+    expect(config.plugins?.FrockBotGoogleAuth).toEqual({
+      serverClientId: "123-example.apps.googleusercontent.com",
     });
   });
 

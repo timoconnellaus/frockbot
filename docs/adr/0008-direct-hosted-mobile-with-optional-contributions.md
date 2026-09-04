@@ -15,3 +15,5 @@ This decision supersedes [ADR-0005](0005-mobile-hosted-webui-cutover.md). Capaci
 ## Consequences
 
 The hosted origin is required at build time and is the WebView's top-level origin. Native mounting additionally requires the configured origin and immutable application deployment hash to match the loaded document. Capability calls use exact bounded invoke/result/error DTOs with cancellation and timeouts; no general API proxy or credentials cross this seam. Missing declarations, denied capabilities, or host startup failure leave the hosted application running with Web fallbacks and do not affect Agent execution.
+
+Android Google sign-in follows the same boundary. A dedicated Capacitor plugin invokes Credential Manager and returns only a one-use ID token plus its nonce. The hosted auth Package submits both to Better Auth on the loaded origin, where the configured Web OAuth client ID is enforced as audience and the ordinary hosted session cookie is created. The Android OAuth client is registered in Google Cloud by package `com.frockbot.mobile` plus signing SHA-1; the app uses the matching Web client ID as Credential Manager's `serverClientId`.

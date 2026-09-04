@@ -562,6 +562,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@better-auth/electron": "1.7.2",
+        "@capacitor/core": "8.5.0",
         "@frockbot/client-core": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
         "better-auth": "1.7.2",

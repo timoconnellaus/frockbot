@@ -14,6 +14,7 @@ test("Capacitor navigates directly to the configured hosted WebUI", async () => 
       env: {
         ...Bun.env,
         FROCKBOT_HOSTED_APP_URL: "https://app.example.com",
+        FROCKBOT_GOOGLE_WEB_CLIENT_ID: "123-example.apps.googleusercontent.com",
       },
       stdout: "pipe",
       stderr: "pipe",
