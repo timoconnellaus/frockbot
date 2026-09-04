@@ -1,6 +1,7 @@
 import {
   type LlmProvider,
   type LlmStreamEvent,
+  ModelProviderFailureError,
 } from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 
@@ -73,9 +74,40 @@ async function foundationReconciliation(
   return events;
 }
 
+/** Foundation has no remote status surface; an unexpected pre-stream fault is unknown. */
+export function classifyFoundationFailureV1(
+  error: unknown,
+): ModelProviderFailureError {
+  return error instanceof ModelProviderFailureError
+    ? error
+    : new ModelProviderFailureError({
+        classification: "unknown",
+        reason:
+          error instanceof Error
+            ? error.message
+            : "Foundation model failed before replying",
+      });
+}
+
+async function* classifiedFoundationStream(
+  request: Parameters<LlmProvider["stream"]>[0],
+  signal: AbortSignal,
+): AsyncGenerator<LlmStreamEvent> {
+  let started = false;
+  try {
+    for await (const event of foundationStream(request, signal)) {
+      started = true;
+      yield event;
+    }
+  } catch (error) {
+    if (started || signal.aborted) throw error;
+    throw classifyFoundationFailureV1(error);
+  }
+}
+
 export const foundationProvider: LlmProvider = {
   id: FOUNDATION_PROVIDER,
-  stream: foundationStream,
+  stream: classifiedFoundationStream,
   reconciliation: {
     retrieve: async (effect, signal) =>
       ({

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  LlmEffectNotStartedError,
+  ModelProviderFailureError,
   MODEL_FIRST_BYTE_DEADLINE_MS_V1,
   MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
   MODEL_IDLE_DEADLINE_MS_V1,
@@ -247,7 +247,7 @@ describe("Ollama Cloud runtime Contribution", () => {
         failure = error;
       }
 
-      expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+      expect(failure).toBeInstanceOf(ModelProviderFailureError);
       expect(openCount).toBe(0);
       expect(settled).toEqual(["effect-1"]);
       await root.fiber.dispose();
@@ -361,7 +361,7 @@ describe("Ollama Cloud runtime Contribution", () => {
       failure = error;
     }
 
-    expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+    expect(failure).toBeInstanceOf(ModelProviderFailureError);
     expect(leaseCount).toBe(0);
     await root.fiber.dispose();
   });
@@ -449,7 +449,10 @@ describe("Ollama Cloud runtime Contribution", () => {
       } catch (error) {
         failure = error;
       }
-      expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+      expect(failure).toBeInstanceOf(ModelProviderFailureError);
+      expect((failure as ModelProviderFailureError).classification).toBe(
+        "permanent",
+      );
       expect(settled).toEqual([]);
       await root.serial(
         "agent/model-outcome-committed",
@@ -516,7 +519,10 @@ describe("Ollama Cloud runtime Contribution", () => {
         failure = error;
       }
 
-      expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+      expect(failure).toBeInstanceOf(ModelProviderFailureError);
+      expect((failure as ModelProviderFailureError).classification).toBe(
+        "transient",
+      );
       expect(settled).toEqual([]);
       await root.fiber.dispose();
     },
@@ -730,7 +736,7 @@ describe("Ollama Cloud deadlines", () => {
     // before the first event as definitive. That matters more than the class
     // name — a deadline reported as uncertain would park the run on a
     // retrieval nobody can perform. The reason still reaches the person.
-    expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+    expect(failure).toBeInstanceOf(ModelProviderFailureError);
     expect((failure as Error).message).toBe(
       MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
     );

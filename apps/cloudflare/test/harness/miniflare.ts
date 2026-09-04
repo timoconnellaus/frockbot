@@ -70,6 +70,10 @@ export const OLLAMA_GOOD_API_KEY = "workerd-test-key";
  */
 export const OLLAMA_REVOKED_API_KEY = "workerd-revoked-key";
 
+/** A key whose first completion is a 503 and whose next one succeeds. */
+export const OLLAMA_FLAKY_API_KEY = "workerd-flaky-key";
+let ollamaFlakyCompletionCalls = 0;
+
 /** Anything else is rejected by both authenticated endpoints. */
 export const OLLAMA_BAD_API_KEY = "workerd-not-a-key";
 
@@ -447,7 +451,11 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     return webSearchStub(request, key);
   }
   if (url.pathname === "/api/chat") {
-    if (key !== OLLAMA_GOOD_API_KEY && key !== OLLAMA_REVOKED_API_KEY) {
+    if (
+      key !== OLLAMA_GOOD_API_KEY &&
+      key !== OLLAMA_REVOKED_API_KEY &&
+      key !== OLLAMA_FLAKY_API_KEY
+    ) {
       return new Response(UNAUTHORIZED, {
         status: 401,
         headers: { "content-type": "application/json" },
@@ -462,7 +470,15 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     });
   }
   if (url.pathname === "/v1/chat/completions") {
-    if (key !== OLLAMA_GOOD_API_KEY) {
+    if (key === OLLAMA_FLAKY_API_KEY) {
+      ollamaFlakyCompletionCalls += 1;
+      if (ollamaFlakyCompletionCalls === 1) {
+        return Response.json(
+          { error: { message: "temporarily unavailable", code: "overloaded" } },
+          { status: 503 },
+        );
+      }
+    } else if (key !== OLLAMA_GOOD_API_KEY) {
       return new Response(UNAUTHORIZED, {
         status: 401,
         headers: { "content-type": "application/json" },

@@ -7,9 +7,49 @@ export interface DurableModelEffect {
   request: NormalizedModelRequest;
 }
 
-export class LlmEffectNotStartedError extends Error {
+export const MODEL_PROVIDER_FAILURE_REASON_MAX_LENGTH_V1 = 500;
+
+export type ModelProviderFailureClassV1 = "transient" | "permanent" | "unknown";
+
+/** Keep provider diagnostics useful without letting an envelope grow the log. */
+export function boundedModelProviderReasonV1(reason: unknown): string {
+  const value =
+    typeof reason === "string" && reason.trim()
+      ? reason.trim()
+      : "The model provider did not give a reason";
+  return value.slice(0, MODEL_PROVIDER_FAILURE_REASON_MAX_LENGTH_V1);
+}
+
+/** A definitive provider failure raised before response bytes were emitted. */
+export class ModelProviderFailureError extends Error {
+  readonly classification: ModelProviderFailureClassV1;
+  readonly providerReason: string;
+  readonly retryAfterMs?: number;
+
+  constructor(input: {
+    classification: ModelProviderFailureClassV1;
+    reason: unknown;
+    retryAfterMs?: number;
+  }) {
+    const reason = boundedModelProviderReasonV1(input.reason);
+    super(reason);
+    this.name = "ModelProviderFailureError";
+    this.classification = input.classification;
+    this.providerReason = reason;
+    if (
+      input.retryAfterMs !== undefined &&
+      Number.isSafeInteger(input.retryAfterMs) &&
+      input.retryAfterMs >= 0
+    ) {
+      this.retryAfterMs = input.retryAfterMs;
+    }
+  }
+}
+
+/** @deprecated Providers should raise a classified failure instead. */
+export class LlmEffectNotStartedError extends ModelProviderFailureError {
   constructor(message: string) {
-    super(message);
+    super({ classification: "unknown", reason: message });
     this.name = "LlmEffectNotStartedError";
   }
 }
