@@ -10,6 +10,7 @@ import {
 import {
   asUser,
   botStateStubV1,
+  creditWithFakeCheckout,
   expectOkJson,
   freshUserId,
   postAsUser,
@@ -83,6 +84,7 @@ describe("legacy model account migration through the gateway", () => {
         );
       },
     );
+    await creditWithFakeCheckout(userId, 100_000);
 
     const turn = await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
