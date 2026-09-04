@@ -17,6 +17,8 @@ import {
 import type { SessionEvent } from "@frockbot/kernel-contracts";
 import {
   createBotCreateTool,
+  createBotMessageTool,
+  createTeammatesPromptSectionV1,
   createBotUpdateTool,
   createdBotIdV1,
   decodeBotUpdateInputV1,
@@ -162,6 +164,12 @@ function harness(initial?: Partial<BotSettingsViewV1>): Harness {
         };
       },
       listBots: () => flock.listBots(),
+      messageBot: async (request) => ({
+        targetBotId: request.targetBotId,
+        targetBotName: "Teammate",
+        runId: `agent-${request.effectId}`,
+        text: "Teammate answer",
+      }),
       createBot: (command) =>
         // The command crosses the User Durable Object seam, so it decodes on
         // the way in exactly as the production RPC does.
@@ -388,5 +396,36 @@ describe("the self-management seam", () => {
 
     expect(createBotUpdateTool(host).admission).toBeUndefined();
     expect(createBotCreateTool(host).admission).toBeUndefined();
+  });
+});
+
+describe("bot_message", () => {
+  test("returns the target Bot's reply as the tool result", async () => {
+    const test1 = harness();
+    const result = await createBotMessageTool(test1.host).execute(
+      { target_id: "researcher", message: "What changed?" },
+      CONTEXT,
+    );
+
+    expect(result).toEqual({ content: "Teammate answer", isError: false });
+    expect(createBotMessageTool(test1.host).idempotent).toBe(true);
+  });
+
+  test("the teammates section names the other Bots and their descriptions", async () => {
+    const test1 = harness();
+    await createBotCreateTool(test1.host).execute(
+      { name: "Researcher", description: "Finds primary sources." },
+      CONTEXT,
+    );
+    const prompt = await createTeammatesPromptSectionV1(test1.host).render({
+      sessionId: "user-1:bot-1",
+      provider: "test",
+      model: "test",
+      turnType: "chat",
+    });
+
+    expect(prompt).toContain("<teammates>");
+    expect(prompt).toContain("Researcher");
+    expect(prompt).toContain("Finds primary sources.");
   });
 });

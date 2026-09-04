@@ -499,6 +499,17 @@
   background: var(--frock-action-primary);
 }
 
+.message-user-column {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.message-via {
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+}
+
 /*
  * User-facing sends. They stack under the Bot's avatar in the same column the
  * text bubble occupies, so a Turn that only sent a widget still reads as the
