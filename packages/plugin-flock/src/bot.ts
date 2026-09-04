@@ -52,7 +52,10 @@ export interface FlockBotBackendHost {
    * named here at all. It must be idempotent: the delete saga replays, and a
    * Bot torn down twice is torn down once.
    */
-  tearDown(identity: { userId: string; botId: string }): Promise<void>;
+  tearDown(identity: {
+    userId: string;
+    botId: string;
+  }): Promise<"complete" | "pending">;
 }
 
 export class BotArchivedError extends Error {
@@ -314,7 +317,26 @@ export class FlockBotBackendContribution {
         : decodeBotLifecycleViewV1(currentValue);
     if (current && current.botId !== registration.botId)
       throw new Error("Bot lifecycle identity does not match");
-    await this.host.tearDown({ userId, botId: registration.botId });
+    const teardown = await this.host.tearDown({
+      userId,
+      botId: registration.botId,
+    });
+    if (teardown === "pending") {
+      return decodeBotLifecycleReceiptV1({
+        schemaVersion: 1,
+        commandId: command.commandId,
+        botId: command.botId,
+        status: "pending",
+        lifecycle:
+          current ??
+          ({
+            schemaVersion: 1,
+            botId: command.botId,
+            status: "active",
+            revision: 0,
+          } satisfies BotLifecycleViewV1),
+      });
+    }
     const lifecycle = {
       schemaVersion: 1,
       botId: command.botId,
