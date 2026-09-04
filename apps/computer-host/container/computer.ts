@@ -64,6 +64,8 @@ import {
   viewServiceNameV1,
   VNC_PORT_BASE,
   VIEWER_PAGE,
+  WATCHDOG_SCRIPT,
+  WATCHDOG_SERVICE,
   WINDOW_LIVE_MARKER,
   WORKSPACE_SYNC_SERVICE,
   WORKSPACES_ROOT,
@@ -1284,6 +1286,7 @@ export class ComputerHost {
     // Nothing is running yet on a Computer being provisioned, so the
     // declaration *is* the start; there is no older process to replace.
     await this.declareGateway(sprite, false);
+    await this.declareWatchdog(sprite, false);
     await withTimeout(
       settleService(
         await sprite.createService(WORKSPACE_SYNC_SERVICE, {
@@ -1339,7 +1342,16 @@ export class ComputerHost {
         // be a restart, because the service definition has not changed and
         // re-declaring an unchanged definition changes nothing.
         if (inspection.state.update.status === "started") {
+          const watchdogRefreshed = await this.declareWatchdog(sprite, true);
+          if (!watchdogRefreshed) return record;
+          if (inspection.humanControlFresh) return record;
           await this.declareGateway(sprite, true);
+          const browserRefreshed = await this.restartServiceSoft(
+            sprite,
+            BROWSER_SERVICE,
+            "browser",
+          );
+          if (!browserRefreshed) return record;
         }
         await this.writeHostState(sprite, {
           version: 1,
@@ -1380,7 +1392,7 @@ export class ComputerHost {
     record: ComputerRecord,
     progress: ComputerHostProvisioningV1,
     onProgress?: (progress: ComputerHostProvisioningV1) => void,
-    deferGateway = false,
+    deferServiceRestarts = false,
   ): Promise<ComputerRecord> {
     const digest = runtimeDocumentDigestV1();
     // Durable intent precedes the launcher. Recovery sees `started`, compares
@@ -1402,6 +1414,12 @@ export class ComputerHost {
         onProgress?.(observed);
       },
     );
+    // The watchdog is safe to replace under a viewer: it owns no window and
+    // immediately resumes the same read-only scan. Do this even while the
+    // other service restarts are deferred, so the guard exists as soon as its
+    // script does.
+    const watchdogRefreshed = await this.declareWatchdog(sprite, true);
+    if (!watchdogRefreshed) return { ...record, provisioning: updated };
     // A human is driving this desktop. `UPDATE_PHASES` disturbed nothing —
     // they are idempotent file installs, and a running websockify serves the
     // viewer page it just rewrote from the same `--web` directory on the next
@@ -1410,11 +1428,19 @@ export class ComputerHost {
     // the digest now matches, and the reconciliation above re-declares it on
     // the first open after the lease goes stale. Deferring the whole update
     // instead is what left a Computer serving no viewer page at all.
-    if (deferGateway) return { ...record, provisioning: updated };
+    if (deferServiceRestarts) return { ...record, provisioning: updated };
     // A running websockify keeps the `--web` directory from its original
     // process, so the newly installed viewer page is only served once that
     // process is replaced (P3).
     await this.declareGateway(sprite, true);
+    // The launcher's path is stable, so only a service restart makes an
+    // already-running Chromium pick up the newly installed renderer bounds.
+    const browserRefreshed = await this.restartServiceSoft(
+      sprite,
+      BROWSER_SERVICE,
+      "browser",
+    );
+    if (!browserRefreshed) return { ...record, provisioning: updated };
     await this.writeHostState(sprite, {
       version: 1,
       generation: record.generation,
@@ -1500,6 +1526,45 @@ export class ComputerHost {
     } catch {
       // The declaration above stands. box-doctor's `desktop-gateway` check is
       // where a gateway that is not listening becomes visible.
+    }
+  }
+
+  /** Declares the independently supervised renderer-memory guard. */
+  private async declareWatchdog(
+    sprite: SpriteHandle,
+    restart: boolean,
+  ): Promise<boolean> {
+    await this.declareService(sprite, WATCHDOG_SERVICE, {
+      cmd: WATCHDOG_SCRIPT,
+    });
+    return restart
+      ? this.restartServiceSoft(sprite, WATCHDOG_SERVICE, "watchdog")
+      : true;
+  }
+
+  /**
+   * A failed service refresh is observable through box-doctor, not an open
+   * refusal. The boolean keeps the durable update intent pending for retry.
+   * An absent service is already reconciled: its next declaration starts the
+   * current launcher, so there is no old process left to replace.
+   */
+  private async restartServiceSoft(
+    sprite: SpriteHandle,
+    name: string,
+    label: string,
+  ): Promise<boolean> {
+    try {
+      await withTimeout(
+        settleService(await sprite.restartService(name, "30s"), label),
+        `${label} restart`,
+        COMPUTER_HOST_PHASE_TIMEOUTS.service,
+      );
+      return true;
+    } catch (error) {
+      if (isNotFound(error)) return true;
+      // The service declaration remains supervised. Its doctor check carries
+      // the actionable failure without taking exec and file access down too.
+      return false;
     }
   }
 
@@ -2473,6 +2538,7 @@ export class ComputerHost {
       operation.name === WORKSPACE_SYNC_SERVICE ||
       operation.name === SCREEN_SERVICE ||
       operation.name === BROWSER_SERVICE ||
+      operation.name === WATCHDOG_SERVICE ||
       operation.name.startsWith(VIEW_TENANT_SERVICE_PREFIX);
     if (!declared) {
       throw new ComputerHostError(

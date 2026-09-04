@@ -92,6 +92,20 @@ function fakeComputer(options: { launchFails?: boolean } = {}): Computer {
             },
             generation: () => Promise.resolve(computer.generation),
           },
+          browser: {
+            perform: (action) => {
+              const cleanup = action as {
+                type: string;
+                origins?: readonly string[];
+              };
+              calls.push(
+                cleanup.type === "close-origins"
+                  ? `browser:close-origins:${cleanup.origins?.join(",") ?? ""}`
+                  : `browser:${cleanup.type}`,
+              );
+              return Promise.resolve({ accessibilitySnapshot: "" });
+            },
+          },
           close: () => Promise.resolve(),
         }),
     },
@@ -415,6 +429,71 @@ describe("stopping a background process", () => {
     expect(computer.calls).toEqual([
       `launch:${launched.processId}:sleep 600`,
       `stop:${launched.processId}`,
+    ]);
+    await harness.dispose();
+  });
+
+  test("closes the Bot's tabs on an applet dev origin when its process stops", async () => {
+    const computer = fakeComputer();
+    const held = storage();
+    const harness = await mount(computer, held);
+    const launched = JSON.parse(
+      (
+        await call(harness, "computer_exec", {
+          command: "applet dev --port 8787",
+          background: true,
+        })
+      ).content,
+    ) as { processId: string };
+    await call(harness, "computer_browser", {
+      action: "navigate",
+      url: "http://127.0.0.1:8787/",
+    });
+    computer.state = {
+      alive: false,
+      exitCode: 143,
+      logTail: "http://127.0.0.1:8787/\nterminated",
+    };
+
+    const stopped = await call(harness, "computer_process_stop", {
+      processId: launched.processId,
+    });
+
+    expect(stopped.isError).toBe(false);
+    expect(computer.calls).toEqual([
+      `launch:${launched.processId}:applet dev --port 8787`,
+      "browser:navigate",
+      `stop:${launched.processId}`,
+      "browser:close-origins:http://127.0.0.1:8787",
+    ]);
+    await harness.dispose();
+  });
+});
+
+describe("releasing a Bot's Turn", () => {
+  test("closes local preview origins the Bot navigated during the Turn", async () => {
+    const computer = fakeComputer();
+    const harness = await mount(computer, storage());
+    const session = harness.root.sessions.create("session-1");
+    const agent = { botId: "bot-1", session };
+    await harness.root.waterfall(
+      "agent/pre-step",
+      agent as never,
+      [],
+      1,
+      1,
+      () => Promise.resolve({ kind: "enter" as const, inputs: [] }),
+    );
+    await call(harness, "computer_browser", {
+      action: "navigate",
+      url: "http://localhost:8787/preview",
+    });
+
+    await harness.root.serial("agent/turn-stopping", agent as never, 1);
+
+    expect(computer.calls).toEqual([
+      "browser:navigate",
+      "browser:close-origins:http://localhost:8787",
     ]);
     await harness.dispose();
   });

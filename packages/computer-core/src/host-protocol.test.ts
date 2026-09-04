@@ -66,4 +66,31 @@ describe("Computer host protocol", () => {
       "unknown or missing fields",
     );
   });
+
+  test("round-trips the bounded internal browser origin cleanup", () => {
+    const cleanup: ComputerHostEffectRequestV1 = {
+      ...request,
+      operation: {
+        type: "browser",
+        action: {
+          type: "close-origins",
+          origins: ["http://127.0.0.1:8787"],
+        },
+      },
+    };
+    expect(
+      decodeComputerHostEffectRequestV1(
+        computerHostEffectRequestWireV1(cleanup),
+      ),
+    ).toEqual(cleanup);
+    expect(() =>
+      decodeComputerHostEffectRequestV1({
+        ...computerHostEffectRequestWireV1(cleanup),
+        operation: {
+          type: "browser",
+          action: { type: "close-origins", origins: [] },
+        },
+      }),
+    ).toThrow("origins are invalid");
+  });
 });

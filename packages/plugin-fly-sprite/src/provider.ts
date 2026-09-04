@@ -109,6 +109,8 @@ function browserAction(action: ComputerBrowserAction): BrowserAction {
       return { action: "snapshot" };
     case "navigate":
       return { action: "navigate", url: action.url };
+    case "close-origins":
+      return { action: "close-origins", origins: action.origins };
     case "click":
       return {
         action: "click",
@@ -303,11 +305,11 @@ function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
   const ignored = total((root) => root.ignored);
   const omitted = total((root) => root.omitted);
   const detail: string[] = [];
-  if (ignored > 0) {
-    detail.push(
-      `Excluded ${ignored} reproducible Workspace ${ignored === 1 ? "item" : "items"} from sync.`,
-    );
-  }
+  // Reproducible trees (node_modules, dist, …) are excluded by design; the
+  // count is kept on the summary for the Session log, but it is not a reason
+  // to call the sync degraded — that projected "Excluded 5 reproducible
+  // Workspace items from sync." into the conversation, where it meant nothing
+  // to the person reading it (2026-09-05).
   if (omitted > 0) {
     detail.push(
       `Omitted ${omitted} manifest ${omitted === 1 ? "entry" : "entries"} at the sync safety limit.`,
@@ -320,12 +322,13 @@ function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
   }
   const summary: ComputerSyncSummaryV1 = {
     // Every root failing is `unavailable` — the usual shape of a paused
-    // Sprite. Any partial failure or bounded exclusion is truthfully degraded.
+    // Sprite. Any partial failure or safety-limit omission is truthfully
+    // degraded; a by-design exclusion is not.
     status:
       report.failures.length > 0 &&
       report.roots.every((root) => root.failures.length > 0)
         ? "unavailable"
-        : report.failures.length > 0 || ignored > 0 || omitted > 0
+        : report.failures.length > 0 || omitted > 0
           ? "degraded"
           : "ok",
     detail: detail.join(" ").slice(0, 512),
