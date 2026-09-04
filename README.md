@@ -74,6 +74,35 @@ bun run proof:cordis
 
 GitHub Actions runs these checks on pushes to `main` and on pull requests. Dependabot checks Bun/npm dependencies and GitHub Actions weekly.
 
+### Typechecking
+
+`bun run typecheck` runs each package through a pool capped at `min(4, cores/2)`
+rather than starting all 73 at once. One TypeScript 7 process already uses about
+3.7 cores, so a higher cap costs memory and buys no wall-clock time. Override it
+when you have the headroom:
+
+```bash
+TYPECHECK_CONCURRENCY=8 bun run typecheck # 0 means unbounded
+```
+
+Most packages are on TypeScript 7's native compiler. The Vue packages,
+`packages/applet-sdk` and the workspace root stay on 5.9.3 because they depend
+on tools that embed the TypeScript compiler API, which TypeScript 7 does not
+ship — see [ADR 0029](docs/adr/0029-typescript-7-where-the-toolchain-allows-it.md).
+
+### Editor setup
+
+TypeScript 7 ships no `tsserver`; its language server lives inside the native
+binary. Point your editor's TypeScript LSP command at:
+
+```bash
+bun scripts/ts-lsp.ts
+```
+
+Without this, editors fall back to whatever `tsserver` they can find — usually a
+globally installed TypeScript 5.x, which is the wrong version and will grow
+unbounded across long sessions.
+
 ### Test layers
 
 Five layers, each answering a different question. The first four run in CI; the fifth never does.
