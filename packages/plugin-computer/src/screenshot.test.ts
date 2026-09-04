@@ -294,7 +294,9 @@ describe("computer_screenshot", () => {
 
     await harness.root.serial("agent/turn-stopping", agent as never, 1);
 
-    expect(workspace.writes).toHaveLength(1);
+    // One capture for the action the Bot just took, so the card can show it
+    // working, and one final frame at Turn end.
+    expect(workspace.writes).toHaveLength(2);
     expect(workspace.writes[0]?.writer).toEqual({
       kind: "bot",
       botId: "bot-1",
@@ -302,7 +304,41 @@ describe("computer_screenshot", () => {
       turnId: "run-9",
       runId: "run-9",
     });
-    expect(invalidations).toEqual(["bot-1:screenshots"]);
+    // The mid-Turn capture is announced as soon as it is filed; waiting for
+    // Turn end is the delay the live card exists to remove.
+    expect(invalidations).toEqual(["bot-1:screenshots", "bot-1:screenshots"]);
+    await harness.dispose();
+  });
+
+  test("a busy Turn files at most one progress capture per interval", async () => {
+    const workspace = new FakeWorkspace();
+    const harness = await mount(
+      providerWith(workspace, () =>
+        Promise.resolve({
+          bytes: png(1280, 720),
+          mediaType: "image/png" as const,
+          display: ":100",
+          capturedAt: "2026-09-03T00:00:10.000Z",
+        }),
+      ),
+      true,
+    );
+    const session = harness.root.sessions.create("session-1");
+    const agent = { botId: "bot-1", session };
+    await harness.root.waterfall(
+      "agent/pre-step",
+      agent as never,
+      [],
+      1,
+      1,
+      () => Promise.resolve({ kind: "enter" as const, inputs: [] }),
+    );
+    for (let call = 0; call < 5; call += 1) {
+      await executeTool(harness, "computer_exec", { command: "pwd" });
+    }
+
+    // Five shell commands inside the debounce window, one photograph.
+    expect(workspace.writes).toHaveLength(1);
     await harness.dispose();
   });
 
@@ -332,7 +368,9 @@ describe("computer_screenshot", () => {
     await expect(
       harness.root.serial("agent/turn-stopping", agent as never, 1),
     ).resolves.toBeUndefined();
-    expect(captures).toBe(1);
+    // Both the progress capture and the final frame are refused, and neither
+    // refusal reaches the Bot's answer or the Turn's outcome.
+    expect(captures).toBe(2);
     expect(workspace.writes).toHaveLength(0);
     await harness.dispose();
   });

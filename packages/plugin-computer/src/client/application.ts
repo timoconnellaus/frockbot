@@ -95,11 +95,19 @@ export function createComputerClientPlugin(
     let controlRequest: Promise<void> | undefined;
     /** Set by a release the backend refused; no heartbeat renews after it. */
     let controlAbandoned = false;
+    /**
+     * Whether a view-only card preview is watching the desktop right now.
+     *
+     * It is the card's declaration, not a second session: the heartbeat it
+     * keeps alive renews the same minted viewer the overlay would use.
+     */
+    let livePreviewHeld = false;
 
     const state = ref<ComputerState>({
       ...machine,
       connect: () => connect("connect-requested"),
       openViewer: () => openViewer(),
+      holdLivePreview: (held: boolean) => holdLivePreview(held),
       closeViewer: () => closeViewer(),
       takeControl: () => takeControl(),
       releaseControl: () => releaseControl(),
@@ -148,7 +156,11 @@ export function createComputerClientPlugin(
     }
 
     function syncViewerHeartbeat(): void {
-      if (!machine.expanded || !machine.viewerUrl) {
+      // A hidden tab watches nothing, so it renews nothing: the slot lapses
+      // and the Sprite stops paying for a stream no one is looking at.
+      const watching =
+        machine.expanded || (livePreviewHeld && runtime.isVisible());
+      if (!watching || !machine.viewerUrl) {
         stopViewerHeartbeat();
         return;
       }
@@ -333,6 +345,12 @@ export function createComputerClientPlugin(
       await connect("connect-requested");
     }
 
+    function holdLivePreview(held: boolean): void {
+      if (livePreviewHeld === held) return;
+      livePreviewHeld = held;
+      syncViewerHeartbeat();
+    }
+
     async function closeViewer(): Promise<void> {
       if (!machine.expanded) return;
       // A host with no Computer never had a viewer session to close.
@@ -431,6 +449,9 @@ export function createComputerClientPlugin(
         stopViewerHeartbeat();
         stopUpdateRejoin();
         controlAbandoned = false;
+        // The card remounts its preview against the newly selected Bot; a
+        // hold carried across would renew the previous Bot's session.
+        livePreviewHeld = false;
         machine = initialComputerMachineState();
         Object.assign(state.value, machine);
         watchStateChannel(selectedBotId);
@@ -443,6 +464,7 @@ export function createComputerClientPlugin(
     );
     const stopVisibility = runtime.onVisibilityChange(() => {
       syncProjectionPoll();
+      syncViewerHeartbeat();
       syncUpdateRejoin();
       const selectedBotId = shell.value.activeBotId;
       if (!selectedBotId || !runtime.isVisible()) return;

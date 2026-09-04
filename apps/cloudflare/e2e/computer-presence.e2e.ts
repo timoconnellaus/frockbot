@@ -3,7 +3,14 @@
 // the shell, client state machine, confirmation, iframe sandbox and fragment
 // takeover path remain the production implementation.
 import type { Page } from "@playwright/test";
-import { test, expect, provisionThroughUi } from "./fixtures.ts";
+import {
+  test,
+  expect,
+  assistantMessages,
+  composerInput,
+  provisionThroughUi,
+  setFakeOllamaChatMode,
+} from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 
 const viewerUrl =
@@ -197,4 +204,62 @@ test("the right-panel Computer card fits the mobile shell", async ({
   await page.screenshot({
     path: "e2e/test-results/computer-presence-mobile.png",
   });
+});
+
+test("the card shows the Bot working live and settles back to a snapshot", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1351, height: 859 });
+  await installFakeComputer(page);
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Working",
+  });
+
+  const panel = page.getByRole("region", { name: "Bot panel" });
+  const card = panel.getByRole("button", {
+    name: "Open computer in full window",
+  });
+  await expect(card).toBeVisible();
+  const live = page.locator('iframe[title="Computer, live"]');
+  // A Bot with nothing to do holds no stream.
+  await expect(live).toHaveCount(0);
+
+  // A Turn that takes its time is the whole point: the User watches it happen.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "slow");
+  const replies = assistantMessages(page);
+  const before = await replies.count();
+  const composer = composerInput(page);
+  await composer.fill("Do something on the computer");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(live).toBeVisible({ timeout: 60_000 });
+  // The card watches; it never types. The framed viewer is the same one the
+  // full-screen overlay uses, minted view-only, with no takeover lease.
+  await expect(
+    page.frameLocator('iframe[title="Computer, live"]').locator("body"),
+  ).toHaveAttribute("data-view-only", "true");
+  await expect(page.locator(".computer-screen-status")).toHaveText("Live");
+  await expect(page.locator(".computer-overlay")).toHaveCount(0);
+  await page.screenshot({
+    path: "e2e/test-results/computer-presence-live.png",
+  });
+
+  // Clicking the live card still opens the full-screen viewer, unchanged.
+  await card.click();
+  await expect(page.locator(".computer-overlay").first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".computer-overlay")).toHaveCount(0);
+
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+  await expect(replies).toHaveCount(before + 1, { timeout: 120_000 });
+  // The stream outlives the Turn by a short grace window and then lapses, so
+  // an idle Bot stops holding a connection to its desktop.
+  await expect(live).toHaveCount(0, { timeout: 60_000 });
+  await expect(page.locator(".computer-screen-status")).toHaveCount(0);
 });
