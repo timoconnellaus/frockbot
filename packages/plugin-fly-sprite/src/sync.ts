@@ -979,6 +979,17 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
         requiredIgnoredPaths.push(relative);
       }
     }
+    const requiredIgnoredRoots = [
+      ...new Set(
+        requiredIgnoredPaths.map((path) => {
+          const segments = path.split("/");
+          const index = segments.findIndex((segment) =>
+            ignoredDirectoryNames.has(segment),
+          );
+          return segments.slice(0, index + 1).join("/");
+        }),
+      ),
+    ];
     const ignoredExpression = WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1.map(
       (name) => `-name ${shellQuote(name)}`,
     ).join(" -o ");
@@ -1020,6 +1031,12 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
         : "  :",
       "  return 1",
       "}",
+      "required_directory() {",
+      requiredIgnoredRoots.length > 0
+        ? `  case "$1" in ${requiredIgnoredRoots.map((path) => shellQuote(path)).join("|")}) return 0 ;; esac`
+        : "  :",
+      "  return 1",
+      "}",
       // Required artifact files go first: the source manifest may be full,
       // but an explicit one-root publisher must still receive the exact bytes
       // it named. They remain subject to the same byte and entry bounds.
@@ -1034,7 +1051,7 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
       ]),
       // Count pruned directory roots, not every file below them: the count is
       // useful and bounded work even when a dependency tree holds millions.
-      `while IFS= read -r -d "" DIR; do IGNORED=$((IGNORED + 1)); done < <(find "$ROOT" \\( -path "$ROOT/${WORKSPACE_GENERATIONS_DIR}" -o -path "$ROOT/${WORKSPACE_SYNC_DIR}" -o -path "$ROOT/.frockbot-locks" \\) -prune -o -type d \\( ${ignoredExpression} \\) -print0 -prune)`,
+      `while IFS= read -r -d "" DIR; do REL=\${DIR#"$ROOT"/}; required_directory "$REL" || IGNORED=$((IGNORED + 1)); done < <(find "$ROOT" \\( -path "$ROOT/${WORKSPACE_GENERATIONS_DIR}" -o -path "$ROOT/${WORKSPACE_SYNC_DIR}" -o -path "$ROOT/.frockbot-locks" \\) -prune -o -type d \\( ${ignoredExpression} \\) -print0 -prune)`,
       `GRAVES="$ROOT/${WORKSPACE_SYNC_DIR}/${SYNC_TOMBSTONES_DIR}"`,
       'while IFS= read -r -d "" FILE; do',
       '  REL=${FILE#"$GRAVES"/}',

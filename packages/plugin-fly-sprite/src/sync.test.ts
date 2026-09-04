@@ -91,6 +91,8 @@ class FakeSyncSprite {
   paused = false;
   /** Simulates the shared host truncating an oversized storage response. */
   maxScanOutputBytes?: number;
+  /** The exact remote Bash document, for syntax validation. */
+  lastScanScript?: string;
   /** Drops the next sidecar write, as a pause between store and Computer does. */
   dropNextMaterialize = false;
 
@@ -99,6 +101,7 @@ class FakeSyncSprite {
     // A paused Sprite answers nothing, and the host reports the failed exit;
     // the provider turns that into `Sprite storage operation failed: …`.
     if (this.paused) return { exitCode: 1, stderr: "Sprite is paused" };
+    if (script.includes("append_manifest")) this.lastScanScript = script;
     const stdout = this.interpret(script);
     if (
       script.includes("append_manifest") &&
@@ -187,6 +190,17 @@ class FakeSyncSprite {
   private scan(root: string, required: ReadonlySet<string>): string {
     const rows: string[] = [];
     const ignoredDirectories = new Set<string>();
+    const requiredIgnoredDirectories = new Set(
+      [...required].map((path) => {
+        const segments = path.split("/");
+        const index = segments.findIndex((segment) =>
+          (WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1 as readonly string[]).includes(
+            segment,
+          ),
+        );
+        return segments.slice(0, index + 1).join("/");
+      }),
+    );
     const generations = `${root}/.frockbot-generations/`;
     const graves = `${root}/.frockbot-sync/tombstones/`;
     for (const [path, bytes] of [...this.files].sort()) {
@@ -200,7 +214,10 @@ class FakeSyncSprite {
             segment,
           ),
         );
-        ignoredDirectories.add(segments.slice(0, index + 1).join("/"));
+        const ignoredRoot = segments.slice(0, index + 1).join("/");
+        if (!requiredIgnoredDirectories.has(ignoredRoot)) {
+          ignoredDirectories.add(ignoredRoot);
+        }
         continue;
       }
       const meta = this.files.get(`${generations}${relative}`);
@@ -726,6 +743,35 @@ describe("the durable-root sync, Package-declared roots", () => {
     );
     expect(outcome.scan.ignored).toBe(0);
     expect(outcome.scan.omitted).toBe(100);
+  });
+
+  test("emits valid Bash with exact required build paths", async () => {
+    const sprite = new FakeSyncSprite();
+    const surface = new FlySpriteSyncSurface({
+      computer: attach(sprite).bot(BOT),
+      layout: FLY_WORKSPACE_LAYOUT,
+      userId: USER,
+      botDirectoryKey: computerBotKey,
+    });
+
+    await surface.scan(appletSourceRoot, [
+      "todo/dist/server.js",
+      "todo/dist/ui.html",
+      "todo/dist/manifest.json",
+    ]);
+
+    expect(sprite.lastScanScript).toBeString();
+    const process = Bun.spawn(["bash", "-n"], {
+      stdin: new Blob([sprite.lastScanScript!]),
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([
+      process.exited,
+      new Response(process.stderr).text(),
+    ]);
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
   });
 
   // Constitution — Computer and Workspace: "durable roots, declared by the
