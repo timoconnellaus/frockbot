@@ -34,6 +34,7 @@ import {
 import {
   eventsForFailedRun,
   latestModelRequestJournalState,
+  latestModelRequestProviderV1,
   planBotRunRecovery,
   type ProviderReconcilesV1,
   repairedSessionLogV1,
@@ -605,7 +606,7 @@ export class BotDurableAuthority<Snapshot> {
           modelState.status === "unresolved") &&
         !runWasDiscardedV1(durableRun)
       ) {
-        await this.requireRunReconciliation(
+        const settled = await this.parkOrSettleUnresolvedRun(
           command.runId,
           previous,
           events,
@@ -613,6 +614,7 @@ export class BotDurableAuthority<Snapshot> {
             ? unresolvedModelRequestFailure(events, modelState.request)
             : message,
         );
+        if (settled) return settled;
         throw new Error(message);
       }
       await this.failRun(command.runId, previous, events, message);
@@ -746,7 +748,7 @@ export class BotDurableAuthority<Snapshot> {
           modelState.status === "unresolved") &&
         !runWasDiscardedV1(durableRun)
       ) {
-        await this.requireRunReconciliation(
+        const parked = await this.parkOrSettleUnresolvedRun(
           run.runId,
           previous,
           events,
@@ -754,6 +756,7 @@ export class BotDurableAuthority<Snapshot> {
             ? unresolvedModelRequestFailure(events, modelState.request)
             : message,
         );
+        if (parked) return parked;
         throw new Error(message);
       }
       await this.failRun(run.runId, previous, events, message);
@@ -1648,6 +1651,48 @@ export class BotDurableAuthority<Snapshot> {
       );
       await this.refreshRecoveryAlarm(transaction);
     });
+  }
+
+  /**
+   * Settles a Turn whose model outcome is unknown, or parks it when somebody
+   * can still be asked — and never lets the uncertainty escape as a throw.
+   *
+   * This is ADR 0028 applied to the live path. Recovery already refuses to park
+   * a run whose provider offers no retrieval, because parking there is not
+   * caution but a dead end; the executing path did not, and the asymmetry is
+   * what produced the blocker. A model request that ran past its budget threw
+   * out of the Agent as an uncertain outcome, this method's predecessor parked
+   * the run and rethrew, and the `POST /turns` the composer was holding open
+   * answered 500 — so the person read "Couldn't reach the Bot. Check your
+   * connection", which blamed their network for a model that took too long,
+   * and the Bot stayed wedged behind a banner whose only possible resolution
+   * was the settlement we could have written here.
+   *
+   * When the provider does reconcile, nothing changes: the run parks, the
+   * caller still rethrows, and a later attempt can genuinely retrieve the
+   * effect. Uncertainty is never assumed away in either branch — the request is
+   * not re-sent, and every streamed word stays in the journal.
+   *
+   * Returns the settled completion when it settled, `undefined` when it parked.
+   */
+  private async parkOrSettleUnresolvedRun(
+    runId: string,
+    previous: SessionEvent[],
+    events: SessionEvent[],
+    reason: string,
+  ): Promise<BotTurnCompletion | undefined> {
+    const provider = latestModelRequestProviderV1(events);
+    const reconciles = this.hooks.providerReconciles ?? (() => true);
+    if (provider === undefined || reconciles(provider)) {
+      await this.requireRunReconciliation(runId, previous, events, reason);
+      return undefined;
+    }
+    // `failRun` runs the ordinary terminal settlement: the open Turn is closed
+    // with a `turn/end`, the partial text is kept, and the record carries the
+    // reason. The reason is a diagnostic for the debug surface — what the
+    // person reads is the client's own copy for the outcome.
+    await this.failRun(runId, previous, events, reason);
+    return this.settledReconciliationResult(runId);
   }
 
   /**

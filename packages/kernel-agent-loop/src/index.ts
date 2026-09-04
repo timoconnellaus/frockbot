@@ -520,6 +520,7 @@ class LoopAgent implements Agent {
         await this.session.flush();
         signal.throwIfAborted();
         await this.#notifyModelOutcome(response.request.requestId, "completed");
+        await this.#announceAssistantText(response, openTurn, latestStep);
         if (response.toolCalls.length === 0) {
           const shouldStop = await this.#stepShouldStop(
             openTurn,
@@ -640,6 +641,7 @@ class LoopAgent implements Agent {
         await this.session.flush();
         signal.throwIfAborted();
         await this.#notifyModelOutcome(response.request.requestId, "completed");
+        await this.#announceAssistantText(response, openTurn, step);
         if (response.toolCalls.length === 0) {
           const shouldStop = await this.#stepShouldStop(
             openTurn,
@@ -820,6 +822,7 @@ class LoopAgent implements Agent {
         await this.session.flush();
         signal.throwIfAborted();
         await this.#notifyModelOutcome(response.request.requestId, "completed");
+        await this.#announceAssistantText(response, turn, step);
 
         if (response.toolCalls.length === 0) {
           const shouldStop = await this.#stepShouldStop(
@@ -1369,6 +1372,31 @@ class LoopAgent implements Agent {
       await this.session.flush();
     }
     return endsTurn;
+  }
+
+  /**
+   * Raises `agent/assistant-text` for a step that wrote something and then
+   * called tools, so a Package that owns the Bot's voice can do something with
+   * words the model addressed to the person.
+   *
+   * Only that shape. A step with no tool calls ends the Turn on its assistant
+   * message, which every surface already draws; a step with tools and no text
+   * has nothing to say. The narrow case is the one that went missing: text and
+   * tools together, where the text is an acknowledgement and the tools are the
+   * work it was announcing.
+   */
+  async #announceAssistantText(
+    response: ModelResponse,
+    turn: number,
+    step: number,
+  ): Promise<void> {
+    if (response.toolCalls.length === 0) return;
+    if (response.text.trim().length === 0) return;
+    await this.#ctx.serial("agent/assistant-text", this, response.text, {
+      turn,
+      step,
+      requestId: response.request.requestId,
+    });
   }
 
   async #stepShouldStop(

@@ -53,6 +53,7 @@ import {
 import { MCP_OAUTH_CONNECTION_TYPE_ID } from "@frockbot/plugin-mcp/agent";
 import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
+import { RUN_FAILURE_FALLBACK_COPY_V1 } from "../run-failure-copy.js";
 import {
   ClientTurnRefusedErrorV1,
   type ClientTurnRefusalReasonV1,
@@ -289,10 +290,28 @@ function turnRefusalCopyV1(reason: ClientTurnRefusalReasonV1): string {
  * same bubble the settled answer will, and the same send gate applies to
  * both: a Turn that has already delivered a bubble streams nothing into a
  * second one.
+ *
+ * The one thing the gate must not do is swallow a *different* answer. A Turn
+ * that acknowledges the request and then answers in its own text has said two
+ * things, and the rule is against saying the same thing twice, not against
+ * saying a second one — so a settled answer that matches nothing the Turn sent
+ * is still drawn. Mid-Turn the gate stays absolute: a running Turn's text is
+ * unfinished, and half a sentence is not yet distinguishable from the send it
+ * may be about to become.
  */
 function visibleAssistantText(run: ClientRun, fallback = ""): string {
-  if (sendsFrom(run.events).length > 0) return "";
-  return run.responseText ?? run.partialText ?? fallback;
+  const sends = sendsFrom(run.events);
+  if (sends.length === 0)
+    return run.responseText ?? run.partialText ?? fallback;
+  const settled = run.responseText;
+  if (settled === undefined) return "";
+  const delivered = sends.some(
+    (send) =>
+      send.kind === "payload" &&
+      send.payload.type === "text" &&
+      send.payload.text.trim() === settled.trim(),
+  );
+  return delivered ? "" : settled;
 }
 
 function isTerminalRun(run: ClientRun): boolean {
@@ -375,7 +394,10 @@ function assistantMessage(
       runId: run.runId,
       role: "assistant",
       text: run.responseText,
-      notice: run.failure ?? "Agent request failed.",
+      // Already the sentence written for a person: the projection maps the
+      // stored diagnostic through `runFailureCopyV1` before it crosses the
+      // wire, so nothing here has to know what went wrong.
+      notice: run.failure ?? RUN_FAILURE_FALLBACK_COPY_V1,
       status: "error",
       tools: toolsFrom(run.events),
       sends: sendsFrom(run.events),
@@ -388,7 +410,7 @@ function assistantMessage(
     role: "assistant",
     text:
       run.status === "failed"
-        ? "This Bot couldn't finish its reply. Try again."
+        ? RUN_FAILURE_FALLBACK_COPY_V1
         : visibleAssistantText(run, notification?.body ?? ""),
     status: run.status === "failed" ? "error" : "completed",
     tools: toolsFrom(run.events),

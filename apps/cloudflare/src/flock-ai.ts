@@ -1,3 +1,4 @@
+import { MODEL_FIRST_BYTE_DEADLINE_MS_V1 } from "@frockbot/kernel-contracts";
 import { FLOCK_AI_DEFAULT_AUTO_ROUTE } from "@frockbot/plugin-provider-flock-ai/catalog";
 
 export const DEFAULT_FLOCK_AI_GATEWAY_ID_V1 = "flock";
@@ -14,10 +15,25 @@ export interface FlockAiGatewayHostV1 {
 /**
  * The Gateway request is bounded so a gateway that accepts the connection and
  * then never answers fails the Turn instead of holding it open. The deadline
- * covers reaching the gateway; the SSE body that follows is bounded per read by
- * the OpenAI-compatible decoder.
+ * covers *reaching* the gateway — nothing more. The SSE body that follows is
+ * bounded by the kernel's own first-byte and idle deadlines, which is where the
+ * copy a person reads lives.
+ *
+ * It was 60s, and it did not stop at the headers: the same signal was handed to
+ * `fetch` and left armed, so it guillotined the response body sixty seconds
+ * into a tool-calling step. The body's abort surfaced as a raw
+ * `TimeoutError: The operation was aborted due to timeout`, which the Agent
+ * read as an *uncertain* model outcome and parked the run on — a `POST /turns`
+ * answering 500 after 65s with "Couldn't reach the Bot" on screen. A step that
+ * carries the applets SKILL.md plus the dynamic-tool schemas crosses a minute
+ * routinely, so 60s was not a slow gateway, it was the ordinary case.
+ *
+ * Two minutes now, matching `MODEL_FIRST_BYTE_DEADLINE_MS_V1` so the kernel's
+ * deadline — the one with a sentence written for a person — wins the race and
+ * this stays the backstop for a transport that never reaches the seam at all.
+ * Both are far inside the fifteen-minute Turn deadline.
  */
-export const FLOCK_AI_GATEWAY_TIMEOUT_MS_V1 = 60_000;
+export const FLOCK_AI_GATEWAY_TIMEOUT_MS_V1 = MODEL_FIRST_BYTE_DEADLINE_MS_V1;
 
 export interface FlockAiGatewayConfigV1 {
   gatewayId?: string;
@@ -85,59 +101,83 @@ export function createFlockAiGatewayHostV1(
   return {
     autoRoute,
     async runChatCompletion(gatewayModel, body, signal) {
-      const deadline = AbortSignal.timeout(timeoutMs);
+      // The deadline is disarmed the moment the response exists, so what it
+      // bounds is reaching the gateway and nothing after it. Left armed it
+      // aborted the response *body* mid-stream, which is not a gateway that
+      // never answered — it is an answer in progress — and the caller has no
+      // way to tell the two apart from the abort alone.
+      //
+      // The caller's `signal` is still chained in, and it is never disarmed:
+      // a Stop or a superseding message must tear the request down whether the
+      // headers have arrived or not.
+      const deadline = new AbortController();
+      const timer = setTimeout(() => {
+        deadline.abort(
+          new Error(`AI Gateway did not respond within ${timeoutMs}ms`),
+        );
+      }, timeoutMs);
       const requestSignal = signal
-        ? AbortSignal.any([signal, deadline])
-        : deadline;
+        ? AbortSignal.any([signal, deadline.signal])
+        : deadline.signal;
       const timedOut = (error: unknown): never => {
-        if (deadline.aborted && !signal?.aborted) {
-          throw new Error(`AI Gateway did not respond within ${timeoutMs}ms`);
+        if (deadline.signal.aborted && !signal?.aborted) {
+          throw deadline.signal.reason as Error;
         }
         throw error;
       };
-      if (useCompat) {
+      const reachGatewayV1 = async (): Promise<ReadableStream<Uint8Array>> => {
+        if (useCompat) {
+          let response: Response;
+          try {
+            response = await doFetch(
+              compatChatCompletionsUrlV1(accountId!, gatewayId),
+              {
+                method: "POST",
+                headers: {
+                  "content-type": "application/json",
+                  "cf-aig-authorization": `Bearer ${token!}`,
+                },
+                body: JSON.stringify({ ...body, model: gatewayModel }),
+                signal: requestSignal,
+              },
+            );
+          } catch (error) {
+            return timedOut(error);
+          }
+          return streamOrThrowV1(response);
+        }
+        // The `AI` binding takes no signal, so the deadline is raced against
+        // the call rather than cancelling it.
         let response: Response;
         try {
-          response = await doFetch(
-            compatChatCompletionsUrlV1(accountId!, gatewayId),
-            {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                "cf-aig-authorization": `Bearer ${token!}`,
-              },
-              body: JSON.stringify({ ...body, model: gatewayModel }),
-              signal: requestSignal,
-            },
-          );
+          response = await Promise.race([
+            ai.gateway(gatewayId).run({
+              provider: "compat",
+              endpoint: "chat/completions",
+              headers: {},
+              query: { ...body, model: gatewayModel },
+            }),
+            new Promise<never>((_resolve, reject) => {
+              requestSignal.addEventListener(
+                "abort",
+                () => reject(requestSignal.reason),
+                { once: true },
+              );
+            }),
+          ]);
         } catch (error) {
           return timedOut(error);
         }
         return streamOrThrowV1(response);
-      }
-      // The `AI` binding takes no signal, so the deadline is raced against the
-      // call rather than cancelling it.
-      let response: Response;
+      };
       try {
-        response = await Promise.race([
-          ai.gateway(gatewayId).run({
-            provider: "compat",
-            endpoint: "chat/completions",
-            headers: {},
-            query: { ...body, model: gatewayModel },
-          }),
-          new Promise<never>((_resolve, reject) => {
-            requestSignal.addEventListener(
-              "abort",
-              () => reject(requestSignal.reason),
-              { once: true },
-            );
-          }),
-        ]);
-      } catch (error) {
-        return timedOut(error);
+        return await reachGatewayV1();
+      } finally {
+        // Disarmed here rather than per-branch: whatever happened, the gateway
+        // has either answered or failed, and the body is the stream deadline's
+        // to bound from now on.
+        clearTimeout(timer);
       }
-      return streamOrThrowV1(response);
     },
   };
 }
