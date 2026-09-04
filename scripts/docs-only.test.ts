@@ -17,7 +17,7 @@ describe("scripts/docs-only.sh", () => {
     expect(
       await classify([
         "docs/plans/voice.md",
-        "docs/adr/0029-voice.md",
+        "docs/adr/0099-voice.md",
         "README.md",
         "AGENTS.md",
       ]),
