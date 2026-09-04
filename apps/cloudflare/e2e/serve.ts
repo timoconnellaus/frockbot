@@ -23,11 +23,21 @@ const harness = await startHarness({
 console.log(
   `FrockBot e2e harness ready on ${harness.baseUrl} (fake Ollama on ${harness.ollamaUrl}, fake Flock AI on ${harness.flockAiUrl})`,
 );
+console.log(`Harness and wrangler logs: ${harness.logFile}`);
 
 let stopping = false;
 const shutdown = (): void => {
   if (stopping) return;
   stopping = true;
+  const { worker, flockAi } = harness.restarts();
+  if (worker > 0 || flockAi > 0) {
+    // Printed at teardown so a green shard still says the server had to be
+    // rescued: a passing run that needed a restart is a run that is still
+    // hiding a crash, and the log file names where to look.
+    console.log(
+      `The harness restarted wrangler dev ${worker} time(s) and the Flock AI fake ${flockAi} time(s). See ${harness.logFile}.`,
+    );
+  }
   void harness.stop().then(
     () => process.exit(0),
     () => process.exit(1),

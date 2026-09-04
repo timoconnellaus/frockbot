@@ -33,6 +33,59 @@ export interface AllowedFailures {
 interface E2EFixtures {
   userId: string;
   allowedFailures: AllowedFailures;
+  serverReady: void;
+}
+
+/**
+ * How long a test waits for the harness to have a server again.
+ *
+ * The supervisor's backoff is 1s, 2s, 4s, 8s, then 15s, and a fresh
+ * `wrangler dev` takes a few seconds more to load the artifact. This budget
+ * covers a couple of those without covering a genuinely dead harness — when it
+ * runs out the test fails saying so, rather than failing on a locator nobody
+ * can explain.
+ */
+const SERVER_READY_TIMEOUT_MS = 90_000;
+
+/**
+ * Wait until something is serving on `baseURL` again.
+ *
+ * `wrangler dev` has died mid-shard in CI more than once, and until the
+ * harness learned to restart it every later spec failed on
+ * `net::ERR_CONNECTION_REFUSED` — one crash cost a whole shard's evidence.
+ * With the supervisor in front of it, this is what turns that into a single
+ * failed test: the spec that was running when the runtime died still fails,
+ * and the next one waits here for the replacement instead of racing it.
+ *
+ * `/app.js` is a public asset path, so this needs no identity header, and it
+ * is served by the loaded artifact — a 200 proves the replacement Worker has
+ * its artifact back, not merely that a socket accepts.
+ */
+async function waitForServer(baseURL: string): Promise<void> {
+  const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
+  let lastFailure = "no attempt was made";
+  let attempts = 0;
+  for (;;) {
+    try {
+      const response = await fetch(`${baseURL}/app.js`);
+      if (response.ok) {
+        void response.arrayBuffer();
+        return;
+      }
+      void response.arrayBuffer();
+      lastFailure = `HTTP ${response.status}`;
+    } catch (error) {
+      lastFailure = error instanceof Error ? error.message : String(error);
+    }
+    attempts += 1;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `the e2e harness is not serving ${baseURL} after ${attempts} attempts: ${lastFailure}. ` +
+          `The Worker probably died; see the harness log the webServer printed.`,
+      );
+    }
+    await new Promise((sleep) => setTimeout(sleep, 500));
+  }
 }
 
 interface Problem {
@@ -51,7 +104,16 @@ export const test = base.extend<E2EOptions & E2EFixtures>({
     await use({ console: [], requests: [] });
   },
 
-  page: async ({ page, allowedFailures }, use) => {
+  serverReady: async ({ baseURL }, use) => {
+    if (baseURL) await waitForServer(baseURL);
+    await use();
+  },
+
+  // `serverReady` is a dependency rather than an `auto` fixture so it is
+  // guaranteed to have finished before this one opens a page at an address
+  // that may still be coming back up.
+  page: async ({ page, allowedFailures, serverReady }, use) => {
+    void serverReady;
     const problems: Problem[] = [];
     page.on("console", (message) => {
       if (message.type() === "error") {

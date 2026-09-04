@@ -24,11 +24,19 @@
 // the Gateway and native-image seams.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer as createHttpServer, type Server } from "node:http";
-import { createServer as createTcpServer } from "node:net";
+import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { reserveFreePort } from "./ports.ts";
+import {
+  OutputTail,
+  superviseProcess,
+  type SupervisedProcess,
+} from "./supervisor.ts";
+
+export { reserveFreePort } from "./ports.ts";
 
 const cloudflareRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -82,31 +90,6 @@ export const E2E_STREAM_GAP_MS = 8_000;
 
 const READY_TIMEOUT_MS = 120_000;
 const SHUTDOWN_GRACE_MS = 5_000;
-
-/**
- * Ask the operating system for a port nobody is listening on.
- *
- * The Playwright config reserves both ports in its own process and hands them
- * to this harness through the environment, so the specs know the fake server's
- * address without the harness having to report it back.
- */
-export function reserveFreePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const server = createTcpServer();
-    server.unref();
-    server.on("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (typeof address === "string" || address === null) {
-        server.close();
-        reject(new Error("could not reserve a port"));
-        return;
-      }
-      const { port } = address;
-      server.close(() => resolvePort(port));
-    });
-  });
-}
 
 function unauthorized(): { status: number; body: string } {
   return { status: 401, body: JSON.stringify({ error: "Unauthorized" }) };
@@ -566,13 +549,34 @@ export interface RunningHarness {
   baseUrl: string;
   ollamaUrl: string;
   flockAiUrl: string;
+  /** The file both `wrangler dev` processes are teed into. */
+  logFile: string;
+  /** How many times each supervised server has had to be restarted. */
+  restarts(): { worker: number; flockAi: number };
   stop(): Promise<void>;
+}
+
+/**
+ * Where the harness tees everything its children print.
+ *
+ * `wrangler dev`'s own debug log goes to `~/.config/.wrangler/logs`, which a CI
+ * artifact upload cannot address — `actions/upload-artifact` does not expand
+ * `~`, so that upload has silently produced nothing — and Playwright's
+ * `[WebServer]` prefix in the job log is cut off at the point a shard fails. A
+ * file inside the workspace is addressable by both.
+ */
+export function harnessLogDirectory(): string {
+  return resolve(cloudflareRoot, "e2e/wrangler-logs");
 }
 
 /**
  * Build, seed, and serve. Every resource this creates is released by `stop()`,
  * including a `--persist-to` directory that is fresh for every run, so no
  * Durable Object, R2 object or D1 row survives from one run into the next.
+ *
+ * Both `wrangler dev` processes are supervised: an exit nobody asked for is
+ * followed by a fresh one on the same port and the same `--persist-to`
+ * directory. See `supervisor.ts` for why.
  */
 export async function startHarness(
   options: HarnessOptions,
@@ -584,39 +588,80 @@ export async function startHarness(
   const persistDirectory = e2ePersistDirectory(options.port);
   await rm(persistDirectory, { recursive: true, force: true });
   await mkdir(persistDirectory, { recursive: true });
+
+  const logDirectory = harnessLogDirectory();
+  mkdirSync(logDirectory, { recursive: true });
+  const logFile = join(logDirectory, `harness-${options.port}.log`);
+  const log: WriteStream = createWriteStream(logFile, { flags: "a" });
+  const note = (message: string): void => {
+    process.stderr.write(`${message}\n`);
+    log.write(`${message}\n`);
+  };
+
+  /**
+   * Forward a child's output without ever letting a slow reader stall it.
+   *
+   * `stream.pipe(process.stdout)` honours backpressure: when the far end of
+   * this process's own stdout is slow — Playwright's `webServer` pipe, itself
+   * read by a workspace runner that redraws a terminal — `pipe` stops reading
+   * the child. `wrangler dev` then stops draining the workerd it supervises,
+   * workerd's `write()` to the pipe fails, and the runtime dies mid-suite:
+   * `kj/async-io-unix.c++: disconnected: ::write(...): Broken pipe`.
+   *
+   * Copying each chunk on `data` keeps the child's pipe drained no matter how
+   * slow the consumer is; the backlog becomes memory in this short-lived
+   * process instead of a dead Worker runtime. Each chunk also reaches the log
+   * file CI uploads and the tail the supervisor prints on a crash.
+   */
+  const forwardOutput = (child: ChildProcess, tail: OutputTail): void => {
+    for (const [stream, sink] of [
+      [child.stdout, process.stdout],
+      [child.stderr, process.stderr],
+    ] as const) {
+      stream?.on("data", (chunk: Buffer) => {
+        sink.write(chunk);
+        log.write(chunk);
+        tail.write(String(chunk));
+      });
+    }
+  };
+
+  // An inspector port each, out of the same non-ephemeral window as the app
+  // ports. Left unset, wrangler picks its own out of the kernel's ephemeral
+  // range — which is exactly the collision this harness has been losing to.
+  // The three ports the Playwright config already chose were reserved in a
+  // different process, so they are absent from this one's ledger and would
+  // otherwise be fair game — and none of them is bound yet, so a probe would
+  // say they are free.
+  const reservedHere = new Set([
+    options.port,
+    options.ollamaPort,
+    options.flockAiPort,
+  ]);
+  const workerInspectorPort = await reserveFreePort({ taken: reservedHere });
+  const flockAiInspectorPort = await reserveFreePort({ taken: reservedHere });
+
   let ollama: Awaited<ReturnType<typeof startFakeOllama>> | undefined;
-  let flockAi: ChildProcess | undefined;
-  let worker: ChildProcess | undefined;
+  let flockAi: SupervisedProcess | undefined;
+  let worker: SupervisedProcess | undefined;
 
   const stop = async (): Promise<void> => {
-    if (worker) await stopProcessTree(worker);
-    if (flockAi) await stopProcessTree(flockAi);
+    if (worker) await worker.stop();
+    if (flockAi) await flockAi.stop();
     if (ollama) await ollama.close();
+    await new Promise<void>((closed) => log.end(closed));
     await rm(persistDirectory, { recursive: true, force: true });
   };
 
-  try {
-    await run("bun", ["run", "artifact:build"]);
-    await run("bunx", [
-      "wrangler",
-      "--env",
-      "e2e",
-      "r2",
-      "object",
-      "put",
-      "frockbot-application-artifacts/applications/foundation-v1.mjs",
-      "--file",
-      resolve(cloudflareRoot, "dist/artifacts/foundation-v1.mjs"),
-      "--local",
-      "--persist-to",
-      persistDirectory,
-    ]);
+  const childEnvironment = {
+    ...process.env,
+    // Wrangler's own debug log, next to the harness's, so one artifact holds
+    // both halves of a crash.
+    WRANGLER_LOG_PATH: `${logDirectory}/`,
+  };
 
-    await seedPackageCatalog(persistDirectory);
-
-    ollama = await startFakeOllama(options.ollamaPort);
-
-    flockAi = spawn(
+  const spawnFlockAi = (): ChildProcess =>
+    spawn(
       "bunx",
       [
         "wrangler",
@@ -629,6 +674,8 @@ export async function startHarness(
         "127.0.0.1",
         "--port",
         String(options.flockAiPort),
+        "--inspector-port",
+        String(flockAiInspectorPort),
         // A line per request, times two Workers and seventeen specs, is the
         // bulk of what this harness forwards. Warnings and errors — the only
         // output a failing run is read for — still print.
@@ -639,17 +686,12 @@ export async function startHarness(
         cwd: cloudflareRoot,
         stdio: ["ignore", "pipe", "pipe"],
         detached: true,
+        env: childEnvironment,
       },
     );
-    forwardOutput(flockAi);
-    const flockAiUrl = `http://127.0.0.1:${options.flockAiPort}`;
-    const flockAiCrashed = processFailure(
-      flockAi,
-      "Flock AI fake wrangler dev",
-    );
-    await Promise.race([waitForHttpServer(flockAiUrl), flockAiCrashed]);
 
-    worker = spawn(
+  const spawnWorker = (): ChildProcess =>
+    spawn(
       "bunx",
       [
         "wrangler",
@@ -662,6 +704,8 @@ export async function startHarness(
         "127.0.0.1",
         "--port",
         String(options.port),
+        "--inspector-port",
+        String(workerInspectorPort),
         // The gateway's development identity, the same one `bun run dev` and
         // the Electron shell use: `?as_user=` and `x-frockbot-user-id` stand in
         // for a Google session, so the layer needs no secret.
@@ -703,47 +747,70 @@ export async function startHarness(
         cwd: cloudflareRoot,
         stdio: ["ignore", "pipe", "pipe"],
         detached: true,
+        env: childEnvironment,
       },
     );
-    forwardOutput(worker);
-    const baseUrl = `http://127.0.0.1:${options.port}`;
-    const crashed = processFailure(worker, "FrockBot wrangler dev");
-    await Promise.race([waitForManifest(baseUrl), crashed, flockAiCrashed]);
 
-    return { baseUrl, ollamaUrl: ollama.url, flockAiUrl, stop };
+  try {
+    await run("bun", ["run", "artifact:build"]);
+    await run("bunx", [
+      "wrangler",
+      "--env",
+      "e2e",
+      "r2",
+      "object",
+      "put",
+      "frockbot-application-artifacts/applications/foundation-v1.mjs",
+      "--file",
+      resolve(cloudflareRoot, "dist/artifacts/foundation-v1.mjs"),
+      "--local",
+      "--persist-to",
+      persistDirectory,
+    ]);
+
+    await seedPackageCatalog(persistDirectory);
+
+    ollama = await startFakeOllama(options.ollamaPort);
+
+    const flockAiUrl = `http://127.0.0.1:${options.flockAiPort}`;
+    const supervisedFlockAi = superviseProcess({
+      label: "Flock AI fake wrangler dev",
+      spawnChild: spawnFlockAi,
+      waitUntilReady: () => waitForHttpServer(flockAiUrl),
+      stopChild: stopProcessTree,
+      forwardOutput,
+      report: note,
+    });
+    flockAi = supervisedFlockAi;
+    await supervisedFlockAi.start();
+
+    const baseUrl = `http://127.0.0.1:${options.port}`;
+    const supervisedWorker = superviseProcess({
+      label: "FrockBot wrangler dev",
+      spawnChild: spawnWorker,
+      waitUntilReady: () => waitForManifest(baseUrl),
+      stopChild: stopProcessTree,
+      forwardOutput,
+      report: note,
+    });
+    worker = supervisedWorker;
+    await supervisedWorker.start();
+
+    return {
+      baseUrl,
+      ollamaUrl: ollama.url,
+      flockAiUrl,
+      logFile,
+      restarts: () => ({
+        worker: supervisedWorker.restarts(),
+        flockAi: supervisedFlockAi.restarts(),
+      }),
+      stop,
+    };
   } catch (error) {
     await stop();
     throw error;
   }
-}
-
-/**
- * Forward a child's output without ever letting a slow reader stall the child.
- *
- * `stream.pipe(process.stdout)` honours backpressure: when the far end of this
- * process's own stdout is slow — Playwright's `webServer` pipe, itself read by
- * a workspace runner that redraws a terminal — `pipe` stops reading the child.
- * `wrangler dev` then stops draining the workerd it supervises, workerd's
- * `write()` to the pipe fails, and the runtime dies mid-suite:
- * `kj/async-io-unix.c++: disconnected: ::write(...): Broken pipe`. Every spec
- * after that meets `ERR_CONNECTION_REFUSED`.
- *
- * Copying each chunk on `data` keeps the child's pipe drained no matter how
- * slow the consumer is; the backlog becomes memory in this short-lived process
- * instead of a dead Worker runtime.
- */
-function forwardOutput(child: ChildProcess): void {
-  child.stdout?.on("data", (chunk: Buffer) => void process.stdout.write(chunk));
-  child.stderr?.on("data", (chunk: Buffer) => void process.stderr.write(chunk));
-}
-
-function processFailure(child: ChildProcess, label: string): Promise<never> {
-  return new Promise<never>((_, fail) => {
-    child.once("exit", (code) =>
-      fail(new Error(`${label} exited early with code ${code}`)),
-    );
-    child.once("error", fail);
-  });
 }
 
 async function waitForHttpServer(baseUrl: string): Promise<void> {
