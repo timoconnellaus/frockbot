@@ -6,6 +6,7 @@ export {
   UI_ANCHOR_HIGHLIGHT_MS,
   type UiAnchorEvent,
 } from "./anchors.js";
+export { default as UiActivityRing } from "./UiActivityRing.vue";
 export { default as UiButton } from "./UiButton.vue";
 export { default as UiField } from "./UiField.vue";
 export { default as UiIcon } from "./UiIcon.vue";

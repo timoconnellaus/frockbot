@@ -389,6 +389,15 @@ export interface BotUnreadViewV1 {
   lastViewedAt?: string;
   /** Latest settled assistant/user line, projected for the sidebar only. */
   lastMessage?: SidebarMessagePreviewV1;
+  /**
+   * Whether this Bot has a Turn running right now.
+   *
+   * The sidebar draws it as an activity ring on the row's avatar, so somebody
+   * reading one conversation can see another Bot still working rather than
+   * assuming it stalled. Optional: a view a client older than the Bot decodes,
+   * or one stored before this existed, simply draws no ring.
+   */
+  working?: boolean;
 }
 
 export interface BotUnreadDirectoryViewV1 {
@@ -414,6 +423,8 @@ export function projectBotUnreadViewV1(
    * so it counts here even though the firing that produced it does not.
    */
   automationFailures = 0,
+  /** True while a Turn of this Bot's is running. Drawn as the row's ring. */
+  working = false,
 ): BotUnreadViewV1 {
   const ceiling = state.lastActivityCursor;
   let counted = Math.max(0, automationFailures);
@@ -449,6 +460,7 @@ export function projectBotUnreadViewV1(
       ? {}
       : { lastViewedAt: state.lastViewedAt }),
     ...(lastMessage === undefined ? {} : { lastMessage }),
+    ...(working ? { working: true } : {}),
   };
 }
 
@@ -528,7 +540,13 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
   exactKeys(
     value,
     ["schemaVersion", "botId", "count", "capped", "unread", "manuallyUnread"],
-    ["lastActivityCursor", "lastActivityAt", "lastViewedAt", "lastMessage"],
+    [
+      "lastActivityCursor",
+      "lastActivityAt",
+      "lastViewedAt",
+      "lastMessage",
+      "working",
+    ],
     "unread view",
   );
   if (value.schemaVersion !== 1) {
@@ -563,6 +581,9 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
   );
   const lastViewedAt = optionalTimestamp(value, "lastViewedAt", "unread view");
   const lastMessage = optionalSidebarMessagePreviewV1(value.lastMessage);
+  if (value.working !== undefined && typeof value.working !== "boolean") {
+    throw new UnreadDecodeError("unread view working is invalid");
+  }
   return {
     schemaVersion: 1,
     botId: value.botId,
@@ -574,6 +595,7 @@ function decodeBotUnreadViewV1(input: unknown): BotUnreadViewV1 {
     ...(lastActivityAt === undefined ? {} : { lastActivityAt }),
     ...(lastViewedAt === undefined ? {} : { lastViewedAt }),
     ...(lastMessage === undefined ? {} : { lastMessage }),
+    ...(value.working === true ? { working: true } : {}),
   };
 }
 
