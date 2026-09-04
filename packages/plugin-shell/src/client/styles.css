@@ -644,6 +644,45 @@
   cursor: pointer;
 }
 
+/*
+ * The release bar. It sits where the error banner sits and only one shows at
+ * a time, so it borrows that geometry and none of its colour: nothing here is
+ * wrong, there is just newer code waiting.
+ */
+.update-banner {
+  position: absolute;
+  right: 20px;
+  bottom: 84px;
+  left: 20px;
+  z-index: 5;
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+  border: 1px solid var(--frock-border);
+  border-radius: 12px;
+  color: var(--frock-text);
+  background: var(--frock-surface-raised);
+  box-shadow: var(--frock-shadow-card);
+  font-size: var(--frock-text-sm);
+}
+
+.update-banner button {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 999px;
+  color: var(--frock-on-accent);
+  background: var(--frock-action-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.update-banner button:hover {
+  background: var(--frock-action-primary-hover);
+}
+
 .banner-enter-active,
 .banner-leave-active {
   transition:
@@ -732,23 +771,71 @@
   left: 0;
   display: inline-flex;
   max-width: 100%;
-  height: var(--frock-control-md);
+  min-height: var(--frock-control-md);
   align-items: center;
-  gap: 6px;
-  padding: 0 10px;
+  gap: 8px;
+  padding: 6px 10px;
   border: 1px solid var(--frock-border-strong);
-  border-radius: 999px;
+  border-radius: var(--frock-radius-card);
   color: var(--frock-text);
   background: var(--frock-surface-raised);
   box-shadow: var(--frock-shadow-control);
   font-size: var(--frock-text-sm);
+  text-align: left;
   cursor: pointer;
+}
+
+.applet-chip-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
 }
 
 .applet-chip-name {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/*
+ * What the Bot is doing to it, so the phone says the same thing the canvas
+ * beside a wide conversation says without opening anything.
+ */
+.applet-chip-status {
+  display: flex;
+  overflow: hidden;
+  align-items: center;
+  gap: 6px;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.applet-chip-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--frock-action-primary);
+  animation: applet-chip-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes applet-chip-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .applet-chip-dot {
+    animation: none;
+  }
 }
 
 .applet-chip-action {
