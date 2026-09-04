@@ -119,10 +119,10 @@ describe("production setup", () => {
     // green and say what stops working, not write an empty secret that a
     // `--secrets-file` deploy would then push over a good one.
     expect(stdout).toContain(
-      "No AI Gateway token set; Flock AI Auto will not work until one is provided.",
+      "No AI Gateway token set; Frock AI Auto will not work until one is provided.",
     );
     expect(calls).not.toContain(
-      "secret set FLOCK_AI_GATEWAY_TOKEN --repo timoconnellaus/frockbot --env production",
+      "secret set FROCK_AI_GATEWAY_TOKEN --repo timoconnellaus/frockbot --env production",
     );
     expect(calls).toContain(
       "secret set SPRITES_TOKEN --repo timoconnellaus/frockbot --env production",

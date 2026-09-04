@@ -5,7 +5,7 @@
  * A service binding resolves only through the dev service registry, which
  * publishes Workers that are themselves running under `wrangler dev` on this
  * machine, so the bundler needs a session of its own — the same shape the
- * end-to-end harness uses for the Flock AI fake (`e2e/harness.ts`). Without it
+ * end-to-end harness uses for the Frock AI fake (`e2e/harness.ts`). Without it
  * `package_author` writes `package/author-intent`, cannot reach the bundler,
  * and refuses with `Worker "frockbot-cloudflare-bundler" not found`: journey 4
  * is unrunnable on the documented local target (finding F5b).

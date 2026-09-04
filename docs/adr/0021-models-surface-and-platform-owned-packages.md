@@ -49,7 +49,7 @@ The gate itself was a control with no reason to exist. A User who wants Ollama h
 
 - One decision, one surface, one durable record — the same shape ADR 0019 chose for enablement, now applied to model choice.
 - The "enable a Package to get a control" pattern in the constitution survives for configuration only some Users need. Model choice is not that: every User is on some model, and the control exists whether they change it or not. The rule is narrowed, not removed.
-- The naming must be settled once: the platform provider is presented as "FrockBot" everywhere in the product, and the Flock AI Package name stays internal.
+- The naming must be settled once: the platform provider is presented as "FrockBot" everywhere in the product, and the Frock AI Package name stays internal.
 - Platform-owned repair on every read means the product recovers from any path that loses platform state, at the cost of a small pure computation per read and of the User never being able to switch the platform provider off. That is the intended trade: zero configuration is a promise the platform keeps, not one the User maintains.
 - Hiding platform-owned Packages from Plugins means a dependency on one of them is always satisfiable, so the dead end that motivated this ADR cannot recur.
 

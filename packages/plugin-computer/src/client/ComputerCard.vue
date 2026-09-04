@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { useRpc } from "@cordisjs/client";
 import { UiIcon } from "@frockbot/client-ui";
-import { computed, inject, ref } from "vue";
+import {
+  computed,
+  inject,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  watchEffect,
+} from "vue";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computerKey, type ComputerState } from "../shared.ts";
 import { COMPUTER_COLD_PROVISION_EXPECTATION } from "../protocol.ts";
@@ -10,6 +18,12 @@ import {
   computerProgressFrame,
   computerProgressRunKind,
 } from "./progress.ts";
+import {
+  COMPUTER_SCREEN_STATUS_TICK_MS,
+  computerScreenModeV1,
+  computerScreenStatusLabelV1,
+} from "./live-preview.ts";
+import { viewerUrlForControlV1 } from "./viewer.ts";
 
 const computer = inject(computerKey) ?? useRpc<ComputerState>();
 const state = computed(() => computer.value);
@@ -89,6 +103,92 @@ const progressAriaLabel = computed(
   () => `${openingHeading.value}: ${progressPhaseLabel.value}`,
 );
 
+// ---------------------------------------------------------------------------
+// Live while working.
+//
+// The card draws the Bot's own screen region as it changes, in the same
+// view-only frame the full-screen viewer uses and on the same minted session
+// — no second token, no takeover lease, and no input reaching the desktop.
+// Rendering still wakes nothing: with no session minted the card stays on the
+// stored capture, which the Bot now files after every Computer action.
+// ---------------------------------------------------------------------------
+const screen = ref<HTMLElement>();
+const onScreen = ref(true);
+const documentVisible = ref(
+  typeof document === "undefined" || document.visibilityState === "visible",
+);
+const now = ref(Date.now());
+let statusTicker: ReturnType<typeof setInterval> | undefined;
+let observer: IntersectionObserver | undefined;
+/** When the Bot's last Turn stopped; the grace window is measured from it. */
+const turnEndedAt = ref<number | undefined>(undefined);
+const turnRunning = computed(() => Boolean(shell?.value.runningRunId));
+const screenMode = computed(() =>
+  computerScreenModeV1({
+    ...(state.value.viewerUrl ? { viewerUrl: state.value.viewerUrl } : {}),
+    phase: state.value.phase,
+    expanded: state.value.expanded,
+    turnRunning: turnRunning.value,
+    onScreen: onScreen.value,
+    documentVisible: documentVisible.value,
+    ...(turnEndedAt.value === undefined
+      ? {}
+      : { sinceTurnEndedMs: now.value - turnEndedAt.value }),
+  }),
+);
+const streaming = computed(() => screenMode.value === "stream");
+// The one client-visible input fence, set the same way the overlay sets it.
+// The card never asks for control, so this URL is always the view-only one.
+const previewSrc = computed(() =>
+  streaming.value && state.value.viewerUrl
+    ? viewerUrlForControlV1(state.value.viewerUrl, false)
+    : undefined,
+);
+const screenStatus = computed(() =>
+  computerScreenStatusLabelV1({
+    mode: screenMode.value,
+    ...(screenshot.value ? { capturedAt: screenshot.value.capturedAt } : {}),
+    now: now.value,
+  }),
+);
+
+watch(turnRunning, (running, previous) => {
+  if (previous && !running) turnEndedAt.value = Date.now();
+  if (running) turnEndedAt.value = undefined;
+});
+// Holding is what keeps the minted session alive while the card watches it;
+// releasing is what stops an idle Bot from paying for a stream nobody reads.
+watchEffect(() => {
+  state.value.holdLivePreview?.(streaming.value);
+});
+
+function readVisibility(): void {
+  documentVisible.value =
+    typeof document === "undefined" || document.visibilityState === "visible";
+}
+
+onMounted(() => {
+  document.addEventListener("visibilitychange", readVisibility);
+  statusTicker = setInterval(() => {
+    now.value = Date.now();
+  }, COMPUTER_SCREEN_STATUS_TICK_MS);
+  if (typeof IntersectionObserver === "undefined" || !screen.value) return;
+  observer = new IntersectionObserver(
+    (entries) => {
+      const entry = entries.at(-1);
+      if (entry) onScreen.value = entry.isIntersecting;
+    },
+    { threshold: 0.05 },
+  );
+  observer.observe(screen.value);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener("visibilitychange", readVisibility);
+  if (statusTicker !== undefined) clearInterval(statusTicker);
+  observer?.disconnect();
+  state.value.holdLivePreview?.(false);
+});
+
 async function open(): Promise<void> {
   if (busy.value) return;
   busy.value = true;
@@ -105,14 +205,26 @@ async function open(): Promise<void> {
 <template>
   <section v-if="hasBot" class="computer-card">
     <button
+      ref="screen"
       type="button"
       class="computer-screen computer-screen-thumbnail"
+      :class="{ 'is-live': streaming }"
       :disabled="busy || unconfigured"
       aria-label="Open computer in full window"
       @click="open"
     >
+      <iframe
+        v-if="previewSrc && !opening"
+        class="computer-screen-preview"
+        :src="previewSrc"
+        title="Computer, live"
+        tabindex="-1"
+        aria-hidden="true"
+        sandbox="allow-same-origin allow-scripts"
+        referrerpolicy="no-referrer"
+      />
       <img
-        v-if="screenshot && !opening"
+        v-else-if="screenshot && !opening"
         :key="screenshot.contentHash"
         :src="screenshot.url"
         alt=""
@@ -157,5 +269,14 @@ async function open(): Promise<void> {
         </template>
       </span>
     </button>
+    <p
+      v-if="screenStatus"
+      class="computer-screen-status"
+      :class="{ 'is-live': streaming }"
+      aria-live="polite"
+    >
+      <span class="computer-screen-status-dot" aria-hidden="true" />
+      {{ screenStatus }}
+    </p>
   </section>
 </template>

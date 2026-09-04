@@ -8,7 +8,7 @@ import productionSettingsRevision38 from "./production-settings-revision-38.json
 export const PRODUCTION_SETTINGS_STATE_KEY = "user-configuration";
 export const PRODUCTION_DEFAULT_PACKAGES_MARKER_KEY =
   "user-default-packages-bootstrap:v1";
-export const PRODUCTION_FLOCK_BOOTSTRAP_MARKER_KEY =
+export const PRODUCTION_FROCK_BOOTSTRAP_MARKER_KEY =
   "provider-flock-ai:bootstrap-v1";
 export const PRODUCTION_CATALOG_PIN_KEY = "user-catalog-pin";
 
@@ -32,7 +32,7 @@ export function productionDefaultPackagesMarkerV2(): Record<string, unknown> {
   return { schemaVersion: 2 };
 }
 
-export function productionFlockBootstrapMarkerV1(
+export function productionFrockBootstrapMarkerV1(
   userId: string,
 ): Record<string, unknown> {
   return { schemaVersion: 1, userId };

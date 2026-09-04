@@ -1014,14 +1014,23 @@ function createUserApplicationRoute() {
       if (request.method !== "POST")
         return jsonError(405, "method not allowed");
       try {
-        return Response.json(
-          await env.BOT_STATE.startConversation({ schemaVersion: 1, botId }),
-        );
-      } catch (error) {
         // A Bot that is mid-Turn refuses, with the reason: 409 is the same
-        // "not now" the composer already understands.
+        // "not now" the composer already understands. It arrives as a value,
+        // not an exception — a throw here would have crossed a Durable Object
+        // boundary to get here, and workerd logs such a crossing as an
+        // uncaught error and has been seen to take the isolate down with it.
+        const outcome = await env.BOT_STATE.startConversation({
+          schemaVersion: 1,
+          botId,
+        });
+        if (outcome.status === "refused") {
+          return jsonError(409, outcome.reason);
+        }
+        const { status: _status, ...list } = outcome;
+        return Response.json(list);
+      } catch (error) {
         return jsonError(
-          409,
+          500,
           error instanceof Error
             ? error.message
             : "could not start a new conversation",

@@ -19,7 +19,7 @@ Bot is held behind it, and the person gets a banner with a Resolve action.
 
 That is the right answer when somebody can be asked. Nobody can. Ollama Cloud
 exposes no provider-bound response retrieval ([ADR
-0010](0010-abandon-unretrievable-model-effects.md)), and neither does Flock AI;
+0010](0010-abandon-unretrievable-model-effects.md)), and neither does Frock AI;
 the only provider in this deployment that implements
 `LlmReconciliationCapability` is the in-process foundation one used by tests. So
 in production the park is not caution, it is a dead end: nothing will ever

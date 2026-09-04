@@ -1,8 +1,8 @@
-import { FLOCK_AI_DEFAULT_AUTO_ROUTE } from "@frockbot/plugin-provider-flock-ai/catalog";
+import { FROCK_AI_DEFAULT_AUTO_ROUTE } from "@frockbot/plugin-provider-frock-ai/catalog";
 
-export const DEFAULT_FLOCK_AI_GATEWAY_ID_V1 = "flock";
+export const DEFAULT_FROCK_AI_GATEWAY_ID_V1 = "flock";
 
-export interface FlockAiGatewayHostV1 {
+export interface FrockAiGatewayHostV1 {
   autoRoute: string;
   runChatCompletion(
     gatewayModel: string,
@@ -17,9 +17,9 @@ export interface FlockAiGatewayHostV1 {
  * covers reaching the gateway; the SSE body that follows is bounded per read by
  * the OpenAI-compatible decoder.
  */
-export const FLOCK_AI_GATEWAY_TIMEOUT_MS_V1 = 60_000;
+export const FROCK_AI_GATEWAY_TIMEOUT_MS_V1 = 60_000;
 
-export interface FlockAiGatewayConfigV1 {
+export interface FrockAiGatewayConfigV1 {
   gatewayId?: string;
   autoRoute?: string;
   /**
@@ -66,12 +66,12 @@ async function streamOrThrowV1(
 }
 
 /** Keep the generated Cloudflare binding type on the Worker side of the seam. */
-export function createFlockAiGatewayHostV1(
+export function createFrockAiGatewayHostV1(
   ai: Pick<Ai, "gateway">,
-  config: FlockAiGatewayConfigV1,
-): FlockAiGatewayHostV1 {
-  const gatewayId = config.gatewayId || DEFAULT_FLOCK_AI_GATEWAY_ID_V1;
-  const autoRoute = config.autoRoute || FLOCK_AI_DEFAULT_AUTO_ROUTE;
+  config: FrockAiGatewayConfigV1,
+): FrockAiGatewayHostV1 {
+  const gatewayId = config.gatewayId || DEFAULT_FROCK_AI_GATEWAY_ID_V1;
+  const autoRoute = config.autoRoute || FROCK_AI_DEFAULT_AUTO_ROUTE;
   const { accountId, token } = config;
   // The `AI` binding's `gateway(...).run()` reaches the Gateway's *universal*
   // endpoint, whose request-shape translation rejects a `dynamic/<route>` model
@@ -80,7 +80,7 @@ export function createFlockAiGatewayHostV1(
   // no Gateway credentials are configured, which is every local and CI
   // environment that binds a stand-in for `AI`.
   const useCompat = Boolean(accountId && token);
-  const timeoutMs = config.timeoutMs ?? FLOCK_AI_GATEWAY_TIMEOUT_MS_V1;
+  const timeoutMs = config.timeoutMs ?? FROCK_AI_GATEWAY_TIMEOUT_MS_V1;
   const doFetch = config.fetch ?? fetch;
   return {
     autoRoute,

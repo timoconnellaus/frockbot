@@ -49,7 +49,7 @@ test("a new User creates a first Bot and finds it in the directory", async ({
     page.getByRole("heading", { name: "Shepherd is ready." }),
   ).toBeVisible();
   await expect(page.locator(".workspace-title small")).toHaveText(
-    "Auto (recommended) · Flock AI",
+    "Auto (recommended) · Frock AI",
   );
   await expect(composerInput(page)).toBeEnabled();
 });

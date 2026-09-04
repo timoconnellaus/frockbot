@@ -38,6 +38,7 @@ import {
   type ClientRunLookupQueryV1,
   type ClientRunLookupV1,
   type ClientConversationListV1,
+  type ClientConversationOutcomeV1,
   type ClientRunListQueryV1,
   type ClientRunListV1,
   type ClientRunStopCommandV1,
@@ -219,11 +220,18 @@ interface Env {
   PACKAGE_CATALOG?: R2Bucket;
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
+  FROCK_AI_GATEWAY_ID?: string;
+  FROCK_AI_AUTO_ROUTE?: string;
+  /** Cloudflare account owning the AI Gateway; enables the compat transport. */
+  FROCK_AI_ACCOUNT_ID?: string;
+  /** `cf-aig-authorization` bearer for the authenticated AI Gateway. */
+  FROCK_AI_GATEWAY_TOKEN?: string;
+  // The pre-rename names. Each `FROCK_AI_*` setting falls back to its
+  // `FLOCK_AI_*` twin so a deployment whose vars and secrets still carry the
+  // old names keeps working; drop these once every environment is renamed.
   FLOCK_AI_GATEWAY_ID?: string;
   FLOCK_AI_AUTO_ROUTE?: string;
-  /** Cloudflare account owning the AI Gateway; enables the compat transport. */
   FLOCK_AI_ACCOUNT_ID?: string;
-  /** `cf-aig-authorization` bearer for the authenticated AI Gateway. */
   FLOCK_AI_GATEWAY_TOKEN?: string;
   BOT_STATES: DurableObjectNamespace<BotState>;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
@@ -309,7 +317,7 @@ interface BotStateRpc extends BotConfigurationBinding {
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
   listConversations(): Promise<ClientConversationListV1>;
-  startConversation(): Promise<ClientConversationListV1>;
+  startConversation(): Promise<ClientConversationOutcomeV1>;
   debugSnapshot(query: BotDebugQueryV1): Promise<unknown>;
   readFocusedApplet(input: unknown): Promise<unknown>;
   setFocusedApplet(input: unknown): Promise<unknown>;
@@ -752,7 +760,9 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     ).listConversations();
   }
 
-  async startConversation(input: unknown): Promise<ClientConversationListV1> {
+  async startConversation(
+    input: unknown,
+  ): Promise<ClientConversationOutcomeV1> {
     const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
     return botStateStub(
       this.env,

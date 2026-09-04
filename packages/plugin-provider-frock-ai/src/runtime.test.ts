@@ -11,16 +11,16 @@ import {
 import { LlmRegistry } from "@frockbot/plugin-models";
 import { Context } from "cordis";
 import {
-  FLOCK_AI_CONNECTION_GENERATION,
-  FLOCK_AI_CONNECTION_ID,
-  FLOCK_AI_DEFAULT_MODEL,
+  FROCK_AI_CONNECTION_GENERATION,
+  FROCK_AI_CONNECTION_ID,
+  FROCK_AI_DEFAULT_MODEL,
 } from "./catalog.js";
-import { createFlockAiRuntimePlugin } from "./runtime.js";
+import { createFrockAiRuntimePlugin } from "./runtime.js";
 
 const request: NormalizedModelRequest = {
   requestId: "effect-1",
   provider: "flock-ai",
-  model: FLOCK_AI_DEFAULT_MODEL,
+  model: FROCK_AI_DEFAULT_MODEL,
   system: "Be concise.",
   messages: [{ role: "user", content: "hello" }],
   tools: [
@@ -31,8 +31,8 @@ const request: NormalizedModelRequest = {
     },
   ],
   modelBinding: {
-    connectionId: FLOCK_AI_CONNECTION_ID,
-    connectionGeneration: FLOCK_AI_CONNECTION_GENERATION,
+    connectionId: FROCK_AI_CONNECTION_ID,
+    connectionGeneration: FROCK_AI_CONNECTION_GENERATION,
   },
 };
 
@@ -44,13 +44,13 @@ function sse(text: string): ReadableStream<Uint8Array> {
 
 function runtimeConfig(
   runChatCompletion: Parameters<
-    typeof createFlockAiRuntimePlugin
+    typeof createFrockAiRuntimePlugin
   >[0]["runChatCompletion"],
-  deadlines?: Parameters<typeof createFlockAiRuntimePlugin>[0]["deadlines"],
+  deadlines?: Parameters<typeof createFrockAiRuntimePlugin>[0]["deadlines"],
 ) {
   return {
-    connectionId: FLOCK_AI_CONNECTION_ID,
-    connectionGeneration: FLOCK_AI_CONNECTION_GENERATION,
+    connectionId: FROCK_AI_CONNECTION_ID,
+    connectionGeneration: FROCK_AI_CONNECTION_GENERATION,
     autoRoute: "configured-auto",
     runChatCompletion,
     ...(deadlines ? { deadlines } : {}),
@@ -104,11 +104,11 @@ function pushableSse(): {
   return { body, push: (text) => enqueue?.(text) };
 }
 
-describe("Flock AI runtime Contribution", () => {
+describe("Frock AI runtime Contribution", () => {
   test.each([
-    [FLOCK_AI_DEFAULT_MODEL, "dynamic/configured-auto"],
+    [FROCK_AI_DEFAULT_MODEL, "dynamic/configured-auto"],
     [
-      "@flock/deepseek-ai/deepseek-v4-flash-0731",
+      "@frock/deepseek-ai/deepseek-v4-flash-0731",
       "workers-ai/@cf/deepseek-ai/deepseek-v4-flash-0731",
     ],
   ])("maps %s to gateway model %s", async (model, expectedGatewayModel) => {
@@ -119,7 +119,7 @@ describe("Flock AI runtime Contribution", () => {
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createFlockAiRuntimePlugin(
+      createFrockAiRuntimePlugin(
         runtimeConfig((gatewayModel, body) => {
           calls.push({ gatewayModel, body });
           return Promise.resolve(
@@ -153,7 +153,7 @@ describe("Flock AI runtime Contribution", () => {
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createFlockAiRuntimePlugin(
+      createFrockAiRuntimePlugin(
         runtimeConfig((gatewayModel, body) => {
           calls.push({ gatewayModel, body });
           return Promise.resolve(
@@ -217,7 +217,7 @@ describe("Flock AI runtime Contribution", () => {
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createFlockAiRuntimePlugin(
+      createFrockAiRuntimePlugin(
         runtimeConfig(() => {
           calls += 1;
           return Promise.resolve(sse(""));
@@ -250,7 +250,7 @@ describe("Flock AI runtime Contribution", () => {
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createFlockAiRuntimePlugin(
+      createFrockAiRuntimePlugin(
         runtimeConfig(() =>
           Promise.reject(
             new Error("AI Gateway rejected the request (429): slow down"),
@@ -285,7 +285,7 @@ describe("Flock AI runtime Contribution", () => {
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createFlockAiRuntimePlugin(
+      createFrockAiRuntimePlugin(
         runtimeConfig(() =>
           Promise.resolve(
             new ReadableStream({
@@ -316,13 +316,13 @@ describe("Flock AI runtime Contribution", () => {
 // once and serves every Turn, so anything request-scoped it kept on itself — an
 // abort scope, a client, a stream — would let a cancelled Turn take the next
 // one down with it.
-describe("Flock AI request isolation", () => {
+describe("Frock AI request isolation", () => {
   test("leaves the next request working after one is cancelled", async () => {
     const bodies: Array<ReadableStream<Uint8Array>> = [];
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createFlockAiRuntimePlugin(
+      createFrockAiRuntimePlugin(
         runtimeConfig(() => {
           const body =
             bodies.length === 0
@@ -370,13 +370,13 @@ describe("Flock AI request isolation", () => {
 // deadline seam a gateway that accepted the request and then went quiet was
 // bounded by nothing short of the fifteen-minute Turn deadline: an empty
 // bubble, for a quarter of an hour, saying nothing about why.
-describe("Flock AI deadlines", () => {
+describe("Frock AI deadlines", () => {
   test("fails the step when the gateway produces no first byte", async () => {
     const clock = manualClock();
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createFlockAiRuntimePlugin(
+      createFrockAiRuntimePlugin(
         runtimeConfig(
           () => new Promise<ReadableStream<Uint8Array>>(() => undefined),
           { schedule: clock.schedule },
@@ -413,7 +413,7 @@ describe("Flock AI deadlines", () => {
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createFlockAiRuntimePlugin(
+      createFrockAiRuntimePlugin(
         runtimeConfig(() => Promise.resolve(body), {
           schedule: clock.schedule,
         }),
@@ -454,7 +454,7 @@ describe("Flock AI deadlines", () => {
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createFlockAiRuntimePlugin(
+      createFrockAiRuntimePlugin(
         runtimeConfig(() => Promise.resolve(body), {
           schedule: clock.schedule,
         }),
@@ -497,14 +497,14 @@ describe("Flock AI deadlines", () => {
   });
 });
 
-describe("Flock AI reconciliation", () => {
+describe("Frock AI reconciliation", () => {
   test("reports an interrupted response as not retrievable so the run settles", async () => {
     const root = new Context();
     await root.plugin(LlmRegistry);
     await root.plugin(
-      createFlockAiRuntimePlugin({
-        connectionId: FLOCK_AI_CONNECTION_ID,
-        connectionGeneration: FLOCK_AI_CONNECTION_GENERATION,
+      createFrockAiRuntimePlugin({
+        connectionId: FROCK_AI_CONNECTION_ID,
+        connectionGeneration: FROCK_AI_CONNECTION_GENERATION,
         autoRoute: "dynamic/auto",
         runChatCompletion: () =>
           Promise.reject(new Error("must not be reached")),
@@ -519,7 +519,7 @@ describe("Flock AI reconciliation", () => {
     expect(outcome).toEqual({
       status: "not-retrievable",
       reason:
-        "Flock AI keeps no durable copy of an interrupted response, so it cannot be recovered",
+        "Frock AI keeps no durable copy of an interrupted response, so it cannot be recovered",
     });
     await root.fiber.dispose();
   });

@@ -164,6 +164,28 @@ export class SkillAttachmentStore {
   }
 }
 
+/**
+ * The highlight to keep once the candidate list has been recomputed.
+ *
+ * The popover is refreshed from the composer's own `keyup` — including the
+ * `keyup` of the arrow key that has just moved the highlight — so a refresh
+ * that reset the highlight to the first row made the arrow keys look like they
+ * did nothing at all. The highlight is carried by ref rather than by index: the
+ * Skill under it keeps its place for as long as the query still offers it, and
+ * only a Skill that has dropped out of the list hands the highlight back to the
+ * first row.
+ */
+export function keptSkillHighlightV1(
+  highlightedRef: string | undefined,
+  candidates: readonly SkillCandidateV1[],
+): number {
+  if (candidates.length === 0) return 0;
+  const index = candidates.findIndex(
+    (candidate) => candidate.entry.ref === highlightedRef,
+  );
+  return index === -1 ? 0 : index;
+}
+
 /** Moves the popover's highlight, wrapping at both ends. */
 export function nextSkillHighlightV1(
   highlighted: number,

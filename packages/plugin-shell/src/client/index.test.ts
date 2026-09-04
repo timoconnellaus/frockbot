@@ -572,7 +572,11 @@ describe("Bot selection", () => {
     await Promise.all([botLoad, olderLoad]);
 
     expect(provided.value.userSettings?.profile.name).toBe("Newer");
-    expect(provided.value.settingsError).toBe("Bot settings unavailable");
+    // The surface says what failed and what it was for; the thrown text
+    // ("Bot settings unavailable") stays in the console.
+    expect(provided.value.settingsError).toBe(
+      "Couldn't load this Bot's settings.",
+    );
   });
 
   test("says a deployment has no Catalog instead of relaying the gateway's sentence", async () => {
@@ -608,12 +612,14 @@ describe("Bot selection", () => {
       "No plugins are published for this deployment yet.",
     );
 
-    // A genuine fault still reaches the operator, labelled as one.
+    // A genuine fault is labelled as one — and says what failed rather than
+    // what the storage layer called it. "R2 is down" is for the console.
     failure = new Error("R2 is down");
     await provided.value.loadPackageCatalog();
     expect(provided.value.settingsError).toBe(
-      "Plugins could not be loaded: R2 is down",
+      "Couldn't load the plugin catalog.",
     );
+    expect(provided.value.settingsError).not.toContain("R2");
   });
 
   test("commits a catalog without overwriting newer User settings", async () => {
@@ -1258,14 +1264,20 @@ describe("detached Turn projection", () => {
       ],
     );
 
+    // The failure is a notice under the reply, never a bubble that reads as
+    // the Bot saying the provider's own words.
     expect(messages).toMatchObject([
       { role: "user", status: "completed" },
       {
         role: "assistant",
-        text: "This Bot couldn't finish its reply. Try again.",
+        text: "",
+        notice: "This Bot couldn't finish its reply. Try again.",
         status: "error",
       },
     ]);
+    expect(JSON.stringify(messages)).not.toContain(
+      "Provider reconciliation is required",
+    );
   });
 });
 
@@ -1805,6 +1817,9 @@ describe("active durable Turn projection", () => {
         },
       ],
     );
+    // One sentence of the product's own, and the raw provider text nowhere on
+    // screen — the banner, the bubble and the notice all read the same way
+    // whatever the provider called the failure.
     expect(reconciliation.activeRun).toEqual({
       runId: "run-reconciliation",
       status: "reconciliation-required",
@@ -1812,9 +1827,14 @@ describe("active durable Turn projection", () => {
       canResume: true,
     });
     expect(reconciliation.messages[1]).toMatchObject({
-      text: "This reply stopped partway. Try again to continue it.",
+      role: "assistant",
+      text: "",
+      notice: "This reply stopped partway. Try again to continue it.",
       status: "reconciliation-required",
     });
+    expect(JSON.stringify(reconciliation.messages)).not.toContain(
+      "Provider result needs confirmation",
+    );
   });
 
   test("keeps busy state until the durable run becomes terminal", () => {
