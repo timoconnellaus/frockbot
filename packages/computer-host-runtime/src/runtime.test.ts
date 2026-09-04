@@ -459,10 +459,26 @@ state running`);
     const updateDocument = UPDATE_PHASES.map((phase) => phase.body).join("\n");
     expect(updateDocument).not.toContain("apt-get");
     expect(updateDocument).not.toContain("playwright-core/cli.js install");
-    // An in-place update swaps names over files it owns and reaches no
-    // network: the `applets` phase installs the shim and leaves the SDK's
+    // An in-place update swaps names over files it owns and leaves the SDK's
     // dependency tree — which an `applet dev` may be running out of — alone.
-    expect(updateDocument).not.toContain("npm install");
+    // The one install it carries is the SDK itself, and only while the SDK
+    // is absent, which is exactly when nothing can be running out of it.
+    expect(updateDocument).not.toContain("miniflare@");
+    const installs = updateDocument
+      .split("\n")
+      .filter((line) => line.includes("npm install"));
+    expect(installs).toEqual([
+      `  if npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund @frockbot/applet-sdk@${APPLET_SDK_VERSION}; then`,
+    ]);
+    expect(updateDocument).toContain(
+      `if [ ! -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]; then`,
+    );
+  });
+
+  test("the SDK install follows the published dist-tag, not a number", () => {
+    // v0.3.12 published `@frockbot/applet-sdk` as 0.3.12; a pinned "0.1.0"
+    // never existed and left every Computer without an SDK.
+    expect(APPLET_SDK_VERSION).toBe("latest");
   });
 });
 
