@@ -38,6 +38,7 @@ import {
 import { decodeClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 import type { SkillRefV1 } from "@frockbot/kernel-contracts";
 import { BrowserBotStateChannel } from "./bot-state-channel.js";
+import { openVoiceDictationV1 } from "./voice-dictation.js";
 
 function requireAuthenticatedUserId(value: unknown): string {
   if (!isRpcIdentifier(value) || value === "anonymous") {
@@ -274,6 +275,9 @@ const application = new ClientApplication({
   },
   watchBotState(botId, observer) {
     return botStateChannel.watch(botId, observer);
+  },
+  openVoiceDictation(observer) {
+    return openVoiceDictationV1(observer);
   },
   async readAuthenticatedUserId() {
     return decodeAuthenticatedIdentity(await apiRequest("/api/identity"));

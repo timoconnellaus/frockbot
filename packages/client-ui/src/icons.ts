@@ -23,7 +23,9 @@ export type UiIconName =
   | "search"
   | "sparkle"
   | "stop"
-  | "user";
+  | "trash"
+  | "user"
+  | "waveform";
 
 export const uiIconPaths: Record<UiIconName, string[]> = {
   // An Applet: a window with its own title bar, standing on the shell.
@@ -78,5 +80,11 @@ export const uiIconPaths: Record<UiIconName, string[]> = {
   search: ["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z", "m21 21-4.3-4.3"],
   sparkle: ["M12 3l1.9 5.6 5.6 1.9-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z"],
   stop: ["M6 6h12v12H6z"],
+  // Discard. A lid, a rim, and a body — the same three strokes every bin in
+  // this weight is drawn from.
+  trash: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13"],
   user: ["M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", "M20 21a8 8 0 0 0-16 0"],
+  // Dictation. Bars rather than a microphone: the control captures speech as
+  // *text*, and the same shape animates while it is listening.
+  waveform: ["M5 10v4", "M9 7v10", "M12 4v16", "M15 7v10", "M19 10v4"],
 };

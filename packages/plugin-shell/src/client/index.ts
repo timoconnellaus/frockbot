@@ -15,6 +15,7 @@ import {
 } from "@frockbot/client-core";
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { COMPACTED_ANNOUNCEMENT_TEXT_V1 } from "../compaction.js";
+import { voiceCaptureSupportedV1 } from "./voice-microphone.js";
 import { readViewerFocusV1, shouldNotifyForBotV1 } from "../focus.js";
 // Connection mutations use the provider-neutral hosted command contract.
 import type {
@@ -1417,6 +1418,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     modelSource: "none",
     settingsAvailable: true,
     connectionsAvailable: ctx.transport.connectionsAvailable !== false,
+    voiceAvailable:
+      typeof ctx.transport.openVoiceDictation === "function" &&
+      voiceCaptureSupportedV1(),
     activeBotId: undefined,
     composerContext: undefined,
     transcripts: {
@@ -2877,6 +2881,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.runningRunId = undefined;
         }
       }
+    },
+    openVoiceDictation(observer) {
+      return ctx.transport.openVoiceDictation?.(observer);
     },
     async resumeRun(runId: string): Promise<void> {
       if (!ctx.transport.reconcileRun) {

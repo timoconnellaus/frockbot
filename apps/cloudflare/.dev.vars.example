@@ -20,3 +20,15 @@ DEBUG_TOKEN=replace-with-a-random-32-byte-token
 FROCK_AI_GATEWAY_TOKEN=replace-with-ai-gateway-authorization-token
 # The pre-rename name `FLOCK_AI_GATEWAY_TOKEN` is still read as a fallback, so
 # an existing local .dev.vars keeps working until it is renamed.
+# Composer dictation (voice plan slice A). Present, the VoiceSession Durable
+# Object opens `wss://api.openai.com/v1/realtime` directly with this key —
+# which is the path production takes. Absent, it falls back to the AI Gateway's
+# realtime WebSocket using the BYOK provider key stored on the `flock` gateway
+# and the FROCK_AI_GATEWAY_TOKEN above; with neither, the microphone says
+# dictation is not set up and the composer keeps working as it always has.
+# Deployed as a Wrangler secret, never a var, and carried in the release
+# workflow's optional `--secrets-file` list (ADR 0025).
+OPENAI_API_KEY=replace-with-an-openai-api-key
+# Read the same way by the app-wide voice assistant in slice B. Nothing reads
+# it yet; it is here so a local .dev.vars is ready when that lands.
+GEMINI_API_KEY=replace-with-a-google-ai-studio-api-key

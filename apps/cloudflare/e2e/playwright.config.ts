@@ -71,6 +71,19 @@ export default defineConfig<E2EOptions>({
     ...devices["Desktop Chrome"],
     baseURL,
     ollamaBaseUrl: `http://127.0.0.1:${ollamaPort}`,
+    // Dictation needs a microphone, and a headless browser has none. Chromium
+    // synthesises one: a generated tone on a fake capture device, and a
+    // permission prompt that answers itself. The transcript is the fake
+    // upstream's business, not the audio's — no real transcriber would make
+    // words of a tone — so this only has to make frames flow.
+    permissions: ["microphone"],
+    launchOptions: {
+      args: [
+        "--use-fake-device-for-media-stream",
+        "--use-fake-ui-for-media-stream",
+        "--autoplay-policy=no-user-gesture-required",
+      ],
+    },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",

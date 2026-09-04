@@ -37,6 +37,10 @@ import {
 import { decodeApprovalDecisionCommandV1 } from "@frockbot/plugin-shell/approvals";
 import { botTurnRefusalCodeV1 } from "@frockbot/kernel-do";
 import type { UserApplicationEnv } from "./contracts.js";
+import {
+  VOICE_CAPTURE_WORKLET_PATH_V1,
+  VOICE_CAPTURE_WORKLET_SOURCE_V1,
+} from "@frockbot/plugin-shell/client/voice-worklet";
 import { answeredEntryV1, entryFailureStatusV1 } from "./entry-boundary.js";
 import {
   drainedAnswerV1,
@@ -368,6 +372,25 @@ function createUserApplicationRoute() {
     if (request.method === "GET" && url.pathname === "/app.js") {
       return withSecurityHeaders(
         new Response(APP_JS, {
+          headers: {
+            "content-type": "text/javascript; charset=utf-8",
+            "cache-control": "no-cache",
+          },
+        }),
+        packageUiArtifactOrigin(url),
+        url,
+      );
+    }
+    // The composer's dictation worklet. A first-party asset rather than a
+    // blob URL because the page is served under `script-src 'self'`, which a
+    // blob module does not satisfy; the alternative was widening that policy
+    // for every script to load one file. See `plugin-shell/.../voice-worklet.ts`.
+    if (
+      request.method === "GET" &&
+      url.pathname === VOICE_CAPTURE_WORKLET_PATH_V1
+    ) {
+      return withSecurityHeaders(
+        new Response(VOICE_CAPTURE_WORKLET_SOURCE_V1, {
           headers: {
             "content-type": "text/javascript; charset=utf-8",
             "cache-control": "no-cache",

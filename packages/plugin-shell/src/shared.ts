@@ -22,6 +22,10 @@ import type {
   SendToUserPayloadV1,
   SkillRefV1,
 } from "@frockbot/kernel-contracts";
+import type {
+  VoiceDictationObserverV1,
+  VoiceDictationSessionV1,
+} from "@frockbot/client-core";
 import type { McpServerStatusViewV1 } from "@frockbot/plugin-mcp/records";
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import type { ClientSkillCatalogEntryV1 } from "./skill-protocol.js";
@@ -256,6 +260,12 @@ export interface FrockBotWebData {
   modelSource: "bot" | "default" | "none";
   settingsAvailable: boolean;
   connectionsAvailable: boolean;
+  /**
+   * False when this platform cannot dictate — no transport socket, or a
+   * browser with no microphone API. The composer's send button then never
+   * changes shape and nothing about it moves.
+   */
+  voiceAvailable: boolean;
   activeBotId?: string;
   composerContext?: unknown;
   messages: WebChatMessage[];
@@ -511,6 +521,13 @@ export interface FrockBotWebData {
     skills?: readonly SkillRefV1[],
   ): Promise<SendPromptResult>;
   resumeRun(runId: string): Promise<void>;
+  /**
+   * Opens one dictation session (voice plan D2). `undefined` on a platform
+   * whose transport cannot, which is what `voiceAvailable` reports up front.
+   */
+  openVoiceDictation(
+    observer: VoiceDictationObserverV1,
+  ): VoiceDictationSessionV1 | undefined;
   /** Sends the durable Stop command for the observed active run. */
   stopRun(): Promise<void>;
   /** Detaches the local observer only; admitted work stays durable. */

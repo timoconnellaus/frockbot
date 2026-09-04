@@ -2,7 +2,7 @@
 
 ## Status
 
-Design accepted in conversation on 2026-09-04; tracked in [issue #179](https://github.com/timoconnellaus/frockbot/issues/179). Nothing is implemented. Both capabilities are **beyond parity** (Feature rule 8): the parity register has only a "microphone" settings row (`docs/research/grokbot-computer.md`, §Per-user settings).
+Design accepted in conversation on 2026-09-04; tracked in [issue #179](https://github.com/timoconnellaus/frockbot/issues/179). **Slice A (dictation) is implemented** — see "Slice A status" below; B0, B1 and B2 are not. Both capabilities are **beyond parity** (Feature rule 8): the parity register has only a "microphone" settings row (`docs/research/grokbot-computer.md`, §Per-user settings).
 
 Everything below was verified against `main` at `b359d096`. Line numbers drift; verify before relying on them.
 
@@ -23,6 +23,94 @@ Everything below was verified against `main` at `b359d096`. Line numbers drift; 
 - **D8 v1 tools:** `list_bots`; `bot_activity(bot, since)` (runs, partial text, running Tasks, pending inbox — read-only, wakes nothing); `memory_search` over the User tier and each Bot tier; `ask_bot`; `pending_answers`. Routines and Computer captures are deferred. _Why:_ all readable from durable state with the Computer hibernated.
 - **D9 Open mic with Gemini VAD**, an explicit on/off toggle in shell chrome (a shell slot the Package fills), auto-offline after 2 minutes of silence, barge-in enabled, resumption on the next toggle. _Why:_ bounds cost without making the User manage a session.
 - **D10 One live session per User**, newest device wins. Observer sockets later.
+
+## Slice A status (landed 2026-09-04)
+
+Dictation is implemented. What a person sees: with an empty composer the send
+button is a waveform button; pressing it starts capturing, a level-driven wave
+and a "Listening" line appear under the draft, and words arrive in the textarea
+as they are spoken. Two controls replace the one button while it listens — a
+bin and a send. Typing while dictating is allowed and survives the transcripts
+that arrive after it. Send commits the audio, waits for the finished transcript
+and then calls the ordinary `sendMessage`, so a dictated message supersedes,
+counts, and is refused exactly like a typed one. Enter sends; Escape bins.
+
+What landed:
+
+| Piece                                        | Where                                                                                                                             |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Wire protocol (browser ↔ Durable Object)     | `packages/protocol/src/voice-dictation.ts`                                                                                        |
+| `VoiceSession` Durable Object (sockets only) | `apps/cloudflare/src/voice-session.ts`; binding `VOICE_SESSIONS`, migration tag `v5`                                              |
+| Upstream selection and frame translation     | `apps/cloudflare/src/voice-upstream.ts` (pure; unit-tested in `voice-upstream.test.ts`)                                           |
+| Durable per-User voice budget (D1)           | `apps/cloudflare/src/voice-quota.ts`; RPC `reserveVoiceCapture` / `recordVoiceUsage` on `UserConfiguration`                       |
+| Authenticated route                          | `GET /api/voice/dictation?version=1` in `apps/cloudflare/src/gateway.ts`                                                          |
+| Browser socket                               | `apps/cloudflare/src/client/voice-dictation.ts`, behind `AgentTransport.openVoiceDictation`                                       |
+| Composer state, capture animation, controls  | `packages/plugin-shell/src/client/{voice-dictation.ts,voice-microphone.ts,FrockBotApp.vue}`                                       |
+| Capture worklet, served first-party          | `packages/plugin-shell/src/client/voice-worklet.ts`; `GET /voice-capture-worklet.js` in `apps/cloudflare/src/user-application.ts` |
+| Fake transcription service + browser spec    | `apps/cloudflare/e2e/{frock-ai-fake-worker.ts,voice-fake-protocol.ts,voice-dictation.e2e.ts}`                                     |
+
+One thing the plan did not anticipate: the app is served under
+`script-src 'self'`, and an `AudioWorklet` loaded from a `blob:` URL does not
+satisfy it — `addModule` fails with "Unable to load a worklet's module". Rather
+than widen that policy for every script in the app to load one 40-line file,
+the worklet source is a string in `plugin-shell` and the application Worker
+answers `GET /voice-capture-worklet.js` with it. The Content-Security-Policy is
+unchanged.
+
+The budget is **60 minutes of captured audio per User per day**, one constant
+(`VOICE_MINUTES_PER_DAY_V1`), counted in whole seconds against a UTC day and
+swept on the next day's first capture. Exhausted, the composer says so in
+plain English and the person types instead.
+
+### Where each key goes
+
+Two upstream paths, chosen by configuration and not by a deploy of different
+code (`voiceUpstreamTargetV1`). Precedence is: local override, then the direct
+OpenAI key, then the AI Gateway.
+
+1. **Direct OpenAI (the path production takes).** `OPENAI_API_KEY` as a
+   **Worker secret**. Tim added it as a **GitHub repository secret on
+   2026-09-04**, and it is carried in the optional `--secrets-file` list in
+   `.github/workflows/release.yml` (production) and `ci.yml` (staging) — that
+   flag replaces the Worker's whole secret set, so an optional name that is not
+   carried would be deleted on the next deploy (ADR 0025). Locally it goes in
+   `apps/cloudflare/.dev.vars` (see `.dev.vars.example`). With it set, the
+   Durable Object opens `wss://api.openai.com/v1/realtime?intent=transcription`
+   with `Authorization: Bearer …`.
+2. **AI Gateway BYOK (the fallback, and still optional).** No `OPENAI_API_KEY`;
+   instead the OpenAI provider key is stored **BYOK on the `flock` AI Gateway
+   in the Cloudflare dashboard**, and the Worker holds `FROCK_AI_GATEWAY_TOKEN`
+   (already deployed) plus the `FROCK_AI_ACCOUNT_ID` var. The Durable Object
+   then opens
+   `wss://gateway.ai.cloudflare.com/v1/<account>/flock/openai?intent=transcription`
+   with `cf-aig-authorization: Bearer …`. Nothing new has to be placed for this
+   path beyond the BYOK provider key on the gateway.
+
+`GEMINI_API_KEY` is also a GitHub repository secret as of 2026-09-04 and is
+carried in both optional lists already. Nothing reads it yet; slice B will read
+it the same way.
+
+The end-to-end layer takes neither: the harness sets a `VOICE_UPSTREAM_URL` var
+pointing at its own fake transcription Worker, so the browser suite spends
+nothing and needs no credential. Production sets no such var.
+
+### Still unverified
+
+- **Assumption 1 of "Verify before slice A" is still open.** Nobody has proved
+  that AI Gateway's OpenAI realtime path accepts a _transcription-only_ session
+  (`gpt-live-transcribe`); the docs still show only `gpt-4o-realtime` models.
+  That is exactly why the upstream is selectable, and why the direct key takes
+  precedence: with `OPENAI_API_KEY` set, the gateway branch does not run in
+  production. Which path runs is decided by where Tim puts the key, and the
+  gateway branch will not be exercised until a deployment has no direct key.
+- Neither upstream has been reached from a deployed Worker: everything proved so
+  far is against the fake. The first real capture is the proof.
+- The AudioWorklet resample path has been exercised in headless Chromium only.
+  Safari (which ignores a requested `sampleRate`) and the Capacitor and Electron
+  shells are untested; the native shells still need their microphone permission
+  entries.
+- The budget is metered on wall-clock seconds of an open capture, not on audio
+  the upstream actually billed. It is a bound, not an invoice.
 
 ## Verify before slice A
 

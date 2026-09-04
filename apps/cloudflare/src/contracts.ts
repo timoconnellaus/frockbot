@@ -818,6 +818,13 @@ export interface GatewayDependencies {
     userId: string,
     appletId: string,
   ): { fetch(request: Request): Promise<Response> };
+  /**
+   * The composer's dictation socket, handed to the per-User `VoiceSession`
+   * Durable Object after the gateway has authenticated the identity. Absent in
+   * a deployment without voice, and `/api/voice/dictation` then reports itself
+   * unconfigured rather than the Worker failing to construct.
+   */
+  openVoiceDictation?(userId: string, request: Request): Promise<Response>;
   /** Authenticated observer transport into the Bot Durable Object. */
   openBotStateChannel?(
     userId: string,

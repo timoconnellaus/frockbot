@@ -104,6 +104,14 @@
         "name": "APPLET_STATES",
         "class_name": "AppletState",
       },
+      // One voice transport per User, `idFromName(userId)` (voice plan D2).
+      // It holds the browser and provider sockets and no authority: the voice
+      // budget it spends lives in `UserConfiguration`, so an eviction here
+      // loses a live capture and nothing else.
+      {
+        "name": "VOICE_SESSIONS",
+        "class_name": "VoiceSession",
+      },
     ],
   },
   "migrations": [
@@ -122,6 +130,10 @@
     {
       "tag": "v4",
       "new_sqlite_classes": ["AppletState"],
+    },
+    {
+      "tag": "v5",
+      "new_sqlite_classes": ["VoiceSession"],
     },
   ],
   "vars": {
@@ -218,6 +230,10 @@
           {
             "name": "APPLET_STATES",
             "class_name": "AppletState",
+          },
+          {
+            "name": "VOICE_SESSIONS",
+            "class_name": "VoiceSession",
           },
         ],
       },
@@ -334,6 +350,10 @@
             "name": "APPLET_STATES",
             "class_name": "AppletState",
           },
+          {
+            "name": "VOICE_SESSIONS",
+            "class_name": "VoiceSession",
+          },
         ],
       },
       "vars": {
@@ -441,6 +461,10 @@
           {
             "name": "APPLET_STATES",
             "class_name": "AppletState",
+          },
+          {
+            "name": "VOICE_SESSIONS",
+            "class_name": "VoiceSession",
           },
         ],
       },

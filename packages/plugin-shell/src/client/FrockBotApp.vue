@@ -29,6 +29,19 @@ import {
 } from "../shared.js";
 import { ComposerDraftStore } from "./composer-draft.js";
 import {
+  applyDictationTailV1,
+  voiceButtonLabelV1,
+  voiceWaveBarsV1,
+  VoiceDictationTranscriptV1,
+  type VoiceDictationStateV1,
+} from "./voice-dictation.js";
+import {
+  startVoiceMicrophoneV1,
+  voiceMicrophoneRefusalV1,
+  type VoiceMicrophoneV1,
+} from "./voice-microphone.js";
+import type { VoiceDictationSessionV1 } from "@frockbot/client-core";
+import {
   activityTrailBeginV1,
   activityTrailSampleV1,
   activityTrailStepV1,
@@ -371,6 +384,149 @@ const canSend = computed(
  * User has typed something, sending it is what they mean by interrupting.
  */
 const showStop = computed(() => isRunning.value && !canSend.value);
+
+/*
+ * Dictation (voice plan D4).
+ *
+ * The send button's slot already switches between Send and Stop, and this is
+ * the third thing it holds: with nothing to send and nothing to stop, the
+ * button offers to listen instead. While it is listening the slot carries a
+ * bin and a send, because those are the only two things a person wants next.
+ *
+ * Nothing here is a second composer. Speech lands in the same draft the
+ * keyboard writes to, through the same `ComposerDraftStore`, and Send is the
+ * ordinary `sendMessage` — so a message that is half spoken and half typed
+ * behaves exactly like one that is entirely typed, including a refusal that
+ * gives the draft back.
+ */
+const voiceState = ref<VoiceDictationStateV1>("idle");
+const voiceError = ref<string | undefined>(undefined);
+const voiceBars = ref<number[]>(voiceWaveBarsV1(0, []));
+const voiceTranscript = new VoiceDictationTranscriptV1();
+let voiceSession: VoiceDictationSessionV1 | undefined;
+let voiceMicrophone: VoiceMicrophoneV1 | undefined;
+/** The exact text dictation last wrote, so a typed edit around it survives. */
+let voiceTail = "";
+/** Send was pressed; the last transcript is what we are waiting for. */
+let voiceSendOnFinal = false;
+
+const dictating = computed(() => voiceState.value !== "idle");
+const voiceButtonLabel = computed(() => voiceButtonLabelV1(voiceState.value));
+/**
+ * The wave button takes the slot only when the slot is otherwise idle: an
+ * empty draft, no Turn to stop, and a platform that can actually listen.
+ */
+const showVoiceButton = computed(
+  () =>
+    state.value.voiceAvailable &&
+    !dictating.value &&
+    !showStop.value &&
+    draftText.value.length === 0,
+);
+
+function writeDictationIntoDraft(): void {
+  const applied = applyDictationTailV1(
+    draft.value,
+    voiceTail,
+    voiceTranscript.text(),
+  );
+  voiceTail = applied.tail;
+  draft.value = applied.draft;
+  void nextTick(syncComposerHeight);
+}
+
+async function startDictation(): Promise<void> {
+  if (dictating.value || !state.value.voiceAvailable) return;
+  voiceError.value = undefined;
+  voiceTranscript.reset();
+  voiceTail = "";
+  voiceSendOnFinal = false;
+  voiceBars.value = voiceWaveBarsV1(0, []);
+  voiceState.value = "starting";
+  const session = web.value.openVoiceDictation({
+    ready: () => {
+      if (voiceState.value === "starting") voiceState.value = "listening";
+    },
+    delta: (text) => {
+      voiceTranscript.delta(text);
+      writeDictationIntoDraft();
+    },
+    transcript: (text) => {
+      voiceTranscript.settle(text);
+      writeDictationIntoDraft();
+    },
+    final: () => {
+      void completeDictation();
+    },
+    failed: (message) => {
+      voiceError.value = message;
+      void stopDictation();
+    },
+    closed: () => {
+      // A socket that goes away mid-capture leaves the draft exactly where it
+      // is; the person can still type the rest and send it.
+      if (dictating.value) void stopDictation();
+    },
+  });
+  if (!session) {
+    voiceState.value = "idle";
+    voiceError.value = "Dictation isn't available on this device.";
+    return;
+  }
+  voiceSession = session;
+  try {
+    voiceMicrophone = await startVoiceMicrophoneV1({
+      audio: (pcm16) => session.sendAudio(pcm16),
+      level: (value) => {
+        voiceBars.value = voiceWaveBarsV1(value, voiceBars.value);
+      },
+    });
+  } catch (error) {
+    voiceError.value = voiceMicrophoneRefusalV1(error);
+    await stopDictation();
+  }
+}
+
+/** Everything captured has been transcribed; send it if that is why we stopped. */
+async function completeDictation(): Promise<void> {
+  const send = voiceSendOnFinal;
+  await stopDictation();
+  if (send) await sendMessage();
+}
+
+async function stopDictation(): Promise<void> {
+  voiceState.value = "idle";
+  voiceSendOnFinal = false;
+  voiceBars.value = voiceWaveBarsV1(0, []);
+  const microphone = voiceMicrophone;
+  const session = voiceSession;
+  voiceMicrophone = undefined;
+  voiceSession = undefined;
+  await microphone?.stop();
+  session?.close();
+}
+
+/** The bin. Discards what was dictated, exactly as D4 says it does. */
+function discardDictation(): void {
+  voiceSession?.cancel();
+  voiceTranscript.reset();
+  voiceTail = "";
+  draft.value = "";
+  voiceError.value = undefined;
+  void stopDictation();
+  void nextTick(syncComposerHeight);
+}
+
+/**
+ * Send, mid-dictation. The audio is committed and the message waits for the
+ * last transcript rather than sending half a sentence.
+ */
+function sendDictation(): void {
+  if (voiceState.value !== "listening") return;
+  voiceSendOnFinal = true;
+  voiceState.value = "finishing";
+  voiceSession?.commit();
+}
 
 /*
  * Tool activity is internal to the Turn. A Turn that produced only tool calls
@@ -818,6 +974,9 @@ onBeforeUnmount(() => {
   window.removeEventListener("hashchange", applySettingsDeepLink);
   phoneLayoutMedia?.removeEventListener("change", onPhoneLayoutChange);
   window.removeEventListener("keydown", onRootKeydown);
+  // A microphone outlives a component that stops drawing it unless it is told
+  // not to, and a browser shows the recording indicator for as long as it does.
+  void stopDictation();
 });
 
 watch(
@@ -1058,8 +1217,20 @@ function handleComposerKeydown(event: KeyboardEvent): void {
       }
     }
   }
+  if (event.key === "Escape" && dictating.value) {
+    // Escape is the keyboard's bin, the same as it is for the Skill popover.
+    event.preventDefault();
+    discardDictation();
+    return;
+  }
   if (event.key !== "Enter" || event.shiftKey) return;
   event.preventDefault();
+  // Enter means send either way; mid-dictation it commits the audio first so
+  // the last word spoken is in the message.
+  if (dictating.value) {
+    sendDictation();
+    return;
+  }
   void sendMessage();
 }
 </script>
@@ -1492,6 +1663,36 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             >
               {{ draftCounterLabel }}
             </p>
+            <!--
+              The capture animation, and the only place the state is written
+              out. It is level-driven from the microphone: bars that move while
+              the room is silent would say the microphone works when it does
+              not.
+            -->
+            <p
+              v-if="dictating"
+              class="voice-capture"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="voice-wave" aria-hidden="true">
+                <span
+                  v-for="(bar, index) in voiceBars"
+                  :key="index"
+                  class="voice-wave-bar"
+                  :style="{ transform: `scaleY(${bar})` }"
+                />
+              </span>
+              <span>{{ voiceButtonLabel }}</span>
+            </p>
+            <!--
+              Why dictation stopped, in the words the server or the browser
+              used. It sits under the draft it could not add to, and the draft
+              itself is untouched.
+            -->
+            <p v-if="voiceError" class="voice-error" role="alert">
+              {{ voiceError }}
+            </p>
           </div>
           <!--
             Start a new conversation. Sits beside the composer because that is
@@ -1506,13 +1707,43 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             :disabled="isRunning"
             @click="web.startConversation()"
           />
+          <!--
+            The send slot, and its four states. Dictation replaces the one
+            button with two, because while it is listening the only two things
+            worth offering are "throw this away" and "that's the message".
+          -->
+          <template v-if="dictating">
+            <UiIconButton
+              class="voice-discard-button"
+              icon="trash"
+              label="Discard dictation"
+              variant="ghost"
+              @click="discardDictation"
+            />
+            <UiIconButton
+              class="voice-send-button"
+              icon="arrow-up"
+              label="Send dictated message"
+              variant="primary"
+              :disabled="voiceState !== 'listening'"
+              @click="sendDictation"
+            />
+          </template>
           <UiIconButton
-            v-if="showStop"
+            v-else-if="showStop"
             class="stop-button"
             icon="stop"
             label="Stop generating"
             variant="primary"
             @click="web.stopRun()"
+          />
+          <UiIconButton
+            v-else-if="showVoiceButton"
+            class="voice-button"
+            icon="waveform"
+            :label="voiceButtonLabel"
+            variant="primary"
+            @click="startDictation"
           />
           <UiIconButton
             v-else
