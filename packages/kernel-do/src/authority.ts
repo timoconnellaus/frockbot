@@ -39,6 +39,7 @@ import {
   repairedSessionLogV1,
   unresolvedModelRequestFailure,
 } from "./run-recovery.js";
+import { runLivenessV1, STALE_RUNNING_RUN_FAILURE_V1 } from "./run-liveness.js";
 import {
   BotTurnReconciliationRequiredError,
   BotTurnRecoveryRequiredError,
@@ -1133,6 +1134,81 @@ export class BotDurableAuthority<Snapshot> {
       throw new Error("stored run does not match its lookup key");
     }
     return run;
+  }
+
+  /**
+   * Whether a run is still working, settling its record when it is not.
+   *
+   * This is the only honest answer to "is this Bot busy", and both readers that
+   * ask — the sidebar's activity ring and the transcript's running Turn — go
+   * through here. `status === "running"` alone is a claim the record makes and
+   * nothing renews: a Turn that died mid-answer never wrote its own
+   * settlement, so idle Bots wore a pulsing ring for hours.
+   * {@link runLivenessV1} holds the rule; this adds the two things a pure rule
+   * cannot have.
+   *
+   * The first is the fence. A run this object is executing right now is alive
+   * by direct observation, whatever the durable record and the log look like
+   * mid-flush, and it is never judged or touched. The object is
+   * single-threaded, so `executingRunId` is exact for the run in this isolate,
+   * and a run executing in some *other* isolate cannot be at issue: the durable
+   * `active-run` marker admits one Turn at a time, and a record older than the
+   * Turn deadline is past the point where any isolate is still holding it.
+   *
+   * The second is the repair. A read that finds a dead record settles it rather
+   * than merely hiding it, so the ring goes out for every other reader too and
+   * the next message inherits a closed Turn instead of repairing one. The
+   * settlement is `failStoredRun`, exactly as recovery's is, which closes the
+   * open Turn in the log on the way and routes a run carrying a durable Stop or
+   * supersede intent to the outcome that intent already decided. It is
+   * idempotent — a second caller finds a terminal record and settles nothing —
+   * and the run-record write it commits is what publishes the `runs`
+   * invalidation the watching clients re-read on.
+   */
+  async resolveRunWorking(runId: string | undefined): Promise<boolean> {
+    if (runId === undefined) return false;
+    if (runId === this.executingRunId) return true;
+    const run = await this.readRun(runId);
+    if (!run || run.status !== "running") return false;
+    const sessionEvents = (
+      (await this.ctx.storage.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
+    ).map(decodeSessionEvent);
+    if (runLivenessV1({ run, sessionEvents }).working) return true;
+    await this.settleStaleRun(runId);
+    return false;
+  }
+
+  /**
+   * Settles one run whose record says `running` and whose Turn is over.
+   *
+   * The verdict is taken again inside the transaction, against the record and
+   * the log as they are committed there, so a Turn that settled itself between
+   * the read above and this write is left exactly as it settled — and so is one
+   * that started executing in this object in the meantime.
+   */
+  private async settleStaleRun(runId: string): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      if (runId === this.executingRunId) return;
+      const run = this.codec.optional(
+        await transaction.get<unknown>(`${RUN_PREFIX}${runId}`),
+      );
+      if (!run || run.runId !== runId || run.status !== "running") return;
+      const latest = (
+        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
+      ).map(decodeSessionEvent);
+      if (runLivenessV1({ run, sessionEvents: latest }).working) return;
+      await failStoredRun(
+        this.codec,
+        transaction,
+        this.terminalKeys(runId),
+        runId,
+        latest.slice(0, run.previousEventCount),
+        run.events,
+        STALE_RUNNING_RUN_FAILURE_V1,
+        this.supersededPackageRecords(),
+      );
+      await this.refreshRecoveryAlarm(transaction);
+    });
   }
 
   /** Reverse-ordered admission index page: `[cursor, runId]` entries. */

@@ -4,6 +4,7 @@ export * from "./composition-failures.js";
 export * from "./conversations.js";
 export * from "./composition-store.js";
 export * from "./run-records.js";
+export * from "./run-liveness.js";
 export * from "./run-recovery.js";
 export * from "./run-terminal.js";
 export * from "./storage-keys.js";

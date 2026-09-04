@@ -103,14 +103,21 @@ export type ClientStartConnectionResult = StartConnectionResult;
  * A durable Session event that belongs to no Turn — a rename, today. The chat
  * shows it as a system line rather than as a message from either party.
  */
-export interface ClientAnnouncement {
-  type: "bot/renamed";
-  announcementId: string;
-  at: string;
-  from: string;
-  to: string;
-  namedBy: "user" | "bot";
-}
+export type ClientAnnouncement =
+  | {
+      type: "bot/renamed";
+      announcementId: string;
+      at: string;
+      from: string;
+      to: string;
+      namedBy: "user" | "bot";
+    }
+  | {
+      type: "conversation/compacted";
+      announcementId: string;
+      at: string;
+      throughTurn: number;
+    };
 
 export interface ClientRun {
   runId: string;

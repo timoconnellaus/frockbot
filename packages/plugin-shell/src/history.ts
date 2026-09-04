@@ -24,6 +24,13 @@ import {
   type SessionEvent,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
+import {
+  compactionMessageV1,
+  compactionStateV1,
+  historyCharsV1,
+  pruneToolOutputsV1,
+  type CompactionStateV1,
+} from "./compaction.js";
 
 export { currentTurnV1 };
 
@@ -140,6 +147,68 @@ function budgetedMessagesV1(
     : [{ role: "user", content: omittedHistoryNoticeV1(dropped) }, ...narrowed];
 }
 
+/** The conversation's own messages, after any compaction already recorded. */
+export interface ChatWindowV1 {
+  /** Chat-Turn messages the newest compaction does not already cover. */
+  messages: LlmMessage[];
+  /** The Turn each of those belongs to. */
+  turns: number[];
+  /** Every chat Turn on the log, in order, covered or not. */
+  chatTurns: number[];
+  /** What the log says about compaction for this conversation. */
+  state: CompactionStateV1;
+  /** The newest completed compaction, when there is one. */
+  compaction?: CompactionStateV1["compaction"];
+}
+
+/**
+ * The window a chat Turn's request is assembled from, before pruning and
+ * before the budget.
+ *
+ * Shared by request assembly and by the Turn-end evaluation on purpose: what
+ * compaction is measured against has to be what the next request would carry,
+ * or the trigger fires against a number nobody pays.
+ */
+export function chatWindowV1(
+  events: readonly SessionEvent[],
+  messages: readonly LlmMessage[],
+): ChatWindowV1 {
+  const turns = messageTurnsV1(events);
+  const types = turnTypesByTurnV1(events);
+  const chat = (turn: number) => (types.get(turn) ?? "chat") === "chat";
+  const state = compactionStateV1(events);
+  const current = currentTurnV1(events);
+  // A compaction never covers the Turn being assembled, whatever the log says:
+  // the current Turn is carried whole, as it has been since ADR 0027.
+  const compaction =
+    state.compaction && state.compaction.throughTurn < current
+      ? state.compaction
+      : undefined;
+  const kept: LlmMessage[] = [];
+  const keptTurns: number[] = [];
+  for (const [index, message] of messages.entries()) {
+    const turn = turns[index]!;
+    if (!chat(turn)) continue;
+    if (compaction && turn <= compaction.throughTurn) continue;
+    kept.push(message);
+    keptTurns.push(turn);
+  }
+  const chatTurns = [
+    ...new Set(
+      events.flatMap((event) =>
+        event.type === "turn/start" && chat(event.turn) ? [event.turn] : [],
+      ),
+    ),
+  ];
+  return {
+    messages: kept,
+    turns: keptTurns,
+    chatTurns,
+    state,
+    ...(compaction ? { compaction } : {}),
+  };
+}
+
 /**
  * The messages one Turn's request may carry, given the whole session log and
  * the messages derived from it.
@@ -162,15 +231,24 @@ export function turnScopedMessagesV1(
   const current = currentTurnV1(input.events);
   const chatTurn = (turn: number) => (types.get(turn) ?? "chat") === "chat";
   if (chatTurn(current)) {
-    const conversation = input.messages.filter((_, index) =>
-      chatTurn(turns[index]!),
+    const window = chatWindowV1(input.events, input.messages);
+    // Tier 1 of ADR 0030, and the only one that costs nothing: a tool result
+    // older than the newest few Turns keeps its pairing and loses its payload.
+    const pruned = pruneToolOutputsV1(window.messages, window.turns);
+    const preamble = window.compaction
+      ? [compactionMessageV1(window.compaction)]
+      : [];
+    // The summary is never a candidate for eviction — it is what stands in for
+    // the Turns eviction would otherwise have dropped — so it is spent from
+    // the budget rather than measured against it.
+    const budget = Math.max(
+      0,
+      (input.budget ?? CHAT_HISTORY_BUDGET_CHARS_V1) - historyCharsV1(preamble),
     );
-    return budgetedMessagesV1(
-      conversation,
-      turns.filter((turn) => chatTurn(turn)),
-      current,
-      input.budget ?? CHAT_HISTORY_BUDGET_CHARS_V1,
-    );
+    return [
+      ...preamble,
+      ...budgetedMessagesV1(pruned, window.turns, current, budget),
+    ];
   }
   const own = input.messages.filter((_, index) => turns[index] === current);
   const chatTurns = new Set(
