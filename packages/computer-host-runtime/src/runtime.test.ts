@@ -1340,6 +1340,12 @@ describe("box-doctor", () => {
     expect(boxDoctorScript).toContain('"webdriver":true');
   });
 
+  test("counts only the browser main process", () => {
+    expect(boxDoctorScript).toContain(
+      `BROWSERS=$(pgrep -af -- "--user-data-dir=[/]home/box/chrome-profile" 2>/dev/null | awk -v self="$$" -v parent="$PPID" '$1 != self && $1 != parent && $0 ~ /(^|\\/)chrom(e|ium)( |$)/ && $0 !~ /(^|[[:space:]])--type=/ { count++ } END { print count + 0 }')`,
+    );
+  });
+
   test("reports the scratch, the launcher, and the reference version it expects", () => {
     expect(boxDoctorScript).toContain(SCRATCH_ROOT);
     expect(boxDoctorScript).toContain(CHROME_LAUNCHER);
