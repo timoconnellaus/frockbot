@@ -1,4 +1,10 @@
 .frockbot-root {
+  /*
+   * The clear margin a bubble leaves on the side it is not anchored to — about
+   * a centimetre and a half. It is what says which side of the conversation a
+   * line is on, so it is the same on a phone as on a desktop.
+   */
+  --frock-bubble-gutter: 56px;
   position: fixed;
   z-index: 1000;
   inset: 0;
@@ -324,10 +330,14 @@
 }
 
 /*
- * An assistant Turn is its avatar and, beside it, one column holding
- * everything the Turn produced. The row has exactly two children: bubbles,
- * notices, sends and chips stack inside the column, so a one-word reply is a
- * bubble the width of its word rather than a sliver of a shared row.
+ * An assistant Turn is one column holding everything it produced: bubbles,
+ * notices and sends stack inside it, so a one-word reply is a bubble the width
+ * of its word rather than a sliver of a shared row.
+ *
+ * The avatar is beside that column only while the Bot is working. Every reply
+ * in this transcript is from the same Bot — there are no group conversations —
+ * so a sheep on every settled line said nothing and cost the column its left
+ * edge. The one on the running Turn does say something, which is why it stays.
  */
 .message-assistant {
   flex-direction: row;
@@ -381,20 +391,22 @@
   animation: frock-breathe 2600ms ease-in-out infinite;
 }
 
-.bot-avatar-live::after {
-  position: absolute;
-  border-radius: 12px;
-  animation: frock-halo 2600ms ease-in-out infinite;
-  box-shadow: 0 0 0 2px var(--frock-surface-accent);
-  content: "";
-  inset: -4px;
-  opacity: 0;
-  pointer-events: none;
+.bot-avatar-waiting {
+  animation-duration: 1600ms;
 }
 
-.bot-avatar-waiting,
-.bot-avatar-waiting::after {
-  animation-duration: 1600ms;
+/*
+ * The ring's way off screen. The Turn has settled, the reply is the answer
+ * now, and the stroke fades rather than vanishing between two frames.
+ */
+.activity-ring-enter-active,
+.activity-ring-leave-active {
+  transition: opacity 420ms ease-out;
+}
+
+.activity-ring-enter-from,
+.activity-ring-leave-to {
+  opacity: 0;
 }
 
 @keyframes frock-breathe {
@@ -408,22 +420,16 @@
   }
 }
 
-@keyframes frock-halo {
-  0%,
-  100% {
-    opacity: 0;
-    transform: scale(0.94);
-  }
-
-  50% {
-    opacity: 1;
-    transform: scale(1.06);
-  }
-}
-
+/*
+ * A bubble runs nearly the width of the transcript, leaving one clear margin
+ * on the side it is not anchored to: the Bot's at the end, the User's at the
+ * start. That margin is the only thing distinguishing the two columns now that
+ * neither carries an avatar, so it is a fixed gap rather than a percentage —
+ * it has to stay legible at every width.
+ */
 .message-bubble {
   width: max-content;
-  max-width: min(640px, 84%);
+  max-width: calc(100% - var(--frock-bubble-gutter));
   padding: 10px 14px;
   border: 1px solid var(--frock-border);
   border-radius: 18px 18px 18px 6px;
@@ -438,7 +444,7 @@
 }
 
 .message-user .message-bubble {
-  max-width: min(640px, 84%);
+  max-width: calc(100% - var(--frock-bubble-gutter));
   border-color: var(--frock-action-primary);
   border-radius: 18px 18px 6px 18px;
   color: var(--frock-on-accent);
@@ -453,59 +459,9 @@
 
 .message-sends {
   display: flex;
+  width: calc(100% - var(--frock-bubble-gutter));
   flex-direction: column;
   gap: 8px;
-  width: min(640px, 84%);
-}
-
-/*
- * Tool calls. Quieter than anything the Bot said: the User is watching work
- * happen, not reading a message, so a chip carries the name and its state and
- * opens in place to what the tool returned.
- */
-
-.message-tools {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: min(640px, 84%);
-}
-
-.tool-chip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: baseline;
-  padding: 6px 10px;
-  font: inherit;
-  color: var(--frock-text-muted);
-  text-align: left;
-  cursor: pointer;
-  background: var(--frock-surface);
-  border: 1px solid var(--frock-border);
-  border-radius: 10px;
-}
-
-.tool-chip-name {
-  color: var(--frock-text);
-  font-weight: 600;
-}
-
-.tool-chip-status {
-  flex: 1 1 auto;
-  font-size: var(--frock-text-xs);
-}
-
-.tool-chip-failed .tool-chip-status {
-  color: var(--frock-danger-text);
-}
-
-.tool-chip-result {
-  flex: 1 0 100%;
-  max-height: 12em;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 /*
@@ -516,9 +472,9 @@
 
 .message-tasks {
   display: flex;
+  width: calc(100% - var(--frock-bubble-gutter));
   flex-direction: column;
   gap: 6px;
-  width: min(640px, 84%);
 }
 
 .task-chip {
@@ -1167,16 +1123,6 @@
 
   .empty-thread {
     padding: 20px;
-  }
-
-  .message-bubble,
-  .message-user .message-bubble {
-    max-width: 92%;
-  }
-
-  .message-sends,
-  .message-tasks {
-    width: 92%;
   }
 
   .message-attachments img {

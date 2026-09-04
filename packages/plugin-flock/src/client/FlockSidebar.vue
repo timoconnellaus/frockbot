@@ -65,6 +65,18 @@ function previewTime(botId: string): string {
 function isUnread(botId: string): boolean {
   return flock.value.unread[botId]?.unread === true;
 }
+/**
+ * Whether the row draws an activity ring.
+ *
+ * The open Bot's own Turn is the Shell's — it is projecting the run into the
+ * conversation and knows about it a poll sooner — so that row reads the Shell.
+ * Every other row reads the unread fan-out, which is the only thing that knows
+ * a Bot in another conversation is working.
+ */
+function isWorking(botId: string): boolean {
+  if (botId === active.value) return shell.value.activeRunId !== undefined;
+  return flock.value.unread[botId]?.working === true;
+}
 function unreadLabel(botId: string): string | undefined {
   const view = flock.value.unread[botId];
   if (!view?.unread || view.count === 0) return undefined;
@@ -140,6 +152,7 @@ onMounted(() => void flock.value.load());
                 :bot-id="bot.botId"
                 :sheep="flock.identities[bot.botId]?.sheep ?? bot.sheep"
                 :label="`${botName(bot.botId, bot.initialName)} avatar`"
+                :working="isWorking(bot.botId)"
               />
               <span class="flock-bot-copy">
                 <span class="flock-bot-primary">
@@ -238,6 +251,7 @@ onMounted(() => void flock.value.load());
               :bot-id="bot.botId"
               :sheep="flock.identities[bot.botId]?.sheep ?? bot.sheep"
               :label="`${botName(bot.botId, bot.initialName)} avatar`"
+              :working="isWorking(bot.botId)"
             />
             <span class="flock-bot-copy">
               <span class="flock-bot-primary">

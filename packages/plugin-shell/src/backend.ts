@@ -5324,7 +5324,28 @@ export class ShellBotBackendContribution {
       index.map((entry) => entry.cursor),
       await this.sidebarPreview(storedPreview, index),
       failures,
+      await this.isWorking(index[0]?.runId),
     );
+  }
+
+  /**
+   * Whether the Bot's newest admitted run is still going.
+   *
+   * The sidebar draws this as an activity ring, so somebody in another
+   * conversation can see a Bot working rather than reading a quiet row as a
+   * stalled one. It is the newest run only: a Bot admits one Turn at a time,
+   * so an older run that is somehow still marked running is a reconciliation
+   * problem and not something a ring should report. A read that fails is no
+   * ring — liveness is never worth failing a sidebar poll for.
+   */
+  private async isWorking(runId: string | undefined): Promise<boolean> {
+    if (runId === undefined) return false;
+    try {
+      const run = await this.authority.readRun(runId);
+      return run?.status === "running";
+    } catch {
+      return false;
+    }
   }
 
   /**

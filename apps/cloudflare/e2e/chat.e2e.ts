@@ -254,11 +254,82 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   expect(fits.box).toBeGreaterThanOrEqual(fits.text);
   expect(fits.text).toBeGreaterThan(10);
 
-  // The chip says what the tool was in words, and a Turn that finished says so.
-  const chip = reply.locator(".tool-chip");
-  await expect(chip).toHaveCount(1);
-  await expect(chip.locator(".tool-chip-name")).toHaveText("Send to user");
-  await expect(chip).not.toHaveClass(/tool-chip-failed/);
+  // The Turn's tool call is not in the transcript in words. The ring on the
+  // avatar was the whole of what the conversation said about it, and a settled
+  // Turn keeps none.
+  await expect(reply.getByRole("status", { name: "Working" })).toHaveCount(0, {
+    timeout: 120_000,
+  });
+  await expect(reply.locator(".tool-chip")).toHaveCount(0);
+  await expect(reply).not.toContainText("Send to user");
+
+  // A settled reply carries no avatar either. Every line here is from the same
+  // Bot, so a sheep beside each one named nobody; the column starts at the
+  // transcript's own left edge instead, with no gutter left behind.
+  await expect(reply.locator(".bot-avatar")).toHaveCount(0);
+  const edges = await reply.evaluate((element) => {
+    const column = element.querySelector(".message-column");
+    return {
+      row: element.getBoundingClientRect().left,
+      column: (column ?? element).getBoundingClientRect().left,
+    };
+  });
+  expect(edges.column).toBeCloseTo(edges.row, 0);
+});
+
+// The owner's ask, from the other side: a Turn that spends its time making
+// tool calls has to look like it is working without naming one. The ring on
+// the Bot's avatar is that — present and labelled "Working" while the Turn
+// runs, gone once it settles, and never a word about a tool.
+test("a working Bot shows an activity ring on its avatar, and no tool names", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Ringer",
+  });
+
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
+
+  const composer = composerInput(page);
+  await composer.fill("take your time");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(composer).toHaveValue("", { timeout: 120_000 });
+
+  // Latched the way the streaming assertion above is: the ring is on screen at
+  // some point while the Turn runs, never necessarily when a poll happens to
+  // look.
+  let sawRing = false;
+  await expect
+    .poll(
+      async () => {
+        const last = assistantMessages(page).last();
+        if ((await last.count()) === 0) return false;
+        if ((await last.getByRole("status", { name: "Working" }).count()) > 0) {
+          sawRing = true;
+        }
+        return sawRing;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+
+  await expect(assistantMessages(page).last()).toContainText(
+    "Reply from the local Ollama stub.",
+    { timeout: 120_000 },
+  );
+  // The Turn settled, so the ring completed and went. The words "tool" and
+  // "tool calls" were never in the thread at all.
+  await expect(
+    assistantMessages(page).last().getByRole("status", { name: "Working" }),
+  ).toHaveCount(0, { timeout: 120_000 });
+  await expect(assistantMessages(page).last()).not.toContainText(/tool call/i);
+
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
 test("a provider that stops accepting the key ends the Turn with a reason", async ({
