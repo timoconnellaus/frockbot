@@ -1135,14 +1135,30 @@ export class ShellBotBackendContribution {
     if (expired.length > 0) await transaction.delete(expired);
   }
 
-  /** The announcements the Session shows, oldest first. */
+  /**
+   * The announcements the Session shows, oldest first.
+   *
+   * Two sources, and deliberately so. A rename or a settled task has no live
+   * Session to be appended to, so it lives in this object's own bounded
+   * announcement log. A compaction (ADR 0030) is already a durable event on
+   * the conversation's session log — appending a second copy of it here would
+   * be two records of one fact — so it is read back from there instead.
+   */
   async listAnnouncements(): Promise<SessionEvent[]> {
     const stored = await this.ctx.storage.list<unknown>({
       prefix: BOT_ANNOUNCEMENT_PREFIX,
     });
-    return [...stored.entries()]
+    const announcements = [...stored.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([, value]) => decodeSessionEvent(value));
+    const session =
+      (await this.ctx.storage.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+    for (const event of session) {
+      if (event.type === "conversation/compacted") announcements.push(event);
+    }
+    return announcements
+      .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+      .slice(-BOT_ANNOUNCEMENT_RETENTION);
   }
 
   private async refreshRecoveryAlarm(

@@ -191,3 +191,7 @@ _Avoid_: Queued message, pending wake
 **Approval**:
 A durable pending decision the User answers: what the Bot proposes to do, its risk, and a deadline past which it expires. Recorded once — a replayed answer reads back the decision already stored — and never a grant of authority the Bot did not already hold.
 _Avoid_: Permission, consent prompt, confirmation
+
+**Compaction**:
+The durable summary of a conversation's earliest turns, computed once when the assembled history grows past its budget and replayed into every later request in their place. It covers a prefix of the conversation, so a later one supersedes it; the turns it covers are still in the log and still readable.
+_Avoid_: Truncation, trimming, context window management
