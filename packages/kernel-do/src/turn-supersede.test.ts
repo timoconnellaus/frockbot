@@ -3,7 +3,10 @@ import {
   bootstrapGeneration,
   type CompositionGenerationV1,
 } from "@frockbot/kernel-composition/generation";
-import type { SessionEvent } from "@frockbot/kernel-contracts";
+import {
+  type SessionEvent,
+  validateToolOccurrenceJournal,
+} from "@frockbot/kernel-contracts";
 import {
   BotDurableAuthority,
   SUPERSEDED_TURN_REASON_V1,
@@ -690,6 +693,87 @@ describe("a durable log left inside a Turn", () => {
     });
     expect(storedRun(storage, "run-1").status).toBe("completed");
   });
+
+  test("is repaired even once refused Turns have been logged behind it", async () => {
+    const storage = new MemoryStorage();
+    // What production actually holds on a Bot wedged before the repair
+    // existed. The Agent loop journals `turn/start` durably and only then
+    // assembles the request that discovers turn 1 is still open, so every
+    // refused message left a *complete* Turn of its own behind the abandoned
+    // one — and the log stopped ending inside a Turn. The trailing-open test
+    // then said there was nothing to repair, so admission repaired nothing and
+    // the next message failed exactly the same way, forever.
+    storage.values.set("latest-events", [
+      {
+        type: "session/created",
+        createdAt: "2026-09-03T00:00:00.000Z",
+        seq: 0,
+        timestamp: "2026-09-03T00:00:00.000Z",
+      },
+      {
+        type: "turn/start",
+        turn: 1,
+        seq: 1,
+        timestamp: "2026-09-03T00:00:01.000Z",
+      },
+      {
+        type: "turn/start",
+        turn: 2,
+        seq: 2,
+        timestamp: "2026-09-03T00:00:02.000Z",
+      },
+      {
+        type: "turn/end",
+        turn: 2,
+        outcome: "model-error",
+        reason: "turn 2 started while turn 1 is open",
+        seq: 3,
+        timestamp: "2026-09-03T00:00:03.000Z",
+      },
+    ]);
+    const probe = createAuthority(storage);
+
+    const run = probe.authority.run(command("run-1", "hello"));
+    await probe.handle("run-1").started;
+    probe.handle("run-1").finish();
+    await run;
+
+    const events = storage.values.get("latest-events") as SessionEvent[];
+    // Turn 1 is closed where it was abandoned, not after the Turns that
+    // followed it, and the log is resequenced around the insertion.
+    expect(
+      events
+        .slice(0, 5)
+        .map((event) =>
+          event.type === "turn/start" || event.type === "turn/end"
+            ? `${event.type}:${event.turn}`
+            : event.type,
+        ),
+    ).toEqual([
+      "session/created",
+      "turn/start:1",
+      "turn/end:1",
+      "turn/start:2",
+      "turn/end:2",
+    ]);
+    expect(events[2]).toMatchObject({
+      type: "turn/end",
+      turn: 1,
+      outcome: "interrupted",
+    });
+    expect(events.map((event) => event.seq)).toEqual(
+      events.map((_event, index) => index),
+    );
+    // The repaired history is one the invariant accepts, which is what the
+    // refused Turns were failing on. (The stub Agent below numbers its own
+    // Turn rather than reading `nextTurn`, so only the repaired prefix is the
+    // subject here.)
+    expect(() =>
+      validateToolOccurrenceJournal(events.slice(0, 5)),
+    ).not.toThrow();
+    expect(storedRun(storage, "run-1").status).toBe("completed");
+    expect(storedRun(storage, "run-1").previousEventCount).toBe(5);
+  });
 });
 
 describe("a failing recovery of an older Turn", () => {
@@ -917,5 +1001,35 @@ describe("a discarded Turn never crashes the object", () => {
     await expect(evicted.authority.alarm()).resolves.toBeUndefined();
     // And the object still has a deadline, so the next firing tries again.
     expect(storage.alarmAt).toBeGreaterThan(0);
+  });
+});
+
+describe("Try again on a parked Turn", () => {
+  test("answers with the run it settled rather than throwing", async () => {
+    const storage = new MemoryStorage();
+    // The Turn parks on a provider outcome only a User can retrieve, which is
+    // the state the Resolve Turn button exists for.
+    const probe = createAuthority(storage, {
+      dispatch: () => false,
+      parkOnRelease: () => true,
+    });
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    probe.handle("run-1").finish();
+    await first.catch(() => undefined);
+    expect(storedRun(storage, "run-1").status).toBe("reconciliation-required");
+
+    // "Try again": the retry fails again, the run is abandoned, and that is a
+    // successful abandon — not a failed request. Rethrowing here made the
+    // button answer 409, and the transcript read the browser makes straight
+    // afterwards 500 on the half-repaired record.
+    const abandoned = await probe.authority.reconcileRun(identity, "run-1");
+    expect(abandoned.runId).toBe("run-1");
+
+    const settled = storedRun(storage, "run-1");
+    expect(settled.status).toBe("failed");
+    expect(settled.failure).toContain("explicitly abandoned");
+    expect(storage.values.get("active-run")).toBeUndefined();
   });
 });

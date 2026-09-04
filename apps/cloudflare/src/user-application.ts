@@ -707,7 +707,11 @@ function createUserApplicationRoute() {
     const stopMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/stop$/,
     );
+    const conversationsMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/conversations$/,
+    );
     if (
+      !conversationsMatch &&
       !skillsMatch &&
       !packageUiMatch &&
       !packageUiToolMatch &&
@@ -725,6 +729,7 @@ function createUserApplicationRoute() {
     let botId: string;
     try {
       const matched =
+        conversationsMatch ??
         skillsMatch ??
         packageUiMatch ??
         packageUiToolMatch ??
@@ -990,6 +995,40 @@ function createUserApplicationRoute() {
       }
     }
 
+    if (conversationsMatch) {
+      // GET lists the conversations this Bot has had; POST puts the current
+      // one down and starts the next. Both answer with the same list, so the
+      // client never has to ask twice to know where it is.
+      if (request.method === "GET") {
+        try {
+          return Response.json(
+            await env.BOT_STATE.listConversations({ schemaVersion: 1, botId }),
+          );
+        } catch (error) {
+          return jsonError(
+            500,
+            error instanceof Error ? error.message : "conversation list failed",
+          );
+        }
+      }
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      try {
+        return Response.json(
+          await env.BOT_STATE.startConversation({ schemaVersion: 1, botId }),
+        );
+      } catch (error) {
+        // A Bot that is mid-Turn refuses, with the reason: 409 is the same
+        // "not now" the composer already understands.
+        return jsonError(
+          409,
+          error instanceof Error
+            ? error.message
+            : "could not start a new conversation",
+        );
+      }
+    }
+
     if (lookupMatch) {
       if (request.method !== "GET") {
         return jsonError(405, "method not allowed");
@@ -1026,15 +1065,20 @@ function createUserApplicationRoute() {
       try {
         const queryKeys = [...url.searchParams.keys()];
         if (
-          queryKeys.some((key) => key !== "before") ||
-          url.searchParams.getAll("before").length > 1
+          queryKeys.some(
+            (key) => key !== "before" && key !== "conversationId",
+          ) ||
+          url.searchParams.getAll("before").length > 1 ||
+          url.searchParams.getAll("conversationId").length > 1
         ) {
           throw new Error("run list query is invalid");
         }
         const before = url.searchParams.get("before");
+        const conversationId = url.searchParams.get("conversationId");
         query = decodeClientRunListQueryV1({
           schemaVersion: 1,
           ...(before === null ? {} : { before }),
+          ...(conversationId === null ? {} : { conversationId }),
         });
       } catch (error) {
         return jsonError(

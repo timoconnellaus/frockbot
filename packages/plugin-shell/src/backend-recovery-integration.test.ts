@@ -354,38 +354,20 @@ describe("Bot recovery", () => {
         text: "uncertain",
       }),
     ).rejects.toThrow("response lost");
-    expect(
-      await storage.get<StoredRun>("run:ollama-run-uncertain"),
-    ).toMatchObject({ status: "reconciliation-required" });
+    // Ollama keeps no addressable copy of a completion, so a failure raised
+    // before the first stream event is definitive rather than uncertain: the
+    // run settles as a failed Turn instead of parking on a retrieval this
+    // provider can never perform.
+    const uncertain = await storage.get<StoredRun>("run:ollama-run-uncertain");
+    expect(uncertain?.status).toBe("failed");
+    expect(uncertain?.failure).toContain("response lost");
+    expect(await storage.get("active-run")).toBeUndefined();
 
+    // The alarm has nothing left to recover: a settled run stays settled.
     await host().alarm();
-    expect(
-      await storage.get<StoredRun>("run:ollama-run-uncertain"),
-    ).toMatchObject({ status: "reconciliation-required" });
-    // "Try again" that ends in a settled run is a successful abandon, not a
-    // failed request: it used to rethrow, which the gateway turned into a 409
-    // and the browser followed with a transcript read that 500'd. The run is
-    // durable and terminal by now, and its own record says why it ended.
-    const abandoned = await host().reconcileRun(
-      { userId: "user-1", botId: "primary" },
-      "ollama-run-uncertain",
-    );
-    expect(abandoned).toMatchObject({ runId: "ollama-run-uncertain" });
-    // The read the browser makes straight afterwards answers, rather than
-    // 500ing on the record the abandon just settled. It comes before the
-    // assertions below because `storage.get` hands back the live object and an
-    // asymmetric matcher run against it leaves itself behind on the property.
-    const read = await host().lookupRun({
-      schemaVersion: 1,
-      runId: "ollama-run-uncertain",
-    });
-    expect(read).toMatchObject({ run: { runId: "ollama-run-uncertain" } });
-    expect(
-      await storage.get<StoredRun>("run:ollama-run-uncertain"),
-    ).toMatchObject({
-      status: "failed",
-      failure: expect.stringContaining("explicitly abandoned"),
-    });
+    const settled = await storage.get<StoredRun>("run:ollama-run-uncertain");
+    expect(settled?.status).toBe("failed");
+    expect(settled?.failure).toContain("response lost");
     expect(await storage.get("active-run")).toBeUndefined();
   });
 

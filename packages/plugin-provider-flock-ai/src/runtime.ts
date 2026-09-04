@@ -1,6 +1,7 @@
 import {
   LlmEffectNotStartedError,
   type LlmProvider,
+  type LlmReconciliationCapability,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
 import {
@@ -20,6 +21,8 @@ export type OpenAICompatibleChatCompletionBodyV1 = Record<string, unknown>;
 export type FlockAiChatCompletionV1 = (
   gatewayModel: string,
   body: OpenAICompatibleChatCompletionBodyV1,
+  /** Cancels the gateway request; the host bounds it with its own deadline. */
+  signal?: AbortSignal,
 ) => Promise<ReadableStream<Uint8Array>>;
 
 export interface FlockAiRuntimeConfig {
@@ -37,6 +40,20 @@ export interface FlockAiRuntimeConfig {
 
 class FlockAiProvider implements LlmProvider {
   readonly id = FLOCK_AI_PROVIDER_TYPE;
+
+  /**
+   * The Gateway keeps no addressable copy of a completion, so an interrupted
+   * stream can never be read back. Saying so is what lets the run settle as a
+   * failure with its partial text intact; staying silent parks it on a
+   * retrieval that would never arrive.
+   */
+  readonly reconciliation: LlmReconciliationCapability = {
+    retrieve: async () => ({
+      status: "not-retrievable",
+      reason:
+        "Flock AI keeps no durable copy of an interrupted response, so it cannot be recovered",
+    }),
+  };
 
   constructor(private readonly config: FlockAiRuntimeConfig) {}
 
@@ -62,14 +79,22 @@ class FlockAiProvider implements LlmProvider {
     // bare failure it would park the run on a reconciliation this Package
     // cannot perform, and the Bot would stay wedged on a transient gateway
     // error.
-    // The deadlines live in the shared seam rather than here: this transport
-    // is a native binding with no signal of its own, so without it a gateway
-    // that accepted the request and went quiet was bounded by nothing short of
-    // the fifteen-minute Turn deadline.
+    // Both bounds at once, and they are not the same bound. `signal` is the
+    // caller's cancellation — a Stop, a superseded Turn — and main's change
+    // hands it to the gateway so the request is actually torn down. The
+    // deadline seam wraps that with the clock: this transport is a native
+    // binding, so a gateway that accepted the request and then went quiet was
+    // otherwise bounded by nothing short of the fifteen-minute Turn deadline.
+    // The seam's signal is derived from the caller's, so passing it down keeps
+    // the cancellation and adds the deadline.
     yield* streamWithModelRequestDeadlinesV1(
       async (deadlineSignal) => {
         try {
-          return await this.config.runChatCompletion(gatewayModel, body);
+          return await this.config.runChatCompletion(
+            gatewayModel,
+            body,
+            deadlineSignal,
+          );
         } catch (error) {
           deadlineSignal.throwIfAborted();
           throw new LlmEffectNotStartedError(

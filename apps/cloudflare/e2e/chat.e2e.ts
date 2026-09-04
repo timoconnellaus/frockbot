@@ -229,6 +229,11 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
   await expect(page.locator(".message-assistant").last()).toContainText(
     "This Bot couldn't finish its reply. Try again.",
   );
+
+  // The fake endpoint is shared by every spec in the run, so the refusal this
+  // test switched on is switched off again: leaving it on made every later
+  // spec's Turn fail with a 401 it never asked for.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
 // Seam S9 from the other side: what the client does with an answer that is not

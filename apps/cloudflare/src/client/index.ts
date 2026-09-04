@@ -236,6 +236,13 @@ const application = new ClientApplication({
       await apiRequest(`/api/bots/${encodeURIComponent(botId)}/turns`),
     );
   },
+  async startConversation(botId: string) {
+    await apiRequest(
+      `/api/bots/${encodeURIComponent(botId)}/conversations`,
+      "POST",
+      JSON.stringify({ schemaVersion: 1 }),
+    );
+  },
   async listAnnouncements(botId: string) {
     return decodeClientRunPageV1(
       await apiRequest(`/api/bots/${encodeURIComponent(botId)}/turns`),

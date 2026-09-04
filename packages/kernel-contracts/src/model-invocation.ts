@@ -93,7 +93,21 @@ export type LlmReconciliationOutcome =
       events: readonly LlmStreamEvent[];
     }
   | {
+      /**
+       * The effect may still exist at the provider but cannot be read right
+       * now. The run parks and can be reconciled again later.
+       */
       status: "unavailable";
+      reason: string;
+    }
+  | {
+      /**
+       * The provider keeps no durable copy of this effect, so no later attempt
+       * can do better. The run settles as a failure — with whatever text was
+       * already journaled preserved — rather than parking forever on a
+       * retrieval that will never succeed.
+       */
+      status: "not-retrievable";
       reason: string;
     };
 

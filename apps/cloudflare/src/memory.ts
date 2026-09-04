@@ -21,6 +21,7 @@
 import {
   decodeWorkspaceGenerationRecordV1,
   isWorkspaceSharedMemoryRootV1,
+  remoteCallV1,
   type WorkspaceGenerationRecordV1,
   type WorkspaceGenerationsV1,
   type WorkspaceRootV1,
@@ -59,18 +60,39 @@ export function createUserWorkspaceGenerationsV1(
     userId,
     ...extra,
   });
+  // Every one of these crosses a Durable Object boundary, so every one gets a
+  // deadline and one retry: a User object that is mid-eviction or briefly
+  // unreachable must cost a retry, never a Turn that hangs to the platform
+  // limit with nothing on screen.
+  const call = <T>(label: string, invoke: () => Promise<T>) =>
+    remoteCallV1(label, invoke);
   return {
     mint: (at, root) =>
-      rpc.mintWorkspaceGeneration(envelope({ at: at.toISOString(), root })),
+      call("the generation ledger", () =>
+        rpc.mintWorkspaceGeneration(envelope({ at: at.toISOString(), root })),
+      ),
     current: async (root, path) =>
       decodeRecord(
-        await rpc.currentWorkspaceGeneration(envelope({ root, path })),
+        await call("the generation ledger", () =>
+          rpc.currentWorkspaceGeneration(envelope({ root, path })),
+        ),
       ),
-    record: (entry) => rpc.recordWorkspaceGeneration(envelope({ entry })),
-    tombstone: (entry) => rpc.tombstoneWorkspaceGeneration(envelope({ entry })),
-    conflict: (entry) => rpc.conflictWorkspaceGeneration(envelope({ entry })),
+    record: (entry) =>
+      call("the generation ledger", () =>
+        rpc.recordWorkspaceGeneration(envelope({ entry })),
+      ),
+    tombstone: (entry) =>
+      call("the generation ledger", () =>
+        rpc.tombstoneWorkspaceGeneration(envelope({ entry })),
+      ),
+    conflict: (entry) =>
+      call("the generation ledger", () =>
+        rpc.conflictWorkspaceGeneration(envelope({ entry })),
+      ),
     conflicts: async (root, path) => {
-      const answer = await rpc.listWorkspaceConflicts(envelope({ root, path }));
+      const answer = await call("the generation ledger", () =>
+        rpc.listWorkspaceConflicts(envelope({ root, path })),
+      );
       if (!Array.isArray(answer)) return [];
       return answer.map((value) => decodeWorkspaceGenerationRecordV1(value));
     },
@@ -161,17 +183,22 @@ export function createUserMemoryProjectsV1(
     project?: MemoryProjectV1,
   ): Promise<MemoryProjectsOutcomeV1> =>
     decodeProjectsOutcome(
-      await rpc.changeMemoryProjects(
-        envelope({
-          action,
-          projectId,
-          ...(project ? { project } : {}),
-        }),
+      await remoteCallV1("the Project membership authority", () =>
+        rpc.changeMemoryProjects(
+          envelope({
+            action,
+            projectId,
+            ...(project ? { project } : {}),
+          }),
+        ),
       ),
     );
   return {
     joined: async () => {
-      const answer = await rpc.listMemoryProjects(envelope({}));
+      const answer = await remoteCallV1(
+        "the Project membership authority",
+        () => rpc.listMemoryProjects(envelope({})),
+      );
       if (!Array.isArray(answer)) return [];
       return answer.map(decodeProject);
     },

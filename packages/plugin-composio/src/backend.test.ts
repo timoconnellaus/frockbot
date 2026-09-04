@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ConnectionView } from "@frockbot/configuration-core";
 import {
+  callbackFailureResponse,
   connectionCompletionResponse,
   createComposioBackendContribution,
   createConfiguredComposioBackendContribution,
@@ -127,6 +128,37 @@ describe("Composio authorization return handoff", () => {
         "state-secret",
       ),
     ).rejects.toThrow("invalid");
+  });
+});
+
+describe("Composio callback failures", () => {
+  test("returns the browser to the app with the reason instead of raw JSON", () => {
+    const response = callbackFailureResponse(
+      new URL("https://bot.frockbot.com/api/plugins/composio/callback"),
+      "authorization state has expired",
+    );
+
+    expect(response.status).toBe(303);
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.origin).toBe("https://bot.frockbot.com");
+    expect(location.pathname).toBe("/");
+    expect(location.searchParams.get("connection")).toBe("composio-failed");
+    expect(location.searchParams.get("connection_reason")).toBe(
+      "authorization state has expired",
+    );
+  });
+
+  test("keeps a JSON body for the desktop target", async () => {
+    const response = callbackFailureResponse(
+      new URL("https://bot.frockbot.com/api/plugins/composio/callback"),
+      "authorization state has expired",
+      "desktop",
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "authorization state has expired",
+    });
   });
 });
 

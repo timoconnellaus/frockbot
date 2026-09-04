@@ -16,7 +16,6 @@ import {
   sealCredentialV1,
   type CredentialLeaseV1,
 } from "@frockbot/connection-core";
-import { OpenAICompatibleHttpError } from "@frockbot/provider-openai-compatible";
 import { Context, Service } from "cordis";
 import {
   createOllamaCloudRuntimePlugin,
@@ -463,61 +462,88 @@ describe("Ollama Cloud runtime Contribution", () => {
     },
   );
 
-  test("requires reconciliation for ambiguous HTTP failures", async () => {
-    const keyringText = serializedKeyring();
-    const envelope = await sealCredentialV1({
-      keyring: parseCredentialKeyringV1(keyringText),
-      context: {
-        accountId: "account-1",
-        connectionId: "connection-1",
-        packageId: "provider-ollama-cloud",
-        credentialGeneration: "generation-1",
-      },
-      plaintext: "account-secret",
-    });
-    const settled: string[] = [];
+  test.each([408, 429, 500, 502])(
+    "settles pre-stream HTTP %i as not started rather than parking the Turn",
+    async (status) => {
+      const keyringText = serializedKeyring();
+      const envelope = await sealCredentialV1({
+        keyring: parseCredentialKeyringV1(keyringText),
+        context: {
+          accountId: "account-1",
+          connectionId: "connection-1",
+          packageId: "provider-ollama-cloud",
+          credentialGeneration: "generation-1",
+        },
+        plaintext: "account-secret",
+      });
+      const settled: string[] = [];
+      const root = new Context();
+      await root.plugin(LlmRegistry);
+      await mountCredentialRuntime(root, keyringText);
+      await root.plugin(
+        createOllamaCloudRuntimePlugin({
+          accountId: "account-1",
+          connectionId: "connection-1",
+          packageId: "provider-ollama-cloud",
+          now: () => Date.parse("2026-08-30T00:00:00.000Z"),
+          leaseCredential: (effectId) =>
+            Promise.resolve({
+              schemaVersion: 1,
+              leaseId: "lease-1",
+              effectId,
+              connectionId: "connection-1",
+              credentialGeneration: "generation-1",
+              expiresAt: "2026-08-30T01:00:00.000Z",
+              envelope,
+            }),
+          settleCredential: (effectId) => {
+            settled.push(effectId);
+            return Promise.resolve();
+          },
+          fetch: () => Promise.resolve(new Response("transient", { status })),
+        }),
+      );
+
+      let failure: unknown;
+      try {
+        for await (const _ of root.llm.stream(
+          request,
+          new AbortController().signal,
+        )) {
+          void _;
+        }
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+      expect(settled).toEqual([]);
+      await root.fiber.dispose();
+    },
+  );
+
+  test("reports an interrupted response as not retrievable so the run settles", async () => {
     const root = new Context();
     await root.plugin(LlmRegistry);
-    await mountCredentialRuntime(root, keyringText);
+    await mountCredentialRuntime(root, serializedKeyring());
     await root.plugin(
       createOllamaCloudRuntimePlugin({
         accountId: "account-1",
         connectionId: "connection-1",
         packageId: "provider-ollama-cloud",
         now: () => Date.parse("2026-08-30T00:00:00.000Z"),
-        leaseCredential: (effectId) =>
-          Promise.resolve({
-            schemaVersion: 1,
-            leaseId: "lease-1",
-            effectId,
-            connectionId: "connection-1",
-            credentialGeneration: "generation-1",
-            expiresAt: "2026-08-30T01:00:00.000Z",
-            envelope,
-          }),
-        settleCredential: (effectId) => {
-          settled.push(effectId);
-          return Promise.resolve();
-        },
-        fetch: () => Promise.resolve(new Response("timeout", { status: 408 })),
+        leaseCredential: () => Promise.reject(new Error("unused")),
+        settleCredential: () => Promise.resolve(),
+        fetch: () => Promise.reject(new Error("unused")),
       }),
     );
 
-    let failure: unknown;
-    try {
-      for await (const _ of root.llm.stream(
-        request,
-        new AbortController().signal,
-      )) {
-        void _;
-      }
-    } catch (error) {
-      failure = error;
-    }
+    const outcome = await root.llm.reconcile(
+      request,
+      new AbortController().signal,
+    );
 
-    expect(failure).toBeInstanceOf(OpenAICompatibleHttpError);
-    expect(failure).not.toBeInstanceOf(LlmEffectNotStartedError);
-    expect(settled).toEqual([]);
+    expect(outcome.status).toBe("not-retrievable");
     await root.fiber.dispose();
   });
 });
