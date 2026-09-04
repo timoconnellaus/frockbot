@@ -11,6 +11,7 @@ import {
   type ClientTurnEvent,
 } from "@frockbot/client-core";
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
+import { COMPACTED_ANNOUNCEMENT_TEXT_V1 } from "../compaction.js";
 // Connection mutations use the provider-neutral hosted command contract.
 import type {
   ConnectionCommandReceiptV1,
@@ -411,7 +412,10 @@ export function projectAnnouncements(
       id: announcement.announcementId,
       runId: announcement.announcementId,
       role: "system",
-      text: `Renamed to ${announcement.to} by ${announcement.namedBy}`,
+      text:
+        announcement.type === "conversation/compacted"
+          ? COMPACTED_ANNOUNCEMENT_TEXT_V1
+          : `Renamed to ${announcement.to} by ${announcement.namedBy}`,
       at: announcement.at,
       status: "completed",
       tools: [],

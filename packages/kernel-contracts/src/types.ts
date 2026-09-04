@@ -156,6 +156,18 @@ export type TurnOutcome = StepOutcome;
 export const TURN_END_REASON_MAX_LENGTH = 500;
 
 /**
+ * Bounds on one `conversation/compacted` event (ADR 0030).
+ *
+ * A summary is model output that is stored durably and replayed into every
+ * later request of the conversation, so it is bounded here rather than trusted
+ * to be short: the whole point of compaction is that the window stops growing.
+ */
+export const COMPACTION_SUMMARY_MAX_LENGTH = 12_000;
+export const COMPACTION_IDENTIFIERS_MAX = 200;
+export const COMPACTION_IDENTIFIER_MAX_LENGTH = 400;
+export const COMPACTION_FAILURE_REASON_MAX_LENGTH = 500;
+
+/**
  * Truncates a failure description to what a `turn/end` `reason` accepts.
  * Returns `undefined` when nothing describable remains.
  */
@@ -754,6 +766,55 @@ export interface SessionEventMap {
   "task/stopped": {
     taskId: string;
     requestedBy: "bot" | "user";
+  };
+  /**
+   * The durable intent to compact this conversation, recorded before the
+   * summariser model call it fences (ADR 0030). It carries no `turn`: a
+   * compaction is evaluated *after* a Turn has ended, so it belongs to the
+   * conversation rather than to any step of it — the `bot/renamed` shape.
+   *
+   * `throughTurn` is the last Turn the attempt covers. A compaction always
+   * covers a prefix, so the range is that one number, and it is also the
+   * idempotency key: an intent is refused when a `conversation/compacted`
+   * already covers it.
+   */
+  "conversation/compaction-intent": {
+    effectId: string;
+    throughTurn: number;
+    provider: string;
+    model: string;
+  };
+  /**
+   * One summary of Turns `fromTurn` through `throughTurn`, computed once and
+   * replayed on every later request. The newest such event supersedes every
+   * earlier one, because each covers a prefix and the summariser folds the
+   * previous summary into the range it extends.
+   *
+   * `identifiers` is the summariser's own "Identifiers mentioned" list, kept
+   * as a field rather than left inside the prose: an opaque id that a summary
+   * paraphrases produces a later tool call with a plausible-looking wrong
+   * argument, so what the model was asked to preserve is what the log records.
+   */
+  "conversation/compacted": {
+    effectId: string;
+    fromTurn: number;
+    throughTurn: number;
+    summary: string;
+    identifiers: string[];
+    provider: string;
+    model: string;
+  };
+  /**
+   * A compaction intent that produced no summary — the summariser failed, ran
+   * past its deadline, answered unusably, or a restart interrupted it. Never
+   * fatal: the conversation carries on under the whole-Turn eviction ADR 0027
+   * already applies, and the next attempt is spaced by backoff counted from
+   * these events.
+   */
+  "conversation/compaction-failed": {
+    effectId: string;
+    throughTurn: number;
+    reason: string;
   };
   "step/end": { turn: number; step: number; outcome: StepOutcome };
   /**
@@ -2021,6 +2082,82 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         if (event.namedBy !== "bot") {
           throw new Error("session event.writer is invalid");
         }
+      }
+      break;
+    }
+    case "conversation/compaction-intent":
+      requireEventKeys(
+        event,
+        keys("effectId", "throughTurn", "provider", "model"),
+        "session event",
+      );
+      eventString(event.effectId, "session event.effectId");
+      eventInteger(event.throughTurn, "session event.throughTurn", 1);
+      eventString(event.provider, "session event.provider");
+      eventString(event.model, "session event.model");
+      break;
+    case "conversation/compacted": {
+      requireEventKeys(
+        event,
+        keys(
+          "effectId",
+          "fromTurn",
+          "throughTurn",
+          "summary",
+          "identifiers",
+          "provider",
+          "model",
+        ),
+        "session event",
+      );
+      eventString(event.effectId, "session event.effectId");
+      const fromTurn = eventInteger(
+        event.fromTurn,
+        "session event.fromTurn",
+        1,
+      );
+      const throughTurn = eventInteger(
+        event.throughTurn,
+        "session event.throughTurn",
+        1,
+      );
+      if (throughTurn < fromTurn) {
+        throw new Error("session event.throughTurn is invalid");
+      }
+      const summary = eventString(event.summary, "session event.summary");
+      if (summary.length > COMPACTION_SUMMARY_MAX_LENGTH) {
+        throw new Error("session event.summary is too long");
+      }
+      if (
+        !Array.isArray(event.identifiers) ||
+        event.identifiers.length > COMPACTION_IDENTIFIERS_MAX
+      ) {
+        throw new Error("session event.identifiers must be a bounded array");
+      }
+      event.identifiers.forEach((identifier, index) => {
+        const label = `session event.identifiers[${index}]`;
+        if (
+          eventString(identifier, label).length >
+          COMPACTION_IDENTIFIER_MAX_LENGTH
+        ) {
+          throw new Error(`${label} is too long`);
+        }
+      });
+      eventString(event.provider, "session event.provider");
+      eventString(event.model, "session event.model");
+      break;
+    }
+    case "conversation/compaction-failed": {
+      requireEventKeys(
+        event,
+        keys("effectId", "throughTurn", "reason"),
+        "session event",
+      );
+      eventString(event.effectId, "session event.effectId");
+      eventInteger(event.throughTurn, "session event.throughTurn", 1);
+      const reason = eventString(event.reason, "session event.reason");
+      if (reason.length > COMPACTION_FAILURE_REASON_MAX_LENGTH) {
+        throw new Error("session event.reason is too long");
       }
       break;
     }
