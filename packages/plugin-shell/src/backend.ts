@@ -132,6 +132,7 @@ import {
   type ShellAppletMountOptions,
   type ShellIsolateMountOptions,
   type ShellMountedComposition,
+  resolveDeploymentCompositionV1,
 } from "./backend-composition.js";
 import {
   createAppletCapabilityHostV1,
@@ -1229,7 +1230,8 @@ export class ShellBotBackendContribution {
     // from the previous Turn has already handed the log back (ADR 0030).
     await yieldCompactionWorkV1(command.sessionId);
     // Before admission, so the pin this Turn takes already carries whatever the
-    // User's Applet directory says now.
+    // deployment ships and whatever the User's Applet directory says now.
+    await this.followDeploymentComposition();
     await this.resolveAppletComposition(
       { userId: command.userId, botId: command.botId },
       command,
@@ -1244,6 +1246,7 @@ export class ShellBotBackendContribution {
     await this.validateIdentity(identity);
     const catalog = await this.listPackageUi(identity);
     const contribution = requirePackageUiToolDeclarationV1(catalog, command);
+    await this.followDeploymentComposition();
     return projectClientTurnV1(
       await this.authority.run({
         ...identity,
@@ -2723,6 +2726,30 @@ export class ShellBotBackendContribution {
   }
 
   /**
+   * Bring this Bot's built-in members up to the deployment before a Turn is
+   * admitted, so a release that changed a first-party manifest or artifact is
+   * a new generation rather than a Bot that cannot mount (2026-09-05, when
+   * every Bot failed every Turn after the Applets list page changed). Outside
+   * the admission transaction like the Applet resolve below; a failure here
+   * leaves the Bot on the generation it has and is visible where that
+   * generation fails to mount.
+   */
+  private async followDeploymentComposition(): Promise<void> {
+    try {
+      await resolveDeploymentCompositionV1({
+        plan: await this.compileApplication(),
+        composition: {
+          current: () => this.authority.composition.current(),
+          propose: (generation, options) =>
+            this.authority.composition.propose(generation, options),
+        },
+      });
+    } catch {
+      // The mount records why; never a wedged Turn on its own.
+    }
+  }
+
+  /**
    * Resolve the User's Applet directory into this Bot's next Composition
    * generation, before a Turn is admitted.
    *
@@ -3261,6 +3288,7 @@ export class ShellBotBackendContribution {
     fire: RoutineFireV1,
   ): Promise<RoutineFireOutcomeV1> {
     try {
+      await this.followDeploymentComposition();
       await this.authority.run(
         routineTurnCommandV1(identity, fire, new Date().toISOString()),
       );
@@ -4196,6 +4224,7 @@ export class ShellBotBackendContribution {
       await this.ctx.storage.put(key, { ...context, status: "running" });
       let outcome: TaskOutcomeV1;
       try {
+        await this.followDeploymentComposition();
         await this.authority.run({
           ...identity,
           runId: context.taskId,
