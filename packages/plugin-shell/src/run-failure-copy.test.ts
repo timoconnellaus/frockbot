@@ -1,3 +1,4 @@
+import { STEP_LIMIT_REASON_V1 } from "@frockbot/kernel-agent-loop";
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/kernel-contracts";
 import { MODEL_FIRST_BYTE_DEADLINE_REASON_V1 } from "@frockbot/kernel-contracts";
@@ -156,4 +157,14 @@ describe("runFailureCopyV1", () => {
     assertPlainV1(projected.outcome.message);
     expect(projected.outcome.message).toBe(RUN_FAILURE_COPY_V1.interrupted);
   });
+});
+
+test("a reply that ran out of steps says so in plain words", () => {
+  // `kernel-do` wraps the loop's reason; the sentence survives the wrapper.
+  expect(
+    runFailureCopyV1({
+      failure: `Bot turn ended with outcome interrupted: ${STEP_LIMIT_REASON_V1}`,
+    }),
+  ).toBe(STEP_LIMIT_REASON_V1);
+  expect(knownFailureCopyV1(STEP_LIMIT_REASON_V1)).toBe(STEP_LIMIT_REASON_V1);
 });

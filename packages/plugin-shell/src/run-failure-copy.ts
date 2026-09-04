@@ -7,7 +7,10 @@ import {
   MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
   MODEL_IDLE_DEADLINE_REASON_V1,
 } from "@frockbot/kernel-contracts";
-import { TURN_DEADLINE_REASON_V1 } from "@frockbot/kernel-agent-loop";
+import {
+  STEP_LIMIT_REASON_V1,
+  TURN_DEADLINE_REASON_V1,
+} from "@frockbot/kernel-agent-loop";
 import { UNRECONCILABLE_RUN_FAILURE_V1 } from "@frockbot/kernel-do";
 
 /**
@@ -47,6 +50,7 @@ export const USER_FACING_FAILURE_REASONS_V1: readonly string[] = [
   MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
   MODEL_IDLE_DEADLINE_REASON_V1,
   TURN_DEADLINE_REASON_V1,
+  STEP_LIMIT_REASON_V1,
   UNRECONCILABLE_RUN_FAILURE_V1,
 ];
 

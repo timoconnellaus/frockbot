@@ -501,6 +501,42 @@ describe("the acknowledgement reaches the user", () => {
     }
   });
 
+  test("the last steps of a reply tell the model to send a status", async () => {
+    const mounted = await mount();
+    try {
+      const assemble = (current: number) =>
+        mounted.root.systemPrompt.assemble({
+          sessionId: "session-1",
+          provider: "provider-1",
+          model: "model-1",
+          turnType: "chat",
+          step: { current, max: 64 },
+        });
+      const early = await assemble(10);
+      expect(early.text).not.toContain("<step_budget>");
+      const warning = await assemble(61);
+      expect(warning.text).toContain("<step_budget>");
+      expect(warning.text).toContain("3 steps left after this one");
+      expect(warning.text).toContain(SEND_TO_USER_TOOL_V1);
+      const last = await assemble(64);
+      expect(last.text).toContain("This is the last step of this reply");
+      // The budget section sits after the conversation contract, where the
+      // model reads it last.
+      expect(last.text.indexOf("<step_budget>")).toBeGreaterThan(
+        last.text.indexOf("send_to_user"),
+      );
+      const outside = await mounted.root.systemPrompt.assemble({
+        sessionId: "session-1",
+        provider: "provider-1",
+        model: "model-1",
+        turnType: "chat",
+      });
+      expect(outside.text).not.toContain("<step_budget>");
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
   test("a step that already spoke is left alone, and a replay adds nothing", async () => {
     const mounted = await mount();
     try {
