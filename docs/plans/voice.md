@@ -2,7 +2,7 @@
 
 ## Status
 
-Design accepted in conversation on 2026-09-04; tracked in [issue #179](https://github.com/timoconnellaus/frockbot/issues/179). **Slice A (dictation) is implemented** — see "Slice A status" below; B0, B1 and B2 are not. Both capabilities are **beyond parity** (Feature rule 8): the parity register has only a "microphone" settings row (`docs/research/grokbot-computer.md`, §Per-user settings).
+Design accepted in conversation on 2026-09-04; tracked in [issue #179](https://github.com/timoconnellaus/frockbot/issues/179) and [ADR 0035](../adr/0035-voice-is-a-user-package-over-a-socket-only-session.md). **Slice A (dictation) and B0 (the ADR and agent lane) are implemented**; B1 and B2 are not. Both voice capabilities are **beyond parity** (Feature rule 8): the parity register has only a "microphone" settings row (`docs/research/grokbot-computer.md`, §Per-user settings).
 
 Everything below was verified against `main` at `b359d096`. Line numbers drift; verify before relying on them.
 
@@ -132,7 +132,7 @@ These gate D1 and D3. Each is a short spike, not a design question.
 
 - [ ] AI Gateway's OpenAI realtime path accepts a **transcription-only** session (`session.update` with `type: "transcription"`, model `gpt-live-transcribe`). Cloudflare's realtime example still shows the retired beta protocol and an old preview model. If the GA session does not pass through, dictation falls back to the `VoiceSession` DO opening `wss://api.openai.com/v1/realtime` directly with an `OPENAI_API_KEY` Worker secret — which must then be added to the release workflow's `--secrets-file` list, because that flag replaces the Worker's whole secret set (ADR 0025).
 - [ ] AI Gateway's Google AI Studio realtime path carries `gemini-3.1-flash-live-preview` with a BYOK key (the documented pattern passes `?api_key=`). Fallback is the same shape: DO → `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=…`, as zerobsai did.
-- [ ] Choose the per-User voice-minutes quota default (undecided; 60 minutes per day is a reasonable start).
+- [x] The per-User voice-minutes quota default is 60 minutes per UTC day (`VOICE_MINUTES_PER_DAY_V1`).
 
 ## Constraints discovered
 
@@ -160,7 +160,7 @@ These gate D1 and D3. Each is a short spike, not a design question.
 ## Slices
 
 - **A — Dictation.** AI Gateway OpenAI realtime WS through a minimal `VoiceSession` DO; composer wave / bin / send states; worklet and animation; e2e with a fake transcription service. Proves the gateway WebSocket path.
-- **B0 — ADR + #151.** An ADR for the Voice Package and the `VoiceSession` DO seam (check `origin/main` and open PRs before numbering it); land the `agent` lane from #151.
+- **B0 — ADR + #151 (landed 2026-09-04).** ADR 0035 records the Voice Package and socket-only `VoiceSession` seam. The kernel `agent` lane, Flock's chat-only `bot_message`, same-User dispatch, per-User lease, teammate and sender prompt sections, and transcript origin marker are implemented.
 - **B1 — Voice Package core.** Gemini Live via the DO proxy, the ledger in the User DO, read-only tools (`list_bots`, `bot_activity`, `memory_search`, `pending_answers`), the shell toggle, the Voice surface, the quota, the e2e fake.
 - **B2 — Ask a Bot.** `ask_bot` on the agent lane, answer push into the live session, offline notification, connect-time briefing, the "via voice" marker in the thread.
 

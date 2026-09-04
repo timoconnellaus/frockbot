@@ -10,8 +10,10 @@ describe("createCapacitorConfig", () => {
     expect(config.plugins).toEqual({
       SystemBars: {
         insetsHandling: "css",
+        style: "DARK",
       },
     });
+    expect(config.backgroundColor).toBe("#1f1e24");
   });
 
   test("uses an HTTP live-reload origin and enables Android cleartext", () => {
@@ -45,7 +47,7 @@ describe("createCapacitorConfig", () => {
     });
 
     expect(config.plugins).toEqual({
-      SystemBars: { insetsHandling: "css" },
+      SystemBars: { insetsHandling: "css", style: "DARK" },
       FrockBotGoogleAuth: {
         serverClientId: "123-example.apps.googleusercontent.com",
       },

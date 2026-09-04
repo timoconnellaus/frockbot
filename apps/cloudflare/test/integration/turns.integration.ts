@@ -67,16 +67,14 @@ describe("a Turn through the gateway, the loaded artifact and the Bot", () => {
 
     // Run records carry a sequence range since ADR 0033; the fixture hydrates
     // the journal from the paged session log.
-    const stored = await readStoredRunWithEventsV1(
-      userId,
-      botId,
-      "turn-command-503",
-    );
-    const events = (stored?.events ?? []) as Array<{
-      type: string;
-      classification?: string;
-      delayMs?: number;
-    }>;
+    const stored = await readStoredRunWithEventsV1<{
+      events: Array<{
+        type: string;
+        classification?: string;
+        delayMs?: number;
+      }>;
+    }>(userId, botId, "turn-command-503");
+    const events = stored?.events ?? [];
     expect(
       events.filter((event) => event.type === "model/request"),
     ).toHaveLength(2);
@@ -149,12 +147,10 @@ describe("a Turn through the gateway, the loaded artifact and the Bot", () => {
     expect(run).toBeDefined();
     expect(run?.status).toBe("failed");
 
-    const stored = await readStoredRunWithEventsV1(
-      userId,
-      botId,
-      "turn-command-401",
-    );
-    const events = (stored?.events ?? []) as Array<{ type: string }>;
+    const stored = await readStoredRunWithEventsV1<{
+      events: Array<{ type: string }>;
+    }>(userId, botId, "turn-command-401");
+    const events = stored?.events ?? [];
     expect(
       events.filter((event) => event.type === "model/request"),
     ).toHaveLength(1);
