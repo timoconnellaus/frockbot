@@ -24,9 +24,25 @@ import {
   BOTS_ROOT,
   boxDoctorScript,
   browserHelper,
+  BROWSER_ENSURE_ACTION,
+  BROWSER_FOCUS_ACTION,
+  BROWSER_SURVEY_ACTION,
   CHROME_LAUNCHER,
+  CHROME_PROFILE,
   chromeLauncherScript,
   CHROMIUM_PATH,
+  COMPUTER_CDP_PORT,
+  COMPUTER_DISPLAY,
+  DESKTOP_SLOTS,
+  ENSURE_WINDOW_SCRIPT,
+  FLUXBOX_ROOT,
+  fluxboxInit,
+  fluxboxOverlay,
+  FOCUS_WINDOW_SCRIPT,
+  SCREEN_WIDTH,
+  SLOT_HEIGHT,
+  SLOT_WIDTH,
+  TARGET_ID_FILE,
   COMPUTER_GUI_SHELL_COMMANDS,
   COMPUTER_RUNTIME_FILES,
   computerGuiRefusalV1,
@@ -608,22 +624,108 @@ describe("installed shell scripts", () => {
     // because the provisioning document is what creates it.
     expect(provisionScript).toContain(`${HOME_ROOT}/chrome-profile `);
     expect(provisionScript).not.toContain("chrome-profiles");
-    // The flag set moved into the launcher (parity row 33); the desktop
-    // starter calls it and holds no flags of its own.
+    // The flag set moved into the launcher (parity row 33); the browser
+    // service calls it and holds no flags of its own.
     expect(installedScript(provisionScript, CHROME_LAUNCHER)).toContain(
       `--user-data-dir=${HOME_ROOT}/chrome-profile`,
     );
     expect(
-      installedScript(provisionScript, `${RUNTIME_ROOT}/start-desktop.sh`),
-    ).toContain(`${CHROME_LAUNCHER} "$KEY"`);
+      installedScript(provisionScript, `${RUNTIME_ROOT}/start-browser.sh`),
+    ).toContain(`exec ${CHROME_LAUNCHER} about:blank`);
+  });
+
+  test("one browser holds the shared profile, and the launcher takes no Bot key", () => {
+    // ADR 0030. Chromium's singleton lock is per `--user-data-dir`, so a
+    // per-slot launch could only ever produce one browser: the first Bot to
+    // ask got a screen and the rest got "Opening in existing browser session"
+    // and a dead CDP port. One browser, one display, one port.
+    const launcher = installedScript(provisionScript, CHROME_LAUNCHER);
+    expect(launcher).toContain(`--remote-debugging-port=${COMPUTER_CDP_PORT}`);
+    expect(launcher).toContain(`export DISPLAY=${COMPUTER_DISPLAY}`);
+    expect(launcher).not.toContain("9222 + SLOT");
+    expect(launcher).not.toContain("100 + SLOT");
+    // The one thing the launcher may remove is a stale singleton file, and
+    // only when no browser is running. Never the profile: it is the User's
+    // login state, and every Bot's.
+    expect(launcher).toContain(`rm -f ${CHROME_PROFILE}/SingletonLock`);
+    expect(launcher).not.toContain(`rm -rf ${CHROME_PROFILE}`);
+  });
+
+  test("one screen carries every slot, and each viewer is clipped to one", () => {
+    const screen = installedScript(
+      provisionScript,
+      `${RUNTIME_ROOT}/start-screen.sh`,
+    );
+    expect(screen).toContain(
+      `Xvfb ${COMPUTER_DISPLAY} -screen 0 ${SCREEN_WIDTH}x${SLOT_HEIGHT}x24`,
+    );
+    expect(SCREEN_WIDTH).toBe(SLOT_WIDTH * DESKTOP_SLOTS);
+    const view = installedScript(
+      provisionScript,
+      `${RUNTIME_ROOT}/start-view.sh`,
+    );
+    // `-clip`, never `-id`: a window id changes every time a Bot's window is
+    // re-created, and a VNC server bound to a dead window shows nothing.
+    expect(view).toContain(
+      `CLIP=${SLOT_WIDTH}x${SLOT_HEIGHT}+$((SLOT * ${SLOT_WIDTH}))+0`,
+    );
+    expect(view).toContain(
+      `exec x11vnc -display ${COMPUTER_DISPLAY} -clip "$CLIP"`,
+    );
+    expect(view).not.toContain("-id ");
+  });
+
+  test("fluxbox never reaches for a wallpaper setter, and hides its toolbar", () => {
+    // Every desktop carried an xmessage dialog reading "fbsetbg: I can't find
+    // an app to set the wallpaper with", because with no `~/.fluxbox` at all
+    // fluxbox writes its own defaults and applies the style's background.
+    expect(fluxboxOverlay).toContain("background: none");
+    expect(fluxboxInit).toContain("session.screen0.toolbar.visible: false");
+    expect(fluxboxInit).toContain(
+      `session.styleOverlay: ${FLUXBOX_ROOT}/overlay`,
+    );
+    expect(COMPUTER_RUNTIME_FILES.map((file) => file.path)).toEqual(
+      expect.arrayContaining([
+        `${FLUXBOX_ROOT}/init`,
+        `${FLUXBOX_ROOT}/overlay`,
+      ]),
+    );
+    expect(
+      installedScript(provisionScript, `${RUNTIME_ROOT}/start-screen.sh`),
+    ).toContain(`fluxbox -rc ${FLUXBOX_ROOT}/init`);
+  });
+
+  test("browser.mjs drives the Bot's own window and never another Bot's", () => {
+    expect(browserHelper).toContain("newWindow: true");
+    expect(browserHelper).toContain("Browser.setWindowBounds");
+    expect(browserHelper).toContain(
+      `const TARGET_ID_FILE = "${TARGET_ID_FILE}"`,
+    );
+    // The window helpers ask for exactly the actions this module declares.
+    for (const [encoded, action] of [
+      [BROWSER_ENSURE_ACTION, "ensure"],
+      [BROWSER_FOCUS_ACTION, "focus"],
+      [BROWSER_SURVEY_ACTION, "survey"],
+    ] as const) {
+      expect(
+        JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")),
+      ).toEqual({ action });
+      expect(browserHelper).toContain(`action.action === "${action}"`);
+    }
   });
 
   test("every script the provisioning document installs is valid bash", async () => {
     for (const path of [
-      `${RUNTIME_ROOT}/start-desktop.sh`,
+      `${RUNTIME_ROOT}/start-screen.sh`,
+      `${RUNTIME_ROOT}/start-browser.sh`,
+      `${RUNTIME_ROOT}/start-view.sh`,
+      ENSURE_WINDOW_SCRIPT,
+      FOCUS_WINDOW_SCRIPT,
       ENSURE_AGENT_SCRIPT,
       CONTROL_SCRIPT,
       BOUNDED_LOG_SCRIPT,
+      CHROME_LAUNCHER,
+      DOCTOR_SCRIPT,
       `${RUNTIME_ROOT}/start-gateway.sh`,
     ]) {
       await expectValidShell(installedScript(provisionScript, path));
@@ -828,13 +930,13 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
   test("reclaims an idle tenant's display and never a live one", async () => {
     const { directory, runtimeRoot, run } = await installEnsureScript();
     try {
-      for (let slot = 0; slot < 100; slot += 1) {
-        // Slot 7's tenant went quiet long ago; every other tenant is one this
+      for (let slot = 0; slot < DESKTOP_SLOTS; slot += 1) {
+        // Slot 2's tenant went quiet long ago; every other tenant is one this
         // provider ran something for moments ago.
         await seedTenant(
           runtimeRoot,
           slot,
-          slot === 7 ? SLOT_IDLE_SECONDS + 600 : 5,
+          slot === 2 ? SLOT_IDLE_SECONDS + 600 : 5,
         );
       }
 
@@ -845,10 +947,10 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
         (
           await readFile(join(runtimeRoot, "bots/newcomer/slot"), "utf8")
         ).trim(),
-      ).toBe("7");
+      ).toBe("2");
       // The idle tenant lost its slot; the live ones kept theirs.
-      expect(existsSync(join(runtimeRoot, "bots/tenant-007/slot"))).toBe(false);
-      expect(existsSync(join(runtimeRoot, "bots/tenant-008/slot"))).toBe(true);
+      expect(existsSync(join(runtimeRoot, "bots/tenant-002/slot"))).toBe(false);
+      expect(existsSync(join(runtimeRoot, "bots/tenant-003/slot"))).toBe(true);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -857,7 +959,7 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
   test("refuses the new tenant when every display is live, rather than sharing one", async () => {
     const { directory, runtimeRoot, run } = await installEnsureScript();
     try {
-      for (let slot = 0; slot < 100; slot += 1) {
+      for (let slot = 0; slot < DESKTOP_SLOTS; slot += 1) {
         await seedTenant(runtimeRoot, slot, 5);
       }
 
@@ -874,7 +976,7 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
   test("an idle tenant under human control keeps its display", async () => {
     const { directory, runtimeRoot, run } = await installEnsureScript();
     try {
-      for (let slot = 0; slot < 100; slot += 1) {
+      for (let slot = 0; slot < DESKTOP_SLOTS; slot += 1) {
         // The only idle tenant is the one a human is watching right now.
         await seedTenant(
           runtimeRoot,
@@ -896,7 +998,7 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
   test("a fresh User-wide desktop lease keeps every idle display", async () => {
     const { directory, runtimeRoot, run } = await installEnsureScript();
     try {
-      for (let slot = 0; slot < 100; slot += 1) {
+      for (let slot = 0; slot < DESKTOP_SLOTS; slot += 1) {
         await seedTenant(runtimeRoot, slot, SLOT_IDLE_SECONDS + 600);
       }
       const leaseRoot = join(runtimeRoot, "bots", DESKTOP_GUI_LEASE_KEY);
@@ -915,7 +1017,7 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
   test("skips a tenant whose viewer just renewed last-seen", async () => {
     const { directory, runtimeRoot, run } = await installEnsureScript();
     try {
-      for (let slot = 0; slot < 100; slot += 1) {
+      for (let slot = 0; slot < DESKTOP_SLOTS; slot += 1) {
         await seedTenant(runtimeRoot, slot, SLOT_IDLE_SECONDS + 600);
       }
       // Viewer open/renew touches this existing registry fact. The reclaim
@@ -928,6 +1030,40 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
 
       expect(ensured.exitCode).toBe(0);
       expect(existsSync(join(runtimeRoot, "bots/tenant-003/slot"))).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+  test("prunes a slot from the superseded hundred-display layout", async () => {
+    // The migration's registry half (ADR 0030). A Computer that allocated
+    // displays 0-99 carries slots the one screen has no rectangle for; a window
+    // pinned past its last slot is a window nobody can see. They are pruned
+    // under the same lock that allocates, so the tenant re-allocates in range
+    // on its next open — and nothing durable, and no profile, is touched.
+    const { directory, runtimeRoot, run } = await installEnsureScript();
+    try {
+      const stale = await seedTenant(runtimeRoot, 7, 5);
+      await writeFile(join(runtimeRoot, "bots", stale, "target-id"), "old\n");
+
+      const ensured = await run("newcomer");
+
+      expect(ensured.exitCode).toBe(0);
+      expect(existsSync(join(runtimeRoot, "bots", stale, "slot"))).toBe(false);
+      expect(existsSync(join(runtimeRoot, "bots", stale, "target-id"))).toBe(
+        false,
+      );
+      expect(
+        (
+          await readFile(join(runtimeRoot, "bots/newcomer/slot"), "utf8")
+        ).trim(),
+      ).toBe("0");
+      // One browser, one port: the file stays, and every tenant reads the same
+      // number out of it.
+      expect(
+        (
+          await readFile(join(runtimeRoot, "bots/newcomer/cdp-port"), "utf8")
+        ).trim(),
+      ).toBe(String(COMPUTER_CDP_PORT));
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -1128,6 +1264,9 @@ describe("box-doctor", () => {
         "scratch",
         "desktop-gateway",
         "sync-watcher",
+        "browser-process",
+        "browser-cdp",
+        "screen",
         "tenant-display",
         "browser",
         "browser-profile",
