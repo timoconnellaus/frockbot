@@ -301,6 +301,10 @@ export function routineInboxEntryViewV1(
     ...(entry.acknowledgedAt === undefined
       ? {}
       : { acknowledgedAt: entry.acknowledgedAt }),
+    ...(entry.repeatCount === undefined
+      ? {}
+      : { repeatCount: entry.repeatCount }),
+    ...(entry.failure === undefined ? {} : { failure: entry.failure }),
   };
 }
 

@@ -65,8 +65,11 @@ export interface MemoryFactV1 {
 export interface SourcedMemoryFactV1 extends MemoryFactV1 {
   /** The Bot whose shard holds it. */
   botId: string;
-  /** The display name of that Bot, or its id when no name is known. */
-  via: string;
+  /**
+   * The display name of that Bot, absent when no name is known. Never its id:
+   * a rendered id is a handle the model reads as a name and says out loud.
+   */
+  via?: string;
   /** `profile.md` or a monthly log. */
   kind: "profile" | "log";
   /** The generation the line was read from; ordering's tiebreak. */

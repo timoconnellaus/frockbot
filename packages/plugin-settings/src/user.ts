@@ -731,6 +731,54 @@ export class UserSettingsBackendContribution {
     return undefined;
   }
 
+  /**
+   * The mirror of `packageDependencyFailure`, read the other way round.
+   *
+   * Enabling B before A is refused, so leaving B enabled once A is switched
+   * off would put the account in exactly the configuration the enable path
+   * will not create. Refusing the disable is not the answer either: a Package
+   * the User never chose — `provider-ollama-cloud` depends on `web` — would
+   * make `web` undisableable. So the disable is allowed and carries its
+   * dependents with it, transitively. Model binding degrades to the platform
+   * default rather than failing, so a cascade that reaches the Package a Bot's
+   * model is bound to costs that Bot its choice, not its next reply.
+   *
+   * Platform-owned Packages are never cascaded: they cannot be disabled by any
+   * other path, and in this application they depend only on each other.
+   */
+  private cascadeDisabledDependents(
+    settings: UserSettingsViewV1,
+  ): UserSettingsViewV1 {
+    let packages = settings.packages;
+    for (;;) {
+      const enabled = new Set(
+        packages
+          .filter((pkg) => pkg.state === "installed")
+          .map((pkg) => pkg.packageId),
+      );
+      const cascaded = packages.map((pkg) => {
+        if (pkg.state !== "installed") return pkg;
+        if (this.platformOwnedPackageIds.has(pkg.packageId)) return pkg;
+        const dependencies = this.packageDependencies.get(
+          `${pkg.packageId}\u0000${pkg.version}`,
+        );
+        if (!dependencies) return pkg;
+        const missing = Object.keys(dependencies).some(
+          (dependencyId) => !enabled.has(dependencyId),
+        );
+        return missing
+          ? { ...pkg, state: "disabled" as const, failure: undefined }
+          : pkg;
+      });
+      if (cascaded.every((pkg, index) => pkg === packages[index])) {
+        return packages === settings.packages
+          ? settings
+          : { ...settings, packages };
+      }
+      packages = cascaded;
+    }
+  }
+
   async readConfiguration(input: unknown): Promise<UserSettingsViewV1> {
     const request = decodeUserConfigurationReadRpcV1(input);
     // Settings owns the stored-record migration and platform-row repair. Run
@@ -1001,9 +1049,16 @@ export class UserSettingsBackendContribution {
       await storage.put(receiptKey, { commandFingerprint, receipt });
       return receipt;
     }
-    const next = applyUserCommand(current, command, (packageId, version) =>
+    const applied = applyUserCommand(current, command, (packageId, version) =>
       this.settingDefinitions(packageId, version),
     );
+    // One command, one revision: the cascade is part of the disable the User
+    // asked for, not a second write they have to reconcile against.
+    const next =
+      command.type === "user/uninstall-package" ||
+      (command.type === "user/set-package-enabled" && !command.enabled)
+        ? this.cascadeDisabledDependents(applied)
+        : applied;
     const receipt: OperationReceiptV1 = {
       schemaVersion: 1,
       commandId: command.commandId,

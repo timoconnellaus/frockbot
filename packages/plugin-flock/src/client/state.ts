@@ -21,10 +21,13 @@ export interface FlockWebData {
   unread: Record<string, BotUnreadViewV1>;
   loading: boolean;
   /**
-   * Whether the Bot list has ever been read from the deployment. An empty
-   * list means "no Bots" only once this is true: before it, and after a load
-   * that failed, an empty list is an unknown list, and the sidebar must not
-   * offer to create a first Bot for a User who already has one.
+   * Whether a directory read has ever completed.
+   *
+   * "No Bots yet." is a fact about the User's account, and it can only be
+   * stated once the account has been read. Before that — the first paint, the
+   * reload after a Bot is created, and every read that failed — the list is
+   * unknown, not empty, and offering to create a first Bot to someone who
+   * already has several is the worst thing this column can say.
    */
   loaded: boolean;
   error?: string;

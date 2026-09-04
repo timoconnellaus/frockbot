@@ -291,10 +291,16 @@ function turnRefusalCopyV1(reason: ClientTurnRefusalReasonV1): string {
  * model's own assistant text is scratch space and the thread does not draw it
  * (issue 153): drawing both is how a one-word reply arrived twice, once as the
  * model's text and once as the bubble that was actually delivered.
+ *
+ * A running Turn has no `responseText` yet — that is written only at
+ * settlement — so it draws the words it has written so far. They occupy the
+ * same bubble the settled answer will, and the same send gate applies to
+ * both: a Turn that has already delivered a bubble streams nothing into a
+ * second one.
  */
 function visibleAssistantText(run: ClientRun, fallback = ""): string {
   if (sendsFrom(run.events).length > 0) return "";
-  return run.responseText ?? fallback;
+  return run.responseText ?? run.partialText ?? fallback;
 }
 
 function isTerminalRun(run: ClientRun): boolean {
@@ -1247,6 +1253,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       packageDisplayName: catalogPackage?.displayName,
       connectionDisplayName: connection?.displayName,
       failure: effective.binding?.failure,
+      fallback: Boolean(effective.fallback),
     });
   }
 

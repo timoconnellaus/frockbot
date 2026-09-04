@@ -95,7 +95,7 @@ describe("Bot-state channel Computer storage", () => {
 });
 
 describe("Bot-state channel run observation", () => {
-  function observedChannel(): {
+  function observedChannel(runsNoticeIntervalMs = 0): {
     channel: BotStateChannel;
     storage: MemoryStorage;
     sent: string[];
@@ -118,7 +118,7 @@ describe("Bot-state channel run observation", () => {
       storage,
       getWebSockets: () => [socket],
     } as unknown as DurableObjectState;
-    const channel = new BotStateChannel(state);
+    const channel = new BotStateChannel(state, { runsNoticeIntervalMs });
     return { channel, storage, sent, observed: channel.observeRuns(state) };
   }
 
@@ -179,5 +179,32 @@ describe("Bot-state channel run observation", () => {
     // to know that it should read again.
     expect(sent.length).toBeGreaterThan(0);
     expect(sent.length).toBeLessThan(3);
+  });
+
+  // A streaming answer journals one run write per text delta. Throttled, the
+  // observer is told once immediately and once per interval after that, rather
+  // than once per token — and it is always told about the last write.
+  test("a stream of run writes notices once, then once per interval", async () => {
+    const { sent, observed } = observedChannel(40);
+
+    await observed.storage.put("run:run-1", { text: "one" });
+    await settle();
+    // The first write is never delayed: a Turn that starts or ends says so at
+    // once.
+    expect(sent).toHaveLength(1);
+
+    for (const text of ["two", "three", "four", "five"]) {
+      await observed.storage.put("run:run-1", { text });
+      await settle();
+    }
+    // Four more writes inside one interval, and still only the first notice.
+    expect(sent).toHaveLength(1);
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 120);
+    });
+    // The last write is never dropped: the pending flag outlives the wait.
+    expect(sent).toHaveLength(2);
+    expect(JSON.parse(sent[1]!) as unknown).toMatchObject({ topic: "runs" });
   });
 });

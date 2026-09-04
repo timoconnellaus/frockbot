@@ -55,12 +55,16 @@ export const ROUTINE_LIST_MAX = 100;
 export const ROUTINE_RUN_LIST_MAX = 50;
 
 /**
- * Who wrote a Routine, as the client is told it. The Session and Turn a Bot
- * writer records stay in the durable record: the UI needs to say "the Bot wrote
- * this", not to replay the Turn that did.
+ * Who wrote a Routine, as the client is told it.
+ *
+ * A Bot writer names the Session and the Turn it wrote from. The panel only
+ * says "the Bot wrote this", but provenance that cannot answer "which Turn?"
+ * is not provenance: the audit trail and the run log both address a Turn, and
+ * a Routine that a Bot wrote must be traceable to the one that wrote it.
  */
 export type RoutineWriterViewV1 =
-  { kind: "user" } | { kind: "bot"; botId: string };
+  | { kind: "user" }
+  | { kind: "bot"; botId: string; sessionId: string; turnId: string };
 
 /** One Routine as the hosted client sees it. Never any key material. */
 export interface RoutineViewV1 {
@@ -420,10 +424,17 @@ function decodeRoutineWriterViewV1(
   if (candidate.kind !== "bot") {
     throw new RoutineDecodeError(`${label} kind is invalid`);
   }
-  routineExactKeys(candidate, ["kind", "botId"], [], label);
+  routineExactKeys(
+    candidate,
+    ["kind", "botId", "sessionId", "turnId"],
+    [],
+    label,
+  );
   return {
     kind: "bot",
     botId: routineText(candidate.botId, 128, `${label} botId`),
+    sessionId: routineText(candidate.sessionId, 128, `${label} sessionId`),
+    turnId: routineText(candidate.turnId, 128, `${label} turnId`),
   };
 }
 
@@ -709,6 +720,10 @@ export interface RoutineInboxEntryViewV1 {
   createdAt: string;
   acknowledged: boolean;
   acknowledgedAt?: string;
+  /** How many firings this entry stands for; absent means one. */
+  repeatCount?: number;
+  /** The firing did not work. */
+  failure?: true;
 }
 
 export interface RoutineInboxViewV1 {

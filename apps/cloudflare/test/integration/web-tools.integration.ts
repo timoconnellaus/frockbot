@@ -252,32 +252,35 @@ describe("web_fetch through the gateway, the artifact and the Bot", () => {
 });
 
 describe("a disabled Web Package", () => {
-  it("removes web_fetch while leaving another enabled Package's tools", async () => {
+  // What used to be asserted here — `web_fetch` gone, `web_search` still
+  // there — is no longer a reachable account. `provider-ollama-cloud` declares
+  // a dependency on `web`, so disabling Web carries the provider off with it,
+  // and the provider owns both `web_search` and the only Connection-backed
+  // model in this harness. The reachable question is the one below: does the
+  // Bot survive losing the Package its model was bound to.
+  it("carries the Packages that depend on it, and the Bot keeps answering", async () => {
     const userId = freshUserId("web-unassigned");
-    const botId = "bare-bot";
-    // Package enablement is account-wide and changes the next admitted Turn.
+    const botId = "cascade-bot";
     await provisionThroughGateway({ userId, botId });
+
     await disablePackage(userId, "web");
-
-    const turn = await turnCalling(
-      userId,
-      botId,
-      "web-unassigned-1",
-      "web_fetch",
-      { url: "https://example.test/page" },
+    const settings = (await expectOkJson(
+      await asUser(userId, "/api/settings"),
+    )) as { packages: Array<{ packageId: string; state: string }> };
+    const states = Object.fromEntries(
+      settings.packages.map((pkg) => [pkg.packageId, pkg.state]),
     );
-    const outcome = toolOutcome(turn, "web_fetch");
-    expect(outcome.isError).toBe(true);
-    expect(outcome.content).toContain("Unknown tool");
+    expect(states["web"]).toBe("disabled");
+    expect(states["provider-ollama-cloud"]).toBe("disabled");
 
-    const searched = await turnCalling(
-      userId,
-      botId,
-      "web-unassigned-2",
-      "web_search",
-      { query: "anything" },
-    );
-    const searchOutcome = toolOutcome(searched, "web_search");
-    expect(searchOutcome.isError, searchOutcome.content).toBe(false);
+    // The account model was bound to the cascaded provider. The platform
+    // bootstrap stands in, so this Turn answers rather than failing.
+    const turn = await postAsUser(userId, `/api/bots/${botId}/turns`, {
+      schemaVersion: 1,
+      commandId: "web-unassigned-turn",
+      text: "hello",
+    });
+    expect(turn.status).toBe(200);
+    expect(JSON.stringify(await turn.json())).toContain("Flock AI reply");
   });
 });

@@ -7,7 +7,8 @@
 // versioned command with its own idempotency key, and every read is decoded at
 // the seam before a component sees it.
 import type { ClientPlugin } from "@frockbot/client-core";
-import { ref } from "vue";
+import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
+import { ref, watch } from "vue";
 import {
   decodeRoutineCommandReceiptV1,
   decodeRoutineInboxReceiptV1,
@@ -261,6 +262,40 @@ export const routinesClientPlugin: ClientPlugin = (ctx) => {
       }
     },
   });
+
+  // The badge is the only place a firing that finished becomes visible, and it
+  // used to load only on a Bot switch and on opening the drawer: a Routine that
+  // completed while the app was open left the count stale until something else
+  // happened to reload it. The state channel already says when this Bot's runs
+  // changed — an automation Turn settling is one of those — so the badge reads
+  // the inbox again on that signal rather than polling or waiting for a click.
+  const watchBotState = ctx.transport.watchBotState;
+  if (watchBotState) {
+    const shell = ctx.inject(frockBotWebDataKey);
+    let stopWatching: (() => void) | undefined;
+    watch(
+      () => shell.value.activeBotId,
+      (activeBotId) => {
+        stopWatching?.();
+        stopWatching = undefined;
+        if (!activeBotId) return;
+        stopWatching = watchBotState(activeBotId, {
+          async invalidate(topic) {
+            // `undefined` is a resynchronise, so it is not filtered out.
+            if (topic !== undefined && topic !== "runs") return;
+            if (shell.value.activeBotId !== activeBotId) return;
+            await state.value.loadInbox(activeBotId);
+          },
+          status() {
+            // The badge has nothing to say about the socket itself; a closed
+            // channel simply stops refreshing it, and opening the drawer still
+            // reads the inbox.
+          },
+        });
+      },
+      { immediate: true },
+    );
+  }
 
   return [
     ctx.provide(routinesStateKey, state),

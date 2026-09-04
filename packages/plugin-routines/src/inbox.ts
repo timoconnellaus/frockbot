@@ -58,6 +58,42 @@ export function subagentAttributionV1(description: string): string {
 
 /** Longest hand-off an inbox entry or a pending wake carries. */
 export const ROUTINE_INBOX_TEXT_MAX = 4_000;
+
+/**
+ * What a person is told a firing failed for.
+ *
+ * A failure summary is whatever the kernel had to hand — the run's `failure`
+ * string, a thrown message, a lease timeout. Some of those are sentences a
+ * person can act on ("the model is unavailable"); others are invariants
+ * addressed to this codebase, like `tool occurrence "tool:1:1:1" was not
+ * settled before step end`, which told a User nothing except that something
+ * they cannot see is broken. The raw string stays on the run-log row, which is
+ * where an operator looks; what reaches the inbox and the notification is a
+ * sentence.
+ *
+ * The test is deliberately coarse: anything carrying the shape of an internal
+ * identifier — a quoted occurrence, a `foo:1:2:3` coordinate, a stack frame —
+ * is not for a person. Everything else is passed through, because a provider
+ * saying "rate limited" is exactly what the User wants to read.
+ */
+const INTERNAL_FAILURE_MARKERS = [
+  /\btool occurrence\b/i,
+  /\b[a-z-]+:\d+:\d+:\d+\b/i,
+  /\bat [\w$.]+ \(/,
+  /\bschemaVersion\b/,
+  /\boutcome model-error\b/i,
+  /\binvariant\b/i,
+];
+
+/** The sentence a person reads instead of a kernel string. Never empty. */
+export function routineFailureSentenceV1(summary: string | undefined): string {
+  const text = (summary ?? "").trim();
+  if (text.length === 0) return "It stopped without saying why.";
+  if (INTERNAL_FAILURE_MARKERS.some((marker) => marker.test(text))) {
+    return "Something inside FrockBot went wrong; the run log has the details.";
+  }
+  return text;
+}
 /** Longest title a pending wake carries. */
 export const ROUTINE_WAKE_TITLE_MAX = 200;
 
@@ -78,6 +114,23 @@ export interface RoutineInboxEntryV1 {
   /** Present when the Turn also handed off, naming the wake it queued. */
   wakeId?: string;
   acknowledgedAt?: string;
+  /**
+   * How many firings this entry stands for. Absent means one.
+   *
+   * A Routine that fails every minute wrote a fresh entry every minute, and a
+   * user who had not looked in an hour found sixty rows of the same sentence.
+   * Consecutive failures of the same Routine with the same failure fold into
+   * the entry already there and raise this count, so the inbox says what is
+   * wrong once and how often it has happened.
+   */
+  repeatCount?: number;
+  /**
+   * Set when the entry is a firing that did not work. A completion is routine
+   * and deliberately badges nothing; a failure is the Bot telling its User
+   * that an automation they set up has stopped, which is exactly what the
+   * sidebar badge is for.
+   */
+  failure?: true;
   /**
    * What produced this entry. Absent means `routine`; `routineId` then carries
    * the task id, because the field names the automation the entry came from
@@ -210,7 +263,7 @@ export function decodeRoutineInboxEntryV1(
       "createdAt",
       "acknowledged",
     ],
-    ["wakeId", "acknowledgedAt", "source"],
+    ["wakeId", "acknowledgedAt", "source", "repeatCount", "failure"],
     label,
   );
   if (candidate.schemaVersion !== 1) {
@@ -249,7 +302,23 @@ export function decodeRoutineInboxEntryV1(
     ...(candidate.source === undefined
       ? {}
       : { source: completionSourceV1(candidate.source, `${label} source`) }),
+    ...(candidate.repeatCount === undefined
+      ? {}
+      : {
+          repeatCount: routineRepeatCountV1(
+            candidate.repeatCount,
+            `${label} repeatCount`,
+          ),
+        }),
+    ...(candidate.failure === undefined ? {} : { failure: true as const }),
   };
+}
+
+function routineRepeatCountV1(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) {
+    throw new RoutineDecodeError(`${label} is invalid`);
+  }
+  return value as number;
 }
 
 export function decodePendingBotInputV1(

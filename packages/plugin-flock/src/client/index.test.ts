@@ -377,6 +377,38 @@ describe("Flock client reconciliation", () => {
     expect(state.value.overlay).toBeUndefined();
     expect(selected).not.toHaveLength(0);
     expect(selected.every((botId) => botId === createdBotId)).toBe(true);
+    // The User has just made a Bot; nothing on screen may say they have none.
+    // `loaded` is what the sidebar reads before it renders "No Bots yet.", and
+    // the created Bot is in the list by the time the dialog is gone.
+    expect(state.value.loaded).toBe(true);
+    expect(state.value.directory.bots.map((bot) => bot.botId)).toEqual([
+      createdBotId,
+    ]);
+  });
+
+  // The empty state is a fact about the account, and before the first read the
+  // account is unknown: the sidebar used to claim "No Bots yet." on the first
+  // paint, before `load()` had even been called.
+  test("does not claim an empty flock before the first read lands", async () => {
+    installStorage();
+    const state = mount((path) => {
+      if (path === "/api/bots")
+        return Promise.resolve({ schemaVersion: 1, revision: 1, bots: [] });
+      if (path === "/api/bots/lifecycles")
+        return Promise.resolve({ schemaVersion: 1, lifecycles: [] });
+      if (path === "/api/bots/identities")
+        return Promise.resolve({ schemaVersion: 1, identities: [] });
+      return Promise.reject(new Error(`unexpected request: ${path}`));
+    });
+
+    // Before any read: the account is unknown, so the sidebar keeps its
+    // skeleton rather than asserting the User has no Bots.
+    expect(state.value.loaded).toBe(false);
+
+    await state.value.load();
+
+    expect(state.value.loaded).toBe(true);
+    expect(state.value.directory.bots).toEqual([]);
   });
 
   test("archives with confirmation, hides archived Bots, and selects a fallback", async () => {

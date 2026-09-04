@@ -145,6 +145,12 @@ export interface ClientRun {
    * as an ordinary message it has not reached yet.
    */
   queued?: true;
+  /**
+   * The answer the Bot has written so far, present only while the Turn is
+   * still running. It is the same bubble `responseText` becomes when the Turn
+   * settles, so the thread never draws both.
+   */
+  partialText?: string;
   recovery?: { action: "resume"; message: string };
 }
 

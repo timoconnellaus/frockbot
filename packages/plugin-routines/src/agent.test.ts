@@ -180,6 +180,97 @@ describe("routine_manage", () => {
   });
 });
 
+// A Bot paused a User's Routine in a Turn about sheep farming: no approval, no
+// confirmation, nothing in the transcript. A Routine the User made is theirs.
+describe("a Routine the User created", () => {
+  async function seeded() {
+    const seam = host();
+    await seam.store.execute(
+      {
+        schemaVersion: 1,
+        type: "routine/create",
+        commandId: "cmd-user",
+        botId: "scout",
+        routineId: "theirs",
+        name: "Minute ping",
+        prompt: "Say ping.",
+        schedule: "@every 1m",
+        timezone: "UTC",
+      },
+      { kind: "user" },
+    );
+    return seam;
+  }
+
+  for (const action of ["pause", "delete", "update"] as const) {
+    test(`refuses ${action} when the User did not ask`, async () => {
+      const seam = await seeded();
+      const tool = createRoutineManageTool({ ...seam, writer: WRITER });
+
+      const result = await tool.execute(
+        {
+          action,
+          routineId: "theirs",
+          ...(action === "update" ? { prompt: "Say pong." } : {}),
+        },
+        CONTEXT,
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toContain("created by the User");
+      expect(result.content).toContain("userAsked: true");
+      const listed = await seam.list();
+      expect(listed.routines[0]).toMatchObject({
+        enabled: true,
+        prompt: "Say ping.",
+        createdBy: { kind: "user" },
+      });
+    });
+  }
+
+  test("pauses it once the User has asked", async () => {
+    const seam = await seeded();
+    const tool = createRoutineManageTool({ ...seam, writer: WRITER });
+
+    const result = await tool.execute(
+      { action: "pause", routineId: "theirs", userAsked: true },
+      CONTEXT,
+    );
+
+    expect(result.isError).toBe(false);
+    expect((await seam.list()).routines[0]).toMatchObject({ enabled: false });
+  });
+
+  test("leaves the Bot free to manage its own Routines", async () => {
+    const seam = host();
+    const tool = createRoutineManageTool({ ...seam, writer: WRITER });
+    await tool.execute(
+      {
+        action: "create",
+        routineId: "mine",
+        name: "Housekeeping",
+        prompt: "Tidy up.",
+        schedule: "@daily",
+      },
+      CONTEXT,
+    );
+
+    const result = await tool.execute(
+      { action: "pause", routineId: "mine" },
+      { ...CONTEXT, effectId: "tool:1:2:0" },
+    );
+
+    expect(result.isError).toBe(false);
+    expect((await seam.list()).routines[0]).toMatchObject({ enabled: false });
+  });
+
+  test("says destructive actions need the User's word", () => {
+    const tool = createRoutineManageTool({ ...host(), writer: WRITER });
+    expect(tool.description).toContain("only when the User asked you");
+    expect(tool.description).toContain("do not switch it off yourself");
+  });
+});
+
 describe("routineManageCommandV1", () => {
   test("maps a webhook trigger to the record's trigger shape", () => {
     expect(

@@ -94,7 +94,30 @@ onMounted(() => void flock.value.load());
       {{ flock.showArchived ? "Done" : "Manage" }}
     </button>
   </div>
-  <div v-if="flock.loading" class="flock-skeleton" aria-busy="true">
+  <!--
+    An unreadable list is not an empty one, and it is not a loading one either.
+    Offering to add a first Bot to a User whose Bots simply did not load is the
+    worst thing this column can say; leaving the skeleton up forever is the
+    second worst, because it says the read is still coming when it has already
+    failed. So the failure takes the slot first, and offers the read again.
+  -->
+  <p
+    v-if="flock.error && !flock.directory.bots.length"
+    class="flock-error"
+    role="alert"
+  >
+    {{ flock.error }}
+    <button type="button" class="flock-retry" @click="flock.load()">
+      Retry
+    </button>
+  </p>
+  <!--
+    The skeleton is for a list nobody has yet, not for every request: the first
+    paint happens before `load()` is even called, and a reload after creating a
+    Bot must keep the list already on screen rather than blanking it. "No Bots
+    yet." is a fact about the account, so it waits for an answer.
+  -->
+  <div v-else-if="!flock.loaded" class="flock-skeleton" aria-busy="true">
     <span class="flock-skeleton-label">Loading your flock…</span>
     <div v-for="row in 3" :key="row" class="flock-skeleton-row">
       <UiSkeleton shape="circle" />
@@ -104,21 +127,6 @@ onMounted(() => void flock.value.load());
       </span>
     </div>
   </div>
-  <!--
-    An unreadable list is not an empty one. Offering to add a first Bot to a
-    User whose Bots simply did not load is the worst thing this column can say,
-    so the failure takes the slot and offers the read again instead.
-  -->
-  <p
-    v-else-if="flock.error && !flock.directory.bots.length"
-    class="flock-error"
-    role="alert"
-  >
-    {{ flock.error }}
-    <button type="button" class="flock-retry" @click="flock.load()">
-      Retry
-    </button>
-  </p>
   <p v-else-if="!flock.directory.bots.length" class="flock-empty">
     No Bots yet. Add your first sheep.
   </p>

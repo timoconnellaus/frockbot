@@ -1476,6 +1476,87 @@ describe("dispatched subagents in the run projection", () => {
     }
   });
 
+  test("a running Turn projects the words it has written so far", () => {
+    const streamed: SessionEvent[] = [
+      event({
+        type: "assistant/chunk",
+        seq: 0,
+        timestamp,
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: "Half a",
+      }),
+      event({
+        type: "assistant/chunk",
+        seq: 1,
+        timestamp,
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: " thought",
+      }),
+    ];
+
+    const projected = projectClientRunV1(storedRun(streamed, "running"));
+    expect(projected.partialText).toBe("Half a thought");
+    expect(projected.outcome).toBeUndefined();
+
+    // And it survives the wire, so the thread draws it while the Turn runs.
+    const decoded = decodeClientRunPageV1(
+      createClientRunListV1([projected], { truncated: false }),
+    ).runs[0];
+    expect(decoded?.partialText).toBe("Half a thought");
+    expect(decoded?.responseText).toBeUndefined();
+  });
+
+  test("a running Turn that has said nothing carries no partial text", () => {
+    expect(projectClientRunV1(storedRun([], "running")).partialText).toBe(
+      undefined,
+    );
+  });
+
+  test("a later request restarts the partial answer", () => {
+    const streamed: SessionEvent[] = [
+      event({
+        type: "assistant/chunk",
+        seq: 0,
+        timestamp,
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: "scratch",
+      }),
+      event({
+        type: "assistant/chunk",
+        seq: 1,
+        timestamp,
+        turn: 1,
+        step: 2,
+        requestId: "request-2",
+        text: "the answer",
+      }),
+    ];
+    expect(projectClientRunV1(storedRun(streamed, "running")).partialText).toBe(
+      "the answer",
+    );
+  });
+
+  test("a settled Turn carries its answer once, as an outcome", () => {
+    const projected = projectClientRunV1(storedRun([], "completed"));
+    expect(projected.partialText).toBeUndefined();
+    expect(projected.outcome).toMatchObject({ type: "completed" });
+
+    const page = createClientRunListV1([projected], { truncated: false });
+    const tampered = structuredClone(page) as unknown as {
+      runs: Array<Record<string, unknown>>;
+    };
+    tampered.runs[0]!.partialText = "words";
+    expect(() => decodeClientRunPageV1(tampered)).toThrow(
+      "only a running run may carry partial text",
+    );
+  });
+
   test("refuses a chip whose background flag is not a boolean", () => {
     const page = createClientRunListV1(
       [projectClientRunV1(storedRun([dispatched]))],

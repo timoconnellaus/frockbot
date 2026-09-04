@@ -14,7 +14,9 @@ export {
 export {
   AuditStoreV1,
   AUDIT_REBUILD_PAGE_V1,
-  decodeAuditOffsetV1,
+  decodeAuditCursorV1,
+  encodeAuditCursorV1,
+  type AuditCursorV1,
   type AuditEntrySourceV1,
   type AuditRebuildOutcomeV1,
   type AuditSqlCursorV1,

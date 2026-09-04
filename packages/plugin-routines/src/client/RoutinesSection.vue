@@ -3,7 +3,15 @@
 // Routine. It renders durable state and submits versioned commands; it decides
 // nothing — "Next run" is the moment the scheduler has actually armed an alarm
 // on, sent down with the Routine, and blank when there is none to promise.
-import { UiAnchor, UiButton, UiField, UiIcon } from "@frockbot/client-ui";
+import {
+  browserTimeZoneV1,
+  formatMomentV1,
+  formatRelativeMomentV1,
+  UiAnchor,
+  UiButton,
+  UiField,
+  UiIcon,
+} from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { computed, inject, reactive, ref, watch } from "vue";
@@ -27,7 +35,6 @@ const formOpen = ref(false);
 const openLog = ref<string>();
 const copied = ref(false);
 const openRun = ref<string>();
-
 // An automation Turn never appears in the transcript, so opening a run here is
 // the only way to read one, and it is read-only in both directions: the view
 // carries what happened and no way to act on it.
@@ -49,6 +56,31 @@ const form = reactive({
   schedule: "",
   timezone: "UTC",
 });
+
+/**
+ * The reason the last save was refused, held beside the form rather than in
+ * the section header. The header sits above every Routine card, so on a Bot
+ * with a few Routines the refusal rendered hundreds of pixels off-screen and
+ * the form simply appeared to do nothing.
+ */
+const saveError = ref<string>();
+/** The Routine a delete has been asked for and not yet confirmed. */
+const pendingDelete = ref<RoutineViewV1>();
+
+/**
+ * Whether a refusal is about the schedule, so it can be rendered under the
+ * Schedule field. Every schedule refusal comes from one validator, and it
+ * names cron, the expression, or the time zone.
+ */
+const scheduleError = computed(() =>
+  saveError.value !== undefined &&
+  form.timing === "schedule" &&
+  /cron|schedule|expression|time zone|timezone|occurrence/iu.test(
+    saveError.value,
+  )
+    ? saveError.value
+    : undefined,
+);
 
 watch(
   botId,
@@ -92,13 +124,22 @@ function summary(routine: RoutineViewV1): string {
     : "Webhook trigger";
 }
 
+/** A durable moment, read in the Routine's own zone — the one it fires on. */
+function moment(routine: RoutineViewV1, iso: string): string {
+  return formatMomentV1(iso, { timeZone: routine.timezone });
+}
+
 function startCreate(): void {
   form.routineId = undefined;
   form.name = "";
   form.prompt = "";
   form.timing = "schedule";
   form.schedule = "0 9 * * *";
-  form.timezone = "UTC";
+  // The reader's own zone, not UTC: a schedule is almost always meant in the
+  // day the person writing it is living in, and the Bot picks the same when it
+  // writes one itself.
+  form.timezone = browserTimeZoneV1();
+  saveError.value = undefined;
   formOpen.value = true;
 }
 
@@ -109,12 +150,14 @@ function startEdit(routine: RoutineViewV1): void {
   form.timing = routine.schedule ? "schedule" : "webhook";
   form.schedule = routine.schedule ?? "";
   form.timezone = routine.timezone;
+  saveError.value = undefined;
   formOpen.value = true;
 }
 
 async function submit(): Promise<void> {
   const id = botId.value;
   if (!id) return;
+  saveError.value = undefined;
   try {
     await routines.value.save(id, {
       ...(form.routineId ? { routineId: form.routineId } : {}),
@@ -126,9 +169,31 @@ async function submit(): Promise<void> {
       timezone: form.timezone.trim(),
     });
     formOpen.value = false;
-  } catch {
-    // The state holds the reason; the form stays open so it can be corrected.
+  } catch (error) {
+    // The form stays open and holds the reason itself, beside the field that
+    // caused it. The section header keeps its copy for the reader who scrolls
+    // back up, but the form no longer refuses in silence.
+    saveError.value =
+      error instanceof Error
+        ? error.message
+        : (routines.value.error ?? "Could not save the Routine");
   }
+}
+
+/**
+ * Deleting takes a Routine, its schedule, its prompt and its whole run log
+ * with it, and the button sits in a row of six others. It asks first.
+ */
+function askDelete(routine: RoutineViewV1): void {
+  pendingDelete.value = routine;
+}
+
+async function confirmDelete(): Promise<void> {
+  const routine = pendingDelete.value;
+  const id = botId.value;
+  pendingDelete.value = undefined;
+  if (!routine || !id) return;
+  await routines.value.remove(id, routine.routineId);
 }
 
 async function toggleLog(routineId: string): Promise<void> {
@@ -220,7 +285,12 @@ async function toggleLog(routineId: string): Promise<void> {
       <dl class="routine-card__facts">
         <div>
           <dt>Next run</dt>
-          <dd>{{ routine.nextRunAt ?? "—" }}</dd>
+          <dd>
+            <time v-if="routine.nextRunAt" :datetime="routine.nextRunAt">{{
+              moment(routine, routine.nextRunAt)
+            }}</time>
+            <template v-else>—</template>
+          </dd>
         </div>
         <div v-if="routine.trigger">
           <dt>Webhook key</dt>
@@ -234,7 +304,15 @@ async function toggleLog(routineId: string): Promise<void> {
         </div>
         <div>
           <dt>Last run</dt>
-          <dd>{{ routine.lastRunAt ?? "Never" }}</dd>
+          <dd>
+            <time
+              v-if="routine.lastRunAt"
+              :datetime="routine.lastRunAt"
+              :title="moment(routine, routine.lastRunAt)"
+              >{{ formatRelativeMomentV1(routine.lastRunAt) }}</time
+            >
+            <template v-else>Never</template>
+          </dd>
         </div>
         <div>
           <dt>Written by</dt>
@@ -289,10 +367,35 @@ async function toggleLog(routineId: string): Promise<void> {
           type="button"
           variant="danger"
           :disabled="routines.busy"
-          @click="botId && routines.remove(botId, routine.routineId)"
+          @click="askDelete(routine)"
         >
           Delete
         </UiButton>
+      </div>
+      <div
+        v-if="pendingDelete?.routineId === routine.routineId"
+        class="routine-confirm"
+        role="alertdialog"
+        :aria-label="`Delete ${routine.name}?`"
+      >
+        <strong>Delete {{ routine.name }}?</strong>
+        <small>
+          Its schedule, its prompt and its whole run log go with it. This can't
+          be undone.
+        </small>
+        <div class="routine-card__actions">
+          <UiButton type="button" @click="pendingDelete = undefined">
+            Cancel
+          </UiButton>
+          <UiButton
+            type="button"
+            variant="danger"
+            :disabled="routines.busy"
+            @click="confirmDelete"
+          >
+            Delete Routine
+          </UiButton>
+        </div>
       </div>
       <div v-if="openLog === routine.routineId" class="routine-card__log">
         <p
@@ -312,7 +415,13 @@ async function toggleLog(routineId: string): Promise<void> {
               :aria-expanded="openRun === entry.runId"
               @click="toggleRun(routine.routineId, entry.runId)"
             >
-              <span>{{ entry.startedAt }}</span>
+              <span
+                ><time
+                  :datetime="entry.startedAt"
+                  :title="moment(routine, entry.startedAt)"
+                  >{{ formatRelativeMomentV1(entry.startedAt) }}</time
+                ></span
+              >
               <span>{{ entry.trigger }}</span>
               <span>{{ entry.status }}</span>
             </button>
@@ -361,8 +470,20 @@ async function toggleLog(routineId: string): Promise<void> {
           v-model="form.schedule"
           maxlength="256"
           placeholder="0 9 * * *"
+          :aria-invalid="scheduleError ? 'true' : undefined"
+          :aria-describedby="
+            scheduleError ? 'routine-schedule-error' : undefined
+          "
         />
       </UiField>
+      <p
+        v-if="scheduleError"
+        id="routine-schedule-error"
+        class="routine-form__error"
+        role="alert"
+      >
+        {{ scheduleError }}
+      </p>
       <p v-else class="routines__note">
         A delivery key is minted when the Routine is saved, and shown once.
       </p>
@@ -373,6 +494,13 @@ async function toggleLog(routineId: string): Promise<void> {
           placeholder="Australia/Sydney"
         />
       </UiField>
+      <p
+        v-if="saveError && !scheduleError"
+        class="routine-form__error"
+        role="alert"
+      >
+        {{ saveError }}
+      </p>
       <div class="routine-card__actions">
         <UiButton
           type="button"
@@ -586,6 +714,33 @@ async function toggleLog(routineId: string): Promise<void> {
   padding: 6px 0 6px 16px;
   color: var(--frock-text-subtle);
   font-size: var(--frock-text-xs);
+}
+
+.routine-form__error {
+  margin: 0;
+  color: var(--frock-danger-text);
+  font-size: var(--frock-text-sm);
+}
+
+.routine-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--frock-danger-text);
+  border-radius: var(--frock-radius-card);
+  padding: 10px;
+  background: var(--frock-surface);
+}
+
+.routine-confirm strong {
+  color: var(--frock-text);
+  font-size: var(--frock-text-sm);
+  font-weight: 600;
+}
+
+.routine-confirm small {
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
 }
 
 .routine-form__timing {
