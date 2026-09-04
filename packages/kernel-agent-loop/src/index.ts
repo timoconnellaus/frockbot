@@ -1232,7 +1232,7 @@ class LoopAgent implements Agent {
           error.message ||
             "Model provider reported a retryable failure after returning response data",
         );
-        await this.#recordModelUsage(
+        this.#recordModelUsage(
           request,
           turn,
           step,
@@ -1249,7 +1249,7 @@ class LoopAgent implements Agent {
       // a successful unmetered stream. A definitive no-effect result is the
       // sole exception because the provider says no billable call occurred.
       if (!(error instanceof ModelProviderFailureError)) {
-        await this.#recordModelUsage(
+        this.#recordModelUsage(
           request,
           turn,
           step,
@@ -1261,7 +1261,7 @@ class LoopAgent implements Agent {
       }
       throw error;
     }
-    await this.#recordModelUsage(
+    this.#recordModelUsage(
       request,
       turn,
       step,
@@ -1349,7 +1349,7 @@ class LoopAgent implements Agent {
         structuredFailure = event.failure;
       }
     }
-    await this.#recordModelUsage(
+    this.#recordModelUsage(
       request,
       turn,
       step,
@@ -1369,7 +1369,7 @@ class LoopAgent implements Agent {
     };
   }
 
-  async #recordModelUsage(
+  #recordModelUsage(
     request: NormalizedModelRequest,
     turn: number,
     step: number,
@@ -1377,7 +1377,7 @@ class LoopAgent implements Agent {
     text: string,
     toolCalls: readonly ToolCall[],
     latencyMs: number,
-  ): Promise<void> {
+  ): void {
     const existing = this.session.events.some(
       (event) =>
         event.type === "model/usage" && event.requestId === request.requestId,
@@ -1400,7 +1400,6 @@ class LoopAgent implements Agent {
       latencyMs,
       estimated: reported === undefined,
     });
-    await this.session.flush();
   }
 
   #applyStreamEvent(
