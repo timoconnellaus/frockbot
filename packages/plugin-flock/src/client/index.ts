@@ -20,6 +20,7 @@ import FlockIdentity from "./FlockIdentity.vue";
 import FlockAvatar from "./FlockAvatar.vue";
 import FlockAvatarEditor from "./FlockAvatarEditor.vue";
 import FlockCreateButton from "./FlockCreateButton.vue";
+import FlockDangerZone from "./FlockDangerZone.vue";
 import {
   decodeBotNotificationDirectoryViewV1,
   decodeBotUnreadDirectoryViewV1,
@@ -559,6 +560,59 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         console.debug("bot archive failed", clientFailureDetailV1(error));
       }
     },
+    openDelete(botId) {
+      if (!state.value.directory.bots.some((bot) => bot.botId === botId))
+        return;
+      state.value.lifecyclePending = botId;
+      state.value.overlay = "delete";
+      state.value.error = undefined;
+    },
+    async deleteBot() {
+      const botId = state.value.lifecyclePending;
+      if (!botId) return;
+      try {
+        const receipt = decodeBotLifecycleReceiptV1(
+          await request(
+            `/api/bots/${encodeURIComponent(botId)}/lifecycle`,
+            "POST",
+            JSON.stringify({
+              schemaVersion: 1,
+              type: "bot/delete",
+              commandId: crypto.randomUUID(),
+              botId,
+            }),
+          ),
+        );
+        if (receipt.status === "rejected")
+          throw new Error(receipt.failure ?? "Couldn't delete this Bot.");
+        if (receipt.status === "pending") {
+          state.value.error = "Still deleting — this will finish shortly.";
+          return;
+        }
+        state.value.overlay = undefined;
+        state.value.lifecyclePending = undefined;
+        // An archived Bot's cached transcript is merely stale; a deleted one's
+        // is a lie, and there is no Bot left to read it from again.
+        shell?.value.transcripts.forget(botId);
+        // Move off the deleted Bot before anything else. Selecting aborts the
+        // Shell's in-flight reads for it, and every one of those is now a 404
+        // waiting to happen: the panels poll the Bot the User is looking at,
+        // and that Bot has just stopped existing.
+        const next = state.value.directory.bots.find(
+          (bot) =>
+            bot.botId !== botId &&
+            state.value.lifecycles[bot.botId] !== "archived",
+        );
+        if (next && shell?.value.activeBotId === botId)
+          await state.value.select(next.botId);
+        // The Bot is gone from the directory, so the reload re-derives the
+        // list, the selection and the `?bot=` parameter without a page reload.
+        await state.value.load();
+      } catch (error) {
+        state.value.error = presentClientFailureV1(error, "delete this Bot");
+        console.debug("bot delete failed", clientFailureDetailV1(error));
+      }
+    },
     async restore(botId) {
       try {
         const receipt = decodeBotLifecycleReceiptV1(
@@ -844,6 +898,13 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       slot: "frockbot.bot-avatar-editor",
       order: 10,
       component: FlockAvatarEditor,
+    }),
+    // Last on the Bot's settings screen, below every setting it could still
+    // change: the one action that ends the Bot.
+    ctx.slot({
+      slot: "frockbot.bot-settings-primary-sections",
+      order: 900,
+      component: FlockDangerZone,
     }),
   ];
 };

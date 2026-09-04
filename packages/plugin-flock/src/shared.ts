@@ -52,7 +52,12 @@ export interface BotDirectoryViewV1 {
   revision: number;
   bots: BotRegistrationV1[];
 }
-export type BotLifecycleStatusV1 = "active" | "archived";
+/**
+ * A Bot's durable lifecycle. `deleted` is terminal: the Bot and its chat
+ * history are gone, and the status survives only as a tombstone so a late
+ * command or Turn is refused rather than resurrecting the Bot.
+ */
+export type BotLifecycleStatusV1 = "active" | "archived" | "deleted";
 export interface BotLifecycleViewV1 {
   schemaVersion: 1;
   botId: string;
@@ -65,7 +70,7 @@ export interface BotLifecycleDirectoryViewV1 {
 }
 export interface BotLifecycleCommandV1 {
   schemaVersion: 1;
-  type: "bot/archive" | "bot/restore";
+  type: "bot/archive" | "bot/restore" | "bot/delete";
   commandId: string;
   botId: string;
 }
@@ -162,6 +167,19 @@ export class FlockConflictError extends Error {
     this.name = "FlockConflictError";
   }
 }
+/**
+ * The status a lifecycle command settles on. The saga on the User side and the
+ * Bot Durable Object both read the target from here rather than each writing
+ * out the same mapping.
+ */
+export function lifecycleTargetStatusV1(
+  type: BotLifecycleCommandV1["type"],
+): BotLifecycleStatusV1 {
+  if (type === "bot/archive") return "archived";
+  if (type === "bot/delete") return "deleted";
+  return "active";
+}
+
 export class BotNotFoundError extends Error {
   constructor(readonly botId: string) {
     super(`Bot "${botId}" is not registered`);
@@ -456,7 +474,9 @@ export function decodeBotLifecycleCommandV1(
   exact(value, ["schemaVersion", "type", "commandId", "botId"]);
   if (
     value.schemaVersion !== 1 ||
-    (value.type !== "bot/archive" && value.type !== "bot/restore")
+    (value.type !== "bot/archive" &&
+      value.type !== "bot/restore" &&
+      value.type !== "bot/delete")
   )
     throw new FlockDecodeError("unsupported Bot lifecycle command");
   return {
@@ -472,7 +492,9 @@ export function decodeBotLifecycleViewV1(input: unknown): BotLifecycleViewV1 {
   exact(value, ["schemaVersion", "botId", "status", "revision"]);
   if (
     value.schemaVersion !== 1 ||
-    (value.status !== "active" && value.status !== "archived")
+    (value.status !== "active" &&
+      value.status !== "archived" &&
+      value.status !== "deleted")
   )
     throw new FlockDecodeError("Bot lifecycle is invalid");
   return {

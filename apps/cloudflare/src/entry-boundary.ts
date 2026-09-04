@@ -29,6 +29,10 @@ const ENTRY_STATUS_BY_ERROR_NAME_V1 = new Map<string, number>([
   ["BotNotFoundError", 404],
   ["ComputerBotNotFoundError", 404],
   ["BotArchivedError", 409],
+  // Gone, not merely absent: the Bot was here, its history has been destroyed,
+  // and no retry will bring it back. A caller that still holds the id — a
+  // second tab, a queued Turn — is told the difference.
+  ["BotDeletedError", 410],
 ]);
 
 function errorName(error: unknown): string | undefined {

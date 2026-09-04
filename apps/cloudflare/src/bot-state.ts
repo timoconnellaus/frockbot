@@ -145,7 +145,10 @@ import {
   decodeMachineResultDeliveryV1,
   type MachineResultDeliveryV1,
 } from "@frockbot/plugin-user-machine/delivery";
-import { createDurableWorkspaceFilesV1 } from "./workspace.js";
+import {
+  createDurableWorkspaceFilesV1,
+  deleteBotWorkspaceRootsV1,
+} from "./workspace.js";
 import { R2PackageCatalog } from "./package-catalog.js";
 import type { BotSkillCatalogReaderV1 } from "@frockbot/plugin-shell/backend-skills";
 import type { ClientWorkspaceFileV1 } from "./contracts.js";
@@ -470,6 +473,7 @@ export class BotState extends DurableObject<BotStateEnv> {
               },
               archiveEligible: (storage) =>
                 requireShell().archiveEligible(storage),
+              tearDown: (identity) => this.tearDown(identity),
             },
             computer: {
               storage: this.stateChannel.computerStorage,
@@ -650,6 +654,42 @@ export class BotState extends DurableObject<BotStateEnv> {
       identity,
     );
     this.surfacesFor = key;
+  }
+
+  /**
+   * Everything this Bot owns, destroyed. The Flock Contribution calls this on
+   * `bot/delete` and writes its tombstone afterwards.
+   *
+   * Order matters. The alarm goes first: this object's single alarm is
+   * multiplexed by the kernel authority over the active run, the Routine
+   * schedules and the Computer's scheduled work, and every one of those
+   * deadlines is about to stop existing — an alarm left armed would wake a Bot
+   * with no state to recover. The durable keys go next, in one `deleteAll()`:
+   * the session event log and its runs, the transcript and conversations, the
+   * Bot's Memory and Skills generation ledger, Routines and their schedules,
+   * Subagent tasks, approvals, notifications, unread and sidebar preview, the
+   * Package composition generations, the Applet mirror, and the state-channel
+   * log. Then the two object-store roots the Bot owns, which are the only
+   * Bot-scoped state that does not live in this object.
+   *
+   * The mount memo is dropped last so the next call to this object rebuilds
+   * from empty storage, reads the tombstone the caller is about to write, and
+   * refuses rather than materializing the Bot again. Dropping it also
+   * guarantees no surviving Contribution re-arms the alarm from a stale
+   * transaction.
+   *
+   * Idempotent, because the delete saga replays: an empty object has nothing
+   * to delete and an empty prefix has nothing to list.
+   */
+  private async tearDown(identity: {
+    userId: string;
+    botId: string;
+  }): Promise<void> {
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    await deleteBotWorkspaceRootsV1(this.env, identity);
+    this.mounted = undefined;
+    this.surfacesFor = undefined;
   }
 
   private async materialized(identity: { userId: string; botId: string }) {

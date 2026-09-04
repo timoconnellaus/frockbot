@@ -1101,6 +1101,28 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         contributions.audit.purgeAuditForBot(lifecycle.botId);
       }
     }
+    // A delete that settled on a retry rather than on its own command left its
+    // User-scoped projections behind, and the deleted Bot is no longer in any
+    // lifecycle list to sweep from. The Flock Contribution keeps the to-do
+    // list instead, and it is cleared only once the projections are gone.
+    for (const botId of await contributions.flock.listDeletedBotIds()) {
+      await this.forgetDeletedBot(botId);
+    }
+  }
+
+  /**
+   * The User-scoped state one deleted Bot leaves behind: its transcript rows,
+   * its audit entries and its Memory Project membership.
+   *
+   * Every step is a delete, so repeating it is free, and the to-do entry is
+   * dropped last — a crash before that simply replays the sweep.
+   */
+  private async forgetDeletedBot(botId: string): Promise<void> {
+    const contributions = await this.contributions();
+    contributions.search.purge(botId);
+    contributions.audit.purgeAuditForBot(botId);
+    await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}`);
+    await contributions.flock.forgetDeletedBot(botId);
   }
 
   // --- Applet directory (ADR 0022 decision 3) ------------------------------
@@ -1258,6 +1280,12 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     if (command.type === "bot/archive" && receipt.status === "applied") {
       (await this.searchContribution()).purge(command.botId);
       (await this.auditContribution()).purgeAuditForBot(command.botId);
+    }
+    // Deleting a Bot destroys them rather than dropping a projection: nothing
+    // is left to rebuild from. The sweep runs here on the common path and from
+    // the alarm on every other one.
+    if (command.type === "bot/delete" && receipt.status === "applied") {
+      await this.forgetDeletedBot(command.botId);
     }
     return receipt;
   }

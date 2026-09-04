@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { sheepCatalog } from "../shared.js";
 import { flockWebDataKey } from "./state.js";
 import { dialogFocusWrapTarget } from "./dialog-focus.js";
@@ -7,6 +7,22 @@ import SheepAvatar from "./SheepAvatar.vue";
 const providedFlock = inject(flockWebDataKey);
 if (!providedFlock) throw new Error("Flock client data was not provided");
 const flock = providedFlock;
+
+/**
+ * The name the confirmation names. The live profile is the Bot's current name;
+ * the registration seed is what it was called when it was made, and is the
+ * fallback for a Bot whose identity read has not landed.
+ */
+const pendingName = computed(() => {
+  const botId = flock.value.lifecyclePending;
+  if (!botId) return "this Bot";
+  return (
+    flock.value.profiles[botId]?.name ??
+    flock.value.directory.bots.find((bot) => bot.botId === botId)
+      ?.initialName ??
+    "this Bot"
+  );
+});
 
 const dialog = ref<HTMLElement>();
 let restoreFocus: HTMLElement | undefined;
@@ -87,6 +103,25 @@ onBeforeUnmount(() => restoreFocus?.focus());
           <button type="button" @click="flock.closeOverlay">Cancel</button>
           <button class="primary" type="button" @click="flock.archive">
             Archive Bot
+          </button>
+        </div>
+      </div>
+      <div v-else-if="flock.overlay === 'delete'" class="flock-form">
+        <span class="flock-eyebrow">Delete Bot</span>
+        <h1 id="flock-title">Delete {{ pendingName }}?</h1>
+        <p>This Bot and its chat history will be permanently deleted.</p>
+        <p
+          v-if="flock.error"
+          class="flock-error"
+          role="alert"
+          aria-live="assertive"
+        >
+          {{ flock.error }}
+        </p>
+        <div class="flock-actions">
+          <button type="button" @click="flock.closeOverlay">Cancel</button>
+          <button class="danger" type="button" @click="flock.deleteBot">
+            Delete
           </button>
         </div>
       </div>

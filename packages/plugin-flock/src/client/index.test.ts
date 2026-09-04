@@ -411,6 +411,114 @@ describe("Flock client reconciliation", () => {
     expect(state.value.directory.bots).toEqual([]);
   });
 
+  test("deletes with confirmation and drops the Bot from the list", async () => {
+    installStorage();
+    const location = { href: "https://app.example/?bot=alpha" };
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location,
+        history: {
+          state: null,
+          replaceState: (_state: unknown, _title: string, url: URL) => {
+            location.href = url.href;
+          },
+        },
+      },
+    });
+    const sheep = randomSheepRecipeV1(() => 0);
+    // A deleted Bot leaves the directory outright, unlike an archived one.
+    let bots = ["alpha", "beta"];
+    let deleteCommands = 0;
+    const state = mount((path, method, body) => {
+      if (path === "/api/bots/identities")
+        return Promise.resolve({ schemaVersion: 1, identities: [] });
+      if (path === "/api/bots/alpha/lifecycle" && method === "POST") {
+        const command = JSON.parse(body ?? "") as {
+          commandId: string;
+          botId: string;
+          type: string;
+        };
+        expect(command.type).toBe("bot/delete");
+        deleteCommands += 1;
+        bots = bots.filter((botId) => botId !== "alpha");
+        return Promise.resolve({
+          schemaVersion: 1,
+          commandId: command.commandId,
+          botId: command.botId,
+          status: "applied",
+          lifecycle: {
+            schemaVersion: 1,
+            botId: command.botId,
+            status: "deleted",
+            revision: 1,
+          },
+        });
+      }
+      if (path === "/api/bots")
+        return Promise.resolve({
+          schemaVersion: 1,
+          revision: 3,
+          bots: bots.map((botId) => ({
+            schemaVersion: 1,
+            botId,
+            registeredAt: new Date(0).toISOString(),
+            initialName: botId,
+            sheep,
+          })),
+        });
+      if (path === "/api/bots/lifecycles")
+        return Promise.resolve({
+          schemaVersion: 1,
+          lifecycles: bots.map((botId) => ({
+            schemaVersion: 1,
+            botId,
+            status: "active",
+            revision: 0,
+          })),
+        });
+      if (path.endsWith("/sheep")) {
+        const botId = path.split("/")[3]!;
+        return Promise.resolve({ schemaVersion: 1, botId, revision: 0, sheep });
+      }
+      return Promise.reject(new Error(`unexpected request: ${path}`));
+    });
+    const selected: string[] = [];
+    const forgotten: (string | undefined)[] = [];
+    state.value.bindShell(
+      ref({
+        activeBotId: "alpha",
+        selectBot: (botId: string) => {
+          selected.push(botId);
+          return Promise.resolve();
+        },
+        transcripts: {
+          rememberViewport: () => undefined,
+          viewportFor: () => undefined,
+          forget: (botId?: string) => forgotten.push(botId),
+        },
+      }) as unknown as Ref<FrockBotWebData>,
+    );
+    await state.value.load();
+    state.value.openDelete("alpha");
+    expect(state.value.overlay).toBe("delete");
+    expect(state.value.lifecyclePending).toBe("alpha");
+    await state.value.deleteBot();
+    expect(deleteCommands).toBe(1);
+    expect(state.value.overlay).toBeUndefined();
+    expect(state.value.directory.bots.map((bot) => bot.botId)).toEqual([
+      "beta",
+    ]);
+    expect(selected.at(-1)).toBe("beta");
+    expect(new URL(location.href).searchParams.get("bot")).toBe("beta");
+    // The held transcript goes with the Bot: unlike an archive, there is no
+    // Bot left to read it back from.
+    expect(forgotten).toEqual(["alpha"]);
+    // A Bot that is no longer in the directory cannot be confirmed for delete.
+    state.value.openDelete("alpha");
+    expect(state.value.overlay).toBeUndefined();
+  });
+
   test("archives with confirmation, hides archived Bots, and selects a fallback", async () => {
     installStorage();
     const location = { href: "https://app.example/?bot=alpha" };

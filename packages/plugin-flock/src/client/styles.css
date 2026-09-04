@@ -70,6 +70,11 @@
   color: var(--frock-text);
 }
 
+.flock-lifecycle--danger,
+.flock-lifecycle--danger:hover {
+  color: var(--frock-danger-text);
+}
+
 /*
  * Pinned Bots. A wrapping row of large round tiles above the labelled groups,
  * each one a whole Bot rather than a line of text about it.
@@ -622,6 +627,17 @@
 
 .flock-actions .primary:active {
   background: var(--frock-action-primary-pressed);
+}
+
+/* The one irreversible action in this dialog set, and it says so. */
+.flock-actions .danger {
+  border-color: var(--frock-danger-strong);
+  background: var(--frock-danger-strong);
+  color: var(--frock-on-accent);
+}
+
+.flock-actions .danger:hover {
+  background: var(--frock-danger-text);
 }
 
 @media (max-width: 600px) {

@@ -287,6 +287,110 @@ describe("Flock User contribution", () => {
     ).toMatchObject({ status: "applied", lifecycle: { status: "archived" } });
   });
 
+  test("removes a deleted Bot from the directory and queues its sweep", async () => {
+    const storage = new MemoryStorage();
+    let botStatus: "active" | "deleted" = "active";
+    const contribution = createFlockUserBackendContribution({
+      storage,
+      commandBotLifecycle: (_userId, lifecycleCommand) => {
+        botStatus = "deleted";
+        return Promise.resolve({
+          schemaVersion: 1,
+          commandId: lifecycleCommand.commandId,
+          botId: lifecycleCommand.botId,
+          status: "applied",
+          lifecycle: {
+            schemaVersion: 1,
+            botId: lifecycleCommand.botId,
+            status: "deleted",
+            revision: 1,
+          },
+        });
+      },
+      readBotLifecycle: (_userId, botId) =>
+        Promise.resolve({
+          schemaVersion: 1,
+          botId,
+          status: botStatus,
+          revision: 1,
+        }),
+    });
+    await contribution.createBot("user-1", command());
+    const remove = {
+      schemaVersion: 1 as const,
+      type: "bot/delete" as const,
+      commandId: "delete-1",
+      botId: "alpha",
+    };
+    const applied = await contribution.executeLifecycle("user-1", remove);
+    expect(applied).toMatchObject({
+      status: "applied",
+      lifecycle: { status: "deleted" },
+    });
+    // Gone from every read the sidebar, the fan-outs and the debug surface do.
+    expect(await contribution.listBots()).toMatchObject({
+      revision: 2,
+      bots: [],
+    });
+    expect(await contribution.listBotLifecycles()).toEqual({
+      schemaVersion: 1,
+      lifecycles: [],
+    });
+    expect(storage.values.has("flock:lifecycle:alpha")).toBe(false);
+    // The User-scoped projections are somebody else's to sweep, so the
+    // removal leaves the to-do entry that says so.
+    expect(await contribution.listDeletedBotIds()).toEqual(["alpha"]);
+    await contribution.forgetDeletedBot("alpha");
+    expect(await contribution.listDeletedBotIds()).toEqual([]);
+    // Replaying the command settles from the stored receipt rather than
+    // reporting a Bot that is no longer registered.
+    expect(await contribution.executeLifecycle("user-1", remove)).toEqual(
+      applied,
+    );
+    // A fresh delete of a Bot that is already gone is a plain 404.
+    await expect(
+      contribution.executeLifecycle("user-1", {
+        ...remove,
+        commandId: "delete-2",
+      }),
+    ).rejects.toThrow('Bot "alpha" is not registered');
+  });
+
+  test("finishes a half-done delete from the User alarm", async () => {
+    const storage = new MemoryStorage();
+    // The Bot tore itself down but the reply never arrived, so the saga is the
+    // only thing that knows the registration still has to go.
+    const contribution = createFlockUserBackendContribution({
+      storage,
+      commandBotLifecycle: () => Promise.reject(new Error("response lost")),
+      readBotLifecycle: (_userId, botId) =>
+        Promise.resolve({
+          schemaVersion: 1,
+          botId,
+          status: "deleted",
+          revision: 1,
+        }),
+    });
+    await contribution.createBot("user-1", command());
+    const failing = createFlockUserBackendContribution({
+      storage,
+      commandBotLifecycle: () => Promise.reject(new Error("response lost")),
+      readBotLifecycle: () => Promise.reject(new Error("Bot unavailable")),
+    });
+    expect(
+      await failing.executeLifecycle("user-1", {
+        schemaVersion: 1,
+        type: "bot/delete",
+        commandId: "delete-alarm",
+        botId: "alpha",
+      }),
+    ).toMatchObject({ status: "pending" });
+    expect((await contribution.listBots()).bots).toHaveLength(1);
+    await contribution.alarm();
+    expect((await contribution.listBots()).bots).toEqual([]);
+    expect(await contribution.listDeletedBotIds()).toEqual(["alpha"]);
+  });
+
   test("reconciles uncorrelated, pending, and wrong-target Bot replies", async () => {
     for (const variant of [
       "wrong-command",
