@@ -99,6 +99,12 @@ export interface BotProfile {
   namedBy?: BotNameProvenanceV1;
   /** Keeps the Bot out of the default sidebar list without archiving it. */
   hiddenFromSidebar?: boolean;
+  /**
+   * When the User pinned this Bot, as an ISO 8601 instant. Absent means not
+   * pinned. The instant rather than a flag, so the pinned row keeps a stable
+   * order — earliest pin first — without a second ordering field.
+   */
+  pinnedAt?: string;
 }
 
 /**
@@ -112,6 +118,8 @@ export interface BotProfilePatchV1 {
   description?: string;
   title?: string;
   hiddenFromSidebar?: boolean;
+  /** An ISO 8601 instant pins the Bot; the empty string unpins it. */
+  pinnedAt?: string;
 }
 
 export interface BotNotificationPolicy {
@@ -1065,6 +1073,7 @@ const BOT_PROFILE_OPTIONAL_FIELDS = [
   "title",
   "namedBy",
   "hiddenFromSidebar",
+  "pinnedAt",
 ] as const;
 
 function botProfile(value: unknown): BotProfile {
@@ -1096,7 +1105,19 @@ function botProfile(value: unknown): BotProfile {
             "profile.hiddenFromSidebar",
           ),
         }),
+    ...(profile.pinnedAt === undefined
+      ? {}
+      : { pinnedAt: profileTimestamp(profile.pinnedAt, "profile.pinnedAt") }),
   };
+}
+
+/** An ISO 8601 instant a profile field carries. Never a duration or a count. */
+function profileTimestamp(value: unknown, label: string): string {
+  const candidate = text(value, label, 64);
+  if (!Number.isFinite(Date.parse(candidate))) {
+    throw new ConfigurationDecodeError(`${label} is invalid`);
+  }
+  return candidate;
 }
 
 /**
@@ -1123,7 +1144,7 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
     value,
     "profile",
     [],
-    ["name", "label", "description", "title", "hiddenFromSidebar"],
+    ["name", "label", "description", "title", "hiddenFromSidebar", "pinnedAt"],
   );
   if (Reflect.ownKeys(patch).length === 0) {
     throw new ConfigurationDecodeError("profile has invalid fields");
@@ -1148,6 +1169,15 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
             "profile.hiddenFromSidebar",
           ),
         }),
+    // An instant pins; the empty string unpins, the same way text clears.
+    ...(patch.pinnedAt === undefined
+      ? {}
+      : {
+          pinnedAt:
+            patchText(patch.pinnedAt, "profile.pinnedAt", 64) === ""
+              ? ""
+              : profileTimestamp(patch.pinnedAt, "profile.pinnedAt"),
+        }),
   };
 }
 
@@ -1167,7 +1197,7 @@ export function applyBotProfilePatchV1(
     next.name = patch.name;
     next.namedBy = namedBy;
   }
-  for (const key of ["label", "description", "title"] as const) {
+  for (const key of ["label", "description", "title", "pinnedAt"] as const) {
     const value = patch[key];
     if (value === undefined) continue;
     if (value === "") delete next[key];

@@ -184,6 +184,28 @@ describe("Flock v1 contracts", () => {
       }),
     ).toThrow("duplicate IDs");
   });
+
+  test("carries the pin instant, and refuses one that is not an instant", () => {
+    const identity = {
+      schemaVersion: 1 as const,
+      botId: "alpha",
+      name: "Atlas",
+      namedBy: "user" as const,
+      hiddenFromSidebar: false,
+      pinnedAt: "2026-09-03T10:15:00.000Z",
+    };
+    expect(decodeBotIdentityViewV1(structuredClone(identity))).toEqual(
+      identity,
+    );
+    // Absent stays absent: every identity written before pinning existed.
+    const { pinnedAt: _pinnedAt, ...unpinned } = identity;
+    expect(decodeBotIdentityViewV1(structuredClone(unpinned))).toEqual(
+      unpinned,
+    );
+    expect(() =>
+      decodeBotIdentityViewV1({ ...identity, pinnedAt: "someday" }),
+    ).toThrow("pinnedAt is invalid");
+  });
 });
 
 describe("stored Bot directory migration", () => {

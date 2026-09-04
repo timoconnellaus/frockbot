@@ -10,7 +10,7 @@ const props = withDefaults(
     botId: string;
     sheep: SheepRecipeV1;
     label?: string;
-    size?: "mini" | "small" | "large";
+    size?: "mini" | "small" | "tile" | "large";
   }>(),
   { label: "Bot avatar", size: "small" },
 );

@@ -1,3 +1,40 @@
+export interface PinnedSidebarBotsV1<T> {
+  /** Pinned Bots, earliest pin first. Rendered as tiles above the list. */
+  pinned: T[];
+  /** Everything else, in the order it arrived. */
+  rest: T[];
+}
+
+/**
+ * Splits the pinned Bots out of the sidebar list. A pinned Bot is a tile at
+ * the top instead of a row below, never both, so the list this returns is what
+ * {@link groupSidebarBotsV1} then groups by label.
+ *
+ * Order is by pin time — earliest first — because the tile row is a place a
+ * User builds up over time and a Bot pinned today must not displace the one
+ * they pinned last month. Ties and unparseable instants keep list order.
+ */
+export function partitionPinnedSidebarBotsV1<T extends { botId: string }>(
+  bots: readonly T[],
+  profiles: Readonly<Record<string, { pinnedAt?: string } | undefined>>,
+): PinnedSidebarBotsV1<T> {
+  const pinned: Array<{ bot: T; at: number; index: number }> = [];
+  const rest: T[] = [];
+  for (const [index, bot] of bots.entries()) {
+    const pinnedAt = profiles[bot.botId]?.pinnedAt?.trim();
+    if (!pinnedAt) {
+      rest.push(bot);
+      continue;
+    }
+    const at = Date.parse(pinnedAt);
+    pinned.push({ bot, at: Number.isFinite(at) ? at : 0, index });
+  }
+  pinned.sort((left, right) =>
+    left.at === right.at ? left.index - right.index : left.at - right.at,
+  );
+  return { pinned: pinned.map((entry) => entry.bot), rest };
+}
+
 export interface SidebarBotGroupV1<T> {
   key: string;
   label: string;
