@@ -74,6 +74,7 @@ describe("Applet tools mounted into a Turn's Composition", () => {
   test("the call carries the generation the Turn pinned, not just the Applet id", async () => {
     const calls: Array<{ appletId: string; generationId: string }> = [];
     const generation = await generationWithApplet();
+    const { signal } = new AbortController();
     const mounted = await createShellCompositionHost({
       botId: "bot-1",
       sessionId: `${USER}:bot-1`,
@@ -88,9 +89,9 @@ describe("Applet tools mounted into a Turn's Composition", () => {
           return Promise.resolve({ status: "ok" as const, content: "added" });
         },
       },
-    }).mount(generation, new AbortController().signal);
+    }).mount(generation, signal);
     try {
-      await mounted.verify();
+      await mounted.verify(signal);
       const schema = mounted.root.tools
         .schemas({ turnType: "chat" })
         .find((entry) => entry.name === "add_todo");
@@ -99,7 +100,7 @@ describe("Applet tools mounted into a Turn's Composition", () => {
       // string. If they ever diverge the Turn stops being reconstructable.
       expect(schema?.description).toContain(APPLET_MEMBER.generationId);
 
-      const call = { name: "add_todo", input: { title: "milk" } };
+      const call = { id: "call-1", name: "add_todo", input: { title: "milk" } };
       const context = {
         botId: "bot-1",
         agentId: "bot-1",
@@ -108,7 +109,7 @@ describe("Applet tools mounted into a Turn's Composition", () => {
         effectId: "effect-1",
         toolCall: call,
         turnType: "chat" as const,
-        signal: new AbortController().signal,
+        signal,
       };
       const prepared = await mounted.root.tools.prepare(call, context);
       expect(prepared.kind).toBe("ready");
