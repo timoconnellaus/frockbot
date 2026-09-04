@@ -114,6 +114,20 @@ function browserAction(input: unknown): ComputerBrowserAction {
       throw new Error("Computer browser URL is invalid");
     return { type, url: value.url };
   }
+  if (type === "close-origins") {
+    const value = record(input, ["type", "origins"], "Computer browser action");
+    if (
+      !Array.isArray(value.origins) ||
+      value.origins.length < 1 ||
+      value.origins.length > 16 ||
+      value.origins.some(
+        (origin) => typeof origin !== "string" || origin.length > 2_048,
+      )
+    ) {
+      throw new Error("Computer browser origins are invalid");
+    }
+    return { type, origins: value.origins as string[] };
+  }
   if (type === "click") {
     const value = record(
       input,

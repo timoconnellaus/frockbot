@@ -14,6 +14,7 @@ import { SessionStore } from "@frockbot/kernel-contracts";
 import manifest from "../frockbot.json" with { type: "json" };
 import packageJson from "../package.json" with { type: "json" };
 import {
+  COMPUTER_OVERLOADED_TOOL_MESSAGE_V1,
   createComputerAgentPlugin,
   HUMAN_CONTROL_PROMPT_LINE,
 } from "./agent.js";
@@ -221,6 +222,50 @@ describe("computer agent contribution", () => {
       isError: true,
     });
     await harness.dispose();
+  });
+
+  test("computer_exec maps overloaded transport failures to one bounded plain reason", async () => {
+    for (const message of [
+      "Computer command failed: WebSocket keepalive timeout after 45000ms",
+      "The Computer effect was cancelled",
+    ]) {
+      const provider: ComputerProvider = {
+        id: "fixture",
+        open: async (identity, tenant, assignment) => ({
+          assignment,
+          identity,
+          tenant,
+          exec: {
+            execute: () => Promise.reject(new Error(message)),
+          },
+          close: () => Promise.resolve(),
+        }),
+      };
+      const harness = await createPluginHarness([
+        ComputerRegistry,
+        ToolRegistry,
+        SystemPromptRegistry,
+        SessionStore,
+      ]);
+      harness.root.computers.register(provider);
+      await harness.mount(
+        createComputerAgentPlugin({
+          userId: "user-1",
+          defaultProviderId: "fixture",
+        }),
+      );
+
+      await expect(
+        execute(harness, "computer_exec", { command: "pwd" }),
+      ).resolves.toEqual({
+        content: COMPUTER_OVERLOADED_TOOL_MESSAGE_V1,
+        isError: true,
+      });
+      expect(COMPUTER_OVERLOADED_TOOL_MESSAGE_V1.length).toBeLessThanOrEqual(
+        160,
+      );
+      await harness.dispose();
+    }
   });
 
   test("injects and records the human-control line only while the durable lease is fresh", async () => {

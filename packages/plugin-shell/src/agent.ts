@@ -234,6 +234,11 @@ export const STEP_BUDGET_PROMPT_SECTION_V1 = "step-budget";
 export const STEP_BUDGET_PROMPT_ORDER_V1 = 90;
 /** The section appears when this many steps or fewer remain after this one. */
 export const STEP_BUDGET_WARNING_STEPS_V1 = 3;
+export const TIME_BUDGET_PROMPT_SECTION_V1 = "time-budget";
+/** Immediately after the step warning, so the time warning is read last. */
+export const TIME_BUDGET_PROMPT_ORDER_V1 = 91;
+/** The section appears only once strictly fewer than two minutes remain. */
+export const TIME_BUDGET_WARNING_MS_V1 = 2 * 60_000;
 
 /**
  * What the model is told when its reply is about to be stopped.
@@ -262,6 +267,23 @@ export function stepBudgetPromptTextV1(context: {
     "<step_budget>",
     `This reply has ${remaining} ${remaining === 1 ? "step" : "steps"} left after this one before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with a short status for the person: what is finished, what is not, and what they can do next.`,
     "</step_budget>",
+  ].join("\n");
+}
+
+/** Warns by wall-clock budget even when the model has used few steps. */
+export function timeBudgetPromptTextV1(context: {
+  deadline?: { at: number; now: number };
+}): string {
+  const deadline = context.deadline;
+  if (!deadline) return "";
+  const remaining = deadline.at - deadline.now;
+  if (!Number.isFinite(remaining) || remaining >= TIME_BUDGET_WARNING_MS_V1) {
+    return "";
+  }
+  return [
+    "<time_budget>",
+    `This Turn has fewer than 2 minutes left before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with a short status for the person: what is finished, what is not, and what they can do next.`,
+    "</time_budget>",
   ].join("\n");
 }
 
@@ -468,6 +490,11 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
       id: STEP_BUDGET_PROMPT_SECTION_V1,
       order: STEP_BUDGET_PROMPT_ORDER_V1,
       render: (context) => stepBudgetPromptTextV1(context),
+    }),
+    ctx.systemPrompt.register({
+      id: TIME_BUDGET_PROMPT_SECTION_V1,
+      order: TIME_BUDGET_PROMPT_ORDER_V1,
+      render: (context) => timeBudgetPromptTextV1(context),
     }),
     ctx.tools.register(
       createSendToUserTool(SEND_TO_USER_TOOL_V1, ctx.sessions),

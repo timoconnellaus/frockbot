@@ -22,6 +22,13 @@ export interface PromptAssemblyContext {
    * Absent when the assembler is not inside a Turn.
    */
   step?: { current: number; max: number };
+  /**
+   * The Turn's absolute deadline and the assembly instant, both Unix epoch
+   * milliseconds from the loop's clock. A prompt section can warn by elapsed
+   * time without owning a timer or guessing when the Turn began.
+   * Absent when the assembler is not inside a Turn.
+   */
+  deadline?: { at: number; now: number };
 }
 
 /** What a host assembles as when it is not running an admitted Turn. */
