@@ -405,6 +405,45 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
+// Tim's report, as the thread: a Bot that says three things in one Turn leaves
+// three messages behind, in the order it said them. Each one used to land in
+// the same bubble, so the newest overwrote the one before it and a person
+// watching an acknowledgement followed by a result was left with only the
+// result.
+test("every message the Bot sends is its own bubble, in order", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Sayer",
+  });
+
+  const said = ["On it.", "Looking now.", "Booked."];
+  await sendMessage(
+    page,
+    [
+      "book it",
+      ...said.map((text) =>
+        e2eToolCallPrompt("send_to_user", { payload: { type: "text", text } }),
+      ),
+    ].join("\n"),
+    { replies: said.length },
+  );
+
+  const bubbles = page.locator("article.message-assistant .send-text");
+  await expect(bubbles).toHaveCount(said.length, { timeout: 120_000 });
+  await expect(bubbles).toHaveText(said);
+
+  // Durable order is display order: the thread a reload draws is the thread
+  // that was watched being written, and no send has been folded into another.
+  await page.reload();
+  await expect(bubbles).toHaveText(said, { timeout: 120_000 });
+});
+
 // The owner's ask, from the other side: a Turn that spends its time making
 // tool calls has to look like it is working without naming one. The comet
 // trail off the Bot's avatar is that — a working row labelled "Working" while

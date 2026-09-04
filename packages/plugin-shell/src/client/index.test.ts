@@ -1526,16 +1526,95 @@ describe("active durable Turn projection", () => {
       ],
     );
 
-    expect(state.messages[1]?.sends).toEqual([
+    // One message per send, in the order they were sent, and nothing merged:
+    // the last line is the Turn's own, and it carries no send at all.
+    expect(
+      state.messages.slice(1).map((message) => [message.id, message.sends]),
+    ).toEqual([
+      [
+        "run-send:send:0",
+        [{ kind: "payload", payload: { type: "text", text: "On it." } }],
+      ],
+      [
+        "run-send:send:1",
+        [
+          {
+            kind: "payload",
+            payload: {
+              type: "widget",
+              widget: { prompt: "Which day?", options: ["Tue"] },
+            },
+          },
+        ],
+      ],
+      ["run-send:send:2", [{ kind: "unsupported" }]],
+      ["run-send:assistant", []],
+    ]);
+  });
+
+  test("a second send is a new bubble, and never rewrites the first", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+    const run = (
+      events: ClientRun["events"],
+      status: ClientRun["status"] = "running",
+    ): ClientRun => ({
+      runId: "run-stack",
+      input: "Book it",
+      admittedAt: "2026-09-04T00:00:00.000Z",
+      status,
+      events,
+    });
+
+    // The acknowledgement arrives first, on its own.
+    projectDurableRuns(state, [], [
+      run([
+        { type: "send/to-user", payload: { type: "text", text: "On it." } },
+      ]),
+    ] as ClientRun[]);
+    const acknowledgement = state.messages[1];
+    expect(acknowledgement?.sends).toEqual([
       { kind: "payload", payload: { type: "text", text: "On it." } },
-      {
-        kind: "payload",
-        payload: {
-          type: "widget",
-          widget: { prompt: "Which day?", options: ["Tue"] },
-        },
-      },
-      { kind: "unsupported" },
+    ]);
+
+    // The result follows in the same Turn. It appends: the first bubble is
+    // still the first bubble, still saying what it said.
+    projectDurableRuns(state, [], [
+      run(
+        [
+          {
+            type: "send/to-user",
+            payload: { type: "text", text: "On it." },
+          },
+          { type: "send/to-user", payload: { type: "text", text: "Booked." } },
+        ],
+        "completed",
+      ),
+    ] as ClientRun[]);
+
+    expect(
+      state.messages
+        .filter((message) => message.sends.length > 0)
+        .map((message) => [message.id, message.sends]),
+    ).toEqual([
+      [
+        "run-stack:send:0",
+        [{ kind: "payload", payload: { type: "text", text: "On it." } }],
+      ],
+      [
+        "run-stack:send:1",
+        [{ kind: "payload", payload: { type: "text", text: "Booked." } }],
+      ],
+    ]);
+    // The Turn's lines stay together and in order behind the prompt that
+    // started it, so a reload draws the thread that was watched being written.
+    expect(state.messages.map((message) => message.id)).toEqual([
+      "run-stack:user",
+      "run-stack:send:0",
+      "run-stack:send:1",
+      "run-stack:assistant",
     ]);
   });
 
@@ -1561,8 +1640,8 @@ describe("active durable Turn projection", () => {
       ],
     );
 
-    expect(state.messages[1]?.text).toBe("");
     expect(state.messages[1]?.sends).toHaveLength(1);
+    expect(state.messages[2]?.text).toBe("");
   });
 
   test("a Turn that sent nothing still draws the model's text", () => {
@@ -1712,8 +1791,8 @@ describe("active durable Turn projection", () => {
         },
       ],
     );
-    expect(state.messages[1]).toMatchObject({ text: "", status: "streaming" });
     expect(state.messages[1]?.sends).toHaveLength(1);
+    expect(state.messages[2]).toMatchObject({ text: "", status: "streaming" });
   });
 
   test("projects reconciliation-required recovery state", () => {

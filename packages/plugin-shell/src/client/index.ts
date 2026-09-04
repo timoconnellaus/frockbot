@@ -293,13 +293,14 @@ function turnRefusalCopyV1(reason: ClientTurnRefusalReasonV1): string {
  * The Bot's voice is its sends. When a Turn delivered anything to the User the
  * model's own assistant text is scratch space and the thread does not draw it
  * (issue 153): drawing both is how a one-word reply arrived twice, once as the
- * model's text and once as the bubble that was actually delivered.
+ * model's text and once as the bubble that was actually delivered — the Turn's
+ * derived text is the last text send when the model wrote no message of its
+ * own (`backend-runner.ts`'s `lastSentTextV1`), so it is literally that copy.
  *
  * A running Turn has no `responseText` yet — that is written only at
  * settlement — so it draws the words it has written so far. They occupy the
- * same bubble the settled answer will, and the same send gate applies to
- * both: a Turn that has already delivered a bubble streams nothing into a
- * second one.
+ * same bubble the settled answer will, and that bubble is the Turn's own line,
+ * which follows the sends rather than replacing any of them.
  */
 function visibleAssistantText(run: ClientRun, fallback = ""): string {
   if (sendsFrom(run.events).length > 0) return "";
@@ -315,6 +316,33 @@ function isTerminalRun(run: ClientRun): boolean {
   );
 }
 
+/**
+ * One message per `send_to_user`, in the order the Bot sent them.
+ *
+ * A Turn is not one bubble. The Bot acknowledges, works, and reports back,
+ * and each of those is a message in the conversation exactly as it would be
+ * from a person (issue 153). The order is the durable order of the run's
+ * events, so the thread a reload draws is the thread that was watched being
+ * written, and a bubble is never edited once it is in the transcript: a later
+ * send appends, it does not replace.
+ */
+function sendMessages(run: ClientRun): WebChatMessage[] {
+  return sendsFrom(run.events).map((send, index) => ({
+    id: `${run.runId}:send:${index}`,
+    runId: run.runId,
+    role: "assistant" as const,
+    text: "",
+    status: "completed" as const,
+    tools: [],
+    sends: [send],
+  }));
+}
+
+/**
+ * The Turn's own line: the model's words, why the Turn ended where it did,
+ * the tools it ran and the subagents it dispatched. It closes the run, under
+ * whatever the Turn had already sent.
+ */
 function assistantMessage(
   run: ClientRun,
   notification: ClientNotificationIntent | undefined,
@@ -332,7 +360,7 @@ function assistantMessage(
       // message is the whole of what the thread says about it.
       ...(run.queued ? { pending: true } : {}),
       tools: toolsFrom(run.events),
-      sends: sendsFrom(run.events),
+      sends: [],
       tasks: tasksFrom(run.events),
     };
   }
@@ -347,7 +375,7 @@ function assistantMessage(
       notice: "Interrupted by your next message.",
       status: "aborted",
       tools: toolsFrom(run.events),
-      sends: sendsFrom(run.events),
+      sends: [],
       tasks: tasksFrom(run.events),
     };
   }
@@ -367,7 +395,7 @@ function assistantMessage(
       notice: "This reply stopped partway. Try again to continue it.",
       status: "reconciliation-required",
       tools: toolsFrom(run.events),
-      sends: sendsFrom(run.events),
+      sends: [],
       tasks: tasksFrom(run.events),
     };
   }
@@ -380,7 +408,7 @@ function assistantMessage(
       notice: "You stopped this.",
       status: "aborted",
       tools: toolsFrom(run.events),
-      sends: sendsFrom(run.events),
+      sends: [],
       tasks: tasksFrom(run.events),
     };
   }
@@ -401,7 +429,7 @@ function assistantMessage(
       notice: "This Bot couldn't finish its reply. Try again.",
       status: "error",
       tools: toolsFrom(run.events),
-      sends: sendsFrom(run.events),
+      sends: [],
       tasks: tasksFrom(run.events),
     };
   }
@@ -420,7 +448,7 @@ function assistantMessage(
       : {}),
     status: run.status === "failed" ? "error" : "completed",
     tools: toolsFrom(run.events),
-    sends: sendsFrom(run.events),
+    sends: [],
     tasks: tasksFrom(run.events),
   };
 }
@@ -521,16 +549,12 @@ export function projectDurableRuns(
     if (userIndex >= 0) state.messages[userIndex] = user;
     else state.messages.push(user);
 
-    const assistantIndex = state.messages.findIndex(
-      (message) => message.runId === run.runId && message.role === "assistant",
+    replaceTurnMessages(
+      state.messages,
+      run.runId,
+      [...sendMessages(run), assistantMessage(run, notification)],
+      run.admittedAt,
     );
-    const assistant = assistantMessage(run, notification);
-    const assistantAt =
-      run.admittedAt ??
-      (assistantIndex >= 0 ? state.messages[assistantIndex]?.at : undefined);
-    if (assistantAt) assistant.at = assistantAt;
-    if (assistantIndex >= 0) state.messages[assistantIndex] = assistant;
-    else state.messages.push(assistant);
 
     activeRun = activeRunView(run) ?? activeRun;
     if (run.status === "running" || run.status === "reconciliation-required") {
@@ -2638,19 +2662,24 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           message.runId = result.runId;
           message.id = `${result.runId}:${message.role}`;
         }
-        replaceMessage(web.value.messages, result.runId, {
-          id: `${result.runId}:assistant`,
+        // Projected exactly as the durable read projects it, from the same
+        // events: one bubble per send, in order, and the model's own text
+        // after them (issue 153). The POST's copy of a Turn and the transcript
+        // read must draw the same thread, or the reply rearranges itself on
+        // the next reload.
+        const settled: ClientRun = {
           runId: result.runId,
-          role: "assistant",
-          // The same rule the durable projection follows: a Turn that
-          // delivered something speaks through its sends, not through the
-          // model's own text (issue 153).
-          text: sendsFrom(result.events).length > 0 ? "" : result.text,
-          at: optimisticAt,
+          input: text,
           status: "completed",
-          tools: toolsFrom(result.events),
-          sends: sendsFrom(result.events),
-        });
+          responseText: result.text,
+          events: result.events,
+        };
+        replaceTurnMessages(
+          web.value.messages,
+          result.runId,
+          [...sendMessages(settled), assistantMessage(settled, undefined)],
+          optimisticAt,
+        );
         try {
           await deliverNotifications(botId, generation);
         } catch (error) {
@@ -2709,16 +2738,23 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
               message.runId === pendingRunId && message.role === "user",
           )?.at ?? optimisticAt,
         );
-        replaceMessage(web.value.messages, pendingRunId, {
-          id: `${pendingRunId}:assistant`,
-          runId: pendingRunId,
-          role: "assistant",
-          text: "Checking whether your message went through…",
-          at: placeholderAt,
-          status: "interrupted",
-          tools: [],
-          sends: [],
-        });
+        replaceTurnMessages(
+          web.value.messages,
+          pendingRunId,
+          [
+            {
+              id: `${pendingRunId}:assistant`,
+              runId: pendingRunId,
+              role: "assistant",
+              text: "Checking whether your message went through…",
+              at: placeholderAt,
+              status: "interrupted",
+              tools: [],
+              sends: [],
+            },
+          ],
+          placeholderAt,
+        );
         if (aborted) {
           web.value.error = undefined;
         } else {
@@ -2744,17 +2780,24 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         // have to improvise — and with the Turn no longer running, so Stop
         // stops standing for a Turn nobody is executing.
         if (disposition === "unreachable") {
-          replaceMessage(web.value.messages, pendingRunId, {
-            id: `${pendingRunId}:assistant`,
-            runId: pendingRunId,
-            role: "assistant",
-            text: UNREACHABLE_BOT_MESSAGE_V1,
-            at: placeholderAt,
-            status: "error",
-            retry: "resend",
-            tools: [],
-            sends: [],
-          });
+          replaceTurnMessages(
+            web.value.messages,
+            pendingRunId,
+            [
+              {
+                id: `${pendingRunId}:assistant`,
+                runId: pendingRunId,
+                role: "assistant",
+                text: UNREACHABLE_BOT_MESSAGE_V1,
+                at: placeholderAt,
+                status: "error",
+                retry: "resend",
+                tools: [],
+                sends: [],
+              },
+            ],
+            placeholderAt,
+          );
           // The bubble is the report, and it is the one carrying the Retry.
           // Saying the same sentence again in the banner above it is what the
           // thread already looked like when it was broken — the same string
@@ -2774,19 +2817,26 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           // retry, and one system line says so.
           const notAdmitted =
             "Your message didn't go through. Try sending it again.";
-          replaceMessage(web.value.messages, pendingRunId, {
-            id: `${pendingRunId}:assistant`,
-            runId: pendingRunId,
-            role: "system",
-            text: notAdmitted,
-            at: placeholderAt,
-            status: "error",
-            // The same affordance an unreachable send gets: the draft is back
-            // in the composer, and this sends it again.
-            retry: "resend",
-            tools: [],
-            sends: [],
-          });
+          replaceTurnMessages(
+            web.value.messages,
+            pendingRunId,
+            [
+              {
+                id: `${pendingRunId}:assistant`,
+                runId: pendingRunId,
+                role: "system",
+                text: notAdmitted,
+                at: placeholderAt,
+                status: "error",
+                // The same affordance an unreachable send gets: the draft is
+                // back in the composer, and this sends it again.
+                retry: "resend",
+                tools: [],
+                sends: [],
+              },
+            ],
+            placeholderAt,
+          );
           return { accepted: false, error: notAdmitted };
         }
         return { accepted: true, runId: pendingRunId };
@@ -3081,15 +3131,46 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   ];
 };
 
-function replaceMessage(
+/**
+ * Puts a Turn's Bot-side lines in the thread, in order, in one place.
+ *
+ * A Turn is one user message and then however many the Bot sent, so a merge
+ * cannot key one bubble by run id and overwrite it — that is exactly how a
+ * second `send_to_user` used to replace the first. Every Bot-side line the
+ * run already has is lifted out and the new ones go back at the same
+ * position, which keeps the sends in their durable order and keeps the whole
+ * Turn together between the Turn before it and the Turn after it.
+ *
+ * Where a line already carried a timestamp and the caller offers none, the
+ * one it had is kept: the thread sorts by time and a line must not jump.
+ */
+function replaceTurnMessages(
   messages: WebChatMessage[],
   runId: string,
-  replacement: WebChatMessage,
+  replacements: WebChatMessage[],
+  at?: string,
 ): void {
-  const index = messages.findIndex(
-    (message) => message.runId === runId && message.role === "assistant",
-  );
-  if (index >= 0) messages[index] = replacement;
+  let start = -1;
+  let existingAt: string | undefined;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.runId !== runId || message.role !== "assistant")
+      continue;
+    existingAt = message.at ?? existingAt;
+    start = index;
+    messages.splice(index, 1);
+  }
+  if (start < 0) {
+    // No Bot-side line yet: it belongs directly after this Turn's prompt, so
+    // an older Turn's reply can never come between them.
+    const userIndex = messages.findIndex(
+      (message) => message.runId === runId && message.role === "user",
+    );
+    start = userIndex >= 0 ? userIndex + 1 : messages.length;
+  }
+  const stamp = at ?? existingAt;
+  if (stamp) for (const message of replacements) message.at = stamp;
+  messages.splice(start, 0, ...replacements);
 }
 
 /** Takes back both optimistic lines of a send the Bot never admitted. */
