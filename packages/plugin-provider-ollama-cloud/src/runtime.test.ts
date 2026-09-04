@@ -725,8 +725,12 @@ describe("Ollama Cloud deadlines", () => {
     clock.advance(MODEL_FIRST_BYTE_DEADLINE_MS_V1);
 
     const failure = await outcome;
-    expect(failure).toBeInstanceOf(ModelRequestDeadlineError);
-    expect((failure as ModelRequestDeadlineError).phase).toBe("first-byte");
+    // Reported as "not started", not as a bare deadline: nothing was streamed,
+    // so no provider effect exists, and this Package classifies every failure
+    // before the first event as definitive. That matters more than the class
+    // name — a deadline reported as uncertain would park the run on a
+    // retrieval nobody can perform. The reason still reaches the person.
+    expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
     expect((failure as Error).message).toBe(
       MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
     );
