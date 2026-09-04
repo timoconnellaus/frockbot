@@ -28,7 +28,7 @@
     "@capacitor/cli": "8.5.0",
     "@capacitor/ios": "8.5.0",
     "@types/bun": "1.4.0",
-    "typescript": "5.9.3",
+    "typescript": "^7.0.2",
     "vite": "8.2.2"
   }
 }

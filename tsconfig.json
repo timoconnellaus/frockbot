@@ -1,11 +1,22 @@
 {
-  "files": [],
-  "references": [
-    { "path": "./packages/protocol" },
-    { "path": "./apps/agent-runtime" },
-    { "path": "./apps/cloudflare" },
-    { "path": "./apps/marketing" },
-    { "path": "./apps/desktop" },
-    { "path": "./apps/mobile" }
-  ]
+  // A base for `extends`, not a solution file. Every workspace package owns its
+  // own tsconfig and is checked on its own by `bun run typecheck`, because the
+  // packages do not share compiler options: Workers code needs lib WebWorker,
+  // UI needs DOM, and merging them would let a Worker see DOM globals it does
+  // not have.
+  //
+  // This file previously listed `references` to six projects, but project
+  // references require `composite: true`, which requires declaration emit — and
+  // 66 packages here export `./src/*.ts` directly with no build step. So the
+  // references never worked; `tsc -b` against them fails. They are gone rather
+  // than left looking functional.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "exclude": ["node_modules", "**/node_modules", "**/dist"]
 }
