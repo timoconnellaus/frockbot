@@ -433,6 +433,15 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       readAudit: () => Promise.reject(new Error("not used while composing")),
       readUsage: () => Promise.reject(new Error("not used while composing")),
+      readBilling: () => Promise.reject(new Error("not used while composing")),
+      applyStripeEvent: () =>
+        Promise.reject(new Error("not used while composing")),
+      prepareStripeCommand: () =>
+        Promise.reject(new Error("not used while composing")),
+      recordStripeCustomer: () =>
+        Promise.reject(new Error("not used while composing")),
+      completeStripeCommand: () =>
+        Promise.reject(new Error("not used while composing")),
       rebuildAuditIndex: () =>
         Promise.reject(new Error("not used while composing")),
       listBotUnread: () =>
