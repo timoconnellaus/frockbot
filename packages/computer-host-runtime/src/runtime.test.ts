@@ -448,7 +448,7 @@ state running`);
     );
   });
 
-  test("the update runner replaces files and installs nothing", () => {
+  test("the update runner replaces files and only repairs Applet dependencies", () => {
     expect(UPDATE_PHASES.map((phase) => phase.name)).toEqual([
       "runtime",
       "applets",
@@ -460,16 +460,16 @@ state running`);
     const updateDocument = UPDATE_PHASES.map((phase) => phase.body).join("\n");
     expect(updateDocument).not.toContain("apt-get");
     expect(updateDocument).not.toContain("playwright-core/cli.js install");
-    // An in-place update swaps names over files it owns and leaves the SDK's
-    // dependency tree — which an `applet dev` may be running out of — alone.
-    // The one install it carries is the SDK itself, and only while the SDK
-    // is absent, which is exactly when nothing can be running out of it.
+    // An in-place update swaps names over files it owns. It installs the SDK
+    // only while absent, and fills the four shared React dependencies only
+    // when the resolution probe proves an older installation needs repair.
     expect(updateDocument).not.toContain("miniflare@");
     const installs = updateDocument
       .split("\n")
       .filter((line) => line.includes("npm install"));
     expect(installs).toEqual([
       `  if npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund @frockbot/applet-sdk@${APPLET_SDK_VERSION}; then`,
+      `    npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund react@19.2.8 react-dom@19.2.8 @types/react@19.2.18 @types/react-dom@19.2.4 || true`,
     ]);
     expect(updateDocument).toContain(
       `if [ ! -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]; then`,
@@ -528,18 +528,52 @@ describe("the applets phase", () => {
     expect(appletSdkInstallScript).not.toContain("user-packages");
   });
 
-  test("an SDK that cannot be fetched leaves a record and not a failed run", () => {
-    // `@frockbot/applet-sdk` is not on npm yet. A Computer whose SDK could not
-    // be installed still browses, execs, and syncs, so the phase records the
-    // failure for the doctor rather than failing provisioning.
+  test("repairs old SDK installs and verifies every shared build import", () => {
+    const fallback =
+      `npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund ` +
+      "react@19.2.8 react-dom@19.2.8 @types/react@19.2.18 @types/react-dom@19.2.4";
+    const fallbackProbe = `cd ${APPLETS_ROOT} && node -e "require.resolve('react-dom/client')"`;
+
+    expect(appletSdkInstallScript).toContain(fallback);
+    expect(appletSdkInstallScript).toContain(fallbackProbe);
+    expect(appletSdkInstallScript).toContain(
+      `SDK_RESOLUTION_ERROR=$(cd ${APPLETS_ROOT} && node -e`,
+    );
+    for (const specifier of [
+      "react-dom/client",
+      "react",
+      "@frockbot/applet-sdk/client",
+    ]) {
+      expect(appletSdkInstallScript).toContain(`'${specifier}'`);
+    }
+    expect(appletSdkInstallScript.indexOf(fallbackProbe)).toBeLessThan(
+      appletSdkInstallScript.indexOf(fallback),
+    );
+    expect(appletSdkInstallScript.indexOf(fallback)).toBeLessThan(
+      appletSdkInstallScript.indexOf("SDK_RESOLUTION_ERROR=$(cd"),
+    );
+    expect(appletSdkInstallScript).toContain(`> ${APPLETS_SDK_FAILURE_PATH}`);
+  });
+
+  test("an SDK that cannot be fetched or resolved leaves a record and not a failed run", () => {
+    // A Computer whose SDK could not be installed or resolved still browses,
+    // execs, and syncs, so the phase records the failure for the doctor rather
+    // than failing provisioning.
     const applets = PROVISION_PHASES.find((phase) => phase.name === "applets")!;
     expect(applets.body).toContain(`> ${APPLETS_SDK_FAILURE_PATH}`);
     expect(applets.body).toContain(`rm -f ${APPLETS_SDK_FAILURE_PATH}`);
     expect(boxDoctorScript).toContain("record applets-sdk fail");
     expect(boxDoctorScript).toContain("record applets-sdk pass");
+    expect(
+      boxDoctorScript.indexOf(`[ -f ${APPLETS_SDK_FAILURE_PATH} ]`),
+    ).toBeLessThan(
+      boxDoctorScript.indexOf(
+        `[ -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]`,
+      ),
+    );
   });
 
-  test("runs again rather than once, because the SDK has not shipped", () => {
+  test("runs again rather than once so old SDK installs can be repaired", () => {
     const applets = PROVISION_PHASES.find((phase) => phase.name === "applets")!;
     expect(applets.always).toBe(true);
     expect(provisionScript).not.toContain('[ ! -f "$MARKERS/applets"');
