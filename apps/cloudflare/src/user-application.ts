@@ -37,7 +37,7 @@ import {
 import { decodeApprovalDecisionCommandV1 } from "@frockbot/plugin-shell/approvals";
 import { botTurnRefusalCodeV1 } from "@frockbot/kernel-do";
 import type { UserApplicationEnv } from "./contracts.js";
-import { answeredEntryV1 } from "./entry-boundary.js";
+import { answeredEntryV1, entryFailureStatusV1 } from "./entry-boundary.js";
 import {
   drainedAnswerV1,
   isRequestTooLargeV1,
@@ -168,6 +168,26 @@ function jsonError(status: number, message: string): Response {
 }
 
 /**
+ * A Bot-scoped call that failed, answered with the status the failure is owed.
+ *
+ * These routes check the registration once, at the top, and then talk to the
+ * Bot Durable Object — and a Bot can stop existing in between. Deleting a Bot
+ * makes that window real and routine: the panels of the Bot being looked at
+ * poll it, so a read is almost always in flight when the delete lands. Such a
+ * read is a 404 or a 410, not a server fault, and answering 500 made the
+ * client log an error for the correct answer to its own question.
+ *
+ * Only a failure the entry boundary names gets a status of its own; anything
+ * unrecognised is still this Worker's 500.
+ */
+function botFailure(error: unknown, fallback: string): Response {
+  return jsonError(
+    entryFailureStatusV1(error),
+    error instanceof Error ? error.message : fallback,
+  );
+}
+
+/**
  * A Turn the Bot Durable Object declined to admit, told apart from one that
  * broke.
  *
@@ -230,6 +250,11 @@ async function requireRegisteredBot(
         return jsonError(
           409,
           error instanceof Error ? error.message : "Bot is archived",
+        );
+      if (error.name === "BotDeletedError")
+        return jsonError(
+          410,
+          error instanceof Error ? error.message : "Bot is deleted",
         );
     }
     return jsonError(
@@ -633,10 +658,7 @@ function createUserApplicationRoute() {
             }),
           );
         } catch (error) {
-          return jsonError(
-            500,
-            error instanceof Error ? error.message : "approvals failed",
-          );
+          return botFailure(error, "approvals failed");
         }
       }
       if (request.method !== "POST") {
@@ -762,10 +784,7 @@ function createUserApplicationRoute() {
           await env.BOT_STATE.listSkills({ schemaVersion: 1, botId }),
         );
       } catch (error) {
-        return jsonError(
-          500,
-          error instanceof Error ? error.message : "skill catalog failed",
-        );
+        return botFailure(error, "skill catalog failed");
       }
     }
 
@@ -781,10 +800,7 @@ function createUserApplicationRoute() {
           artifactOrigin: packageUiArtifactOrigin(url),
         } satisfies PackageIframeCatalogV1);
       } catch (error) {
-        return jsonError(
-          500,
-          error instanceof Error ? error.message : "Package UI catalog failed",
-        );
+        return botFailure(error, "Package UI catalog failed");
       }
     }
 
@@ -844,10 +860,7 @@ function createUserApplicationRoute() {
               }),
         );
       } catch (error) {
-        return jsonError(
-          500,
-          error instanceof Error ? error.message : "Applet read failed",
-        );
+        return botFailure(error, "Applet read failed");
       }
     }
 
@@ -959,10 +972,7 @@ function createUserApplicationRoute() {
           }),
         );
       } catch (error) {
-        return jsonError(
-          500,
-          error instanceof Error ? error.message : "admission fence failed",
-        );
+        return botFailure(error, "admission fence failed");
       }
     }
 
@@ -1005,10 +1015,7 @@ function createUserApplicationRoute() {
             await env.BOT_STATE.listConversations({ schemaVersion: 1, botId }),
           );
         } catch (error) {
-          return jsonError(
-            500,
-            error instanceof Error ? error.message : "conversation list failed",
-          );
+          return botFailure(error, "conversation list failed");
         }
       }
       if (request.method !== "POST")
@@ -1053,10 +1060,7 @@ function createUserApplicationRoute() {
           await env.BOT_STATE.lookupRun({ schemaVersion: 1, botId, query }),
         );
       } catch (error) {
-        return jsonError(
-          500,
-          error instanceof Error ? error.message : "run lookup failed",
-        );
+        return botFailure(error, "run lookup failed");
       }
     }
 
@@ -1093,10 +1097,7 @@ function createUserApplicationRoute() {
       } catch (error) {
         // A stored run the current codec refuses is a visible failure with
         // its reason, never a crash of the whole application Worker.
-        return jsonError(
-          500,
-          error instanceof Error ? error.message : "run list failed",
-        );
+        return botFailure(error, "run list failed");
       }
     }
     if (request.method !== "POST") return jsonError(405, "method not allowed");
@@ -1147,10 +1148,7 @@ function createUserApplicationRoute() {
     } catch (error) {
       const refusal = turnRefusal(error);
       if (refusal) return Response.json(refusal, { status: 409 });
-      return jsonError(
-        500,
-        error instanceof Error ? error.message : "Bot turn failed",
-      );
+      return botFailure(error, "Bot turn failed");
     }
   };
 }

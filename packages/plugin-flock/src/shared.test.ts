@@ -4,11 +4,13 @@ import {
   decodeBotIdentityViewV1,
   decodeBotLifecycleCommandV1,
   decodeBotLifecycleReceiptV1,
+  decodeBotLifecycleViewV1,
   decodeBotMembershipViewV1,
   decodeBotRegistrationV1,
   decodeCreateBotCommandV1,
   decodeDirectoryViewV1,
   decodeSheepRecipeV1,
+  lifecycleTargetStatusV1,
   migrateStoredBotDirectoryV1,
   randomSheepRecipeV1,
   sheepCatalog,
@@ -36,6 +38,45 @@ describe("Flock v1 contracts", () => {
         extra: true,
       }),
     ).toThrow("unknown or missing field");
+  });
+
+  test("strictly decodes the delete command and its terminal status", () => {
+    const command = {
+      schemaVersion: 1 as const,
+      type: "bot/delete" as const,
+      commandId: "delete-1",
+      botId: "alpha",
+    };
+    expect(decodeBotLifecycleCommandV1(command)).toEqual(command);
+    expect(lifecycleTargetStatusV1("bot/delete")).toBe("deleted");
+    expect(lifecycleTargetStatusV1("bot/archive")).toBe("archived");
+    expect(lifecycleTargetStatusV1("bot/restore")).toBe("active");
+    expect(
+      decodeBotLifecycleReceiptV1({
+        schemaVersion: 1,
+        commandId: "delete-1",
+        botId: "alpha",
+        status: "applied",
+        lifecycle: {
+          schemaVersion: 1,
+          botId: "alpha",
+          status: "deleted",
+          revision: 1,
+        },
+      }),
+    ).toMatchObject({ lifecycle: { status: "deleted" } });
+    // A near-miss is still a rejection: the union is exact, not prefixed.
+    expect(() =>
+      decodeBotLifecycleCommandV1({ ...command, type: "bot/delete-all" }),
+    ).toThrow("unsupported Bot lifecycle command");
+    expect(() =>
+      decodeBotLifecycleViewV1({
+        schemaVersion: 1,
+        botId: "alpha",
+        status: "removed",
+        revision: 1,
+      }),
+    ).toThrow("Bot lifecycle is invalid");
   });
 
   test("strictly decodes archive and restore DTOs", () => {
