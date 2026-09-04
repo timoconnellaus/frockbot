@@ -12,6 +12,7 @@ import {
   buildCatalogGeneration,
   type CatalogSourcePackage,
 } from "./publish-catalog.ts";
+import { CATALOG_DESCRIPTIONS } from "./catalog-descriptions.ts";
 
 function sourcePackage(
   id: string,
@@ -159,6 +160,50 @@ describe("seed catalog generation", () => {
       },
     });
     expect(entry?.description).toBe("Tracks parcels across carriers.");
+  });
+
+  test("every shipped Package carries a written line, not the fallback", async () => {
+    const { compileFoundationApplication } =
+      await import("../applications/foundation/src/runtime.ts");
+    const plan = await compileFoundationApplication();
+    const built = await buildCatalogGeneration(plan.packages);
+
+    expect(built.index.entries.length).toBeGreaterThan(0);
+    const architectural = built.index.entries.filter((entry) =>
+      entry.description.startsWith("First-party FrockBot Package"),
+    );
+    expect(architectural.map((entry) => entry.catalogId)).toEqual([]);
+    // The line is what `package_search` matches on, so it has to read as a
+    // sentence a person would type words from, not as a label.
+    expect(
+      built.index.entries.every((entry) => entry.description.includes(" ")),
+    ).toBe(true);
+  });
+
+  test("a Package with no written line still falls back to its Contributions", async () => {
+    const built = await buildCatalogGeneration([
+      sourcePackage("not-a-real-package"),
+    ]);
+
+    expect(built.index.entries[0]?.description).toBe(
+      "First-party FrockBot Package contributing runtime.",
+    );
+  });
+
+  test("a written line wins over the fallback, and a publication wins over both", async () => {
+    const built = await buildCatalogGeneration([
+      sourcePackage("memory"),
+      publishedPackage(),
+    ]);
+
+    expect(
+      built.index.entries.find((entry) => entry.catalogId === "memory")
+        ?.description,
+    ).toBe(CATALOG_DESCRIPTIONS.memory);
+    expect(
+      built.index.entries.find((entry) => entry.catalogId === "parcel-tracking")
+        ?.description,
+    ).toBe("Tracks parcels across carriers.");
   });
 
   test("delisting changes only the new pointer generation, never an old entry or artifact identity", async () => {

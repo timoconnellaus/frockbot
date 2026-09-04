@@ -208,4 +208,113 @@ describe("a Bot installing a Package from the Catalog", () => {
       ),
     ).toEqual(["shell"]);
   });
+
+  test("installs a first-party entry that publishes no bundle, the way the Plugins page does", async () => {
+    // Every one of the 37 seeded Catalog entries is bundle-less: the seed is
+    // built from the compiled-in application, which publishes no artifacts. So
+    // `package_install` by chat refused all of them with `does not carry
+    // installable code`, while the Plugins page installed the same entry
+    // happily — two paths disagreeing about one entry. The chat path now
+    // records what the UI path records: no `contentHash`, no `artifact`, and a
+    // member the compiled-in application mounts.
+    const id = suffix();
+    const userId = `first-party-user-${id}`;
+    const botId = `first-party-bot-${id}`;
+    const generation = `first-party-${id}`;
+    await publishBundlelessCatalog(generation);
+    const user = env.USER_CONFIGURATIONS.getByName(userId) as unknown as {
+      readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
+    };
+    expect(
+      (await user.readConfiguration({ schemaVersion: 1, userId }))
+        .catalogGeneration,
+    ).toBe(generation);
+    const probe = env.AUTHORING.getByName(`first-party-probe-${id}`);
+
+    // No `contentHash`: there is none to send, and the tool no longer demands
+    // one.
+    const installed = await probe.runTurn({
+      runId: `first-party-install-${id}`,
+      userId,
+      botId,
+      tool: "package_install",
+      input: { catalogId: "clock", summary: "Added the clock" },
+    });
+
+    expect(installed.text).toContain('ok:Installed Package "Clock"');
+    expect(installed.text).not.toContain("does not carry installable code");
+    const settings = await user.readConfiguration({ schemaVersion: 1, userId });
+    expect(settings.packages.some((pkg) => pkg.packageId === "clock")).toBe(
+      true,
+    );
+    const current = await probe.currentGeneration();
+    expect(current.summary).toBe("Added the clock");
+    const member = current.members.find(
+      (candidate) => candidate.packageId === "clock",
+    );
+    expect(member).toBeDefined();
+    // No artifact and no pinned hash: the member mounts from the compiled-in
+    // application, which is what makes it first-party.
+    expect(member?.artifact).toBeUndefined();
+    expect(
+      (member?.provenance as { contentHash?: string } | undefined)?.contentHash,
+    ).toBeUndefined();
+  });
 });
+
+/** A Catalog generation shaped like the real seed: entries, no bundles. */
+async function publishBundlelessCatalog(generation: string) {
+  const manifest = {
+    schemaVersion: 3 as const,
+    id: "clock",
+    displayName: "Clock",
+    version: "0.0.1",
+    compatibility: { frockbot: "*" },
+    dependencies: {},
+    contributions: { backend: { entry: "./backend.js" } },
+    configuration: { settings: [], connectionTypes: [], capabilities: [] },
+    tools: [],
+    permissions: [],
+  };
+  const manifestHash = await sha256(canonicalJson(manifest));
+  const entry = {
+    schemaVersion: 1,
+    catalogId: "clock",
+    packageId: "clock",
+    displayName: "Clock",
+    description: "Tell the time in any timezone, and work out dates for you.",
+    version: "0.0.1",
+    kind: "package",
+    manifestHash,
+    tags: ["time", "timezone"],
+    servers: [],
+    setupFields: [],
+    skills: [],
+  };
+  const indexDocument = canonicalJson({
+    schemaVersion: 1,
+    generation,
+    entries: [
+      {
+        catalogId: entry.catalogId,
+        packageId: entry.packageId,
+        displayName: entry.displayName,
+        description: entry.description,
+        version: entry.version,
+        manifestHash,
+        kind: entry.kind,
+        tags: entry.tags,
+      },
+    ],
+  });
+  const indexHash = await catalogContentHashV1(indexDocument);
+  await env.PACKAGE_CATALOG.put(
+    catalogEntryKeyV1(generation, entry.catalogId),
+    canonicalJson(entry),
+  );
+  await env.PACKAGE_CATALOG.put(catalogIndexKeyV1(generation), indexDocument);
+  await env.PACKAGE_CATALOG.put(
+    CATALOG_POINTER_KEY_V1,
+    canonicalJson({ schemaVersion: 1, generation, indexHash }),
+  );
+}

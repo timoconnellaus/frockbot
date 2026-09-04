@@ -65,6 +65,7 @@ import {
 import { BotState } from "../src/bot-state.ts";
 import { BOT_CONFIGURATION_KEY } from "@frockbot/plugin-shell/backend";
 import { ISOLATE_MODEL_REQUEST_PREFIX } from "@frockbot/plugin-shell/backend-isolate";
+import { notificationIdV1 } from "@frockbot/plugin-shell/notification-id";
 import type { BotSettingsViewV1 } from "@frockbot/configuration-core";
 import { UserConfiguration } from "../src/user-configuration.ts";
 export { DeploymentPolicy } from "../src/deployment-policy.ts";
@@ -855,7 +856,11 @@ export class CompositionProbe extends DurableObject {
       signal: new AbortController().signal,
       onFailure: (failure, fallback) =>
         this.authority.recordNotification({
-          notificationId: `composition-failure:${failure.generationId}:${failure.attempt}`,
+          notificationId: notificationIdV1(
+            "composition-failure",
+            failure.generationId,
+            failure.attempt,
+          ),
           runId: input.command.runId,
           createdAt: failure.at,
           title: "Composition failed to activate",
