@@ -277,6 +277,36 @@ function boundedString(
   );
 }
 
+/** The largest failure a run record may carry, in UTF-8 bytes. */
+export const MAX_RUN_FAILURE_BYTES_V1 = 8_000;
+
+/**
+ * The failure a settlement may durably write, cut to what the record allows.
+ *
+ * A failure string is whatever an error's `message` happened to be, and nothing
+ * upstream bounds it — a provider that echoes a request back, or a message
+ * built by concatenating one, easily runs past the limit. Writing it anyway
+ * produced a record the codec refused on every later read, so a Turn that
+ * failed once went on to 500 the transcript endpoint for ever. The message is
+ * for a person to read: cutting it costs nothing the record does not already
+ * hold, and losing the whole transcript costs everything.
+ */
+export function boundedRunFailureV1(failure: string): string {
+  if (UTF8_ENCODER.encode(failure).byteLength <= MAX_RUN_FAILURE_BYTES_V1) {
+    return failure;
+  }
+  const ellipsis = "…";
+  const budget =
+    MAX_RUN_FAILURE_BYTES_V1 - UTF8_ENCODER.encode(ellipsis).byteLength;
+  let kept = failure;
+  // Cutting by characters and re-measuring keeps the result valid UTF-8; a
+  // byte-wise slice can land inside a multi-byte sequence.
+  while (UTF8_ENCODER.encode(kept).byteLength > budget) {
+    kept = kept.slice(0, Math.max(0, Math.floor(kept.length * 0.9) - 1));
+  }
+  return `${kept}${ellipsis}`;
+}
+
 function decodeDirectToolCommandV1(value: unknown): DirectToolCommandV1 {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("stored run has invalid direct tool command");
