@@ -247,6 +247,10 @@ export class BillingStoreV1 {
   read(): BillingViewV1 {
     this.open();
     const account = this.account();
+    const subscriptionStatus = String(account.subscription_status);
+    const subscribed = !["none", "canceled", "incomplete_expired"].includes(
+      subscriptionStatus,
+    );
     const active = this.hasCurrentAllowance(account);
     const allowanceMicros = active ? BASIC_ALLOWANCE_MICROS_V1 : 0;
     const allowanceUsedMicros = active
@@ -280,8 +284,8 @@ export class BillingStoreV1 {
       }));
     return {
       schemaVersion: 1,
-      plan: active ? "basic" : "none",
-      subscriptionStatus: String(account.subscription_status),
+      plan: subscribed ? "basic" : "none",
+      subscriptionStatus,
       ...(account.period_start
         ? { currentPeriodStart: String(account.period_start) }
         : {}),

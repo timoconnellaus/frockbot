@@ -173,6 +173,7 @@ describe("billing entitlement", () => {
       },
     });
     expect(billing.readBilling()).toMatchObject({
+      plan: "basic",
       subscriptionStatus: "active",
       allowanceMicros: 0,
       canStartTurn: false,
