@@ -97,6 +97,63 @@ button.computer-screen {
   pointer-events: auto;
 }
 
+/*
+ * The card's live frame. It is inert by inheritance: `.computer-screen iframe`
+ * already takes no pointer events, so a click lands on the button behind it and
+ * opens the full-screen viewer exactly as a click on the stored capture did.
+ */
+.computer-screen-preview {
+  display: block;
+}
+
+.computer-screen-thumbnail.is-live {
+  border-color: var(--frock-computer-accent);
+}
+
+.computer-screen-status {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0 0;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+  line-height: 1.4;
+}
+
+.computer-screen-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+.computer-screen-status.is-live {
+  color: var(--frock-computer-accent-text);
+}
+
+.computer-screen-status.is-live .computer-screen-status-dot {
+  background: var(--frock-computer-accent);
+  opacity: 1;
+  animation: computer-live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes computer-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .computer-screen-status.is-live .computer-screen-status-dot {
+    animation: none;
+  }
+}
+
 .human-control .computer-screen {
   border-color: var(--frock-computer-accent);
   box-shadow: 0 0 0 1px var(--frock-computer-focus);

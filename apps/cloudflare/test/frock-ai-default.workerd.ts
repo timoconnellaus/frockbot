@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
 import {
-  FLOCK_AI_CONNECTION_ID,
-  FLOCK_AI_DEFAULT_MODEL,
-} from "@frockbot/plugin-provider-flock-ai/catalog";
+  FROCK_AI_CONNECTION_ID,
+  FROCK_AI_DEFAULT_MODEL,
+} from "@frockbot/plugin-provider-frock-ai/catalog";
 
 interface FreshUserRpc {
   readConfiguration(input: unknown): Promise<{
@@ -22,11 +22,11 @@ interface FreshUserRpc {
   createBot(input: unknown): Promise<{ status: string }>;
 }
 
-describe("ambient Flock AI default", () => {
+describe("ambient Frock AI default", () => {
   test("a fresh User can run a Turn without configuring credentials", async () => {
     const suffix = crypto.randomUUID();
-    const userId = `flock-ai-user-${suffix}`;
-    const botId = `flock-ai-bot-${suffix}`;
+    const userId = `frock-ai-user-${suffix}`;
+    const botId = `frock-ai-bot-${suffix}`;
     const user = env.USER_CONFIGURATIONS.getByName(
       userId,
     ) as unknown as FreshUserRpc;
@@ -44,14 +44,14 @@ describe("ambient Flock AI default", () => {
       ]),
       connections: expect.arrayContaining([
         expect.objectContaining({
-          connectionId: FLOCK_AI_CONNECTION_ID,
+          connectionId: FROCK_AI_CONNECTION_ID,
           state: "ready",
           providerType: "flock-ai",
         }),
       ]),
       platformModel: {
-        connectionId: FLOCK_AI_CONNECTION_ID,
-        providerModelId: FLOCK_AI_DEFAULT_MODEL,
+        connectionId: FROCK_AI_CONNECTION_ID,
+        providerModelId: FROCK_AI_DEFAULT_MODEL,
       },
     });
 
@@ -65,7 +65,7 @@ describe("ambient Flock AI default", () => {
           commandId: `create-${suffix}`,
           expectedRevision: 0,
           botId,
-          name: "Flock AI Bot",
+          name: "Frock AI Bot",
         },
       }),
     ).resolves.toMatchObject({ status: "applied" });
@@ -82,6 +82,6 @@ describe("ambient Flock AI default", () => {
         text: "Say hello.",
       },
     });
-    expect(result.text).toBe("Flock AI reply");
+    expect(result.text).toBe("Frock AI reply");
   });
 });

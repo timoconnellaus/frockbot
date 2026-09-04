@@ -1,6 +1,6 @@
 // The browser end-to-end project.
 //
-// One browser, one app Worker, and one auxiliary Flock AI RPC Worker: the
+// One browser, one app Worker, and one auxiliary Frock AI RPC Worker: the
 // specs share those processes and the fake providers, and each takes a fresh
 // `?as_user=` identity so no two ever meet in one User Durable Object.
 // `e2e/harness.ts` is the `webServer`.
@@ -31,7 +31,7 @@ async function stablePort(name: string): Promise<number> {
 
 const port = await stablePort("FROCKBOT_E2E_PORT");
 const ollamaPort = await stablePort("FROCKBOT_E2E_OLLAMA_PORT");
-const flockAiPort = await stablePort("FROCKBOT_E2E_FLOCK_AI_PORT");
+const frockAiPort = await stablePort("FROCKBOT_E2E_FROCK_AI_PORT");
 const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig<E2EOptions>({
@@ -94,7 +94,7 @@ export default defineConfig<E2EOptions>({
     env: {
       FROCKBOT_E2E_PORT: String(port),
       FROCKBOT_E2E_OLLAMA_PORT: String(ollamaPort),
-      FROCKBOT_E2E_FLOCK_AI_PORT: String(flockAiPort),
+      FROCKBOT_E2E_FROCK_AI_PORT: String(frockAiPort),
     },
   },
 });

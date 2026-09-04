@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   compatChatCompletionsUrlV1,
-  createFlockAiGatewayHostV1,
-} from "./flock-ai.js";
+  createFrockAiGatewayHostV1,
+} from "./frock-ai.js";
 
 const ACCOUNT_ID = "account-under-test";
 const TOKEN = "gateway-token";
@@ -36,8 +36,8 @@ function unusedBinding(): Pick<Ai, "gateway"> {
 
 function compatHost(respond: () => Response) {
   const calls: { url: string; init: RequestInit }[] = [];
-  const host = createFlockAiGatewayHostV1(unusedBinding(), {
-    gatewayId: "flock-test",
+  const host = createFrockAiGatewayHostV1(unusedBinding(), {
+    gatewayId: "frock-test",
     accountId: ACCOUNT_ID,
     token: TOKEN,
     fetch: ((url: string, init: RequestInit) => {
@@ -48,7 +48,7 @@ function compatHost(respond: () => Response) {
   return { host, calls };
 }
 
-describe("Flock AI Gateway host, compat transport", () => {
+describe("Frock AI Gateway host, compat transport", () => {
   // The `AI` binding's `gateway(...).run()` reaches the universal endpoint,
   // whose translation rejects a `dynamic/<route>` model before inference
   // (cloudflare/ai#617). Configuring an account and token has to move the
@@ -64,7 +64,7 @@ describe("Flock AI Gateway host, compat transport", () => {
     expect(await new Response(body).text()).toBe("data: [DONE]\n\n");
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe(
-      compatChatCompletionsUrlV1(ACCOUNT_ID, "flock-test"),
+      compatChatCompletionsUrlV1(ACCOUNT_ID, "frock-test"),
     );
     expect(calls[0]!.init.method).toBe("POST");
     expect(
@@ -103,30 +103,30 @@ describe("Flock AI Gateway host, compat transport", () => {
     const { ai, gatewayIds } = gatewayHost(
       () => new Response("data: [DONE]\n\n"),
     );
-    const host = createFlockAiGatewayHostV1(ai, {
-      gatewayId: "flock-test",
+    const host = createFrockAiGatewayHostV1(ai, {
+      gatewayId: "frock-test",
       accountId: ACCOUNT_ID,
     });
 
     await host.runChatCompletion("dynamic/flock-auto", { messages: [] });
 
-    expect(gatewayIds).toEqual(["flock-test"]);
+    expect(gatewayIds).toEqual(["frock-test"]);
   });
 });
 
-describe("Flock AI Gateway host, binding transport", () => {
+describe("Frock AI Gateway host, binding transport", () => {
   test("returns the response stream for an accepted request", async () => {
     const { ai, gatewayIds } = gatewayHost(
       () => new Response("data: [DONE]\n\n"),
     );
-    const host = createFlockAiGatewayHostV1(ai, { gatewayId: "flock-test" });
+    const host = createFrockAiGatewayHostV1(ai, { gatewayId: "frock-test" });
 
     const body = await host.runChatCompletion("dynamic/auto", {
       messages: [],
     });
 
     expect(await new Response(body).text()).toBe("data: [DONE]\n\n");
-    expect(gatewayIds).toEqual(["flock-test"]);
+    expect(gatewayIds).toEqual(["frock-test"]);
   });
 
   // A rejected request answers with a JSON error body, not an SSE stream.
@@ -142,7 +142,7 @@ describe("Flock AI Gateway host, binding transport", () => {
             status,
           }),
       );
-      const host = createFlockAiGatewayHostV1(ai, {});
+      const host = createFrockAiGatewayHostV1(ai, {});
 
       const failure = await host
         .runChatCompletion("dynamic/auto", { messages: [] })
@@ -160,7 +160,7 @@ describe("Flock AI Gateway host, binding transport", () => {
 
   test("names the status when the rejection carries no body", async () => {
     const { ai } = gatewayHost(() => new Response(null, { status: 502 }));
-    const host = createFlockAiGatewayHostV1(ai, {});
+    const host = createFrockAiGatewayHostV1(ai, {});
 
     const failure = await host
       .runChatCompletion("dynamic/auto", { messages: [] })
@@ -178,7 +178,7 @@ describe("Flock AI Gateway host, binding transport", () => {
     const { ai } = gatewayHost(
       () => new Response("x".repeat(2000), { status: 500 }),
     );
-    const host = createFlockAiGatewayHostV1(ai, {});
+    const host = createFrockAiGatewayHostV1(ai, {});
 
     const failure = await host
       .runChatCompletion("dynamic/auto", { messages: [] })
@@ -193,14 +193,14 @@ describe("Flock AI Gateway host, binding transport", () => {
   });
 });
 
-describe("Flock AI gateway deadline", () => {
+describe("Frock AI gateway deadline", () => {
   test("a gateway that never answers fails the request", async () => {
     const ai = {
       gateway() {
         return { run: () => new Promise<Response>(() => {}) };
       },
     } as unknown as Pick<Ai, "gateway">;
-    const host = createFlockAiGatewayHostV1(ai, { timeoutMs: 20 });
+    const host = createFrockAiGatewayHostV1(ai, { timeoutMs: 20 });
 
     await expect(
       host.runChatCompletion("dynamic/auto", { messages: [] }),
@@ -208,7 +208,7 @@ describe("Flock AI gateway deadline", () => {
   });
 
   test("a compat transport that never answers fails the request", async () => {
-    const host = createFlockAiGatewayHostV1(unusedBinding(), {
+    const host = createFrockAiGatewayHostV1(unusedBinding(), {
       accountId: ACCOUNT_ID,
       token: TOKEN,
       timeoutMs: 20,

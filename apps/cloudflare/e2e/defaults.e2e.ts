@@ -25,6 +25,6 @@ test("a fresh User's Bot answers with zero configuration and no model prompt", a
 
   await sendMessage(page, "Answer with the platform model");
   await expect(page.locator(".message-assistant").last()).toContainText(
-    "Reply from the Flock AI stub.",
+    "Reply from the Frock AI stub.",
   );
 });

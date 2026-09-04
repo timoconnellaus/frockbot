@@ -12,9 +12,11 @@ ALLOW_DEVELOPMENT_AUTH=true
 # Authorizes the read-only operator surface at /api/debug/*. Absent or empty
 # and those routes 404. Deployed as a Wrangler secret, never a var.
 DEBUG_TOKEN=replace-with-a-random-32-byte-token
-# `cf-aig-authorization` bearer for the AI Gateway named by FLOCK_AI_GATEWAY_ID.
-# Set together with the FLOCK_AI_ACCOUNT_ID var, this selects the compat HTTP
+# `cf-aig-authorization` bearer for the AI Gateway named by FROCK_AI_GATEWAY_ID.
+# Set together with the FROCK_AI_ACCOUNT_ID var, this selects the compat HTTP
 # transport, the only one that accepts the `dynamic/<route>` Auto model
-# (cloudflare/ai#617). Absent, Flock AI falls back to the `AI` binding, which
-# serves concrete `@flock/...` models but rejects Auto.
-FLOCK_AI_GATEWAY_TOKEN=replace-with-ai-gateway-authorization-token
+# (cloudflare/ai#617). Absent, Frock AI falls back to the `AI` binding, which
+# serves concrete `@frock/...` models but rejects Auto.
+FROCK_AI_GATEWAY_TOKEN=replace-with-ai-gateway-authorization-token
+# The pre-rename name `FLOCK_AI_GATEWAY_TOKEN` is still read as a fallback, so
+# an existing local .dev.vars keeps working until it is renamed.

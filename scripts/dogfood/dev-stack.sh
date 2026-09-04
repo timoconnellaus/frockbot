@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local "dogfood" dev stack: the real Worker, the real Vue client, real Workers
-# AI through the Flock AI Gateway, and the real Computer host service binding.
+# AI through the Frock AI Gateway, and the real Computer host service binding.
 #
 #   scripts/dogfood/dev-stack.sh [start]   build, seed, serve, wait, report
 #   scripts/dogfood/dev-stack.sh stop      stop this stack's wrangler / workerd / vite
@@ -224,7 +224,7 @@ wait_for_bundler() {
 # `PACKAGE_BUNDLER` is a service binding, and a service binding resolves only
 # through the dev service registry: the Worker it names must be running under
 # its own `wrangler dev` on this machine. That is exactly what the end-to-end
-# harness does for the Flock AI fake (`apps/cloudflare/e2e/harness.ts`), and
+# harness does for the Frock AI fake (`apps/cloudflare/e2e/harness.ts`), and
 # without it `package_author` writes its intent, cannot reach the bundler, and
 # refuses — journey 4 is unrunnable on the documented local target.
 #

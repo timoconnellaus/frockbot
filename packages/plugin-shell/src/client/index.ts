@@ -15,6 +15,7 @@ import {
 } from "@frockbot/client-core";
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { COMPACTED_ANNOUNCEMENT_TEXT_V1 } from "../compaction.js";
+import { readViewerFocusV1, shouldNotifyForBotV1 } from "../focus.js";
 // Connection mutations use the provider-neutral hosted command contract.
 import type {
   ConnectionCommandReceiptV1,
@@ -1191,7 +1192,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         web.value.settingsError = "A completed Bot result is waiting to load";
         continue;
       }
-      if (document.hidden) {
+      // The open Bot is only *read* while the tab is visible and the window
+      // holds focus; `document.hidden` alone called a visible tab behind
+      // another window "open", and the reply that landed there was never
+      // heard about. One definition, shared with the sidebar's badge.
+      if (
+        shouldNotifyForBotV1(readViewerFocusV1(web.value.activeBotId), botId)
+      ) {
         // One seam: the desktop or mobile notifications Package when the shell
         // exposes it, the web API when it does not.
         const delivery = await showClientNotificationV1({
