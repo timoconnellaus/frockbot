@@ -5418,12 +5418,15 @@ export class ShellBotBackendContribution {
    * so an older run that is somehow still marked running is a reconciliation
    * problem and not something a ring should report. A read that fails is no
    * ring — liveness is never worth failing a sidebar poll for.
+   *
+   * The record's `status` is not the test and never was. `resolveRunWorking`
+   * holds the rule — running, inside the Turn deadline, and a Turn the log has
+   * not already closed — and settles the record when it finds one that only
+   * claims to be running, which is why this read is also the repair.
    */
   private async isWorking(runId: string | undefined): Promise<boolean> {
-    if (runId === undefined) return false;
     try {
-      const run = await this.authority.readRun(runId);
-      return run?.status === "running";
+      return await this.authority.resolveRunWorking(runId);
     } catch {
       return false;
     }
@@ -5653,6 +5656,16 @@ export class ShellBotBackendContribution {
       limit: CLIENT_RUN_PAGE_LIMIT + 1,
       ...(query.before ? { before: query.before } : {}),
     });
+    // The open chat draws its own activity ring from whichever run this page
+    // projects as `running`, so it owes the same liveness rule the sidebar row
+    // does — and from the same helper, or the two surfaces disagree about the
+    // same Bot. Only the newest run and the active marker are asked: a Turn
+    // further back cannot be the one anybody is waiting on, and a transcript
+    // read is not the place to walk a Bot's whole history looking for
+    // leftovers.
+    if (!query.before) {
+      await this.isWorking(activeRunId ?? candidates[0]?.runId);
+    }
 
     const selected = new Map<string, { cursor?: string; run: ClientRunV1 }>();
     if (activeRunId) {
