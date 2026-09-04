@@ -484,7 +484,9 @@ export async function sendMessage(
   await expect(replies).toHaveCount(before + (options.replies ?? 1), {
     timeout: 120_000,
   });
-  await expect(replies.last().locator(".bot-avatar-live")).toHaveCount(0, {
+  // The working row is the thread's own last child rather than a part of the
+  // running Turn's article, so "still working" is asked of the thread.
+  await expect(page.locator(".thread .bot-avatar-live")).toHaveCount(0, {
     timeout: 120_000,
   });
 }

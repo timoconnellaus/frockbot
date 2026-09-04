@@ -33,6 +33,19 @@ import {
   TURN_TOO_LONG_MESSAGE_V1,
 } from "../src/request-body.ts";
 
+/*
+ * The fake provider is one server shared by every spec in the shard, so a mode
+ * a spec switched on is switched off here rather than on its own last line —
+ * a spec that fails mid-Turn never reaches its last line. Leaving
+ * `unauthorized` on made every later spec's Turn fail with a 401 it never
+ * asked for; leaving `streaming` on made every later spec wait out the gap in
+ * the middle of every reply until it ran out of time. Both read as a
+ * regression in whatever ran next.
+ */
+test.afterEach(async ({ page, ollamaBaseUrl }) => {
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+});
+
 test("Turns stay ordered, render Markdown, and survive a reload", async ({
   page,
   userId,
@@ -159,13 +172,9 @@ test("a Turn that is running when the page reloads still delivers its reply", as
     "Reply from the local Ollama stub.",
     { timeout: 120_000 },
   );
-  await expect(
-    assistantMessages(page).last().locator(".bot-avatar-live"),
-  ).toHaveCount(0, { timeout: 120_000 });
-
-  // The fake provider is one server for the whole worker, so a spec that
-  // slowed it down puts it back before the next one runs.
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+  await expect(page.locator(".thread .bot-avatar-live")).toHaveCount(0, {
+    timeout: 120_000,
+  });
 });
 
 // The reply is drawn as it is written, not only when the Turn settles. The
@@ -201,7 +210,10 @@ test("a reply appears while the Bot is still writing it", async ({
         const last = assistantMessages(page).last();
         if ((await last.count()) === 0) return false;
         const text = (await last.textContent()) ?? "";
-        const live = await last.locator(".bot-avatar-live").count();
+        // The working row is the thread's own last child, not part of the
+        // running Turn's article, so the live avatar is looked for in the
+        // thread.
+        const live = await page.locator(".thread .bot-avatar-live").count();
         if (
           live > 0 &&
           text.includes("Reply from the") &&
@@ -220,11 +232,9 @@ test("a reply appears while the Bot is still writing it", async ({
     "Reply from the local Ollama stub.",
     { timeout: 120_000 },
   );
-  await expect(
-    assistantMessages(page).last().locator(".bot-avatar-live"),
-  ).toHaveCount(0, { timeout: 120_000 });
-
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+  await expect(page.locator(".thread .bot-avatar-live")).toHaveCount(0, {
+    timeout: 120_000,
+  });
 });
 
 // The thread's shape, not its plumbing: a reply the Bot delivered is drawn
@@ -278,9 +288,9 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   // The Turn's tool call is not in the transcript in words. The trail off the
   // avatar was the whole of what the conversation said about it, and a settled
   // Turn keeps none.
-  await expect(reply.getByRole("status", { name: "Working" })).toHaveCount(0, {
-    timeout: 120_000,
-  });
+  await expect(
+    page.locator(".thread").getByRole("status", { name: "Working" }),
+  ).toHaveCount(0, { timeout: 120_000 });
   await expect(reply.locator(".tool-chip")).toHaveCount(0);
   await expect(reply).not.toContainText("Send to user");
 
@@ -401,8 +411,6 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
     return bubble ? bubble.getBoundingClientRect().left : Number.NaN;
   });
   expect(settledLeft).toBeCloseTo(midTurn.bubbleLeft, 0);
-
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
 // Tim's report: sending while the Bot is working put the new message *under*
@@ -476,8 +484,6 @@ test("a message sent mid-Turn lands above the working sheep, unlabelled", async 
   await expect(page.locator(".thread")).not.toContainText(
     "Interrupted by your next message.",
   );
-
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
 // Tim's report, as the thread: a Bot that says three things in one Turn leaves
@@ -551,7 +557,11 @@ test("a working Bot shows a comet trail beside its avatar, and no tool names", a
       async () => {
         const last = assistantMessages(page).last();
         if ((await last.count()) === 0) return false;
-        const working = last.getByRole("status", { name: "Working" });
+        // The row is at the end of the thread rather than inside the running
+        // Turn's article, so it is found there.
+        const working = page
+          .locator(".thread")
+          .getByRole("status", { name: "Working" });
         if (
           (await working
             .locator('.ui-activity-trail[data-state="running"]')
@@ -572,11 +582,9 @@ test("a working Bot shows a comet trail beside its avatar, and no tool names", a
   // The Turn settled, so the working row and its trail went. The words "tool"
   // and "tool calls" were never in the thread at all.
   await expect(
-    assistantMessages(page).last().getByRole("status", { name: "Working" }),
+    page.locator(".thread").getByRole("status", { name: "Working" }),
   ).toHaveCount(0, { timeout: 120_000 });
   await expect(assistantMessages(page).last()).not.toContainText(/tool call/i);
-
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
 test("a provider that stops accepting the key ends the Turn with a reason", async ({
@@ -622,10 +630,9 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
   await expect(page.locator(".thread")).not.toContainText("outcome");
   await expect(page.locator(".thread")).not.toContainText("401");
 
-  // The fake endpoint is shared by every spec in the run, so the refusal this
-  // test switched on is switched off again: leaving it on made every later
-  // spec's Turn fail with a 401 it never asked for.
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+  // The refusal this test switched on is switched off in the `afterEach` at
+  // the top of the file, so it is off even when the test above fails: leaving
+  // it on made every later spec's Turn fail with a 401 it never asked for.
 });
 
 // Seam S9 from the other side: what the client does with an answer that is not
