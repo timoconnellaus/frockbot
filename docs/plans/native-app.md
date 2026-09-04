@@ -136,6 +136,8 @@ Create, publish and open one **real Applet**, mutate a value, reconnect and conf
 
 Land the review's failed-activation/data-preservation and concurrent-publication/pinned-call regressions first. Inspect the actual fixes already landing; do not duplicate another session's work. Then prove indexed history, observer reconnect and durable cold recovery. Triage reachable vulnerable dependency paths rather than coupling native work to a blanket dependency rewrite.
 
+During phase 1, [PR #253](https://github.com/timoconnellaus/frockbot/pull/253) landed recoverable facet snapshots and refusal when an Applet call names a generation that is no longer resident; its workerd tests cover destructive failed activation and interrupted trials. The transcript read-cost ADR 0038 also landed indexed display reads. These are evidence for this slice, not completion of the newly required declared schema windows, live authorization checks or the full device/history fixture.
+
 **Exit:** failed activation preserves prior code and data; publication cannot alter a pinned call; a revoked Connection prevents the next external effect; incompatible code undo is a visible refusal; cold recovery and history queries are bounded. These are backend gates before enabling the corresponding new native/extension behavior, not claims that phase 1 fixed them.
 
 **Tests:** real workerd/facet storage migration and health-failure tests, overlapping publication/call latch, restart around intent/effect/result, revoke between tool steps, duplicate alarms and deliveries, 10,000-Turn query-count regression. Reuse the relevant Applet, observer and recovery suites and record merged PR/commit evidence in the slice before promotion.
