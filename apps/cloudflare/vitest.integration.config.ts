@@ -143,14 +143,11 @@ export default defineConfig({
         // Deliberately absent, and why:
         //
         // - `MEMORY_INDEX`: miniflare has no local Vectorize simulator, and
-        //   `wrangler.jsonc` marks it `remote` even in the development
-        //   environment. `BotStateEnv` declares it, but no production code path
-        //   reads it today (`grep MEMORY_INDEX packages apps` finds only the
-        //   declarations), so leaving it undefined stubs nothing the suite
-        //   exercises. The day a Package reads it, the failure is a clear
-        //   `undefined` at that seam. `AI` used to sit here for the same
-        //   reason; `plugin-image` reads it now, so it is bound above to an
-        //   auxiliary RPC Worker rather than left undefined.
+        //   `wrangler.jsonc` marks it `remote` even in development. Bot deletion
+        //   treats its absence as an explicit, journaled skip; the workerd suite
+        //   binds an auxiliary RPC fake in `vitest.config.ts` where deletion
+        //   paging itself is under test. `AI` is bound above because image
+        //   generation exercises it throughout this integration suite.
         // - `PACKAGE_BUNDLER`: `BotStateEnv` types it optional precisely so a
         //   host without Bot authoring still runs; the Bot Durable Object then
         //   refuses `package_author` visibly instead of throwing. No test in

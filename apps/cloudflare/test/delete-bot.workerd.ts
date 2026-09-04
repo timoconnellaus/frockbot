@@ -13,9 +13,18 @@
 //     genuinely gone — rather than quietly re-creating the Bot from its own
 //     empty storage.
 import { env } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
+import {
+  evictDurableObject,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test";
 import { describe, expect, test } from "vitest";
+import {
+  BotState,
+  MEMORY_VECTOR_DELETE_BATCH_SIZE_V1,
+} from "../src/bot-state.ts";
 import { entryFailureStatusV1 } from "../src/entry-boundary.ts";
+import { MEMORY_CHUNK_INDEX_PREFIX_V1 } from "@frockbot/plugin-memory/chunk-index";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 
 function bot(userId: string, botId: string) {
@@ -27,9 +36,14 @@ function user(userId: string) {
 }
 
 interface BotRpc {
+  executeLifecycle(input: unknown): Promise<{
+    status: string;
+    lifecycle: { status: string };
+  }>;
   readUnread(input: unknown): Promise<{ count: number }>;
   executeRoutineCommand(input: unknown): Promise<{ status: string }>;
   listRoutines(input: unknown): Promise<{ routines: unknown[] }>;
+  seedMemoryChunkVectorIds(vectorIds: string[]): Promise<void>;
 }
 
 function botRpc(userId: string, botId: string): BotRpc {
@@ -55,6 +69,106 @@ function userRpc(userId: string): UserRpc {
 }
 
 describe("deleting a Bot in Workerd", () => {
+  test("purges every indexed vector in bounded alarm batches across eviction", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `vector-delete-user-${suffix}`,
+      botId: `vector-delete-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    await env.MEMORY_INDEX_PROBE.reset();
+    const ids = Array.from(
+      { length: MEMORY_VECTOR_DELETE_BATCH_SIZE_V1 + 5 },
+      (_, index) => `vector-${String(index).padStart(4, "0")}`,
+    );
+    const stub = bot(identity.userId, identity.botId);
+    await botRpc(identity.userId, identity.botId).seedMemoryChunkVectorIds(ids);
+    expect(
+      await runInDurableObject(
+        stub,
+        async (_instance, state) =>
+          (await state.storage.list({ prefix: MEMORY_CHUNK_INDEX_PREFIX_V1 }))
+            .size,
+      ),
+    ).toBe(ids.length);
+
+    const command = {
+      schemaVersion: 1 as const,
+      type: "bot/delete" as const,
+      commandId: `delete-${suffix}`,
+      botId: identity.botId,
+    };
+    const pending = await botRpc(
+      identity.userId,
+      identity.botId,
+    ).executeLifecycle({
+      schemaVersion: 1,
+      userId: identity.userId,
+      botId: identity.botId,
+      command,
+    });
+    expect(await env.MEMORY_INDEX_PROBE.deletedBatches()).toEqual([
+      ids.slice(0, MEMORY_VECTOR_DELETE_BATCH_SIZE_V1),
+    ]);
+    expect(pending.status).toBe("pending");
+
+    // The first page committed before eviction, while all other Bot state is
+    // still present and the remaining ledger is the durable resume cursor.
+    const midway = await runInDurableObject(
+      stub,
+      async (instance: BotState, state) => ({
+        instance: instance.constructor.name,
+        remaining: (
+          await state.storage.list({ prefix: MEMORY_CHUNK_INDEX_PREFIX_V1 })
+        ).size,
+        keys: (await state.storage.list()).size,
+        alarm: await state.storage.getAlarm(),
+      }),
+    );
+    expect(midway).toMatchObject({
+      remaining: 5,
+      alarm: expect.any(Number),
+    });
+    expect(midway.keys).toBeGreaterThan(midway.remaining);
+
+    await evictDurableObject(stub);
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    expect(
+      (await env.MEMORY_INDEX_PROBE.deletedBatches()).map(
+        (batch) => batch.length,
+      ),
+    ).toEqual([MEMORY_VECTOR_DELETE_BATCH_SIZE_V1, 5]);
+    expect((await env.MEMORY_INDEX_PROBE.deletedBatches()).flat()).toEqual(ids);
+
+    // The alarm that removed the last vector page also finished the teardown.
+    expect(
+      await runInDurableObject(stub, async (_instance, state) => ({
+        keys: (await state.storage.list()).size,
+        alarm: await state.storage.getAlarm(),
+      })),
+    ).toEqual({ keys: 0, alarm: null });
+
+    // The lifecycle retry sees the empty Bot, repeats the idempotent teardown,
+    // and writes the tombstone. The full User-side saga remains covered below.
+    expect(
+      await botRpc(identity.userId, identity.botId).executeLifecycle({
+        schemaVersion: 1,
+        userId: identity.userId,
+        botId: identity.botId,
+        command,
+      }),
+    ).toMatchObject({ status: "applied", lifecycle: { status: "deleted" } });
+    expect(
+      await runInDurableObject(stub, async (_instance, state) =>
+        [...(await state.storage.list()).keys()].sort(),
+      ),
+    ).toEqual([
+      `flock:lifecycle-receipt:delete-${suffix}`,
+      "flock:lifecycle:v1",
+    ]);
+  });
+
   test("tears the Bot Durable Object down and drops it from the User", async () => {
     const suffix = crypto.randomUUID();
     const identity = {

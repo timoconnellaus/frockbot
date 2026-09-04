@@ -39,9 +39,11 @@ import {
   buildMemoryIndexV1,
   emptyMemoryIndexV1,
   embedMemoryIndexV1,
+  memoryChunkVectorIdV1,
   updateMemoryIndexV1,
   type MemoryIndexV1,
 } from "./indexer.js";
+import type { MemoryChunkIndexWriterV1 } from "./chunk-index.js";
 import {
   parseProjectDocumentV1,
   projectDocumentPathV1,
@@ -99,6 +101,8 @@ export interface MemoryRuntimeHostV1 {
   projects?: MemoryProjectsV1;
   /** Optional derived-index bindings; Memory is complete without them. */
   vectorize?: MemoryVectorIndex;
+  /** Durable ledger for vectors derived from this Bot's own Memory root. */
+  chunkIndex?: MemoryChunkIndexWriterV1;
   embed?: EmbedMemory;
   ai?: MemoryAiBinding;
   embeddingModel?: string;
@@ -387,6 +391,19 @@ export class MemoryProjection {
     const embed = memoryEmbedderV1(this.#host);
     if (!embed || !this.#host.vectorize) return;
     try {
+      if (this.#host.chunkIndex) {
+        const ownVectorIds = await Promise.all(
+          this.#index.chunks
+            .filter(
+              (chunk) =>
+                chunk.scope === "bot" && chunk.botId === this.#host.owner.botId,
+            )
+            .map(memoryChunkVectorIdV1),
+        );
+        // Intent before effect: a crash after this write and before/during the
+        // upsert leaves at worst an id whose delete is a harmless no-op.
+        await this.#host.chunkIndex.record(ownVectorIds);
+      }
       await embedMemoryIndexV1(this.#index, embed, this.#host.vectorize);
     } catch (error) {
       // Embeddings are derived from the files and rebuildable; losing them
