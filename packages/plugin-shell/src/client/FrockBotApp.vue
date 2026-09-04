@@ -39,6 +39,7 @@ import AppletCanvas from "./AppletCanvas.vue";
 import PackageIframeHost from "./PackageIframeHost.vue";
 import type { ClientSkillCatalogEntryV1 } from "../skill-protocol.js";
 import {
+  keptSkillHighlightV1,
   nextSkillHighlightV1,
   rankSkillCandidatesV1,
   SkillAttachmentStore,
@@ -823,10 +824,31 @@ function closeSkillPopover(): void {
 function refreshSkillPopover(): void {
   const element = composerInput.value;
   if (!element) return closeSkillPopover();
+  // Read the highlighted Skill before the query moves, so the refilter below
+  // can put the highlight back on the same Skill rather than on row zero.
+  const highlighted = skillCandidates.value[skillHighlight.value]?.entry.ref;
   const open = skillPopoverForV1(draft.value, element.selectionStart ?? 0);
   skillPopover.value = open;
-  skillHighlight.value = 0;
+  skillHighlight.value = keptSkillHighlightV1(
+    highlighted,
+    skillCandidates.value,
+  );
 }
+
+/*
+ * The popover is bounded and scrolls, so a highlight moved past its edge has
+ * to bring its row with it; `nearest` leaves a row that is already visible
+ * exactly where it is.
+ */
+const skillPopoverList = ref<HTMLUListElement | undefined>(undefined);
+watch(skillHighlight, (index) => {
+  void nextTick(() => {
+    const option = skillPopoverList.value?.children.item(index);
+    if (option instanceof HTMLElement && option.scrollIntoView) {
+      option.scrollIntoView({ block: "nearest" });
+    }
+  });
+});
 
 function attachSkill(entry: ClientSkillCatalogEntryV1): void {
   const open = skillPopover.value;
@@ -1235,6 +1257,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         >
           <ul
             v-if="skillPopoverOpen"
+            ref="skillPopoverList"
             id="skill-popover"
             class="skill-popover"
             role="listbox"

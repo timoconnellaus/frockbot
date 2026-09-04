@@ -48,14 +48,16 @@ export type ComputerErrorCode =
 /**
  * What every seam says when this deployment has no Computer at all.
  *
- * One sentence, addressed to the person reading it. It names no environment
- * variable and no settings screen: attaching a Computer is a deployment act,
- * and nothing a User or a Bot can do inside the product changes it, so
- * inventing a remedy here only sends the User looking for a control that does
- * not exist.
+ * One sentence, in the words the person reading it would use. It names no
+ * environment variable and no settings screen — a Computer is wired in when the
+ * app is deployed, and nothing a User or a Bot can do inside the product
+ * changes it, so inventing a remedy here only sends the User looking for a
+ * control that does not exist. It also names no part of the architecture: what
+ * the reader has lost is the ability to have the Bot browse and run tasks, and
+ * that is what the sentence says.
  */
 export const COMPUTER_UNCONFIGURED_MESSAGE_V1 =
-  "This FrockBot has no Computer. Nothing in the app can attach one.";
+  "This Bot has no computer, so it can't browse the web or run tasks for you.";
 
 export class ComputerError extends Error {
   constructor(
