@@ -129,9 +129,31 @@ describe("invoking a Skill from the composer", () => {
       text: "Run the standup.",
       skills: [{ schemaVersion: 1, source: "bot", slug: "no-such-skill" }],
     });
-    expect(unknown.status).toBe(500);
-    const failure = (await unknown.json()) as { error?: string };
-    expect(failure.error ?? "").toContain("bot/no-such-skill");
+    // The Turn settles on it rather than rejecting the request over the top of
+    // its own settlement, so the answer is the run and the reason is durable.
+    expect(unknown.status).toBe(200);
+    const runs = (await expectOkJson(
+      await asUser(userId, `/api/bots/${botId}/turns`),
+    )) as {
+      runs: Array<{
+        runId: string;
+        status: string;
+        outcome?: { message?: string };
+      }>;
+    };
+    const failed = runs.runs.find(
+      (entry) => entry.runId === "skill-invoke-unknown",
+    );
+    expect(failed?.status).toBe("failed");
+    // The ref stays on the durable record for the debug surface; what the
+    // person reads is the sentence for the outcome, with no ref in it.
+    const stored = await runInDurableObject(
+      env.BOT_STATES.getByName(`${userId}:${botId}`),
+      (_instance, state) =>
+        state.storage.get<{ failure?: string }>("run:skill-invoke-unknown"),
+    );
+    expect(stored?.failure ?? "").toContain("bot/no-such-skill");
+    expect(failed?.outcome?.message ?? "").not.toContain("no-such-skill");
 
     // A malformed ref never reaches the Bot at all: the route refuses it.
     const malformed = await postAsUser(userId, `/api/bots/${botId}/turns`, {

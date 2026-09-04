@@ -32,6 +32,9 @@ import {
   TURN_TEXT_MAX_CHARACTERS_V1,
   TURN_TOO_LONG_MESSAGE_V1,
 } from "../src/request-body.ts";
+// Same rule for the failure copy: the sentence lives in one place, and the
+// spec reads it from there rather than restating it.
+import { RUN_FAILURE_COPY_V1 } from "@frockbot/plugin-shell/run-failure-copy";
 
 /*
  * The fake provider is one server shared by every spec in the shard, so a mode
@@ -604,35 +607,49 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
   // inference, which is what an upstream revocation looks like.
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "unauthorized");
 
-  // Submitting a Turn that fails at the provider answers 500 with the durable
-  // failure as JSON. That is the designed report of a failed Turn — the reason
-  // below is read out of it — so this one request, and the browser's console
-  // note about it, are expected.
+  // A Turn that fails at the provider settles itself and answers with that
+  // settlement, so the send is an ordinary 200 carrying a failed run. It used
+  // to answer 500 over the top of a Turn that had already recorded its own
+  // outcome, which is why these allowances exist; they are kept because a
+  // slower run can still see the connection torn down, and an allowance that
+  // matches nothing costs nothing.
   allowedFailures.requests.push(/\/api\/bots\/[^/]+\/turns$/);
   allowedFailures.console.push(/Failed to load resource.*500/);
 
-  await sendMessage(page, "will not work");
+  // Everything from here runs inside a `finally`, because the endpoint this
+  // test switched into refusing is shared by every spec in the shard. A
+  // failing assertion used to skip the reset below, and then each later spec's
+  // Turns failed with a 401 they never asked for — which is how one wrong
+  // sentence here also broke "a conversation opens at its end", whose six
+  // Turns then produced no transcript tall enough to scroll. One failure
+  // should report one failure.
+  try {
+    await sendMessage(page, "will not work");
 
-  /*
-   * A failed Turn is a notice, not the Bot speaking.
-   *
-   * The thread used to render the durable failure verbatim in an assistant
-   * bubble — `Bot turn ended with outcome model-error`, a provider status
-   * code, and on one occasion a run UUID and the words "no durable provider
-   * outcome" — styled exactly like something the Bot had said. The reason is
-   * still on the run for `/api/debug` and the console; what the User is shown
-   * is one line, in the product's own words.
-   */
-  await expect(page.locator(".message-notice").last()).toHaveText(
-    "This Bot couldn't finish its reply. Try again.",
-  );
-  await expect(page.locator(".thread")).not.toContainText("model-error");
-  await expect(page.locator(".thread")).not.toContainText("outcome");
-  await expect(page.locator(".thread")).not.toContainText("401");
-
-  // The refusal this test switched on is switched off in the `afterEach` at
-  // the top of the file, so it is off even when the test above fails: leaving
-  // it on made every later spec's Turn fail with a 401 it never asked for.
+    /*
+     * A failed Turn is a notice, not the Bot speaking.
+     *
+     * The thread used to render the durable failure verbatim in an assistant
+     * bubble — `Bot turn ended with outcome model-error`, a provider status
+     * code, and on one occasion a run UUID and the words "no durable provider
+     * outcome" — styled exactly like something the Bot had said. The reason is
+     * still on the run for `/api/debug` and the console; what the User is shown
+     * is one line, in the product's own words.
+     */
+    // Asserted through the constant the product renders from, so the copy and
+    // the spec cannot drift apart the way they just did. A provider refusal ends
+    // the Turn `model-error`, and that outcome has its own sentence — naming the
+    // model rather than the Bot, because the Bot did nothing wrong.
+    await expect(page.locator(".message-notice").last()).toHaveText(
+      RUN_FAILURE_COPY_V1["model-error"],
+    );
+    await expect(page.locator(".thread")).not.toContainText("model-error");
+    await expect(page.locator(".thread")).not.toContainText("outcome");
+    await expect(page.locator(".thread")).not.toContainText("401");
+  } finally {
+    // Switched off however the test ended, not only when it passed.
+    await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+  }
 });
 
 // Seam S9 from the other side: what the client does with an answer that is not

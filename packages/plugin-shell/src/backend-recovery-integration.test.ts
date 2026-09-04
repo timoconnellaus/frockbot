@@ -344,16 +344,16 @@ describe("Bot recovery", () => {
     };
 
     failRequests = true;
-    await expect(
-      host().run({
-        userId: "user-1",
-        botId: "primary",
-        runId: "ollama-run-uncertain",
-        sessionId: "user-1:primary",
-        acceptedAt: "2026-08-30T00:02:00.000Z",
-        text: "uncertain",
-      }),
-    ).rejects.toThrow("response lost");
+    // The call resolves: the Turn settled itself, and the caller is handed
+    // that settlement rather than a rejection thrown over the top of it.
+    await host().run({
+      userId: "user-1",
+      botId: "primary",
+      runId: "ollama-run-uncertain",
+      sessionId: "user-1:primary",
+      acceptedAt: "2026-08-30T00:02:00.000Z",
+      text: "uncertain",
+    });
     // Ollama keeps no addressable copy of a completion, so a failure raised
     // before the first stream event is definitive rather than uncertain: the
     // run settles as a failed Turn instead of parking on a retrieval this
