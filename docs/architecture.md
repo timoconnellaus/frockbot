@@ -355,7 +355,7 @@ The Flock Package contributes chat-only `bot_message { target_id, message }` and
 
 Before dispatch, the asking Bot reserves one of eight per-User agent-Turn slots in the User Durable Object. The reservation is idempotent on asking Bot and run id and is released after a terminal target answer; recovery replays the same request and releases the same lease. The target Bot's internal-only `runAgent` RPC—not the hosted Turn route—constructs `turnType: "agent"`, `lane: "agent"`, and a Bot origin. An agent Turn receives a Flock-owned sender cue in its system prompt, can call `send_to_user`, and cannot call `bot_message`, which prevents recursive fan-out.
 
-The asking Turn receives the target's first text send as the `bot_message` tool result. The target transcript remains visible: run projection schema 3 carries `via { kind, name, botId? }`, the original question is unchanged, and the WebUI draws `via <Bot>` below it. A Voice origin projects the same seam as `via Voice`; the Voice Package that submits one is slice B2 of [ADR 0035](adr/0035-voice-is-a-user-package-over-a-socket-only-session.md).
+The asking Turn receives the target's first text send as the `bot_message` tool result. The target transcript remains visible: run projection schema 3 carries `via { kind, name, botId? }`, the original question is unchanged, and the WebUI draws `via <Bot>` below it. A Voice origin projects the same seam as `via Voice`; the Voice Package submits it through the same internal agent admission in [ADR 0035](adr/0035-voice-is-a-user-package-over-a-socket-only-session.md).
 
 ### The Bot's voice to its User
 
@@ -685,11 +685,23 @@ never persisted.
 
 The assistant uses `gemini-3.1-flash-live-preview`, PCM16 mono input at 16 kHz,
 PCM16 mono output at 24 kHz, automatic VAD, barge-in, and a two-minute silence
-ceiling. Its B1 Gemini declarations are the bounded read-only `list_bots`,
-`bot_activity`, `memory_search`, and `pending_answers` tools. They read User and
-Bot Durable Object projections plus User/Bot Memory object storage without a
-Computer call. The table is the seam B2 extends with `ask_bot`; B1 has no
-effectful Voice tool and writes no Memory.
+ceiling. Its Gemini declarations are the bounded read-only `list_bots`,
+`bot_activity`, `memory_search`, and `pending_answers` tools plus effectful
+`ask_bot`. Reads use User and Bot Durable Object projections plus User/Bot
+Memory object storage without a Computer call. `ask_bot` first writes a
+`voice/ask` record in the User object, then schedules the target Bot on the
+existing agent lane under a deterministic run id and returns immediately.
+
+After that Bot's `turn/end` is durable, its first text `send_to_user` enters a
+Bot-local durable outbox and is recorded as `voice/answered` by the User
+object. The User object pushes a live answer into Gemini with
+`realtimeInput.text`; otherwise the answer stays pending, raises the shared
+client notification seam while Voice is off, and is included in the next
+connection's kickoff. Gemini turn completion records `voice/briefed`. One
+Voice session may have only one unanswered ask to a given Bot; the shared
+eight-per-User agent lease, 32-per-target FIFO, and 32-pending-answer bounds
+remain in force. The target thread shows the unchanged question with the
+existing `via Voice` projection. Voice still writes no Memory.
 
 The Voice Package fills the shell's global header slot and mounts a panel for
 listening/speaking/offline state, current-session transcript, plain-language

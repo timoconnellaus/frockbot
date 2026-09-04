@@ -2,7 +2,7 @@
 
 ## Status
 
-Design accepted in conversation on 2026-09-04; tracked in [issue #179](https://github.com/timoconnellaus/frockbot/issues/179) and [ADR 0035](../adr/0035-voice-is-a-user-package-over-a-socket-only-session.md). **Slice A (dictation), B0 (the ADR and agent lane), and B1 (the Voice Package core) are implemented**; B2 is not. Both voice capabilities are **beyond parity** (Feature rule 8): the parity register has only a "microphone" settings row (`docs/research/grokbot-computer.md`, §Per-user settings).
+Design accepted in conversation on 2026-09-04; tracked in [issue #179](https://github.com/timoconnellaus/frockbot/issues/179) and [ADR 0035](../adr/0035-voice-is-a-user-package-over-a-socket-only-session.md). **Slice A (dictation), B0 (the ADR and agent lane), B1 (the Voice Package core), and B2 (ask-and-deliver) are implemented.** Both voice capabilities are **beyond parity** (Feature rule 8): the parity register has only a "microphone" settings row (`docs/research/grokbot-computer.md`, §Per-user settings).
 
 Everything below was verified against `main` at `43cae29a`. Line numbers drift; verify before relying on them.
 
@@ -103,6 +103,30 @@ settle atomically with the Billing ledger; Gemini audio is token-priced, so the
 duration is recorded under the actual provider/model with an explicitly
 unknown price instead of a false duration estimate.
 
+## Slice B2 status (implemented 2026-09-05)
+
+Gemini now declares the effectful `ask_bot(bot, question)` tool. A call records
+`voice/ask` in the User Durable Object before scheduling the target Bot's
+ordinary `agent`-lane Turn, then immediately returns “I've asked … I'll tell
+you when … answers.” The ask id and target run id are deterministic from the
+Voice session and Gemini call id, so replay reaches the target Bot's existing
+run instead of creating another one.
+
+After the target Turn's `turn/end` is durable, the Bot Durable Object projects
+its first text `send_to_user` into a bounded Voice answer outbox. The User
+ledger accepts that delivery idempotently as `voice/answered`, releases the
+shared agent-Turn lease, and keeps the answer pending. If Voice is live, the
+User object pushes it to the socket-only `VoiceSession`; the answer is marked
+`voice/briefed` only after Gemini completes the speech turn. If Voice is off,
+the hosted client raises `showClientNotificationV1`, and the next connection's
+kickoff text carries every still-pending answer before normal conversation.
+
+The limits are one unanswered ask per target Bot per Voice session, the
+existing eight concurrent agent Turns per User, the existing FIFO of 32 queued
+agent Turns per target Bot, and 32 pending Voice answers. The target run uses
+the B0 Voice origin, so its ordinary thread projection shows `via Voice` with
+no second execution or rendering path.
+
 ## Where each key goes
 
 Each capability has two production upstream paths, chosen by configuration and
@@ -200,7 +224,7 @@ These gate D1 and D3. Each is a short spike, not a design question.
 - **A — Dictation.** AI Gateway OpenAI realtime WS through a minimal `VoiceSession` DO; composer wave / bin / send states; worklet and animation; e2e with a fake transcription service. Proves the gateway WebSocket path.
 - **B0 — ADR + #151 (landed 2026-09-04).** ADR 0035 records the Voice Package and socket-only `VoiceSession` seam. The kernel `agent` lane, Flock's chat-only `bot_message`, same-User dispatch, per-User lease, teammate and sender prompt sections, and transcript origin marker are implemented.
 - **B1 — Voice Package core (implemented 2026-09-04).** Gemini Live via the DO proxy, the ledger in the User DO, read-only tools (`list_bots`, `bot_activity`, `memory_search`, `pending_answers`), the shell toggle, the Voice surface, the quota, Billing settlement, native microphone declarations, and the e2e fake.
-- **B2 — Ask a Bot.** `ask_bot` on the agent lane, answer push into the live session, offline notification, connect-time briefing, the "via voice" marker in the thread.
+- **B2 — Ask a Bot (implemented 2026-09-05).** `ask_bot` on the agent lane, answer push into the live session, offline notification, connect-time briefing, the "via Voice" marker in the thread.
 
 Depends on #151 and #153.
 
