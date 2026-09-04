@@ -16,6 +16,13 @@
   border-radius: 9px;
 }
 
+/* The pinned sidebar tile: round, so a pin reads as a destination not a row. */
+.flock-avatar--tile {
+  width: var(--frock-avatar-lg);
+  height: var(--frock-avatar-lg);
+  border-radius: 50%;
+}
+
 .flock-avatar--large {
   width: 188px;
   height: 188px;
@@ -61,6 +68,88 @@
 .flock-lifecycle:hover {
   background: var(--frock-fill-hover);
   color: var(--frock-text);
+}
+
+/*
+ * Pinned Bots. A wrapping row of large round tiles above the labelled groups,
+ * each one a whole Bot rather than a line of text about it.
+ */
+.flock-pinned {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 6px 10px;
+  border-bottom: 1px solid var(--frock-border);
+  margin-bottom: 8px;
+}
+
+.flock-pinned-tile {
+  display: flex;
+  width: 72px;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 2px;
+  border: 0;
+  border-radius: var(--frock-radius-card);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--frock-motion-fast);
+}
+
+.flock-pinned-tile:hover:not(:disabled) {
+  background: var(--frock-fill-hover);
+}
+
+.flock-pinned-tile.active {
+  background: var(--frock-fill-pressed);
+}
+
+.flock-pinned-tile.archived {
+  opacity: 0.72;
+  cursor: default;
+}
+
+.flock-pinned-tile:focus-visible {
+  outline: 2px solid var(--frock-focus-ring);
+  outline-offset: 2px;
+}
+
+.flock-pinned-art {
+  position: relative;
+  display: inline-flex;
+}
+
+/* The tile has no preview line, so unread is a dot rather than bold text. */
+.flock-pinned-dot {
+  position: absolute;
+  right: 0;
+  bottom: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--frock-action-primary);
+  box-shadow: 0 0 0 2px var(--frock-surface);
+}
+
+.flock-pinned-name {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+  line-height: var(--frock-leading-tight);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flock-pinned-tile.active .flock-pinned-name,
+.flock-pinned-tile.unread .flock-pinned-name {
+  color: var(--frock-text);
+  font-weight: 600;
 }
 
 .flock-groups,

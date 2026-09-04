@@ -3,7 +3,11 @@ import { UiSkeleton } from "@frockbot/client-ui";
 import { computed, inject, onMounted } from "vue";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { flockWebDataKey } from "./state.js";
-import { formatSidebarMessageTimeV1, groupSidebarBotsV1 } from "./sidebar.js";
+import {
+  formatSidebarMessageTimeV1,
+  groupSidebarBotsV1,
+  partitionPinnedSidebarBotsV1,
+} from "./sidebar.js";
 import BotAvatar from "./BotAvatar.vue";
 
 const injectedFlock = inject(flockWebDataKey);
@@ -33,8 +37,16 @@ const listedBots = computed(() =>
 const visibleBots = computed(() =>
   listedBots.value.filter((bot) => !isHidden(bot.botId)),
 );
+/*
+ * A pinned Bot is a tile above the list instead of a row inside it, never
+ * both: the tile is the row, moved, so grouping runs over what is left.
+ */
+const partitionedBots = computed(() =>
+  partitionPinnedSidebarBotsV1(visibleBots.value, flock.value.profiles),
+);
+const pinnedBots = computed(() => partitionedBots.value.pinned);
 const groupedVisibleBots = computed(() =>
-  groupSidebarBotsV1(visibleBots.value, flock.value.profiles),
+  groupSidebarBotsV1(partitionedBots.value.rest, flock.value.profiles),
 );
 const hiddenBots = computed(() =>
   listedBots.value.filter((bot) => isHidden(bot.botId)),
@@ -109,6 +121,49 @@ onMounted(() => void flock.value.load());
     No Bots yet. Add your first sheep.
   </p>
   <template v-else>
+    <!--
+      Pinned Bots: large tiles above the labelled groups, in pin order. The
+      tile is the row moved, so clicking it selects exactly as a row does.
+    -->
+    <TransitionGroup
+      v-if="pinnedBots.length"
+      name="flock-row"
+      tag="div"
+      class="flock-pinned"
+    >
+      <button
+        v-for="bot in pinnedBots"
+        :key="bot.botId"
+        type="button"
+        class="flock-pinned-tile"
+        :class="{
+          active: active === bot.botId,
+          archived: flock.lifecycles[bot.botId] === 'archived',
+          unread: isUnread(bot.botId),
+        }"
+        :disabled="flock.lifecycles[bot.botId] === 'archived'"
+        :aria-current="active === bot.botId ? 'true' : undefined"
+        @click="flock.select(bot.botId)"
+      >
+        <span class="flock-pinned-art">
+          <BotAvatar
+            :bot-id="bot.botId"
+            :sheep="flock.identities[bot.botId]?.sheep ?? bot.sheep"
+            size="tile"
+            :label="`${botName(bot.botId, bot.initialName)} avatar`"
+          />
+          <i
+            v-if="isUnread(bot.botId)"
+            class="flock-pinned-dot"
+            role="img"
+            :aria-label="`${botName(bot.botId, bot.initialName)} has unread`"
+          />
+        </span>
+        <span class="flock-pinned-name">{{
+          botName(bot.botId, bot.initialName)
+        }}</span>
+      </button>
+    </TransitionGroup>
     <div class="flock-groups">
       <section
         v-for="group in groupedVisibleBots.groups"

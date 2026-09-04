@@ -137,6 +137,12 @@ export interface BotIdentityViewV1 {
   /** Purely organisational sidebar group; never part of Bot instructions. */
   label?: string;
   title?: string;
+  /**
+   * When the User pinned this Bot, as an ISO 8601 instant. A pinned Bot is
+   * shown as a tile above the list instead of a row inside it, earliest pin
+   * first. Absent means not pinned.
+   */
+  pinnedAt?: string;
 }
 
 export interface BotIdentityDirectoryViewV1 {
@@ -600,7 +606,7 @@ export function decodeBotIdentityViewV1(input: unknown): BotIdentityViewV1 {
   exact(
     value,
     ["schemaVersion", "botId", "name", "namedBy", "hiddenFromSidebar"],
-    ["label", "title"],
+    ["label", "title", "pinnedAt"],
   );
   if (value.schemaVersion !== 1 || typeof value.hiddenFromSidebar !== "boolean")
     throw new FlockDecodeError("Bot identity is invalid");
@@ -616,7 +622,18 @@ export function decodeBotIdentityViewV1(input: unknown): BotIdentityViewV1 {
     ...(value.title === undefined
       ? {}
       : { title: boundedText(value.title, "title", 120) }),
+    ...(value.pinnedAt === undefined
+      ? {}
+      : { pinnedAt: timestampText(value.pinnedAt, "pinnedAt") }),
   };
+}
+
+/** An ISO 8601 instant. The sidebar orders pinned Bots by it. */
+function timestampText(value: unknown, label: string): string {
+  const candidate = boundedText(value, label, 64);
+  if (!Number.isFinite(Date.parse(candidate)))
+    throw new FlockDecodeError(`${label} is invalid`);
+  return candidate;
 }
 
 export function decodeBotIdentityDirectoryViewV1(

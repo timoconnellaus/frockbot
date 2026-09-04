@@ -182,4 +182,40 @@ describe("bot/set-profile", () => {
       ),
     ).toEqual({ name: "Housework" });
   });
+
+  test("pins with an instant and unpins with the empty string", () => {
+    const at = "2026-09-03T10:15:00.000Z";
+    expect(
+      decodeBotSettingsViewV1(settings({ name: "Housework", pinnedAt: at })),
+    ).toMatchObject({ profile: { pinnedAt: at } });
+    expect(() =>
+      decodeBotSettingsViewV1(
+        settings({ name: "Housework", pinnedAt: "whenever" }),
+      ),
+    ).toThrow("profile.pinnedAt is invalid");
+
+    const current: BotProfile = { name: "Housework", pinnedAt: at };
+    // A later save must not reshuffle the pinned row: the instant is durable,
+    // so only an explicit change moves it.
+    expect(
+      applyBotProfilePatchV1(current, { title: "Chief" }, "user").pinnedAt,
+    ).toBe(at);
+    expect(applyBotProfilePatchV1(current, { pinnedAt: "" }, "user")).toEqual({
+      name: "Housework",
+    });
+    expect(
+      applyBotProfilePatchV1({ name: "Housework" }, { pinnedAt: at }, "user")
+        .pinnedAt,
+    ).toBe(at);
+    expect(() =>
+      decodeConfigurationCommandV1({
+        schemaVersion: 1,
+        type: "bot/set-profile",
+        commandId: "command-1",
+        botId: "primary",
+        expectedRevision: 3,
+        profile: { pinnedAt: "soon" },
+      }),
+    ).toThrow("profile.pinnedAt is invalid");
+  });
 });
