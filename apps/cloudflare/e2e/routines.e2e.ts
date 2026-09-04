@@ -14,6 +14,15 @@ import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 import type { Locator, Page } from "@playwright/test";
 
 /**
+ * The browser runs in a real zone that is not UTC, so "the form defaults to
+ * the browser's zone" is a claim the spec can actually test. The CI runner's
+ * own zone is UTC, where a default of UTC and a default of the browser's zone
+ * are indistinguishable — this spec asserted "not UTC" and passed locally for
+ * exactly that reason while failing on CI.
+ */
+test.use({ timezoneId: "Australia/Sydney" });
+
+/**
  * Open Bot settings and reveal the Routines section, which lives under
  * Advanced — the same path `bot-settings.e2e.ts` walks.
  */
@@ -53,7 +62,7 @@ test("a refused schedule says why, next to the field that caused it", async ({
   // The form defaults the time zone to the browser's own, not UTC: a schedule
   // is meant in the day the person writing it is living in.
   const timezone = form.getByLabel("Time zone");
-  await expect(timezone).not.toHaveValue("UTC");
+  await expect(timezone).toHaveValue("Australia/Sydney");
   await expect(timezone).toHaveValue(
     await page.evaluate(
       () => new Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -95,6 +104,10 @@ test("a refused schedule says why, next to the field that caused it", async ({
   const nextRun = section.locator(".routine-card__facts time").first();
   await expect(nextRun).toBeVisible();
   await expect(nextRun).not.toContainText("T");
+  // Read in the Routine's own zone — the one it fires on — in the house
+  // order: "3 Sep 2026, 9:00am", never "2026-09-03T23:00:00.000Z".
+  await expect(nextRun).toContainText("9:00am");
+  await expect(nextRun).toHaveText(/^\d{1,2} [A-Z][a-z]{2} \d{4}, 9:00am$/u);
   await expect(nextRun).toHaveAttribute("datetime", /^\d{4}-\d{2}-\d{2}T/u);
 });
 

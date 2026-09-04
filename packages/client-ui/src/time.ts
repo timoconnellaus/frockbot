@@ -8,9 +8,42 @@
  * verbatim — "Next run 2026-09-03T12:08:28.834Z" — which is precise and
  * unreadable, and the one panel that did format dates picked the US order for
  * an Australian reader. So this module, and nothing else, decides the shape.
+ *
+ * The shape is assembled here from numeric parts rather than taken from a
+ * locale's own rendering. `Intl` is asked only for the two things it alone
+ * knows — which calendar day and clock hour a UTC instant falls on in a given
+ * zone — and every visible character after that is ours. It has to be: the
+ * month abbreviation and the am/pm marker are CLDR data, so the same code
+ * renders "3 Sep 2026" under one ICU version and "3 Sept 2026" under the next,
+ * and a narrow no-break space before the marker under some builds and a plain
+ * one under others. That is invisible until a test written on one machine
+ * fails on another, and worse, it means two people reading the same Bot see
+ * different text. A house style that varies by machine is not a house style.
  */
 
-const DEFAULT_LOCALE = "en-AU";
+/** The month names this module renders. Ours, not the platform's. */
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+/**
+ * A locale chosen for one property only: it yields plain numeric parts for
+ * `year`/`month`/`day`/`hour`/`minute` in every ICU build. Nothing of its
+ * ordering, separators or names reaches the screen — `formatToParts` is read
+ * by name and the string is rebuilt below.
+ */
+const PARTS_LOCALE = "en-GB";
 
 /** The reader's own zone, or UTC where the environment will not say. */
 export function browserTimeZoneV1(): string {
@@ -25,25 +58,58 @@ export function browserTimeZoneV1(): string {
 export interface UiMomentOptionsV1 {
   /** The zone to read the moment in. Defaults to the reader's own. */
   timeZone?: string;
-  /** Locale override, for tests. */
-  locale?: string;
 }
 
-function parts(
+interface MomentPartsV1 {
+  day: number;
+  month: number;
+  year: number;
+  hour: number;
+  minute: number;
+}
+
+/**
+ * The calendar day and clock time one UTC instant falls on in one zone.
+ *
+ * Read as a 24-hour clock and converted below, because `hour12` is where the
+ * am/pm marker and its spacing come from, and those are exactly the parts that
+ * differ between ICU builds.
+ */
+function momentParts(
   iso: string,
   options: UiMomentOptionsV1,
-  shape: Intl.DateTimeFormatOptions,
-): string | undefined {
+): MomentPartsV1 | undefined {
   const parsed = Date.parse(iso);
   if (!Number.isFinite(parsed)) return undefined;
+  let parts: Intl.DateTimeFormatPart[];
   try {
-    return new Intl.DateTimeFormat(options.locale ?? DEFAULT_LOCALE, {
-      ...shape,
+    parts = new Intl.DateTimeFormat(PARTS_LOCALE, {
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: false,
       timeZone: options.timeZone ?? browserTimeZoneV1(),
-    }).format(new Date(parsed));
+    }).formatToParts(new Date(parsed));
   } catch {
     return undefined;
   }
+  const read = (type: Intl.DateTimeFormatPartTypes): number => {
+    const found = parts.find((part) => part.type === type);
+    return found === undefined ? Number.NaN : Number(found.value);
+  };
+  const moment = {
+    day: read("day"),
+    month: read("month"),
+    year: read("year"),
+    // Some builds render midnight under a 24-hour clock as `24`.
+    hour: read("hour") % 24,
+    minute: read("minute"),
+  };
+  return Object.values(moment).every((value) => Number.isFinite(value))
+    ? moment
+    : undefined;
 }
 
 /** `9:30am`, lowercase, no leading zero on the hour. */
@@ -51,15 +117,11 @@ export function formatTimeOfDayV1(
   iso: string,
   options: UiMomentOptionsV1 = {},
 ): string {
-  const formatted = parts(iso, options, {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-  if (formatted === undefined) return iso;
-  return formatted.replace(/\s*(AM|PM|am|pm)$/u, (_match, marker: string) =>
-    marker.toLowerCase(),
-  );
+  const moment = momentParts(iso, options);
+  if (!moment) return iso;
+  const marker = moment.hour < 12 ? "am" : "pm";
+  const hour = moment.hour % 12 === 0 ? 12 : moment.hour % 12;
+  return `${hour}:${String(moment.minute).padStart(2, "0")}${marker}`;
 }
 
 /** `3 Sep 2026` — day first, never the US month-first order. */
@@ -67,13 +129,11 @@ export function formatDayV1(
   iso: string,
   options: UiMomentOptionsV1 = {},
 ): string {
-  return (
-    parts(iso, options, {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    }) ?? iso
-  );
+  const moment = momentParts(iso, options);
+  if (!moment) return iso;
+  const month = MONTHS[moment.month - 1];
+  if (month === undefined) return iso;
+  return `${moment.day} ${month} ${moment.year}`;
 }
 
 /**
@@ -84,8 +144,8 @@ export function formatMomentV1(
   iso: string,
   options: UiMomentOptionsV1 = {},
 ): string {
-  const parsed = Date.parse(iso);
-  if (!Number.isFinite(parsed)) return iso;
+  const moment = momentParts(iso, options);
+  if (!moment) return iso;
   return `${formatDayV1(iso, options)}, ${formatTimeOfDayV1(iso, options)}`;
 }
 
