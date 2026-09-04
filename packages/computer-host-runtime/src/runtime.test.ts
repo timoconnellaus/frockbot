@@ -95,6 +95,7 @@ import {
   UPDATE_PHASES,
   updateLaunchScript,
   WATCHDOG_LOG,
+  WATCHDOG_MEM_AVAILABLE_FLOOR_KIB,
   WATCHDOG_RENDERER_RSS_LIMIT_KIB,
   WATCHDOG_SCRIPT,
   WORKSPACES_ROOT,
@@ -802,6 +803,58 @@ describe("installed shell scripts", () => {
     } finally {
       oversized.kill();
       bounded.kill();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("low available memory closes only the worst renderer needed for the floor", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "frockbot-low-memory-"));
+    const worst = Bun.spawn(["sleep", "60"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    const smaller = Bun.spawn(["sleep", "60"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    try {
+      const procRoot = join(directory, "proc");
+      await mkdir(procRoot, { recursive: true });
+      await writeFile(
+        join(procRoot, "meminfo"),
+        `MemAvailable:   ${WATCHDOG_MEM_AVAILABLE_FLOOR_KIB - 262_144} kB\n`,
+      );
+      for (const [pid, rssKiB] of [
+        [worst.pid, 393_216],
+        [smaller.pid, 262_144],
+      ] as const) {
+        const root = join(procRoot, String(pid));
+        await mkdir(root, { recursive: true });
+        await writeFile(join(root, "cmdline"), `chromium\0--type=renderer\0`);
+        await writeFile(join(root, "status"), `VmRSS:\t${rssKiB} kB\n`);
+      }
+      const logPath = join(directory, "watchdog.log");
+      const watchdog = Bun.spawn(["bash"], {
+        stdin: new Blob([browserWatchdogScript]),
+        stdout: "ignore",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          FROCKBOT_WATCHDOG_ONCE: "1",
+          FROCKBOT_WATCHDOG_PROC_ROOT: procRoot,
+          FROCKBOT_WATCHDOG_LOG: logPath,
+        },
+      });
+      expect(await watchdog.exited).toBe(0);
+      expect(await worst.exited).not.toBe(0);
+      expect(smaller.exitCode).toBeNull();
+      const log = await readFile(logPath, "utf8");
+      expect(log).toContain(`pid=${worst.pid}`);
+      expect(log).toContain("reason=low-mem-available");
+      expect(log).not.toContain(`pid=${smaller.pid}`);
+    } finally {
+      worst.kill();
+      smaller.kill();
       await rm(directory, { recursive: true, force: true });
     }
   });

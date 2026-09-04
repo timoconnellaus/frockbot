@@ -608,7 +608,9 @@ trim_log() {
 
 while true; do
   MEM_AVAILABLE=$(awk '/^MemAvailable:/ { print $2; exit }' "$PROC_ROOT/meminfo" 2>/dev/null || true)
-  case "$MEM_AVAILABLE" in (''|*[!0-9]*) MEM_AVAILABLE=0;; esac
+  # If the kernel did not provide a reading, keep enforcing the per-renderer
+  # bound but do not infer box-wide pressure and kill otherwise healthy tabs.
+  case "$MEM_AVAILABLE" in (''|*[!0-9]*) MEM_AVAILABLE=${WATCHDOG_MEM_AVAILABLE_FLOOR_KIB};; esac
   CANDIDATES=$(
     for STATUS in "$PROC_ROOT"/[0-9]*/status; do
       [ -f "$STATUS" ] || continue
@@ -1925,7 +1927,7 @@ if pgrep -f -- ${WATCHDOG_SCRIPT} >/dev/null 2>&1; then
 else
   record watchdog fail "the renderer watchdog is not running; recent actions: \${WATCHDOG_ACTIONS:-none}"
 fi
-TOP_MEMORY=$(ps -eo pid=,rss=,comm=,args= --sort=-rss 2>/dev/null | head -n 5 | tr '\n' ';' || true)
+TOP_MEMORY=$(ps -eo pid=,rss=,comm= --sort=-rss 2>/dev/null | head -n 5 | tr '\n' ';' || true)
 record memory-top pass "top resident-memory consumers (pid rssKiB command): \${TOP_MEMORY:-unavailable}"
 SLOT=""
 if [ -n "$KEY" ] && [ -s ${BOTS_ROOT}/"$KEY"/slot ]; then SLOT=$(cat ${BOTS_ROOT}/"$KEY"/slot); fi

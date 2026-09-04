@@ -707,6 +707,24 @@ export function createComputerAgentPlugin(
       await selfCheck(computer, botId, signal);
       return computer;
     };
+    const closePreviewTabs = async (
+      computer: ComputerHandle,
+      origins: readonly string[],
+      effectId: string,
+      signal?: AbortSignal,
+    ): Promise<void> => {
+      if (!computer.browser) return;
+      const unique = [...new Set(origins)];
+      for (let offset = 0; offset < unique.length; offset += 16) {
+        await computer.browser.perform(
+          { type: "close-origins", origins: unique.slice(offset, offset + 16) },
+          {
+            ...(signal ? { signal } : {}),
+            effectId: `${effectId}:${Math.floor(offset / 16)}`,
+          },
+        );
+      }
+    };
 
     const execTool: ToolDefinition = {
       name: "computer_exec",
@@ -1093,12 +1111,11 @@ export function createComputerAgentPlugin(
             ) {
               const origins = localPreviewOriginsV1(observed.logTail);
               if (origins.length > 0) {
-                await computer.browser.perform(
-                  { type: "close-origins", origins },
-                  {
-                    signal: context.signal,
-                    effectId: `${context.effectId}:close-preview-tabs`,
-                  },
+                await closePreviewTabs(
+                  computer,
+                  origins,
+                  `${context.effectId}:close-preview-tabs`,
+                  context.signal,
                 );
                 for (const origin of origins) previewOrigins.delete(origin);
               }
@@ -1701,11 +1718,10 @@ export function createComputerAgentPlugin(
         try {
           if (computer.browser && previewOrigins.size > 0) {
             const origins = [...previewOrigins];
-            await computer.browser.perform(
-              { type: "close-origins", origins },
-              {
-                effectId: `computer:${writer?.runId ?? agent.session.id}:${turn}:close-preview-tabs`,
-              },
+            await closePreviewTabs(
+              computer,
+              origins,
+              `computer:${writer?.runId ?? agent.session.id}:${turn}:close-preview-tabs`,
             );
             previewOrigins.clear();
           }
