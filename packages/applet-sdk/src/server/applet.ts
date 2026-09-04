@@ -38,6 +38,11 @@ import { AppletStore } from "./store.js";
 
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 
+/** The readable half of whatever escaped an entry point. */
+function errorMessageV1(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** One tool as the kernel's manifest declares it: `inputSchema` is JSON Schema. */
 export interface AppletToolDeclarationV1 {
   name: string;
@@ -311,15 +316,26 @@ export abstract class Applet<
     return this.ctx.id.name ?? this.ctx.id.toString();
   }
 
+  // A socket callback is an entry point: workerd calls it with no caller of
+  // ours left to catch what escapes, so a malformed frame from one viewer — or
+  // an Applet's own tool throwing — became an uncaught exception in the object
+  // rather than one dropped frame. Recording it and returning is the whole of
+  // the recovery; the viewer retries, and every other viewer keeps its socket.
   async webSocketMessage(
     socket: AppletHibernatableWebSocket,
     message: string | ArrayBuffer,
   ): Promise<void> {
-    await this.ready();
-    this.#protocol().receive(
-      this.#peer(socket),
-      typeof message === "string" ? message : new TextDecoder().decode(message),
-    );
+    try {
+      await this.ready();
+      this.#protocol().receive(
+        this.#peer(socket),
+        typeof message === "string"
+          ? message
+          : new TextDecoder().decode(message),
+      );
+    } catch (error) {
+      console.error(`Applet socket message failed: ${errorMessageV1(error)}`);
+    }
   }
 
   async webSocketClose(
@@ -327,8 +343,12 @@ export abstract class Applet<
     code: number,
     closeReason: string,
   ): Promise<void> {
-    // 1006 is never a valid code to echo back.
-    socket.close(code === 1006 ? 1000 : code, closeReason);
+    try {
+      // 1006 is never a valid code to echo back.
+      socket.close(code === 1006 ? 1000 : code, closeReason);
+    } catch (error) {
+      console.error(`Applet socket close failed: ${errorMessageV1(error)}`);
+    }
   }
 
   /**
