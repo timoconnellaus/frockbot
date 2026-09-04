@@ -16,6 +16,10 @@ export const ACTIVE_RUN_KEY = "active-run";
  * working through a backlog of things the User has already replaced.
  */
 export const PENDING_RUN_KEY = "pending-run";
+/** Agent-lane Turns wait FIFO behind conversational work. */
+export const PENDING_AGENT_RUN_PREFIX = "pending-agent-run:";
+/** A Bot cannot accumulate an unbounded cross-Bot inbox. */
+export const MAX_PENDING_AGENT_RUNS_V1 = 32;
 export const LATEST_EVENTS_KEY = "latest-events";
 export const IDENTITY_KEY = "identity";
 export const NOTIFICATION_PREFIX = "notification:";
@@ -78,6 +82,10 @@ export function workspaceConflictKey(
 
 export function runIndexKey(acceptedAt: string, runId: string): string {
   return `${RUN_INDEX_PREFIX}${acceptedAt}:${runId}`;
+}
+
+export function pendingAgentRunKey(acceptedAt: string, runId: string): string {
+  return `${PENDING_AGENT_RUN_PREFIX}${acceptedAt}:${runId}`;
 }
 
 export function compositionGenerationKey(generationId: string): string {

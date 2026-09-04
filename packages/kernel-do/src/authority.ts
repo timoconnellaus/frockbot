@@ -16,6 +16,7 @@ import {
   botTurnCommandFingerprintV1,
   defaultRunLaneV1,
   storedRunAdmissionV1,
+  storedRunLaneV1,
   storedRunSubagentRoleV1,
   storedRunTurnTypeV1,
   type BotNotificationIntent,
@@ -61,6 +62,8 @@ import {
   CONVERSATION_INDEX_KEY,
   CONVERSATION_KEY,
   MAX_LISTED_CONVERSATIONS,
+  MAX_PENDING_AGENT_RUNS_V1,
+  PENDING_AGENT_RUN_PREFIX,
   PENDING_RUN_KEY,
   IDENTITY_KEY,
   LATEST_EVENTS_KEY,
@@ -71,6 +74,7 @@ import {
   RUN_ADMISSION_FENCE_PREFIX,
   RUN_INDEX_PREFIX,
   RUN_PREFIX,
+  pendingAgentRunKey,
   runIndexKey,
   storedRunAdmissionFences,
 } from "./storage-keys.js";
@@ -384,12 +388,28 @@ export class BotDurableAuthority<Snapshot> {
     return this.ctx.storage.transaction(async (transaction) => {
       const pendingRunId = await transaction.get<string>(PENDING_RUN_KEY);
       const run = this.codec.optional(await transaction.get<unknown>(key));
-      if (
-        pendingRunId !== runId ||
-        !run ||
-        run.status !== "running" ||
-        run.phase !== "queued"
-      ) {
+      const lane = run ? storedRunLaneV1(run) : undefined;
+      const firstPendingAgent = await transaction.list<string>({
+        prefix: PENDING_AGENT_RUN_PREFIX,
+        limit: 1,
+      });
+      const firstPendingAgentEntry = firstPendingAgent.entries().next()
+        .value as [string, string] | undefined;
+      if (!run || run.status !== "running" || run.phase !== "queued") {
+        return "not-queued" as const;
+      }
+      if (lane === "agent") {
+        // A User Turn always has first claim on an idle Bot, and agent Turns
+        // retain FIFO order behind it. The run is still queued in either case;
+        // reporting `not-queued` here would strand its blocking caller even
+        // though the durable queue entry remains.
+        if (pendingRunId !== undefined) return "blocked" as const;
+        if (firstPendingAgentEntry?.[1] !== runId) {
+          return firstPendingAgentEntry
+            ? ("blocked" as const)
+            : ("not-queued" as const);
+        }
+      } else if (pendingRunId !== runId) {
         return "not-queued" as const;
       }
       if (await transaction.get<string>(ACTIVE_RUN_KEY)) {
@@ -420,7 +440,11 @@ export class BotDurableAuthority<Snapshot> {
             }
           : {}),
       });
-      await transaction.delete(PENDING_RUN_KEY);
+      if (lane === "agent" && firstPendingAgentEntry) {
+        await transaction.delete(firstPendingAgentEntry[0]);
+      } else {
+        await transaction.delete(PENDING_RUN_KEY);
+      }
       await this.refreshRecoveryAlarm(transaction);
       return {
         previous: latestEvents,
@@ -714,6 +738,7 @@ export class BotDurableAuthority<Snapshot> {
           // Recovery re-mounts on the recorded turn type, so the resumed Turn
           // sees the same trimmed catalog the evicted one did.
           turnType: storedRunTurnTypeV1(run),
+          lane: storedRunLaneV1(run),
           ...(storedRunSubagentRoleV1(run)
             ? { subagentRole: storedRunSubagentRoleV1(run) }
             : {}),
@@ -928,6 +953,26 @@ export class BotDurableAuthority<Snapshot> {
       });
       return;
     }
+    const [activeBeforeAlarm, pendingUser, pendingAgents] = await Promise.all([
+      this.ctx.storage.get<string>(ACTIVE_RUN_KEY),
+      this.ctx.storage.get<string>(PENDING_RUN_KEY),
+      this.ctx.storage.list<string>({
+        prefix: PENDING_AGENT_RUN_PREFIX,
+        limit: 1,
+      }),
+    ]);
+    // An admitted Turn is work already owed. It runs before a due Routine;
+    // otherwise a busy schedule can starve a Bot-to-Bot question indefinitely.
+    if (!activeBeforeAlarm && (pendingUser || pendingAgents.size > 0)) {
+      try {
+        await this.recoverQueuedRun();
+      } finally {
+        await this.ctx.storage.transaction((transaction) =>
+          this.refreshRecoveryAlarm(transaction),
+        );
+      }
+      return;
+    }
     await this.hooks.settleScheduledWork();
     const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
     if (activeRunId) {
@@ -1058,7 +1103,11 @@ export class BotDurableAuthority<Snapshot> {
     return this.ctx.storage.transaction(async (transaction) => {
       const active = await transaction.get<string>(ACTIVE_RUN_KEY);
       const pending = await transaction.get<string>(PENDING_RUN_KEY);
-      if (active || pending) {
+      const pendingAgent = await transaction.list<string>({
+        prefix: PENDING_AGENT_RUN_PREFIX,
+        limit: 1,
+      });
+      if (active || pending || pendingAgent.size > 0) {
         // A typed refusal, not a bare Error: the Durable Object boundary turns
         // this one case into a 409 value rather than letting it escape the
         // object's entry frame as an uncaught exception.
@@ -1283,9 +1332,13 @@ export class BotDurableAuthority<Snapshot> {
   async refreshRecoveryAlarm(
     transaction: DurableObjectTransaction,
   ): Promise<void> {
-    const [activeRunId, scheduled] = await Promise.all([
+    const [activeRunId, scheduled, pendingAgents] = await Promise.all([
       transaction.get<string>(ACTIVE_RUN_KEY),
       this.hooks.scheduledDeadlines(transaction),
+      transaction.list<string>({
+        prefix: PENDING_AGENT_RUN_PREFIX,
+        limit: 1,
+      }),
     ]);
     const activeRun = activeRunId
       ? this.codec.optional(
@@ -1300,7 +1353,8 @@ export class BotDurableAuthority<Snapshot> {
       deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
     } else if (
       !activeRunId &&
-      (await transaction.get<string>(PENDING_RUN_KEY))
+      ((await transaction.get<string>(PENDING_RUN_KEY)) ||
+        pendingAgents.size > 0)
     ) {
       // A Turn admitted and waiting is work this object owes, so it keeps the
       // recovery alarm even with nothing running.
@@ -1386,9 +1440,62 @@ export class BotDurableAuthority<Snapshot> {
         throw new Error("Bot authority does not match its durable identity");
       }
       const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
-      const supersede = activeRunId
-        ? await this.planSupersede(transaction, command, activeRunId)
+      const pendingUserRunId = await transaction.get<string>(PENDING_RUN_KEY);
+      const lane = command.lane ?? defaultRunLaneV1(command.turnType ?? "chat");
+      const activeRun = activeRunId
+        ? this.codec.optional(
+            await transaction.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
+          )
         : undefined;
+      const pendingAgents = await transaction.list<string>({
+        prefix: PENDING_AGENT_RUN_PREFIX,
+      });
+      const hasPendingAgent = pendingAgents.size > 0;
+      let supersede: ((supersededBy: string) => Promise<boolean>) | undefined;
+      if (activeRunId) {
+        if (
+          lane === "agent" &&
+          activeRun?.status === "reconciliation-required"
+        ) {
+          throw new BotTurnRefusedError(
+            "reconciliation-required",
+            "bot cannot admit agent work while its active run requires reconciliation",
+          );
+        }
+        if (lane === "user") {
+          supersede = await this.planSupersede(
+            transaction,
+            command,
+            activeRunId,
+          );
+        } else if (lane === "background") {
+          throw new BotTurnRefusedError(
+            "busy",
+            "bot already has an active run",
+          );
+        }
+      } else if (
+        lane === "background" &&
+        (pendingUserRunId || hasPendingAgent)
+      ) {
+        throw new BotTurnRefusedError(
+          "busy",
+          "bot has queued conversational work",
+        );
+      }
+      const queued =
+        Boolean(activeRunId) ||
+        (lane === "agent" && (Boolean(pendingUserRunId) || hasPendingAgent));
+      if (
+        lane === "agent" &&
+        queued &&
+        pendingAgents.size >= MAX_PENDING_AGENT_RUNS_V1
+      ) {
+        throw new BotTurnRefusedError(
+          "busy",
+          `bot agent queue is full (${MAX_PENDING_AGENT_RUNS_V1} Turns)`,
+        );
+      }
       const storedEvents = (
         (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
       ).map(decodeSessionEvent);
@@ -1407,11 +1514,6 @@ export class BotDurableAuthority<Snapshot> {
       // that Turn's end: a `running` record is, and so is a
       // `reconciliation-required` one, whose Turn is held open on purpose
       // until its outcome is retrieved. Nothing else is.
-      const activeRun = activeRunId
-        ? this.codec.optional(
-            await transaction.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
-          )
-        : undefined;
       const stillOwned =
         activeRun?.status === "running" ||
         activeRun?.status === "reconciliation-required";
@@ -1449,7 +1551,7 @@ export class BotDurableAuthority<Snapshot> {
         // A queued Turn is admitted — durable, ordered, and owed a terminal
         // state — but has not started. Its `previousEventCount` is recomputed
         // when it is promoted, because the Turn ahead of it is still writing.
-        phase: activeRunId ? "queued" : "admitted",
+        phase: queued ? "queued" : "admitted",
         compositionGenerationId: pin.generationId,
         configurationSnapshot: structuredClone(admittedSettings),
         previousEventCount: latestEvents.length,
@@ -1466,8 +1568,13 @@ export class BotDurableAuthority<Snapshot> {
       await transaction.put({
         [key]: admittedRun,
         [runIndexKey(command.acceptedAt, command.runId)]: command.runId,
-        ...(activeRunId
-          ? { [PENDING_RUN_KEY]: command.runId }
+        ...(queued
+          ? lane === "agent"
+            ? {
+                [pendingAgentRunKey(command.acceptedAt, command.runId)]:
+                  command.runId,
+              }
+            : { [PENDING_RUN_KEY]: command.runId }
           : { [ACTIVE_RUN_KEY]: command.runId }),
         [IDENTITY_KEY]: identity ?? {
           userId: command.userId,
@@ -1476,13 +1583,15 @@ export class BotDurableAuthority<Snapshot> {
       });
       const interrupted = supersede ? await supersede(command.runId) : false;
       await this.refreshRecoveryAlarm(transaction);
-      if (activeRunId) {
+      if (queued) {
         return {
           kind: "queued" as const,
           // Only a Turn whose supersede intent was actually recorded is
           // interrupted. One that had not dispatched a model request is left
           // to finish, and the new message simply waits behind it.
-          ...(interrupted ? { interrupt: { runId: activeRunId } } : {}),
+          ...(interrupted && activeRunId
+            ? { interrupt: { runId: activeRunId } }
+            : {}),
         };
       }
       return {
@@ -1792,7 +1901,16 @@ export class BotDurableAuthority<Snapshot> {
    * do the promoting itself.
    */
   private async recoverQueuedRun(): Promise<void> {
-    const pendingRunId = await this.ctx.storage.get<string>(PENDING_RUN_KEY);
+    const pendingUserRunId =
+      await this.ctx.storage.get<string>(PENDING_RUN_KEY);
+    const pendingAgents = pendingUserRunId
+      ? new Map<string, string>()
+      : await this.ctx.storage.list<string>({
+          prefix: PENDING_AGENT_RUN_PREFIX,
+          limit: 1,
+        });
+    const pendingRunId =
+      pendingUserRunId ?? pendingAgents.values().next().value;
     if (!pendingRunId || this.queuedWaiters.has(pendingRunId)) return;
     if (pendingRunId === this.executingRunId) return;
     const durableIdentity =
@@ -1823,6 +1941,7 @@ export class BotDurableAuthority<Snapshot> {
       acceptedAt: run.acceptedAt,
       text: run.input,
       turnType: storedRunTurnTypeV1(run),
+      lane: storedRunLaneV1(run),
       ...(storedRunSubagentRoleV1(run)
         ? { subagentRole: storedRunSubagentRoleV1(run) }
         : {}),
@@ -1987,6 +2106,7 @@ export class BotDurableAuthority<Snapshot> {
         acceptedAt: recovery.run.acceptedAt,
         text: recovery.run.input,
         turnType: storedRunTurnTypeV1(recovery.run),
+        lane: storedRunLaneV1(recovery.run),
         ...(storedRunSubagentRoleV1(recovery.run)
           ? { subagentRole: storedRunSubagentRoleV1(recovery.run) }
           : {}),
