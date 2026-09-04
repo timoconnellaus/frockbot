@@ -413,7 +413,9 @@ async function sha256Hex(value: string): Promise<string> {
 }
 
 const APPLET_SECRET_V1 = /^[0-9a-f]{32}$/;
-const APPLET_OWNER_V1 = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// A User id as the auth layer mints it: mixed case, underscore allowed. Must
+// agree with `APPLET_ID_V1`'s owner half.
+const APPLET_OWNER_V1 = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/;
 
 /**
  * `<publicUserId>.<random>` — ADR 0015's share-id shape, reused.

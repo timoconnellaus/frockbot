@@ -1039,7 +1039,9 @@ export function decodeIsolateScheduleRequestV1(
   };
 }
 
-const APPLET_CAPABILITY_ID = /^[a-z0-9][a-z0-9-]{0,63}\.[a-z0-9-]{1,64}$/;
+// Same shape as `APPLET_ID_V1`: a mixed-case User id, then the random half.
+const APPLET_CAPABILITY_ID =
+  /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\.[a-z0-9-]{1,64}$/;
 
 export function decodeIsolateAppletsRequestV1(
   input: unknown,

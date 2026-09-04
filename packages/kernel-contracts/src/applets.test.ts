@@ -71,6 +71,13 @@ describe("Applet directory entry v1", () => {
     expect(() =>
       decodeAppletDirectoryEntryV1({ ...entry, appletId: "todo" }),
     ).toThrow("appletId is invalid");
+    // The owner half is a real User id, which Better Auth mints in mixed case.
+    expect(
+      decodeAppletDirectoryEntryV1({
+        ...entry,
+        appletId: "vgpqfaCcwnPlzjYdb2mIfNcOW1YV0SkG.todo",
+      }).appletId,
+    ).toBe("vgpqfaCcwnPlzjYdb2mIfNcOW1YV0SkG.todo");
     expect(() =>
       decodeAppletDirectoryEntryV1({ ...entry, status: "archived" }),
     ).toThrow("status is invalid");

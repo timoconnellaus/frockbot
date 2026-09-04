@@ -206,7 +206,14 @@ export const APPLET_SOURCE_MAX_BYTES_V1 = 512 * 1024;
 export const APPLET_SOURCE_MAX_FILES_V1 = 256;
 export const APPLET_SOURCE_MAX_DIAGNOSTICS_V1 = 64;
 
-export const APPLET_ID_V1 = /^[a-z0-9][a-z0-9-]{0,63}\.[a-z0-9-]{1,64}$/;
+/**
+ * `<ownerUserId>.<random>`. The owner half is a User id exactly as the auth
+ * layer mints it — Better Auth ids are mixed case (`vgpqfaCcwnPlzjYdb2mI…`),
+ * so the pattern matches `templateShareIdV1`'s owner half rather than a slug.
+ * A lowercase-only owner half locked every real account out of Applets
+ * while the lowercase test ids sailed through (Bob, 2026-09-04).
+ */
+export const APPLET_ID_V1 = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\.[a-z0-9-]{1,64}$/;
 export const APPLET_TOOL_NAME_V1 = /^[a-z][a-z0-9_]{0,63}$/;
 export const APPLET_MAX_TOOLS_V1 = 64;
 export const APPLET_MAX_GENERATIONS_PAGE_V1 = 64;
