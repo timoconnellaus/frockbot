@@ -3,6 +3,10 @@
 //
 // Two tools, and no authority of its own:
 //
+//  0. One prompt section, `conversation`: when to speak and when not to. It
+//     is contributed beside the tool so the section and the tool description
+//     cannot drift into telling the model two different things.
+//
 //  1. `send_to_user` (legacy alias `send_message`) — parity register row 57b.
 //     One tool carrying the typed payload union, admitted on chat turns only,
 //     recording each send as `send/to-user` on the durable log. Row 57c: a
@@ -127,8 +131,38 @@ function sendAcknowledgement(payload: SendToUserPayloadV1): string {
   }
 }
 
+/**
+ * The Bot's conversational contract, in the words the model reads.
+ *
+ * It lives here rather than in a prompt Package because it is the same rule
+ * the send tool's own description states: one place to write it, so the
+ * section and the tool cannot drift into telling the model two things. The
+ * Shell already owns the voice; it owns how the voice is used.
+ */
+export const CONVERSATION_PROMPT_SECTION_V1 = "conversation";
+/** Ordered after identity (0), before anything a Package contributes. */
+export const CONVERSATION_PROMPT_ORDER_V1 = 1;
+
+export const CONVERSATION_PROMPT_TEXT_V1 = [
+  "## Talking to the user",
+  "",
+  "Everything the user sees is a `send_to_user` call; nothing else reaches them.",
+  'When a request will take more than a moment, send one short line first — "On it." or "Looking into that." — then go quiet and work.',
+  "After that, send only on a real beat: the result, a decision only the user can make, or a blocker you cannot get past.",
+  "Never narrate what you are doing, what you are about to do, or which tool you are using.",
+  "Never leave a question or a request hanging: before you stop, the user must have the answer, the result, or the reason there isn't one.",
+  "When the work is finished, send the result itself, not an account of how you got it.",
+  "Keep every message short — a line or two, no preamble and no sign-off.",
+  "Don't say the same thing twice.",
+].join("\n");
+
 const SEND_TO_USER_DESCRIPTION = [
   "Speak to the user. This is the only way to say anything the user sees.",
+  "Call it once, immediately, with one short line when the request will take",
+  "more than a moment, then work in silence. Call it again only on a real",
+  "beat: the result, a decision only the user can make, or a blocker. Do not",
+  "call it to narrate a step or a tool, and never end your Turn leaving the",
+  "user's question unanswered. Each call is one message; keep it short.",
   "The payload is one of:",
   '{"type":"text","text":"…"}',
   '{"type":"attachment","url":"https://…","name":"…","mediaType":"…"}',
@@ -295,6 +329,13 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
   const userVoice = shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1);
   const parentHandoff = shellAdmissionCeilingV1(PARENT_HANDOFF_CAPABILITY_V1);
   const disposers = [
+    // The voice and the rules for using it are contributed together, so a
+    // Composition that admits the send tool always carries the contract.
+    ctx.systemPrompt.register({
+      id: CONVERSATION_PROMPT_SECTION_V1,
+      order: CONVERSATION_PROMPT_ORDER_V1,
+      render: () => CONVERSATION_PROMPT_TEXT_V1,
+    }),
     ctx.tools.register(
       createSendToUserTool(SEND_TO_USER_TOOL_V1, ctx.sessions),
       userVoice ? { admissionCeiling: userVoice } : undefined,
@@ -327,6 +368,6 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
     for (const dispose of disposers.toReversed()) dispose();
   };
 };
-shellAgentPlugin.inject = ["tools", "sessions"];
+shellAgentPlugin.inject = ["tools", "sessions", "systemPrompt"];
 
 export default shellAgentPlugin;

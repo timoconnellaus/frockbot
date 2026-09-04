@@ -4,8 +4,9 @@
  *
  * `working` draws the same activity ring the thread puts on the Bot it is
  * talking to, so a person reading one conversation can see another Bot still
- * going. The sidebar knows only that a Turn is running — the step count is the
- * open conversation's to show — so the row's ring pulses and does not tick.
+ * going — on a list row and on a pinned tile alike. The sidebar knows only that
+ * a Turn is running; the step count is the open conversation's to show, so a
+ * ring out here pulses and does not tick.
  */
 import { UiActivityRing } from "@frockbot/client-ui";
 import SheepAvatar from "./SheepAvatar.vue";
@@ -16,7 +17,7 @@ withDefaults(
     botId: string;
     sheep: SheepRecipeV1;
     label?: string;
-    size?: "mini" | "small" | "large";
+    size?: "mini" | "small" | "tile" | "large";
     working?: boolean;
   }>(),
   { label: "Bot avatar", size: "small", working: false },

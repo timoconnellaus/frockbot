@@ -8,9 +8,12 @@ import {
   type ToolExecutionContext,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
+import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
 import { ToolRegistry } from "@frockbot/plugin-tools";
 import { Context } from "cordis";
 import {
+  CONVERSATION_PROMPT_SECTION_V1,
+  CONVERSATION_PROMPT_TEXT_V1,
   shellAdmissionCeilingV1,
   shellAgentPlugin,
   PARENT_HANDOFF_CAPABILITY_V1,
@@ -31,6 +34,7 @@ interface Mounted {
 async function mount(): Promise<Mounted> {
   const root = new Context();
   await root.plugin(SessionStore);
+  await root.plugin(SystemPromptRegistry);
   await root.plugin(ToolRegistry);
   const session = root.sessions.create(SESSION_ID);
   session.appendBatch([
@@ -377,6 +381,68 @@ describe("wake_parent", () => {
       expect(
         mounted.session.events.some((event) => event.type === "wake/parent"),
       ).toBe(false);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+});
+
+// The conversational contract is a prompt section and a tool description, and
+// the two have to say the same thing: a model that read one and not the other
+// would have half the rule.
+describe("the conversation prompt section", () => {
+  test("is assembled into the system prompt the model reads", async () => {
+    const mounted = await mount();
+    try {
+      const assembled = await mounted.root.systemPrompt.assemble({
+        sessionId: SESSION_ID,
+        provider: "test",
+        model: "test-model",
+        turnType: "chat",
+      });
+
+      const section = assembled.sections.find(
+        (candidate) => candidate.id === CONVERSATION_PROMPT_SECTION_V1,
+      );
+      expect(section?.text).toBe(CONVERSATION_PROMPT_TEXT_V1);
+      expect(assembled.text).toContain(CONVERSATION_PROMPT_TEXT_V1);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("says acknowledge first, then beats, and never the steps between", () => {
+    expect(CONVERSATION_PROMPT_TEXT_V1).toContain("On it.");
+    expect(CONVERSATION_PROMPT_TEXT_V1).toContain(
+      "send only on a real beat: the result, a decision only the user can make, or a blocker",
+    );
+    expect(CONVERSATION_PROMPT_TEXT_V1).toContain(
+      "Never narrate what you are doing",
+    );
+    expect(CONVERSATION_PROMPT_TEXT_V1).toContain(
+      "Never leave a question or a request hanging",
+    );
+    // Short enough to be read as guidance rather than skimmed as a document.
+    expect(CONVERSATION_PROMPT_TEXT_V1.split("\n").length).toBeLessThanOrEqual(
+      12,
+    );
+  });
+
+  test("matches what the send tool's own description tells the model", async () => {
+    const mounted = await mount();
+    try {
+      const schema = mounted.root.tools
+        .schemas({ turnType: "chat" })
+        .find((tool) => tool.name === SEND_TO_USER_TOOL_V1);
+      const description = schema?.description ?? "";
+
+      expect(description).toContain("only way to say anything the user sees");
+      // When to call it, not only what it does.
+      expect(description).toContain("Call it once, immediately");
+      expect(description).toContain("Call it again only on a real");
+      expect(description).toContain("narrate a step or a tool");
+      expect(description).toContain("never end your Turn leaving the");
+      expect(description).toContain("keep it short");
     } finally {
       await mounted.dispose();
     }
