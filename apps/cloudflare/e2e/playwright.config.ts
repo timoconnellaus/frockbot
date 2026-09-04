@@ -46,9 +46,13 @@ export default defineConfig<E2EOptions>({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
-  // A single retry in CI distinguishes a real regression from a flaky
-  // start-up; locally a failure should stay failed.
-  retries: process.env.CI ? 1 : 0,
+  // Retries in CI distinguish a real regression from a flaky start-up;
+  // locally a failure should stay failed. Two rather than one because
+  // wrangler dev itself can exit mid-spec on a 2-core runner
+  // (cloudflare/workers-sdk#15317: its proxy treats one rejected forwarded
+  // request as fatal). The harness supervisor restarts it, but the spec in
+  // flight is lost, and the same trigger has hit both attempts of one spec.
+  retries: process.env.CI ? 2 : 0,
   // A CI runner is several times slower than a laptop, and the paths here are
   // the product's coldest: an application isolate load, a Durable Object start,
   // a Composition mount. The budget is for that, not for hiding a hang — a

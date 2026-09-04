@@ -265,6 +265,21 @@ jobs:
             tail -n 200 "$log"
             echo "::endgroup::"
           done
+          # wrangler's own debug log is where the reason lives when `wrangler
+          # dev` exits: its stdout prints a blank `✘ [ERROR]`, while the
+          # debug log carries the ProxyController/ProxyWorker error (for
+          # example "Network connection lost.") that explains it. Print only
+          # the error entries with a little context; the `Error contextual
+          # data` dump that follows can be megabytes of bundled worker script,
+          # so it stays in the uploaded artifact.
+          for log in apps/cloudflare/e2e/wrangler-logs/wrangler-*.log; do
+            echo "::group::Error entries in $log"
+            grep -n -B 2 -A 12 -E "^Error in ProxyController|\[ERROR\]|Network connection lost|wrangler command errored" "$log" \
+              | grep -v -E "inherited by environments|is not what you probably want" \
+              | cut -c 1-400 \
+              | head -n 400 || echo "No error entries."
+            echo "::endgroup::"
+          done
 
       - name: Upload wrangler logs
         # Both halves of a crash: the harness's own tee of everything the two
