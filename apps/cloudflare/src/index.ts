@@ -130,6 +130,7 @@ import {
   type SetSignupsCommandV1,
 } from "@frockbot/plugin-admin/shared";
 import { gatewayAuth } from "./auth.js";
+import { isDeploymentAdminV1 } from "./admin-identities.js";
 import type { DebugGatewaySurface } from "./debug.js";
 import type { BotDebugQueryV1 } from "@frockbot/plugin-shell/debug-protocol";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
@@ -292,8 +293,9 @@ interface Env {
 }
 
 /**
- * The `/api/debug` surface, over the same Bot RPCs the gateway already holds.
- * Without `DEBUG_TOKEN` it carries no token, and the routes 404.
+ * The `/api/debug` surface, over the same durable records and identity store
+ * the gateway already holds. Without `DEBUG_TOKEN` it carries no token, and
+ * the routes 404.
  */
 function debugSurface(env: Env): DebugGatewaySurface {
   return {
@@ -308,6 +310,24 @@ function debugSurface(env: Env): DebugGatewaySurface {
       userConfigurationStub(env, userId).listBots({ schemaVersion: 1, userId }),
     snapshot: (userId, botId, query) =>
       botStateStub(env, userId, botId).debugSnapshot(query),
+    isAdminUser: async (userId) => {
+      // Better Auth is the durable identity source for production Users. The
+      // path's User id is never trusted on its own: it must resolve to a stored
+      // email, and that identity is evaluated by the same allowlist policy as
+      // the signed-in gateway and the admin Package.
+      const identity = await env.AUTH_DB.prepare(
+        'select "id", "email" from "user" where "id" = ? limit 1',
+      )
+        .bind(userId)
+        .first<{ id: string; email: string }>();
+      return (
+        identity !== null &&
+        isDeploymentAdminV1(
+          { id: identity.id, email: identity.email, mode: "better-auth" },
+          env.FROCKBOT_ADMIN_EMAILS,
+        )
+      );
+    },
   };
 }
 

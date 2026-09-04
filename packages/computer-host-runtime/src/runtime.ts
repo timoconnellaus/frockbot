@@ -1770,7 +1770,7 @@ if [ -n "$KEY" ] && [ -s ${BOTS_ROOT}/"$KEY"/slot ]; then SLOT=$(cat ${BOTS_ROOT
 # second browser holding — or failing to hold — the one shared profile, which
 # is the defect this layout replaced: the loser prints "Opening in existing
 # browser session", exits, and leaves its Bot a black screen.
-BROWSERS=$(pgrep -f -- "--remote-debugging-port=${COMPUTER_CDP_PORT}" 2>/dev/null | wc -l | tr -d ' ')
+BROWSERS=$(pgrep -af -- "--user-data-dir=${CHROME_PROFILE.replace("/", "[/]")}" 2>/dev/null | awk -v self="$$" -v parent="$PPID" '$1 != self && $1 != parent && $0 ~ /(^|\\/)chrom(e|ium)( |$)/ && $0 !~ /(^|[[:space:]])--type=/ { count++ } END { print count + 0 }')
 if [ "$BROWSERS" = 1 ]; then
   record browser-process pass "exactly one browser process holds ${CHROME_PROFILE}"
 elif [ "$BROWSERS" = 0 ]; then

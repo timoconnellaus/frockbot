@@ -1,6 +1,6 @@
 ---
 name: frockbot-debug
-description: Debug a FrockBot Bot's agent loop against a deployed or local Worker through the read-only /api/debug surface — why a turn failed, why a Bot is wedged mid-run, which Composition generation failed to mount, which model binding it resolved. Use when the user says a bot "isn't working", "is stuck", "stopped", "never replied", when a turn failed with no visible reason, when the app shows "Model unavailable", when you need to look at the user's production account or Bots from a terminal, or whenever you need the raw session events (model requests, tool inputs) that the in-app transcript deliberately hides. Always reach for this skill's script before hand-writing a curl to production — it already knows where the DEBUG_TOKEN lives.
+description: Debug a FrockBot Bot's agent loop against a deployed or local Worker through the /api/debug surface — why a turn failed, why a Bot is wedged mid-run, which Composition generation failed to mount, which model binding it resolved, or send an owner-authorized Turn. Use when the user says a bot "isn't working", "is stuck", "stopped", "never replied", when a turn failed with no visible reason, when the app shows "Model unavailable", when you need to look at the user's production account or Bots from a terminal, or whenever you need the raw session events (model requests, tool inputs) that the in-app transcript deliberately hides. Always reach for this skill's script before hand-writing a curl to production — it already knows where the DEBUG_TOKEN lives.
 ---
 
 # FrockBot debug surface
@@ -9,8 +9,11 @@ description: Debug a FrockBot Bot's agent loop against a deployed or local Worke
 authority stored it. It is authorized by `DEBUG_TOKEN`, not by a session, so it
 works while nobody is signed in and while a Bot is wedged.
 
-It is **read-only by design**: it never recovers an active run, reconciles an
-effect, or writes storage. Looking at a stuck Bot must not be what unsticks it.
+It is **read-only except for `send`, which is owner-only**: every read still
+never recovers an active run, reconciles an effect, or writes storage. `send`
+requires both the debug token and a User whose stored email is in
+`FROCKBOT_ADMIN_EMAILS`, then uses the ordinary client Turn path. Looking at a
+stuck Bot must not be what unsticks it.
 
 ## Run
 
@@ -25,7 +28,13 @@ which then looks like "no production token" when the token was there all along.
 .claude/skills/frockbot-debug/scripts/debug.sh bots <userId>
 .claude/skills/frockbot-debug/scripts/debug.sh bot <userId> <botId> [--events] [--limit N] [--before CURSOR]
 .claude/skills/frockbot-debug/scripts/debug.sh run <userId> <botId> <runId>
+.claude/skills/frockbot-debug/scripts/debug.sh send <userId> <botId> <text...>
+.claude/skills/frockbot-debug/scripts/debug.sh send <userId> <botId> < message.txt
+.claude/skills/frockbot-debug/scripts/debug.sh watch <userId> <botId> <runId>
 ```
+
+`watch` polls the single-run debug read every three seconds until the run
+settles, then prints its projected `send/to-user` payloads and durable outcome.
 
 Defaults to production (`https://bot.frockbot.com`). Override with
 `FROCKBOT_DEBUG_URL=http://127.0.0.1:8787` for a local `bun run dev:cloudflare`.
