@@ -422,6 +422,17 @@ export interface TemplateImportReceiptV1 {
 /** Most imports one User may hold, so planning cannot fill the object. */
 export const MAX_TEMPLATE_IMPORTS_V1 = 100;
 
+/**
+ * Where one import record lives in the User Durable Object's storage.
+ *
+ * Named here rather than kept private to the Contribution because a durability
+ * test has to be able to leave an import in the state an eviction mid-apply
+ * would leave it in, without an RPC that would also finish it.
+ */
+export function templateImportRecordKeyV1(importId: string): string {
+  return `bot-template:import:${importId}`;
+}
+
 function importStatus(value: unknown): TemplateImportStatusV1 {
   const found = TEMPLATE_IMPORT_STATUSES_V1.find((known) => known === value);
   if (!found)
