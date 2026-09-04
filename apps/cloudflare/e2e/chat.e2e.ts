@@ -48,6 +48,22 @@ test("Turns stay ordered, render Markdown, and survive a reload", async ({
   const firstPrompt = "Render **this** please";
   const secondPrompt = "Then render _that_ too";
   await sendMessage(page, firstPrompt);
+
+  // The row and the transcript are two renderings of the same Turn, so the
+  // *first* settled Turn has to move both. The sidebar used to re-read only on
+  // its fifteen-second poll, so a Bot's first reply left the row reading "No
+  // messages yet" — in practice until the Turn after it. This timeout is
+  // deliberately under that interval: a row that only a poll could have
+  // refreshed fails here, and no reload is involved.
+  const sidebarRow = page.locator(".flock-bot-row", {
+    has: page.getByText("Talker", { exact: true }),
+  });
+  await expect(sidebarRow).toContainText(E2E_ASSISTANT_REPLY, {
+    timeout: 10_000,
+  });
+  await expect(sidebarRow).not.toContainText("No messages yet");
+  await expect(sidebarRow.locator("time")).not.toHaveText("");
+
   await sendMessage(page, secondPrompt);
 
   const thread = page.locator("main");
@@ -81,9 +97,6 @@ test("Turns stay ordered, render Markdown, and survive a reload", async ({
 
   // The row is the Bot Durable Object's small settled preview projection, not
   // a copy scraped out of the open thread. Its time is present beside the name.
-  const sidebarRow = page.locator(".flock-bot-row", {
-    has: page.getByText("Talker", { exact: true }),
-  });
   await expect(sidebarRow).toContainText(E2E_ASSISTANT_REPLY, {
     timeout: 30_000,
   });
