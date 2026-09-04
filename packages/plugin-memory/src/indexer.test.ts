@@ -4,7 +4,10 @@
 // the files in one pass.
 import { describe, expect, test } from "bun:test";
 import type { WorkspaceWriterV1 } from "@frockbot/kernel-contracts";
-import { listAllMemoryDocumentsV1 } from "./documents.ts";
+import {
+  listAllMemoryDocumentsV1,
+  readMemoryDocumentsV1,
+} from "./documents.ts";
 import {
   buildMemoryIndexV1,
   emptyMemoryIndexV1,
@@ -87,5 +90,60 @@ describe("the derived Memory index", () => {
     expect(emptied.index.chunks).toEqual([]);
     expect(emptied.documentsRemoved).toBe(1);
     expect(emptied.index).toEqual(await buildMemoryIndexV1([]));
+  });
+});
+
+describe("a tier that could not be read whole says so", () => {
+  test("a failed listing is partial, not empty", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const store = new MemoryStore({
+      files,
+      owner: OWNER,
+      clock: () => new Date("2026-08-31T10:00:00.000Z"),
+    });
+    const root = botMemoryRootV1(OWNER);
+    await store.write({
+      root,
+      tier: "profile",
+      fact: "A fact worth chunking.",
+      writer: WRITER,
+    });
+    expect((await readMemoryDocumentsV1(files, root)).complete).toBe(true);
+
+    // Object storage blips on the listing exactly once.
+    const list = files.list.bind(files);
+    files.list = () =>
+      Promise.resolve({ status: "unavailable" as const, reason: "R2 blip" });
+
+    const listing = await readMemoryDocumentsV1(files, root);
+    // The distinction that matters: nothing was read, and the caller is told,
+    // so the indexer cannot mistake "unreadable" for "deleted".
+    expect(listing.documents).toEqual([]);
+    expect(listing.complete).toBe(false);
+
+    files.list = list;
+    expect((await readMemoryDocumentsV1(files, root)).complete).toBe(true);
+  });
+
+  test("a file that cannot be read leaves the tier partial", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const store = new MemoryStore({
+      files,
+      owner: OWNER,
+      clock: () => new Date("2026-08-31T10:00:00.000Z"),
+    });
+    const root = botMemoryRootV1(OWNER);
+    await store.write({
+      root,
+      tier: "profile",
+      fact: "A fact worth chunking.",
+      writer: WRITER,
+    });
+    files.read = () =>
+      Promise.resolve({ status: "unavailable" as const, reason: "R2 blip" });
+
+    const listing = await readMemoryDocumentsV1(files, root);
+    expect(listing.documents).toEqual([]);
+    expect(listing.complete).toBe(false);
   });
 });

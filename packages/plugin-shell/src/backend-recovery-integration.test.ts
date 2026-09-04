@@ -354,26 +354,20 @@ describe("Bot recovery", () => {
         text: "uncertain",
       }),
     ).rejects.toThrow("response lost");
-    expect(
-      await storage.get<StoredRun>("run:ollama-run-uncertain"),
-    ).toMatchObject({ status: "reconciliation-required" });
+    // Ollama keeps no addressable copy of a completion, so a failure raised
+    // before the first stream event is definitive rather than uncertain: the
+    // run settles as a failed Turn instead of parking on a retrieval this
+    // provider can never perform.
+    const uncertain = await storage.get<StoredRun>("run:ollama-run-uncertain");
+    expect(uncertain?.status).toBe("failed");
+    expect(uncertain?.failure).toContain("response lost");
+    expect(await storage.get("active-run")).toBeUndefined();
 
+    // The alarm has nothing left to recover: a settled run stays settled.
     await host().alarm();
-    expect(
-      await storage.get<StoredRun>("run:ollama-run-uncertain"),
-    ).toMatchObject({ status: "reconciliation-required" });
-    await expect(
-      host().reconcileRun(
-        { userId: "user-1", botId: "primary" },
-        "ollama-run-uncertain",
-      ),
-    ).rejects.toThrow();
-    expect(
-      await storage.get<StoredRun>("run:ollama-run-uncertain"),
-    ).toMatchObject({
-      status: "failed",
-      failure: expect.stringContaining("explicitly abandoned"),
-    });
+    const settled = await storage.get<StoredRun>("run:ollama-run-uncertain");
+    expect(settled?.status).toBe("failed");
+    expect(settled?.failure).toContain("response lost");
     expect(await storage.get("active-run")).toBeUndefined();
   });
 

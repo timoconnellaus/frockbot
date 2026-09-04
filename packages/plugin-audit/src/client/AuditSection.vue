@@ -61,6 +61,8 @@ function selectKind(kind: AuditKindV1 | undefined): void {
 /** Where the effect ran, in words rather than in the wire shape. */
 function target(entry: AuditEntryV1): string {
   if (entry.target === "computer") return "This Computer";
+  // Memory and Skills are files in the Workspace, not on the Computer.
+  if (entry.target === "workspace") return "Workspace";
   if (entry.target.startsWith("machine:")) {
     return `Machine ${entry.target.slice("machine:".length)}`;
   }

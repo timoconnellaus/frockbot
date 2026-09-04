@@ -70,6 +70,8 @@ import { defineComponent, h, ref, toRaw, watch, type Ref } from "vue";
 import {
   frockBotWebDataKey,
   type FrockBotWebData,
+  decodeConnectionReturnV1,
+  withoutConnectionReturnV1,
   type PluginCatalogItem,
   type SendPromptResult,
   type WebActiveRun,
@@ -270,6 +272,17 @@ function turnRefusalCopyV1(reason: ClientTurnRefusalReasonV1): string {
   return "That message didn't go through. Try sending it again.";
 }
 
+/**
+ * The Bot's voice is its sends. When a Turn delivered anything to the User the
+ * model's own assistant text is scratch space and the thread does not draw it
+ * (issue 153): drawing both is how a one-word reply arrived twice, once as the
+ * model's text and once as the bubble that was actually delivered.
+ */
+function visibleAssistantText(run: ClientRun, fallback = ""): string {
+  if (sendsFrom(run.events).length > 0) return "";
+  return run.responseText ?? fallback;
+}
+
 function isTerminalRun(run: ClientRun): boolean {
   return (
     run.status === "completed" ||
@@ -290,7 +303,7 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.responseText ?? "",
+      text: visibleAssistantText(run),
       status: "streaming",
       // A Turn that has not started shows nothing of its own: the greyed user
       // message is the whole of what the thread says about it.
@@ -307,7 +320,7 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.responseText ?? "",
+      text: visibleAssistantText(run),
       notice: "Interrupted by your next message.",
       status: "aborted",
       tools: toolsFrom(run.events),
@@ -332,7 +345,7 @@ function assistantMessage(
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
-      text: run.responseText ?? "",
+      text: visibleAssistantText(run),
       notice: "You stopped this.",
       status: "aborted",
       tools: toolsFrom(run.events),
@@ -364,7 +377,7 @@ function assistantMessage(
     text:
       run.status === "failed"
         ? "This Bot couldn't finish its reply. Try again."
-        : (run.responseText ?? notification?.body ?? ""),
+        : visibleAssistantText(run, notification?.body ?? ""),
     status: run.status === "failed" ? "error" : "completed",
     tools: toolsFrom(run.events),
     sends: sendsFrom(run.events),
@@ -456,8 +469,12 @@ export function projectDurableRuns(
     activeRun = activeRunView(run) ?? activeRun;
     if (run.status === "running" || run.status === "reconciliation-required") {
       busyRunId = run.runId;
-      if (!run.queued) runningRunId = run.runId;
     }
+    // Stop belongs to a Turn that is executing. A Turn parked on a
+    // reconciliation is busy but not running: there is nothing to stop, and
+    // offering it left a Stop button standing for good — across reloads,
+    // because the state it was keyed off never became terminal.
+    if (run.status === "running" && !run.queued) runningRunId = run.runId;
     if (notification && isTerminalRun(run)) {
       projected.add(notification.notificationId);
     }
@@ -475,7 +492,13 @@ export function projectDurableRuns(
     state.activeRunId = undefined;
   }
   if (runningRunId) state.runningRunId = runningRunId;
-  else if (state.runningRunId && terminalRunIds.has(state.runningRunId)) {
+  else if (
+    state.runningRunId &&
+    runs.some((run) => run.runId === state.runningRunId)
+  ) {
+    // The channel is carrying this run and it is not executing, whatever it
+    // settled as. A run the list does not carry yet is the one this tab just
+    // submitted, which keeps its Stop.
     state.runningRunId = undefined;
   }
   if (activeRun) state.activeRun = activeRun;
@@ -841,6 +864,15 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   let admissionObserver: AbortController | undefined;
   let runObserver: AbortController | undefined;
   let selectionGeneration = 0;
+  /*
+   * Which conversation the transcript is showing.
+   *
+   * A read that was already in flight when the User starts a new conversation
+   * answers with the conversation that just ended, and projecting it puts the
+   * old Turns back on a transcript the User has just been told is empty. The
+   * epoch is bumped at the boundary so those answers are dropped.
+   */
+  let conversationGeneration = 0;
   let userSettingsGeneration = 0;
   let pluginCatalogGeneration = 0;
   let packageCatalogGeneration = 0;
@@ -1007,6 +1039,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     if (!ctx.transport.lookupRun) return;
     let delayMs = 250;
     let observationError: string | undefined;
+    const conversation = conversationGeneration;
     while (!signal.aborted) {
       try {
         const run = await observeWhileAttached(
@@ -1016,6 +1049,9 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         if (
           signal.aborted ||
           generation !== selectionGeneration ||
+          // The Turn belongs to the conversation it was sent in, so a new one
+          // ends the observation rather than drawing it on an empty thread.
+          conversation !== conversationGeneration ||
           web.value.activeBotId !== botId
         ) {
           return;
@@ -1043,15 +1079,18 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     botId: string,
     generation = selectionGeneration,
   ): Promise<void> {
+    const conversation = conversationGeneration;
+    const current = () =>
+      generation === selectionGeneration &&
+      conversation === conversationGeneration &&
+      web.value.activeBotId === botId;
     const runs = await (ctx.transport.listRuns?.(botId) ?? Promise.resolve([]));
-    if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-      return;
+    if (!current()) return;
     projectDurableRuns(web.value, [], runs);
     try {
       const announcements = await (ctx.transport.listAnnouncements?.(botId) ??
         Promise.resolve([]));
-      if (generation === selectionGeneration && web.value.activeBotId === botId)
-        projectAnnouncements(web.value.messages, announcements);
+      if (current()) projectAnnouncements(web.value.messages, announcements);
     } catch {
       // Announcements are conversational history, never admission: a Session
       // that cannot read them still shows every Turn.
@@ -1060,17 +1099,14 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     try {
       notifications = await (ctx.transport.listNotifications?.(botId) ??
         Promise.resolve([]));
-      if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-        return;
+      if (!current()) return;
     } catch (error) {
-      if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-        return;
+      if (!current()) return;
       web.value.settingsError =
         error instanceof Error ? error.message : "Could not load notifications";
       return;
     }
-    if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-      return;
+    if (!current()) return;
     const projected = projectDurableRuns(web.value, notifications, runs);
     // A decision may have been recorded on another device since the last poll,
     // and an expiry is recorded by an alarm nobody clicked.
@@ -1078,12 +1114,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     // A background subagent settles after its Turn is over, so the chips in
     // the transcript learn what became of it here and not from the run.
     await web.value.loadTasks();
-    if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-      return;
+    if (!current()) return;
     if (!ctx.transport.acknowledgeNotification) return;
     for (const notification of notifications) {
-      if (generation !== selectionGeneration || web.value.activeBotId !== botId)
-        return;
+      if (!current()) return;
       if (!projected.has(notification.notificationId)) {
         web.value.settingsError = "A completed Bot result is waiting to load";
         continue;
@@ -1216,8 +1250,24 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     ): Promise<void>;
   };
 
+  // Read once, from the URL the authorization redirect landed on, and then
+  // stripped so a reload does not report the same return again.
+  const connectionReturn =
+    typeof window === "undefined"
+      ? undefined
+      : decodeConnectionReturnV1(window.location.search);
+  if (connectionReturn && typeof window !== "undefined") {
+    const rest = withoutConnectionReturnV1(window.location.search);
+    window.history?.replaceState?.(
+      window.history.state,
+      "",
+      `${window.location.pathname}${rest}${window.location.hash}`,
+    );
+  }
+
   const web: Ref<ShellWebData> = ref({
     connection: "ready",
+    ...(connectionReturn ? { connectionReturn } : {}),
     modelLabel: "No model available — set one up in Models",
     modelReady: false,
     modelSource: "none",
@@ -1282,6 +1332,41 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         window.history.replaceState(null, "", url);
       }
       await web.value.loadBotSettings();
+    },
+    /**
+     * Puts this conversation down and starts the next one.
+     *
+     * What the Bot knows about you is Memory and stays; what it carries into
+     * the next model request is the new conversation and nothing else. The
+     * transcript clears because it is showing the conversation, and the one
+     * just ended is still durable behind it.
+     */
+    async startConversation(): Promise<void> {
+      const start = ctx.transport.startConversation;
+      const botId = web.value.activeBotId;
+      if (!start || !botId) return;
+      const generation = selectionGeneration;
+      try {
+        await start(botId);
+      } catch (error) {
+        web.value.settingsError =
+          error instanceof Error
+            ? error.message
+            : "Could not start a new conversation";
+        return;
+      }
+      if (generation !== selectionGeneration || web.value.activeBotId !== botId)
+        return;
+      // Reads already in flight answer with the conversation that just ended;
+      // the epoch drops them instead of letting them redraw it.
+      conversationGeneration += 1;
+      runObserver?.abort();
+      runObserver = undefined;
+      web.value.messages = [];
+      web.value.activeRun = undefined;
+      web.value.activeRunId = undefined;
+      web.value.runningRunId = undefined;
+      web.value.settingsError = undefined;
     },
     async loadSkillCatalog(): Promise<void> {
       // A missing transport method or an unreadable catalog is an empty
@@ -2411,7 +2496,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           id: `${result.runId}:assistant`,
           runId: result.runId,
           role: "assistant",
-          text: result.text,
+          // The same rule the durable projection follows: a Turn that
+          // delivered something speaks through its sends, not through the
+          // model's own text (issue 153).
+          text: sendsFrom(result.events).length > 0 ? "" : result.text,
           at: optimisticAt,
           status: "completed",
           tools: toolsFrom(result.events),

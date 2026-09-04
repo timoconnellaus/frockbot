@@ -1,3 +1,4 @@
+import { remoteCallV1 } from "@frockbot/kernel-contracts";
 import {
   EMBEDDING_MODEL,
   type EmbedMemory,
@@ -13,9 +14,11 @@ export function createMemoryEmbedder(
   return async (texts) => {
     const vectors: number[][] = [];
     for (let index = 0; index < texts.length; index += MAX_BATCH_SIZE) {
-      const response = await ai.run(model, {
-        text: texts.slice(index, index + MAX_BATCH_SIZE),
-      });
+      // Workers AI is remote in every environment. Without a deadline a hung
+      // binding held the whole Turn open to the platform limit.
+      const response = await remoteCallV1("the embedding model", () =>
+        ai.run(model, { text: texts.slice(index, index + MAX_BATCH_SIZE) }),
+      );
       vectors.push(...response.data);
     }
     return vectors;

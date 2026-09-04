@@ -416,10 +416,47 @@ function toolChipsOf(message: WebChatMessage): WebToolActivity[] {
   return message.tools.filter((tool) => iframeEntriesFor(tool).length === 0);
 }
 
+/**
+ * What a chip calls a tool, in the User's words rather than the model's.
+ *
+ * A tool name is an identifier — `send_to_user`, `user-Github--acme/search_issues`
+ * — and the transcript is a conversation, so the chip drops the namespace,
+ * un-snakes the rest and capitalises it.
+ */
+function toolChipLabel(tool: WebToolActivity): string {
+  const bare = tool.name.split("/").pop() ?? tool.name;
+  const words = bare.replace(/[_.-]+/g, " ").trim();
+  if (words.length === 0) return tool.name;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * Whether a chip is drawn as a failure.
+ *
+ * A tool call the model recovered from is not a failure the User has anything
+ * to do with: a refused call followed by a Turn that went on to finish is the
+ * Bot correcting itself, and colouring it red reports a broken Turn that
+ * worked. Only a Turn that itself ended badly keeps the failed state.
+ */
+function toolChipState(
+  tool: WebToolActivity,
+  message: WebChatMessage,
+): "running" | "completed" | "failed" | "retried" {
+  if (tool.status !== "failed") return tool.status;
+  return message.status === "completed" || message.status === "streaming"
+    ? "retried"
+    : "failed";
+}
+
 /** What a chip says a tool is doing. Its status, in the User's words. */
-function toolChipStatus(tool: WebToolActivity): string {
-  if (tool.status === "running") return "running";
-  return tool.status === "failed" ? "failed" : "done";
+function toolChipStatus(
+  tool: WebToolActivity,
+  message: WebChatMessage,
+): string {
+  const state = toolChipState(tool, message);
+  if (state === "running") return "running";
+  if (state === "retried") return "retried";
+  return state === "failed" ? "failed" : "done";
 }
 
 /** Which tool chips the User has opened. Local, and per chip. */
@@ -883,139 +920,159 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                 /></span>
                 <k-slot name="frockbot.bot-avatar" />
               </div>
-              <div v-if="message.text" class="message-bubble">
-                <UiMarkdown :text="message.text" />
-              </div>
               <!--
+                Everything the Turn produced stacks in one column beside the
+                avatar. The row holds exactly two children — avatar, column —
+                so a bubble, a notice and a chip are stacked lines rather than
+                side-by-side columns squeezing the reply to a few pixels.
+              -->
+              <div class="message-column">
+                <div v-if="message.text" class="message-bubble">
+                  <UiMarkdown :text="message.text" />
+                </div>
+                <!--
                 Why the Turn ends where it does, under whatever it had already
                 said rather than in place of it.
               -->
-              <p v-if="message.notice" class="message-notice">
-                {{ message.notice }}
-              </p>
-              <template v-for="tool in message.tools" :key="tool.id">
-                <PackageIframeHost
-                  v-for="entry in iframeEntriesFor(tool)"
-                  :key="`${tool.id}:${entry.contribution.packageId}:${entry.page.id}`"
-                  class="message-package-iframe"
-                  :contribution="entry.contribution"
-                  :page="entry.page"
-                  :slot="entry.slot"
-                  :states="{ [`tool:${tool.name}`]: toolResultState(tool) }"
-                />
-              </template>
-              <!--
+                <p v-if="message.notice" class="message-notice">
+                  {{ message.notice }}
+                </p>
+                <template v-for="tool in message.tools" :key="tool.id">
+                  <PackageIframeHost
+                    v-for="entry in iframeEntriesFor(tool)"
+                    :key="`${tool.id}:${entry.contribution.packageId}:${entry.page.id}`"
+                    class="message-package-iframe"
+                    :contribution="entry.contribution"
+                    :page="entry.page"
+                    :slot="entry.slot"
+                    :states="{ [`tool:${tool.name}`]: toolResultState(tool) }"
+                  />
+                </template>
+                <!--
                 A binary a tool filed in the Workspace, drawn from the
                 Workspace read route. The thread carries the path, never the
                 bytes, so a long conversation costs paths and the image is
                 fetched only when it is on screen.
               -->
-              <div
-                v-if="attachmentsOf(message).length > 0"
-                class="message-attachments"
-              >
-                <a
-                  v-for="attachment in attachmentsOf(message)"
-                  :key="attachment.contentHash"
-                  :href="workspaceFileUrl(attachment.path)"
-                  target="_blank"
-                  rel="noreferrer"
+                <div
+                  v-if="attachmentsOf(message).length > 0"
+                  class="message-attachments"
                 >
-                  <img
-                    :src="workspaceFileUrl(attachment.path)"
-                    :alt="`Attachment from ${message.runId}`"
-                    loading="lazy"
-                  />
-                </a>
-              </div>
-              <!--
+                  <a
+                    v-for="attachment in attachmentsOf(message)"
+                    :key="attachment.contentHash"
+                    :href="workspaceFileUrl(attachment.path)"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      :src="workspaceFileUrl(attachment.path)"
+                      :alt="`Attachment from ${message.runId}`"
+                      loading="lazy"
+                    />
+                  </a>
+                </div>
+                <!--
                 Sends sit beside the derived text rather than inside it: each
                 payload is its own block, and a widget-ended Turn has no text
                 bubble at all.
               -->
-              <div v-if="message.sends.length > 0" class="message-sends">
-                <SendPayloadView
-                  v-for="(send, sendIndex) in message.sends"
-                  :key="sendIndex"
-                  :send="send"
-                />
-              </div>
-              <!--
+                <div v-if="message.sends.length > 0" class="message-sends">
+                  <SendPayloadView
+                    v-for="(send, sendIndex) in message.sends"
+                    :key="sendIndex"
+                    :send="send"
+                  />
+                </div>
+                <!--
                 What the Bot did, while it is doing it. The chip is the
                 conversation's whole account of an ordinary tool call: its
                 name, whether it is running, and — when the User opens it —
                 what it returned.
               -->
-              <div v-if="toolChipsOf(message).length > 0" class="message-tools">
-                <button
-                  v-for="tool in toolChipsOf(message)"
-                  :key="tool.id"
-                  type="button"
-                  class="tool-chip"
-                  :class="`tool-chip-${tool.status}`"
-                  :aria-expanded="expandedTools.has(tool.id)"
-                  @click="toggleTool(tool.id)"
+                <div
+                  v-if="toolChipsOf(message).length > 0"
+                  class="message-tools"
                 >
-                  <span class="tool-chip-name">{{ tool.name }}</span>
-                  <span class="tool-chip-status">{{
-                    toolChipStatus(tool)
-                  }}</span>
-                  <span
-                    v-if="expandedTools.has(tool.id) && tool.text !== undefined"
-                    class="tool-chip-result"
-                    >{{ tool.text }}</span
+                  <button
+                    v-for="tool in toolChipsOf(message)"
+                    :key="tool.id"
+                    type="button"
+                    class="tool-chip"
+                    :class="`tool-chip-${toolChipState(tool, message)}`"
+                    :aria-expanded="expandedTools.has(tool.id)"
+                    @click="toggleTool(tool.id)"
                   >
-                </button>
-              </div>
-              <!--
+                    <span class="tool-chip-name">{{
+                      toolChipLabel(tool)
+                    }}</span>
+                    <span class="tool-chip-status">{{
+                      toolChipStatus(tool, message)
+                    }}</span>
+                    <span
+                      v-if="
+                        expandedTools.has(tool.id) && tool.text !== undefined
+                      "
+                      class="tool-chip-result"
+                      >{{ tool.text }}</span
+                    >
+                  </button>
+                </div>
+                <!--
                 The subagents this Turn dispatched. The child's own Session is
                 never in this transcript, so the chip is the whole of what the
                 conversation says about it; opening one shows the summary the
                 child handed back and nothing else.
               -->
-              <div v-if="taskChipsOf(message).length > 0" class="message-tasks">
-                <button
-                  v-for="entry in taskChipsOf(message)"
-                  :key="entry.chip.taskId"
-                  type="button"
-                  class="task-chip"
-                  :class="`task-chip-${entry.status}`"
-                  :aria-expanded="expandedTasks.has(entry.chip.taskId)"
-                  @click="toggleTask(entry.chip.taskId)"
+                <div
+                  v-if="taskChipsOf(message).length > 0"
+                  class="message-tasks"
                 >
-                  <span class="task-chip-type">{{ entry.chip.taskType }}</span>
-                  <span class="task-chip-description">{{
-                    entry.chip.description
-                  }}</span>
-                  <span class="task-chip-status">{{ entry.status }}</span>
-                  <span class="task-chip-model">{{ entry.chip.model }}</span>
-                  <span
-                    v-if="expandedTasks.has(entry.chip.taskId)"
-                    class="task-chip-summary"
-                    >{{
-                      entry.summary ??
-                      "This subagent has not reported a summary yet."
-                    }}</span
+                  <button
+                    v-for="entry in taskChipsOf(message)"
+                    :key="entry.chip.taskId"
+                    type="button"
+                    class="task-chip"
+                    :class="`task-chip-${entry.status}`"
+                    :aria-expanded="expandedTasks.has(entry.chip.taskId)"
+                    @click="toggleTask(entry.chip.taskId)"
                   >
-                  <!--
+                    <span class="task-chip-type">{{
+                      entry.chip.taskType
+                    }}</span>
+                    <span class="task-chip-description">{{
+                      entry.chip.description
+                    }}</span>
+                    <span class="task-chip-status">{{ entry.status }}</span>
+                    <span class="task-chip-model">{{ entry.chip.model }}</span>
+                    <span
+                      v-if="expandedTasks.has(entry.chip.taskId)"
+                      class="task-chip-summary"
+                      >{{
+                        entry.summary ??
+                        "This subagent has not reported a summary yet."
+                      }}</span
+                    >
+                    <!--
                     Cancellation is the User's, explicit and authenticated. It
                     is offered only while the subagent is live: a settled one
                     has an outcome, and stopping it would rewrite it.
                   -->
-                  <span
-                    v-if="
-                      expandedTasks.has(entry.chip.taskId) &&
-                      isTaskLive(entry.status)
-                    "
-                    class="task-chip-stop"
-                    role="button"
-                    tabindex="0"
-                    @click.stop="stopTask(entry.chip.taskId)"
-                    @keydown.enter.stop.prevent="stopTask(entry.chip.taskId)"
-                    @keydown.space.stop.prevent="stopTask(entry.chip.taskId)"
-                    >Stop this subagent</span
-                  >
-                </button>
+                    <span
+                      v-if="
+                        expandedTasks.has(entry.chip.taskId) &&
+                        isTaskLive(entry.status)
+                      "
+                      class="task-chip-stop"
+                      role="button"
+                      tabindex="0"
+                      @click.stop="stopTask(entry.chip.taskId)"
+                      @keydown.enter.stop.prevent="stopTask(entry.chip.taskId)"
+                      @keydown.space.stop.prevent="stopTask(entry.chip.taskId)"
+                      >Stop this subagent</span
+                    >
+                  </button>
+                </div>
               </div>
             </template>
             <div v-else class="message-bubble">{{ message.text }}</div>
@@ -1132,6 +1189,19 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               @blur="closeSkillPopover"
             />
           </div>
+          <!--
+            Start a new conversation. Sits beside the composer because that is
+            where you are when you decide the last one is finished. Disabled
+            while a Turn is running: the Bot is still writing to it.
+          -->
+          <UiIconButton
+            icon="plus"
+            label="New conversation"
+            variant="ghost"
+            class="new-conversation-button"
+            :disabled="isRunning"
+            @click="web.startConversation()"
+          />
           <UiIconButton
             v-if="showStop"
             class="stop-button"

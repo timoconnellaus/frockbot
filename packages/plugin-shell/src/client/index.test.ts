@@ -1523,6 +1523,55 @@ describe("active durable Turn projection", () => {
     ]);
   });
 
+  test("a Turn that sent something draws the send, not the model's own text", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-once",
+          input: "ping",
+          status: "completed",
+          responseText: "pong",
+          events: [
+            { type: "send/to-user", payload: { type: "text", text: "pong" } },
+          ],
+        },
+      ],
+    );
+
+    expect(state.messages[1]?.text).toBe("");
+    expect(state.messages[1]?.sends).toHaveLength(1);
+  });
+
+  test("a Turn that sent nothing still draws the model's text", () => {
+    const state: Pick<
+      FrockBotWebData,
+      "messages" | "activeRunId" | "activeRun"
+    > = { messages: [] };
+
+    projectDurableRuns(
+      state,
+      [],
+      [
+        {
+          runId: "run-plain",
+          input: "ping",
+          status: "completed",
+          responseText: "pong",
+          events: [],
+        },
+      ],
+    );
+
+    expect(state.messages[1]?.text).toBe("pong");
+  });
+
   test("streams running text without a banner and clears busy state", () => {
     const state: Pick<
       FrockBotWebData,

@@ -257,3 +257,31 @@ describe("Flock AI runtime Contribution", () => {
     await root.fiber.dispose();
   });
 });
+
+describe("Flock AI reconciliation", () => {
+  test("reports an interrupted response as not retrievable so the run settles", async () => {
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await root.plugin(
+      createFlockAiRuntimePlugin({
+        connectionId: FLOCK_AI_CONNECTION_ID,
+        connectionGeneration: FLOCK_AI_CONNECTION_GENERATION,
+        autoRoute: "dynamic/auto",
+        runChatCompletion: () =>
+          Promise.reject(new Error("must not be reached")),
+      }),
+    );
+
+    const outcome = await root.llm.reconcile(
+      request,
+      new AbortController().signal,
+    );
+
+    expect(outcome).toEqual({
+      status: "not-retrievable",
+      reason:
+        "Flock AI keeps no durable copy of an interrupted response, so it cannot be recovered",
+    });
+    await root.fiber.dispose();
+  });
+});

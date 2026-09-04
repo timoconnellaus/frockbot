@@ -44,6 +44,7 @@
 // and `gcTombstoneMarkersV1` collects markers old enough that no create can
 // still be conditioned on one.
 import {
+  retryOnceV1,
   WORKSPACE_MAX_FILE_BYTES,
   WORKSPACE_MAX_LIST_ENTRIES,
   isWorkspaceComputerReadOnlyRootV1,
@@ -613,19 +614,25 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
         );
       }
       if (written) {
+        // The bytes are durable. The ledger is the index of that fact, not
+        // the fact: reporting a failure here told the model nothing was
+        // written while object storage held it, and the write then turned up
+        // in the next injection anyway — exactly the intent/outcome
+        // divergence the record exists to prevent. So the ledger call is
+        // retried, and a still-failing ledger is `ok` with `ledgerPending`:
+        // the metadata beside the bytes lets `reconcile` repair the entry.
         try {
-          await this.generations.record({
-            schemaVersion: 1,
-            root,
-            path: relative,
-            generation,
-            etag: written.etag,
-          });
-        } catch (error) {
-          return failure(
-            "unavailable",
-            error instanceof Error ? error.message : String(error),
+          await retryOnceV1(() =>
+            this.generations.record({
+              schemaVersion: 1,
+              root,
+              path: relative,
+              generation,
+              etag: written.etag,
+            }),
           );
+        } catch {
+          return { status: "ok", generation, ledgerPending: true };
         }
         return { status: "ok", generation };
       }
