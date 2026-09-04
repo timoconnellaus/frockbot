@@ -1664,7 +1664,7 @@ describe("effective Bot model resolution", () => {
    */
   const flockModel: ModelBindingV1 = {
     connectionId: "flock-ai",
-    providerModelId: "@flock/auto",
+    providerModelId: "@frock/auto",
   };
   const flockPackage: ExecutionPackageDefinition = {
     packageId: "provider-flock-ai",
@@ -1705,7 +1705,7 @@ describe("effective Bot model resolution", () => {
           connectionId: "flock-ai",
           packageId: "provider-flock-ai",
           connectionTypeId: "flock-ai-account",
-          displayName: "Flock AI",
+          displayName: "Frock AI",
           state: "ready",
           providerType: "flock-ai",
           modelCatalog: {
@@ -1714,7 +1714,7 @@ describe("effective Bot model resolution", () => {
             state: "fresh",
             models: [
               {
-                providerModelId: "@flock/auto",
+                providerModelId: "@frock/auto",
                 displayName: "Auto",
                 capabilities: { tools: true, vision: false, reasoning: true },
                 source: "discovered",

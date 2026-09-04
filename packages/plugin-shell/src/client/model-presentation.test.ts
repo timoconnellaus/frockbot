@@ -42,11 +42,11 @@ describe("model runtime presentation", () => {
       modelRuntimeLabel({
         source: "platform",
         modelDisplayName: "Auto",
-        providerModelId: "@flock/auto",
-        packageDisplayName: "Flock AI",
+        providerModelId: "@frock/auto",
+        packageDisplayName: "Frock AI",
         fallback: true,
       }),
-    ).toBe("Auto · Flock AI · your chosen model is unavailable");
+    ).toBe("Auto · Frock AI · your chosen model is unavailable");
   });
 
   test("shows unavailable and backend failure states", () => {

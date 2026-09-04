@@ -82,7 +82,7 @@ jobs:
         run: bun run build
 
   publish-npm:
-    name: Publish packages and release
+    name: Publish packages
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -230,10 +230,27 @@ jobs:
           printf '%s\n' packages/*/ \
             | xargs -P 8 -I{} bash -c 'publish_one "$@"' _ {}
 
+  github-release:
+    name: Create GitHub release
+    # A Release is the record that this tag shipped. It must not wait behind
+    # npm publishing, which has its own failure modes (first-publish trust,
+    # OIDC), or a tag that deployed to production shows up as a bare tag.
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists"
+          else
+            gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi
 
   deploy-marketing:
     name: Deploy marketing site
@@ -505,10 +522,13 @@ jobs:
           # Absent and the deployed Worker simply 404s those routes.
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
           # Optional: the `cf-aig-authorization` bearer for the AI Gateway.
-          # Present, Flock AI takes the compat HTTP transport, the only one
+          # Present, Frock AI takes the compat HTTP transport, the only one
           # that accepts the `dynamic/<route>` Auto model (cloudflare/ai#617).
           # Absent, it falls back to the `AI` binding and Auto fails.
-          FLOCK_AI_GATEWAY_TOKEN: ${{ secrets.FLOCK_AI_GATEWAY_TOKEN }}
+          # Falls back to the pre-rename repository secret until that one is
+          # re-added as FROCK_AI_GATEWAY_TOKEN; `--secrets-file` replaces the
+          # Worker's whole secret set, so an unresolved name would delete it.
+          FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-production.env"
@@ -534,7 +554,7 @@ jobs:
           // `--secrets-file` replaces the Worker's whole secret set, so an
           // optional secret has to be carried here or a deploy would delete
           // it. Omitted when unset, rather than written empty.
-          const optional = ['DEBUG_TOKEN', 'FLOCK_AI_GATEWAY_TOKEN'].filter(
+          const optional = ['DEBUG_TOKEN', 'FROCK_AI_GATEWAY_TOKEN'].filter(
             (name) => process.env[name],
           );
           console.log(

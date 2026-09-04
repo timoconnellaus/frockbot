@@ -180,9 +180,9 @@ import {
   type UserMemoryRpc,
 } from "./memory.js";
 import {
-  createFlockAiGatewayHostV1,
-  type FlockAiGatewayHostV1,
-} from "./flock-ai.js";
+  createFrockAiGatewayHostV1,
+  type FrockAiGatewayHostV1,
+} from "./frock-ai.js";
 import {
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
@@ -197,7 +197,7 @@ import {
 } from "./durable-rpc.js";
 import { answeredEntryV1, loggedEntryV1 } from "./entry-boundary.js";
 
-function isFlockAiGatewayBindingV1(
+function isFrockAiGatewayBindingV1(
   value: BotStateEnv["AI"],
 ): value is NonNullable<BotStateEnv["AI"]> & Pick<Ai, "gateway"> {
   return (
@@ -211,6 +211,23 @@ function optionalWorkerVarV1(
 ): string | undefined {
   const value = Reflect.get(env, name);
   return typeof value === "string" && value ? value : undefined;
+}
+
+/**
+ * A Frock AI setting, read under its current name and then under the
+ * pre-rename `FLOCK_AI_*` one. The vars are deployment configuration and the
+ * secrets are set outside this repo, so the fallback is what lets the rename
+ * land before they are re-added under the new names. Remove it once every
+ * environment names them `FROCK_AI_*`.
+ */
+function frockAiWorkerVarV1(
+  env: BotStateEnv,
+  name: `FROCK_AI_${string}`,
+): string | undefined {
+  return (
+    optionalWorkerVarV1(env, name) ??
+    optionalWorkerVarV1(env, `FLOCK_AI_${name.slice("FROCK_AI_".length)}`)
+  );
 }
 
 export type { BotStateEnv, OwnedBotTurnCommand };
@@ -264,7 +281,7 @@ export class BotState extends DurableObject<BotStateEnv> {
    * constructed here and never reaches the deployed bindings map.
    */
   protected readonly backendEnv: BotStateEnv & {
-    FLOCK_AI?: FlockAiGatewayHostV1;
+    FROCK_AI?: FrockAiGatewayHostV1;
     WORKSPACE_FILES?: WorkspaceFilesV1;
     PACKAGE_CATALOG_ENTRIES?: BotSkillCatalogReaderV1;
     MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
@@ -314,13 +331,13 @@ export class BotState extends DurableObject<BotStateEnv> {
     // serves from the RPC that addresses it, never from its constructor.
     this.backendEnv = {
       ...env,
-      ...(isFlockAiGatewayBindingV1(env.AI)
+      ...(isFrockAiGatewayBindingV1(env.AI)
         ? {
-            FLOCK_AI: createFlockAiGatewayHostV1(env.AI, {
-              gatewayId: optionalWorkerVarV1(env, "FLOCK_AI_GATEWAY_ID"),
-              autoRoute: optionalWorkerVarV1(env, "FLOCK_AI_AUTO_ROUTE"),
-              accountId: optionalWorkerVarV1(env, "FLOCK_AI_ACCOUNT_ID"),
-              token: optionalWorkerVarV1(env, "FLOCK_AI_GATEWAY_TOKEN"),
+            FROCK_AI: createFrockAiGatewayHostV1(env.AI, {
+              gatewayId: frockAiWorkerVarV1(env, "FROCK_AI_GATEWAY_ID"),
+              autoRoute: frockAiWorkerVarV1(env, "FROCK_AI_AUTO_ROUTE"),
+              accountId: frockAiWorkerVarV1(env, "FROCK_AI_ACCOUNT_ID"),
+              token: frockAiWorkerVarV1(env, "FROCK_AI_GATEWAY_TOKEN"),
             }),
           }
         : {}),

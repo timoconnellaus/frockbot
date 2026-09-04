@@ -1599,7 +1599,7 @@ describe("Cloudflare user application gateway", () => {
           expectedRevision: 0,
           model: {
             connectionId: "flock-default",
-            providerModelId: "@flock/auto",
+            providerModelId: "@frock/auto",
           },
         }),
       }),

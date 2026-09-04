@@ -252,6 +252,80 @@ describe("per-Bot unread in Workerd", () => {
     });
   });
 
+  // The badge half of "one notification per message, none for the open Bot".
+  //
+  // The client suppresses the row of the Bot it is looking at and sends a read
+  // receipt behind it. What that leans on is this: reading is a cursor, so the
+  // *next* message still counts one, and the receipt behind it clears exactly
+  // that one — the same conversation, kept at zero for as long as it is being
+  // read, without the durable record ever having heard of "focus".
+  test("reading keeps pace with the conversation, one message at a time", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `unread-focus-user-${suffix}`,
+      botId: `unread-focus-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const name = `${identity.userId}:${identity.botId}`;
+    const stub = bot(name);
+
+    const say = async (index: number): Promise<void> => {
+      await stub.run({
+        ...identity,
+        command: {
+          runId: `run-${index}`,
+          sessionId: name,
+          acceptedAt: `2026-09-04T00:0${index}:00.000Z`,
+          text: `message ${index}`,
+        },
+      });
+    };
+    const read = async (upToCursor: string, label: string): Promise<number> => {
+      const receipt = await unreadRpc(name).executeUnreadCommand({
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          type: "bot/mark-read",
+          commandId: `${label}-${suffix}`,
+          botId: identity.botId,
+          upToCursor,
+        },
+      });
+      return receipt.unread.count;
+    };
+
+    // Three replies to a Bot nobody is reading: three, not one.
+    for (const index of [1, 2, 3]) await say(index);
+    const away = await unreadRpc(name).readUnread(identity);
+    expect(away).toMatchObject({ count: 3, unread: true });
+
+    // Opening the chat is one command and it clears all three.
+    expect(await read(away.lastActivityCursor!, "open")).toBe(0);
+
+    // Now the chat is open. Each further reply counts exactly one against the
+    // cursor, and the receipt the focused client sends puts it straight back
+    // to zero — durably, so the reload and the second tab agree.
+    for (const index of [4, 5]) {
+      await say(index);
+      const after = await unreadRpc(name).readUnread(identity);
+      expect(after).toMatchObject({ count: 1, unread: true });
+      expect(await read(after.lastActivityCursor!, `read-${index}`)).toBe(0);
+      await evictDurableObject(stub);
+      expect(await unreadRpc(name).readUnread(identity)).toMatchObject({
+        count: 0,
+        unread: false,
+      });
+    }
+
+    // And a reply that arrives after the User has looked away is news again.
+    await say(6);
+    expect(await unreadRpc(name).readUnread(identity)).toMatchObject({
+      count: 1,
+      unread: true,
+    });
+  });
+
   test("recovering an interrupted Turn does not count it twice", async () => {
     const suffix = crypto.randomUUID();
     const identity = {

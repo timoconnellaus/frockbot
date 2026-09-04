@@ -150,7 +150,7 @@ function configuredUser(): UserSettingsViewV1 {
         connectionId: "flock-ai-ambient",
         packageId: "provider-flock-ai",
         connectionTypeId: "flock-ai-account",
-        displayName: "Flock AI",
+        displayName: "Frock AI",
         state: "ready",
         providerType: "flock-ai",
         generation: "foundation-generation-1",
@@ -160,7 +160,7 @@ function configuredUser(): UserSettingsViewV1 {
           state: "fresh",
           models: [
             {
-              providerModelId: "@flock/auto",
+              providerModelId: "@frock/auto",
               displayName: "Platform",
               capabilities: {
                 tools: true,
@@ -174,7 +174,7 @@ function configuredUser(): UserSettingsViewV1 {
         safeMetadata: {},
       },
     ],
-    platformModel: model("flock-ai-ambient", "@flock/auto"),
+    platformModel: model("flock-ai-ambient", "@frock/auto"),
   };
 }
 
@@ -194,7 +194,7 @@ function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
       },
       MEMORY_FILES: {},
       MEMORY_INDEX: {},
-      FLOCK_AI: {
+      FROCK_AI: {
         autoRoute: "flock-auto",
         runChatCompletion: () =>
           Promise.resolve(
@@ -527,7 +527,7 @@ describe("generic per-Turn model resolution", () => {
       connectionId: "flock-ai-ambient",
       packageId: "provider-flock-ai",
       provider: "flock-ai",
-      providerModelId: "@flock/auto",
+      providerModelId: "@frock/auto",
       connectionGeneration: "foundation-generation-1",
       catalogGeneration: "catalog-1",
     });
@@ -651,7 +651,7 @@ describe("generic per-Turn model resolution", () => {
       ),
     };
     expect(await contribution.resolveConfiguration(identity)).toMatchObject({
-      model: model("flock-ai-ambient", "@flock/auto"),
+      model: model("flock-ai-ambient", "@frock/auto"),
     });
     expect(await contribution.getSettings(identity)).toMatchObject({
       packageValues: {

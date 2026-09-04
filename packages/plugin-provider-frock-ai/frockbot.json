@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
   "id": "provider-flock-ai",
-  "displayName": "Flock AI",
+  "displayName": "Frock AI",
   "version": "0.0.1",
   "compatibility": { "frockbot": ">=0.0.1" },
   "dependencies": { "settings": ">=0.0.1" },
@@ -14,7 +14,7 @@
     "connectionTypes": [
       {
         "id": "flock-ai-account",
-        "displayName": "Flock AI",
+        "displayName": "Frock AI",
         "allowMultiple": false,
         "authorization": { "kind": "ambient-native" },
         "capabilities": ["flock-ai-models"]

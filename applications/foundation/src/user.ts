@@ -39,7 +39,7 @@ import {
   type SearchUserBackendHost,
 } from "@frockbot/plugin-search/user";
 import { type OllamaCloudUserBackendContribution } from "@frockbot/plugin-provider-ollama-cloud/user";
-import { type FlockAiUserBackendContribution } from "@frockbot/plugin-provider-flock-ai/user";
+import { type FrockAiUserBackendContribution } from "@frockbot/plugin-provider-frock-ai/user";
 import {
   type UserPackageCatalogHost,
   type UserSettingsBackendContribution,
@@ -52,7 +52,7 @@ import {
   createFoundationBackendContributions,
   createFoundationMountedContributionsV1,
   credentialsUserContribution,
-  flockAiUserContribution,
+  frockAiUserContribution,
   flockUserContribution,
   machineUserContribution,
   mcpUserContribution,
@@ -330,10 +330,10 @@ export async function createFoundationUserBackendContributions(
       }
       return { storage: host.storage, settings, credentials };
     },
-    get flockAi() {
+    get frockAi() {
       const settings = mountedContributions.get(settingsUserContribution);
       if (!settings) {
-        throw new Error("Flock AI requires the Settings Contribution");
+        throw new Error("Frock AI requires the Settings Contribution");
       }
       return { storage: host.storage, settings };
     },
@@ -449,7 +449,7 @@ export async function createFoundationUserBackendContributions(
     | UserSettingsBackendContribution
     | CredentialUserBackendContribution
     | OllamaCloudUserBackendContribution
-    | FlockAiUserBackendContribution
+    | FrockAiUserBackendContribution
     | McpUserBackendContribution
     | FlockUserBackendContribution
     | BotTemplateUserBackendContribution
@@ -462,7 +462,7 @@ export async function createFoundationUserBackendContributions(
   const settings = mounted.get(settingsUserContribution);
   const credentials = mounted.get(credentialsUserContribution);
   const ollama = mounted.get(ollamaCloudUserContribution);
-  const flockAi = mounted.get(flockAiUserContribution);
+  const frockAi = mounted.get(frockAiUserContribution);
   const mcp = mounted.get(mcpUserContribution);
   const flock = mounted.get(flockUserContribution);
   const botTemplate = mounted.get(botTemplateUserContribution);
@@ -474,7 +474,7 @@ export async function createFoundationUserBackendContributions(
     !settings ||
     !credentials ||
     !ollama ||
-    !flockAi ||
+    !frockAi ||
     !mcp ||
     !flock ||
     !botTemplate ||
@@ -485,7 +485,7 @@ export async function createFoundationUserBackendContributions(
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Flock AI, MCP, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Frock AI, MCP, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
     );
   }
 

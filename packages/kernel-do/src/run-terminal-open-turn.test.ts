@@ -63,7 +63,7 @@ function interruptedJournal(): SessionEvent[] {
       request: {
         requestId: "request-1",
         provider: "flock-ai",
-        model: "@flock/auto",
+        model: "@frock/auto",
         system: "",
         messages: [],
         tools: [],
