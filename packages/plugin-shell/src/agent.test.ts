@@ -7,6 +7,7 @@ import {
   type ToolCall,
   type ToolExecutionContext,
   type TurnTypeV1,
+  TURN_DEADLINE_MS_V1,
 } from "@frockbot/kernel-contracts";
 import { SystemPromptRegistry } from "@frockbot/plugin-prompt";
 import { ToolRegistry } from "@frockbot/plugin-tools";
@@ -19,6 +20,7 @@ import {
   PARENT_HANDOFF_CAPABILITY_V1,
   SEND_MESSAGE_ALIAS_V1,
   SEND_TO_USER_TOOL_V1,
+  TIME_BUDGET_WARNING_MS_V1,
   USER_VOICE_CAPABILITY_V1,
   WAKE_PARENT_TOOL_V1,
 } from "./agent.ts";
@@ -570,6 +572,36 @@ describe("the acknowledgement reaches the user", () => {
         turnType: "chat",
       });
       expect(outside.text).not.toContain("<step_budget>");
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("the last two minutes of a Turn tell the model to send a status", async () => {
+    const mounted = await mount();
+    try {
+      const assemble = (remainingMs: number) =>
+        mounted.root.systemPrompt.assemble({
+          sessionId: "session-1",
+          provider: "provider-1",
+          model: "model-1",
+          turnType: "chat",
+          step: { current: 61, max: 64 },
+          deadline: {
+            at: TURN_DEADLINE_MS_V1,
+            now: TURN_DEADLINE_MS_V1 - remainingMs,
+          },
+        });
+      const boundary = await assemble(TIME_BUDGET_WARNING_MS_V1);
+      expect(boundary.text).not.toContain("<time_budget>");
+      const warning = await assemble(TIME_BUDGET_WARNING_MS_V1 - 1);
+      expect(warning.text).toContain("<time_budget>");
+      expect(warning.text).toContain("fewer than 2 minutes left");
+      expect(warning.text).toContain("Do not start new work");
+      expect(warning.text).toContain(SEND_TO_USER_TOOL_V1);
+      expect(warning.text.indexOf("<time_budget>")).toBeGreaterThan(
+        warning.text.indexOf("<step_budget>"),
+      );
     } finally {
       await mounted.dispose();
     }

@@ -1046,6 +1046,9 @@ class LoopAgent implements Agent {
       // Where the Turn is in its budget, so a section can warn the model
       // before the loop stops it.
       step: { current: step, max: this.#maxSteps },
+      // The same loop clock that armed the deadline. Prompt policy receives
+      // the deadline as data; the kernel retains ownership of the timer.
+      deadline: { at: this.#turnDeadlineAt, now: this.#retry.now() },
     });
 
     // One automatic retry, and only for a failure the provider itself

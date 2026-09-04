@@ -55,6 +55,8 @@ import {
   SCREEN_SERVICE,
   UPDATE_PHASES,
   viewServiceNameV1,
+  WATCHDOG_SCRIPT,
+  WATCHDOG_SERVICE,
   WORKSPACE_SYNC_SERVICE,
 } from "@frockbot/computer-host-runtime";
 import {
@@ -317,6 +319,10 @@ describe("open", () => {
     const sprite = client.only();
     expect(sprite.services.has(DESKTOP_SERVICE)).toBe(true);
     expect(sprite.services.has(WORKSPACE_SYNC_SERVICE)).toBe(true);
+    expect(sprite.services.has(WATCHDOG_SERVICE)).toBe(true);
+    expect(sprite.serviceConfigs.get(WATCHDOG_SERVICE)).toEqual({
+      cmd: WATCHDOG_SCRIPT,
+    });
     expect(sprite.urlSettings).toEqual({ auth: "public" });
     expect(sprite.files.has(COMPUTER_HOST_STATE_PATH)).toBe(true);
 
@@ -836,6 +842,7 @@ describe("open", () => {
 
   test("updates a mismatched runtime in place without apt and then hands back the same Computer", async () => {
     const { host, sprite } = provisioned();
+    sprite.services.set(BROWSER_SERVICE, "running");
     writeFile(sprite, PROVISION_DIGEST, "stale\n");
     let stateAtLaunch: unknown;
     const launch = report("running", updatingRuntime, "update");
@@ -882,7 +889,11 @@ describe("open", () => {
     // runs it — so re-declaring it is a no-op the platform correctly ignores.
     // A Computer went on serving noVNC's stock page for days that way. Picking
     // up a rewritten launcher takes a restart.
-    expect(sprite.serviceRestarts).toEqual([DESKTOP_SERVICE]);
+    expect(sprite.serviceRestarts).toEqual([
+      WATCHDOG_SERVICE,
+      DESKTOP_SERVICE,
+      BROWSER_SERVICE,
+    ]);
   });
 
   test("a gateway that will not restart does not fail the open", async () => {
@@ -906,6 +917,47 @@ describe("open", () => {
     expect(sprite.services.get(DESKTOP_SERVICE)).toBe("running");
   });
 
+  test("a browser refresh that fails stays pending and retries on the next open", async () => {
+    const { host, sprite } = provisioned();
+    sprite.services.set(BROWSER_SERVICE, "running");
+    writeFile(sprite, PROVISION_DIGEST, "stale\n");
+    sprite.scripts = [
+      report("running", updatingRuntime, "update"),
+      report("stopped", updateReady, "update"),
+    ];
+    let browserFailures = 1;
+    sprite.onServiceOperation = (operation, name) => {
+      if (
+        operation === "restart" &&
+        name === BROWSER_SERVICE &&
+        browserFailures-- > 0
+      ) {
+        throw new FakeApiError(500, "the browser would not restart");
+      }
+    };
+
+    const first = await host.handle(request({ kind: "open" }));
+
+    expect(first.status).toBe(200);
+    expect(
+      JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
+    ).toMatchObject({
+      update: { status: "started", digest: runtimeDocumentDigestV1() },
+    });
+
+    const second = await host.handle(
+      request({ kind: "open" }, { effectId: "open-after-restart-failure" }),
+    );
+
+    expect(second.status).toBe(200);
+    expect(
+      sprite.serviceRestarts.filter((name) => name === BROWSER_SERVICE),
+    ).toEqual([BROWSER_SERVICE]);
+    expect(
+      JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
+    ).toEqual({ version: 1, generation: 4 });
+  });
+
   test("provisioning a Computer starts the gateway rather than restarting it", async () => {
     // Nothing is running yet, so the declaration is the start. A restart here
     // would be a second process launch on a Computer that has had none.
@@ -926,6 +978,7 @@ describe("open", () => {
 
   test("reconciles the gateway before clearing a completed runtime-update intent", async () => {
     const { host, sprite } = provisioned();
+    sprite.services.set(BROWSER_SERVICE, "running");
     writeFile(
       sprite,
       COMPUTER_HOST_STATE_PATH,
@@ -948,7 +1001,11 @@ describe("open", () => {
     ).toHaveLength(1);
     // The reconciliation replays the update's last effect, and that effect is
     // the restart: the definition it re-declares has not changed.
-    expect(sprite.serviceRestarts).toEqual([DESKTOP_SERVICE]);
+    expect(sprite.serviceRestarts).toEqual([
+      WATCHDOG_SERVICE,
+      DESKTOP_SERVICE,
+      BROWSER_SERVICE,
+    ]);
     expect(
       JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
     ).toEqual({ version: 1, generation: 4 });
@@ -1853,6 +1910,17 @@ describe("services", () => {
         await host.handle(
           request({ kind: "service", name: WORKSPACE_SYNC_SERVICE }),
         )
+      ).json(),
+    );
+    expect(result.status).toBe("running");
+  });
+
+  test("reattaches the renderer watchdog as a provider-declared service", async () => {
+    const { host, sprite } = provisioned();
+    sprite.services.set(WATCHDOG_SERVICE, "running");
+    const result = decodeComputerHostServiceResultV1(
+      await (
+        await host.handle(request({ kind: "service", name: WATCHDOG_SERVICE }))
       ).json(),
     );
     expect(result.status).toBe("running");

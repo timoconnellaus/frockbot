@@ -343,6 +343,8 @@ export interface ComputerExec {
 export type ComputerBrowserAction =
   | { type: "snapshot" }
   | { type: "navigate"; url: string }
+  /** Internal lifecycle action; the model-facing browser tool cannot send it. */
+  | { type: "close-origins"; origins: readonly string[] }
   | { type: "click"; role: string; name: string; exact?: boolean }
   | { type: "fill"; label: string; text: string; exact?: boolean }
   | { type: "press"; key: string }
