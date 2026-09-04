@@ -16,6 +16,7 @@ import {
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { COMPACTED_ANNOUNCEMENT_TEXT_V1 } from "../compaction.js";
 import { voiceCaptureSupportedV1 } from "./voice-microphone.js";
+import { deploymentStaleV1 } from "./deployment.js";
 import { readViewerFocusV1, shouldNotifyForBotV1 } from "../focus.js";
 // Connection mutations use the provider-neutral hosted command contract.
 import type {
@@ -1433,6 +1434,19 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     voiceAvailable:
       typeof ctx.transport.openVoiceDictation === "function" &&
       voiceCaptureSupportedV1(),
+    deploymentStale: false,
+    reloadHolds: 0,
+    holdReload: () => {
+      web.value.reloadHolds += 1;
+      let released = false;
+      return () => {
+        // Idempotent: a Package that lets go twice must not leave the count
+        // below zero, which would read as "another holder released early".
+        if (released) return;
+        released = true;
+        web.value.reloadHolds -= 1;
+      };
+    },
     activeBotId: undefined,
     composerContext: undefined,
     transcripts: {
@@ -3161,6 +3175,43 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     { immediate: true },
   );
 
+  /*
+   * Following a release in a page that is already open.
+   *
+   * Every answer names the application that produced it and the request layer
+   * reports it here, so a page whose own application has stopped answering is
+   * running code the backend has moved past. Nothing polls for this: the
+   * reads the app already makes carry the answer.
+   */
+  const stopDeploymentWatch = ctx.transport.observeDeployment?.((answered) => {
+    if (deploymentStaleV1(ctx.transport.servedDeployment, answered)) {
+      web.value.deploymentStale = true;
+    }
+  });
+  /*
+   * A tab that has been in the background for a day should not have to wait
+   * for the next scheduled read to find out. Coming back asks for the
+   * manifest the client already reads at start-up rather than adding a poll
+   * of its own, and only while the answer is still unknown.
+   */
+  const readManifest = ctx.transport.readApplicationManifest?.bind(
+    ctx.transport,
+  );
+  const followDeploymentOnReturn = () => {
+    if (document.visibilityState !== "visible") return;
+    if (web.value.deploymentStale || !readManifest) return;
+    void readManifest().catch(() => {
+      // A read that failed says nothing about the deployment. The next one,
+      // or the next answer of any kind, will.
+    });
+  };
+  // The Plugin is also installed without a document — the unit tests drive it
+  // headless — and there a tab can neither be hidden nor come back.
+  const inDocument = typeof document !== "undefined";
+  if (inDocument) {
+    document.addEventListener("visibilitychange", followDeploymentOnReturn);
+  }
+
   return [
     ctx.provide(clientSurfaceRegistryKey, surfaces),
     // The shared client projection is updated by the contracts lane. This cast
@@ -3177,6 +3228,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       component: PackageIframeSettings,
     }),
     () => {
+      stopDeploymentWatch?.();
+      if (inDocument) {
+        document.removeEventListener(
+          "visibilitychange",
+          followDeploymentOnReturn,
+        );
+      }
       stopEntrySync();
       stopRunFollow();
       stopRunChannelWatch();
