@@ -1,5 +1,6 @@
 export * from "./agent.js";
 export * from "./chunker.js";
+export * from "./chunk-index.js";
 export * from "./documents.js";
 export * from "./embeddings.js";
 export * from "./facts.js";

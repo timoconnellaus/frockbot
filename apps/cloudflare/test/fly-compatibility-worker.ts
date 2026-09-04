@@ -33,6 +33,7 @@ import {
   createMemoryWriteTool,
   MemoryProjection,
 } from "@frockbot/plugin-memory/agent";
+import { memoryChunkIndexEntriesV1 } from "@frockbot/plugin-memory/chunk-index";
 import { createBotMemoryHost } from "@frockbot/plugin-shell/backend-memory";
 import {
   createBotPluginSkillsSource,
@@ -287,6 +288,12 @@ class ProbeComputerSurface implements ComputerSyncSurfaceV1 {
 }
 
 export class WorkerdBotState extends BotState {
+  /** Seed the Package-owned chunk ledger through its exact stored contract. */
+  async seedMemoryChunkVectorIds(vectorIds: string[]): Promise<void> {
+    const entries = memoryChunkIndexEntriesV1(vectorIds);
+    if (Object.keys(entries).length > 0) await this.ctx.storage.put(entries);
+  }
+
   /**
    * The production Workspace surface this object serves — the same
    * `WORKSPACE_FILES` the Skills seam reads, built over the real R2 bucket and

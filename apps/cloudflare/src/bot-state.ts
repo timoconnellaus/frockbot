@@ -158,6 +158,12 @@ import {
 } from "@frockbot/kernel-do";
 import type { MemoryProjectsV1 } from "@frockbot/plugin-memory/agent";
 import {
+  decodeMemoryChunkIndexEntryV1,
+  memoryChunkIndexEntriesV1,
+  MEMORY_CHUNK_INDEX_PREFIX_V1,
+  type MemoryChunkIndexWriterV1,
+} from "@frockbot/plugin-memory/chunk-index";
+import {
   searchRowsFromClientRunV1,
   type SearchSinkV1,
 } from "@frockbot/plugin-search";
@@ -234,6 +240,58 @@ function frockAiWorkerVarV1(
   );
 }
 
+/** One Vectorize mutation per alarm firing, at the Workers binding limit. */
+export const MEMORY_VECTOR_DELETE_BATCH_SIZE_V1 = 1_000;
+const MEMORY_VECTOR_PURGE_JOURNAL_KEY_V1 = "memory:vector-purge:v1";
+const MEMORY_VECTOR_PURGE_RETRY_DELAY_MS_V1 = 1_000;
+
+interface MemoryVectorPurgeJournalV1 {
+  schemaVersion: 1;
+  userId: string;
+  botId: string;
+  status: "pending" | "complete" | "skipped";
+  deleted: number;
+  note?: string;
+}
+
+function decodeMemoryVectorPurgeJournalV1(
+  input: unknown,
+): MemoryVectorPurgeJournalV1 {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error("Stored Memory vector purge journal is invalid");
+  }
+  const allowed = new Set([
+    "schemaVersion",
+    "userId",
+    "botId",
+    "status",
+    "deleted",
+    "note",
+  ]);
+  const status = Reflect.get(input, "status");
+  const note = Reflect.get(input, "note");
+  if (
+    Object.keys(input).some((field) => !allowed.has(field)) ||
+    Reflect.get(input, "schemaVersion") !== 1 ||
+    typeof Reflect.get(input, "userId") !== "string" ||
+    typeof Reflect.get(input, "botId") !== "string" ||
+    (status !== "pending" && status !== "complete" && status !== "skipped") ||
+    !Number.isSafeInteger(Reflect.get(input, "deleted")) ||
+    (Reflect.get(input, "deleted") as number) < 0 ||
+    (note !== undefined && typeof note !== "string")
+  ) {
+    throw new Error("Stored Memory vector purge journal is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    userId: Reflect.get(input, "userId") as string,
+    botId: Reflect.get(input, "botId") as string,
+    status,
+    deleted: Reflect.get(input, "deleted") as number,
+    ...(typeof note === "string" ? { note } : {}),
+  };
+}
+
 export type { BotStateEnv, OwnedBotTurnCommand };
 
 export interface BotStateDependencies {
@@ -290,6 +348,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     PACKAGE_CATALOG_ENTRIES?: BotSkillCatalogReaderV1;
     MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
     MEMORY_PROJECTS?: MemoryProjectsV1;
+    MEMORY_CHUNK_INDEX?: MemoryChunkIndexWriterV1;
     WORKSPACE_SYNC_FILES?: WorkspaceFilesV1;
     WORKSPACE_SYNC_EFFECTS?: WorkspaceSyncEffectsV1;
     WORKSPACE_SYNC_GENERATIONS?: WorkspaceGenerationsV1;
@@ -335,6 +394,14 @@ export class BotState extends DurableObject<BotStateEnv> {
     // serves from the RPC that addresses it, never from its constructor.
     this.backendEnv = {
       ...env,
+      MEMORY_CHUNK_INDEX: {
+        record: async (vectorIds) => {
+          const entries = memoryChunkIndexEntriesV1(vectorIds);
+          if (Object.keys(entries).length > 0) {
+            await this.ctx.storage.put(entries);
+          }
+        },
+      },
       ...(isFrockAiGatewayBindingV1(env.AI)
         ? {
             FROCK_AI: createFrockAiGatewayHostV1(env.AI, {
@@ -661,17 +728,19 @@ export class BotState extends DurableObject<BotStateEnv> {
    * Everything this Bot owns, destroyed. The Flock Contribution calls this on
    * `bot/delete` and writes its tombstone afterwards.
    *
-   * Order matters. The alarm goes first: this object's single alarm is
-   * multiplexed by the kernel authority over the active run, the Routine
-   * schedules and the Computer's scheduled work, and every one of those
-   * deadlines is about to stop existing — an alarm left armed would wake a Bot
-   * with no state to recover. The durable keys go next, in one `deleteAll()`:
+   * Order matters. The object's existing alarm is cancelled first, then its
+   * Bot-Memory vector ids are deleted from Vectorize in bounded alarm pages.
+   * Only once the durable chunk index is empty do the durable keys go in one
+   * `deleteAll()`:
    * the session event log and its runs, the transcript and conversations, the
    * Bot's Memory and Skills generation ledger, Routines and their schedules,
    * Subagent tasks, approvals, notifications, unread and sidebar preview, the
    * Package composition generations, the Applet mirror, and the state-channel
    * log. Then the two object-store roots the Bot owns, which are the only
    * Bot-scoped state that does not live in this object.
+   *
+   * If Vectorize is not bound (local development and workerd by default), the
+   * journal records that the derived cleanup was skipped before teardown.
    *
    * The mount memo is dropped last so the next call to this object rebuilds
    * from empty storage, reads the tombstone the caller is about to write, and
@@ -682,22 +751,115 @@ export class BotState extends DurableObject<BotStateEnv> {
    * Idempotent, because the delete saga replays: an empty object has nothing
    * to delete and an empty prefix has nothing to list.
    */
-  private async tearDown(identity: {
+  private async finishTearDown(identity: {
     userId: string;
     botId: string;
   }): Promise<void> {
-    // The channel is silenced before either, and for the same reason the alarm
-    // goes first: a `runs` notice is deferred behind its throttle, so a delete
-    // can land while one is still waiting to write. Left running, that notice
-    // finished after `deleteAll()` and put `bot-state-channel:meta:v1` and an
-    // event back into a tombstoned object — storage the teardown had just
-    // removed, describing runs that no longer exist.
-    this.stateChannel.silence();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     await deleteBotWorkspaceRootsV1(this.env, identity);
     this.mounted = undefined;
     this.surfacesFor = undefined;
+  }
+
+  /**
+   * Delete one bounded page of this Bot's own Memory vectors.
+   *
+   * The index keys are the cursor. They leave storage only after the external
+   * delete succeeds, so an eviction in either side of that boundary repeats a
+   * harmless delete or resumes at the first id not yet acknowledged. The next
+   * alarm is armed before the remote call: even a long Vectorize outage cannot
+   * exhaust the platform's finite automatic alarm retries and strand data.
+   */
+  private async purgeMemoryVectorBatch(
+    journal: MemoryVectorPurgeJournalV1,
+  ): Promise<"complete" | "pending"> {
+    const vectorize = this.env.MEMORY_INDEX;
+    if (!vectorize) {
+      await this.ctx.storage.put(MEMORY_VECTOR_PURGE_JOURNAL_KEY_V1, {
+        ...journal,
+        status: "skipped",
+        note: "MEMORY_INDEX binding is absent; no Vectorize purge was available",
+      } satisfies MemoryVectorPurgeJournalV1);
+      return "complete";
+    }
+
+    const page = await this.ctx.storage.list<unknown>({
+      prefix: MEMORY_CHUNK_INDEX_PREFIX_V1,
+      limit: MEMORY_VECTOR_DELETE_BATCH_SIZE_V1,
+    });
+    if (page.size === 0) {
+      await this.ctx.storage.put(MEMORY_VECTOR_PURGE_JOURNAL_KEY_V1, {
+        ...journal,
+        status: "complete",
+      } satisfies MemoryVectorPurgeJournalV1);
+      return "complete";
+    }
+
+    const entries = [...page].map(([key, value]) =>
+      decodeMemoryChunkIndexEntryV1(key, value),
+    );
+    await this.ctx.storage.setAlarm(
+      Date.now() + MEMORY_VECTOR_PURGE_RETRY_DELAY_MS_V1,
+    );
+    await vectorize.deleteByIds(entries.map((entry) => entry.vectorId));
+    const keys = [...page.keys()];
+    const deleted = journal.deleted + entries.length;
+    const hasAnotherPage = page.size === MEMORY_VECTOR_DELETE_BATCH_SIZE_V1;
+    await this.ctx.storage.transaction(async (storage) => {
+      await storage.delete(keys);
+      await storage.put(MEMORY_VECTOR_PURGE_JOURNAL_KEY_V1, {
+        ...journal,
+        status: hasAnotherPage ? "pending" : "complete",
+        deleted,
+      } satisfies MemoryVectorPurgeJournalV1);
+      if (hasAnotherPage) {
+        await storage.setAlarm(
+          Date.now() + MEMORY_VECTOR_PURGE_RETRY_DELAY_MS_V1,
+        );
+      } else {
+        await storage.deleteAlarm();
+      }
+    });
+    return hasAnotherPage ? "pending" : "complete";
+  }
+
+  private async tearDown(identity: {
+    userId: string;
+    botId: string;
+  }): Promise<"complete" | "pending"> {
+    // A throttled channel notice and every pre-delete scheduled deadline must
+    // stop before the alarm is repurposed for the purge journal.
+    this.stateChannel.silence();
+    const stored = await this.ctx.storage.get<unknown>(
+      MEMORY_VECTOR_PURGE_JOURNAL_KEY_V1,
+    );
+    let journal: MemoryVectorPurgeJournalV1;
+    if (stored === undefined) {
+      await this.ctx.storage.deleteAlarm();
+      journal = {
+        schemaVersion: 1,
+        ...identity,
+        status: "pending",
+        deleted: 0,
+      };
+      await this.ctx.storage.put(MEMORY_VECTOR_PURGE_JOURNAL_KEY_V1, journal);
+    } else {
+      journal = decodeMemoryVectorPurgeJournalV1(stored);
+      if (
+        journal.userId !== identity.userId ||
+        journal.botId !== identity.botId
+      ) {
+        throw new Error("Memory vector purge journal identity does not match");
+      }
+    }
+    const outcome =
+      journal.status === "pending"
+        ? await this.purgeMemoryVectorBatch(journal)
+        : "complete";
+    if (outcome === "pending") return outcome;
+    await this.finishTearDown(identity);
+    return "complete";
   }
 
   private async materialized(identity: { userId: string; botId: string }) {
@@ -1955,6 +2117,25 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   async alarm(): Promise<void> {
+    const purgeValue = await this.ctx.storage.get<unknown>(
+      MEMORY_VECTOR_PURGE_JOURNAL_KEY_V1,
+    );
+    if (purgeValue !== undefined) {
+      await loggedEntryV1("Bot Memory vector purge", async () => {
+        const journal = decodeMemoryVectorPurgeJournalV1(purgeValue);
+        const outcome =
+          journal.status === "pending"
+            ? await this.purgeMemoryVectorBatch(journal)
+            : "complete";
+        if (outcome === "complete") {
+          await this.finishTearDown({
+            userId: journal.userId,
+            botId: journal.botId,
+          });
+        }
+      });
+      return;
+    }
     // The outbox drain is in a `finally` for the same reason the kernel's
     // re-arm is: it is the audit trail's second chance, and a throw anywhere in
     // the Bot's own settlement must not be what stops entries leaving.

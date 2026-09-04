@@ -7,12 +7,16 @@ function surface(
   overrides: Partial<DebugGatewaySurface> = {},
 ): DebugGatewaySurface & {
   snapshots: Array<{ userId: string; botId: string; query: unknown }>;
+  submissions: Array<{ userId: string; botId: string; text: string }>;
 } {
   const snapshots: Array<{ userId: string; botId: string; query: unknown }> =
+    [];
+  const submissions: Array<{ userId: string; botId: string; text: string }> =
     [];
   return {
     token: TOKEN,
     snapshots,
+    submissions,
     listUsers: () =>
       Promise.resolve([
         {
@@ -27,7 +31,20 @@ function surface(
       snapshots.push({ userId, botId, query });
       return Promise.resolve({ schemaVersion: 1, botId });
     },
+    isAdminUser: () => Promise.resolve(true),
     ...overrides,
+  };
+}
+
+function submitter(target: ReturnType<typeof surface>) {
+  return (userId: string, botId: string, text: string) => {
+    target.submissions.push({ userId, botId, text });
+    return Promise.resolve(
+      Response.json(
+        { schemaVersion: 1, runId: "run-1", status: "running" },
+        { status: 202 },
+      ),
+    );
   };
 }
 
@@ -77,7 +94,7 @@ describe("debug route", () => {
     }
   });
 
-  test("is read-only", async () => {
+  test("keeps every route except the owner Turn send read-only", async () => {
     const route = createDebugRoute(surface());
     const request = new Request("https://bot.frockbot.com/api/debug/users", {
       method: "POST",
@@ -85,6 +102,53 @@ describe("debug route", () => {
     });
 
     expect((await route(request, new URL(request.url)))?.status).toBe(405);
+  });
+
+  test("submits the one write as an ordinary Turn and preserves its response", async () => {
+    const target = surface();
+    const request = new Request(
+      "https://bot.frockbot.com/api/debug/users/user-1/bots/primary/turns",
+      {
+        method: "POST",
+        headers: { ...authorized, "content-type": "application/json" },
+        body: JSON.stringify({ text: "hello from the terminal" }),
+      },
+    );
+
+    const response = await createDebugRoute(target, submitter(target))(
+      request,
+      new URL(request.url),
+    );
+
+    expect(response?.status).toBe(202);
+    expect(await response?.json()).toMatchObject({ runId: "run-1" });
+    expect(target.submissions).toEqual([
+      { userId: "user-1", botId: "primary", text: "hello from the terminal" },
+    ]);
+  });
+
+  test("403s a non-admin with a plain sentence before submitting", async () => {
+    const target = surface({ isAdminUser: () => Promise.resolve(false) });
+    const request = new Request(
+      "https://bot.frockbot.com/api/debug/users/user-2/bots/primary/turns",
+      {
+        method: "POST",
+        headers: { ...authorized, "content-type": "application/json" },
+        body: JSON.stringify({ text: "not allowed" }),
+      },
+    );
+
+    const response = await createDebugRoute(target, submitter(target))(
+      request,
+      new URL(request.url),
+    );
+
+    expect(response?.status).toBe(403);
+    expect(response?.headers.get("content-type")).toContain("text/plain");
+    expect(await response?.text()).toBe(
+      "Debug Turn submission is only allowed for an administrator account.",
+    );
+    expect(target.submissions).toEqual([]);
   });
 
   test("requires the user a Bot is read under", async () => {
