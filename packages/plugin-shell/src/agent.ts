@@ -39,7 +39,14 @@ import {
 } from "@frockbot/kernel-contracts";
 // Merges the Agent loop's event declarations into the cordis Context type.
 import type {} from "@frockbot/kernel-agent-loop/agent";
-import { automationParentPointerV1, turnScopedMessagesV1 } from "./history.js";
+import {
+  automationParentPointerV1,
+  chatWindowV1,
+  CHAT_HISTORY_BUDGET_CHARS_V1,
+  turnScopedMessagesV1,
+  turnTypesByTurnV1,
+} from "./history.js";
+import { runCompactionV1 } from "./compaction.js";
 import type { Plugin } from "cordis";
 import manifest from "../frockbot.json" with { type: "json" };
 
@@ -83,6 +90,11 @@ export function shellAdmissionCeilingV1(
 
 function refusal(reason: string): ToolExecutionResult {
   return { content: reason, isError: true };
+}
+
+/** Adapts a cordis fiber to the plain disposer this Package's list holds. */
+function disposeFiber(fiber: { dispose(): unknown }): () => void {
+  return () => void fiber.dispose();
 }
 
 /**
@@ -347,6 +359,55 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
     ctx.tools.register(
       createWakeParentTool(ctx.sessions),
       parentHandoff ? { admissionCeiling: parentHandoff } : undefined,
+    ),
+    // ADR 0030. `ctx.inject` rather than a declared dependency: a host that
+    // mounts the Shell without a model still gets its tools and its transcript
+    // seam, and simply never compacts. The hook is evaluated after `turn/end`
+    // is on the log and flushed, so a compaction never sits in the user's
+    // latency path — the Turn they were waiting on is already over. Nothing
+    // here may throw: the loop awaits this inside its `finally`, and a
+    // compaction that fails is a Turn that carries on under ADR 0027's
+    // eviction, not a Turn that failed.
+    disposeFiber(
+      ctx.inject(["llm"], (scoped) => {
+        scoped.on("agent/turn-stopping", async (agent, turn) => {
+          try {
+            const session = agent.session;
+            const types = turnTypesByTurnV1(session.events);
+            if ((types.get(turn) ?? "chat") !== "chat") return;
+            await runCompactionV1({
+              session,
+              window: chatWindowV1(session.events, session.deriveMessages()),
+              budget: CHAT_HISTORY_BUDGET_CHARS_V1,
+              currentTurn: turn,
+              newEffectId: () => `compaction-${crypto.randomUUID()}`,
+              summarise: async (request) => {
+                let text = "";
+                for await (const event of scoped.llm.stream(
+                  {
+                    requestId: `compaction-${crypto.randomUUID()}`,
+                    provider: request.provider,
+                    model: request.model,
+                    system: request.system,
+                    messages: request.messages,
+                    tools: [],
+                    ...(request.modelBinding
+                      ? { modelBinding: request.modelBinding }
+                      : {}),
+                  },
+                  request.signal,
+                )) {
+                  if (event.type === "text-delta") text += event.text;
+                }
+                return text;
+              },
+            });
+          } catch {
+            // A compaction that could not even be attempted leaves the log
+            // exactly as ADR 0027 left it: nothing to repair, nothing to say.
+          }
+        });
+      }),
     ),
     // Applied after the rest of the chain, so this Package has the last word on
     // what history a request carries — the one rule the visible transcript

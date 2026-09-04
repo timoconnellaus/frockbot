@@ -24,17 +24,23 @@
 
 import {
   BOTS_ROOT,
+  BROWSER_LIVE_MARKER,
+  BROWSER_SERVICE,
   computerSpriteNameV1,
   computerSpriteNameSourceV1,
+  COMPUTER_CDP_PORT,
+  COMPUTER_DISPLAY,
   CONTROL_SCRIPT,
   DATA_ROOT,
   DESKTOP_GUI_LEASE_KEY,
   DESKTOP_LIVE_MARKER,
   DESKTOP_SERVICE,
   DESKTOP_SLOT_PREFIX,
+  DESKTOP_SLOTS,
   DESKTOP_TENANT_SERVICE_PREFIX,
-  desktopServiceNameV1,
   ENSURE_AGENT_SCRIPT,
+  ENSURE_WINDOW_SCRIPT,
+  FOCUS_WINDOW_SCRIPT,
   HOME_ROOT,
   LEASE_MAX_AGE_SECONDS,
   NO_SLOTS_MARKER,
@@ -48,12 +54,17 @@ import {
   provisionPollScript,
   RUNTIME_ROOT,
   runtimeDocumentDigestV1,
+  SCREEN_SERVICE,
   shellQuote,
+  TARGET_ID_FILE,
   UPDATE_PHASES,
   UPDATE_STARTING_PHASE,
   updateLaunchScript,
+  VIEW_TENANT_SERVICE_PREFIX,
+  viewServiceNameV1,
   VNC_PORT_BASE,
   VIEWER_PAGE,
+  WINDOW_LIVE_MARKER,
   WORKSPACE_SYNC_SERVICE,
   WORKSPACES_ROOT,
 } from "@frockbot/computer-host-runtime";
@@ -157,6 +168,27 @@ export interface SpriteHandle {
     name: string,
     duration?: string,
   ): Promise<SpriteServiceStreamHandle>;
+  /**
+   * Restarts a declared service, which is the *only* way to make one pick up a
+   * rewritten launcher.
+   *
+   * `createService` is a create-or-update keyed by the definition: declaring a
+   * service again with a byte-identical `{cmd, args, httpPort}` is a no-op, so
+   * the running process keeps every path it was started with. That is how a
+   * Computer went on serving noVNC's own page from `/usr/share/novnc` for days
+   * after the runtime update had rewritten `start-gateway.sh` to serve
+   * FrockBot's viewer.
+   */
+  restartService(
+    name: string,
+    duration?: string,
+  ): Promise<SpriteServiceStreamHandle>;
+  stopService(
+    name: string,
+    timeout?: string,
+  ): Promise<SpriteServiceStreamHandle>;
+  deleteService(name: string): Promise<void>;
+  listServices(): Promise<{ name: string }[]>;
   updateURLSettings(settings: { auth: string }): Promise<void>;
 }
 
@@ -679,6 +711,13 @@ export class ComputerHost {
   /** One update per User; every other operation waits only its declared bound. */
   private readonly updates = new Map<string, ActiveUpdate>();
   /**
+   * Sprites whose superseded per-slot desktop services this container has
+   * already retired (ADR 0030). The migration is idempotent, so this is a cost
+   * saving rather than a correctness one: one `listServices` per Sprite per
+   * container instead of one per open.
+   */
+  private readonly retired = new Set<string>();
+  /**
    * The Sprite handle for a name, looked up once.
    *
    * Every operation used to open with its own `GET /v1/sprites/<name>`, and a
@@ -963,6 +1002,16 @@ export class ComputerHost {
         `if [ -n "$SLOT" ] && (exec 3<>/dev/tcp/127.0.0.1/$((${VNC_PORT_BASE} + SLOT))) 2>/dev/null; then`,
         `  echo ${DESKTOP_LIVE_MARKER}`,
         `fi`,
+        // One browser on the Computer, so one port to probe (ADR 0030). Its
+        // liveness is a different fact from the tenant's viewer being up:
+        // either can be missing on its own, and declaring a running service
+        // again would restart it.
+        `if (exec 3<>/dev/tcp/127.0.0.1/${COMPUTER_CDP_PORT}) 2>/dev/null; then`,
+        `  echo ${BROWSER_LIVE_MARKER}`,
+        `fi`,
+        `if [ -s ${shellQuote(`${BOTS_ROOT}/${botKey}/${TARGET_ID_FILE}`)} ]; then`,
+        `  echo ${WINDOW_LIVE_MARKER}`,
+        `fi`,
         "",
       ].join("\n"),
       "ensure agent",
@@ -986,21 +1035,25 @@ export class ComputerHost {
       );
     }
 
-    // A display is optional. Slots are allocated on demand and there are a
-    // hundred of them, so a tenant that has not been given one — or a Computer
-    // whose desktop stack is not up — is answered without a display rather
-    // than refused: the exec and file surfaces do not need a screen.
+    // A display is optional. Slots are allocated on demand and there are
+    // `DESKTOP_SLOTS` of them, so a tenant that has not been given one — or a
+    // Computer whose desktop stack is not up — is answered without a display
+    // rather than refused: the exec and file surfaces do not need a screen.
     const rawSlot = ensuredText
       .split("\n")
       .find((line) => line.startsWith(DESKTOP_SLOT_PREFIX))
       ?.slice(DESKTOP_SLOT_PREFIX.length);
-    const slot = rawSlot && /^\d+$/.test(rawSlot) ? Number(rawSlot) : undefined;
-    const display = await this.desktop(
-      sprite,
-      botKey,
-      slot !== undefined && Number.isSafeInteger(slot) ? slot : undefined,
-      ensuredText.includes(DESKTOP_LIVE_MARKER),
-    );
+    const parsed =
+      rawSlot && /^\d+$/.test(rawSlot) ? Number(rawSlot) : undefined;
+    const slot =
+      parsed !== undefined && Number.isSafeInteger(parsed) && parsed >= 0
+        ? parsed
+        : undefined;
+    const display = await this.desktop(sprite, botKey, slot, {
+      view: ensuredText.includes(DESKTOP_LIVE_MARKER),
+      browser: ensuredText.includes(BROWSER_LIVE_MARKER),
+      window: ensuredText.includes(WINDOW_LIVE_MARKER),
+    });
     const result: ComputerHostOpenResultV1 = {
       version: 1,
       effectId: request.effectId,
@@ -1014,56 +1067,139 @@ export class ComputerHost {
   }
 
   /**
-   * Brings up the tenant's own desktop, and answers with the display it runs
-   * on.
+   * Brings up the Computer's shared screen, its one browser, and this tenant's
+   * window and viewer, and answers with the display they are on (ADR 0030).
    *
    * The gateway is not the desktop. `start-gateway.sh` serves noVNC and routes
    * a viewer token to a loopback VNC port, but the process that *owns* that
-   * port — Xvfb, the window manager, the browser, `x11vnc` — is per tenant and
-   * per slot, so it can only be started once a tenant has a slot. Until this
-   * ran, `start-desktop.sh` was installed on every Computer and launched on
-   * none: `websockify` resolved a valid token to a port nothing was listening
-   * on, dropped the socket, and the viewer showed noVNC's own "Failed to
-   * connect to server" over a desktop that had never been started.
+   * port is per tenant, so it can only be started once a tenant has a slot.
    *
-   * It is declared as a service rather than spawned because a detached process
-   * is assumed dead after a cold pause and only a declared service may be
-   * reattached — which is what the `service` op has always been able to do for
-   * this name.
+   * What is per tenant, and what is not, is the whole of ADR 0030. There is one
+   * Xvfb and one Chromium for the Computer, because the browser profile is the
+   * User's and Chromium's singleton lock is per profile: the previous layout
+   * gave every slot its own Xvfb and its own browser launch, and every launch
+   * after the first lost that lock, printed "Opening in existing browser
+   * session", and left its Bot a black screen with a dead CDP port. Per tenant
+   * there remains exactly one thing the platform supervises — an `x11vnc`
+   * clipped to that tenant's slot — plus one window, which is not a service but
+   * a CDP target this ensures.
+   *
+   * Each piece is declared only when its own probe says it is absent, because
+   * `createService` is a create-*or-update*: declaring a running screen again
+   * would take every Bot's window down with it.
    *
    * A display stays optional (`open` answers without one rather than refusing:
-   * the exec and file surfaces do not need a screen), but "optional" now means
-   * a screen that failed to start is reported as absent instead of as a
-   * display no viewer can reach.
+   * the exec and file surfaces do not need a screen), and "optional" means a
+   * screen that failed to start is reported as absent rather than as a display
+   * no viewer can reach.
    */
   private async desktop(
     sprite: SpriteHandle,
     botKey: string,
     slot: number | undefined,
-    live: boolean,
+    live: { view: boolean; browser: boolean; window: boolean },
   ): Promise<string | undefined> {
     if (slot === undefined) return undefined;
-    const display = `:${100 + slot}`;
-    if (live) return display;
+    if (slot >= DESKTOP_SLOTS) {
+      // A slot outside the screen is a window nobody can see and a clip
+      // rectangle x11vnc refuses. It can only come from a Computer that
+      // allocated slots under the superseded hundred-display layout.
+      return undefined;
+    }
+    await this.retireLegacyDesktops(sprite);
     try {
-      await withTimeout(
-        settleService(
-          await sprite.createService(
-            desktopServiceNameV1(botKey),
-            { cmd: `${RUNTIME_ROOT}/start-desktop.sh`, args: [botKey] },
-            "30s",
-          ),
-          `Desktop for "${botKey}"`,
-        ),
-        "tenant desktop",
-        COMPUTER_HOST_PHASE_TIMEOUTS.service,
-      );
+      if (!live.browser) {
+        await this.declareService(sprite, SCREEN_SERVICE, {
+          cmd: `${RUNTIME_ROOT}/start-screen.sh`,
+        });
+        await this.declareService(sprite, BROWSER_SERVICE, {
+          cmd: `${RUNTIME_ROOT}/start-browser.sh`,
+        });
+      }
+      if (!live.view) {
+        await this.declareService(sprite, viewServiceNameV1(botKey), {
+          cmd: `${RUNTIME_ROOT}/start-view.sh`,
+          args: [botKey],
+        });
+      }
+      if (!live.browser || !live.window) {
+        // One window per Bot, pinned over its own slot. Cheap and idempotent,
+        // and skipped entirely on the ordinary open where the browser is up
+        // and this tenant already has a window recorded.
+        const ensured = await this.run(
+          sprite,
+          `exec ${ENSURE_WINDOW_SCRIPT} ${shellQuote(botKey)}\n`,
+          "ensure window",
+          COMPUTER_HOST_PHASE_TIMEOUTS.control,
+        );
+        if (ensured.exitCode !== 0) return undefined;
+      }
     } catch {
       // Reported as no display. The tenant keeps its slot and its files, the
       // next open tries again, and box-doctor is where a human reads why.
       return undefined;
     }
-    return display;
+    return COMPUTER_DISPLAY;
+  }
+
+  /** One declared service, settled, under the service phase's bound. */
+  private async declareService(
+    sprite: SpriteHandle,
+    name: string,
+    config: { cmd: string; args?: string[]; httpPort?: number },
+  ): Promise<void> {
+    await withTimeout(
+      settleService(await sprite.createService(name, config, "30s"), name),
+      "service",
+      COMPUTER_HOST_PHASE_TIMEOUTS.service,
+    );
+  }
+
+  /**
+   * Stops and forgets the superseded per-slot desktop services (ADR 0030).
+   *
+   * An existing Computer carries one `frockbot-desktop-<botKey>` per tenant
+   * that ever opened a screen. Each is an Xvfb, a window manager, an `x11vnc`,
+   * and a browser launch — and one of those browsers is holding the shared
+   * profile's singleton lock right now. Leaving them running would mean the new
+   * browser service could never take the profile, so they are stopped and
+   * deleted before anything new is declared.
+   *
+   * Defensive and idempotent on purpose: it runs once per Sprite per container,
+   * a Computer with no legacy services does nothing, and every per-service
+   * failure is swallowed — a service that is already gone, or a platform that
+   * will not list services at all, must not cost a Bot its Computer. It removes
+   * *services*, never files: `${HOME_ROOT}/chrome-profile` is the User's login
+   * state and is not this migration's to touch.
+   */
+  private async retireLegacyDesktops(sprite: SpriteHandle): Promise<void> {
+    if (this.retired.has(sprite.name)) return;
+    this.retired.add(sprite.name);
+    let names: string[];
+    try {
+      names = (await sprite.listServices())
+        .map((service) => service.name)
+        .filter((name) => name.startsWith(DESKTOP_TENANT_SERVICE_PREFIX));
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      try {
+        await withTimeout(
+          settleService(await sprite.stopService(name, "10s"), name),
+          "legacy desktop stop",
+          COMPUTER_HOST_PHASE_TIMEOUTS.service,
+        );
+      } catch {
+        // Already stopped, or refused. The delete below is what matters.
+      }
+      try {
+        await sprite.deleteService(name);
+      } catch {
+        // A service that cannot be deleted is one the reattach path will
+        // refuse anyway: the `service` op no longer declares this prefix.
+      }
+    }
   }
 
   /** The User's Computer, provisioning it exactly once per container. */
@@ -1135,7 +1271,9 @@ export class ComputerHost {
       "provision",
       onProgress,
     );
-    await this.declareGateway(sprite);
+    // Nothing is running yet on a Computer being provisioned, so the
+    // declaration *is* the start; there is no older process to replace.
+    await this.declareGateway(sprite, false);
     await withTimeout(
       settleService(
         await sprite.createService(WORKSPACE_SYNC_SERVICE, {
@@ -1186,11 +1324,12 @@ export class ComputerHost {
     if (inspection.digest === digest) {
       if (inspection.state?.update) {
         // The runtime document may have reached disk before this container
-        // observed the named gateway restart. Re-declaration is keyed by the
-        // service name, so it reconciles that last update effect before the
-        // durable intent is cleared (P3/P4).
+        // observed the named gateway restart. This is that last update effect,
+        // replayed before the durable intent is cleared (P3/P4) — and it has to
+        // be a restart, because the service definition has not changed and
+        // re-declaring an unchanged definition changes nothing.
         if (inspection.state.update.status === "started") {
-          await this.declareGateway(sprite);
+          await this.declareGateway(sprite, true);
         }
         await this.writeHostState(sprite, {
           version: 1,
@@ -1263,9 +1402,9 @@ export class ComputerHost {
     // instead is what left a Computer serving no viewer page at all.
     if (deferGateway) return { ...record, provisioning: updated };
     // A running websockify keeps the `--web` directory from its original
-    // process. Re-declare the provider-owned service so the newly installed
-    // digest-tracked viewer page is served by this very open (P3).
-    await this.declareGateway(sprite);
+    // process, so the newly installed viewer page is only served once that
+    // process is replaced (P3).
+    await this.declareGateway(sprite, true);
     await this.writeHostState(sprite, {
       version: 1,
       generation: record.generation,
@@ -1273,7 +1412,31 @@ export class ComputerHost {
     return { ...record, provisioning: updated };
   }
 
-  private async declareGateway(sprite: SpriteHandle): Promise<void> {
+  /**
+   * Declares the viewer gateway, and — after a runtime update — restarts it.
+   *
+   * `createService` is a create-or-update keyed by the definition it is given.
+   * The gateway's definition never changes: `{cmd: start-gateway.sh, httpPort}`
+   * is the same string before and after a runtime update, because what the
+   * update rewrites is the *contents* of that launcher. Declaring it again is
+   * therefore a no-op, and the running `websockify` keeps the `--web` directory
+   * it was started with for the life of the Computer.
+   *
+   * That is not a hypothetical. A Computer went on serving noVNC's stock page
+   * out of `/usr/share/novnc` for days after the runtime had been rewritten to
+   * serve FrockBot's own viewer from `${VIEWER_ROOT}` — the viewer 404 ADR 0030
+   * records — because every reconciliation re-declared a definition the
+   * platform correctly recognised as unchanged. Picking up a rewritten launcher
+   * takes a restart, so this asks for one.
+   *
+   * A restart is refused softly: a gateway that would not come back is a
+   * Computer with no viewer, which is worth reporting through box-doctor and is
+   * not worth failing an open over.
+   */
+  private async declareGateway(
+    sprite: SpriteHandle,
+    restart: boolean,
+  ): Promise<void> {
     await withTimeout(
       settleService(
         await sprite.createService(
@@ -1286,6 +1449,20 @@ export class ComputerHost {
       "desktop gateway",
       COMPUTER_HOST_PHASE_TIMEOUTS.service,
     );
+    if (!restart) return;
+    try {
+      await withTimeout(
+        settleService(
+          await sprite.restartService(DESKTOP_SERVICE, "30s"),
+          "Desktop gateway",
+        ),
+        "desktop gateway restart",
+        COMPUTER_HOST_PHASE_TIMEOUTS.service,
+      );
+    } catch {
+      // The declaration above stands. box-doctor's `desktop-gateway` check is
+      // where a gateway that is not listening becomes visible.
+    }
   }
 
   private async waitForUpdate(active: ActiveUpdate): Promise<ComputerRecord> {
@@ -2080,6 +2257,20 @@ export class ComputerHost {
         true,
       );
     }
+    // A human has just taken this Computer over. Every Bot's window is on one
+    // screen now (ADR 0030), so the screen they are handed shows whichever
+    // window Chromium last focused unless this raises theirs. Best effort: a
+    // window that would not come to the front is a takeover of the wrong
+    // rectangle, and is not worth refusing a lease the Sprite already granted.
+    // Nothing is lowered on release — the next takeover raises its own.
+    if (operation.action === "acquire") {
+      await this.run(
+        sprite,
+        `exec ${FOCUS_WINDOW_SCRIPT} ${shellQuote(computerBotKeyV1(request.tenant.botId, this.digest))}\n`,
+        "focus window",
+        COMPUTER_HOST_PHASE_TIMEOUTS.control,
+      ).catch(() => undefined);
+    }
     const result: ComputerHostControlResultV1 = {
       version: 1,
       effectId: request.effectId,
@@ -2242,7 +2433,9 @@ export class ComputerHost {
     const declared =
       operation.name === DESKTOP_SERVICE ||
       operation.name === WORKSPACE_SYNC_SERVICE ||
-      operation.name.startsWith(DESKTOP_TENANT_SERVICE_PREFIX);
+      operation.name === SCREEN_SERVICE ||
+      operation.name === BROWSER_SERVICE ||
+      operation.name.startsWith(VIEW_TENANT_SERVICE_PREFIX);
     if (!declared) {
       throw new ComputerHostError(
         "invalid-request",

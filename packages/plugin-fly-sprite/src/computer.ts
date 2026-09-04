@@ -1055,7 +1055,9 @@ export class FlySpriteComputer {
     const script = [
       this.agentControlGuard(layout),
       `PORT=$(cat ${layout.runtimeDir}/cdp-port)`,
-      `node ${RUNTIME_ROOT}/browser.mjs "$PORT" ${shellQuote(encoded)}`,
+      // The Bot key, because one browser now serves every Bot of the User and
+      // the helper has to know whose window to act in (ADR 0030).
+      `node ${RUNTIME_ROOT}/browser.mjs "$PORT" ${shellQuote(encoded)} ${shellQuote(layout.key)}`,
     ].join("\n");
     const outcome = await this.execute(
       host,

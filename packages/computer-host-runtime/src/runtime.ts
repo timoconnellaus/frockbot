@@ -85,6 +85,10 @@ export const BOUNDED_LOG_HEAD_BYTES = 131_072;
 /** Bytes kept from its tail. Together, GrokBot's 256 KiB cap. */
 export const BOUNDED_LOG_TAIL_BYTES = 131_072;
 export const ENSURE_AGENT_SCRIPT = `${RUNTIME_ROOT}/ensure-agent.sh`;
+/** Gives one Bot its window on the Computer's one screen, and pins it there. */
+export const ENSURE_WINDOW_SCRIPT = `${RUNTIME_ROOT}/ensure-window.sh`;
+/** Raises one Bot's window, for a human taking the Computer over. */
+export const FOCUS_WINDOW_SCRIPT = `${RUNTIME_ROOT}/focus-window.sh`;
 /** Where Playwright keeps the browser builds it downloads for this Computer. */
 export const BROWSERS_ROOT = `${RUNTIME_ROOT}/browsers`;
 /**
@@ -95,7 +99,7 @@ export const BROWSERS_ROOT = `${RUNTIME_ROOT}/browsers`;
  * `systemd` and never finished inside the ten-minute bound. The browser is
  * Playwright's own Chromium build instead — a self-contained tarball from
  * Playwright's CDN, no package manager involved — and this symlink is what
- * keeps `start-desktop.sh` free of the version in its directory name.
+ * keeps the browser launcher free of the version in its directory name.
  */
 export const CHROMIUM_PATH = `${HOME_ROOT}/bin/chromium`;
 /** Pinned with `playwright-core`, because the driver and the build must agree. */
@@ -197,14 +201,15 @@ export const LEASE_MAX_AGE_SECONDS = 90;
  * How long a tenant's slot is held after the provider last opened or ran
  * anything for it.
  *
- * A slot is a display number — an Xvfb, VNC, and CDP port triple — and there
- * are a hundred of them, so they are allocated on demand and reclaimed rather
- * than owned for ever. What makes a tenant live is this provider having opened
- * or executed for it recently, or a human holding its takeover lease; nothing
- * on the Computer is evidence, because the desktop script deletes its own X
- * lock when it restarts and an exec-only tenant never holds one at all. The
- * threshold is declared here so a reclaim is a stated policy rather than a
- * guess about who is still using a screen.
+ * A slot is a *region of the one screen* (ADR 0030): an x offset on the
+ * Computer's single Xvfb, one browser window pinned over it, and one VNC port
+ * clipped to it. There are `DESKTOP_SLOTS` of them, so they are allocated on
+ * demand and reclaimed rather than owned for ever. What makes a tenant live is
+ * this provider having opened or executed for it recently, or a human holding
+ * its takeover lease; nothing on the Computer is evidence, because an
+ * exec-only tenant never opens a window at all. The threshold is declared here
+ * so a reclaim is a stated policy rather than a guess about who is still using
+ * a screen.
  */
 export const SLOT_IDLE_SECONDS = 900;
 /** Exit code the ensure script uses when every slot belongs to a live tenant. */
@@ -216,34 +221,91 @@ export const NO_SLOTS_MARKER = "__FROCKBOT_NO_SLOTS__";
 export const VNC_PORT_BASE = 5900;
 
 /**
- * The prefix of a tenant's own desktop service.
+ * How many Bots of one User can hold a screen region at once (ADR 0030).
  *
- * One service per tenant rather than one for the Computer: a slot *is* an
- * Xvfb, VNC, and CDP triple, so the process group that owns a display belongs
- * to the tenant holding that slot and dies with it. The prefix is declared
- * because two call sites need the same answer — the host starts these, and the
+ * The Computer runs **one** Xvfb whose width is this many slots, so the number
+ * is a real resource bound rather than a policy: a 1280×720 slot costs about
+ * 3.5 MiB of framebuffer, and a hundred of them would be a 128 000-pixel-wide
+ * root window nobody asked for. Four is the agreed figure; a Computer whose
+ * every slot belongs to a live tenant refuses the next one rather than putting
+ * two Bots on one screen.
+ */
+export const DESKTOP_SLOTS = 4;
+/** One slot's width in pixels; a slot's x offset is this times its number. */
+export const SLOT_WIDTH = 1280;
+/** One slot's height. The screen is exactly this tall. */
+export const SLOT_HEIGHT = 720;
+/** The width of the Computer's single root window. */
+export const SCREEN_WIDTH = SLOT_WIDTH * DESKTOP_SLOTS;
+/** The one X display on a Computer. Every Bot's window lives on it. */
+export const COMPUTER_DISPLAY_NUMBER = 100;
+export const COMPUTER_DISPLAY = `:${COMPUTER_DISPLAY_NUMBER}`;
+/**
+ * The one CDP port on a Computer.
+ *
+ * There is one browser process, because there is one profile: Chromium's
+ * singleton lock is per `--user-data-dir`, so a second launch against
+ * `${HOME_ROOT}/chrome-profile` never becomes a second browser — it prints
+ * "Opening in existing browser session" and exits, leaving its CDP port dead
+ * and its Bot's screen black. That is the defect ADR 0030 records; the model
+ * that replaces it is one browser, one port, one window per Bot.
+ */
+export const COMPUTER_CDP_PORT = 9222;
+
+/** The Computer's single Xvfb and window manager. */
+export const SCREEN_SERVICE = "frockbot-screen";
+/** The Computer's single Chromium, supervised so a crash comes back. */
+export const BROWSER_SERVICE = "frockbot-browser";
+
+/**
+ * The prefix of a tenant's own **viewer** service: one `x11vnc`, clipped to
+ * that tenant's slot of the shared screen.
+ *
+ * One service per tenant rather than one for the Computer, because a viewer
+ * session is per Bot: the token the gateway resolves addresses this port, and
+ * this port shows this slot and nothing else. The prefix is declared because
+ * two call sites need the same answer — the host starts these, and the
  * `service` op reattaches them after a cold pause, which it may only do for a
  * Computer-provider-declared name.
  */
+export const VIEW_TENANT_SERVICE_PREFIX = "frockbot-view-";
+
+/** The tenant viewer service that `start-view.sh` runs under. */
+export function viewServiceNameV1(botKey: string): string {
+  return `${VIEW_TENANT_SERVICE_PREFIX}${botKey}`;
+}
+
+/**
+ * The prefix of the **superseded** per-slot desktop service (ADR 0030).
+ *
+ * Each of these was an Xvfb, a window manager, a browser launch, and an
+ * `x11vnc` for one tenant. Only the first ever got a browser — the rest lost
+ * the profile's singleton lock — so the layout is gone. The name stays
+ * declared because an existing Computer still has these services registered
+ * and the migration has to stop and delete them by name.
+ */
 export const DESKTOP_TENANT_SERVICE_PREFIX = "frockbot-desktop-";
 
-/** The tenant desktop service that `start-desktop.sh` runs under. */
+/** The superseded per-tenant desktop service name. Migration only. */
 export function desktopServiceNameV1(botKey: string): string {
   return `${DESKTOP_TENANT_SERVICE_PREFIX}${botKey}`;
 }
 
 /**
- * Printed by the attach probe when the tenant's VNC port already answers.
+ * Printed by the attach probe when the tenant's own VNC port already answers.
  *
- * The probe is the whole reason attaching a tenant does not restart its
- * desktop on every Turn: `createService` is a create-*or-update*, so calling it
- * unconditionally would tear down a running Xvfb — and with it the browser and
- * every page the Bot had open — each time the Computer was opened. A listening
- * VNC port is the one piece of evidence that the display behind it is real,
- * which is more than the slot file can say: the slot is an allocation, not a
- * running process.
+ * The probe is the whole reason attaching a tenant does not restart anything
+ * on every Turn: `createService` is a create-*or-update*, so calling it
+ * unconditionally would tear down a running `x11vnc` each time the Computer
+ * was opened. A listening VNC port is the one piece of evidence that the
+ * viewer behind it is real, which is more than the slot file can say: the slot
+ * is an allocation, not a running process.
  */
 export const DESKTOP_LIVE_MARKER = "__FROCKBOT_DESKTOP_LIVE__";
+/** Printed by the same probe when the Computer's one CDP port answers. */
+export const BROWSER_LIVE_MARKER = "__FROCKBOT_BROWSER_LIVE__";
+/** Printed by the same probe when this tenant already has a window recorded. */
+export const WINDOW_LIVE_MARKER = "__FROCKBOT_WINDOW_LIVE__";
 /** Prefix carrying the slot the attach exec already read back to the host. */
 export const DESKTOP_SLOT_PREFIX = "__FROCKBOT_DESKTOP_SLOT__";
 
@@ -311,14 +373,24 @@ export function shellGuiCommandV1(command: string): string | undefined {
   return match?.[1];
 }
 
+/** The one browser profile every Bot of one User shares (ADR 0012). */
+export const CHROME_PROFILE = `${HOME_ROOT}/chrome-profile`;
+
 /** The browser flags the Computer runs chromium under, in one place. */
 export const CHROMIUM_FLAGS: readonly string[] = [
   "--no-sandbox",
   "--disable-dev-shm-usage",
   "--disable-gpu",
-  `--user-data-dir=${HOME_ROOT}/chrome-profile`,
+  `--user-data-dir=${CHROME_PROFILE}`,
   "--remote-debugging-address=127.0.0.1",
-  "--start-maximized",
+  // Not `--start-maximized`: a window belongs to one Bot's slot, and the slot
+  // is a region of a screen `DESKTOP_SLOTS` windows wide. Every window is
+  // placed by `Browser.setWindowBounds` once it exists; this is only the size
+  // the first one opens at.
+  `--window-size=${SLOT_WIDTH},${SLOT_HEIGHT}`,
+  "--window-position=0,0",
+  "--no-first-run",
+  "--no-default-browser-check",
 ];
 
 export const CHROME_LAUNCHER = `${BIN_ROOT}/frockbot-chrome`;
@@ -326,34 +398,33 @@ export const CHROME_LAUNCHER = `${BIN_ROOT}/frockbot-chrome`;
 /**
  * The single place the Computer's chromium flags live (parity row 33).
  *
- * It takes a Bot key, reads that tenant's slot, and derives the display and
- * the CDP port from it — the same arithmetic the desktop starter does, done
- * once. `start-desktop.sh` calls it, and so may a human debugging the box;
- * nothing else needs to know the flag set exists.
+ * It takes no Bot key any more (ADR 0030). There is one browser on a Computer
+ * because there is one profile, so there is one display and one CDP port to
+ * derive: the arithmetic that used to turn a slot into a port is gone, and a
+ * slot now only says *where on the screen* a Bot's window sits. `start-browser.sh`
+ * calls this, and so may a human debugging the box; nothing else needs to know
+ * the flag set exists.
  */
 export const chromeLauncherScript = `#!/usr/bin/env bash
 set -eu
-KEY="\${1:-\${FROCKBOT_BOT_KEY:-}}"
-if [ -z "$KEY" ]; then
-  echo "frockbot-chrome needs a Bot key: frockbot-chrome <botKey> [chromium args…]" >&2
-  exit 64
-fi
-shift || true
-SLOT=$(cat ${BOTS_ROOT}/"$KEY"/slot 2>/dev/null || echo "")
-if [ -z "$SLOT" ]; then
-  echo "Bot \\"$KEY\\" has no desktop slot on this Computer" >&2
-  exit 69
-fi
-export DISPLAY=":$((100 + SLOT))"
+export DISPLAY=${COMPUTER_DISPLAY}
 export ${SANCTIONED_SURFACE_ENV}=1
 if [ ! -x ${CHROMIUM_PATH} ]; then
   echo "no browser is installed at ${CHROMIUM_PATH}; the Computer installs one when it is provisioned" >&2
   exit 69
 fi
+# The singleton files, and never the profile. Chromium's lock is per
+# user-data-dir and is left behind by a browser the platform killed rather than
+# stopped; a stale one makes the next launch print "Opening in existing browser
+# session" and exit. Removed only when no browser is actually running, because
+# two Chromiums on one profile is the one thing worse than none.
+if ! pgrep -f -- "--remote-debugging-port=${COMPUTER_CDP_PORT}" >/dev/null 2>&1; then
+  rm -f ${CHROME_PROFILE}/SingletonLock ${CHROME_PROFILE}/SingletonSocket ${CHROME_PROFILE}/SingletonCookie
+fi
 # By absolute path, not by name: the browser is Playwright's own build behind a
 # stable symlink, and reaching it through PATH would go past the shim that
 # covers the name chromium.
-exec ${CHROMIUM_PATH} ${CHROMIUM_FLAGS.join(" ")} --remote-debugging-port="$((9222 + SLOT))" "$@"
+exec ${CHROMIUM_PATH} ${CHROMIUM_FLAGS.join(" ")} --remote-debugging-port=${COMPUTER_CDP_PORT} "$@"
 `;
 
 /**
@@ -382,30 +453,155 @@ exit 64
 `;
 }
 
-export const startDesktopScript = `#!/usr/bin/env bash
+/** Where fluxbox is told what it may and may not do, on this Computer. */
+export const FLUXBOX_ROOT = `${HOME_ROOT}/.fluxbox`;
+
+/**
+ * fluxbox's configuration, declared rather than generated.
+ *
+ * With no `~/.fluxbox` at all, fluxbox writes its own defaults and then
+ * applies the default style's background by calling `fbsetbg` — which is not
+ * installed, and whose failure is an `xmessage` dialog reading "fbsetbg: I
+ * can't find an app to set the wallpaper with" sitting on top of every Bot's
+ * screen. `background: none` in the style overlay is the documented way to
+ * tell fluxbox not to set a background at all, which is what a screen made
+ * entirely of browser windows wants.
+ *
+ * The toolbar goes for the same reason: the viewer shows a Bot's 1280×720 slot
+ * and nothing else, and a window-list bar across the bottom of it is fluxbox's
+ * chrome in FrockBot's frame.
+ */
+export const fluxboxInit = `session.screen0.toolbar.visible: false
+session.screen0.slit.autoHide: true
+session.screen0.workspaces: 1
+session.screen0.workspacewarping: false
+session.screen0.defaultDeco: NONE
+session.screen0.focusModel: ClickToFocus
+session.screen0.tabs.usePixmap: false
+session.screen0.fullMaximization: false
+session.styleOverlay: ${FLUXBOX_ROOT}/overlay
+session.configVersion: 13
+`;
+
+/** The style overlay whose one job is to stop fluxbox reaching for fbsetbg. */
+export const fluxboxOverlay = `background: none
+`;
+
+/**
+ * The Computer's one screen: a single Xvfb `DESKTOP_SLOTS` slots wide, and a
+ * window manager over it (ADR 0030).
+ *
+ * One Xvfb per Computer rather than one per slot, because there is one browser
+ * per Computer — Chromium's singleton lock is per profile and the profile is
+ * the User's — and a browser can only put its windows on the display it was
+ * launched under. Each Bot gets a *region* of this screen instead of a display
+ * of its own: window pinned by CDP, VNC clipped to the same rectangle.
+ */
+export const startScreenScript = `#!/usr/bin/env bash
+set -eu
+# The desktop stack *is* the sanctioned surface, so the shims step aside for
+# it. Everything a Bot's own shell runs arrives without this set.
+export ${SANCTIONED_SURFACE_ENV}=1
+export DISPLAY=${COMPUTER_DISPLAY}
+export HOME=${HOME_ROOT}
+cleanup() {
+  jobs -pr | xargs -r kill >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+rm -f "/tmp/.X${COMPUTER_DISPLAY_NUMBER}-lock" "/tmp/.X11-unix/X${COMPUTER_DISPLAY_NUMBER}"
+Xvfb ${COMPUTER_DISPLAY} -screen 0 ${SCREEN_WIDTH}x${SLOT_HEIGHT}x24 -nolisten tcp &
+XVFB_PID=$!
+for _ in $(seq 1 100); do xdpyinfo -display ${COMPUTER_DISPLAY} >/dev/null 2>&1 && break; sleep 0.1; done
+mkdir -p ${FLUXBOX_ROOT}
+fluxbox -rc ${FLUXBOX_ROOT}/init >${RUNTIME_ROOT}/fluxbox.log 2>&1 &
+wait "$XVFB_PID"
+`;
+
+/**
+ * The Computer's one browser, supervised (ADR 0030).
+ *
+ * Its own service rather than a background job of the screen's, so a Chromium
+ * that crashes is restarted by the platform without taking the screen — and
+ * every Bot's window — down with it. Each Bot re-creates its window on its
+ * next action, which is what `ensure-window.sh` is for.
+ */
+export const startBrowserScript = `#!/usr/bin/env bash
+set -eu
+export ${SANCTIONED_SURFACE_ENV}=1
+export DISPLAY=${COMPUTER_DISPLAY}
+# The screen is a separate service, so this one may start first. Wait for the
+# display rather than failing: a service that exits is a service the platform
+# restarts, and a browser started before its X server never draws anything.
+for _ in $(seq 1 300); do xdpyinfo -display ${COMPUTER_DISPLAY} >/dev/null 2>&1 && break; sleep 0.2; done
+if ! xdpyinfo -display ${COMPUTER_DISPLAY} >/dev/null 2>&1; then
+  echo "no X server on ${COMPUTER_DISPLAY} after 60s; the ${SCREEN_SERVICE} service is what starts one" >&2
+  exit 69
+fi
+exec ${CHROME_LAUNCHER} about:blank
+`;
+
+/**
+ * One Bot's viewer: an `x11vnc` clipped to that Bot's slot of the one screen.
+ *
+ * `-clip`, not `-id`: a window id changes every time the Bot's window is
+ * re-created, and a VNC server bound to a dead window shows nothing. The
+ * rectangle is stable for as long as the Bot holds the slot.
+ */
+export const startViewScript = `#!/usr/bin/env bash
 set -eu
 KEY="$1"
 ROOT=${RUNTIME_ROOT}
 BOT="$ROOT/bots/$KEY"
 SLOT=$(cat "$BOT/slot")
-DISPLAY_NUMBER=$((100 + SLOT))
 VNC_PORT=$((${VNC_PORT_BASE} + SLOT))
-export DISPLAY=:$DISPLAY_NUMBER
-# The desktop stack *is* the sanctioned surface, so the shims step aside for
-# it. Everything a Bot's own shell runs arrives without this set.
+CLIP=${SLOT_WIDTH}x${SLOT_HEIGHT}+$((SLOT * ${SLOT_WIDTH}))+0
 export ${SANCTIONED_SURFACE_ENV}=1
-cleanup() {
-  jobs -pr | xargs -r kill >/dev/null 2>&1 || true
-}
-trap cleanup EXIT INT TERM
-rm -f "/tmp/.X$DISPLAY_NUMBER-lock" "/tmp/.X11-unix/X$DISPLAY_NUMBER"
-Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp &
-for _ in $(seq 1 100); do xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break; sleep 0.1; done
-fluxbox >"$BOT/fluxbox.log" 2>&1 &
-${CHROME_LAUNCHER} "$KEY" about:blank >"$BOT/chromium.log" 2>&1 &
-x11vnc -display "$DISPLAY" -forever -shared -rfbport "$VNC_PORT" -passwd "$(cat "$BOT/vnc-password")" >"$BOT/x11vnc.log" 2>&1 &
-VNC_PID=$!
-wait "$VNC_PID"
+export DISPLAY=${COMPUTER_DISPLAY}
+for _ in $(seq 1 300); do xdpyinfo -display ${COMPUTER_DISPLAY} >/dev/null 2>&1 && break; sleep 0.2; done
+if ! xdpyinfo -display ${COMPUTER_DISPLAY} >/dev/null 2>&1; then
+  echo "no X server on ${COMPUTER_DISPLAY} after 60s; the ${SCREEN_SERVICE} service is what starts one" >&2
+  exit 69
+fi
+exec x11vnc -display ${COMPUTER_DISPLAY} -clip "$CLIP" -forever -shared -rfbport "$VNC_PORT" -passwd "$(cat "$BOT/vnc-password")"
+`;
+
+/** What `ensure-window.sh` asks `browser.mjs`, base64url as it takes it. */
+export const BROWSER_ENSURE_ACTION = "eyJhY3Rpb24iOiJlbnN1cmUifQ";
+/** What `focus-window.sh` asks it, when a human takes this Computer over. */
+export const BROWSER_FOCUS_ACTION = "eyJhY3Rpb24iOiJmb2N1cyJ9";
+/** What box-doctor asks it, to report every tenant's window at once. */
+export const BROWSER_SURVEY_ACTION = "eyJhY3Rpb24iOiJzdXJ2ZXkifQ";
+
+/** Where the Bot's own browser window is recorded, under its Bot directory. */
+export const TARGET_ID_FILE = "target-id";
+
+/**
+ * Gives one Bot its window on the shared screen, and pins it to its slot.
+ *
+ * Idempotent by construction: it re-uses the recorded target when that target
+ * is still a live page and creates a new window when it is not, so a browser
+ * that crashed and came back costs one window per Bot on their next action and
+ * nothing else.
+ */
+export const ensureWindowScript = `#!/usr/bin/env bash
+set -eu
+KEY="$1"
+export ${SANCTIONED_SURFACE_ENV}=1
+exec timeout 30 node ${RUNTIME_ROOT}/browser.mjs ${COMPUTER_CDP_PORT} ${BROWSER_ENSURE_ACTION} "$KEY"
+`;
+
+/**
+ * Brings one Bot's window to the front, for a human taking the Computer over.
+ *
+ * Best effort and non-fatal: a takeover whose window could not be raised is a
+ * takeover of a screen showing the wrong Bot, which is worth reporting and is
+ * not worth refusing the lease over.
+ */
+export const focusWindowScript = `#!/usr/bin/env bash
+set -eu
+KEY="$1"
+export ${SANCTIONED_SURFACE_ENV}=1
+exec timeout 20 node ${RUNTIME_ROOT}/browser.mjs ${COMPUTER_CDP_PORT} ${BROWSER_FOCUS_ACTION} "$KEY"
 `;
 
 export const ensureAgentScript = `#!/usr/bin/env bash
@@ -425,29 +621,45 @@ chmod 600 "$PROFILE_TMP"
 mv "$PROFILE_TMP" "$AGENT_DATA/profile.json"
 exec 9>"$ROOT/registry.lock"
 flock -x 9
+# Slots allocated under the superseded hundred-display layout (ADR 0030) cannot
+# be shown on the one screen: it has ${DESKTOP_SLOTS} rectangles on it, and a
+# window pinned past the last of them is a window nobody can see behind a clip
+# x11vnc refuses. Pruned under the same lock that allocates, so a migrated
+# Computer re-allocates in range on the tenant's next open. Only the
+# provider-owned registry files go; nothing durable, and never the profile.
+for SLOT_FILE in "$ROOT"/bots/*/slot; do
+  [ -s "$SLOT_FILE" ] || continue
+  SLOT_VALUE=$(cat "$SLOT_FILE")
+  SLOT_BOT=$(dirname "$SLOT_FILE")
+  case "$SLOT_VALUE" in
+    (''|*[!0-9]*) rm -f "$SLOT_FILE" "$SLOT_BOT/${TARGET_ID_FILE}" "$SLOT_BOT/cdp-port"; continue;;
+  esac
+  if [ "$SLOT_VALUE" -ge ${DESKTOP_SLOTS} ]; then
+    rm -f "$SLOT_FILE" "$SLOT_BOT/${TARGET_ID_FILE}" "$SLOT_BOT/cdp-port"
+  fi
+done
 if [ ! -s "$BOT/slot" ]; then
   # Every slot in use, read once. The registry lock is held, so the answer
   # cannot change under this scan, and one read beats one per slot per tenant
   # when a Computer is close to full.
   USED=" $(cat "$ROOT"/bots/*/slot 2>/dev/null | tr '\n' ' ') "
   SLOT=0
-  while [ "$SLOT" -lt 100 ]; do
+  while [ "$SLOT" -lt ${DESKTOP_SLOTS} ]; do
     case "$USED" in (*" $SLOT "*) ;; (*) break ;; esac
     SLOT=$((SLOT + 1))
   done
-  if [ "$SLOT" -ge 100 ]; then
-    # A slot is a display number, not durable state: it is the Xvfb, VNC, and
-    # CDP port triple a tenant's desktop uses while it has one. A tenant that
-    # never comes back would otherwise hold one for ever, and the hundred and
-    # first Bot of a User could never open a desktop, so the allocation is
-    # bounded rather than permanent.
+  if [ "$SLOT" -ge ${DESKTOP_SLOTS} ]; then
+    # A slot is a region of the one screen, not durable state: it is the x
+    # offset a tenant's browser window is pinned at and the VNC port clipped to
+    # it. A tenant that never comes back would otherwise hold one for ever, so
+    # the allocation is bounded rather than permanent.
     #
     # Liveness is decided by the provider's own registry, never by the
     # Computer's state: "last-seen" is written by the backend every time it
     # opens or runs anything for a tenant, and "human-control" is the takeover
-    # lease. An X lock proves nothing — the desktop script deletes its own on
-    # restart, and a tenant that only ever execs never holds one — so a slot is
-    # reclaimed only when its tenant has been idle past the declared threshold
+    # lease. A window proves nothing — the browser is restarted under every
+    # tenant at once, and a tenant that only ever execs never opens one — so a
+    # slot is reclaimed only when its tenant has been idle past the threshold
     # AND no viewer lease is fresh. Its viewer token goes with the slot, or
     # that token would address another Bot's screen. When every slot belongs to
     # a live tenant the new tenant is refused: sharing a display would put two
@@ -496,7 +708,9 @@ if [ ! -s "$BOT/slot" ]; then
       chmod 600 "$VTMP"
       mv "$VTMP" "$ROOT/tokens"
     fi
-    rm -f "$VICTIM" "$VICTIM_BOT/cdp-port"
+    # The window goes with the slot: the next holder of this rectangle must
+    # not inherit a target id addressing the previous tenant's window.
+    rm -f "$VICTIM" "$VICTIM_BOT/cdp-port" "$VICTIM_BOT/${TARGET_ID_FILE}"
   fi
   printf '%s\n' "$SLOT" > "$BOT/slot"
 fi
@@ -505,7 +719,9 @@ fi
 # the registry entry the reclaim reads to decide whether a tenant is live.
 touch "$BOT/slot" "$BOT/last-seen"
 SLOT=$(cat "$BOT/slot")
-printf '%s\n' "$((9222 + SLOT))" > "$BOT/cdp-port"
+# One browser on this Computer, so one port for every tenant. The file stays
+# because callers read it rather than deriving a port of their own.
+printf '%s\n' "${COMPUTER_CDP_PORT}" > "$BOT/cdp-port"
 if [ ! -s "$BOT/vnc-password" ]; then
   umask 077
   head -c 32 /dev/urandom | base64 | tr -d '\n=+/' > "$BOT/vnc-password"
@@ -641,13 +857,172 @@ case "$ACTION" in
 esac
 `;
 
-export const browserHelper = `import { chromium } from "playwright-core";
+/**
+ * The one program that drives this Computer's browser (ADR 0030).
+ *
+ * There is one Chromium and one CDP port, and each Bot owns one *window* on
+ * it. The window is recorded at `<bot>/target-id` and re-created when it is
+ * gone, so a browser that crashed costs each Bot one new window and nothing
+ * else. A Bot may open as many tabs inside its own window as it likes; this
+ * program never touches a target belonging to another Bot's window.
+ *
+ * Isolation between two Bots of one User is therefore weaker than it looks:
+ * one profile, one CDP port, one process. That is the trade ADR 0030 records —
+ * the requirement is that a login one Bot makes is a login all of them have —
+ * and the sanctioned-surface shims remain the line of defence.
+ */
+export const browserHelper = `import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chromium } from "playwright-core";
+
+const BOTS_ROOT = "${BOTS_ROOT}";
+const TARGET_ID_FILE = "${TARGET_ID_FILE}";
+const SLOT_WIDTH = ${SLOT_WIDTH};
+const SLOT_HEIGHT = ${SLOT_HEIGHT};
+
 const port = Number(process.argv[2]);
 const action = JSON.parse(Buffer.from(process.argv[3], "base64url").toString("utf8"));
+const botKey = process.argv[4] ?? "";
+
+const botDir = (key) => \`\${BOTS_ROOT}/\${key}\`;
+const targetPath = (key) => \`\${botDir(key)}/\${TARGET_ID_FILE}\`;
+
+function slotOf(key) {
+  const raw = readFileSync(\`\${botDir(key)}/slot\`, "utf8").trim();
+  if (!/^\\d+$/.test(raw)) throw new Error(\`Bot "\${key}" holds no desktop slot\`);
+  return Number(raw);
+}
+
+function recordedTarget(key) {
+  try {
+    return readFileSync(targetPath(key), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+function boundsFor(slot) {
+  return { left: slot * SLOT_WIDTH, top: 0, width: SLOT_WIDTH, height: SLOT_HEIGHT, windowState: "normal" };
+}
+
+function placed(bounds, slot) {
+  const want = boundsFor(slot);
+  return Boolean(bounds) && bounds.left === want.left && bounds.top === want.top && bounds.width === want.width && bounds.height === want.height;
+}
+
 const browser = await chromium.connectOverCDP(\`http://127.0.0.1:\${port}\`);
-const context = browser.contexts()[0];
-const pages = context.pages();
-const page = pages.at(-1) ?? await context.newPage();
+const cdp = await browser.newBrowserCDPSession();
+
+async function pageTargets() {
+  const { targetInfos } = await cdp.send("Target.getTargets");
+  return targetInfos.filter((info) => info.type === "page");
+}
+
+/** The Bot's own window: the recorded one when it is alive, a new one when not. */
+async function ensureWindow(key) {
+  const slot = slotOf(key);
+  let targetId = recordedTarget(key);
+  if (!targetId || !(await pageTargets()).some((info) => info.targetId === targetId)) {
+    ({ targetId } = await cdp.send("Target.createTarget", { url: "about:blank", newWindow: true }));
+    mkdirSync(botDir(key), { recursive: true });
+    writeFileSync(targetPath(key), \`\${targetId}\\n\`, { mode: 0o600 });
+  }
+  const { windowId } = await cdp.send("Browser.getWindowForTarget", { targetId });
+  await cdp.send("Browser.setWindowBounds", { windowId, bounds: boundsFor(slot) });
+  return { targetId, windowId, slot };
+}
+
+/** The Playwright page for one target id, waited for: CDP creates it, Playwright discovers it. */
+async function pageFor(targetId) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    for (const context of browser.contexts()) {
+      for (const candidate of context.pages()) {
+        if ((await targetIdOf(context, candidate)) === targetId) return candidate;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return undefined;
+}
+
+async function targetIdOf(context, page) {
+  const session = await context.newCDPSession(page);
+  const { targetInfo } = await session.send("Target.getTargetInfo");
+  await session.detach().catch(() => {});
+  return targetInfo.targetId;
+}
+
+/** Every page in the Bot's own window. Tabs it opened there are its own. */
+async function pagesInWindow(windowId) {
+  const own = [];
+  for (const context of browser.contexts()) {
+    for (const candidate of context.pages()) {
+      const targetId = await targetIdOf(context, candidate);
+      const window = await cdp
+        .send("Browser.getWindowForTarget", { targetId })
+        .catch(() => undefined);
+      if (window && window.windowId === windowId) own.push(candidate);
+    }
+  }
+  return own;
+}
+
+async function done(value) {
+  if (value !== undefined) console.log(JSON.stringify(value));
+  await browser.close();
+  process.exit(0);
+}
+
+// box-doctor's whole-Computer view (ADR 0030): every tenant that holds a slot,
+// whether its window exists, and whether it sits over its own slot. One CDP
+// connection for the Computer rather than one probe per Bot.
+if (action.action === "survey") {
+  const infos = await pageTargets();
+  const rows = [];
+  for (const entry of readdirSync(BOTS_ROOT, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    let slot;
+    try {
+      slot = slotOf(entry.name);
+    } catch {
+      continue;
+    }
+    const targetId = recordedTarget(entry.name);
+    const alive = Boolean(targetId) && infos.some((info) => info.targetId === targetId);
+    let bounds;
+    if (alive) {
+      const { windowId } = await cdp.send("Browser.getWindowForTarget", { targetId });
+      ({ bounds } = await cdp.send("Browser.getWindowBounds", { windowId }));
+    }
+    rows.push({ key: entry.name, slot, targetId, alive, placed: alive && placed(bounds, slot) });
+  }
+  await done({ tenants: rows.sort((left, right) => left.slot - right.slot) });
+}
+
+// The Bot's window, created and pinned, and nothing else. What an open runs.
+if (action.action === "ensure") {
+  await done(await ensureWindow(botKey));
+}
+
+const anchor = botKey ? await ensureWindow(botKey) : undefined;
+
+// A human is taking this Computer over: raise the Bot's window so the screen
+// they are handed is the Bot's, not whichever window Chromium last focused.
+if (action.action === "focus") {
+  const focusPage = anchor ? await pageFor(anchor.targetId) : undefined;
+  if (focusPage) await focusPage.bringToFront();
+  await done({ focused: Boolean(focusPage), ...(anchor ? { targetId: anchor.targetId } : {}) });
+}
+
+const own = anchor ? await pagesInWindow(anchor.windowId) : [];
+const page =
+  own.at(-1) ??
+  (anchor ? await pageFor(anchor.targetId) : undefined) ??
+  browser.contexts()[0]?.pages().at(-1);
+if (!page) {
+  console.error("this Computer's browser has no page for this Bot");
+  await browser.close();
+  process.exit(69);
+}
 // box-doctor's browser-identity measurement (parity row 34b). It answers
 // before any navigation and before the snapshot, so the check reads what the
 // browser presents without moving the page a human or a Bot left open.
@@ -657,9 +1032,7 @@ if (action.action === "identity") {
     webdriver: navigator.webdriver === true,
     brands: (navigator.userAgentData?.brands ?? []).map((brand) => \`\${brand.brand}/\${brand.version}\`),
   }));
-  console.log(JSON.stringify(identity));
-  await browser.close();
-  process.exit(0);
+  await done(identity);
 }
 if (action.action === "navigate") await page.goto(action.url, { waitUntil: "domcontentloaded" });
 if (action.action === "click") await page.getByRole(action.role, { name: action.name, exact: action.exact ?? false }).click();
@@ -667,8 +1040,7 @@ if (action.action === "fill") await page.getByLabel(action.label, { exact: actio
 if (action.action === "press") await page.keyboard.press(action.key);
 if (action.action === "wait") await page.waitForTimeout(action.milliseconds ?? 1000);
 const snapshot = await page.locator("body").ariaSnapshot({ timeout: 10000 });
-console.log(JSON.stringify({ url: page.url(), title: await page.title(), snapshot }));
-await browser.close();
+await done({ url: page.url(), title: await page.title(), snapshot });
 `;
 
 export const syncWatchScript = `#!/usr/bin/env bash
@@ -883,7 +1255,7 @@ export const CLOCK_FLOOR_EPOCH = 1_756_684_800;
  * corrected. The version is compared on every adoption instead, and the whole
  * set is rewritten when it moves. Bump it whenever a document below changes.
  */
-export const REFERENCE_DOCS_VERSION = "2026-09-03.1";
+export const REFERENCE_DOCS_VERSION = "2026-09-04.1";
 
 /**
  * What a Bot reads to debug its own Computer.
@@ -900,8 +1272,8 @@ export const REFERENCE_DOCS: readonly { name: string; content: string }[] = [
     content: `# Your FrockBot Computer
 
 One Computer serves all of your User's Bots. You have your own directories and
-your own desktop on it; the browser profile is shared, so a login one Bot makes
-is a login all of them have.
+your own window on its one screen; the browser and its profile are shared, so a
+login one Bot makes is a login all of them have.
 
 - \`layout.md\` — what is durable, what is scratch, and what is lost when.
 - \`browser.md\` — how the browser is launched and driven, and what never is.
@@ -990,11 +1362,27 @@ accessibility snapshot, which is what you should read a page from.
 \`computer_screenshot\` captures your own desktop as an image and files it in
 your durable screenshots root.
 
+## One browser, one window each
+
+There is exactly one browser process on this Computer, because there is one
+profile: Chromium's lock is per profile, and a second launch against it is not
+a second browser. Each Bot gets one **window** on that browser, pinned over its
+own slot of the one screen.
+
+- Tabs you open inside your own window are yours; use as many as you like.
+- A login one Bot makes is a login every Bot has, the instant it is made — the
+  cookie jar is the profile, and the profile is shared.
+- Other Bots' windows are not yours to drive, read, or close. Nothing stops
+  you at the CDP layer; this is a rule, not a wall.
+- If your window is gone — the browser crashed and came back — the next
+  \`computer_browser\` action opens you a new one.
+
 ## Launching it
 
-\`${CHROME_LAUNCHER} <botKey>\` is the only sanctioned launcher. It derives
-your display and your CDP port from your desktop slot and holds the flag set;
-the desktop starter calls it, and nothing else needs to know the flags exist.
+\`${CHROME_LAUNCHER}\` is the only sanctioned launcher. It takes no Bot key any
+more: it holds the flag set and starts the Computer's one browser on the one
+display and the one CDP port. The \`${BROWSER_SERVICE}\` service calls it, and
+nothing else needs to know the flags exist.
 
 ## What is never run from the shell
 
@@ -1017,8 +1405,10 @@ tools do.
 
 \`computer_doctor\` runs \`${DOCTOR_SCRIPT}\` and hands back a report: disk on
 \`/\` and \`${HOME_ROOT}\`, the size of \`${SCRATCH_ROOT}\`, the viewer
-gateway, the durable-root watcher, your display and CDP port, the browser and
-its profile, the sync signal and any conflicting generations, this reference
+gateway, the durable-root watcher, the shared screen, the one browser process
+and its CDP port, every Bot's window and whether it sits over that Bot's own
+slot, the browser build and its profile, the sync signal and any conflicting
+generations, this reference
 set's version, the launcher and its shims, the clock, DNS, and whether a
 provisioning hold is still keeping this Computer awake.
 
@@ -1037,8 +1427,13 @@ Computer rather than of one run.
 - **sync-signal with conflicts** — a write landed on a generation its writer
   had not seen. The conflicting generation is preserved, never merged; say so
   rather than resolving it silently.
-- **tenant-display** — your desktop is gone. Ask for it again; slots are
-  allocated on demand and a Computer with all hundred in use will say so.
+- **tenant-display-<botKey>** — that Bot has no window on the screen, or its
+  window is not over its own slot. A window comes back on that Bot's next
+  browser action. Slots are allocated on demand, and a Computer with all of
+  them in use will say so.
+- **browser-process** — none, or more than one. One is the whole design: the
+  profile's lock admits exactly one browser, and a second one is a Bot with a
+  black screen.
 - **reference-docs** — this set is stale and refreshes when the Computer is
   next opened. Nothing you can do on the box fixes it.
 - **browser** — the browser build is missing. It is installed by provisioning,
@@ -1338,26 +1733,66 @@ else
 fi
 SLOT=""
 if [ -n "$KEY" ] && [ -s ${BOTS_ROOT}/"$KEY"/slot ]; then SLOT=$(cat ${BOTS_ROOT}/"$KEY"/slot); fi
-if [ -z "$KEY" ]; then
-  record tenant-display pass "no Bot key was named, so no desktop was checked"
-elif [ -z "$SLOT" ]; then
-  record tenant-display pass "Bot \\"$KEY\\" holds no desktop slot; its exec and file surfaces need no screen"
-elif (exec 3<>/dev/tcp/127.0.0.1/$((9222 + SLOT))) 2>/dev/null; then
-  record tenant-display pass "Bot \\"$KEY\\" is on display :$((100 + SLOT)) with CDP on $((9222 + SLOT))"
-elif [ ! -e "/tmp/.X$((100 + SLOT))-lock" ]; then
-  # A slot is reserved at attach; the desktop starts when somebody asks to see
-  # it. An exec-only tenant never holds an X lock, so this is a healthy state
-  # and not a missing screen.
-  record tenant-display pass "Bot \\"$KEY\\" holds slot $SLOT with no desktop running, which its exec and file surfaces do not need"
+# One browser, one CDP port (ADR 0030). A second main process would mean a
+# second browser holding — or failing to hold — the one shared profile, which
+# is the defect this layout replaced: the loser prints "Opening in existing
+# browser session", exits, and leaves its Bot a black screen.
+BROWSERS=$(pgrep -f -- "--remote-debugging-port=${COMPUTER_CDP_PORT}" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$BROWSERS" = 1 ]; then
+  record browser-process pass "exactly one browser process holds ${CHROME_PROFILE}"
+elif [ "$BROWSERS" = 0 ]; then
+  record browser-process fail "no browser process is running; the ${BROWSER_SERVICE} service is what starts one"
 else
-  record tenant-display fail "Bot \\"$KEY\\" has an X server on display :$((100 + SLOT)) but nothing answers CDP on $((9222 + SLOT)); its desktop is only half up"
+  record browser-process fail "$BROWSERS browser processes hold ${CHROME_PROFILE}; only the first of them can own the profile"
+fi
+if (exec 3<>/dev/tcp/127.0.0.1/${COMPUTER_CDP_PORT}) 2>/dev/null; then
+  record browser-cdp pass "CDP answers on ${COMPUTER_CDP_PORT}"
+else
+  record browser-cdp fail "nothing answers CDP on ${COMPUTER_CDP_PORT}; no Bot can be given a window"
+fi
+if xdpyinfo -display ${COMPUTER_DISPLAY} >/dev/null 2>&1; then
+  record screen pass "the shared screen is up on ${COMPUTER_DISPLAY}, ${SCREEN_WIDTH}x${SLOT_HEIGHT} for ${DESKTOP_SLOTS} slots"
+else
+  record screen fail "no X server on ${COMPUTER_DISPLAY}; the ${SCREEN_SERVICE} service is what starts one"
+fi
+# Every tenant, not just the one that asked (ADR 0030). One Bot's report used
+# to be the only evidence there was, which is exactly how three Bots sat on
+# black screens while the first one browsed.
+SURVEY=""
+if (exec 3<>/dev/tcp/127.0.0.1/${COMPUTER_CDP_PORT}) 2>/dev/null; then
+  SURVEY=$(timeout 20 node ${RUNTIME_ROOT}/browser.mjs ${COMPUTER_CDP_PORT} ${BROWSER_SURVEY_ACTION} 2>/dev/null | tail -n 1)
+fi
+case "$SURVEY" in (*'"tenants"'*) ;; (*) SURVEY="";; esac
+TENANTS=0
+for SLOT_FILE in ${BOTS_ROOT}/*/slot; do
+  [ -s "$SLOT_FILE" ] || continue
+  TENANT=$(basename "$(dirname "$SLOT_FILE")")
+  TENANT_SLOT=$(cat "$SLOT_FILE")
+  TENANTS=$((TENANTS + 1))
+  if [ -z "$SURVEY" ]; then
+    record "tenant-display-$TENANT" fail "Bot \\"$TENANT\\" holds slot $TENANT_SLOT and no browser could be asked about its window"
+    continue
+  fi
+  ROW=$(printf '%s' "$SURVEY" | tr '{' '\\n' | grep "\\"key\\":\\"$TENANT\\"" | head -n 1)
+  if [ -z "$ROW" ]; then
+    record "tenant-display-$TENANT" fail "Bot \\"$TENANT\\" holds slot $TENANT_SLOT but the browser reported no window for it"
+  elif ! printf '%s' "$ROW" | grep -q '"alive":true'; then
+    record "tenant-display-$TENANT" fail "Bot \\"$TENANT\\" holds slot $TENANT_SLOT with no live window; it opens one on its next action"
+  elif ! printf '%s' "$ROW" | grep -q '"placed":true'; then
+    record "tenant-display-$TENANT" fail "Bot \\"$TENANT\\" has a window that is not over slot $TENANT_SLOT; its viewer shows another Bot's rectangle"
+  else
+    record "tenant-display-$TENANT" pass "Bot \\"$TENANT\\" has a live window pinned over slot $TENANT_SLOT of ${COMPUTER_DISPLAY}"
+  fi
+done
+if [ "$TENANTS" = 0 ]; then
+  record tenant-display pass "no Bot holds a slot on this Computer; the exec and file surfaces need no screen"
 fi
 if [ -x ${CHROMIUM_PATH} ]; then
   record browser pass "the browser is installed at ${CHROMIUM_PATH} ($(readlink -f ${CHROMIUM_PATH} 2>/dev/null || echo unresolved))"
 else
   record browser fail "no browser at ${CHROMIUM_PATH}; provisioning installs one, and no desktop can start without it"
 fi
-PROFILE=${HOME_ROOT}/chrome-profile
+PROFILE=${CHROME_PROFILE}
 if [ -d "$PROFILE" ] && [ -w "$PROFILE" ]; then
   record browser-profile pass "the shared browser profile at $PROFILE is writable"
 else
@@ -1378,13 +1813,13 @@ fi
 IDENTITY=null
 if [ ! -x ${CHROMIUM_PATH} ]; then
   record browser-identity fail "no browser at ${CHROMIUM_PATH}, so nothing could be asked what it announces itself as"
-elif [ -z "$SLOT" ] || ! (exec 3<>/dev/tcp/127.0.0.1/$((9222 + SLOT))) 2>/dev/null; then
+elif ! (exec 3<>/dev/tcp/127.0.0.1/${COMPUTER_CDP_PORT}) 2>/dev/null; then
   record browser-identity pass "no browser answers CDP for this report, so nothing was asked what it announces itself as"
 else
-  MEASURED=$(timeout 15 node ${RUNTIME_ROOT}/browser.mjs $((9222 + SLOT)) ${DOCTOR_BROWSER_IDENTITY_ACTION} 2>/dev/null | tail -n 1)
+  MEASURED=$(timeout 15 node ${RUNTIME_ROOT}/browser.mjs ${COMPUTER_CDP_PORT} ${DOCTOR_BROWSER_IDENTITY_ACTION} "$KEY" 2>/dev/null | tail -n 1)
   case "$MEASURED" in (*'"userAgent"'*) ;; (*) MEASURED="";; esac
   if [ -z "$MEASURED" ]; then
-    record browser-identity fail "a browser answers CDP on $((9222 + SLOT)) but did not say what it presents"
+    record browser-identity fail "a browser answers CDP on ${COMPUTER_CDP_PORT} but did not say what it presents"
   else
     IDENTITY="$MEASURED"
     UA=$(printf '%s' "$MEASURED" | sed -n 's/.*"userAgent":"\\([^"]*\\)".*/\\1/p')
@@ -1473,10 +1908,24 @@ export const COMPUTER_RUNTIME_FILES: readonly {
   readonly mode: number;
 }[] = [
   {
-    path: `${RUNTIME_ROOT}/start-desktop.sh`,
-    content: startDesktopScript,
+    path: `${RUNTIME_ROOT}/start-screen.sh`,
+    content: startScreenScript,
     mode: 0o700,
   },
+  {
+    path: `${RUNTIME_ROOT}/start-browser.sh`,
+    content: startBrowserScript,
+    mode: 0o700,
+  },
+  {
+    path: `${RUNTIME_ROOT}/start-view.sh`,
+    content: startViewScript,
+    mode: 0o700,
+  },
+  { path: ENSURE_WINDOW_SCRIPT, content: ensureWindowScript, mode: 0o700 },
+  { path: FOCUS_WINDOW_SCRIPT, content: focusWindowScript, mode: 0o700 },
+  { path: `${FLUXBOX_ROOT}/init`, content: fluxboxInit, mode: 0o644 },
+  { path: `${FLUXBOX_ROOT}/overlay`, content: fluxboxOverlay, mode: 0o644 },
   { path: ENSURE_AGENT_SCRIPT, content: ensureAgentScript, mode: 0o700 },
   { path: CONTROL_SCRIPT, content: controlScript, mode: 0o700 },
   { path: BOUNDED_LOG_SCRIPT, content: boundedLogScript, mode: 0o700 },
@@ -1568,7 +2017,7 @@ fi`,
   {
     name: "runtime",
     label: "installing the Computer runtime",
-    body: `mkdir -p ${VIEWER_ROOT}
+    body: `mkdir -p ${VIEWER_ROOT} ${FLUXBOX_ROOT}
 ${installDeclaredFiles(COMPUTER_RUNTIME_FILES)}
 # noVNC's ES modules in core/ import one another and ../vendor/pako. The links
 # keep that package-owned graph intact while FrockBot owns every rendered element.
@@ -1599,7 +2048,7 @@ if [ ! -x ${CHROMIUM_PATH} ]; then
     exit 1
   fi
   # A symlink, so the version in the build's directory name stays out of
-  # start-desktop.sh and an upgrade is one relink rather than a script change.
+  # the launcher and an upgrade is one relink rather than a script change.
   ln -sfn "$CHROMIUM_BUILD" ${CHROMIUM_PATH}
 fi`,
   },

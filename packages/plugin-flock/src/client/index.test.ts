@@ -481,12 +481,18 @@ describe("Flock client reconciliation", () => {
       return Promise.reject(new Error(`unexpected request: ${path}`));
     });
     const selected: string[] = [];
+    const forgotten: (string | undefined)[] = [];
     state.value.bindShell(
       ref({
         activeBotId: "alpha",
         selectBot: (botId: string) => {
           selected.push(botId);
           return Promise.resolve();
+        },
+        transcripts: {
+          rememberViewport: () => undefined,
+          viewportFor: () => undefined,
+          forget: (botId?: string) => forgotten.push(botId),
         },
       }) as unknown as Ref<FrockBotWebData>,
     );
@@ -496,6 +502,9 @@ describe("Flock client reconciliation", () => {
     expect(state.value.lifecycles.alpha).toBe("archived");
     expect(selected.at(-1)).toBe("beta");
     expect(new URL(location.href).searchParams.get("bot")).toBe("beta");
+    // The archived Bot's held transcript goes with it, so restoring it later
+    // reads from the Bot rather than redrawing what the cache still had.
+    expect(forgotten).toEqual(["alpha"]);
   });
 
   test("reconciles a lost sheep response and clears the exact pending command", async () => {
