@@ -22,6 +22,7 @@ import {
   type ToolCallOccurrence,
   type ToolExecutionResult,
   type TurnTypeV1,
+  TURN_DEADLINE_MS_V1,
   toolCallOccurrences,
   turnEndReason,
   validateSettledToolOccurrenceJournal,
@@ -112,12 +113,12 @@ class StepLimitReachedError extends Error {
 /**
  * The longest a single Turn may run before the loop stops waiting for it.
  *
- * Nothing bounded a Turn's wall clock before this: one hung for seventeen
- * minutes with an animated avatar and nothing else, and would have hung until
- * the isolate died. Fifteen minutes is well past any Turn a person is watching
- * and well inside the point at which they have concluded the product is broken.
+ * Defined in the contracts, because the loop is not its only reader: anything
+ * deciding whether a run still marked `running` can still be running needs the
+ * same number. Re-exported here because this is where every caller looks for
+ * it.
  */
-export const TURN_DEADLINE_MS_V1 = 15 * 60 * 1000;
+export { TURN_DEADLINE_MS_V1 };
 
 /**
  * How many times one step will send its model request.
