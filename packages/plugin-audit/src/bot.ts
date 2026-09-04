@@ -273,10 +273,12 @@ export class AuditOutboxV1 {
     if (entries.length === 0) return this.state();
     const outbox = await this.read();
     const seen = new Set(
-      outbox.entries.map((entry) => `${entry.runId} ${entry.occurrenceId}`),
+      outbox.entries.map(
+        (entry) => `${entry.runId}\u0000${entry.occurrenceId}`,
+      ),
     );
     for (const entry of entries) {
-      const key = `${entry.runId} ${entry.occurrenceId}`;
+      const key = `${entry.runId}\u0000${entry.occurrenceId}`;
       if (seen.has(key)) continue;
       seen.add(key);
       outbox.entries.push(entry);
@@ -314,12 +316,15 @@ export class AuditOutboxV1 {
     const remaining = await this.read();
     // Anything appended while the sink was in flight stays pending.
     const deliveredKeys = new Set(
-      outbox.entries.map((entry) => `${entry.runId} ${entry.occurrenceId}`),
+      outbox.entries.map(
+        (entry) => `${entry.runId}\u0000${entry.occurrenceId}`,
+      ),
     );
     const next: StoredOutbox = {
       schemaVersion: 1,
       entries: remaining.entries.filter(
-        (entry) => !deliveredKeys.has(`${entry.runId} ${entry.occurrenceId}`),
+        (entry) =>
+          !deliveredKeys.has(`${entry.runId}\u0000${entry.occurrenceId}`),
       ),
       truncated: remaining.truncated || outbox.truncated,
     };
