@@ -152,4 +152,53 @@ describe("the durable-root sync's records in the Bot Durable Object", () => {
     // Bots, so nothing on this path knows which process wrote the file.
     expect(generation?.generation.writer).toEqual({ kind: "unattributed" });
   });
+
+  test("a fresh Computer restores source without restoring a legacy dependency tree", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = identityFor(suffix);
+    const root = instructionRoot(identity);
+    const stub = bot(`sync-restore-${suffix}`);
+    const writer = { kind: "user" as const, userId: identity.userId };
+
+    expect(
+      await stub.writeWorkspaceFile({
+        userId: identity.userId,
+        root,
+        path: "todo/src/index.ts",
+        text: "export const todo = true;",
+        writer,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "ok" });
+    // This represents a generation written before dependency trees became
+    // reproducible scratch. It remains durable, but is no longer materialized.
+    expect(
+      await stub.writeWorkspaceFile({
+        userId: identity.userId,
+        root,
+        path: "todo/node_modules/dependency/package.json",
+        text: '{"name":"dependency"}',
+        writer,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({ status: "ok" });
+
+    const restored = await stub.computerSyncRun(identity);
+
+    expect(restored).toMatchObject({
+      status: "ok",
+      pulled: ["todo/src/index.ts"],
+      ignored: 1,
+      omitted: 0,
+    });
+    expect(await stub.computerFile({ root, path: "todo/src/index.ts" })).toBe(
+      "export const todo = true;",
+    );
+    expect(
+      await stub.computerFile({
+        root,
+        path: "todo/node_modules/dependency/package.json",
+      }),
+    ).toBeUndefined();
+  });
 });

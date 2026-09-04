@@ -22,6 +22,11 @@ import { FLY_WORKSPACE_LAYOUT, FlySpriteComputerProvider } from "./provider.ts";
 import {
   createFlySpriteSyncV1,
   declaredWorkspaceRootsV1,
+  FlySpriteSyncSurface,
+  isWorkspaceSyncIgnoredPathV1,
+  WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1,
+  WORKSPACE_SYNC_MANIFEST_MAX_BYTES_V1,
+  WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1,
   type WorkspaceSyncReportV1,
 } from "./sync.ts";
 import { WORKSPACE_EMPTY_SHA256 } from "./workspace.ts";
@@ -84,6 +89,10 @@ class FakeSyncSprite {
   readonly files = new Map<string, Uint8Array>();
   /** Set to fail every storage call, as a paused Sprite does. */
   paused = false;
+  /** Simulates the shared host truncating an oversized storage response. */
+  maxScanOutputBytes?: number;
+  /** The exact remote Bash document, for syntax validation. */
+  lastScanScript?: string;
   /** Drops the next sidecar write, as a pause between store and Computer does. */
   dropNextMaterialize = false;
 
@@ -92,7 +101,19 @@ class FakeSyncSprite {
     // A paused Sprite answers nothing, and the host reports the failed exit;
     // the provider turns that into `Sprite storage operation failed: …`.
     if (this.paused) return { exitCode: 1, stderr: "Sprite is paused" };
-    return { stdout: this.interpret(script) };
+    if (script.includes("append_manifest")) this.lastScanScript = script;
+    const stdout = this.interpret(script);
+    if (
+      script.includes("append_manifest") &&
+      this.maxScanOutputBytes !== undefined &&
+      stdout.length > this.maxScanOutputBytes
+    ) {
+      return {
+        stdout: stdout.slice(0, this.maxScanOutputBytes),
+        outputTruncated: true,
+      };
+    }
+    return { stdout };
   };
 
   /** Writes a file the way a shell command on the Computer would: no sidecar. */
@@ -118,7 +139,16 @@ class FakeSyncSprite {
   private interpret(shell: string): string {
     const root = quoted(shell, "ROOT");
     const relative = quoted(shell, "REL");
-    if (shell.includes('printf "F\\t')) return this.scan(root ?? "");
+    if (shell.includes("append_manifest") && shell.includes("sha256sum")) {
+      const encoded = quoted(shell, "REQUIRED_PATHS") ?? "W10=";
+      const required = new Set<string>(
+        Buffer.from(encoded, "base64")
+          .toString("utf8")
+          .split("\n")
+          .filter(Boolean),
+      );
+      return this.scan(root ?? "", required);
+    }
     if (root && relative) {
       if (shell.includes("__SYNCED__")) {
         if (this.dropNextMaterialize) {
@@ -160,14 +190,39 @@ class FakeSyncSprite {
       : `${decoder.decode(bytes)}\n`;
   }
 
-  private scan(root: string): string {
+  private scan(root: string, required: ReadonlySet<string>): string {
     const rows: string[] = [];
+    const ignoredDirectories = new Set<string>();
+    const requiredIgnoredDirectories = new Set(
+      [...required].map((path) => {
+        const segments = path.split("/");
+        const index = segments.findIndex((segment) =>
+          (WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1 as readonly string[]).includes(
+            segment,
+          ),
+        );
+        return segments.slice(0, index + 1).join("/");
+      }),
+    );
     const generations = `${root}/.frockbot-generations/`;
     const graves = `${root}/.frockbot-sync/tombstones/`;
     for (const [path, bytes] of [...this.files].sort()) {
       if (!path.startsWith(`${root}/`)) continue;
       const relative = path.slice(root.length + 1);
       if (relative.startsWith(".frockbot-")) continue;
+      if (isWorkspaceSyncIgnoredPathV1(relative) && !required.has(relative)) {
+        const segments = relative.split("/");
+        const index = segments.findIndex((segment) =>
+          (WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1 as readonly string[]).includes(
+            segment,
+          ),
+        );
+        const ignoredRoot = segments.slice(0, index + 1).join("/");
+        if (!requiredIgnoredDirectories.has(ignoredRoot)) {
+          ignoredDirectories.add(ignoredRoot);
+        }
+        continue;
+      }
       const meta = this.files.get(`${generations}${relative}`);
       rows.push(
         [
@@ -181,10 +236,13 @@ class FakeSyncSprite {
     }
     for (const [path, bytes] of [...this.files].sort()) {
       if (path.startsWith(graves)) {
+        const relative = path.slice(graves.length);
+        if (isWorkspaceSyncIgnoredPathV1(relative) && !required.has(relative))
+          continue;
         rows.push(
           [
             "T",
-            Buffer.from(path.slice(graves.length)).toString("base64"),
+            Buffer.from(relative).toString("base64"),
             Buffer.from(bytes).toString("base64"),
           ].join("\t"),
         );
@@ -192,6 +250,8 @@ class FakeSyncSprite {
       }
       if (!path.startsWith(generations)) continue;
       const relative = path.slice(generations.length);
+      if (isWorkspaceSyncIgnoredPathV1(relative) && !required.has(relative))
+        continue;
       if (this.files.has(`${root}/${relative}`)) continue;
       rows.push(
         [
@@ -201,7 +261,22 @@ class FakeSyncSprite {
         ].join("\t"),
       );
     }
-    return rows.length ? `${rows.join("\n")}\n` : "";
+    const bounded: string[] = [];
+    let bytes = 0;
+    let omitted = 0;
+    for (const row of rows) {
+      const rowBytes = Buffer.byteLength(`${row}\n`);
+      if (
+        bounded.length >= WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1 ||
+        bytes + rowBytes > WORKSPACE_SYNC_MANIFEST_MAX_BYTES_V1
+      ) {
+        omitted += 1;
+        continue;
+      }
+      bounded.push(row);
+      bytes += rowBytes;
+    }
+    return `${bounded.length ? `${bounded.join("\n")}\n` : ""}X\t${ignoredDirectories.size}\t${omitted}\n`;
   }
 
   private materialize(root: string, relative: string, shell: string): string {
@@ -631,6 +706,78 @@ describe("the durable-root sync, Computer to store", () => {
 });
 
 describe("the durable-root sync, Package-declared roots", () => {
+  test("ignores reproducible dependency, VCS, cache, and build directories", () => {
+    for (const directory of WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1) {
+      expect(
+        isWorkspaceSyncIgnoredPathV1(`to-dos/${directory}/nested/file.js`),
+      ).toBe(true);
+    }
+    expect(isWorkspaceSyncIgnoredPathV1("to-dos/src/build-result.ts")).toBe(
+      false,
+    );
+    expect(isWorkspaceSyncIgnoredPathV1("to-dos/.gitignore")).toBe(false);
+  });
+
+  test("bounds a source-only manifest and reports every omitted row", async () => {
+    const sprite = new FakeSyncSprite();
+    const surface = new FlySpriteSyncSurface({
+      computer: attach(sprite).bot(BOT),
+      layout: FLY_WORKSPACE_LAYOUT,
+      userId: USER,
+      botDirectoryKey: computerBotKey,
+    });
+    for (
+      let index = 0;
+      index < WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1 + 100;
+      index += 1
+    ) {
+      sprite.shellWrite(
+        MOUNTS.appletSource,
+        `to-dos/src/file-${index.toString().padStart(4, "0")}.ts`,
+        `export const value${index} = ${index};`,
+      );
+    }
+
+    const outcome = await surface.scan(appletSourceRoot);
+
+    if (outcome.status !== "ok") throw new Error(outcome.reason);
+    expect(outcome.scan.entries).toHaveLength(
+      WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1,
+    );
+    expect(outcome.scan.ignored).toBe(0);
+    expect(outcome.scan.omitted).toBe(100);
+  });
+
+  test("emits valid Bash with exact required build paths", async () => {
+    const sprite = new FakeSyncSprite();
+    const surface = new FlySpriteSyncSurface({
+      computer: attach(sprite).bot(BOT),
+      layout: FLY_WORKSPACE_LAYOUT,
+      userId: USER,
+      botDirectoryKey: computerBotKey,
+    });
+
+    await surface.scan(appletSourceRoot, [
+      "todo/dist/server.js",
+      "todo/dist/ui.html",
+      "todo/dist/manifest.json",
+      "todo/dist/it's-$(not-a-command).js",
+    ]);
+
+    expect(sprite.lastScanScript).toBeString();
+    const process = Bun.spawn(["bash", "-n"], {
+      stdin: new Blob([sprite.lastScanScript!]),
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([
+      process.exited,
+      new Response(process.stderr).text(),
+    ]);
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
+
   // Constitution — Computer and Workspace: "durable roots, declared by the
   // Computer Package's Workspace layout **and by Package manifests**". The
   // layout half was always here; a `package-declared` root reaches the sync
@@ -643,10 +790,9 @@ describe("the durable-root sync, Package-declared roots", () => {
   });
 
   test("a declared root round-trips: store to Computer, and a shell write back", async () => {
-    // ADR 0022 decision 7: this is the root Applet source lives in, and both
-    // directions matter — the Bot edits source the store holds, and `applet
-    // build` writes `dist/` with a shell that a publish then reads from the
-    // store.
+    // ADR 0022 decision 7: this is the root Applet source lives in, and source
+    // edits still move in both directions while reproducible build trees do
+    // not enter the ordinary whole-Workspace manifest.
     const { sprite, store, sync, roots } = harness({
       packageRoots: [APPLET_SOURCE_PACKAGE_ROOT],
     });
@@ -667,24 +813,102 @@ describe("the durable-root sync, Package-declared roots", () => {
       "export class TodoApplet {}",
     );
 
-    // `applet build` is an ordinary shell write on the Computer.
+    // An ordinary shell source edit on the Computer is mirrored back.
     sprite.shellWrite(
       MOUNTS.appletSource,
-      `${appletId}/dist/server.js`,
-      "export class A{}",
+      `${appletId}/server.ts`,
+      "export class TodoApplet { health() {} }",
     );
     const pushed = await sync();
 
     const built = await store.read({
       root: appletSourceRoot,
-      path: `${appletId}/dist/server.js`,
+      path: `${appletId}/server.ts`,
     });
     if (built.status !== "ok") throw new Error(built.reason);
-    expect(decoder.decode(built.file.bytes)).toBe("export class A{}");
+    expect(decoder.decode(built.file.bytes)).toBe(
+      "export class TodoApplet { health() {} }",
+    );
     // A shell wrote it, so nothing claims to know which Bot did: the artifact
-    // is data the publish reads, never provenance.
+    // is data, never provenance.
     expect(built.file.generation.writer).toEqual({ kind: "unattributed" });
     expect(pushed.failures).toEqual([]);
+  });
+
+  test("a large node_modules tree cannot prevent Applet source from syncing", async () => {
+    const { sprite, store, sync } = harness({
+      packageRoots: [APPLET_SOURCE_PACKAGE_ROOT],
+    });
+    const appletId = "to-dos";
+    sprite.maxScanOutputBytes = 10_000;
+    sprite.shellWrite(
+      MOUNTS.appletSource,
+      `${appletId}/server.ts`,
+      "export class TodoApplet {}",
+    );
+    for (let index = 0; index < 200; index += 1) {
+      sprite.shellWrite(
+        MOUNTS.appletSource,
+        `${appletId}/node_modules/dependency-${index}/package.json`,
+        JSON.stringify({ name: `dependency-${index}` }),
+      );
+    }
+
+    const report = await sync();
+
+    expect(report.failures).toEqual([]);
+    expect(report.roots.at(-1)).toMatchObject({ ignored: 1, omitted: 0 });
+    const source = await store.read({
+      root: appletSourceRoot,
+      path: `${appletId}/server.ts`,
+    });
+    if (source.status !== "ok") throw new Error(source.reason);
+    expect(decoder.decode(source.file.bytes)).toBe(
+      "export class TodoApplet {}",
+    );
+    expect(
+      await store.read({
+        root: appletSourceRoot,
+        path: `${appletId}/node_modules/dependency-0/package.json`,
+      }),
+    ).toMatchObject({ status: "not-found" });
+  });
+
+  test("an empty replacement Computer restores source but not legacy project dependencies", async () => {
+    const { sprite, store, sync } = harness({
+      packageRoots: [APPLET_SOURCE_PACKAGE_ROOT],
+    });
+    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    await writeToStore(
+      store,
+      appletSourceRoot,
+      `${appletId}/server.ts`,
+      "export class TodoApplet {}",
+      BOT_WRITER,
+    );
+    // A pre-policy generation stays in object storage for audit/recovery, but
+    // a new Computer must not materialize it back into the project.
+    await writeToStore(
+      store,
+      appletSourceRoot,
+      `${appletId}/node_modules/dependency/package.json`,
+      '{"name":"dependency"}',
+      BOT_WRITER,
+    );
+
+    const report = await sync();
+
+    expect(sprite.text(`${MOUNTS.appletSource}/${appletId}/server.ts`)).toBe(
+      "export class TodoApplet {}",
+    );
+    expect(
+      sprite.text(
+        `${MOUNTS.appletSource}/${appletId}/node_modules/dependency/package.json`,
+      ),
+    ).toBeUndefined();
+    expect(
+      report.roots.find((item) => item.root.kind === "package-declared"),
+    ).toMatchObject({ pulled: [`${appletId}/server.ts`], ignored: 1 });
   });
 });
 
@@ -1108,6 +1332,34 @@ describe("the durable-root sync on the Computer handle", () => {
     }
   });
 
+  test("reports a bounded dependency exclusion as degraded while source still syncs", async () => {
+    const { sprite, open } = providerHarness([APPLET_SOURCE_PACKAGE_ROOT]);
+    const handle = await open();
+    sprite.shellWrite(
+      MOUNTS.appletSource,
+      "todo/src/index.ts",
+      "export const todo = true;",
+    );
+    sprite.shellWrite(
+      MOUNTS.appletSource,
+      "todo/node_modules/dependency/package.json",
+      '{"name":"dependency"}',
+    );
+
+    const summary = await handle.sync!.reconcile("turn-end");
+
+    expect(summary).toMatchObject({
+      status: "degraded",
+      pushed: 1,
+      ignored: 1,
+      omitted: 0,
+      failures: 0,
+    });
+    expect(summary.detail).toBe(
+      "Excluded 1 reproducible Workspace item from sync.",
+    );
+  });
+
   // The sync-now seam of ADR 0022 decision 7, provider side: an Applet publish
   // needs the bytes `applet build` left on the Computer to be in the store
   // before it reads them, and it needs that for one root, not the Workspace.
@@ -1127,6 +1379,7 @@ describe("the durable-root sync on the Computer handle", () => {
     const summary = await handle.sync!.reconcileRoot!(
       appletSourceRoot,
       "publish",
+      { requiredPaths: [`${appletId}/dist/server.js`] },
     );
 
     expect(summary.status).toBe("ok");

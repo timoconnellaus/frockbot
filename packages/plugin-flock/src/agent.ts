@@ -1,12 +1,13 @@
-// The Flock runtime Contribution: a Bot's own self-management tools.
+// The Flock runtime Contribution: a Bot's flock tools and prompt context.
 //
-// GrokBot exposes two of these and no more (§2.12): `UpdateAgent`, where only
-// the fields the call carries change, and `CreateAgent`, which makes a new
-// agent in the same user's flock. **There is no delete tool** — deletion is a
+// GrokBot's self-management surface (§2.12) has `UpdateAgent`, where only the
+// fields the call carries change, and `CreateAgent`, which makes a new agent
+// in the same user's flock. **There is no delete tool** — deletion is a
 // user-only action — and this Package matches that: `bot_update` cannot
-// archive, restore, or remove anything, and no third tool exists to do it.
+// archive, restore, or remove anything. Direct Bot messaging is the separate
+// `bot_message` capability and does not mutate either Bot.
 //
-// AUTHORITY. "Self-modification never widens authority." Both tools run
+// AUTHORITY. "Self-modification never widens authority." The mutation tools run
 // through paths the Bot's User already owns:
 //
 //  - `bot_update` issues the same `bot/set-profile` command the settings UI
@@ -48,18 +49,23 @@ import {
   type OperationReceiptV1,
 } from "@frockbot/configuration-core";
 import type {
+  PromptSection,
   ToolDefinition,
   ToolExecutionContext,
   ToolExecutionResult,
+  TurnTypeV1,
 } from "@frockbot/kernel-contracts";
+import { decodeTurnTypeV1 } from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 import {
   FlockConflictError,
+  isFlockIdentifier,
   randomSheepRecipeV1,
   type BotDirectoryViewV1,
   type CreateBotCommandV1,
   type FlockReceiptV1,
 } from "./shared.js";
+import manifest from "../frockbot.json" with { type: "json" };
 export type {
   BotDirectoryViewV1,
   CreateBotCommandV1,
@@ -79,10 +85,9 @@ export interface FlockSelfOwnerV1 {
  * not registered at all: a Bot changes itself only inside a Turn whose Session
  * and Turn its provenance can name.
  *
- * Every method is a command the User's own surfaces already issue. This
- * Package holds no authority: the Bot Durable Object owns the profile, the
- * User Durable Object owns the Flock directory, and neither is reachable from
- * here except through these four calls.
+ * This Package holds no authority: the Bot Durable Object owns profiles and
+ * Turn admission, while the User Durable Object owns the Flock directory and
+ * concurrency slots. Each is reachable only through the narrow calls below.
  */
 export interface FlockSelfRuntimeHostV1 {
   owner: FlockSelfOwnerV1;
@@ -98,7 +103,30 @@ export interface FlockSelfRuntimeHostV1 {
   listBots(): Promise<BotDirectoryViewV1>;
   /** The User's own `bot/create` path, and no wider. */
   createBot(command: CreateBotCommandV1): Promise<FlockReceiptV1>;
+  /** Ask another Bot registered to this same User. */
+  messageBot(request: BotMessageRequestV1): Promise<BotMessageOutcomeV1>;
+  /** Sender cue for an inbound agent Turn, when this is one. */
+  inboundAgent?:
+    { kind: "bot"; fromBotId: string; fromBotName: string } | { kind: "voice" };
 }
+
+export interface BotMessageRequestV1 {
+  targetBotId: string;
+  message: string;
+  effectId: string;
+}
+
+export interface BotMessageOutcomeV1 {
+  targetBotId: string;
+  targetBotName: string;
+  runId: string;
+  text: string;
+}
+
+export const BOT_MESSAGE_TOOL_V1 = "bot_message";
+export const BOT_MESSAGING_CAPABILITY_V1 = "bot-messaging";
+export const TEAMMATES_PROMPT_SECTION_V1 = "teammates";
+export const INBOUND_AGENT_PROMPT_SECTION_V1 = "agent-message";
 
 /** How many times a command is re-issued after losing an optimistic race. */
 const REVISION_RETRIES = 3;
@@ -159,6 +187,22 @@ const BOT_CREATE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+const BOT_MESSAGE_SCHEMA = {
+  type: "object",
+  properties: {
+    target_id: {
+      type: "string",
+      description: "The id of another Bot listed in <teammates>.",
+    },
+    message: {
+      type: "string",
+      description: "The complete question or task to send to that Bot.",
+    },
+  },
+  required: ["target_id", "message"],
+  additionalProperties: false,
+} as const;
+
 interface BotUpdateInputV1 {
   profile: BotProfilePatchV1;
   notifyOnUpdates?: boolean;
@@ -167,6 +211,11 @@ interface BotUpdateInputV1 {
 interface BotCreateInputV1 {
   name: string;
   description?: string;
+}
+
+interface BotMessageInputV1 {
+  targetId: string;
+  message: string;
 }
 
 function fields(
@@ -264,6 +313,37 @@ export function decodeBotCreateInputV1(input: unknown): BotCreateInputV1 {
           })(),
         }),
   };
+}
+
+export function decodeBotMessageInputV1(input: unknown): BotMessageInputV1 {
+  const value = fields(input, ["target_id", "message"]);
+  if (!isFlockIdentifier(value.target_id)) {
+    throw new Error("target_id is invalid");
+  }
+  const message = patchText(value.message, "message", 32_000);
+  if (!message) throw new Error("message must not be empty");
+  return { targetId: value.target_id, message };
+}
+
+function flockAdmissionCeilingV1(
+  capabilityId: string,
+): readonly TurnTypeV1[] | undefined {
+  const capabilities = (
+    manifest as {
+      configuration?: {
+        capabilities?: Array<{
+          id: string;
+          admission?: { turnTypes: string[] };
+        }>;
+      };
+    }
+  ).configuration?.capabilities;
+  const turnTypes = capabilities?.find(
+    (candidate) => candidate.id === capabilityId,
+  )?.admission?.turnTypes;
+  return turnTypes?.map((value) =>
+    decodeTurnTypeV1(value, `flock capability "${capabilityId}" admission`),
+  );
 }
 
 function refusal(reason: string): ToolExecutionResult {
@@ -549,24 +629,128 @@ export function createBotCreateTool(
   };
 }
 
+export function createBotMessageTool(
+  host: FlockSelfRuntimeHostV1,
+): ToolDefinition {
+  return {
+    name: BOT_MESSAGE_TOOL_V1,
+    description:
+      "Ask one of your User's other Bots a question. Use a target_id from <teammates>. The other Bot runs an agent Turn and its send_to_user-style reply is returned here as this tool result. Do not message yourself or fan out speculatively.",
+    inputSchema: BOT_MESSAGE_SCHEMA as unknown as Record<string, unknown>,
+    idempotent: true,
+    validate: (input) => {
+      try {
+        decodeBotMessageInputV1(input);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    execute: async (input: unknown, context: ToolExecutionContext) => {
+      let decoded: BotMessageInputV1;
+      try {
+        decoded = decodeBotMessageInputV1(input);
+      } catch (error) {
+        return refusal(
+          `bot_message was refused: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (decoded.targetId === host.owner.botId) {
+        return refusal("bot_message was refused: a Bot cannot message itself");
+      }
+      try {
+        const outcome = await host.messageBot({
+          targetBotId: decoded.targetId,
+          message: decoded.message,
+          effectId: context.effectId,
+        });
+        return { content: outcome.text, isError: false };
+      } catch (error) {
+        return refusal(
+          `bot_message failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+  };
+}
+
+function promptText(value: string): string {
+  return value.replace(/[<>]/g, (character) =>
+    character === "<" ? "&lt;" : "&gt;",
+  );
+}
+
+export function createTeammatesPromptSectionV1(
+  host: FlockSelfRuntimeHostV1,
+): PromptSection {
+  return {
+    id: TEAMMATES_PROMPT_SECTION_V1,
+    order: 92,
+    render: async (context) => {
+      if (context.turnType !== "chat") return "";
+      const teammates = (await host.listBots()).bots.filter(
+        (bot) => bot.botId !== host.owner.botId,
+      );
+      if (teammates.length === 0) return "";
+      const lines = teammates.map((bot) => {
+        const description = bot.initialDescription?.trim();
+        return `- ${promptText(bot.botId)}: ${promptText(bot.initialName)}${
+          description ? ` — ${promptText(description)}` : ""
+        }`;
+      });
+      return [
+        "<teammates>",
+        "These are the other Bots owned by your User. Use bot_message only when another Bot's perspective or specialty is materially useful.",
+        ...lines,
+        "</teammates>",
+      ].join("\n");
+    },
+  };
+}
+
+export function createInboundAgentPromptSectionV1(
+  host: FlockSelfRuntimeHostV1,
+): PromptSection {
+  return {
+    id: INBOUND_AGENT_PROMPT_SECTION_V1,
+    order: 93,
+    render: (context) => {
+      if (context.turnType !== "agent" || !host.inboundAgent) return "";
+      if (host.inboundAgent.kind === "voice") {
+        return "The User's Voice session asked you the current question. Answer it directly with send_to_user; that answer returns to Voice.";
+      }
+      return `Bot ${promptText(host.inboundAgent.fromBotName)} (${promptText(host.inboundAgent.fromBotId)}) asked you the current question. Answer it directly with send_to_user; that answer returns to the asking Bot.`;
+    },
+  };
+}
+
 /**
- * The runtime Contribution. Registers the two self-management tools; both are
- * work tools, offered on every turn type, because an automation or a subagent
- * Turn is as entitled to correct its own title as a chat Turn is.
+ * The runtime Contribution. The two self-management tools remain work tools
+ * on every turn type. `bot_message` is separately bounded to chat by the
+ * manifest so an inbound agent Turn cannot recursively fan out.
  */
 export function createFlockRuntimePlugin(
   host: FlockSelfRuntimeHostV1,
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx) => {
+    const messagingCeiling = flockAdmissionCeilingV1(
+      BOT_MESSAGING_CAPABILITY_V1,
+    );
     const disposers = [
+      ctx.systemPrompt.register(createTeammatesPromptSectionV1(host)),
+      ctx.systemPrompt.register(createInboundAgentPromptSectionV1(host)),
       ctx.tools.register(createBotUpdateTool(host)),
       ctx.tools.register(createBotCreateTool(host)),
+      ctx.tools.register(
+        createBotMessageTool(host),
+        messagingCeiling ? { admissionCeiling: messagingCeiling } : undefined,
+      ),
     ];
     return () => {
       for (const dispose of disposers.toReversed()) dispose();
     };
   };
-  plugin.inject = ["tools"];
+  plugin.inject = ["tools", "systemPrompt"];
   return plugin;
 }
 

@@ -175,7 +175,10 @@ export function chatWindowV1(
 ): ChatWindowV1 {
   const turns = messageTurnsV1(events);
   const types = turnTypesByTurnV1(events);
-  const chat = (turn: number) => (types.get(turn) ?? "chat") === "chat";
+  const chat = (turn: number) => {
+    const type = types.get(turn) ?? "chat";
+    return type === "chat" || type === "agent";
+  };
   const state = compactionStateV1(events);
   const current = currentTurnV1(events);
   // A compaction never covers the Turn being assembled, whatever the log says:
@@ -229,7 +232,10 @@ export function turnScopedMessagesV1(
   }
   const types = turnTypesByTurnV1(input.events);
   const current = currentTurnV1(input.events);
-  const chatTurn = (turn: number) => (types.get(turn) ?? "chat") === "chat";
+  const chatTurn = (turn: number) => {
+    const type = types.get(turn) ?? "chat";
+    return type === "chat" || type === "agent";
+  };
   if (chatTurn(current)) {
     const window = chatWindowV1(input.events, input.messages);
     // Tier 1 of ADR 0030, and the only one that costs nothing: a tool result

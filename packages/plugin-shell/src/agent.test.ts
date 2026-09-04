@@ -74,7 +74,7 @@ async function invoke(
 }
 
 describe("the Shell's tool admission", () => {
-  test("offers the send tool and its alias on chat turns only", async () => {
+  test("offers the send tool on chat and agent Turns", async () => {
     const mounted = await mount();
     try {
       const chat = mounted.root.tools
@@ -86,10 +86,16 @@ describe("the Shell's tool admission", () => {
       const subagent = mounted.root.tools
         .schemas({ turnType: "subagent" })
         .map((tool) => tool.name);
+      const agent = mounted.root.tools
+        .schemas({ turnType: "agent" })
+        .map((tool) => tool.name);
 
       expect(chat).toContain(SEND_TO_USER_TOOL_V1);
       expect(chat).toContain(SEND_MESSAGE_ALIAS_V1);
       expect(chat).not.toContain(WAKE_PARENT_TOOL_V1);
+      expect(agent).toContain(SEND_TO_USER_TOOL_V1);
+      expect(agent).toContain(SEND_MESSAGE_ALIAS_V1);
+      expect(agent).not.toContain(WAKE_PARENT_TOOL_V1);
       expect(automation).toEqual([
         WAKE_PARENT_TOOL_V1,
         "get_dynamic_tools",
@@ -179,7 +185,10 @@ describe("the Shell's tool admission", () => {
   });
 
   test("bounds each tool by the turn types its manifest Capability declares", () => {
-    expect(shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1)).toEqual(["chat"]);
+    expect(shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1)).toEqual([
+      "chat",
+      "agent",
+    ]);
     expect(shellAdmissionCeilingV1(PARENT_HANDOFF_CAPABILITY_V1)).toEqual([
       "automation",
       "subagent",

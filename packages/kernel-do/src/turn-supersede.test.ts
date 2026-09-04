@@ -25,6 +25,10 @@ import {
   storedRunLaneV1,
   type StoredRunV1,
 } from "./run-records.ts";
+import {
+  MAX_PENDING_AGENT_RUNS_V1,
+  pendingAgentRunKey,
+} from "./storage-keys.ts";
 
 const codec = createStoredRunCodecV1<undefined>({
   decodeRunId: (value) => value as string,
@@ -609,6 +613,150 @@ describe("a background admission never supersedes", () => {
         admission: { schemaVersion: 1, turnType: "automation" },
       }),
     ).toBe("background");
+  });
+});
+
+describe("the agent lane", () => {
+  test("queues behind the active Turn without superseding it", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+    const first = probe.authority.run(command("run-1", "person"));
+    await probe.handle("run-1").started;
+
+    const agent = probe.authority.run(
+      command("run-agent", "question", {
+        turnType: "agent",
+        origin: {
+          kind: "bot",
+          fromBotId: "researcher",
+          fromBotName: "Researcher",
+          messageId: "message-1",
+        },
+      }),
+    );
+    await admitted();
+    expect(probe.interrupts).toEqual([]);
+    expect(storedRun(storage, "run-agent")).toMatchObject({
+      phase: "queued",
+      admission: { turnType: "agent" },
+    });
+    expect(storedRunLaneV1(storedRun(storage, "run-agent"))).toBe("agent");
+
+    probe.handle("run-1").finish();
+    await first;
+    await probe.handle("run-agent").started;
+    probe.handle("run-agent").finish();
+    expect(await agent).toMatchObject({ text: "done: question" });
+  });
+
+  test("runs queued agent Turns FIFO", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+    const active = probe.authority.run(command("run-1", "person"));
+    await probe.handle("run-1").started;
+
+    const firstAgent = probe.authority.run(
+      command("run-agent-1", "first agent", { turnType: "agent" }),
+    );
+    await admitted();
+    const secondAgent = probe.authority.run(
+      command("run-agent-2", "second agent", { turnType: "agent" }),
+    );
+    await admitted();
+
+    probe.handle("run-1").finish();
+    await active;
+    await probe.handle("run-agent-1").started;
+    expect(probe.observed.map(({ command }) => command.runId)).toEqual([
+      "run-1",
+      "run-agent-1",
+    ]);
+    probe.handle("run-agent-1").finish();
+    await firstAgent;
+
+    await probe.handle("run-agent-2").started;
+    probe.handle("run-agent-2").finish();
+    await secondAgent;
+    expect(probe.observed.map(({ command }) => command.runId)).toEqual([
+      "run-1",
+      "run-agent-1",
+      "run-agent-2",
+    ]);
+  });
+
+  test("gives a queued User Turn priority over queued agent work", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+    const active = probe.authority.run(command("run-1", "person"));
+    await probe.handle("run-1").started;
+    const agent = probe.authority.run(
+      command("run-agent", "agent", { turnType: "agent" }),
+    );
+    await admitted();
+
+    const user = probe.authority.run(
+      command("run-user", "next message", {
+        lane: "user",
+        supersedes: { runId: "run-1" },
+      }),
+    );
+    await active;
+    await probe.handle("run-user").started;
+    expect(probe.observed.map(({ command }) => command.runId)).toEqual([
+      "run-1",
+      "run-user",
+    ]);
+    probe.handle("run-user").finish();
+    await user;
+
+    await probe.handle("run-agent").started;
+    probe.handle("run-agent").finish();
+    await agent;
+    expect(probe.observed.map(({ command }) => command.runId)).toEqual([
+      "run-1",
+      "run-user",
+      "run-agent",
+    ]);
+  });
+
+  test("refuses agent admission while the active Turn awaits reconciliation", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage, { parkOnRelease: () => true });
+    const active = probe.authority.run(command("run-1", "person"));
+    await probe.handle("run-1").started;
+    probe.handle("run-1").finish();
+    await active.catch(() => undefined);
+
+    await expect(
+      probe.authority.run(command("run-agent", "agent", { turnType: "agent" })),
+    ).rejects.toThrow(/cannot admit agent work.*requires reconciliation/);
+    expect(storage.values.has("run:run-agent")).toBe(false);
+  });
+
+  test("refuses admission when the Bot's bounded agent queue is full", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+    const first = probe.authority.run(command("run-1", "person"));
+    await probe.handle("run-1").started;
+    for (let index = 0; index < MAX_PENDING_AGENT_RUNS_V1; index += 1) {
+      const runId = `queued-${index}`;
+      storage.values.set(
+        pendingAgentRunKey(
+          new Date(Date.UTC(2026, 8, 3, 1, 0, index)).toISOString(),
+          runId,
+        ),
+        runId,
+      );
+    }
+
+    await expect(
+      probe.authority.run(
+        command("run-past-bound", "question", { turnType: "agent" }),
+      ),
+    ).rejects.toThrow(/agent queue is full \(32 Turns\)/);
+
+    probe.handle("run-1").finish();
+    await first;
   });
 });
 

@@ -290,7 +290,7 @@ function createSendToUserTool(
       string,
       unknown
     >,
-    admission: { turnTypes: ["chat"] },
+    admission: { turnTypes: ["chat", "agent"] },
     validate: (input: unknown) =>
       typeof input === "object" && input !== null && !Array.isArray(input),
     execute: async (

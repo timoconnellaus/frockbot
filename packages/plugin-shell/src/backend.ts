@@ -9,6 +9,7 @@ import {
   decodeIsolateWorkspaceListRequestV1,
   decodeIsolateWorkspacePathV1,
   decodeIsolateWorkspaceWriteRequestV1,
+  decodeSendToUserPayloadV1,
   decodeWorkspacePathV1,
   decodeWorkspaceRootV1,
   decodeSessionEvent,
@@ -134,6 +135,7 @@ import {
 import {
   createAppletCapabilityHostV1,
   createAppletInstanceBindingV1,
+  APPLET_DIST_FILES_V1,
   appletRpcSnapshotV1 as rpcJsonSnapshotV1,
   resolveAppletCompositionV1,
   type AppletCapabilityHostV1,
@@ -253,6 +255,7 @@ import {
   decodeSubagentSlotReceiptV1,
   type SubagentSlotBinding,
 } from "@frockbot/plugin-subagents/quota";
+import { decodeAgentTurnSlotReceiptV1 } from "@frockbot/plugin-flock/quota";
 import {
   subagentModelCatalogV1,
   type SubagentModelOptionV1,
@@ -406,6 +409,7 @@ import {
   decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
   decodeClientRunStopCommandV1,
+  decodeClientTurnV1,
   isVisibleRunV1,
   projectClientRunLookupV1,
   projectClientRunV1,
@@ -667,6 +671,16 @@ export interface ShellBotBackendHost {
   scheduledWorkInFlight?(): boolean;
   deferScheduledWork?(transaction: DurableObjectTransaction): Promise<void>;
   settleScheduledWork?(): Promise<void>;
+  /**
+   * A derived accounting projection after `turn/end` is durable. The host
+   * queues it before delivery, so failure never changes the Turn's outcome.
+   */
+  recordSettledUsage?(input: {
+    botId: string;
+    runId: string;
+    turn: number;
+    events: readonly SessionEvent[];
+  }): Promise<void>;
 }
 
 /** The narrow storage seam the Bot's announcement log is written through. */
@@ -769,6 +783,7 @@ export class ShellBotBackendContribution {
   private readonly hostScheduledWorkInFlight?: ShellBotBackendHost["scheduledWorkInFlight"];
   private readonly hostDeferScheduledWork?: ShellBotBackendHost["deferScheduledWork"];
   private readonly hostSettleScheduledWork?: ShellBotBackendHost["settleScheduledWork"];
+  private readonly recordSettledUsage?: ShellBotBackendHost["recordSettledUsage"];
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
@@ -784,6 +799,7 @@ export class ShellBotBackendContribution {
     this.hostScheduledWorkInFlight = host.scheduledWorkInFlight;
     this.hostDeferScheduledWork = host.deferScheduledWork;
     this.hostSettleScheduledWork = host.settleScheduledWork;
+    this.recordSettledUsage = host.recordSettledUsage;
     const routines = createBotRoutines(
       host.state.storage,
       createBotRoutineHookMinter(
@@ -1645,6 +1661,9 @@ export class ShellBotBackendContribution {
       // One admitted Turn is one run; the Turn ordinal lives in the session log.
       turnId: input.command.runId,
       sessionId: input.command.sessionId,
+      // The admitted configuration snapshot is durable, so a recovered
+      // bot_message reuses the same sender display name in its target command.
+      fromBotName: settings.profile.name,
       // The pin this Turn was admitted under, and the type it was admitted as.
       // A subagent dispatched from here runs on this generation, and the model
       // catalog it is offered is narrowed by this turn type.
@@ -1660,6 +1679,17 @@ export class ShellBotBackendContribution {
       ...(input.command.origin?.kind === "subagent"
         ? { subagentTaskId: input.command.origin.taskId }
         : {}),
+      ...(input.command.origin?.kind === "bot"
+        ? {
+            inboundAgent: {
+              kind: "bot" as const,
+              fromBotId: input.command.origin.fromBotId,
+              fromBotName: input.command.origin.fromBotName,
+            },
+          }
+        : input.command.origin?.kind === "voice"
+          ? { inboundAgent: { kind: "voice" as const } }
+          : {}),
     };
     let mountedRoot: ShellMountedComposition["root"] | undefined;
     let mountedGeneration: CompositionGenerationV1 | undefined;
@@ -1729,6 +1759,16 @@ export class ShellBotBackendContribution {
               input.command.sessionId,
               effect,
             ),
+          ...(this.recordSettledUsage
+            ? {
+                onTurnStopping: (settled) =>
+                  this.recordSettledUsage!({
+                    botId: input.identity.botId,
+                    runId: input.command.runId,
+                    ...settled,
+                  }),
+              }
+            : {}),
           ...(isolate ? { isolate } : {}),
           ...(appletRouting ? { applets: appletRouting } : {}),
         }).mount(mounting, signal);
@@ -2414,7 +2454,7 @@ export class ShellBotBackendContribution {
       // User with no Computer assignment has no root to pull, and the Bot that
       // just built on its Computer has it open already.
       syncSourceRootNow: active
-        ? async () => {
+        ? async (appletId) => {
             const root = active.mounted.runtime.root as unknown as {
               computers?: ComputerRegistry;
               sessions: typeof active.mounted.runtime.root.sessions;
@@ -2437,6 +2477,9 @@ export class ShellBotBackendContribution {
               sessionId: active.sessionId,
               turn,
               root: appletsSourceRootV1(identity.userId),
+              requiredPaths: APPLET_DIST_FILES_V1.map(
+                (path) => `${appletId}/${path}`,
+              ),
               signal: active.signal,
             });
           }
@@ -3247,6 +3290,22 @@ export class ShellBotBackendContribution {
         decodeSubagentSlotReceiptV1(await rpc.reserveSubagentSlot(request)),
       release: async (request) => {
         await rpc.releaseSubagentSlot(request);
+      },
+    };
+  }
+
+  /** Narrow RPC for the User-wide agent-lane concurrency lease. */
+  private agentTurnSlots(identity: BotIdentity) {
+    const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+    const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      reserveAgentTurnSlot(input: unknown): Promise<unknown>;
+      releaseAgentTurnSlot(input: unknown): Promise<unknown>;
+    };
+    return {
+      reserve: async (request: unknown) =>
+        decodeAgentTurnSlotReceiptV1(await rpc.reserveAgentTurnSlot(request)),
+      release: async (request: unknown) => {
+        await rpc.releaseAgentTurnSlot(request);
       },
     };
   }
@@ -4333,6 +4392,7 @@ export class ShellBotBackendContribution {
       runId: string;
       turnId: string;
       sessionId: string;
+      fromBotName: string;
       /**
        * The generation this Turn pinned, and the type it was admitted as. A
        * dispatched subagent runs on the generation its parent pinned, and the
@@ -4522,6 +4582,39 @@ export class ShellBotBackendContribution {
                   this.userConfiguration(identity).listBots(userId),
                 createBot: (userId, command) =>
                   this.userConfiguration(identity).createBot(userId, command),
+                reserveAgentTurn: (request) =>
+                  this.agentTurnSlots(identity).reserve(request),
+                releaseAgentTurn: (request) =>
+                  this.agentTurnSlots(identity).release(request),
+                runAgent: async (request) => {
+                  if (!this.env.BOT_STATES) {
+                    throw new Error("Bot-to-Bot messaging is unavailable");
+                  }
+                  const id = this.env.BOT_STATES.idFromName(
+                    `${request.userId}:${request.botId}`,
+                  );
+                  const rpc = this.env.BOT_STATES.get(id) as unknown as {
+                    runAgent(input: unknown): Promise<unknown>;
+                  };
+                  const completed = decodeClientTurnV1(
+                    structuredClone(await rpc.runAgent(request)),
+                  );
+                  let sentText: string | undefined;
+                  for (const event of completed.events) {
+                    if (event.type !== "send/to-user") continue;
+                    const payload = decodeSendToUserPayloadV1(
+                      event.payload,
+                      "agent send/to-user payload",
+                    );
+                    if (payload.type === "text") {
+                      sentText = payload.text;
+                      break;
+                    }
+                  }
+                  return {
+                    text: sentText ?? completed.text,
+                  };
+                },
               }),
             }
           : {}),
