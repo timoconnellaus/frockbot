@@ -58,6 +58,20 @@ export const APPLET_PUBLISH_EFFECT_PREFIX = "applets:publish-effect:";
  */
 export const APPLET_DIRECTORY_REVISION_SEEN_KEY = "applets:directory-revision";
 
+/**
+ * How the pre-publish pull of the Applet's source root went.
+ *
+ * `ok` and `skipped` mean the store now holds what the Computer holds. Anything
+ * else means the two may differ, and a `dist/` file the publish cannot find is
+ * then far more likely to be one the sync could not carry than one `applet
+ * build` never wrote.
+ */
+export interface AppletSourceSyncOutcomeV1 {
+  status: "ok" | "degraded" | "unavailable" | "refused" | "skipped";
+  /** What the sync said went wrong, empty when it had nothing to say. */
+  detail: string;
+}
+
 /** The three files `applet build` writes, read from the durable root. */
 export const APPLET_DIST_FILES_V1 = [
   "dist/server.js",
@@ -293,8 +307,12 @@ export interface AppletCapabilityHostOptionsV1 {
    * store is read as it stands — correct but possibly stale — and the Bot is
    * told so in the failure when the files are missing, rather than the publish
    * silently using old bytes.
+   *
+   * What it answers is how that pull went. A build that is on the Computer but
+   * did not reach the store is a different failure from a build that was never
+   * run, and the publish can only say which when it is told.
    */
-  syncSourceRootNow?(appletId: string): Promise<void>;
+  syncSourceRootNow?(appletId: string): Promise<AppletSourceSyncOutcomeV1>;
   composition: Pick<CompositionStore, "current" | "lastKnownGood" | "propose">;
   now?(): Date;
 }
@@ -594,11 +612,20 @@ export function createAppletCapabilityHostV1(
     appletId: string,
     file: string,
     maximum: number,
+    synced?: AppletSourceSyncOutcomeV1,
   ): Promise<{ text: string } | { failure: string }> {
     const outcome = await options.workspace.read(
       appletDistPathV1(options.userId, appletId, file),
     );
     if (outcome.status !== "ok") {
+      // A pull that did not finish is the likelier explanation than an
+      // unbuilt Applet, and telling the Bot to build again would send it
+      // round a loop that cannot end.
+      if (synced && synced.status !== "ok" && synced.status !== "skipped") {
+        return {
+          failure: `"${file}" is on the Computer but did not reach the Workspace: ${synced.detail || "the sync could not carry it"}`,
+        };
+      }
       return {
         failure: `"${file}" is ${outcome.status}: run \`applet build\` in applets/${appletId} on the Computer first`,
       };
@@ -731,12 +758,13 @@ export function createAppletCapabilityHostV1(
 
       // Force a pull of the source root so the publish sees what the Bot just
       // built, not the last synced copy. See the seam note on the option.
-      await options.syncSourceRootNow?.(input.appletId);
+      const synced = await options.syncSourceRootNow?.(input.appletId);
 
       const server = await readFile(
         input.appletId,
         "dist/server.js",
         APPLET_MAX_SERVER_BYTES_V1,
+        synced,
       );
       if ("failure" in server) {
         return settle(failed(input.appletId, "unbuilt", server.failure));
@@ -745,6 +773,7 @@ export function createAppletCapabilityHostV1(
         input.appletId,
         "dist/ui.html",
         APPLET_MAX_UI_BYTES_V1,
+        synced,
       );
       if ("failure" in ui) {
         return settle(failed(input.appletId, "unbuilt", ui.failure));
@@ -753,6 +782,7 @@ export function createAppletCapabilityHostV1(
         input.appletId,
         "dist/manifest.json",
         APPLET_MAX_MANIFEST_BYTES_V1,
+        synced,
       );
       if ("failure" in manifestFile) {
         return settle(failed(input.appletId, "unbuilt", manifestFile.failure));

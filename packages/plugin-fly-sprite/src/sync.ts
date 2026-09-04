@@ -103,6 +103,7 @@ import {
 import type { FlySpriteAgentComputer } from "./computer.js";
 import {
   SYNC_CONFLICTS_DIR,
+  SYNC_STAGING_DIR,
   SYNC_TOMBSTONES_DIR,
   WORKSPACE_EMPTY_SHA256,
   WORKSPACE_GENERATIONS_DIR,
@@ -144,6 +145,49 @@ export const WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1 = [
 export const WORKSPACE_SYNC_MANIFEST_MAX_BYTES_V1 = 400_000;
 /** Bounds work and rows even when unusually short paths fit under the bytes. */
 export const WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1 = 2_000;
+
+/**
+ * The most file bytes one storage command carries, in either direction.
+ *
+ * A command's answer travels as base64, so a chunk this size comes back as
+ * roughly 350 KB — inside the 500 KB an answer may be — and goes out inside a
+ * script well inside the 1 MB a script may be. A file larger than one chunk
+ * travels as several commands rather than as one command that would be refused
+ * for its size, which is the whole reason the sync reads and writes in chunks.
+ */
+export const WORKSPACE_SYNC_CHUNK_BYTES_V1 = 256 * 1024;
+
+/**
+ * The largest durable-root file the sync carries between the Computer and the
+ * store.
+ *
+ * It sits above `WORKSPACE_MAX_FILE_BYTES`, the bound the Workspace puts
+ * on one durable-root file, so the transport is never what decides: a file too
+ * large to keep is refused for its size by the Workspace, never for the shape
+ * of the commands that would have moved it.
+ */
+export const WORKSPACE_SYNC_MAX_FILE_BYTES_V1 = 4 * 1024 * 1024;
+
+/** Every chunk offset after the first, in bytes, for a file of this size. */
+function chunkOffsets(size: number): number[] {
+  const offsets: number[] = [];
+  for (
+    let offset = WORKSPACE_SYNC_CHUNK_BYTES_V1;
+    offset < size;
+    offset += WORKSPACE_SYNC_CHUNK_BYTES_V1
+  ) {
+    offsets.push(offset);
+  }
+  return offsets;
+}
+
+/** A staging file name that is one path segment whatever the id looks like. */
+function stagingName(generationId: string, kind: string): string {
+  const safe = generationId.replaceAll(/[^A-Za-z0-9._-]/g, "-").slice(0, 128);
+  return `${safe}.${kind}`;
+}
+
+const SHA256_HEX = /^[0-9a-f]{64}$/;
 
 const ignoredDirectoryNames = new Set<string>(
   WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1,
@@ -1132,6 +1176,18 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     };
   }
 
+  /**
+   * Pulls one file off the Computer, in bounded chunks.
+   *
+   * A command's answer has a hard ceiling, and base64 is a third larger than
+   * the bytes it carries, so one `base64` of a whole file stopped working long
+   * before a file got large: half a megabyte of built Applet page is two thirds
+   * of a megabyte of answer, and the command was refused rather than truncated.
+   * So the first command answers the size and digest and the first chunk, and
+   * one command per further chunk brings the rest. The digest is the proof the
+   * pieces are one file: a file rewritten between two chunks fails the check
+   * and is reported, never stitched together from two different versions.
+   */
   async read(
     root: WorkspaceRootV1,
     path: string,
@@ -1140,21 +1196,109 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     if (typeof mount !== "string") return mount;
     const relative = this.relative(path);
     if (typeof relative !== "string") return relative;
-    const script = [
+    const prelude = [
+      "set -eu",
       `ROOT=${shellQuote(mount)}`,
       `REL=${shellQuote(relative)}`,
-      'if [ ! -f "$ROOT/$REL" ]; then echo __MISSING__; exit 0; fi',
-      'base64 -w0 "$ROOT/$REL"; echo',
-    ].join("\n");
-    const output = await this.run(script);
-    if (typeof output !== "string") return output;
-    if (output.includes("__MISSING__")) {
+      'FILE="$ROOT/$REL"',
+    ];
+    const head = await this.run(
+      [
+        ...prelude,
+        `CHUNK=${WORKSPACE_SYNC_CHUNK_BYTES_V1}`,
+        'if [ ! -f "$FILE" ]; then echo __MISSING__; exit 0; fi',
+        'SIZE=$(stat -c %s "$FILE")',
+        `if [ "$SIZE" -gt ${WORKSPACE_SYNC_MAX_FILE_BYTES_V1} ]; then echo __TOO_LARGE__; exit 0; fi`,
+        'printf "%s\\t%s\\n" "$SIZE" "$(sha256sum "$FILE" | cut -d" " -f1)"',
+        'head -c "$CHUNK" "$FILE" | base64 -w0; echo',
+      ].join("\n"),
+    );
+    if (typeof head !== "string") return head;
+    if (head.includes("__MISSING__")) {
       return failure("not-found", `No such Workspace file: ${relative}`);
     }
-    return {
-      status: "ok",
-      bytes: Uint8Array.from(Buffer.from(output.trim(), "base64")),
-    };
+    if (head.includes("__TOO_LARGE__")) {
+      return failure(
+        "refused",
+        `"${relative}" is past the ${WORKSPACE_SYNC_MAX_FILE_BYTES_V1}-byte limit on a synced Workspace file`,
+      );
+    }
+    const [header = "", first = ""] = head.split("\n");
+    const [declared = "", digest = ""] = header.split("\t");
+    const size = Number(declared.trim());
+    if (!Number.isSafeInteger(size) || size < 0 || !SHA256_HEX.test(digest)) {
+      return failure("unavailable", "Invalid Fly Workspace sync response");
+    }
+    const chunks = [Buffer.from(first.trim(), "base64")];
+    for (const offset of chunkOffsets(size)) {
+      const next = await this.run(
+        [
+          ...prelude,
+          // `tail -c +N` counts from one, so the offset is one past the bytes
+          // already carried.
+          `tail -c +${offset + 1} "$FILE" | head -c ${WORKSPACE_SYNC_CHUNK_BYTES_V1} | base64 -w0; echo`,
+        ].join("\n"),
+      );
+      if (typeof next !== "string") return next;
+      chunks.push(Buffer.from(next.trim(), "base64"));
+    }
+    const bytes = Buffer.concat(chunks);
+    if (
+      bytes.byteLength !== size ||
+      createHash("sha256").update(bytes).digest("hex") !== digest
+    ) {
+      return failure(
+        "unavailable",
+        `"${relative}" changed on the Computer while it was being read`,
+      );
+    }
+    return { status: "ok", bytes: Uint8Array.from(bytes) };
+  }
+
+  /**
+   * Puts bytes on the Computer under the sync's own staging directory, in
+   * bounded chunks, and answers where they landed.
+   *
+   * The push has the pull's problem in the other direction: a script carrying a
+   * whole file as base64 is refused for its length. Bytes that fit in one chunk
+   * take no staging file at all — the caller writes them inline, which is one
+   * command and the overwhelmingly common case. Anything larger is appended
+   * chunk by chunk and the caller's own command moves it into place, so a file
+   * only ever appears at its real path complete.
+   */
+  private async stage(
+    mount: string,
+    name: string,
+    bytes: Uint8Array,
+  ): Promise<string | WorkspaceFailureV1 | undefined> {
+    if (bytes.byteLength <= WORKSPACE_SYNC_CHUNK_BYTES_V1) return undefined;
+    const staged = `${mount}/${WORKSPACE_SYNC_DIR}/${SYNC_STAGING_DIR}/${name}`;
+    for (
+      let offset = 0;
+      offset < bytes.byteLength;
+      offset += WORKSPACE_SYNC_CHUNK_BYTES_V1
+    ) {
+      const chunk = bytes.subarray(
+        offset,
+        offset + WORKSPACE_SYNC_CHUNK_BYTES_V1,
+      );
+      const output = await this.run(
+        [
+          "set -eu",
+          `STAGE=${shellQuote(staged)}`,
+          'mkdir -p "$(dirname "$STAGE")"',
+          ...(offset === 0 ? ['rm -f "$STAGE"'] : []),
+          `printf %s ${shellQuote(Buffer.from(chunk).toString("base64"))} | base64 -d >> "$STAGE"`,
+          'chmod 600 "$STAGE"',
+          "echo __STAGED__",
+        ].join("\n"),
+      );
+      if (typeof output !== "string") return output;
+      if (!output.includes("__STAGED__")) {
+        return failure("unavailable", "Invalid Fly Workspace sync response");
+      }
+    }
+    return staged;
   }
 
   async materialize(
@@ -1167,6 +1311,14 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     if (typeof mount !== "string") return mount;
     const relative = this.relative(path);
     if (typeof relative !== "string") return relative;
+    const oversized = this.oversized(relative, bytes);
+    if (oversized) return oversized;
+    const staged = await this.stage(
+      mount,
+      stagingName(generation.generationId, "pull"),
+      bytes,
+    );
+    if (staged && typeof staged !== "string") return staged;
     const script = [
       "set -eu",
       `ROOT=${shellQuote(mount)}`,
@@ -1176,7 +1328,7 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
       `GRAVE="$ROOT/${WORKSPACE_SYNC_DIR}/${SYNC_TOMBSTONES_DIR}/$REL"`,
       'mkdir -p "$(dirname "$TARGET")" "$(dirname "$META")"',
       'TMP=$(mktemp "${TARGET}.XXXXXX")',
-      `printf %s ${shellQuote(Buffer.from(bytes).toString("base64"))} | base64 -d > "$TMP"`,
+      ...this.assemble(staged, bytes, generation.contentHash),
       'chmod 600 "$TMP"',
       'mv "$TMP" "$TARGET"',
       'MTMP=$(mktemp "${META}.XXXXXX")',
@@ -1188,10 +1340,54 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     ].join("\n");
     const output = await this.run(script);
     if (typeof output !== "string") return output;
+    if (output.includes("__CORRUPT__")) {
+      return this.corrupt(relative);
+    }
     if (!output.includes("__SYNCED__")) {
       return failure("unavailable", "Invalid Fly Workspace sync response");
     }
     return { status: "ok" };
+  }
+
+  /** Refuses bytes the sync will not carry, before a command is composed. */
+  private oversized(
+    relative: string,
+    bytes: Uint8Array,
+  ): WorkspaceFailureV1 | undefined {
+    if (bytes.byteLength <= WORKSPACE_SYNC_MAX_FILE_BYTES_V1) return undefined;
+    return failure(
+      "refused",
+      `"${relative}" is past the ${WORKSPACE_SYNC_MAX_FILE_BYTES_V1}-byte limit on a synced Workspace file`,
+    );
+  }
+
+  private corrupt(relative: string): WorkspaceFailureV1 {
+    return failure(
+      "unavailable",
+      `"${relative}" did not reach the Computer intact`,
+    );
+  }
+
+  /**
+   * The lines that fill `$TMP` with the bytes: inline when they fitted in one
+   * command, otherwise the staged file, checked against its digest before it is
+   * used so a half-written staging file never becomes a durable-root file.
+   */
+  private assemble(
+    staged: string | undefined,
+    bytes: Uint8Array,
+    contentHash: string,
+  ): string[] {
+    if (!staged) {
+      return [
+        `printf %s ${shellQuote(Buffer.from(bytes).toString("base64"))} | base64 -d > "$TMP"`,
+      ];
+    }
+    return [
+      `STAGE=${shellQuote(staged)}`,
+      `if [ "$(sha256sum "$STAGE" | cut -d" " -f1)" != ${shellQuote(contentHash)} ]; then rm -f "$STAGE"; echo __CORRUPT__; exit 0; fi`,
+      'mv "$STAGE" "$TMP"',
+    ];
   }
 
   async remove(
@@ -1262,18 +1458,31 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     if (typeof mount !== "string") return mount;
     const relative = this.relative(path);
     if (typeof relative !== "string") return relative;
+    const oversized = this.oversized(relative, bytes);
+    if (oversized) return oversized;
+    const staged = await this.stage(
+      mount,
+      stagingName(generation.generationId, "conflict"),
+      bytes,
+    );
+    if (staged && typeof staged !== "string") return staged;
     const script = [
       "set -eu",
       `ROOT=${shellQuote(mount)}`,
       `REL=${shellQuote(relative)}`,
       `KEPT="$ROOT/${WORKSPACE_SYNC_DIR}/${SYNC_CONFLICTS_DIR}/$REL/${generation.generationId}"`,
       'mkdir -p "$(dirname "$KEPT")"',
-      `printf %s ${shellQuote(Buffer.from(bytes).toString("base64"))} | base64 -d > "$KEPT"`,
-      'chmod 600 "$KEPT"',
+      'TMP=$(mktemp "${KEPT}.XXXXXX")',
+      ...this.assemble(staged, bytes, generation.contentHash),
+      'chmod 600 "$TMP"',
+      'mv "$TMP" "$KEPT"',
       "echo __PRESERVED__",
     ].join("\n");
     const output = await this.run(script);
     if (typeof output !== "string") return output;
+    if (output.includes("__CORRUPT__")) {
+      return this.corrupt(relative);
+    }
     if (!output.includes("__PRESERVED__")) {
       return failure("unavailable", "Invalid Fly Workspace sync response");
     }

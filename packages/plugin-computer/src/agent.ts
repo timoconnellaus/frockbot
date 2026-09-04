@@ -224,6 +224,7 @@ function base64Of(bytes: Uint8Array): string {
 interface ExecInput {
   command: string;
   background: boolean;
+  cwd?: string;
 }
 
 function record(input: unknown): Record<string, unknown> | undefined {
@@ -233,17 +234,75 @@ function record(input: unknown): Record<string, unknown> | undefined {
 }
 
 const MAX_EXEC_COMMAND_LENGTH = 20_000;
+/** An absolute path on the Computer, at the Computer host's own path bound. */
+const MAX_EXEC_CWD_LENGTH = 4_096;
+
+/** One shell word, whatever the path holds. */
+function shellQuoteV1(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/** Every key `computer_exec` accepts; anything else is refused by name. */
+const EXEC_INPUT_KEYS = ["command", "background", "cwd"] as const;
 
 function decodeExec(input: unknown): ExecInput | undefined {
   const value = record(input);
-  const command = value?.command;
+  if (!value) return undefined;
+  if (
+    Object.keys(value).some(
+      (key) => !(EXEC_INPUT_KEYS as readonly string[]).includes(key),
+    )
+  ) {
+    return undefined;
+  }
+  const command = value.command;
   if (typeof command !== "string" || !command.trim()) return undefined;
   if (command.length > MAX_EXEC_COMMAND_LENGTH) return undefined;
-  const background = value?.background;
+  const background = value.background;
   if (background !== undefined && typeof background !== "boolean") {
     return undefined;
   }
-  return { command, background: background === true };
+  const cwd = value.cwd;
+  if (cwd !== undefined) {
+    if (typeof cwd !== "string") return undefined;
+    if (!cwd.startsWith("/") || cwd.length > MAX_EXEC_CWD_LENGTH) {
+      return undefined;
+    }
+    if (/[\0\n\r]/.test(cwd)) return undefined;
+  }
+  return {
+    command,
+    background: background === true,
+    ...(typeof cwd === "string" ? { cwd } : {}),
+  };
+}
+
+/**
+ * Why a `computer_exec` input could not be used, in the words that fix it.
+ *
+ * An argument the tool does not know used to be dropped on the way in, so a
+ * `cwd` the model sent was silently ignored and the command ran somewhere else
+ * — four wasted steps on production (2026-09-04) working out why `cat` could
+ * not see a file that was plainly there. An unknown key is refused now, and the
+ * refusal names it, which is the only reason refusing is better than dropping.
+ */
+export function execInputRefusalV1(input: unknown): string {
+  const value = record(input);
+  const unknown = Object.keys(value ?? {}).filter(
+    (key) => !(EXEC_INPUT_KEYS as readonly string[]).includes(key),
+  );
+  if (unknown.length > 0) {
+    return `computer_exec input is invalid: ${unknown
+      .map((key) => `"${key}"`)
+      .join(", ")} ${unknown.length === 1 ? "is not a" : "are not"} field${
+      unknown.length === 1 ? "" : "s"
+    } of this tool. It takes "command", optional "cwd", and optional "background".`;
+  }
+  const cwd = value?.cwd;
+  if (cwd !== undefined && (typeof cwd !== "string" || !cwd.startsWith("/"))) {
+    return `computer_exec input is invalid: "cwd" must be an absolute path of at most ${MAX_EXEC_CWD_LENGTH} characters, such as "/home/box/agent-data".`;
+  }
+  return `computer_exec input is invalid: "command" must be a shell command of at most ${MAX_EXEC_COMMAND_LENGTH} characters.`;
 }
 
 /** The durable root a finished process's log tail is mirrored into. */
@@ -676,6 +735,7 @@ export function createComputerAgentPlugin(
       idempotent: config.idempotentEffects === true,
       description: [
         "Run a shell command in the Bot's selected persistent Computer. New calls are blocked while the user has taken control.",
+        "Pass cwd as an absolute path to run the command in that directory instead of the home directory.",
         "With background:true the command keeps running after this call returns and after this Turn ends, and you get a processId to check later.",
         "A background process runs only while the Computer is awake. Nothing keeps it awake for you: if the Computer hibernates first, the outcome is reported as unknown, with whatever log was durable at the time.",
         `${SCRATCH_ROOT} (also $FROCKBOT_SCRATCH) is scratch shared with your User's other Bots: it survives hibernation but is not durable and never reaches storage, so keep nothing there you cannot lose.`,
@@ -685,6 +745,12 @@ export function createComputerAgentPlugin(
         type: "object",
         properties: {
           command: { type: "string", maxLength: MAX_EXEC_COMMAND_LENGTH },
+          cwd: {
+            type: "string",
+            maxLength: MAX_EXEC_CWD_LENGTH,
+            description:
+              "Absolute path to run the command in. Defaults to the Bot's home directory.",
+          },
           background: {
             type: "boolean",
             description:
@@ -694,14 +760,15 @@ export function createComputerAgentPlugin(
         required: ["command"],
         additionalProperties: false,
       },
-      validate: (input) => decodeExec(input) !== undefined,
+      // Deliberately permissive, for the same reason `computer_browser` is: a
+      // wrong shape reaches `execute`, which names the field. A `false` here is
+      // the loop's generic "Invalid input for tool", which names nothing.
+      validate: (input) => !!record(input),
       execute: async (input, context) => {
         const decoded = decodeExec(input);
-        if (!decoded)
-          return {
-            content: `A command of at most ${MAX_EXEC_COMMAND_LENGTH} characters is required`,
-            isError: true,
-          };
+        if (!decoded) {
+          return { content: execInputRefusalV1(input), isError: true };
+        }
         // "The GUI is never driven from the shell" (parity row 33), refused at
         // the seam where the model can be told why. This is policy and not a
         // boundary — a regex over a shell string is defeatable, and the
@@ -714,7 +781,15 @@ export function createComputerAgentPlugin(
         }
         if (decoded.background) {
           return processes
-            ? launchBackground(decoded.command, context)
+            ? // A launch carries a command and not a directory, so the
+              // directory becomes part of the command. `cd` failing stops the
+              // process before it starts, which is what a wrong path deserves.
+              launchBackground(
+                decoded.cwd
+                  ? `cd ${shellQuoteV1(decoded.cwd)} && ${decoded.command}`
+                  : decoded.command,
+                context,
+              )
             : {
                 content:
                   "A background process is recorded before it is launched; this runtime has nowhere durable to record it",
@@ -735,6 +810,7 @@ export function createComputerAgentPlugin(
                 {
                   executable: "/bin/bash",
                   args: ["-lc", decoded.command],
+                  ...(decoded.cwd ? { cwd: decoded.cwd } : {}),
                   timeoutMs: 120_000,
                   maxOutputBytes: 30_000,
                 },

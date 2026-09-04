@@ -180,6 +180,82 @@ describe("computer agent contribution", () => {
     await harness.dispose();
   });
 
+  // Production, 2026-09-04: the model sent a `cwd` the tool did not have, the
+  // key was dropped without a word, and `cat server.ts` ran in the home
+  // directory. Four steps went into working that out. The directory is carried
+  // now, and an argument the tool does not know is refused by name.
+  test("computer_exec runs in the cwd it is given and names an argument it does not know", async () => {
+    const requests: Array<{ cwd?: string; command?: string }> = [];
+    const provider: ComputerProvider = {
+      id: "fixture",
+      open: async (identity, tenant, assignment) => ({
+        assignment,
+        identity,
+        tenant,
+        exec: {
+          execute: async (request) => {
+            requests.push({
+              ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
+              ...(request.args?.[1] === undefined
+                ? {}
+                : { command: request.args[1] }),
+            });
+            return {
+              exitCode: 0,
+              stdout: new TextEncoder().encode("server.ts ui.tsx"),
+              stderr: new Uint8Array(),
+              outputTruncated: false,
+            };
+          },
+        },
+        close: () => Promise.resolve(),
+      }),
+    };
+    const harness = await createPluginHarness([
+      ComputerRegistry,
+      ToolRegistry,
+      SystemPromptRegistry,
+      SessionStore,
+    ]);
+    harness.root.computers.register(provider);
+    await harness.mount(
+      createComputerAgentPlugin({
+        userId: "user-1",
+        defaultProviderId: "fixture",
+      }),
+    );
+
+    const listed = await execute(harness, "computer_exec", {
+      command: "ls",
+      cwd: "/home/box/agent-data/source/todo",
+    });
+    expect(listed).toMatchObject({
+      content: "server.ts ui.tsx",
+      isError: false,
+    });
+    expect(requests).toEqual([
+      { cwd: "/home/box/agent-data/source/todo", command: "ls" },
+    ]);
+
+    const relative = await execute(harness, "computer_exec", {
+      command: "ls",
+      cwd: "todo",
+    });
+    expect(relative.isError).toBe(true);
+    expect(relative.content).toContain('"cwd" must be an absolute path');
+
+    const misspelled = await execute(harness, "computer_exec", {
+      command: "ls",
+      directory: "/home/box",
+    });
+    expect(misspelled.isError).toBe(true);
+    expect(misspelled.content).toContain('"directory"');
+    expect(misspelled.content).toContain('It takes "command"');
+    // Refused, never run with the argument quietly dropped.
+    expect(requests).toHaveLength(1);
+    await harness.dispose();
+  });
+
   test("computer_exec during an update returns an actionable tool failure", async () => {
     const provider: ComputerProvider = {
       id: "fixture",

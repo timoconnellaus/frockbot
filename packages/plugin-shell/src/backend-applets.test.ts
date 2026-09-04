@@ -8,6 +8,7 @@ import {
   resolveAppletCompositionV1,
   APPLET_DIRECTORY_REVISION_SEEN_KEY,
   type AppletInstanceBindingV1,
+  type AppletSourceSyncOutcomeV1,
   type AppletUserDirectoryV1,
 } from "./backend-applets.js";
 import {
@@ -344,6 +345,7 @@ describe("ctx.applets", () => {
     directory?: Partial<AppletUserDirectoryV1>;
     instance?: Partial<AppletInstanceBindingV1>;
     storage?: ReturnType<typeof memoryStorage>;
+    synced?: AppletSourceSyncOutcomeV1;
   }) {
     const storage = options.storage ?? memoryStorage();
     const recorded: unknown[] = [];
@@ -455,6 +457,9 @@ describe("ctx.applets", () => {
           stat: () =>
             Promise.resolve({ status: "not-found", reason: "" }) as never,
         },
+        ...(options.synced
+          ? { syncSourceRootNow: () => Promise.resolve(options.synced!) }
+          : {}),
         composition: {
           current: () => bootstrap(),
           lastKnownGood: () => bootstrap(),
@@ -483,6 +488,39 @@ describe("ctx.applets", () => {
     const { host: capability } = host({ files: {} });
     const outcome = await capability.publish({ appletId: APPLET }, scope);
     expect(outcome.status).toBe("failed");
+    expect(outcome.status === "failed" && outcome.reason).toMatch(
+      /applet build/,
+    );
+  });
+
+  // Production, 2026-09-04: a 470 KB `dist/ui.html` the Bot had just built was
+  // reported as `not-found: run \`applet build\` … first`, and the Bot ran the
+  // build again, three times. The build was fine; the sync could not carry the
+  // file. The publish says which of the two it was now.
+  test("publish says a built file did not reach the Workspace rather than blaming the build", async () => {
+    const { host: capability } = host({
+      files: {},
+      synced: {
+        status: "degraded",
+        detail:
+          '1 sync operation failed at "dist/ui.html": unavailable: the Computer could not answer.',
+      },
+    });
+    const outcome = await capability.publish({ appletId: APPLET }, scope);
+    expect(outcome.status).toBe("failed");
+    const reason = outcome.status === "failed" ? outcome.reason : "";
+    expect(reason).toBe(
+      '"dist/server.js" is on the Computer but did not reach the Workspace: 1 sync operation failed at "dist/ui.html": unavailable: the Computer could not answer.',
+    );
+    expect(reason).not.toMatch(/applet build/);
+  });
+
+  test("publish still blames the build when the pull of the source root was clean", async () => {
+    const { host: capability } = host({
+      files: {},
+      synced: { status: "ok", detail: "" },
+    });
+    const outcome = await capability.publish({ appletId: APPLET }, scope);
     expect(outcome.status === "failed" && outcome.reason).toMatch(
       /applet build/,
     );
