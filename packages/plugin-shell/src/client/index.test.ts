@@ -95,6 +95,40 @@ afterEach(() => {
   }
 });
 
+test("a degraded Computer sync is a notice beneath the Turn once", () => {
+  const state: Pick<
+    FrockBotWebData,
+    "messages" | "activeRunId" | "runningRunId" | "activeRun"
+  > = { messages: [] };
+
+  projectDurableRuns(
+    state,
+    [],
+    [
+      {
+        runId: "run-sync",
+        input: "build the applet",
+        status: "completed",
+        responseText: "The Applet is ready.",
+        events: [
+          {
+            type: "computer/sync",
+            status: "degraded",
+            message: "Excluded 1 reproducible Workspace item from sync.",
+          },
+        ],
+      },
+    ],
+  );
+
+  expect(state.messages).toHaveLength(2);
+  expect(state.messages[1]).toMatchObject({
+    role: "assistant",
+    text: "The Applet is ready.",
+    notice: "Excluded 1 reproducible Workspace item from sync.",
+  });
+});
+
 describe("application manifest protocol", () => {
   const emptyManifest = {
     schemaVersion: 1,

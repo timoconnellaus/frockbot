@@ -719,13 +719,17 @@ export interface SessionEventMap {
   "computer/sync": {
     turn: number;
     reason: "open" | "signal" | "turn-end" | "publish";
-    status: "ok" | "unavailable" | "refused" | "skipped";
+    status: "ok" | "degraded" | "unavailable" | "refused" | "skipped";
     detail: string;
     pulled: number;
     pushed: number;
     restored: number;
     removed: number;
     adopted: number;
+    /** Absent only on records written before bounded manifests shipped. */
+    ignored?: number;
+    /** Absent only on records written before bounded manifests shipped. */
+    omitted?: number;
     conflicts: number;
     failures: number;
   };
@@ -2145,6 +2149,8 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
           "restored",
           "removed",
           "adopted",
+          ...(Object.hasOwn(event, "ignored") ? ["ignored"] : []),
+          ...(Object.hasOwn(event, "omitted") ? ["omitted"] : []),
           "conflicts",
           "failures",
         ),
@@ -2159,7 +2165,7 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         throw new Error("session event.reason is invalid");
       }
       if (
-        !["ok", "unavailable", "refused", "skipped"].includes(
+        !["ok", "degraded", "unavailable", "refused", "skipped"].includes(
           event.status as string,
         )
       ) {
@@ -2176,6 +2182,12 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         "failures",
       ] as const) {
         eventInteger(event[field], `session event.${field}`, 0);
+      }
+      if (event.ignored !== undefined) {
+        eventInteger(event.ignored, "session event.ignored", 0);
+      }
+      if (event.omitted !== undefined) {
+        eventInteger(event.omitted, "session event.omitted", 0);
       }
       break;
     }

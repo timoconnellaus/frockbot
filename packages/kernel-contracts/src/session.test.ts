@@ -75,6 +75,38 @@ test("a Bot-isolate hook failure is an exact durable session event", () => {
   );
 });
 
+test("a degraded Computer sync records bounded exclusions and decodes legacy rows", () => {
+  const legacy = {
+    type: "computer/sync",
+    turn: 1,
+    reason: "open",
+    status: "ok",
+    detail: "",
+    pulled: 1,
+    pushed: 0,
+    restored: 0,
+    removed: 0,
+    adopted: 0,
+    conflicts: 0,
+    failures: 0,
+    seq: 0,
+    timestamp,
+  } as const;
+  expect(decodeSessionEvent(legacy)).toEqual(legacy);
+
+  const degraded = {
+    ...legacy,
+    status: "degraded",
+    detail: "Excluded 1 reproducible Workspace item from sync.",
+    ignored: 1,
+    omitted: 0,
+  } as const;
+  expect(decodeSessionEvent(degraded)).toEqual(degraded);
+  expect(() => decodeSessionEvent({ ...degraded, ignored: -1 })).toThrow(
+    /ignored/,
+  );
+});
+
 test("a compaction is an exact durable session event", () => {
   const intent = {
     type: "conversation/compaction-intent",

@@ -294,7 +294,7 @@ export interface AppletCapabilityHostOptionsV1 {
    * told so in the failure when the files are missing, rather than the publish
    * silently using old bytes.
    */
-  syncSourceRootNow?(): Promise<void>;
+  syncSourceRootNow?(appletId: string): Promise<void>;
   composition: Pick<CompositionStore, "current" | "lastKnownGood" | "propose">;
   now?(): Date;
 }
@@ -731,7 +731,7 @@ export function createAppletCapabilityHostV1(
 
       // Force a pull of the source root so the publish sees what the Bot just
       // built, not the last synced copy. See the seam note on the option.
-      await options.syncSourceRootNow?.();
+      await options.syncSourceRootNow?.(input.appletId);
 
       const server = await readFile(
         input.appletId,
