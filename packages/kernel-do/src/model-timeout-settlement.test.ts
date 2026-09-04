@@ -31,7 +31,7 @@ import {
   BotTurnExecutionError,
   BotTurnReconciliationRequiredError,
 } from "./turn-errors.ts";
-import { createStoredRunCodecV1, type StoredRunV1 } from "./run-records.ts";
+import { createStoredRunCodecV1 } from "./run-records.ts";
 
 const codec = createStoredRunCodecV1<undefined>({
   decodeRunId: (value) => value as string,
@@ -188,11 +188,11 @@ function createAuthority(
   });
 }
 
-function storedRun(
-  storage: MemoryStorage,
+async function storedRun(
+  authority: BotDurableAuthority<undefined>,
   runId: string,
-): StoredRunV1<undefined> {
-  return codec.require(storage.values.get(`run:${runId}`));
+) {
+  return (await authority.readRun(runId))!;
 }
 
 describe("a model request that ran out of time", () => {
@@ -205,7 +205,7 @@ describe("a model request that ran out of time", () => {
     const completion = await authority.run(command("run-1", "build me one"));
 
     expect(completion.runId).toBe("run-1");
-    const run = storedRun(storage, "run-1");
+    const run = await storedRun(authority, "run-1");
     expect(run.status).toBe("failed");
     // The ordinary run-terminal path: the open Turn is closed rather than left
     // for the next message to trip over.
@@ -233,7 +233,7 @@ describe("a model request that ran out of time", () => {
       authority.run(command("run-1", "build me one")),
     ).rejects.toThrow();
 
-    const run = storedRun(storage, "run-1");
+    const run = await storedRun(authority, "run-1");
     expect(run.status).toBe("reconciliation-required");
     expect(run.events.some((event) => event.type === "turn/end")).toBe(false);
   });
@@ -252,7 +252,7 @@ describe("a model request that ran out of time", () => {
     const completion = await authority.run(command("run-1", "hello"));
 
     expect(completion.runId).toBe("run-1");
-    const run = storedRun(storage, "run-1");
+    const run = await storedRun(authority, "run-1");
     expect(run.status).toBe("failed");
     expect(
       run.events.findLast((event) => event.type === "turn/end"),

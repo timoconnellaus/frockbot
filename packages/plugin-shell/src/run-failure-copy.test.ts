@@ -3,6 +3,7 @@ import type { SessionEvent } from "@frockbot/kernel-contracts";
 import { MODEL_FIRST_BYTE_DEADLINE_REASON_V1 } from "@frockbot/kernel-contracts";
 import {
   knownFailureCopyV1,
+  MODEL_PROVIDER_FAILURE_COPY_V1,
   RUN_FAILURE_COPY_V1,
   RUN_FAILURE_FALLBACK_COPY_V1,
   runFailureCopyV1,
@@ -75,6 +76,14 @@ function failedRun(failure: string, events: SessionEvent[]): StoredRun {
 describe("runFailureCopyV1", () => {
   test("every mapped sentence is written for a person", () => {
     for (const copy of Object.values(RUN_FAILURE_COPY_V1)) assertPlainV1(copy);
+    expect(Object.keys(MODEL_PROVIDER_FAILURE_COPY_V1).sort()).toEqual([
+      "permanent",
+      "transient",
+      "unknown",
+    ]);
+    for (const copy of Object.values(MODEL_PROVIDER_FAILURE_COPY_V1)) {
+      assertPlainV1(copy);
+    }
     assertPlainV1(RUN_FAILURE_FALLBACK_COPY_V1);
     for (const reason of USER_FACING_FAILURE_REASONS_V1) assertPlainV1(reason);
   });

@@ -16,9 +16,11 @@ import {
   type LlmUsageV1,
   type LoopStepContinuationV1,
   type NormalizedModelRequest,
+  ModelProviderFailureError,
   type Session,
   type SessionEvent,
   type StepOutcome,
+  StructuredOutputValidationError,
   type ToolCall,
   type ToolCallOccurrence,
   type ToolExecutionResult,
@@ -30,6 +32,13 @@ import {
   validateToolOccurrenceJournal,
 } from "@frockbot/kernel-contracts";
 import { type Context, Service } from "cordis";
+import {
+  defaultModelRetrySleepV1,
+  type ModelRetryPolicyRuntimeV1,
+  nextModelRetryV1,
+} from "./retry-policy.js";
+
+export * from "./retry-policy.js";
 
 declare module "cordis" {
   interface Events {
@@ -48,6 +57,8 @@ export interface AgentLoopConfig {
    * {@link TURN_DEADLINE_MS_V1}; named by a caller only to test it.
    */
   turnDeadlineMs?: number;
+  /** Deterministic retry seams; production uses wall time, Math.random and timers. */
+  retry?: Partial<ModelRetryPolicyRuntimeV1>;
   /** The Composition generation this mounted root was pinned to at admission. */
   composition: CompositionPinV1;
 }
@@ -146,13 +157,7 @@ class StepLimitReachedError extends Error {
  */
 export { TURN_DEADLINE_MS_V1 };
 
-/**
- * How many times one step will send its model request.
- *
- * Two: the first attempt and one retry. It applies only to a failure the
- * provider classified as never having started, so no retry can duplicate a
- * call that may already have run.
- */
+/** Legacy ceiling for unknown failures: the first attempt plus one retry. */
 export const MODEL_REQUEST_ATTEMPTS_V1 = 2;
 
 /** What a `turn/end` records when the Turn ran out of wall clock. */
@@ -239,6 +244,8 @@ class LoopAgent implements Agent {
   #turnDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
   #turnDeadlineReached = false;
   #turnDeadlineMs: number;
+  #turnDeadlineAt = 0;
+  #retry: ModelRetryPolicyRuntimeV1;
 
   constructor(
     ctx: Context,
@@ -247,6 +254,7 @@ class LoopAgent implements Agent {
     maxSteps: number,
     composition: CompositionPinV1,
     turnDeadlineMs: number,
+    retry: ModelRetryPolicyRuntimeV1,
   ) {
     this.#ctx = ctx;
     this.#composition = composition;
@@ -261,6 +269,7 @@ class LoopAgent implements Agent {
     this.#subagentRole = options.subagentRole;
     this.#maxSteps = maxSteps;
     this.#turnDeadlineMs = turnDeadlineMs;
+    this.#retry = retry;
   }
 
   get status(): AgentStatus {
@@ -331,6 +340,7 @@ class LoopAgent implements Agent {
   #armTurnDeadline(): void {
     this.#disarmTurnDeadline();
     this.#turnDeadlineReached = false;
+    this.#turnDeadlineAt = this.#retry.now() + this.#turnDeadlineMs;
     this.#turnDeadlineTimer = setTimeout(() => {
       this.#turnDeadlineReached = true;
       this.#controller?.abort(new Error(TURN_DEADLINE_REASON_V1));
@@ -414,6 +424,8 @@ class LoopAgent implements Agent {
     let unresolvedRequest: NormalizedModelRequest | undefined;
     let definitiveNoEffect:
       Extract<SessionEvent, { type: "model/effect-not-started" }> | undefined;
+    let definitiveResponseFailure:
+      Extract<SessionEvent, { type: "model/response-failed" }> | undefined;
     for (const event of this.session.events) {
       if (event.type === "turn/start") {
         openTurn = event.turn;
@@ -422,6 +434,7 @@ class LoopAgent implements Agent {
         latestStepOutcome = undefined;
         unresolvedRequest = undefined;
         definitiveNoEffect = undefined;
+        definitiveResponseFailure = undefined;
       }
       if (event.type === "turn/end" && event.turn === openTurn)
         openTurn = undefined;
@@ -441,12 +454,19 @@ class LoopAgent implements Agent {
       if (event.type === "model/request" && event.turn === openTurn) {
         unresolvedRequest = event.request;
         definitiveNoEffect = undefined;
+        definitiveResponseFailure = undefined;
       }
       if (
         event.type === "model/effect-not-started" &&
         event.requestId === unresolvedRequest?.requestId
       ) {
         definitiveNoEffect = event;
+      }
+      if (
+        event.type === "model/response-failed" &&
+        event.requestId === unresolvedRequest?.requestId
+      ) {
+        definitiveResponseFailure = event;
       }
       if (
         event.type === "assistant/message" &&
@@ -481,6 +501,22 @@ class LoopAgent implements Agent {
       let nextStep = latestStep === 0 ? 1 : latestStep + 1;
       if (unresolvedRequest) {
         openStep = latestStep;
+        if (definitiveResponseFailure) {
+          await this.#notifyModelOutcome(
+            definitiveResponseFailure.requestId,
+            "completed",
+          );
+          turnOutcome = "model-error";
+          turnReason = turnEndReason(definitiveResponseFailure.failure.message);
+          this.#ctx.emit(
+            "agent/error",
+            this,
+            new StructuredOutputValidationError(
+              definitiveResponseFailure.failure,
+            ),
+          );
+          return;
+        }
         if (definitiveNoEffect) {
           await this.#notifyModelOutcome(
             definitiveNoEffect.requestId,
@@ -1071,6 +1107,11 @@ class LoopAgent implements Agent {
       try {
         return await this.#consumeStream(request, turn, step, signal);
       } catch (error) {
+        if (error instanceof StructuredOutputValidationError) {
+          await this.session.flush();
+          await this.#notifyModelOutcome(request.requestId, "completed");
+          throw error;
+        }
         if (signal.aborted) {
           const reason = `Model response outcome is uncertain after cancellation: ${modelFailureMessage(error)}`;
           this.session.append({
@@ -1086,7 +1127,7 @@ class LoopAgent implements Agent {
             reason,
           );
         }
-        if (!(error instanceof LlmEffectNotStartedError)) {
+        if (!(error instanceof ModelProviderFailureError)) {
           const reason = `Model response outcome is uncertain: ${modelFailureMessage(error)}`;
           this.session.append({
             type: "model/reconciliation-required",
@@ -1110,10 +1151,15 @@ class LoopAgent implements Agent {
         });
         await this.session.flush();
         await this.#notifyModelOutcome(request.requestId, "not-started");
-        // The durable evidence of a retry is the log itself: a `model/request`,
-        // the `model/effect-not-started` just journaled against it, and then a
-        // second `model/request`. A Package listening on `agent/request-error`
-        // still has the final say in either direction.
+        const retry = nextModelRetryV1({
+          failure: error,
+          attempt: attempts,
+          deadlineAt: this.#turnDeadlineAt,
+          runtime: this.#retry,
+        });
+        // A Package can refuse a planned retry, or replace a permanent failure
+        // with a provider-owned fallback. It cannot turn a permanent failure
+        // into another attempt against the same model.
         const action = await this.#ctx.waterfall(
           "agent/request-error",
           this,
@@ -1121,13 +1167,25 @@ class LoopAgent implements Agent {
           signal,
           () =>
             Promise.resolve(
-              attempts < MODEL_REQUEST_ATTEMPTS_V1
+              retry
                 ? ({ kind: "retry" } as const)
                 : ({ kind: "fail" } as const),
             ),
         );
-        if (action.kind !== "retry") throw error;
+        if (action.kind === "fail") throw error;
+        if (action.kind === "retry" && !retry) throw error;
+        const delayMs = action.kind === "fallback" ? 0 : retry!.delayMs;
+        this.session.append({
+          type: "model/retry",
+          turn,
+          step,
+          attempt: attempts + 1,
+          classification: error.classification,
+          delayMs,
+        });
+        await this.session.flush();
         this.#ctx.emit("agent/error", this, error);
+        await this.#retry.sleep(delayMs, signal);
       }
     }
   }
@@ -1141,11 +1199,17 @@ class LoopAgent implements Agent {
     let text = "";
     const toolCalls: ToolCall[] = [];
     let usage: LlmUsageV1 | undefined;
+    let structuredFailure:
+      | Extract<
+          LlmStreamEvent,
+          { type: "structured-output-failure" }
+        >["failure"]
+      | undefined;
     let receivedProviderEvent = false;
     const startedAt = Date.now();
     try {
       for await (const event of this.#ctx.llm.stream(request, signal)) {
-        receivedProviderEvent = true;
+        if (event.type !== "response-format-note") receivedProviderEvent = true;
         signal.throwIfAborted();
         if (event.type === "usage") usage = structuredClone(event.usage);
         this.#applyStreamEvent(
@@ -1158,11 +1222,15 @@ class LoopAgent implements Agent {
             text += delta;
           },
         );
+        if (event.type === "structured-output-failure") {
+          structuredFailure = event.failure;
+        }
       }
     } catch (error) {
-      if (receivedProviderEvent && error instanceof LlmEffectNotStartedError) {
+      if (receivedProviderEvent && error instanceof ModelProviderFailureError) {
         const invalidNoEffectClaim = new Error(
-          "Model provider reported no effect after returning response data",
+          error.message ||
+            "Model provider reported a retryable failure after returning response data",
         );
         await this.#recordModelUsage(
           request,
@@ -1180,7 +1248,7 @@ class LoopAgent implements Agent {
       // counts when present and otherwise write the same explicit estimate as
       // a successful unmetered stream. A definitive no-effect result is the
       // sole exception because the provider says no billable call occurred.
-      if (!(error instanceof LlmEffectNotStartedError)) {
+      if (!(error instanceof ModelProviderFailureError)) {
         await this.#recordModelUsage(
           request,
           turn,
@@ -1202,6 +1270,9 @@ class LoopAgent implements Agent {
       toolCalls,
       Math.max(0, Date.now() - startedAt),
     );
+    if (structuredFailure) {
+      throw new StructuredOutputValidationError(structuredFailure);
+    }
     return { request, text, toolCalls };
   }
 
@@ -1249,6 +1320,12 @@ class LoopAgent implements Agent {
     let text = "";
     const toolCalls: ToolCall[] = [];
     let usage: LlmUsageV1 | undefined;
+    let structuredFailure:
+      | Extract<
+          LlmStreamEvent,
+          { type: "structured-output-failure" }
+        >["failure"]
+      | undefined;
     let textDeltaIndex = 0;
     const startedAt = Date.now();
     for (const event of reconciliation.events) {
@@ -1268,6 +1345,9 @@ class LoopAgent implements Agent {
         journalTextDelta,
       );
       if (event.type === "text-delta") textDeltaIndex += 1;
+      if (event.type === "structured-output-failure") {
+        structuredFailure = event.failure;
+      }
     }
     await this.#recordModelUsage(
       request,
@@ -1278,6 +1358,11 @@ class LoopAgent implements Agent {
       toolCalls,
       Math.max(0, Date.now() - startedAt),
     );
+    if (structuredFailure) {
+      await this.session.flush();
+      await this.#notifyModelOutcome(request.requestId, "completed");
+      throw new StructuredOutputValidationError(structuredFailure);
+    }
     return {
       status: "recovered",
       response: { request, text, toolCalls },
@@ -1340,6 +1425,22 @@ class LoopAgent implements Agent {
       }
     } else if (event.type === "tool-call") {
       toolCalls.push(event.call);
+    } else if (event.type === "response-format-note") {
+      this.session.append({
+        type: "model/response-format-note",
+        turn,
+        step,
+        requestId,
+        note: event.note,
+      });
+    } else if (event.type === "structured-output-failure") {
+      this.session.append({
+        type: "model/response-failed",
+        turn,
+        step,
+        requestId,
+        failure: event.failure,
+      });
     }
   }
 
@@ -1605,6 +1706,7 @@ export class AgentLoop extends Service implements AgentFactory {
   private maxSteps: number;
   private turnDeadlineMs: number;
   private composition: CompositionPinV1;
+  private retry: ModelRetryPolicyRuntimeV1;
   private handles = new Set<AgentHandle>();
 
   constructor(ctx: Context, config: AgentLoopConfig) {
@@ -1612,6 +1714,11 @@ export class AgentLoop extends Service implements AgentFactory {
     this.composition = config.composition;
     this.maxSteps = config.maxSteps ?? 20;
     this.turnDeadlineMs = config.turnDeadlineMs ?? TURN_DEADLINE_MS_V1;
+    this.retry = {
+      now: config.retry?.now ?? Date.now,
+      random: config.retry?.random ?? Math.random,
+      sleep: config.retry?.sleep ?? defaultModelRetrySleepV1,
+    };
     if (!Number.isInteger(this.maxSteps) || this.maxSteps <= 0) {
       throw new Error("agent-loop maxSteps must be a positive integer");
     }
@@ -1629,6 +1736,7 @@ export class AgentLoop extends Service implements AgentFactory {
       this.maxSteps,
       this.composition,
       this.turnDeadlineMs,
+      this.retry,
     );
     const unregister = this.ctx.agents.register(agent);
     let disposed = false;

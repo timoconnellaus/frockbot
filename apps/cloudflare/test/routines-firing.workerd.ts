@@ -19,6 +19,11 @@ import {
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
+import {
+  hydrateStoredRunEventsV1,
+  hydratedStoredRunsV1,
+  rewindStoredRunEventsV1,
+} from "./session-log-probe.ts";
 
 const HANDOFF = "Two overnight emails need you.";
 
@@ -38,6 +43,7 @@ interface FiringRpc {
 
 interface StoredRunProbe {
   runId: string;
+  sessionId: string;
   status: string;
   previousEventCount: number;
   admission?: { turnType: string; origin?: { routineId: string } };
@@ -101,11 +107,7 @@ async function storedRuns(identity: {
 }): Promise<StoredRunProbe[]> {
   return runInDurableObject(
     bot(identity.userId, identity.botId),
-    async (_instance, state) => [
-      ...(
-        await state.storage.list<StoredRunProbe>({ prefix: "run:" })
-      ).values(),
-    ],
+    (_instance, state) => hydratedStoredRunsV1<StoredRunProbe>(state.storage),
   );
 }
 
@@ -137,27 +139,15 @@ describe("a firing's durable consequences in Workerd", () => {
         const stored = (await state.storage.get<
           StoredRunProbe & { responseText?: string; failure?: string }
         >(key))!;
-        // A running run carries no completion fields; the codec says so.
-        const { responseText: _text, failure: _failure, ...run } = stored;
+        const run = await hydrateStoredRunEventsV1(state.storage, stored);
         const interrupted = run.events.filter(
           (event) => event.type !== "turn/end",
         );
-        const latest =
-          (await state.storage.get<Array<{ type: string }>>("latest-events")) ??
-          [];
-        await state.storage.put({
-          [key]: {
-            ...run,
-            events: interrupted,
-            status: "running",
-            phase: "executing",
-          },
-          "latest-events": [
-            ...latest.slice(0, run.previousEventCount),
-            ...interrupted,
-          ],
-          "active-run": settled!.runId,
+        await rewindStoredRunEventsV1(state.storage, key, stored, interrupted, {
+          status: "running",
+          phase: "executing",
         });
+        await state.storage.put("active-run", settled!.runId);
       },
     );
     await evictDurableObject(bot(identity.userId, identity.botId));

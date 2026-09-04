@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
+import { SessionEventLog, storedRunRecordV2 } from "@frockbot/kernel-do";
 import { createShellBotBackendContribution } from "./backend.js";
 import type { StoredRun } from "./backend-contracts.js";
 
@@ -152,6 +153,54 @@ describe("Bot debug snapshot", () => {
       failure: "model connection is unavailable",
     });
     expect(snapshot.activeRunId).toBeUndefined();
+  });
+
+  test("reads bounded projections instead of hydrating full model prompts", async () => {
+    const storage = new MemoryStorage();
+    const event = {
+      type: "model/request",
+      turn: 1,
+      step: 1,
+      request: {
+        requestId: "request-large",
+        provider: "fake",
+        model: "large-context",
+        system: "s".repeat(80_000),
+        messages: [{ role: "user", content: "last question" }],
+        tools: [],
+      },
+      seq: 0,
+      timestamp: "2026-08-28T00:00:01.000Z",
+    } as StoredRun["events"][number];
+    const run = storedRun({ events: [event] });
+    await new SessionEventLog(storage).rewrite(run.sessionId, [event]);
+    await storage.put({
+      identity: IDENTITY,
+      [`run:${run.runId}`]: storedRunRecordV2(run),
+      [`run-index:${run.acceptedAt}:${run.runId}`]: run.runId,
+    });
+
+    const snapshot = await contributionOver(storage).debugSnapshot(IDENTITY, {
+      schemaVersion: 1,
+      runId: run.runId,
+    });
+
+    expect(snapshot.runs[0]?.eventCount).toBe(1);
+    expect(snapshot.runs[0]?.events?.[0]).toMatchObject({
+      type: "model/request",
+      cut: { marker: "content-cut", originalBytes: expect.any(Number) },
+      request: {
+        requestId: "request-large",
+        messageCount: 1,
+        toolCount: 0,
+        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        truncated: true,
+      },
+    });
+    expect(JSON.stringify(snapshot)).not.toContain("s".repeat(10_000));
+    expect(
+      new TextEncoder().encode(JSON.stringify(snapshot)).byteLength,
+    ).toBeLessThan(20_000);
   });
 
   test("includes an active run older than the page it would otherwise fall off", async () => {

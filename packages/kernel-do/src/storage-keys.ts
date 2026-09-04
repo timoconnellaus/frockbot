@@ -16,7 +16,11 @@ export const ACTIVE_RUN_KEY = "active-run";
  * working through a backlog of things the User has already replaced.
  */
 export const PENDING_RUN_KEY = "pending-run";
+/** Legacy pre-ADR-0033 Session value, read only for transparent migration. */
 export const LATEST_EVENTS_KEY = "latest-events";
+export const SESSION_EVENT_LOG_INDEX_PREFIX = "session-events:index:";
+export const SESSION_EVENT_LOG_PAGE_PREFIX = "session-events:page:";
+export const SESSION_EVENT_PAYLOAD_PREFIX = "session-events:payload:";
 export const IDENTITY_KEY = "identity";
 export const NOTIFICATION_PREFIX = "notification:";
 export const COMPOSITION_CURRENT_KEY = "composition:current";

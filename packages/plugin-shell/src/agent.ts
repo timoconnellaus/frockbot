@@ -46,7 +46,12 @@ import {
   turnScopedMessagesV1,
   turnTypesByTurnV1,
 } from "./history.js";
-import { runCompactionV1 } from "./compaction.js";
+import {
+  COMPACTION_RESPONSE_SCHEMA_V1,
+  type CompactionSummaryPayloadV1,
+  renderCompactionSummaryV1,
+  runCompactionV1,
+} from "./compaction.js";
 import { compactionWorkV1 } from "./compaction-scheduler.js";
 import type { Plugin } from "cordis";
 import manifest from "../frockbot.json" with { type: "json" };
@@ -449,27 +454,32 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
               currentTurn: turn,
               newEffectId: () => `compaction-${crypto.randomUUID()}`,
               summarise: async (request) => {
-                let text = "";
                 // Two deadlines, one call: the compaction's own, and the abort
                 // a newly admitted Turn raises when it takes the log back.
                 const cancelled = AbortSignal.any([request.signal, signal]);
-                for await (const event of scoped.llm.stream(
-                  {
-                    requestId: `compaction-${crypto.randomUUID()}`,
-                    provider: request.provider,
-                    model: request.model,
-                    system: request.system,
-                    messages: request.messages,
-                    tools: [],
-                    ...(request.modelBinding
-                      ? { modelBinding: request.modelBinding }
-                      : {}),
-                  },
-                  cancelled,
-                )) {
-                  if (event.type === "text-delta") text += event.text;
+                const result =
+                  await scoped.llm.structured<CompactionSummaryPayloadV1>(
+                    {
+                      requestId: `compaction-${crypto.randomUUID()}`,
+                      provider: request.provider,
+                      model: request.model,
+                      system: request.system,
+                      messages: request.messages,
+                      tools: [],
+                      ...(request.modelBinding
+                        ? { modelBinding: request.modelBinding }
+                        : {}),
+                    },
+                    {
+                      name: "conversation_compaction",
+                      schema: COMPACTION_RESPONSE_SCHEMA_V1,
+                    },
+                    cancelled,
+                  );
+                if (result.status === "failed") {
+                  throw new Error(result.failure.message);
                 }
-                return text;
+                return renderCompactionSummaryV1(result.value);
               },
             });
           });

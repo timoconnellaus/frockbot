@@ -82,7 +82,8 @@ export function latestModelRequestJournalState(
     ) {
       state = { status: "no-effect", request: state.request, outcome: event };
     } else if (
-      event.type === "assistant/message" &&
+      (event.type === "assistant/message" ||
+        event.type === "model/response-failed") &&
       state.status !== "none" &&
       event.requestId === state.request.request.requestId
     ) {

@@ -7,7 +7,6 @@
 // The server is impersonated at the outbound seam, exactly as in
 // `mcp-tools.integration.ts`: nothing crosses a Package boundary to make it
 // work, so the request shapes are the production ones.
-import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import {
   MCP_ENDPOINT,
@@ -20,6 +19,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -57,10 +57,6 @@ interface McpReceipt {
 interface StoredRun {
   runId: string;
   events: { type: string; [key: string]: unknown }[];
-}
-
-function botStub(userId: string, botId: string) {
-  return env.BOT_STATES.get(env.BOT_STATES.idFromName(`${userId}:${botId}`));
 }
 
 async function installMcp(userId: string): Promise<void> {
@@ -116,10 +112,7 @@ async function offeredTools(
   botId: string,
   runId: string,
 ): Promise<{ name: string; description?: string }[]> {
-  const run = await runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => state.storage.get<StoredRun>(`run:${runId}`),
-  );
+  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
   expect(run).toBeDefined();
   const request = run!.events.find((event) => event.type === "model/request");
   expect(request).toBeDefined();

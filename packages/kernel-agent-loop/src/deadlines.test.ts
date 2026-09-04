@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   LlmEffectNotStartedError,
   type LlmProvider,
+  ModelProviderFailureError,
   SessionStore,
 } from "@frockbot/kernel-contracts";
 import { LlmRegistry } from "@frockbot/plugin-models";
@@ -24,7 +25,14 @@ afterEach(async () => {
 
 async function mount(
   provider: LlmProvider,
-  config: { turnDeadlineMs?: number } = {},
+  config: {
+    turnDeadlineMs?: number;
+    retry?: {
+      now?: () => number;
+      random?: () => number;
+      sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+    };
+  } = {},
 ): Promise<Context> {
   const root = new Context();
   roots.push(root);
@@ -243,6 +251,11 @@ describe("a model request the provider says never started", () => {
         (event) => event.type === "model/effect-not-started",
       ),
     ).toHaveLength(1);
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/retry",
+      ),
+    ).toHaveLength(1);
   });
 
   test("is not retried a second time", async () => {
@@ -303,6 +316,121 @@ describe("a model request the provider says never started", () => {
         (event) => event.type === "model/reconciliation-required",
       ),
     ).toBe(true);
+  });
+});
+
+describe("classified model retry policy", () => {
+  test("backs off with injected time and random before a transient retry", async () => {
+    let attempts = 0;
+    let now = 10_000;
+    const sleeps: number[] = [];
+    const provider: LlmProvider = {
+      id: "transient-once",
+      async *stream() {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new ModelProviderFailureError({
+            classification: "transient",
+            reason: "service unavailable",
+          });
+        }
+        yield { type: "text-delta", text: "Recovered." } as const;
+        yield { type: "finish", reason: "completed" } as const;
+      },
+    };
+    const root = await mount(provider, {
+      retry: {
+        now: () => now,
+        random: () => 1,
+        sleep: (milliseconds) => {
+          sleeps.push(milliseconds);
+          now += milliseconds;
+          return Promise.resolve();
+        },
+      },
+    });
+    const handle = await root.agents.create({
+      botId: "transient-bot",
+      sessionId: "transient",
+      provider: provider.id,
+      model: "test-model",
+      admitEffect: allowEffect,
+    });
+
+    handle.agent.send("Try the provider.");
+    await handle.agent.whenIdle();
+
+    expect(attempts).toBe(2);
+    expect(sleeps).toEqual([500]);
+    expect(
+      handle.agent.session.events.find((event) => event.type === "model/retry"),
+    ).toMatchObject({
+      attempt: 2,
+      classification: "transient",
+      delayMs: 500,
+    });
+  });
+
+  test("does not retry a permanent failure", async () => {
+    let attempts = 0;
+    const provider: LlmProvider = {
+      id: "permanent",
+      async *stream() {
+        attempts += 1;
+        throw new ModelProviderFailureError({
+          classification: "permanent",
+          reason: "credentials were refused",
+        });
+      },
+    };
+    const root = await mount(provider);
+    const handle = await root.agents.create({
+      botId: "permanent-bot",
+      sessionId: "permanent",
+      provider: provider.id,
+      model: "test-model",
+      admitEffect: allowEffect,
+    });
+
+    handle.agent.send("Try the provider.");
+    await handle.agent.whenIdle();
+
+    expect(attempts).toBe(1);
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/retry",
+      ),
+    ).toHaveLength(0);
+  });
+
+  test("does not schedule a retry beyond the remaining Turn deadline", async () => {
+    let attempts = 0;
+    const provider: LlmProvider = {
+      id: "deadline-bound",
+      async *stream() {
+        attempts += 1;
+        throw new ModelProviderFailureError({
+          classification: "transient",
+          reason: "service unavailable",
+        });
+      },
+    };
+    const root = await mount(provider, {
+      turnDeadlineMs: 400,
+      retry: { now: () => 0, random: () => 1 },
+    });
+    const handle = await root.agents.create({
+      botId: "bounded-bot",
+      sessionId: "bounded",
+      provider: provider.id,
+      model: "test-model",
+      admitEffect: allowEffect,
+    });
+
+    handle.agent.send("Try the provider.");
+    await handle.agent.whenIdle();
+
+    expect(attempts).toBe(1);
   });
 });
 

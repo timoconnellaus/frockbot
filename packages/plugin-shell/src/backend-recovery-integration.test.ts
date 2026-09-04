@@ -9,6 +9,7 @@ import {
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
+import { SessionEventLog } from "@frockbot/kernel-do";
 import { createShellBotBackendContribution } from "./backend.js";
 import {
   botTurnCommandFingerprintV1,
@@ -291,10 +292,23 @@ describe("Bot recovery", () => {
       },
     ]);
     expect(settledEffects).toHaveLength(2);
+    const eventLog = new SessionEventLog(storage);
     for (const runId of ["ollama-run-1", "ollama-run-2"]) {
-      const run = await storage.get<StoredRun>(`run:${runId}`);
+      const run = await storage.get<
+        Omit<StoredRun, "events"> & {
+          eventRange: { startSeq: number; endSeq: number };
+        }
+      >(`run:${runId}`);
+      expect(run).not.toHaveProperty("events");
+      const events = run
+        ? await eventLog.readRange(
+            "user-1:primary",
+            run.eventRange.startSeq,
+            run.eventRange.endSeq,
+          )
+        : [];
       expect(
-        run?.events.find((event) => event.type === "model/request"),
+        events.find((event) => event.type === "model/request"),
       ).toMatchObject({
         request: {
           provider: "ollama-cloud",

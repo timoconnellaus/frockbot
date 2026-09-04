@@ -12,6 +12,7 @@ import {
   asUser,
   expectOkJson,
   freshUserId,
+  hydratedStoredRunsV1,
   postAsUser,
   provisionThroughGateway,
   toolCallTriggerPrompt,
@@ -215,11 +216,12 @@ describe("turn admission through the gateway and the Bot", () => {
         // `run:` and nothing else: other durable records name the same run
         // (the admission idempotency record among them) and carry no events,
         // so an unprefixed scan can answer with the wrong one.
-        const stored = await state.storage.list<{
+        const stored = await hydratedStoredRunsV1<{
           runId: string;
+          sessionId: string;
           events: Array<{ type: string }>;
-        }>({ prefix: "run:" });
-        const record = [...stored.values()].find(
+        }>(state.storage);
+        const record = stored.find(
           (value) =>
             typeof value === "object" &&
             value !== null &&

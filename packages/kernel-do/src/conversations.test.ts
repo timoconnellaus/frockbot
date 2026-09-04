@@ -16,6 +16,7 @@ import {
 } from "./conversations.ts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
 import { createStoredRunCodecV1 } from "./run-records.ts";
+import { SessionEventLog } from "./session-event-log.ts";
 
 const codec = createStoredRunCodecV1<undefined>({
   decodeRunId: (value) => value as string,
@@ -108,20 +109,17 @@ describe("starting a new conversation", () => {
     const probe = createAuthority(storage);
 
     await probe.authority.run(command("run-1"));
-    expect((storage.values.get("latest-events") as SessionEvent[]).length).toBe(
-      1,
-    );
+    const log = new SessionEventLog(storage);
+    expect((await log.read("user-1:primary")).length).toBe(1);
 
     const started = await probe.authority.startConversation(IDENTITY);
     expect(started.ordinal).toBe(2);
     expect(started.sessionId).toBe("user-1:primary#2");
-    // The unbounded log is the bug: the next Turn starts from nothing.
-    expect(storage.values.get("latest-events")).toEqual([]);
+    // The next Turn starts from a distinct, empty paged log.
+    expect(await log.read("user-1:primary#2")).toEqual([]);
     // The conversation just ended is still on disk, Turn for Turn.
-    expect(
-      (storage.values.get("run:run-1") as { events: SessionEvent[] }).events
-        .length,
-    ).toBe(1);
+    expect((await probe.authority.readRun("run-1"))?.events.length).toBe(1);
+    expect(storage.values.get("run:run-1")).not.toHaveProperty("events");
 
     await probe.authority.run(command("run-2"));
     // The new Turn ran in the new Session, and saw none of the old history.

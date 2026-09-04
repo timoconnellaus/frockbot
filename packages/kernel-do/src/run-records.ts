@@ -133,6 +133,12 @@ export interface StoredRunV1<Snapshot = unknown> {
   acceptedAt: string;
   input: string;
   events: SessionEvent[];
+  /**
+   * Inclusive/exclusive coordinates of this Turn in the authoritative Session
+   * log. New durable records carry this instead of embedding `events`; the
+   * in-memory record is hydrated through the Session log accessor.
+   */
+  eventRange?: StoredRunEventRangeV1;
   effectAdmissions: StoredEffectAdmission[];
   status: StoredRunStatus;
   responseText?: string;
@@ -157,6 +163,44 @@ export interface StoredRunV1<Snapshot = unknown> {
   admission?: StoredRunAdmissionV1;
   /** An ordinary admitted Turn whose only action is one caller-selected tool. */
   directTool?: DirectToolCommandV1;
+}
+
+export interface StoredRunEventRangeV1 {
+  startSeq: number;
+  endSeq: number;
+}
+
+/** Keeps a hydrated journal and its durable coordinates in lockstep. */
+export function storedRunEventFieldsV2(
+  previousEventCount: number,
+  events: SessionEvent[],
+): { events: SessionEvent[]; eventRange: StoredRunEventRangeV1 } {
+  return {
+    events,
+    eventRange: {
+      startSeq: previousEventCount,
+      endSeq: previousEventCount + events.length,
+    },
+  };
+}
+
+/**
+ * The compact durable run shape. Keeping this encoder beside the strict
+ * decoder makes it difficult for a metadata update to accidentally put a
+ * hydrated multi-megabyte journal back into one SQLite value.
+ */
+export function storedRunRecordV2<Snapshot>(
+  run: StoredRunV1<Snapshot>,
+): Omit<StoredRunV1<Snapshot>, "events"> {
+  const { events, ...record } = run;
+  const eventRange =
+    events.length === 0 && run.eventRange
+      ? run.eventRange
+      : {
+          startSeq: run.previousEventCount,
+          endSeq: run.previousEventCount + events.length,
+        };
+  return { ...record, eventRange };
 }
 
 export interface DirectToolCommandV1 {
@@ -246,7 +290,6 @@ const STORED_RUN_REQUIRED_KEYS = [
   "sessionId",
   "acceptedAt",
   "input",
-  "events",
   "effectAdmissions",
   "status",
   "phase",
@@ -255,6 +298,8 @@ const STORED_RUN_REQUIRED_KEYS = [
   "previousEventCount",
 ] as const;
 const STORED_RUN_OPTIONAL_KEYS = [
+  "events",
+  "eventRange",
   "responseText",
   "failure",
   "stopRequestedAt",
@@ -483,6 +528,32 @@ function decodeStoredRunEvents(value: unknown): SessionEvent[] {
   return value.map(decodeSessionEvent);
 }
 
+function decodeStoredRunEventRange(
+  value: unknown,
+  runId: string,
+): StoredRunEventRangeV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`run "${runId}" has an invalid event range`);
+  }
+  const candidate = value as Record<PropertyKey, unknown>;
+  if (
+    Reflect.ownKeys(candidate).length !== 2 ||
+    Object.keys(candidate).length !== 2 ||
+    !Object.hasOwn(candidate, "startSeq") ||
+    !Object.hasOwn(candidate, "endSeq") ||
+    !Number.isSafeInteger(candidate.startSeq) ||
+    !Number.isSafeInteger(candidate.endSeq) ||
+    (candidate.startSeq as number) < 0 ||
+    (candidate.endSeq as number) < (candidate.startSeq as number)
+  ) {
+    throw new Error(`run "${runId}" has an invalid event range`);
+  }
+  return {
+    startSeq: candidate.startSeq as number,
+    endSeq: candidate.endSeq as number,
+  };
+}
+
 const STORED_EFFECT_ADMISSIONS_MAX = 256;
 const STORED_EFFECT_ID_MAX_BYTES = 512;
 
@@ -582,7 +653,17 @@ function requireStoredRunRecordV1<Snapshot>(
   if (!boundedString(candidate.input, 32_000)) {
     throw new Error(`run "${runId}" has no valid input`);
   }
-  const events = decodeStoredRunEvents(candidate.events);
+  if (candidate.events === undefined && candidate.eventRange === undefined) {
+    throw new Error(`run "${runId}" has no event journal reference`);
+  }
+  const events =
+    candidate.events === undefined
+      ? []
+      : decodeStoredRunEvents(candidate.events);
+  const eventRange =
+    candidate.eventRange === undefined
+      ? undefined
+      : decodeStoredRunEventRange(candidate.eventRange, runId);
   const effectAdmissions = decodeStoredEffectAdmissions(
     candidate.effectAdmissions,
   );
@@ -604,6 +685,15 @@ function requireStoredRunRecordV1<Snapshot>(
     (candidate.previousEventCount as number) < 0
   ) {
     throw new Error(`run "${runId}" has no valid previous event count`);
+  }
+  if (
+    eventRange &&
+    (eventRange.startSeq !== candidate.previousEventCount ||
+      (events.length > 0 &&
+        (events[0]?.seq !== eventRange.startSeq ||
+          events.at(-1)!.seq + 1 !== eventRange.endSeq)))
+  ) {
+    throw new Error(`run "${runId}" has an inconsistent event range`);
   }
   const configurationSnapshot = options.decodeConfigurationSnapshot(
     candidate.configurationSnapshot,
@@ -679,6 +769,7 @@ function requireStoredRunRecordV1<Snapshot>(
     acceptedAt: candidate.acceptedAt,
     input: candidate.input,
     events,
+    ...(eventRange ? { eventRange } : {}),
     effectAdmissions,
     status,
     phase,

@@ -91,6 +91,7 @@ function settleBotTurn(
       events.some(
         (event) =>
           (event.type === "assistant/message" ||
+            event.type === "model/response-failed" ||
             event.type === "model/effect-not-started") &&
           event.requestId === latestRequest.request.requestId,
       );

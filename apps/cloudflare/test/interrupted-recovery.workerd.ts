@@ -20,6 +20,11 @@ import {
 } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
+import {
+  hydrateStoredRunEventsV1,
+  hydratedStoredRunsV1,
+  rewindStoredRunEventsV1,
+} from "./session-log-probe.ts";
 
 /**
  * How far ahead a test arms an alarm it is about to fire by hand.
@@ -45,6 +50,7 @@ interface RecoveryRpc {
 
 interface StoredRunProbe {
   runId: string;
+  sessionId: string;
   status: string;
   previousEventCount: number;
   stopRequestedAt?: string;
@@ -63,11 +69,7 @@ async function storedRuns(identity: {
 }): Promise<StoredRunProbe[]> {
   return runInDurableObject(
     bot(identity.userId, identity.botId),
-    async (_instance, state) => [
-      ...(
-        await state.storage.list<StoredRunProbe>({ prefix: "run:" })
-      ).values(),
-    ],
+    (_instance, state) => hydratedStoredRunsV1<StoredRunProbe>(state.storage),
   );
 }
 
@@ -96,23 +98,14 @@ async function rewindToStopped(
       const stored = (await state.storage.get<
         StoredRunProbe & { responseText?: string; failure?: string }
       >(key))!;
-      // A running run carries no completion fields; the codec says so.
-      const { responseText: _text, failure: _failure, ...run } = stored;
+      const run = await hydrateStoredRunEventsV1(state.storage, stored);
       const open = run.events.filter((event) => event.type !== "turn/end");
-      const latest =
-        (await state.storage.get<Array<{ type: string }>>("latest-events")) ??
-        [];
-      await state.storage.put({
-        [key]: {
-          ...run,
-          events: open,
-          status: "running",
-          phase: "executing",
-          stopRequestedAt: new Date().toISOString(),
-        },
-        "latest-events": [...latest.slice(0, run.previousEventCount), ...open],
-        "active-run": runId,
+      await rewindStoredRunEventsV1(state.storage, key, stored, open, {
+        status: "running",
+        phase: "executing",
+        stopRequestedAt: new Date().toISOString(),
       });
+      await state.storage.put("active-run", runId);
     },
   );
 }

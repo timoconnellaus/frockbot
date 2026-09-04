@@ -8,7 +8,13 @@ import type {
   StoredRunCodecV1,
   StoredRunV1,
 } from "./run-records.js";
+import { storedRunRecordV2 } from "./run-records.js";
+import { storedRunEventFieldsV2 } from "./run-records.js";
 import { repairedSessionLogV1 } from "./run-recovery.js";
+import {
+  SessionEventLog,
+  type SessionEventLogStorage,
+} from "./session-event-log.js";
 
 /**
  * The events a terminal settlement commits, with any Turn they were left
@@ -57,17 +63,31 @@ function settledEventsV1(
   };
 }
 
-export interface RunTerminalStorage {
-  get<T>(key: string): Promise<T | undefined>;
-  put(entries: Record<string, unknown>): Promise<void>;
-  delete(key: string): Promise<boolean>;
-}
+export interface RunTerminalStorage extends SessionEventLogStorage {}
 
 export interface RunTerminalKeys {
   run: string;
   activeRun: string;
   latestEvents: string;
   notificationPrefix: string;
+}
+
+async function hydratedRun<Snapshot>(
+  codec: StoredRunCodecV1<Snapshot>,
+  storage: RunTerminalStorage,
+  key: string,
+): Promise<StoredRunV1<Snapshot> | undefined> {
+  const stored = codec.optional(await storage.get<unknown>(key));
+  if (!stored?.eventRange) return stored;
+  const events = await new SessionEventLog(storage).readRange(
+    stored.sessionId,
+    stored.eventRange.startSeq,
+    stored.eventRange.endSeq,
+  );
+  if (events.length !== stored.eventRange.endSeq - stored.eventRange.startSeq) {
+    throw new Error(`run "${stored.runId}" has an incomplete event range`);
+  }
+  return codec.require({ ...stored, events });
 }
 
 /**
@@ -126,9 +146,8 @@ export async function supersedeStoredRun<Snapshot>(
   events: readonly SessionEvent[],
   packageRecords?: SupersededPackageRecords<Snapshot>,
 ): Promise<"superseded"> {
-  const stored = await storage.get<StoredRunV1<Snapshot>>(keys.run);
-  if (!stored) throw new Error(`run "${runId}" was not accepted`);
-  const run = codec.require(stored);
+  const run = await hydratedRun(codec, storage, keys.run);
+  if (!run) throw new Error(`run "${runId}" was not accepted`);
   if (!run.supersededAt) {
     throw new Error(`run "${runId}" has no durable supersede intent`);
   }
@@ -141,7 +160,10 @@ export async function supersedeStoredRun<Snapshot>(
   const queued = settled.phase === "queued";
   const superseded = codec.require({
     ...settled,
-    events: queued ? [] : decodedEvents,
+    ...storedRunEventFieldsV2(
+      run.previousEventCount,
+      queued ? [] : decodedEvents,
+    ),
     status: "superseded",
     phase:
       settled.phase === "reconciliation-required"
@@ -151,12 +173,7 @@ export async function supersedeStoredRun<Snapshot>(
           : settled.phase,
   } satisfies StoredRunV1<Snapshot>);
   const records: Record<string, unknown> = {
-    [keys.run]: structuredClone(superseded),
-    ...(queued
-      ? {}
-      : {
-          [keys.latestEvents]: structuredClone(settledEvents.latestEvents),
-        }),
+    [keys.run]: structuredClone(storedRunRecordV2(superseded)),
   };
   if (packageRecords && !queued) {
     const contributed = await packageRecords({
@@ -167,6 +184,12 @@ export async function supersedeStoredRun<Snapshot>(
     for (const [key, value] of Object.entries(contributed)) {
       records[key] = structuredClone(value);
     }
+  }
+  if (!queued) {
+    await new SessionEventLog(storage).rewrite(
+      run.sessionId,
+      settledEvents.latestEvents,
+    );
   }
   await storage.put(records);
   if ((await storage.get<string>(keys.activeRun)) === runId) {
@@ -187,9 +210,8 @@ export async function completeStoredRun<Snapshot>(
 ): Promise<"completed" | "cancelled" | "superseded"> {
   const activeRunId = await storage.get<string>(keys.activeRun);
   if (activeRunId !== runId) throw new Error(`run "${runId}" is not active`);
-  const stored = await storage.get<StoredRunV1<Snapshot>>(keys.run);
-  if (!stored) throw new Error(`run "${runId}" was not accepted`);
-  const run = codec.require(stored);
+  const run = await hydratedRun(codec, storage, keys.run);
+  if (!run) throw new Error(`run "${runId}" was not accepted`);
   const events = result.events.map(decodeSessionEvent);
   const latestEvents = [...previous, ...events].map(decodeSessionEvent);
   // Stop outranks supersede: the User asked for this Turn to stop, and a
@@ -212,29 +234,28 @@ export async function completeStoredRun<Snapshot>(
     const { responseText: _text, failure: _failure, ...settled } = run;
     const cancelled = codec.require({
       ...settled,
-      events,
+      ...storedRunEventFieldsV2(run.previousEventCount, events),
       status: "cancelled",
       phase:
         settled.phase === "reconciliation-required"
           ? "executing"
           : settled.phase,
     } satisfies StoredRunV1<Snapshot>);
+    await new SessionEventLog(storage).rewrite(run.sessionId, latestEvents);
     await storage.put({
-      [keys.run]: structuredClone(cancelled),
-      [keys.latestEvents]: structuredClone(latestEvents),
+      [keys.run]: structuredClone(storedRunRecordV2(cancelled)),
     });
     await storage.delete(keys.activeRun);
     return "cancelled";
   }
   const completed = codec.require({
     ...run,
-    events,
+    ...storedRunEventFieldsV2(run.previousEventCount, events),
     status: "completed",
     responseText: result.text,
   } satisfies StoredRunV1<Snapshot>);
   const records: Record<string, unknown> = {
-    [keys.run]: structuredClone(completed),
-    [keys.latestEvents]: structuredClone(latestEvents),
+    [keys.run]: structuredClone(storedRunRecordV2(completed)),
   };
   if (result.notification) {
     records[`${keys.notificationPrefix}${result.notification.notificationId}`] =
@@ -250,6 +271,7 @@ export async function completeStoredRun<Snapshot>(
       records[key] = structuredClone(value);
     }
   }
+  await new SessionEventLog(storage).rewrite(run.sessionId, latestEvents);
   await storage.put(records);
   await storage.delete(keys.activeRun);
   return "completed";
@@ -267,9 +289,8 @@ export async function cancelStoredRun<Snapshot>(
   previous: readonly SessionEvent[],
   events: readonly SessionEvent[],
 ): Promise<"cancelled" | "preserved-completion" | "missing"> {
-  const stored = await storage.get<StoredRunV1<Snapshot>>(keys.run);
-  if (!stored) return "missing";
-  const run = codec.require(stored);
+  const run = await hydratedRun(codec, storage, keys.run);
+  if (!run) return "missing";
   if (run.status === "completed") return "preserved-completion";
   if (!run.stopRequestedAt) {
     throw new Error(`run "${runId}" has no durable stop intent`);
@@ -280,14 +301,14 @@ export async function cancelStoredRun<Snapshot>(
   const { responseText: _text, failure: _failure, ...settled } = run;
   const cancelled = codec.require({
     ...settled,
-    events: decodedEvents,
+    ...storedRunEventFieldsV2(run.previousEventCount, decodedEvents),
     status: "cancelled",
     phase:
       settled.phase === "reconciliation-required" ? "executing" : settled.phase,
   } satisfies StoredRunV1<Snapshot>);
+  await new SessionEventLog(storage).rewrite(run.sessionId, latestEvents);
   await storage.put({
-    [keys.run]: structuredClone(cancelled),
-    [keys.latestEvents]: structuredClone(latestEvents),
+    [keys.run]: structuredClone(storedRunRecordV2(cancelled)),
   });
   if ((await storage.get<string>(keys.activeRun)) === runId) {
     await storage.delete(keys.activeRun);
@@ -307,9 +328,8 @@ export async function failStoredRun<Snapshot>(
 ): Promise<
   "failed" | "cancelled" | "superseded" | "preserved-completion" | "missing"
 > {
-  const stored = await storage.get<StoredRunV1<Snapshot>>(keys.run);
-  if (!stored) return "missing";
-  const run = codec.require(stored);
+  const run = await hydratedRun(codec, storage, keys.run);
+  if (!run) return "missing";
   if (run.status === "completed") return "preserved-completion";
   // A stopped run never becomes `failed`: Stop is the durable outcome.
   if (run.stopRequestedAt) {
@@ -332,15 +352,13 @@ export async function failStoredRun<Snapshot>(
   const latestEvents = settledEvents.latestEvents;
   const failed = codec.require({
     ...run,
-    events: decodedEvents,
+    ...storedRunEventFieldsV2(run.previousEventCount, decodedEvents),
     status: "failed",
     phase: run.phase === "reconciliation-required" ? "executing" : run.phase,
     failure,
   } satisfies StoredRunV1<Snapshot>);
-  await storage.put({
-    [keys.run]: structuredClone(failed),
-    [keys.latestEvents]: structuredClone(latestEvents),
-  });
+  await new SessionEventLog(storage).rewrite(run.sessionId, latestEvents);
+  await storage.put({ [keys.run]: structuredClone(storedRunRecordV2(failed)) });
   if ((await storage.get<string>(keys.activeRun)) === runId) {
     await storage.delete(keys.activeRun);
   }
@@ -358,20 +376,19 @@ export async function requireStoredRunReconciliation<Snapshot>(
 ): Promise<void> {
   const activeRunId = await storage.get<string>(keys.activeRun);
   if (activeRunId !== runId) throw new Error(`run "${runId}" is not active`);
-  const stored = await storage.get<StoredRunV1<Snapshot>>(keys.run);
-  if (!stored) throw new Error(`run "${runId}" was not accepted`);
-  const run = codec.require(stored);
+  const run = await hydratedRun(codec, storage, keys.run);
+  if (!run) throw new Error(`run "${runId}" was not accepted`);
   const decodedEvents = events.map(decodeSessionEvent);
   const latestEvents = [...previous, ...decodedEvents].map(decodeSessionEvent);
   const reconciliation = codec.require({
     ...run,
-    events: decodedEvents,
+    ...storedRunEventFieldsV2(run.previousEventCount, decodedEvents),
     status: "reconciliation-required",
     phase: "reconciliation-required",
     failure,
   } satisfies StoredRunV1<Snapshot>);
+  await new SessionEventLog(storage).rewrite(run.sessionId, latestEvents);
   await storage.put({
-    [keys.run]: structuredClone(reconciliation),
-    [keys.latestEvents]: structuredClone(latestEvents),
+    [keys.run]: structuredClone(storedRunRecordV2(reconciliation)),
   });
 }

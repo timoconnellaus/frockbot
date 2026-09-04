@@ -11,6 +11,7 @@ import {
 import manifest from "../frockbot.json" with { type: "json" };
 import packageJson from "../package.json" with { type: "json" };
 import foundationProviderPlugin, {
+  classifyFoundationFailureV1,
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
 } from "./runtime.js";
@@ -33,6 +34,11 @@ async function collect(
 }
 
 describe("foundation provider plugin", () => {
+  test("classifies its only pre-stream failure shape as unknown", () => {
+    const failure = classifyFoundationFailureV1(new Error("local failure"));
+    expect(failure.classification).toBe("unknown");
+    expect(failure.providerReason).toBe("local failure");
+  });
   test("registers deterministic provider behavior for its fiber lifetime", async () => {
     const harness = await createPluginHarness([LlmRegistry]);
     const fiber = await harness.mount(foundationProviderPlugin);

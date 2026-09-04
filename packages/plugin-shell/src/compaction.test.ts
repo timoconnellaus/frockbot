@@ -15,6 +15,7 @@ import {
   parseCompactionSummaryV1,
   PRUNED_TOOL_RESULT_V1,
   pruneToolOutputsV1,
+  renderCompactionSummaryV1,
   runCompactionV1,
   COMPACTION_TRIGGER_RATIO_V1,
 } from "./compaction.js";
@@ -385,6 +386,31 @@ describe("injecting a compaction", () => {
 });
 
 describe("reading the summariser's answer", () => {
+  test("renders the validated fields into the durable heading format", () => {
+    expect(
+      renderCompactionSummaryV1({
+        summary: "Work on the Applet.",
+        decisions: ["Keep the first design."],
+        openItems: [],
+        identifiers: ["applet-9f2c"],
+      }),
+    ).toBe(
+      [
+        "## Summary",
+        "Work on the Applet.",
+        "",
+        "## Decisions",
+        "- Keep the first design.",
+        "",
+        "## Open items",
+        "- none",
+        "",
+        "## Identifiers mentioned",
+        "- applet-9f2c",
+      ].join("\n"),
+    );
+  });
+
   test("lifts the identifiers out of their heading", () => {
     const parsed = parseCompactionSummaryV1(
       [

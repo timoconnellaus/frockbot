@@ -39,6 +39,26 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => root.fiber.dispose()));
 });
 
+test("a model retry is a small exact durable session event", () => {
+  const event = {
+    type: "model/retry",
+    turn: 1,
+    step: 2,
+    attempt: 3,
+    classification: "transient",
+    delayMs: 1_000,
+    seq: 0,
+    timestamp,
+  } as const;
+  expect(decodeSessionEvent(event)).toEqual(event);
+  expect(() =>
+    decodeSessionEvent({ ...event, reason: "large envelope" }),
+  ).toThrow(/invalid fields/);
+  expect(() =>
+    decodeSessionEvent({ ...event, classification: "maybe" }),
+  ).toThrow(/classification is invalid/);
+});
+
 test("a Bot-isolate hook failure is an exact durable session event", () => {
   const event = {
     type: "package/hook-failed",

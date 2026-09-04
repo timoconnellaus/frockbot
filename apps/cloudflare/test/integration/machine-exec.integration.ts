@@ -14,12 +14,11 @@
 //      a preamble line, and `machine_command_check` reads the whole thing;
 //   6. `GET /api/audit?target=machine:<id>` has the one shell row, with the
 //      command itself absent and a digest in its place.
-import { runInDurableObject, SELF } from "cloudflare:test";
+import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { machineRoutePathV1 } from "@frockbot/machine-protocol";
 import { MachineAgentDriverV1 } from "@frockbot/plugin-user-machine/testing";
 import type { AuditEntryV1 } from "@frockbot/plugin-audit";
-import { env } from "cloudflare:test";
 import { toolCallTriggerPrompt } from "../harness/miniflare.ts";
 import {
   asUser,
@@ -28,6 +27,7 @@ import {
   ORIGIN,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -53,22 +53,12 @@ interface AuditPage {
   total: number;
 }
 
-function botStub(userId: string, botId: string) {
-  return env.BOT_STATES.get(env.BOT_STATES.idFromName(`${userId}:${botId}`));
-}
-
 async function storedRun(
   userId: string,
   botId: string,
   runId: string,
 ): Promise<TurnView> {
-  const runs = await runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => [
-      ...(await state.storage.list<TurnView>({ prefix: "run:" })).values(),
-    ],
-  );
-  const run = runs.find((candidate) => candidate.runId === runId);
+  const run = await readStoredRunWithEventsV1<TurnView>(userId, botId, runId);
   if (!run) throw new Error(`no stored run "${runId}"`);
   return run;
 }
