@@ -86,10 +86,11 @@ export const APPLET_FACET_NAME_V1 = "applet";
 /**
  * The second facet name an `AppletState` object uses, and it holds no code.
  *
- * `ctx.facets.clone(src, dst)` copies a facet's whole storage, so the kernel
+ * The Durable Object facet API can clone a facet's whole storage, so the kernel
  * parks a byte copy of the live Applet here for the length of one activation
  * trial and clones it back if the candidate fails. Nothing is ever mounted
- * against it; it exists only to be copied from.
+ * against it; it exists only to be copied from. `AppletState` is the one place
+ * that call is made, and an architecture check keeps it that way.
  */
 export const APPLET_ROLLBACK_FACET_NAME_V1 = "applet-rollback";
 /** The Instance Contract version this kernel speaks. */
