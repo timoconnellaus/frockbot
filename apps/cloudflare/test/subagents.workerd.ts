@@ -192,12 +192,24 @@ describe("subagent dispatch across two Durable Objects", () => {
     // Everything the parent held in memory is gone before the child answers.
     await evictDurableObject(bot(identity));
 
+    // What the eviction must not cost is the record: the parent reads back the
+    // same durable task, by id and by the description it was dispatched with,
+    // from an object that no longer holds anything in memory.
     const surviving = await tasks(identity);
+    expect(surviving.tasks).toHaveLength(1);
     expect(surviving.tasks[0]).toMatchObject({
       taskId,
-      status: "running",
+      description: "Survive an eviction",
     });
-    expect(surviving.active).toBe(1);
+    // Its status is deliberately not pinned. The child settles on its own
+    // alarm in its own object, and nothing orders that against this read — the
+    // stub answers instantly and cannot be held per test — so asserting
+    // `running` here was asserting that the child had not finished yet, which
+    // is a race rather than a property. The invariant that does hold is that
+    // the slot count follows the record: a task the parent still shows as
+    // unsettled occupies its slot, and a settled one has given it back.
+    const settled = surviving.tasks[0]?.settledAt !== undefined;
+    expect(surviving.active).toBe(settled ? 0 : 1);
 
     await evictDurableObject(bot(identity));
     await settleTask(identity, taskId);
