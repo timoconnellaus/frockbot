@@ -39,7 +39,12 @@ class MemoryStorage {
     return Promise.resolve();
   }
 
-  delete(key: string): Promise<boolean> {
+  delete(key: string | string[]): Promise<boolean | number> {
+    if (Array.isArray(key)) {
+      return Promise.resolve(
+        key.reduce((count, entry) => count + (this.values.delete(entry) ? 1 : 0), 0),
+      );
+    }
     return Promise.resolve(this.values.delete(key));
   }
 
@@ -388,6 +393,94 @@ describe("fail-closed Composition activation", () => {
     ).toBeUndefined();
     // The recorded failure survives: it is the repair history a User reads.
     expect(await failures.list(broken.generationId)).toHaveLength(1);
+  });
+
+  test("three failed repairs quarantine, even though each one is a new generation", async () => {
+    // The safeguard was dead code in the path a real user takes. The model
+    // never retries a failed generation: it authors a *new* one, which
+    // supersedes the failed one at attempt 1, so the per-generation counter
+    // never reached three and the Composition just grew one dead generation
+    // per repair attempt.
+    const { store, failures, storage, lastKnownGood } = await fixture();
+    const attempts: CompositionGenerationV1[] = [];
+    for (const minute of [1, 2, 3]) {
+      const generation = await authored(
+        lastKnownGood,
+        `2026-09-01T00:0${minute}:00.000Z`,
+      );
+      await store.propose(generation, { pin: true });
+      attempts.push(generation);
+      const activation = await activateCompositionV1({
+        generationId: generation.generationId,
+        store: activationStore(store),
+        failures,
+        host: brokenHost(generation.generationId, "mount"),
+        signal: new AbortController().signal,
+      });
+      expect(activation.status).toBe("failed-closed");
+      if (activation.status !== "failed-closed") return;
+      // Each new generation is on its own first attempt...
+      expect(activation.failure?.attempt).toBe(1);
+      // ...but the Bot's streak is what earns the quarantine.
+      expect(activation.quarantined).toBe(minute === 3);
+    }
+
+    const third = attempts[2]!;
+    expect((await store.read(third.generationId))?.status).toBe("quarantined");
+    expect(
+      storage.values.get(compositionQuarantineKey(third.generationId)),
+    ).toBeDefined();
+    // The two earlier attempts stay `failed`: a quarantine is a decision about
+    // the generation that earned it, not a verdict on its history.
+    expect((await store.read(attempts[0]!.generationId))?.status).toBe(
+      "failed",
+    );
+    expect((await store.read(attempts[1]!.generationId))?.status).toBe(
+      "failed",
+    );
+  });
+
+  test("a generation that activates clears the streak, so the next failure starts over", async () => {
+    const { store, failures, lastKnownGood } = await fixture();
+    for (const minute of [1, 2]) {
+      const generation = await authored(
+        lastKnownGood,
+        `2026-09-01T00:0${minute}:00.000Z`,
+      );
+      await store.propose(generation, { pin: true });
+      await activateCompositionV1({
+        generationId: generation.generationId,
+        store: activationStore(store),
+        failures,
+        host: brokenHost(generation.generationId, "mount"),
+        signal: new AbortController().signal,
+      });
+    }
+
+    const working = await authored(lastKnownGood, "2026-09-01T00:03:00.000Z");
+    await store.propose(working, { pin: true });
+    const activated = await activateCompositionV1({
+      generationId: working.generationId,
+      store: activationStore(store),
+      failures,
+      host: { mount: (generation) => Promise.resolve(mounted(generation)) },
+      signal: new AbortController().signal,
+    });
+    expect(activated.status).toBe("activated");
+
+    const next = await authored(lastKnownGood, "2026-09-01T00:04:00.000Z");
+    await store.propose(next, { pin: true });
+    const activation = await activateCompositionV1({
+      generationId: next.generationId,
+      store: activationStore(store),
+      failures,
+      host: brokenHost(next.generationId, "mount"),
+      signal: new AbortController().signal,
+    });
+
+    expect(activation.status).toBe("failed-closed");
+    if (activation.status !== "failed-closed") return;
+    expect(activation.quarantined).toBe(false);
   });
 
   test("a last known good that will not mount has nothing to fail into", async () => {

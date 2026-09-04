@@ -411,6 +411,11 @@ import {
 } from "./run-protocol.js";
 import { notificationIdV1 } from "./notification-id.js";
 import {
+  type CompositionManifestSourcesV1,
+  compositionMemberManifestDocumentV1,
+  compositionMemberManifestV1,
+} from "./composition-manifest.js";
+import {
   BOT_DEBUG_DEFAULT_RUN_LIMIT_V1,
   BOT_DEBUG_EVENT_BYTES_V1,
   BOT_DEBUG_GENERATION_LIMIT_V1,
@@ -1237,22 +1242,32 @@ export class ShellBotBackendContribution {
    * that can be handed to it; callers that want the typed shape decode it
    * themselves through `readCompositionMemberManifest`.
    */
-  private async readCompositionMemberManifestDocument(
-    member: CompositionMemberV1,
-  ): Promise<unknown | undefined> {
-    const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
-      authorshipManifestKey(member.manifestHash),
-    );
-    if (stored) return stored.manifest;
-    return await this.readApplicationMemberManifest(member);
+  private compositionManifestSources(): CompositionManifestSourcesV1 {
+    return {
+      stored: (manifestHash) =>
+        this.ctx.storage.get<AuthoredManifestRecordV1>(
+          authorshipManifestKey(manifestHash),
+        ),
+      application: (member) => this.readApplicationMemberManifest(member),
+    };
   }
 
-  private async readCompositionMemberManifest(
+  private readCompositionMemberManifestDocument(
+    member: CompositionMemberV1,
+  ): Promise<unknown | undefined> {
+    return compositionMemberManifestDocumentV1(
+      member,
+      this.compositionManifestSources(),
+    );
+  }
+
+  private readCompositionMemberManifest(
     member: CompositionMemberV1,
   ): Promise<FrockBotManifest | undefined> {
-    const document = await this.readCompositionMemberManifestDocument(member);
-    if (document === undefined) return undefined;
-    return decodeFrockBotManifest(document);
+    return compositionMemberManifestV1(
+      member,
+      this.compositionManifestSources(),
+    );
   }
 
   /**
