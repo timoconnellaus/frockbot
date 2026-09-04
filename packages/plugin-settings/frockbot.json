@@ -43,6 +43,7 @@
         }
       ],
       "outlets": [
+        "frockbot.user-settings-primary-sections",
         "frockbot.user-settings-sections",
         "frockbot.bot-settings-sections",
         "frockbot.bot-settings-primary-sections",

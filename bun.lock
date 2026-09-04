@@ -32,6 +32,7 @@
         "@frockbot/plugin-audit": "workspace:*",
         "@frockbot/plugin-auth": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
+        "@frockbot/plugin-billing": "workspace:*",
         "@frockbot/plugin-bot-template": "workspace:*",
         "@frockbot/plugin-clock": "workspace:*",
         "@frockbot/plugin-computer": "workspace:*",
@@ -116,6 +117,7 @@
         "@frockbot/plugin-applets": "workspace:*",
         "@frockbot/plugin-audit": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
+        "@frockbot/plugin-billing": "workspace:*",
         "@frockbot/plugin-bot-template": "workspace:*",
         "@frockbot/plugin-computer": "workspace:*",
         "@frockbot/plugin-credentials": "workspace:*",
@@ -588,6 +590,26 @@
       "devDependencies": {
         "@types/bun": "1.4.0",
         "typescript": "^7.0.2",
+      },
+    },
+    "packages/plugin-billing": {
+      "name": "@frockbot/plugin-billing",
+      "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/client-core": "workspace:*",
+        "@frockbot/client-ui": "workspace:*",
+        "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/plugin-flock": "workspace:*",
+        "@frockbot/plugin-shell": "workspace:*",
+        "cordis": "4.0.0-rc.8",
+        "vue": "3.5.41",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.0",
+        "@vitejs/plugin-vue": "6.0.8",
+        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
+        "vite": "8.2.2",
+        "vue-tsc": "3.3.10",
       },
     },
     "packages/plugin-bot-template": {
@@ -1566,6 +1588,8 @@
     "@frockbot/plugin-auth": ["@frockbot/plugin-auth@workspace:packages/plugin-auth"],
 
     "@frockbot/plugin-authoring": ["@frockbot/plugin-authoring@workspace:packages/plugin-authoring"],
+
+    "@frockbot/plugin-billing": ["@frockbot/plugin-billing@workspace:packages/plugin-billing"],
 
     "@frockbot/plugin-bot-template": ["@frockbot/plugin-bot-template@workspace:packages/plugin-bot-template"],
 
@@ -3400,6 +3424,8 @@
     "@frockbot/plugin-auth/typescript": ["typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2", "", { "optionalDependencies": { "@typescript-native-bridge/darwin-arm64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/darwin-x64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/linux-arm": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/linux-arm64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/linux-x64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/win32-arm64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/win32-x64": "6.0.3-bridge.16.tsgo.7.0.2" }, "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-bO+fh23fh4j0mK2NmlFOrlbR9Ke5cHpjOsDaM2czXlSXqxNchGdDVyAdaVCFz0DofkFOov96HLvQaP3W57F+CA=="],
 
     "@frockbot/plugin-authoring/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
+
+    "@frockbot/plugin-billing/typescript": ["typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2", "", { "optionalDependencies": { "@typescript-native-bridge/darwin-arm64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/darwin-x64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/linux-arm": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/linux-arm64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/linux-x64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/win32-arm64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/win32-x64": "6.0.3-bridge.16.tsgo.7.0.2" }, "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-bO+fh23fh4j0mK2NmlFOrlbR9Ke5cHpjOsDaM2czXlSXqxNchGdDVyAdaVCFz0DofkFOov96HLvQaP3W57F+CA=="],
 
     "@frockbot/plugin-bot-template/typescript": ["typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2", "", { "optionalDependencies": { "@typescript-native-bridge/darwin-arm64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/darwin-x64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/linux-arm": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/linux-arm64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/linux-x64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/win32-arm64": "6.0.3-bridge.16.tsgo.7.0.2", "@typescript-native-bridge/win32-x64": "6.0.3-bridge.16.tsgo.7.0.2" }, "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-bO+fh23fh4j0mK2NmlFOrlbR9Ke5cHpjOsDaM2czXlSXqxNchGdDVyAdaVCFz0DofkFOov96HLvQaP3W57F+CA=="],
 

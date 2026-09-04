@@ -165,6 +165,7 @@ describe("Ollama Cloud runtime Contribution", () => {
             new Response(
               'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n' +
                 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
+                'data: {"choices":[],"prompt_eval_count":11,"eval_count":4}\n\n' +
                 "data: [DONE]\n\n",
               {
                 status: 200,
@@ -192,6 +193,10 @@ describe("Ollama Cloud runtime Contribution", () => {
 
     expect(events).toEqual([
       { type: "text-delta", text: "hello" },
+      {
+        type: "usage",
+        usage: { inputTokens: 11, outputTokens: 4 },
+      },
       { type: "finish", reason: "completed" },
     ]);
     expect(authorizations).toEqual(["Bearer account-secret"]);

@@ -145,9 +145,20 @@ export interface NormalizedModelRequest {
   modelBinding?: ModelBindingSnapshot;
 }
 
+/** Provider-reported token accounting for one normalized model request. */
+export interface LlmUsageV1 {
+  inputTokens: number;
+  outputTokens: number;
+  /** Input tokens served from a provider cache; included in `inputTokens`. */
+  cachedInputTokens?: number;
+  /** Reasoning tokens; included in `outputTokens`. */
+  reasoningTokens?: number;
+}
+
 export type LlmStreamEvent =
   | { type: "text-delta"; text: string }
   | { type: "tool-call"; call: ToolCall }
+  | { type: "usage"; usage: LlmUsageV1 }
   | { type: "response-format-note"; note: ResponseFormatNoteV1 }
   | {
       type: "structured-output-failure";
@@ -315,6 +326,25 @@ export interface SessionEventMap {
     turn: number;
     step: number;
     request: NormalizedModelRequest;
+  };
+  /**
+   * Bounded accounting for one model request. Providers report tokens when
+   * they can; otherwise the loop estimates from the exact durable request and
+   * response sizes. It deliberately carries no prompt or response content.
+   */
+  "model/usage": {
+    turn: number;
+    step: number;
+    requestId: string;
+    provider: string;
+    model: string;
+    modelBinding?: ModelBindingSnapshot;
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens?: number;
+    reasoningTokens?: number;
+    latencyMs: number;
+    estimated: boolean;
   };
   "model/effect-not-started": {
     turn: number;
@@ -1343,6 +1373,88 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       step();
       requireNormalizedModelRequest(event.request, "session event.request");
       break;
+    case "model/usage": {
+      requireEventKeys(
+        event,
+        keys(
+          "turn",
+          "step",
+          "requestId",
+          "provider",
+          "model",
+          ...(Object.hasOwn(event, "modelBinding") ? ["modelBinding"] : []),
+          "inputTokens",
+          "outputTokens",
+          ...(Object.hasOwn(event, "cachedInputTokens")
+            ? ["cachedInputTokens"]
+            : []),
+          ...(Object.hasOwn(event, "reasoningTokens")
+            ? ["reasoningTokens"]
+            : []),
+          "latencyMs",
+          "estimated",
+        ),
+        "session event",
+      );
+      turn();
+      step();
+      requestId();
+      eventString(event.provider, "session event.provider");
+      eventString(event.model, "session event.model");
+      if (event.modelBinding !== undefined) {
+        requireNormalizedModelRequest(
+          {
+            requestId: event.requestId,
+            provider: event.provider,
+            model: event.model,
+            system: "",
+            messages: [],
+            tools: [],
+            modelBinding: event.modelBinding,
+          },
+          "session event usage binding",
+        );
+      }
+      const inputTokens = eventInteger(
+        event.inputTokens,
+        "session event.inputTokens",
+        0,
+      );
+      const outputTokens = eventInteger(
+        event.outputTokens,
+        "session event.outputTokens",
+        0,
+      );
+      if (event.cachedInputTokens !== undefined) {
+        const cached = eventInteger(
+          event.cachedInputTokens,
+          "session event.cachedInputTokens",
+          0,
+        );
+        if (cached > inputTokens) {
+          throw new Error(
+            "session event.cachedInputTokens cannot exceed inputTokens",
+          );
+        }
+      }
+      if (event.reasoningTokens !== undefined) {
+        const reasoning = eventInteger(
+          event.reasoningTokens,
+          "session event.reasoningTokens",
+          0,
+        );
+        if (reasoning > outputTokens) {
+          throw new Error(
+            "session event.reasoningTokens cannot exceed outputTokens",
+          );
+        }
+      }
+      eventInteger(event.latencyMs, "session event.latencyMs", 0);
+      if (typeof event.estimated !== "boolean") {
+        throw new Error("session event.estimated must be a boolean");
+      }
+      break;
+    }
     case "model/effect-not-started":
     case "model/reconciliation-required":
       requireEventKeys(

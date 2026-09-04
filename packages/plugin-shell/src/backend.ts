@@ -671,6 +671,16 @@ export interface ShellBotBackendHost {
   scheduledWorkInFlight?(): boolean;
   deferScheduledWork?(transaction: DurableObjectTransaction): Promise<void>;
   settleScheduledWork?(): Promise<void>;
+  /**
+   * A derived accounting projection after `turn/end` is durable. The host
+   * queues it before delivery, so failure never changes the Turn's outcome.
+   */
+  recordSettledUsage?(input: {
+    botId: string;
+    runId: string;
+    turn: number;
+    events: readonly SessionEvent[];
+  }): Promise<void>;
 }
 
 /** The narrow storage seam the Bot's announcement log is written through. */
@@ -773,6 +783,7 @@ export class ShellBotBackendContribution {
   private readonly hostScheduledWorkInFlight?: ShellBotBackendHost["scheduledWorkInFlight"];
   private readonly hostDeferScheduledWork?: ShellBotBackendHost["deferScheduledWork"];
   private readonly hostSettleScheduledWork?: ShellBotBackendHost["settleScheduledWork"];
+  private readonly recordSettledUsage?: ShellBotBackendHost["recordSettledUsage"];
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
@@ -788,6 +799,7 @@ export class ShellBotBackendContribution {
     this.hostScheduledWorkInFlight = host.scheduledWorkInFlight;
     this.hostDeferScheduledWork = host.deferScheduledWork;
     this.hostSettleScheduledWork = host.settleScheduledWork;
+    this.recordSettledUsage = host.recordSettledUsage;
     const routines = createBotRoutines(
       host.state.storage,
       createBotRoutineHookMinter(
@@ -1747,6 +1759,16 @@ export class ShellBotBackendContribution {
               input.command.sessionId,
               effect,
             ),
+          ...(this.recordSettledUsage
+            ? {
+                onTurnStopping: (settled) =>
+                  this.recordSettledUsage!({
+                    botId: input.identity.botId,
+                    runId: input.command.runId,
+                    ...settled,
+                  }),
+              }
+            : {}),
           ...(isolate ? { isolate } : {}),
           ...(appletRouting ? { applets: appletRouting } : {}),
         }).mount(mounting, signal);
