@@ -146,8 +146,18 @@ export const APPLET_SHIM_PATH = `${BIN_ROOT}/applet`;
  * reported fact, not a Computer nobody can open.
  */
 export const APPLETS_SDK_FAILURE_PATH = `${APPLETS_ROOT}/.sdk-unavailable`;
-/** The Applets SDK the Computer authors and previews an Applet with. */
-export const APPLET_SDK_VERSION = "0.1.0";
+/**
+ * The Applets SDK the Computer authors and previews an Applet with.
+ *
+ * A dist-tag, not a number: the release workflow stamps every published
+ * Package with the tag's version (v0.3.12 published `@frockbot/applet-sdk`
+ * as 0.3.12), and this document has no way to learn that version at
+ * provisioning time. A pinned "0.1.0" here never existed on npm, so every
+ * Computer provisioned before this line was written reported the SDK as
+ * unavailable. `latest` follows each release; a Computer installs it once
+ * and keeps that tree until it is provisioned again.
+ */
+export const APPLET_SDK_VERSION = "latest";
 /** Pinned with the SDK: `applet dev` embeds this Miniflare, never wrangler. */
 export const MINIFLARE_VERSION = "5.20260828.0-alpha";
 
@@ -1632,6 +1642,29 @@ fi
 exec "$APPLET" "$@"
 `;
 
+/**
+ * Installs the Applets SDK when, and only when, it is absent.
+ *
+ * Guarded, and deliberately not fatal: a Computer that cannot fetch the SDK
+ * is still a Computer — it browses, execs, and syncs — so the failure is
+ * recorded as a file the doctor reports under `applets-sdk` rather than as a
+ * phase that fails and leaves the whole run resumable-but-unfinished.
+ *
+ * The `[ ! -d ]` guard is also what makes this safe inside an in-place
+ * update. The only thing that runs out of `${APPLETS_ROOT}` is `applet dev`,
+ * and the shim refuses to start it while the SDK is missing, so an install
+ * that runs only when the SDK is missing never touches a tree a process is
+ * using. Once the SDK is present neither provisioning nor an update installs
+ * again; a newer SDK arrives with the next provisioning adoption.
+ */
+export const appletSdkInstallScript = `if [ ! -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]; then
+  if npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund @frockbot/applet-sdk@${APPLET_SDK_VERSION}; then
+    rm -f ${APPLETS_SDK_FAILURE_PATH}
+  else
+    printf '%s\\n' "npm could not install @frockbot/applet-sdk@${APPLET_SDK_VERSION}" > ${APPLETS_SDK_FAILURE_PATH}
+  fi
+fi`;
+
 /** The files the `applets` phase installs, with their modes. */
 export const APPLETS_RUNTIME_FILES: readonly {
   readonly path: string;
@@ -2071,18 +2104,7 @@ fi`,
 if [ ! -d ${APPLETS_ROOT}/node_modules/miniflare ]; then
   npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund miniflare@${MINIFLARE_VERSION}
 fi
-# Guarded, and deliberately not fatal. \`@frockbot/applet-sdk\` is not on npm
-# yet, and a Computer that cannot fetch it is still a Computer: it browses,
-# execs, and syncs. The failure is recorded as a file the doctor reports under
-# \`applets-sdk\` rather than as a phase that fails and leaves the whole
-# provisioning run resumable-but-unfinished.
-if [ ! -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]; then
-  if npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund @frockbot/applet-sdk@${APPLET_SDK_VERSION}; then
-    rm -f ${APPLETS_SDK_FAILURE_PATH}
-  else
-    printf '%s\\n' "npm could not install @frockbot/applet-sdk@${APPLET_SDK_VERSION}" > ${APPLETS_SDK_FAILURE_PATH}
-  fi
-fi
+${appletSdkInstallScript}
 ${installDeclaredFiles(APPLETS_RUNTIME_FILES)}`,
   },
   {
@@ -2119,12 +2141,18 @@ export const UPDATE_PHASES: readonly {
   {
     name: "applets",
     label: "Updating the Applets command",
-    // The shim and nothing else. The provisioning phase beside it also runs
-    // `npm install`, which is a network fetch into a dependency tree an
-    // `applet dev` may be running out of right now; an in-place update
-    // replaces files atomically and must not do that. A Computer picks up a
-    // newly published SDK on its next provisioning adoption, not here.
-    body: installDeclaredFiles(APPLETS_RUNTIME_FILES),
+    // The shim, plus the SDK only if this Computer has none. The provisioning
+    // phase beside it also installs Miniflare, a network fetch into a
+    // dependency tree an `applet dev` may be running out of right now; an
+    // in-place update replaces files atomically and must not do that. The SDK
+    // install is different: it runs only while the SDK is absent, and nothing
+    // runs out of that tree until the SDK is there (see
+    // `appletSdkInstallScript`). This is how a Computer provisioned while the
+    // SDK was unpublished gets it without being provisioned again. A newer
+    // SDK still waits for the next provisioning adoption.
+    body: `mkdir -p ${APPLETS_ROOT}
+${appletSdkInstallScript}
+${installDeclaredFiles(APPLETS_RUNTIME_FILES)}`,
   },
   {
     name: "reference",

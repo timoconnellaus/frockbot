@@ -224,4 +224,69 @@ describe("Frock AI gateway deadline", () => {
       host.runChatCompletion("dynamic/auto", { messages: [] }),
     ).rejects.toThrow("AI Gateway did not respond within 20ms");
   });
+
+  // The blocker. The deadline used to stay armed after the headers arrived, so
+  // a tool-calling step whose body was still streaming at sixty seconds had its
+  // response torn out from under it. The abort read as an *uncertain* model
+  // outcome, the run parked, and `POST /turns` answered 500 with "Couldn't
+  // reach the Bot" on screen. A gateway that answered is not a gateway that
+  // never answered — so the deadline stops at the response.
+  test("a body still streaming past the deadline is not torn down", async () => {
+    let cancelled: unknown;
+    let push!: (chunk: string) => void;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        push = (chunk) => controller.enqueue(new TextEncoder().encode(chunk));
+      },
+      cancel(reason) {
+        cancelled = reason;
+      },
+    });
+    const host = createFrockAiGatewayHostV1(unusedBinding(), {
+      accountId: ACCOUNT_ID,
+      token: TOKEN,
+      timeoutMs: 20,
+      fetch: ((_input: unknown, _init?: RequestInit) =>
+        Promise.resolve(new Response(body, { status: 200 }))) as typeof fetch,
+    });
+
+    const stream = await host.runChatCompletion("dynamic/auto", {
+      messages: [],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    push("data: still going\n\n");
+    const first = await stream.getReader().read();
+
+    expect(cancelled).toBeUndefined();
+    expect(new TextDecoder().decode(first.value)).toContain("still going");
+  });
+
+  // The caller's own signal is not the deadline and is never disarmed: a Stop
+  // or a superseding message has to reach a request whose body is mid-flight.
+  test("a Stop still tears down a body that has started", async () => {
+    let cancelled: unknown;
+    const body = new ReadableStream<Uint8Array>({
+      cancel(reason) {
+        cancelled = reason;
+      },
+    });
+    const stop = new AbortController();
+    const host = createFrockAiGatewayHostV1(unusedBinding(), {
+      accountId: ACCOUNT_ID,
+      token: TOKEN,
+      timeoutMs: 20,
+      fetch: ((_input: unknown, init?: RequestInit) => {
+        init?.signal?.addEventListener("abort", () => {
+          void body.cancel(init.signal?.reason);
+        });
+        return Promise.resolve(new Response(body, { status: 200 }));
+      }) as typeof fetch,
+    });
+
+    await host.runChatCompletion("dynamic/auto", { messages: [] }, stop.signal);
+    stop.abort(new Error("You stopped this."));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect((cancelled as Error | undefined)?.message).toBe("You stopped this.");
+  });
 });

@@ -35,6 +35,7 @@
     "./notification-id": "./src/notification-id.ts",
     "./package.json": "./package.json",
     "./run-cursor": "./src/run-cursor.ts",
+    "./run-failure-copy": "./src/run-failure-copy.ts",
     "./run-protocol": "./src/run-protocol.ts",
     "./settings-links": "./src/settings-links.ts",
     "./shared": "./src/shared.ts",

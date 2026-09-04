@@ -3057,4 +3057,79 @@ describe("AgentLoop", () => {
       ),
     ).toHaveLength(1);
   });
+
+  // A model that writes an acknowledgement and then calls tools has said
+  // something to the person, and the Package that owns the Bot's voice has to
+  // hear about it *before* the work it was announcing produces results.
+  test("raises assistant text ahead of the tools the same step called", async () => {
+    const provider: LlmProvider = {
+      id: "acknowledging-model",
+      async *stream() {
+        yield { type: "text-delta", text: "On it — building it now." };
+        yield {
+          type: "tool-call",
+          call: { id: "call-1", name: "build", input: {} },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+      },
+    };
+    const order: string[] = [];
+    const root = await mountRuntime(provider, {
+      name: "build",
+      description: "Does the work the acknowledgement announced.",
+      inputSchema: { type: "object" },
+      execute: () => {
+        order.push("tool");
+        return Promise.resolve({ content: "built", isError: true });
+      },
+    });
+    const seen: string[] = [];
+    root.on("agent/assistant-text", async (_agent, text, position) => {
+      order.push("assistant-text");
+      seen.push(`${position.turn}:${position.step}:${text}`);
+    });
+    const handle = await root.agents.create({
+      ...allowEffectOptions,
+      botId: "bot-ack",
+      sessionId: "acknowledging-model",
+      provider: provider.id,
+      model: "model-1",
+    });
+
+    handle.agent.send("build me a countdown");
+    await handle.agent.whenIdle();
+
+    expect(seen[0]).toBe("1:1:On it — building it now.");
+    expect(order[0]).toBe("assistant-text");
+    expect(order).toContain("tool");
+  });
+
+  // A step with nothing to say, or one that says everything it has and stops,
+  // raises nothing: the first has no text, and the second's text is the reply.
+  test("raises nothing for a step with no text or no tools", async () => {
+    const provider: LlmProvider = {
+      id: "quiet-model",
+      async *stream() {
+        yield { type: "text-delta", text: "Here is your answer." };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const root = await mountRuntime(provider);
+    let raised = 0;
+    root.on("agent/assistant-text", async () => {
+      raised += 1;
+    });
+    const handle = await root.agents.create({
+      ...allowEffectOptions,
+      botId: "bot-quiet",
+      sessionId: "quiet-model",
+      provider: provider.id,
+      model: "model-1",
+    });
+
+    handle.agent.send("answer me");
+    await handle.agent.whenIdle();
+
+    expect(raised).toBe(0);
+  });
 });

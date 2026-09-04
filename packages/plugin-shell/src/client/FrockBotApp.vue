@@ -698,16 +698,18 @@ let trailRunId: string | undefined;
 let trailSeq = 0;
 let trailTick = 0;
 
-/** The one Turn still going, if any. Only one runs at a time. */
-const workingMessage = computed(() =>
-  messages.value.find(
+/**
+ * The Turn still going, if any. Only one executes at a time, but a Turn queued
+ * behind it is streaming-shaped too and has produced nothing yet, so the
+ * executing one wins: the trail keeps reading the words that are arriving
+ * rather than restarting on a Turn that has not begun.
+ */
+const workingMessage = computed(() => {
+  const streaming = messages.value.filter(
     (message) => message.role === "assistant" && message.status === "streaming",
-  ),
-);
-
-function isWorking(message: WebChatMessage): boolean {
-  return message.id === workingMessage.value?.id;
-}
+  );
+  return streaming.find((message) => !message.pending) ?? streaming.at(-1);
+});
 
 const workingSample = computed(() => {
   const message = workingMessage.value;
@@ -1487,49 +1489,55 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                   </button>
                 </div>
               </div>
-              <!--
-                The working row: the Bot's own avatar on its own line at the
-                end of the thread, with the comet trail streaming off to its
-                right. It appears only while the Turn is running. Every line in
-                this transcript is from the same Bot — there are no group
-                conversations yet (issue 152) — so a sheep beside a settled
-                reply named nobody the reader did not already know; the one
-                under a running Turn is the whole account of what the Bot is
-                doing.
-
-                The art comes from whichever Package owns Bot identity; when no
-                Package fills the slot the sparkle tile is the only child and
-                shows through. The row carries the status role, and the canvas
-                beside it is hidden from assistive technology: the trail is a
-                picture of a fact the label already states.
-              -->
-              <Transition name="bot-working">
-                <div
-                  v-if="isWorking(message)"
-                  class="bot-working"
-                  role="status"
-                  aria-label="Working"
-                >
-                  <div
-                    class="bot-avatar bot-avatar-live"
-                    :class="{ 'bot-avatar-waiting': !message.text }"
-                  >
-                    <span class="bot-avatar-fallback" aria-hidden="true"
-                      ><UiIcon name="sparkle" size="sm"
-                    /></span>
-                    <k-slot name="frockbot.bot-avatar" />
-                  </div>
-                  <UiActivityTrail
-                    class="bot-working-indicator"
-                    :rate="trailRate"
-                    :bursts="trailBursts"
-                    :state="trailState"
-                  />
-                </div>
-              </Transition>
             </template>
             <div v-else class="message-bubble">{{ message.text }}</div>
           </article>
+          <!--
+            The working row: the Bot's own avatar on its own line at the end of
+            the thread, with the comet trail streaming off to its right. It
+            appears only while a Turn is running. Every line in this transcript
+            is from the same Bot — there are no group conversations yet (issue
+            152) — so a sheep beside a settled reply named nobody the reader did
+            not already know; the one under a running Turn is the whole account
+            of what the Bot is doing.
+
+            It is a child of the thread rather than of the running Turn's
+            article, so it is always the last thing in the transcript. Send a
+            message while the Bot is still winding down and the new message
+            lands above the sheep, where a reader looking at the bottom of the
+            thread expects the newest thing to be — not underneath a running
+            Turn that is already over.
+
+            The art comes from whichever Package owns Bot identity; when no
+            Package fills the slot the sparkle tile is the only child and shows
+            through. The row carries the status role, and the canvas beside it
+            is hidden from assistive technology: the trail is a picture of a
+            fact the label already states.
+          -->
+          <Transition name="bot-working">
+            <div
+              v-if="workingMessage"
+              class="bot-working"
+              role="status"
+              aria-label="Working"
+            >
+              <div
+                class="bot-avatar bot-avatar-live"
+                :class="{ 'bot-avatar-waiting': !workingMessage.text }"
+              >
+                <span class="bot-avatar-fallback" aria-hidden="true"
+                  ><UiIcon name="sparkle" size="sm"
+                /></span>
+                <k-slot name="frockbot.bot-avatar" />
+              </div>
+              <UiActivityTrail
+                class="bot-working-indicator"
+                :rate="trailRate"
+                :bursts="trailBursts"
+                :state="trailState"
+              />
+            </div>
+          </Transition>
         </section>
 
         <Transition name="banner">

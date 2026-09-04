@@ -59,6 +59,7 @@ import {
 import { MCP_OAUTH_CONNECTION_TYPE_ID } from "@frockbot/plugin-mcp/agent";
 import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
+import { knownFailureCopyV1 } from "../run-failure-copy.js";
 import {
   ClientTurnRefusedErrorV1,
   type ClientTurnRefusalReasonV1,
@@ -302,6 +303,20 @@ function turnRefusalCopyV1(reason: ClientTurnRefusalReasonV1): string {
  * settlement — so it draws the words it has written so far. They occupy the
  * same bubble the settled answer will, and that bubble is the Turn's own line,
  * which follows the sends rather than replacing any of them.
+ *
+ * The gate is absolute, and it has to be. Relaxing it to "suppress only text
+ * that duplicates a send" looked safer and was not: the model's *last* step
+ * routinely writes something of its own after the step that spoke — the e2e
+ * that pins this sends "pong" through the tool and then answers again in text —
+ * and comparing the two drew both. Two bubbles for one reply is the exact
+ * regression issue 153 named.
+ *
+ * So a Turn that sent anything is drawn entirely from its sends, and text the
+ * model wrote beside them is scratch space. That is what makes the promotion in
+ * `promoteAssistantTextToSendV1` the right shape: an acknowledgement reaches
+ * the person by *becoming* a send — and under the per-send projection it is
+ * then its own bubble, in the order it was journaled — rather than being drawn
+ * as text next to one.
  */
 function visibleAssistantText(run: ClientRun, fallback = ""): string {
   if (sendsFrom(run.events).length > 0) return "";
@@ -366,14 +381,15 @@ function assistantMessage(
     };
   }
   if (run.status === "superseded") {
-    // The same quiet treatment a stopped Turn gets. It keeps everything it
-    // already sent; the line only says why it ends where it does.
+    // Quieter than a stopped Turn: it keeps everything it already sent and
+    // carries no notice at all. The message that superseded it is sitting
+    // right underneath, in the person's own words, and it explains the ending
+    // better than a line of ours would (ADR 0024).
     return {
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
       text: visibleAssistantText(run),
-      notice: "Interrupted by your next message.",
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: [],
@@ -423,11 +439,15 @@ function assistantMessage(
       runId: run.runId,
       role: "assistant",
       text: run.responseText,
-      // The same sentence the reply-less failure gets. The durable failure
-      // text is a provider's, not the product's — `Bot turn ended with
-      // outcome model-error`, a status code, once a run UUID — and under a
-      // bubble it reads as part of what the Bot was saying.
-      notice: "This Bot couldn't finish its reply. Try again.",
+      // The durable failure text is a provider's, not the product's — `Bot
+      // turn ended with outcome model-error`, a status code, once a run UUID —
+      // and under a bubble it reads as part of what the Bot was saying. By the
+      // time it reaches here it is already the sentence for a person: the
+      // projection maps it through `runFailureCopyV1` before it crosses the
+      // wire, so this keeps whatever that chose — the model-deadline copy says
+      // something the outcome alone cannot — and falls back to the same line a
+      // reply-less failure gets.
+      notice: knownFailureCopyV1(run.failure),
       status: "error",
       tools: toolsFrom(run.events),
       sends: [],
@@ -445,7 +465,7 @@ function assistantMessage(
     // Why the Turn ends there, under whatever it had already said — never as
     // the bubble's own text, which reads as the Bot saying it.
     ...(run.status === "failed"
-      ? { notice: "This Bot couldn't finish its reply. Try again." }
+      ? { notice: knownFailureCopyV1(run.failure) }
       : {}),
     status: run.status === "failed" ? "error" : "completed",
     tools: toolsFrom(run.events),

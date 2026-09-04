@@ -24,6 +24,7 @@ import {
   type BotTurnCompletion,
   type StoredRun,
 } from "./backend-contracts.js";
+import { runFailureCopyV1 } from "./run-failure-copy.js";
 
 const MAX_RUN_ID_LENGTH = 128;
 const MAX_TIMESTAMP_LENGTH = 64;
@@ -54,8 +55,15 @@ export type ClientRunStatusV1 =
   | "superseded"
   | "reconciliation-required";
 
-const CANCELLED_RUN_MESSAGE = "Stopped by an authenticated Stop command.";
+// Both are sentences for the person, not descriptions of the mechanism: the
+// wire outcome is what a client with no copy of its own renders verbatim, and
+// "Stopped by an authenticated Stop command" told somebody who pressed Stop
+// about the authentication of their own button press.
+const CANCELLED_RUN_MESSAGE = "You stopped this.";
 const SUPERSEDED_RUN_MESSAGE = "Interrupted by your next message.";
+/** What a Turn waiting on a person's "Try again" says while it waits. */
+export const RESUMABLE_RUN_MESSAGE_V1 =
+  "This reply stopped partway. Try again to continue it.";
 
 /**
  * Why the Bot declined to admit a Turn. A refusal is an ordinary answer — the
@@ -836,8 +844,11 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
       : status === "failed"
         ? ({
             type: "failed",
+            // The stored `failure` is a diagnostic and stays one: it is what
+            // the debug surface reads. What crosses to a chat bubble is the
+            // sentence written for the person — see `runFailureCopyV1`.
             message: truncateWireString(
-              run.failure ?? "Agent request failed.",
+              runFailureCopyV1({ failure: run.failure, events: run.events }),
               MAX_FAILURE_BYTES,
             ),
             ...interruptedOutcomeTextV1(run),
@@ -859,11 +870,10 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
     status === "reconciliation-required"
       ? ({
           action: "resume",
-          message: truncateWireString(
-            run.failure ??
-              "Provider reconciliation is required before this Turn can continue.",
-            MAX_FAILURE_BYTES,
-          ),
+          // The stored failure is the diagnostic the debug surface reads; a
+          // person offered a "Try again" needs the sentence, not the reason
+          // the Bot cannot answer it on its own.
+          message: RESUMABLE_RUN_MESSAGE_V1,
         } satisfies ClientRunRecoveryV1)
       : undefined;
   return {
