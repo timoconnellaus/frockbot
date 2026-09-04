@@ -1012,14 +1012,23 @@ export class CompositionProbe extends DurableObject {
     return { pinned: this.observedPin };
   }
 
-  /** The Turn's failure, caught inside the object so no RPC rejection escapes. */
+  /**
+   * The Turn's failure, read where it actually lives.
+   *
+   * A Turn that fails closed settles itself: a `turn/end`, a durable `failed`
+   * record, and the reason on it. The call that started it resolves with that
+   * settlement rather than rejecting over the top of it, so the durable record
+   * is the answer and a rejection is only the fallback for a Turn that never
+   * got far enough to write one. The `catch` is kept for exactly that, and so
+   * no RPC rejection escapes the object either way.
+   */
   async runTurnFailure(runId: string): Promise<string> {
     try {
       await this.runTurn(runId);
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }
-    return "";
+    return (await this.authority.readRun(runId))?.failure ?? "";
   }
 
   async storedPin(runId: string): Promise<string | undefined> {
