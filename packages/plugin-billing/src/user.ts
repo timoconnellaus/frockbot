@@ -1,6 +1,9 @@
 import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 import type { Plugin } from "cordis";
-import { voiceCostMicrosV1, MODEL_PRICE_TABLE_VERSION_V1 } from "./pricing.js";
+import {
+  voiceIncrementCostMicrosV1,
+  MODEL_PRICE_TABLE_VERSION_V1,
+} from "./pricing.js";
 import {
   decodeUsageEntryV1,
   USAGE_ENTRY_PAGE_MAX_V1,
@@ -76,7 +79,10 @@ export class BillingUserBackendContribution {
       estimated: false,
       unknownPrice: false,
       priceTableVersion: MODEL_PRICE_TABLE_VERSION_V1,
-      costMicros: voiceCostMicrosV1(input.recordedSeconds),
+      costMicros: voiceIncrementCostMicrosV1(
+        input.sessionSeconds,
+        input.recordedSeconds,
+      ),
     };
   }
 

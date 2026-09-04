@@ -161,3 +161,16 @@ export function voiceCostMicrosV1(seconds: number): number {
       PLATFORM_COST_MULTIPLIER_V1,
   );
 }
+
+/**
+ * Prices one cumulative voice receipt without making the result depend on how
+ * often the session reported. The sum of every increment therefore equals the
+ * rounded price of the final cumulative duration.
+ */
+export function voiceIncrementCostMicrosV1(
+  sessionSeconds: number,
+  recordedSeconds: number,
+): number {
+  const previousSeconds = sessionSeconds - recordedSeconds;
+  return voiceCostMicrosV1(sessionSeconds) - voiceCostMicrosV1(previousSeconds);
+}

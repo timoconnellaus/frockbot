@@ -4,6 +4,7 @@ import {
   modelCostMicrosV1,
   resolveModelPriceV1,
   voiceCostMicrosV1,
+  voiceIncrementCostMicrosV1,
 } from "./pricing.js";
 
 describe("billing prices", () => {
@@ -43,5 +44,13 @@ describe("billing prices", () => {
 
   test("prices voice by recorded duration", () => {
     expect(voiceCostMicrosV1(90)).toBe(25_500);
+  });
+
+  test("prices cumulative voice increments without report-frequency drift", () => {
+    expect(
+      voiceIncrementCostMicrosV1(1, 1) +
+        voiceIncrementCostMicrosV1(2, 1) +
+        voiceIncrementCostMicrosV1(3, 1),
+    ).toBe(voiceCostMicrosV1(3));
   });
 });
