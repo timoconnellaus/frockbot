@@ -236,14 +236,14 @@ describe("foundation application", () => {
     ).toThrow('Bot model provider "foundation" is unavailable');
   });
 
-  test("mounts an enabled Flock AI model through the gateway host seam", async () => {
+  test("mounts an enabled Frock AI model through the gateway host seam", async () => {
     const plan = await compileFoundationApplication();
     const runtimePackage = createFoundationModelRuntimePackage(
       plan,
       {
         model: {
           connectionId: "flock-ai-ambient",
-          providerModelId: "@flock/auto",
+          providerModelId: "@frock/auto",
         },
         state: "ready",
         packageId: "provider-flock-ai",
@@ -252,7 +252,7 @@ describe("foundation application", () => {
           connectionId: "flock-ai-ambient",
           packageId: "provider-flock-ai",
           connectionTypeId: "flock-ai-account",
-          displayName: "Flock AI",
+          displayName: "Frock AI",
           state: "ready",
           generation: "flock-ai-ambient-v1",
           providerType: "flock-ai",
@@ -262,15 +262,15 @@ describe("foundation application", () => {
       {
         accountId: "account-1",
         connectionId: "flock-ai-ambient",
-        flockAiAutoRoute: "flock-auto",
-        runFlockAiChatCompletion: () =>
+        frockAiAutoRoute: "flock-auto",
+        runFrockAiChatCompletion: () =>
           Promise.reject(new Error("not executed")),
       },
     );
 
     expect(runtimePackage).toMatchObject({
-      specifier: "@frockbot/plugin-provider-flock-ai",
-      contributionSpecifier: "@frockbot/plugin-provider-flock-ai/runtime",
+      specifier: "@frockbot/plugin-provider-frock-ai",
+      contributionSpecifier: "@frockbot/plugin-provider-frock-ai/runtime",
     });
   });
 
@@ -532,7 +532,7 @@ describe("foundation application", () => {
     expect(
       userSpecifiers.indexOf("@frockbot/plugin-settings/user"),
     ).toBeLessThan(
-      userSpecifiers.indexOf("@frockbot/plugin-provider-flock-ai/user"),
+      userSpecifiers.indexOf("@frockbot/plugin-provider-frock-ai/user"),
     );
     expect(
       userSpecifiers.indexOf("@frockbot/plugin-credentials/user"),

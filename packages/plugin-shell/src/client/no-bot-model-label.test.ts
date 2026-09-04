@@ -20,7 +20,7 @@ const { shellClientPlugin } = await import("./index.js");
 
 /**
  * A first-run account: the platform model resolves against a ready ambient
- * Flock AI Connection whose Catalog is fresh, and no Bot has been created yet.
+ * Frock AI Connection whose Catalog is fresh, and no Bot has been created yet.
  * The account's model is available, so the shell must not tell the User it is
  * unavailable before they have made their first Bot.
  */
@@ -37,7 +37,7 @@ test("does not report the account model unavailable before a Bot exists", async 
         connectionId: "flock-ai-ambient",
         packageId: "provider-flock-ai",
         connectionTypeId: "flock-ai-account",
-        displayName: "Flock AI",
+        displayName: "Frock AI",
         state: "ready",
         providerType: "flock-ai",
         safeMetadata: {},
@@ -47,7 +47,7 @@ test("does not report the account model unavailable before a Bot exists", async 
           state: "fresh",
           models: [
             {
-              providerModelId: "@flock/auto",
+              providerModelId: "@frock/auto",
               displayName: "Auto (recommended)",
               capabilities: { tools: true, vision: false, reasoning: true },
               source: "discovered",
@@ -58,7 +58,7 @@ test("does not report the account model unavailable before a Bot exists", async 
     ],
     platformModel: {
       connectionId: "flock-ai-ambient",
-      providerModelId: "@flock/auto",
+      providerModelId: "@frock/auto",
     },
   };
 
@@ -74,7 +74,7 @@ test("does not report the account model unavailable before a Bot exists", async 
           packages: [
             {
               id: "provider-flock-ai",
-              displayName: "Flock AI",
+              displayName: "Frock AI",
               version: "0.0.1",
               contributions: ["backend", "runtime"],
               configuration: {
@@ -82,7 +82,7 @@ test("does not report the account model unavailable before a Bot exists", async 
                 connectionTypes: [
                   {
                     id: "flock-ai-account",
-                    displayName: "Flock AI",
+                    displayName: "Frock AI",
                     allowMultiple: false,
                     authorization: { kind: "ambient-native" },
                     capabilities: ["flock-ai-models"],
@@ -117,6 +117,6 @@ test("does not report the account model unavailable before a Bot exists", async 
 
   // No Bot has been created, so `activeBotId` is unset.
   expect(provided.value.activeBotId).toBeUndefined();
-  expect(provided.value.modelLabel).toBe("Auto (recommended) · Flock AI");
+  expect(provided.value.modelLabel).toBe("Auto (recommended) · Frock AI");
   expect(provided.value.modelReady).toBe(true);
 });

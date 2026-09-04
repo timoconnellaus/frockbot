@@ -6,11 +6,11 @@ import type {
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import {
-  FLOCK_AI_CONNECTION_ID,
-  FLOCK_AI_DEFAULT_MODEL,
-  FLOCK_AI_PACKAGE_ID,
+  FROCK_AI_CONNECTION_ID,
+  FROCK_AI_DEFAULT_MODEL,
+  FROCK_AI_PACKAGE_ID,
 } from "./catalog.js";
-import { createFlockAiUserBackendContribution } from "./user.js";
+import { createFrockAiUserBackendContribution } from "./user.js";
 
 interface TestTransaction {
   get<T>(key: string): Promise<T | undefined>;
@@ -181,9 +181,9 @@ class FakeSettings {
     this.state.revision += 1;
   }
 
-  removeFlockPackageAndPlatformModel(): void {
+  removeFrockPackageAndPlatformModel(): void {
     this.state.packages = this.state.packages.filter(
-      (candidate) => candidate.packageId !== FLOCK_AI_PACKAGE_ID,
+      (candidate) => candidate.packageId !== FROCK_AI_PACKAGE_ID,
     );
     delete this.state.platformModel;
     this.state.revision += 1;
@@ -224,9 +224,9 @@ class FakeSettings {
     this.state.revision += 1;
   }
 
-  seedFlockAiPackageValues(): void {
+  seedFrockAiPackageValues(): void {
     this.state.packages.push({
-      packageId: FLOCK_AI_PACKAGE_ID,
+      packageId: FROCK_AI_PACKAGE_ID,
       version: "0.0.1",
       state: "installed",
       values: { userChoice: "keep-me" },
@@ -237,22 +237,22 @@ class FakeSettings {
 function fixture() {
   const storage = new MemoryStorage();
   const settings = new FakeSettings();
-  const flockAi = createFlockAiUserBackendContribution({ storage, settings });
-  settings.registerConfigurationReadBootstrap(flockAi);
+  const frockAi = createFrockAiUserBackendContribution({ storage, settings });
+  settings.registerConfigurationReadBootstrap(frockAi);
   return { storage, settings };
 }
 
-describe("Flock AI User Contribution", () => {
+describe("Frock AI User Contribution", () => {
   test("ambiently installs, connects, and sets Auto as the platform model exactly once", async () => {
     const { settings } = fixture();
     const first = await settings.readConfiguration("user-1");
 
     expect(first).toMatchObject({
       revision: 3,
-      packages: [{ packageId: FLOCK_AI_PACKAGE_ID, state: "installed" }],
+      packages: [{ packageId: FROCK_AI_PACKAGE_ID, state: "installed" }],
       connections: [
         {
-          connectionId: FLOCK_AI_CONNECTION_ID,
+          connectionId: FROCK_AI_CONNECTION_ID,
           state: "ready",
           providerType: "flock-ai",
           authorization: {
@@ -263,11 +263,11 @@ describe("Flock AI User Contribution", () => {
             state: "fresh",
             models: [
               {
-                providerModelId: FLOCK_AI_DEFAULT_MODEL,
+                providerModelId: FROCK_AI_DEFAULT_MODEL,
                 displayName: "Auto (recommended)",
               },
               {
-                providerModelId: "@flock/deepseek-ai/deepseek-v4-flash-0731",
+                providerModelId: "@frock/deepseek-ai/deepseek-v4-flash-0731",
                 displayName: "DeepSeek V4 Flash",
               },
             ],
@@ -275,8 +275,8 @@ describe("Flock AI User Contribution", () => {
         },
       ],
       platformModel: {
-        connectionId: FLOCK_AI_CONNECTION_ID,
-        providerModelId: FLOCK_AI_DEFAULT_MODEL,
+        connectionId: FROCK_AI_CONNECTION_ID,
+        providerModelId: FROCK_AI_DEFAULT_MODEL,
       },
     });
     expect(
@@ -301,8 +301,8 @@ describe("Flock AI User Contribution", () => {
 
     const second = await settings.readConfiguration("user-1");
     expect(second.platformModel).toEqual({
-      connectionId: FLOCK_AI_CONNECTION_ID,
-      providerModelId: FLOCK_AI_DEFAULT_MODEL,
+      connectionId: FROCK_AI_CONNECTION_ID,
+      providerModelId: FROCK_AI_DEFAULT_MODEL,
     });
     expect(
       settings.commands.filter(
@@ -331,29 +331,29 @@ describe("Flock AI User Contribution", () => {
   test("self-heals after the marker when the installation and model are removed", async () => {
     const { settings } = fixture();
     await settings.readConfiguration("user-1");
-    settings.removeFlockPackageAndPlatformModel();
+    settings.removeFrockPackageAndPlatformModel();
 
     const repaired = await settings.readConfiguration("user-1");
     expect(repaired.packages).toContainEqual(
       expect.objectContaining({
-        packageId: FLOCK_AI_PACKAGE_ID,
+        packageId: FROCK_AI_PACKAGE_ID,
         state: "installed",
       }),
     );
     expect(repaired.platformModel).toEqual({
-      connectionId: FLOCK_AI_CONNECTION_ID,
-      providerModelId: FLOCK_AI_DEFAULT_MODEL,
+      connectionId: FROCK_AI_CONNECTION_ID,
+      providerModelId: FROCK_AI_DEFAULT_MODEL,
     });
   });
 
   test("does not touch Package settings already written by the User", async () => {
     const { settings } = fixture();
-    settings.seedFlockAiPackageValues();
+    settings.seedFrockAiPackageValues();
 
     const view = await settings.readConfiguration("user-1");
     expect(view.packages).toContainEqual(
       expect.objectContaining({
-        packageId: FLOCK_AI_PACKAGE_ID,
+        packageId: FROCK_AI_PACKAGE_ID,
         values: { userChoice: "keep-me" },
       }),
     );
@@ -372,7 +372,7 @@ describe("Flock AI User Contribution", () => {
       unexpected: true,
     });
     await expect(settings.readConfiguration("user-1")).rejects.toThrow(
-      "Stored Flock AI bootstrap marker is invalid",
+      "Stored Frock AI bootstrap marker is invalid",
     );
   });
 });

@@ -281,6 +281,6 @@ describe("a disabled Web Package", () => {
       text: "hello",
     });
     expect(turn.status).toBe(200);
-    expect(JSON.stringify(await turn.json())).toContain("Flock AI reply");
+    expect(JSON.stringify(await turn.json())).toContain("Frock AI reply");
   });
 });

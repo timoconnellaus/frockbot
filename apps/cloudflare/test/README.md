@@ -22,7 +22,7 @@ bucket, so the bytes under test are the bytes that would deploy.
 
 Both projects run their files **sequentially** (`fileParallelism: false`). The
 fakes are shared: the Computer host fake is one Node-side object the whole run
-drives, the Flock AI fake's call log is one array per pool worker, and the
+drives, the Frock AI fake's call log is one array per pool worker, and the
 outbound stub's MCP handshake counter and blocked-address tally are Node module
 state. Several tests read one of those counts, act, and assert it moved by
 exactly one — true only if no other file is acting at the same time. Anything

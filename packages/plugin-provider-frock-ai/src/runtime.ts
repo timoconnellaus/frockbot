@@ -10,7 +10,7 @@ import {
   streamWithModelRequestDeadlinesV1,
 } from "@frockbot/provider-openai-compatible";
 import type { Plugin } from "cordis";
-import { FLOCK_AI_PROVIDER_TYPE, gatewayModelForFlockIdV1 } from "./catalog.js";
+import { FROCK_AI_PROVIDER_TYPE, gatewayModelForFrockIdV1 } from "./catalog.js";
 
 export type OpenAICompatibleChatCompletionBodyV1 = Record<string, unknown>;
 
@@ -18,18 +18,18 @@ export type OpenAICompatibleChatCompletionBodyV1 = Record<string, unknown>;
  * The narrow native host seam. Cloudflare's generated `Ai` type remains in
  * apps/cloudflare; the Package consumes one streaming gateway operation.
  */
-export type FlockAiChatCompletionV1 = (
+export type FrockAiChatCompletionV1 = (
   gatewayModel: string,
   body: OpenAICompatibleChatCompletionBodyV1,
   /** Cancels the gateway request; the host bounds it with its own deadline. */
   signal?: AbortSignal,
 ) => Promise<ReadableStream<Uint8Array>>;
 
-export interface FlockAiRuntimeConfig {
+export interface FrockAiRuntimeConfig {
   connectionId: string;
   connectionGeneration: string;
   autoRoute: string;
-  runChatCompletion: FlockAiChatCompletionV1;
+  runChatCompletion: FrockAiChatCompletionV1;
   /**
    * Deadline overrides and the timer seam behind them. The gateway binding
    * takes no signal of its own, so this is the only bound on a gateway call
@@ -38,8 +38,8 @@ export interface FlockAiRuntimeConfig {
   deadlines?: ModelRequestDeadlineOptionsV1;
 }
 
-class FlockAiProvider implements LlmProvider {
-  readonly id = FLOCK_AI_PROVIDER_TYPE;
+class FrockAiProvider implements LlmProvider {
+  readonly id = FROCK_AI_PROVIDER_TYPE;
 
   /**
    * The Gateway keeps no addressable copy of a completion, so an interrupted
@@ -51,11 +51,11 @@ class FlockAiProvider implements LlmProvider {
     retrieve: async () => ({
       status: "not-retrievable",
       reason:
-        "Flock AI keeps no durable copy of an interrupted response, so it cannot be recovered",
+        "Frock AI keeps no durable copy of an interrupted response, so it cannot be recovered",
     }),
   };
 
-  constructor(private readonly config: FlockAiRuntimeConfig) {}
+  constructor(private readonly config: FrockAiRuntimeConfig) {}
 
   async *stream(request: NormalizedModelRequest, signal: AbortSignal) {
     const binding = request.modelBinding;
@@ -64,13 +64,13 @@ class FlockAiProvider implements LlmProvider {
       binding.connectionGeneration !== this.config.connectionGeneration
     ) {
       throw new LlmEffectNotStartedError(
-        "Flock AI request has invalid Connection authority",
+        "Frock AI request has invalid Connection authority",
       );
     }
     signal.throwIfAborted();
     const wire = requestToWire(request);
     const { model: _model, ...body } = wire;
-    const gatewayModel = gatewayModelForFlockIdV1(
+    const gatewayModel = gatewayModelForFrockIdV1(
       request.model,
       this.config.autoRoute,
     );
@@ -100,7 +100,7 @@ class FlockAiProvider implements LlmProvider {
           throw new LlmEffectNotStartedError(
             error instanceof Error
               ? error.message
-              : "Flock AI request did not reach the gateway",
+              : "Frock AI request did not reach the gateway",
           );
         }
       },
@@ -110,13 +110,13 @@ class FlockAiProvider implements LlmProvider {
   }
 }
 
-export function createFlockAiRuntimePlugin(
-  config: FlockAiRuntimeConfig,
+export function createFrockAiRuntimePlugin(
+  config: FrockAiRuntimeConfig,
 ): Plugin.Function {
   const plugin: Plugin.Function = (ctx) =>
-    ctx.llm.register(new FlockAiProvider(config));
+    ctx.llm.register(new FrockAiProvider(config));
   plugin.inject = ["llm"];
   return plugin;
 }
 
-export default createFlockAiRuntimePlugin;
+export default createFrockAiRuntimePlugin;

@@ -11,15 +11,15 @@ import rawManifest from "../frockbot.json" with { type: "json" };
 
 const platformModel: ModelBindingV1 = {
   connectionId: "flock-ai",
-  providerModelId: "@flock/auto",
+  providerModelId: "@frock/auto",
 };
 const accountModel: ModelBindingV1 = {
   connectionId: "flock-ai",
-  providerModelId: "@flock/manual",
+  providerModelId: "@frock/manual",
 };
 const botModel: ModelBindingV1 = {
   connectionId: "flock-ai",
-  providerModelId: "@flock/bot",
+  providerModelId: "@frock/bot",
 };
 
 const customManifest = decodeFrockBotManifest(rawManifest);
@@ -71,7 +71,7 @@ function user(state: "disabled" | "installed"): UserSettingsViewV1 {
         connectionId: "flock-ai",
         packageId: "provider-flock-ai",
         connectionTypeId: "flock-ai-account",
-        displayName: "Flock AI",
+        displayName: "Frock AI",
         state: "ready",
         providerType: "flock-ai",
         modelCatalog: {

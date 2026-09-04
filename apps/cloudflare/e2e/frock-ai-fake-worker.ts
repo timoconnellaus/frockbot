@@ -2,11 +2,11 @@ import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 
 const encoder = new TextEncoder();
 const reply =
-  'data: {"choices":[{"delta":{"content":"Reply from the Flock AI stub."}}]}\n\n' +
+  'data: {"choices":[{"delta":{"content":"Reply from the Frock AI stub."}}]}\n\n' +
   'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
   "data: [DONE]\n\n";
 
-class FlockAiGatewayFake extends RpcTarget {
+class FrockAiGatewayFake extends RpcTarget {
   run(_request: Record<string, unknown>): Response {
     return new Response(
       new ReadableStream({
@@ -20,9 +20,9 @@ class FlockAiGatewayFake extends RpcTarget {
 }
 
 /** Local RPC stand-in for the production AI Gateway binding. */
-export class FlockAiFake extends WorkerEntrypoint {
-  gateway(_gatewayId: string): FlockAiGatewayFake {
-    return new FlockAiGatewayFake();
+export class FrockAiFake extends WorkerEntrypoint {
+  gateway(_gatewayId: string): FrockAiGatewayFake {
+    return new FrockAiGatewayFake();
   }
 
   run(_model: string, _input: Record<string, unknown>): ReadableStream {
@@ -37,6 +37,6 @@ export class FlockAiFake extends WorkerEntrypoint {
 
 export default {
   fetch(): Response {
-    return new Response("Flock AI fake speaks RPC only", { status: 404 });
+    return new Response("Frock AI fake speaks RPC only", { status: 404 });
   },
 };

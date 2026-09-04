@@ -947,7 +947,7 @@ describe("decodeFrockBotManifest", () => {
     const decoded = decodeFrockBotManifest({
       schemaVersion: 4,
       id: "flock-ai",
-      displayName: "Flock AI",
+      displayName: "Frock AI",
       version: "1.0.0",
       compatibility: { frockbot: ">=0.0.1" },
       contributions: { runtime: { entry: "./runtime" } },
@@ -956,7 +956,7 @@ describe("decodeFrockBotManifest", () => {
         connectionTypes: [
           {
             id: "flock-ai-account",
-            displayName: "Flock AI",
+            displayName: "Frock AI",
             allowMultiple: false,
             authorization: { kind: "ambient-native" },
             capabilities: ["flock-ai-models"],

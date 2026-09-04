@@ -23,13 +23,13 @@ import {
 import {
   PRODUCTION_CATALOG_PIN_KEY,
   PRODUCTION_DEFAULT_PACKAGES_MARKER_KEY,
-  PRODUCTION_FLOCK_BOOTSTRAP_MARKER_KEY,
+  PRODUCTION_FROCK_BOOTSTRAP_MARKER_KEY,
   PRODUCTION_SETTINGS_STATE_KEY,
   PRODUCTION_OLLAMA_CONNECTION_ID,
   PRODUCTION_OLLAMA_MODEL_ID,
   productionCatalogPinV1,
   productionDefaultPackagesMarkerV2,
-  productionFlockBootstrapMarkerV1,
+  productionFrockBootstrapMarkerV1,
   productionUserSettingsRecordV1,
 } from "../test/production-model-account.js";
 
@@ -207,7 +207,7 @@ describe("UserConfiguration Connection routing", () => {
       ],
       platformModel: {
         connectionId: "flock-ai-ambient",
-        providerModelId: "@flock/auto",
+        providerModelId: "@frock/auto",
       },
     });
     expect(first.packages).toContainEqual(
@@ -272,7 +272,7 @@ describe("UserConfiguration Connection routing", () => {
       source: "platform",
       model: {
         connectionId: "flock-ai-ambient",
-        providerModelId: "@flock/auto",
+        providerModelId: "@frock/auto",
       },
       binding: { state: "ready", packageId: "provider-flock-ai" },
     });
@@ -406,8 +406,8 @@ describe("UserConfiguration Connection routing", () => {
       [PRODUCTION_SETTINGS_STATE_KEY]: productionUserSettingsRecordV1(),
       [PRODUCTION_DEFAULT_PACKAGES_MARKER_KEY]:
         productionDefaultPackagesMarkerV2(),
-      [PRODUCTION_FLOCK_BOOTSTRAP_MARKER_KEY]:
-        productionFlockBootstrapMarkerV1(userId),
+      [PRODUCTION_FROCK_BOOTSTRAP_MARKER_KEY]:
+        productionFrockBootstrapMarkerV1(userId),
       [PRODUCTION_CATALOG_PIN_KEY]: productionCatalogPinV1(),
     });
     const bound = identity(userId);
@@ -469,7 +469,7 @@ describe("UserConfiguration Connection routing", () => {
     }
     expect(user.platformModel).toEqual({
       connectionId: "flock-ai-ambient",
-      providerModelId: "@flock/auto",
+      providerModelId: "@frock/auto",
     });
     let effective = resolveEffectiveBotModelV1({
       bot: { packageValues: {} },
