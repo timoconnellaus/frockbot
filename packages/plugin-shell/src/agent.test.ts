@@ -534,6 +534,11 @@ describe("the acknowledgement reaches the user", () => {
         (event) => event.type === "send/to-user",
       );
       expect(sends).toHaveLength(0);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
   test("the last steps of a reply tell the model to send a status", async () => {
     const mounted = await mount();
     try {
