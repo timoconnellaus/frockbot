@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Read-only operator queries against the FrockBot /api/debug surface.
+# Operator queries and the owner-only Turn send on FrockBot's /api/debug surface.
 # See ../SKILL.md for what the snapshot contains and how to read it.
 set -euo pipefail
 
@@ -35,6 +35,8 @@ usage:
   debug.sh bots <userId>
   debug.sh bot  <userId> <botId> [--events] [--limit N] [--before CURSOR]
   debug.sh run  <userId> <botId> <runId>
+  debug.sh send <userId> <botId> [<text...>]   read text from stdin if omitted
+  debug.sh watch <userId> <botId> <runId>      poll every 3s until settled
   debug.sh token store [<value>]   store a token durably (reads stdin if omitted)
   debug.sh token where             report which source a token resolves from
 
@@ -188,25 +190,101 @@ token_command() {
   esac
 }
 
-request() {
-  local path="$1"
-  local response status body
-  response="$(curl -sS -w '\n%{http_code}' \
-    -H "authorization: Bearer $TOKEN" \
-    "$BASE_URL$path")"
-  status="$(printf '%s' "$response" | tail -n1)"
-  body="$(printf '%s' "$response" | sed '$d')"
+require_jq() {
+  command -v jq >/dev/null 2>&1 || {
+    echo "this command requires jq" >&2
+    exit 2
+  }
+}
+
+urlencode() {
+  require_jq
+  jq -rn --arg value "$1" '$value | @uri'
+}
+
+render_body() {
+  local body="$1"
   if command -v jq >/dev/null 2>&1; then
-    printf '%s' "$body" | jq . || printf '%s\n' "$body"
+    printf '%s' "$body" | jq . 2>/dev/null || printf '%s\n' "$body"
   else
     printf '%s\n' "$body"
   fi
+}
+
+request_raw() {
+  local method="$1"
+  local path="$2"
+  local body="${3:-}"
+  local response
+  if [ "$method" = "GET" ]; then
+    response="$(curl -sS -w '\n%{http_code}' \
+      -H "authorization: Bearer $TOKEN" \
+      "$BASE_URL$path")"
+  else
+    response="$(printf '%s' "$body" | curl -sS -w '\n%{http_code}' \
+      -X "$method" \
+      -H "authorization: Bearer $TOKEN" \
+      -H "content-type: application/json" \
+      --data-binary @- \
+      "$BASE_URL$path")"
+  fi
+  HTTP_STATUS="$(printf '%s' "$response" | tail -n1)"
+  HTTP_BODY="$(printf '%s' "$response" | sed '$d')"
+}
+
+request() {
+  local path="$1"
+  local method="${2:-GET}"
+  local body="${3:-}"
+  request_raw "$method" "$path" "$body"
+  render_body "$HTTP_BODY"
   # A 401 here is a stale token; a 404 means the deployment has no DEBUG_TOKEN.
-  if [ "$status" != "200" ]; then
+  if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
     printf 'HTTP %s from %s (token from %s)\n' \
-      "$status" "$BASE_URL$path" "$TOKEN_SOURCE" >&2
+      "$HTTP_STATUS" "$BASE_URL$path" "$TOKEN_SOURCE" >&2
     exit 1
   fi
+}
+
+watch_run() {
+  require_jq
+  local user_id="$1"
+  local bot_id="$2"
+  local run_id="$3"
+  local path run status
+  path="/api/debug/bots/$(urlencode "$bot_id")/runs/$(urlencode "$run_id")?userId=$(urlencode "$user_id")"
+  while true; do
+    request_raw "GET" "$path"
+    if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+      render_body "$HTTP_BODY"
+      printf 'HTTP %s from %s (token from %s)\n' \
+        "$HTTP_STATUS" "$BASE_URL$path" "$TOKEN_SOURCE" >&2
+      exit 1
+    fi
+    if ! run="$(printf '%s' "$HTTP_BODY" | jq -ce --arg run_id "$run_id" '.runs[]? | select(.runId == $run_id)')"; then
+      echo "run $run_id was not found in the debug response" >&2
+      exit 1
+    fi
+    status="$(printf '%s' "$run" | jq -r '.status')"
+    case "$status" in
+      running)
+        sleep 3
+        ;;
+      completed | failed | interrupted | reconciliation-required | cancelled | superseded)
+        printf '%s' "$run" | jq '{
+          sends: [.events[]? | select(.type == "send/to-user") | .payload],
+          outcome: ({status: .status}
+            + (if has("responseText") then {responseText: .responseText} else {} end)
+            + (if has("failure") then {failure: .failure} else {} end))
+        }'
+        return 0
+        ;;
+      *)
+        printf 'run %s returned unknown status %s\n' "$run_id" "$status" >&2
+        exit 1
+        ;;
+    esac
+  done
 }
 
 command="${1:-}"
@@ -266,6 +344,31 @@ case "$command" in
       exit 2
     }
     request "/api/debug/bots/$2/runs/$3?userId=$1"
+    ;;
+  send)
+    [ $# -ge 2 ] || {
+      usage
+      exit 2
+    }
+    user_id="$(urlencode "$1")"
+    bot_id="$(urlencode "$2")"
+    shift 2
+    if [ $# -gt 0 ]; then
+      turn_text="$*"
+    else
+      turn_text="$(cat)"
+    fi
+    request \
+      "/api/debug/users/$user_id/bots/$bot_id/turns" \
+      "POST" \
+      "$(jq -cn --arg text "$turn_text" '{text: $text}')"
+    ;;
+  watch)
+    [ $# -ge 3 ] || {
+      usage
+      exit 2
+    }
+    watch_run "$1" "$2" "$3"
     ;;
   *)
     usage

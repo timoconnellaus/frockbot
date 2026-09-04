@@ -10,9 +10,11 @@ import { decodeBotIdV1 } from "@frockbot/configuration-core";
  * than by a session, so it can be read from a terminal while a Bot is wedged
  * and nobody is signed in.
  *
- * It is read-only. Nothing here admits a Turn, reconciles a run, or writes
- * durable state — an operator looking at a stuck Bot must not be the thing
- * that moves it.
+ * Every route is read-only except the one deliberate Turn send. That write is
+ * safe because it requires both the debug token and an owner/admin identity,
+ * then enters the ordinary client Turn path with its ownership check,
+ * admission/refusal handling and size limit. Nothing here can reconcile,
+ * cancel, or otherwise move an existing run.
  */
 export interface DebugGatewaySurface {
   /** Absent (or empty) disables the whole surface; the routes then 404. */
@@ -26,12 +28,29 @@ export interface DebugGatewaySurface {
     botId: string,
     query: BotDebugQueryV1,
   ): Promise<unknown>;
+  isAdminUser(userId: string): Promise<boolean>;
 }
+
+export type DebugTurnSubmitter = (
+  userId: string,
+  botId: string,
+  text: string,
+) => Promise<Response>;
 
 const DEBUG_PREFIX = "/api/debug";
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
+}
+
+function forbiddenUser(): Response {
+  return new Response(
+    "Debug Turn submission is only allowed for an administrator account.",
+    {
+      status: 403,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    },
+  );
 }
 
 /**
@@ -78,12 +97,27 @@ function debugQuery(url: URL): BotDebugQueryV1 {
   });
 }
 
+function debugTurnText(input: unknown): string {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error("debug Turn body must be an object");
+  }
+  const body = input as Record<string, unknown>;
+  if (Object.keys(body).some((key) => key !== "text")) {
+    throw new Error("debug Turn body only accepts text");
+  }
+  if (typeof body.text !== "string") {
+    throw new Error("debug Turn body.text must be a string");
+  }
+  return body.text;
+}
+
 /**
  * Mounted ahead of authentication in the gateway, so it answers with no
  * session. Returns `undefined` for any path it does not own.
  */
 export function createDebugRoute(
   surface: DebugGatewaySurface | undefined,
+  submitTurn?: DebugTurnSubmitter,
 ): (request: Request, url: URL) => Promise<Response | undefined> {
   return async (request, url) => {
     if (
@@ -98,10 +132,42 @@ export function createDebugRoute(
     if (!presented || !tokenMatches(presented, surface.token)) {
       return jsonError(401, "debug token required");
     }
-    if (request.method !== "GET") return jsonError(405, "method not allowed");
 
     const path = url.pathname.slice(DEBUG_PREFIX.length);
     try {
+      const sendMatch = path.match(/^\/users\/([^/]+)\/bots\/([^/]+)\/turns$/);
+      if (sendMatch) {
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+        const userId = decodeURIComponent(sendMatch[1]!);
+        const botId = decodeBotIdV1(decodeURIComponent(sendMatch[2]!));
+        // Resolve the durable sign-in identity before reading or forwarding
+        // the body. The debug token alone never gains authority to speak as an
+        // arbitrary User, and a User with no identity row is denied too.
+        if (!(await surface.isAdminUser(userId))) return forbiddenUser();
+        let text: string;
+        try {
+          text = debugTurnText(await request.json());
+        } catch (error) {
+          return jsonError(
+            400,
+            error instanceof Error
+              ? error.message
+              : "debug Turn body is invalid",
+          );
+        }
+        // This is the only write on `/api/debug`: `submitTurn` forwards an
+        // ordinary client command to the loaded User application, so the
+        // response (including a 409 admission refusal or a 413 size refusal)
+        // is returned byte-for-byte with its original status.
+        if (!submitTurn)
+          return jsonError(503, "debug Turn send is unavailable");
+        return submitTurn(userId, botId, text);
+      }
+
+      // All other debug routes remain read-only.
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
       if (path === "" || path === "/") {
         return Response.json({
           schemaVersion: 1,
@@ -110,6 +176,7 @@ export function createDebugRoute(
             "GET /api/debug/bots?userId=<id>",
             "GET /api/debug/bots/<botId>?userId=<id>&limit=<n>&events=true&before=<cursor>",
             "GET /api/debug/bots/<botId>/runs/<runId>?userId=<id>",
+            "POST /api/debug/users/<userId>/bots/<botId>/turns",
           ],
         });
       }
@@ -153,7 +220,8 @@ export function createDebugRoute(
       // that reached here is more useful than a generic 500.
       return Response.json(
         {
-          error: error instanceof Error ? error.message : "debug read failed",
+          error:
+            error instanceof Error ? error.message : "debug request failed",
           ...(error instanceof Error && error.stack
             ? { stack: error.stack }
             : {}),
