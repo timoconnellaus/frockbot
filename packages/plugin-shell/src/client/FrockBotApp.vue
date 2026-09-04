@@ -1195,23 +1195,6 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                   <UiMarkdown :text="message.text" />
                 </div>
                 <!--
-                  The working state. Until the model has produced a word there
-                  was nothing beside the avatar at all, for twenty seconds and
-                  occasionally for two minutes, and the only other signal — the
-                  composer's stop button — is at the far end of the window from
-                  where the reply will appear.
-                -->
-                <div
-                  v-else-if="message.status === 'streaming'"
-                  class="message-bubble message-working"
-                  role="status"
-                  aria-label="Working on a reply"
-                >
-                  <span class="working-dots" aria-hidden="true">
-                    <i></i><i></i><i></i>
-                  </span>
-                </div>
-                <!--
                   Why the Turn ends where it does, under whatever it had
                   already said rather than in place of it.
                 -->
