@@ -60,6 +60,7 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
   /** Invalidates a permission prompt or socket callback from an older toggle. */
   let attempt = 0;
   let quotaTicker: ReturnType<typeof setInterval> | undefined;
+  let refreshInFlight: Promise<void> | undefined;
 
   const releaseMedia = async (): Promise<void> => {
     if (quotaTicker !== undefined) clearInterval(quotaTicker);
@@ -78,6 +79,47 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
     });
   };
 
+  const refresh = (): Promise<void> => {
+    if (!request) return Promise.resolve();
+    if (refreshInFlight) return refreshInFlight;
+    const currentAttempt = attempt;
+    refreshInFlight = request("/api/voice")
+      .then(decodeVoiceAssistantViewV1)
+      .then((view) => {
+        // The monthly ceiling is stable even if the User turns Voice on while
+        // this read is in flight. Live remaining time is owned by the socket.
+        state.value.quotaLimitSeconds = view.quota.limitSeconds;
+        if (currentAttempt !== attempt || state.value.status !== "offline") {
+          return;
+        }
+        state.value.enabled = view.ledger.state.enabled;
+        state.value.quotaRemainingSeconds = view.quota.remainingSeconds;
+        const latest = view.ledger.state.activeSessionId
+          ? view.ledger.sessions.find(
+              (entry) => entry.sessionId === view.ledger.state.activeSessionId,
+            )
+          : view.ledger.sessions[0];
+        if (latest) {
+          state.value.session = latest;
+          state.value.transcript = latest.transcript;
+          state.value.tools = latest.toolCalls;
+        }
+        if (view.ledger.state.enabled) {
+          state.value.message =
+            "Voice is ready to resume. Turn it on to reconnect this device.";
+        }
+      })
+      .catch(() => {
+        if (currentAttempt === attempt && state.value.status === "offline") {
+          state.value.message = "Voice status couldn't be loaded.";
+        }
+      })
+      .finally(() => {
+        refreshInFlight = undefined;
+      });
+    return refreshInFlight;
+  };
+
   const state = ref<VoiceClientStateV1>({
     enabled: false,
     status: "offline",
@@ -86,6 +128,7 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
     quotaLimitSeconds: 0,
     transcript: [],
     tools: [],
+    refresh,
     open() {
       surfaces.open(VOICE_SURFACE_ID_V1);
     },
@@ -246,33 +289,6 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
       }
     },
   });
-
-  if (request) {
-    void request("/api/voice")
-      .then(decodeVoiceAssistantViewV1)
-      .then((view) => {
-        state.value.enabled = view.ledger.state.enabled;
-        state.value.quotaRemainingSeconds = view.quota.remainingSeconds;
-        state.value.quotaLimitSeconds = view.quota.limitSeconds;
-        const latest = view.ledger.state.activeSessionId
-          ? view.ledger.sessions.find(
-              (entry) => entry.sessionId === view.ledger.state.activeSessionId,
-            )
-          : view.ledger.sessions[0];
-        if (latest) {
-          state.value.session = latest;
-          state.value.transcript = latest.transcript;
-          state.value.tools = latest.toolCalls;
-        }
-        if (view.ledger.state.enabled) {
-          state.value.message =
-            "Voice is ready to resume. Turn it on to reconnect this device.";
-        }
-      })
-      .catch(() => {
-        state.value.message = "Voice status couldn't be loaded.";
-      });
-  }
 
   return [
     ctx.provide(voiceClientStateKey, state),

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { UiIcon } from "@frockbot/client-ui";
-import { computed, inject } from "vue";
+import { computed, inject, onMounted } from "vue";
 import { voiceClientStateKey } from "./state.js";
 
 const provided = inject(voiceClientStateKey);
@@ -10,6 +10,9 @@ const active = computed(() => voice.value.status !== "offline");
 const label = computed(() =>
   active.value ? "Turn Voice off" : "Turn Voice on",
 );
+onMounted(() => {
+  void voice.value.refresh();
+});
 </script>
 
 <template>

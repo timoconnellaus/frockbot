@@ -16,6 +16,7 @@ export interface VoiceClientStateV1 {
   transcript: VoiceTranscriptEntryV1[];
   tools: VoiceToolCallEntryV1[];
   message?: string;
+  refresh(): Promise<void>;
   toggle(): Promise<void>;
   open(): void;
 }
