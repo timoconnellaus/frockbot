@@ -160,11 +160,25 @@ export function promotedSendOccurrenceIdV1(requestId: string): string {
 export async function promoteAssistantTextToSendV1(
   session: Session,
   text: string,
-  position: { turn: number; step: number; requestId: string },
+  position: {
+    turn: number;
+    step: number;
+    requestId: string;
+    toolNames?: readonly string[];
+  },
 ): Promise<void> {
   const trimmed = text.trim();
   if (trimmed.length === 0 || trimmed.length > PROMOTED_ASSISTANT_TEXT_LIMIT_V1)
     return;
+  // A step that narrates "On it — building it now." AND calls `send_to_user`
+  // with the same line is about to speak for itself; promoting the narration
+  // too is how the person saw the bubble twice. The send has not run yet when
+  // this hook fires (it runs before the tools, on purpose), so the pending
+  // call names are the only evidence.
+  const aboutToSend = (position.toolNames ?? []).some(
+    (name) => name === SEND_TO_USER_TOOL_V1 || name === SEND_MESSAGE_ALIAS_V1,
+  );
+  if (aboutToSend) return;
   const occurrenceId = promotedSendOccurrenceIdV1(position.requestId);
   const spokeThisStep = session.events.some(
     (event) =>

@@ -1498,6 +1498,7 @@ class LoopAgent implements Agent {
       turn,
       step,
       requestId: response.request.requestId,
+      toolNames: response.toolCalls.map((call) => call.name),
     });
   }
 
