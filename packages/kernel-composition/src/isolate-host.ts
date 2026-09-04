@@ -373,7 +373,19 @@ export class BotIsolateContributionHost implements ContributionHost {
         registered.push(
           this.options.tools.registerNamespace({
             name: packageId,
-            external: true,
+            // Not external. `external` exists to force a human-readable
+            // reason onto a call that leaves for a third-party MCP server, and
+            // the dispatch guard refuses an external call without
+            // `mcpDetails.description`. An isolate-hosted Package is this
+            // deployment's own reviewed code reached over no network, and
+            // nothing ever told the model to send `mcpDetails` for one — the
+            // discovery envelope omits it and the `call_dynamic_tool` blurb
+            // says to omit it. So the envelope offered was the envelope
+            // refused, and the Applets Package (which ships as a bundled
+            // artifact and mounts here) could not be called by chat at all:
+            // `applet_create` answered `External namespace "applets" requires
+            // mcpDetails.description` every time.
+            external: false,
             status: "ready",
           }),
         );

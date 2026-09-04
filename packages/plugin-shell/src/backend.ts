@@ -1239,18 +1239,7 @@ export class ShellBotBackendContribution {
     return { schemaVersion: 1, skills: entries };
   }
 
-  /**
-   * The one durable manifest lookup used by mounts, commands, and UI views —
-   * as the **stored document**, byte-for-byte what `manifestHash` was taken
-   * over at authoring time.
-   *
-   * Decoding rebuilds the object (`decodeV5` always writes a `configuration`
-   * key, for one), so a decoded manifest does not canonicalize back to the
-   * recorded hash. Every mount re-verifies that hash
-   * (`botIsolatePackageDescriptorV1`), so the raw document is the only thing
-   * that can be handed to it; callers that want the typed shape decode it
-   * themselves through `readCompositionMemberManifest`.
-   */
+  /** The two places this Bot's manifests live; see `composition-manifest.ts`. */
   private compositionManifestSources(): CompositionManifestSourcesV1 {
     return {
       stored: (manifestHash) =>
@@ -1261,6 +1250,16 @@ export class ShellBotBackendContribution {
     };
   }
 
+  /**
+   * The manifest a **mount** is handed: the stored document, byte-for-byte
+   * what `manifestHash` was taken over at authoring time.
+   *
+   * Decoding rebuilds the object (`decodeV5` always writes a `configuration`
+   * key, for one), so a decoded manifest does not canonicalize back to the
+   * recorded hash. Every mount re-verifies that hash
+   * (`botIsolatePackageDescriptorV1`), so the raw document is the only thing
+   * that can be handed to it.
+   */
   private readCompositionMemberManifestDocument(
     member: CompositionMemberV1,
   ): Promise<unknown | undefined> {
@@ -1270,6 +1269,10 @@ export class ShellBotBackendContribution {
     );
   }
 
+  /**
+   * The same manifest as the typed shape, for the callers that are not mounts:
+   * commands and UI views, which read fields rather than re-hash the document.
+   */
   private readCompositionMemberManifest(
     member: CompositionMemberV1,
   ): Promise<FrockBotManifest | undefined> {
@@ -5386,7 +5389,28 @@ export class ShellBotBackendContribution {
       index.map((entry) => entry.cursor),
       await this.sidebarPreview(storedPreview, index),
       failures,
+      await this.isWorking(index[0]?.runId),
     );
+  }
+
+  /**
+   * Whether the Bot's newest admitted run is still going.
+   *
+   * The sidebar draws this as an activity ring, so somebody in another
+   * conversation can see a Bot working rather than reading a quiet row as a
+   * stalled one. It is the newest run only: a Bot admits one Turn at a time,
+   * so an older run that is somehow still marked running is a reconciliation
+   * problem and not something a ring should report. A read that fails is no
+   * ring — liveness is never worth failing a sidebar poll for.
+   */
+  private async isWorking(runId: string | undefined): Promise<boolean> {
+    if (runId === undefined) return false;
+    try {
+      const run = await this.authority.readRun(runId);
+      return run?.status === "running";
+    } catch {
+      return false;
+    }
   }
 
   /**

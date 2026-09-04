@@ -321,6 +321,47 @@ describe("the shipped member inside a real Bot", () => {
     expect(relisted.content).toContain("Weekly Todos");
   });
 
+  test("dispatches the envelope discovery returns, with no mcpDetails", async () => {
+    // The Applets Package ships as a bundled artifact and mounts through the
+    // isolate host, whose namespaces used to register `external: true`. The
+    // dispatch guard then refused every call that carried no
+    // `mcpDetails.description` — a field the discovery envelope, the namespace
+    // prompt block and the `call_dynamic_tool` blurb all told the model to
+    // omit. So the envelope offered was the envelope refused and an Applet
+    // could not be created by chat at all. Every test above passes a
+    // `description`, which is exactly why none of them caught it.
+    const id = suffix();
+    const identity = {
+      userId: `applets-envelope-${id}`,
+      botId: `applets-envelopebot-${id}`,
+    };
+    await provisionBot(identity);
+    const bot = botStub(identity.userId, identity.botId);
+
+    const created = await bot.run({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        runId: `run-envelope-${id}`,
+        sessionId: `${identity.userId}:${identity.botId}`,
+        acceptedAt: new Date().toISOString(),
+        text: toolCallTriggerPrompt([
+          "call_dynamic_tool",
+          dynamicToolInputV1({
+            namespace: "applets",
+            toolName: "applet_create",
+            input: { displayName: "Envelope Applet" },
+          }),
+        ]),
+      },
+    });
+
+    const result = toolResult(created as never);
+    expect(result.isError).toBe(false);
+    expect(result.content).not.toContain("requires mcpDetails.description");
+    expect(result.content).toContain("Envelope Applet");
+  });
+
   test("the iframe catalog carries both pages, the sidebar entry, and FrockBot provenance", async () => {
     const id = suffix();
     const identity = {

@@ -4,10 +4,9 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
-    "baseUrl": "..",
     "paths": {
       "@cordisjs/client": [
-        "../packages/plugin-shell/src/client/cordis-client-shim.d.ts"
+        "../../packages/plugin-shell/src/client/cordis-client-shim.d.ts"
       ]
     },
     "strict": true,

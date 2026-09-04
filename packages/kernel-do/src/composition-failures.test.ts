@@ -486,6 +486,45 @@ describe("fail-closed Composition activation", () => {
     expect(activation.quarantined).toBe(false);
   });
 
+  test("the streak expires, so unrelated failures far apart are separate incidents", async () => {
+    // Three repair attempts are one sitting. Three failures months apart are
+    // three incidents, and quarantining the third would strand a Bot for
+    // something it had already recovered from twice.
+    const storage = new MemoryStorage();
+    const state = { storage } as unknown as DurableObjectState;
+    const store = new DurableCompositionStore({ state, bootstrap });
+    let clock = new Date("2026-09-01T00:00:00.000Z");
+    const failures = new DurableCompositionFailureLog({
+      state,
+      now: () => clock,
+      streakWindowMs: 60 * 60 * 1000,
+    });
+    const lastKnownGood = await store.current();
+
+    const outcomes: boolean[] = [];
+    for (const day of [1, 2, 3]) {
+      clock = new Date(`2026-09-0${day}T00:00:00.000Z`);
+      const generation = await authored(
+        lastKnownGood,
+        `2026-09-0${day}T00:00:00.000Z`,
+      );
+      await store.propose(generation, { pin: true });
+      const activation = await activateCompositionV1({
+        generationId: generation.generationId,
+        store: activationStore(store),
+        failures,
+        host: brokenHost(generation.generationId, "mount"),
+        signal: new AbortController().signal,
+        now: () => clock,
+      });
+      if (activation.status !== "failed-closed") throw new Error("expected");
+      outcomes.push(activation.quarantined);
+    }
+
+    // A day apart each time: never a streak, so never a quarantine.
+    expect(outcomes).toEqual([false, false, false]);
+  });
+
   test("a last known good that will not mount has nothing to fail into", async () => {
     const { store, failures, lastKnownGood } = await fixture();
     await expect(

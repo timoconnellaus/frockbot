@@ -27,7 +27,22 @@ export interface DurableCompositionFailureLogOptions {
   now?(): Date;
   /** Consecutive failures that quarantine a generation. Defaults to three. */
   threshold?: number;
+  /** How long the Bot-wide streak stays alive. Defaults to one hour. */
+  streakWindowMs?: number;
 }
+
+/** The Bot's live failure streak: how many, and when the last one landed. */
+interface CompositionFailureStreakV1 {
+  count: number;
+  at: string;
+}
+
+/**
+ * One sitting. Repair attempts arrive minutes apart, so an hour is long enough
+ * to span a Bot's whole attempt to fix itself and short enough that yesterday's
+ * unrelated failure does not count towards today's quarantine.
+ */
+const COMPOSITION_FAILURE_STREAK_WINDOW_MS = 60 * 60 * 1000;
 
 /**
  * `CompositionFailureLog` over the Bot object's prefixed keys:
@@ -45,11 +60,14 @@ export class DurableCompositionFailureLog implements CompositionFailureLog {
   private readonly ctx: DurableObjectState;
   private readonly now: () => Date;
   private readonly threshold: number;
+  private readonly streakWindowMs: number;
 
   constructor(options: DurableCompositionFailureLogOptions) {
     this.ctx = options.state;
     this.now = options.now ?? (() => new Date());
     this.threshold = options.threshold ?? COMPOSITION_QUARANTINE_THRESHOLD;
+    this.streakWindowMs =
+      options.streakWindowMs ?? COMPOSITION_FAILURE_STREAK_WINDOW_MS;
   }
 
   /** The attempt number is assigned here, inside the counter's transaction. */
@@ -70,14 +88,27 @@ export class DurableCompositionFailureLog implements CompositionFailureLog {
       // the model repairs by authoring a *new* generation, which is what it
       // always does — so without it the safeguard never fired and the
       // Composition grew one dead generation per repair attempt.
-      const streak =
-        ((await transaction.get<number>(COMPOSITION_FAILURE_STREAK_KEY)) ?? 0) +
-        1;
+      //
+      // The streak is bounded in time as well as reset by success. Three
+      // repair attempts are one sitting; three unrelated failures months apart
+      // are three separate incidents, and quarantining the third would strand
+      // a Bot for something it had already recovered from twice.
+      const at = this.now();
+      const stored = await transaction.get<CompositionFailureStreakV1>(
+        COMPOSITION_FAILURE_STREAK_KEY,
+      );
+      const continues =
+        stored !== undefined &&
+        at.getTime() - Date.parse(stored.at) <= this.streakWindowMs;
+      const streak = (continues ? stored.count : 0) + 1;
       const quarantined = attempt >= this.threshold || streak >= this.threshold;
       const writes: Record<string, unknown> = {
         [compositionFailureKey(generationId, attempt)]: recorded,
         [compositionFailureCountKey(generationId)]: attempt,
-        [COMPOSITION_FAILURE_STREAK_KEY]: streak,
+        [COMPOSITION_FAILURE_STREAK_KEY]: {
+          count: streak,
+          at: at.toISOString(),
+        } satisfies CompositionFailureStreakV1,
       };
       if (quarantined) {
         writes[compositionQuarantineKey(generationId)] =
