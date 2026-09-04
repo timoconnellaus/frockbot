@@ -64,7 +64,12 @@ import { RoutineStore } from "@frockbot/plugin-routines/store";
 import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
 import { createMemoryRoutineStorageV1 } from "@frockbot/plugin-routines/testing";
 import { executeResidentBotTurn } from "./bot-runner.js";
-import { applicationDeploymentId, createGateway } from "./gateway.js";
+import {
+  applicationDeploymentId,
+  createGateway,
+  deploymentAnsweredV1,
+} from "./gateway.js";
+import { DEPLOYMENT_HEADER_V1 } from "@frockbot/protocol";
 import { createUserApplication } from "./user-application.js";
 
 class MemoryBotState implements BotStateBinding {
@@ -1216,6 +1221,42 @@ describe("Cloudflare user application gateway", () => {
     expect(() =>
       applicationDeploymentId({ userId: "../alice", applicationHash: "valid" }),
     ).toThrow("invalid user id");
+  });
+
+  test("names the application on every answer the loaded app gives", async () => {
+    // A tab left open across a release keeps running the client bundle it was
+    // served. Naming the application on the answer is what lets it notice.
+    const { gateway } = createTestGateway();
+
+    const page = await gateway(request("/", "alice"));
+    expect(page.headers.get(DEPLOYMENT_HEADER_V1)).toBe("foundation-v1");
+    const script = await gateway(request("/app.js", "alice"));
+    expect(script.headers.get(DEPLOYMENT_HEADER_V1)).toBe("foundation-v1");
+    const manifest = await gateway(request("/app-manifest", "alice"));
+    expect(manifest.headers.get(DEPLOYMENT_HEADER_V1)).toBe("foundation-v1");
+  });
+
+  test("names each User's own application, not a deployment-wide one", async () => {
+    const { gateway } = createTestGateway((userId) =>
+      Promise.resolve(userId === "alice" ? "hash-alice" : "hash-bob"),
+    );
+
+    expect(
+      (await gateway(request("/app-manifest", "alice"))).headers.get(
+        DEPLOYMENT_HEADER_V1,
+      ),
+    ).toBe("hash-alice");
+    expect(
+      (await gateway(request("/app-manifest", "bob"))).headers.get(
+        DEPLOYMENT_HEADER_V1,
+      ),
+    ).toBe("hash-bob");
+  });
+
+  test("hands a socket upgrade back untouched", () => {
+    // A 101 has no headers worth rewriting and copying one throws.
+    const upgrade = new Response(null, { status: 101 });
+    expect(deploymentAnsweredV1(upgrade, "foundation-v1")).toBe(upgrade);
   });
 
   test("selects each user's active immutable application", async () => {
@@ -2616,7 +2657,7 @@ describe("Cross-origin access for mobile clients", () => {
       MOBILE_ORIGIN,
     );
     expect(response.headers.get("access-control-expose-headers")).toBe(
-      "set-auth-token",
+      `set-auth-token, ${DEPLOYMENT_HEADER_V1}`,
     );
     expect(response.headers.get("vary")).toBe("origin");
     expect(loader.ids).toEqual(["mobile-user:foundation-v1"]);
@@ -2646,7 +2687,7 @@ describe("Cross-origin access for mobile clients", () => {
       MOBILE_ORIGIN,
     );
     expect(response.headers.get("access-control-expose-headers")).toBe(
-      "set-auth-token",
+      `set-auth-token, ${DEPLOYMENT_HEADER_V1}`,
     );
   });
 

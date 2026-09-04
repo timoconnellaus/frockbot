@@ -644,6 +644,45 @@
   cursor: pointer;
 }
 
+/*
+ * The release bar. It sits where the error banner sits and only one shows at
+ * a time, so it borrows that geometry and none of its colour: nothing here is
+ * wrong, there is just newer code waiting.
+ */
+.update-banner {
+  position: absolute;
+  right: 20px;
+  bottom: 84px;
+  left: 20px;
+  z-index: 5;
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+  border: 1px solid var(--frock-border);
+  border-radius: 12px;
+  color: var(--frock-text);
+  background: var(--frock-surface-raised);
+  box-shadow: var(--frock-shadow-card);
+  font-size: var(--frock-text-sm);
+}
+
+.update-banner button {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 999px;
+  color: var(--frock-on-accent);
+  background: var(--frock-action-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.update-banner button:hover {
+  background: var(--frock-action-primary-hover);
+}
+
 .banner-enter-active,
 .banner-leave-active {
   transition:

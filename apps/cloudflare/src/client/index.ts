@@ -37,9 +37,30 @@ import {
 } from "@frockbot/plugin-shell/run-protocol";
 import { decodeClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 import type { SkillRefV1 } from "@frockbot/kernel-contracts";
+import { DEPLOYMENT_HEADER_V1 } from "@frockbot/protocol";
 import { BrowserBotStateChannel } from "./bot-state-channel.js";
 import { openVoiceDictationV1 } from "./voice-dictation.js";
 import { openVoiceAssistantV1 } from "./voice-assistant.js";
+
+/**
+ * The application this page was served from, as the document itself records
+ * it. The Worker-rendered document stamps it; the vite development document
+ * does not, and there nothing can be behind.
+ */
+const servedDeployment = document.body.dataset.frockbotUserApplication;
+
+const deploymentObservers = new Set<(deployment: string) => void>();
+
+/**
+ * Every answer names the application that produced it. Reading it here, on
+ * the one path every request already takes, is what lets the shell notice a
+ * release without a poll of its own.
+ */
+function observeDeploymentHeader(response: Response): void {
+  const answered = response.headers.get(DEPLOYMENT_HEADER_V1);
+  if (!answered) return;
+  for (const observer of deploymentObservers) observer(answered);
+}
 
 function requireAuthenticatedUserId(value: unknown): string {
   if (!isRpcIdentifier(value) || value === "anonymous") {
@@ -86,6 +107,7 @@ async function apiRequest(
         headers: body ? { "content-type": "application/json" } : undefined,
         body,
       });
+  observeDeploymentHeader(response);
   /*
    * Every read of a response goes through the shared reader: it classifies a
    * failed or non-JSON reply rather than letting `JSON.parse` speak for it,
@@ -100,6 +122,13 @@ async function apiRequest(
 const botStateChannel = new BrowserBotStateChannel();
 const application = new ClientApplication({
   connectionsAvailable: true,
+  ...(servedDeployment ? { servedDeployment } : {}),
+  observeDeployment(observer) {
+    deploymentObservers.add(observer);
+    return () => {
+      deploymentObservers.delete(observer);
+    };
+  },
   async turn(
     botId: string,
     text: string,
@@ -146,6 +175,7 @@ const application = new ClientApplication({
           signal,
         });
     signal.throwIfAborted();
+    observeDeploymentHeader(response);
     /*
      * A refusal is the Bot answering, with a reason of its own, so it keeps
      * its typed error: flattening a 409 to a message sent the client down the
