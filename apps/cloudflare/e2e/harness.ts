@@ -737,6 +737,11 @@ export async function startHarness(
         // needs no key and spends nothing. Production sets no such var.
         "--var",
         `VOICE_UPSTREAM_URL:ws://127.0.0.1:${options.frockAiPort}/v1/realtime`,
+        "--var",
+        // Gemini Live's fake provider. The test-only query also shortens the
+        // production two-minute silence ceiling so the offline state is
+        // observable without making the suite wait two minutes.
+        `VOICE_ASSISTANT_UPSTREAM_URL:ws://127.0.0.1:${options.frockAiPort}/v1/gemini-live?frock_idle_ms=5000`,
         "--persist-to",
         persistDirectory,
         // As above: the per-request log is the flood, not the signal.

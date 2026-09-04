@@ -30,6 +30,7 @@ import { clientContribution as botTemplateClient } from "@frockbot/plugin-bot-te
 import { clientContribution as auditClient } from "@frockbot/plugin-audit/client";
 import { clientContribution as packagePublisherClient } from "@frockbot/plugin-package-publisher/client";
 import { clientContribution as userMachineClient } from "@frockbot/plugin-user-machine/client";
+import { clientContribution as voiceClient } from "@frockbot/plugin-voice/client";
 
 export const foundationClientContributions: readonly ClientContributionDescriptorV1<ClientPlugin>[] =
   [
@@ -52,4 +53,5 @@ export const foundationClientContributions: readonly ClientContributionDescripto
     // After Settings: the Computer section mounts into the User settings slot
     // Settings declares.
     userMachineClient,
+    voiceClient,
   ];

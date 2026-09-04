@@ -97,6 +97,15 @@ import {
   type ClientAuditPageV1,
 } from "@frockbot/plugin-audit";
 import type { BotAuditRpc } from "./audit.js";
+import type {
+  VoiceBotActivityV1,
+  VoiceMemoryHitV1,
+  VoiceToolHostV1,
+} from "@frockbot/plugin-voice/tools";
+import type {
+  VoiceUserBackendContributionV1,
+  VoiceUserBackendHostV1,
+} from "@frockbot/plugin-voice/user";
 import {
   decodePublishPackageCommandV1,
   decodeRollbackPackageCommandV1,
@@ -107,9 +116,14 @@ import type {
   McpAuthorizationStartRequestV1,
 } from "@frockbot/plugin-mcp/backend";
 import {
+  readVoiceAssistantQuotaV1,
+  recordVoiceAssistantUsageV1,
   recordVoiceUsageV1,
+  reserveVoiceAssistantV1,
   reserveVoiceCaptureV1,
+  VOICE_QUOTA_MONTH,
   VOICE_QUOTA_DAY,
+  voiceQuotaMonthV1,
   type VoiceQuotaReceiptV1,
   type VoiceUsageReceiptV1,
 } from "./voice-quota.js";
@@ -270,6 +284,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
                 .then(rpcJsonSnapshotV1);
             },
           },
+          voice: this.voiceToolHost(),
           // The audit table (parity register rows 30 and 30b). Same object,
           // same SQL storage, same discipline as the transcript index: every
           // row is a projection of the Bots' own durable session events, and
@@ -397,6 +412,93 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     MountedFoundationUserBackend["flock"]
   > {
     return (await this.contributions()).flock;
+  }
+
+  private async voiceContribution(): Promise<VoiceUserBackendContributionV1> {
+    return (await this.contributions()).voice;
+  }
+
+  private voiceBotState(userId: string, botId: string) {
+    const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+    return this.env.BOT_STATES.get(id) as unknown as {
+      readVoiceActivity(input: unknown): Promise<VoiceBotActivityV1>;
+      searchVoiceMemory(input: unknown): Promise<VoiceMemoryHitV1[]>;
+    };
+  }
+
+  private voiceToolHost(): VoiceToolHostV1 & VoiceUserBackendHostV1 {
+    return {
+      storage: this.ctx.storage,
+      listBots: async () => {
+        const flock = await this.flockContribution();
+        const [directory, lifecycles] = await Promise.all([
+          flock.listBots(),
+          flock.listBotLifecycles(),
+        ]);
+        const statuses = new Map(
+          lifecycles.lifecycles.map((entry) => [entry.botId, entry.status]),
+        );
+        return directory.bots
+          .filter((bot) => statuses.get(bot.botId) !== "deleted")
+          .map((bot) => ({
+            botId: bot.botId,
+            name: bot.initialName,
+            status:
+              statuses.get(bot.botId) === "archived"
+                ? ("archived" as const)
+                : ("active" as const),
+          }));
+      },
+      botActivity: async (botId, since) => {
+        await this.assertVoiceBot(botId);
+        const userId = this.identity!;
+        return this.voiceBotState(userId, botId).readVoiceActivity({
+          schemaVersion: 1,
+          userId,
+          botId,
+          ...(since ? { since } : {}),
+        });
+      },
+      memorySearch: async ({ query, botId }) => {
+        const bots = (await this.voiceToolHost().listBots()).filter(
+          (bot) => bot.status === "active" && (!botId || bot.botId === botId),
+        );
+        if (botId && bots.length === 0) throw new BotNotFoundError(botId);
+        const userId = this.identity!;
+        const reads: Array<Promise<VoiceMemoryHitV1[]>> = bots.map((bot) =>
+          this.voiceBotState(userId, bot.botId).searchVoiceMemory({
+            schemaVersion: 1,
+            userId,
+            botId: bot.botId,
+            query,
+            scope: "bot",
+          }),
+        );
+        const first = bots[0];
+        if (first) {
+          reads.push(
+            this.voiceBotState(userId, first.botId).searchVoiceMemory({
+              schemaVersion: 1,
+              userId,
+              botId: first.botId,
+              query,
+              scope: "user",
+            }),
+          );
+        }
+        return (await Promise.all(reads)).flat().slice(0, 24);
+      },
+      pendingAnswers: async () =>
+        (await this.voiceContribution())
+          .view()
+          .then((view) => view.pendingAnswers),
+    };
+  }
+
+  private async assertVoiceBot(botId: string): Promise<void> {
+    if (!(await (await this.flockContribution()).hasBot(botId))) {
+      throw new BotNotFoundError(botId);
+    }
   }
 
   private async publisherContribution(): Promise<
@@ -839,6 +941,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       day: rpcPattern(VOICE_QUOTA_DAY, 10),
       sessionId: rpcString(128),
     });
+    await this.assertUserIdentity(request.userId as string);
     return reserveVoiceCaptureV1(this.ctx.storage, {
       day: request.day as string,
       sessionId: request.sessionId as string,
@@ -852,11 +955,131 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       sessionId: rpcString(128),
       seconds: rpcInteger({ minimum: 0, maximum: 24 * 60 * 60 }),
     });
+    await this.assertUserIdentity(request.userId as string);
     return recordVoiceUsageV1(this.ctx.storage, {
       day: request.day as string,
       sessionId: request.sessionId as string,
       seconds: request.seconds as number,
     });
+  }
+
+  async startVoiceAssistant(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      month: rpcPattern(VOICE_QUOTA_MONTH, 7),
+      sessionId: rpcString(128),
+      deviceId: rpcString(128),
+      at: rpcString(64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const quota = await reserveVoiceAssistantV1(this.ctx.storage, {
+      month: request.month as string,
+      sessionId: request.sessionId as string,
+    });
+    if (quota.status === "refused") return { schemaVersion: 1, quota };
+    const started = await (
+      await this.voiceContribution()
+    ).start({
+      sessionId: request.sessionId as string,
+      deviceId: request.deviceId as string,
+      at: request.at as string,
+    });
+    return { schemaVersion: 1, quota, ...started };
+  }
+
+  async endVoiceAssistant(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      month: rpcPattern(VOICE_QUOTA_MONTH, 7),
+      sessionId: rpcString(128),
+      at: rpcString(64),
+      reason: rpcEnum(["stopped", "idle", "quota", "error", "replaced"]),
+      seconds: rpcInteger({ minimum: 0, maximum: 31 * 24 * 60 * 60 }),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const usage = await recordVoiceAssistantUsageV1(this.ctx.storage, {
+      month: request.month as string,
+      sessionId: request.sessionId as string,
+      seconds: request.seconds as number,
+    });
+    const state = await (
+      await this.voiceContribution()
+    ).end({
+      sessionId: request.sessionId as string,
+      at: request.at as string,
+      reason: request.reason as
+        "stopped" | "idle" | "quota" | "error" | "replaced",
+      seconds: request.seconds as number,
+    });
+    return { schemaVersion: 1, usage, state };
+  }
+
+  async saveVoiceResumptionHandle(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      sessionId: rpcString(128),
+      handle: rpcString(16_384),
+      at: rpcString(64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await (
+      await this.voiceContribution()
+    ).saveResumptionHandle({
+      sessionId: request.sessionId as string,
+      handle: request.handle as string,
+      at: request.at as string,
+    });
+  }
+
+  async appendVoiceTranscript(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      sessionId: rpcString(128),
+      entryId: rpcString(128),
+      speaker: rpcEnum(["user", "assistant"]),
+      text: rpcString(8_192),
+      at: rpcString(64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await (
+      await this.voiceContribution()
+    ).appendTranscript(request.sessionId as string, {
+      schemaVersion: 1,
+      id: request.entryId as string,
+      speaker: request.speaker as "user" | "assistant",
+      text: request.text as string,
+      at: request.at as string,
+    });
+  }
+
+  async executeVoiceTool(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      sessionId: rpcString(128),
+      callId: rpcString(128),
+      name: rpcString(128),
+      args: rpcJsonRecord,
+      at: rpcString(64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.voiceContribution()).executeTool({
+      sessionId: request.sessionId as string,
+      callId: request.callId as string,
+      name: request.name as string,
+      args: request.args,
+      at: request.at as string,
+    });
+  }
+
+  async readVoiceAssistant(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    const month = voiceQuotaMonthV1();
+    const [ledger, quota] = await Promise.all([
+      (await this.voiceContribution()).view(),
+      readVoiceAssistantQuotaV1(this.ctx.storage, month),
+    ]);
+    return { schemaVersion: 1, ledger, quota };
   }
 
   /** The durable per-User authoring quota configuration; defaults when unset. */

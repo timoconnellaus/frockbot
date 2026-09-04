@@ -61,6 +61,20 @@ export interface VoiceLedgerViewV1 {
   pendingAnswers: VoicePendingAnswerV1[];
 }
 
+export interface VoiceAssistantQuotaViewV1 {
+  schemaVersion: 1;
+  month: string;
+  usedSeconds: number;
+  limitSeconds: number;
+  remainingSeconds: number;
+}
+
+export interface VoiceAssistantViewV1 {
+  schemaVersion: 1;
+  ledger: VoiceLedgerViewV1;
+  quota: VoiceAssistantQuotaViewV1;
+}
+
 export type VoiceToolNameV1 =
   "list_bots" | "bot_activity" | "memory_search" | "pending_answers";
 
@@ -126,13 +140,169 @@ export function decodeVoiceLedgerViewV1(input: unknown): VoiceLedgerViewV1 {
   return {
     schemaVersion: 1,
     state: decodeVoiceStateV1(value.state),
-    sessions: value.sessions.slice(
-      0,
-      VOICE_MAX_SESSIONS_V1,
-    ) as VoiceSessionRecordV1[],
-    pendingAnswers: value.pendingAnswers.slice(
-      0,
-      VOICE_MAX_PENDING_ANSWERS_V1,
-    ) as VoicePendingAnswerV1[],
+    sessions: value.sessions
+      .slice(0, VOICE_MAX_SESSIONS_V1)
+      .map(decodeVoiceSessionRecordV1),
+    pendingAnswers: value.pendingAnswers
+      .slice(0, VOICE_MAX_PENDING_ANSWERS_V1)
+      .map(decodeVoicePendingAnswerV1),
+  };
+}
+
+function timestamp(input: unknown, label: string): string {
+  const value = boundedString(input, label, 64);
+  if (!Number.isFinite(Date.parse(value)))
+    throw new Error(`${label} is invalid`);
+  return value;
+}
+
+function natural(input: unknown, label: string): number {
+  if (!Number.isSafeInteger(input) || (input as number) < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
+  return input as number;
+}
+
+function decodeVoiceTranscriptEntryV1(input: unknown): VoiceTranscriptEntryV1 {
+  const value = record(input, "voice transcript entry");
+  if (
+    value.schemaVersion !== 1 ||
+    (value.speaker !== "user" && value.speaker !== "assistant")
+  ) {
+    throw new Error("voice transcript entry is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    id: boundedString(value.id, "voice transcript entry.id", 128),
+    speaker: value.speaker,
+    text: boundedString(value.text, "voice transcript entry.text", 4_000),
+    at: timestamp(value.at, "voice transcript entry.at"),
+  };
+}
+
+function decodeVoiceToolCallEntryV1(input: unknown): VoiceToolCallEntryV1 {
+  const value = record(input, "voice tool call");
+  const names: VoiceToolNameV1[] = [
+    "list_bots",
+    "bot_activity",
+    "memory_search",
+    "pending_answers",
+  ];
+  if (
+    value.schemaVersion !== 1 ||
+    !names.includes(value.name as VoiceToolNameV1)
+  ) {
+    throw new Error("voice tool call is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    id: boundedString(value.id, "voice tool call.id", 128),
+    name: value.name as VoiceToolNameV1,
+    label: boundedString(value.label, "voice tool call.label", 160),
+    at: timestamp(value.at, "voice tool call.at"),
+  };
+}
+
+function decodeVoiceSessionRecordV1(input: unknown): VoiceSessionRecordV1 {
+  const value = record(input, "voice session");
+  if (
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.transcript) ||
+    !Array.isArray(value.toolCalls)
+  ) {
+    throw new Error("voice session is invalid");
+  }
+  const reasons: VoiceOfflineReasonV1[] = [
+    "stopped",
+    "idle",
+    "quota",
+    "error",
+    "replaced",
+  ];
+  if (
+    value.endedReason !== undefined &&
+    !reasons.includes(value.endedReason as VoiceOfflineReasonV1)
+  ) {
+    throw new Error("voice session.endedReason is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    sessionId: boundedString(value.sessionId, "voice session.sessionId", 128),
+    deviceId: boundedString(value.deviceId, "voice session.deviceId", 128),
+    startedAt: timestamp(value.startedAt, "voice session.startedAt"),
+    ...(value.endedAt === undefined
+      ? {}
+      : { endedAt: timestamp(value.endedAt, "voice session.endedAt") }),
+    ...(value.endedReason === undefined
+      ? {}
+      : { endedReason: value.endedReason as VoiceOfflineReasonV1 }),
+    seconds: natural(value.seconds, "voice session.seconds"),
+    transcript: value.transcript
+      .slice(-VOICE_MAX_TRANSCRIPT_ENTRIES_V1)
+      .map(decodeVoiceTranscriptEntryV1),
+    toolCalls: value.toolCalls
+      .slice(-VOICE_MAX_TOOL_CALLS_V1)
+      .map(decodeVoiceToolCallEntryV1),
+  };
+}
+
+function decodeVoicePendingAnswerV1(input: unknown): VoicePendingAnswerV1 {
+  const value = record(input, "voice pending answer");
+  if (value.schemaVersion !== 1)
+    throw new Error("voice pending answer is invalid");
+  return {
+    schemaVersion: 1,
+    answerId: boundedString(
+      value.answerId,
+      "voice pending answer.answerId",
+      128,
+    ),
+    botId: boundedString(value.botId, "voice pending answer.botId", 128),
+    botName: boundedString(value.botName, "voice pending answer.botName", 160),
+    question: boundedString(
+      value.question,
+      "voice pending answer.question",
+      2_000,
+    ),
+    answer: boundedString(value.answer, "voice pending answer.answer", 4_000),
+    answeredAt: timestamp(value.answeredAt, "voice pending answer.answeredAt"),
+    ...(value.briefedAt === undefined
+      ? {}
+      : {
+          briefedAt: timestamp(
+            value.briefedAt,
+            "voice pending answer.briefedAt",
+          ),
+        }),
+  };
+}
+
+export function decodeVoiceAssistantViewV1(
+  input: unknown,
+): VoiceAssistantViewV1 {
+  const value = record(input, "voice assistant view");
+  const quota = record(value.quota, "voice assistant quota");
+  if (value.schemaVersion !== 1 || quota.schemaVersion !== 1) {
+    throw new Error("voice assistant view version is unsupported");
+  }
+  return {
+    schemaVersion: 1,
+    ledger: decodeVoiceLedgerViewV1(value.ledger),
+    quota: {
+      schemaVersion: 1,
+      month: boundedString(quota.month, "voice assistant quota.month", 7),
+      usedSeconds: natural(
+        quota.usedSeconds,
+        "voice assistant quota.usedSeconds",
+      ),
+      limitSeconds: natural(
+        quota.limitSeconds,
+        "voice assistant quota.limitSeconds",
+      ),
+      remainingSeconds: natural(
+        quota.remainingSeconds,
+        "voice assistant quota.remainingSeconds",
+      ),
+    },
   };
 }

@@ -137,6 +137,7 @@ import {
 } from "@frockbot/plugin-subagents/agent";
 export type { SubagentsRuntimeHostV1 } from "@frockbot/plugin-subagents/agent";
 import searchManifest from "@frockbot/plugin-search/manifest";
+import voiceManifest from "@frockbot/plugin-voice/manifest";
 import { createConfiguredOllamaWebSearchRuntimeContribution } from "@frockbot/plugin-provider-ollama-cloud/web-search";
 // The Web Package contributes `web_fetch`: no Connection, no provider, and no
 // Computer — it works while the User's Computer is hibernated.
@@ -200,6 +201,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-shell", shellManifest],
   ["@frockbot/plugin-skills", skillsManifest],
   ["@frockbot/plugin-search", searchManifest],
+  ["@frockbot/plugin-voice", voiceManifest],
   ["@frockbot/plugin-audit", auditManifest],
   ["@frockbot/plugin-settings", settingsManifest],
   ["@frockbot/plugin-routines", routinesManifest],

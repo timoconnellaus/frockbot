@@ -102,6 +102,9 @@ export default defineConfig({
             className: "UserConfiguration",
             useSQLite: true,
           },
+          // VoiceSession owns only the socket bridge. This binding lets the
+          // gateway integration test prove its RPCs reach the User authority.
+          VOICE_SESSIONS: "VoiceSession",
           DEPLOYMENT_POLICY: {
             className: "DeploymentPolicy",
             useSQLite: true,

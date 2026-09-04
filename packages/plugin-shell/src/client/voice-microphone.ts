@@ -21,10 +21,14 @@ export interface VoiceMicrophoneV1 {
 }
 
 export interface VoiceMicrophoneOptionsV1 {
-  /** One frame of PCM16, little-endian, mono, 24 kHz. */
+  /** One frame of PCM16, little-endian, mono, at `sampleRate`. */
   audio(pcm16: ArrayBuffer): void;
   /** Peak amplitude of the frame, 0…1, for the capture animation. */
   level(value: number): void;
+  /** Defaults to dictation's 24 kHz. Voice assistant input uses 16 kHz. */
+  sampleRate?: number;
+  /** Defaults to 32 ms at the selected sample rate. */
+  frameSamples?: number;
 }
 
 /** False on a platform with no microphone API at all; the button stays hidden. */
@@ -83,8 +87,14 @@ export async function startVoiceMicrophoneV1(
       numberOfOutputs: 1,
       outputChannelCount: [1],
       processorOptions: {
-        targetRate: VOICE_CAPTURE_SAMPLE_RATE_V1,
-        frameSamples: FRAME_SAMPLES,
+        targetRate: options.sampleRate ?? VOICE_CAPTURE_SAMPLE_RATE_V1,
+        frameSamples:
+          options.frameSamples ??
+          Math.round(
+            FRAME_SAMPLES *
+              ((options.sampleRate ?? VOICE_CAPTURE_SAMPLE_RATE_V1) /
+                VOICE_CAPTURE_SAMPLE_RATE_V1),
+          ),
       },
     });
     node.port.onmessage = (event: MessageEvent) => {

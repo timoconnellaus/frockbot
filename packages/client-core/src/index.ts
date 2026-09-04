@@ -193,6 +193,35 @@ export interface VoiceDictationSessionV1 {
   close(): void;
 }
 
+/** The browser projection of one app-wide Voice assistant session. */
+export interface VoiceAssistantObserverV1 {
+  ready(sessionId: string, quotaRemainingSeconds: number): void;
+  state(state: "listening" | "speaking"): void;
+  transcript(entry: {
+    id: string;
+    speaker: "user" | "assistant";
+    text: string;
+    at: string;
+  }): void;
+  tool(entry: { id: string; name: string; label: string; at: string }): void;
+  /** PCM16LE, mono, 24 kHz. */
+  audio(pcm16: ArrayBuffer): void;
+  interrupted(): void;
+  offline(
+    reason: "stopped" | "idle" | "quota" | "error" | "replaced",
+    message: string,
+  ): void;
+  failed(message: string): void;
+  closed(): void;
+}
+
+/** The browser's handle on Voice. Input audio is PCM16LE, mono, 16 kHz. */
+export interface VoiceAssistantSessionV1 {
+  sendAudio(pcm16: ArrayBuffer): void;
+  stop(): void;
+  close(): void;
+}
+
 export interface AgentTransport {
   /** False when this platform cannot complete external Connection authorization. */
   readonly connectionsAvailable?: boolean;
@@ -204,6 +233,11 @@ export interface AgentTransport {
   openVoiceDictation?(
     observer: VoiceDictationObserverV1,
   ): VoiceDictationSessionV1;
+  /** Opens the User-scoped app-wide Voice assistant. */
+  openVoiceAssistant?(
+    deviceId: string,
+    observer: VoiceAssistantObserverV1,
+  ): VoiceAssistantSessionV1;
   turn(
     botId: string,
     text: string,

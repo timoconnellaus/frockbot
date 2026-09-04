@@ -357,6 +357,31 @@ export async function recordVoiceAssistantUsageV1(
   });
 }
 
+export async function readVoiceAssistantQuotaV1(
+  storage: VoiceQuotaTransaction,
+  month: string,
+): Promise<{
+  schemaVersion: 1;
+  month: string;
+  usedSeconds: number;
+  limitSeconds: number;
+  remainingSeconds: number;
+}> {
+  const usedSeconds = storedSeconds(
+    await storage.get<StoredVoiceDayV1>(voiceAssistantQuotaKeyV1(month)),
+  );
+  return {
+    schemaVersion: 1,
+    month,
+    usedSeconds,
+    limitSeconds: VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
+    remainingSeconds: Math.max(
+      0,
+      VOICE_ASSISTANT_SECONDS_PER_MONTH_V1 - usedSeconds,
+    ),
+  };
+}
+
 async function sweepOldAssistantMonthsV1(
   transaction: VoiceQuotaTransaction,
   currentMonth: string,

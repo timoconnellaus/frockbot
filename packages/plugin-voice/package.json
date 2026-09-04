@@ -9,6 +9,7 @@
     "./client": "./src/client/index.ts",
     "./frockbot.json": "./frockbot.json",
     "./ledger": "./src/ledger.ts",
+    "./manifest": "./src/manifest.ts",
     "./package.json": "./package.json",
     "./prompt": "./src/prompt.ts",
     "./shared": "./src/shared.ts",
@@ -27,6 +28,7 @@
     "@frockbot/client-ui": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
+    "@frockbot/protocol": "workspace:*",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.41"
   },

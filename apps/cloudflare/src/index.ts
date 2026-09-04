@@ -180,7 +180,10 @@ import {
 } from "@frockbot/kernel-contracts";
 import type { AppletState } from "./applet-state.js";
 import type { VoiceSession } from "./voice-session.js";
-import { VOICE_DICTATION_INTERNAL_PATH } from "./voice-session.js";
+import {
+  VOICE_ASSISTANT_INTERNAL_PATH,
+  VOICE_DICTATION_INTERNAL_PATH,
+} from "./voice-session.js";
 export { BotCapabilities } from "./bot-capabilities.js";
 // The Applet authority (ADR 0022): the Durable Object that owns one Applet
 // instance, and the loopback `CAPABILITIES` entrypoint its facet is handed.
@@ -257,6 +260,8 @@ interface Env {
   GEMINI_API_KEY?: string;
   /** Local dictation stand-in; set by the end-to-end harness only. */
   VOICE_UPSTREAM_URL?: string;
+  /** Local Gemini Live stand-in; set by the end-to-end harness only. */
+  VOICE_ASSISTANT_UPSTREAM_URL?: string;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
   COMPUTER_HOST: Fetcher;
   /** Shared secret presented on every Computer host call. */
@@ -400,6 +405,10 @@ interface UserConfigurationRpc extends UserConfigurationBinding {
     schemaVersion: 1;
     userId: string;
   }): Promise<boolean>;
+  readVoiceAssistant(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<unknown>;
 }
 
 type RpcBoundary<T> = {
@@ -585,6 +594,7 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     resolveTemplateShare: (request) => rpc.resolveTemplateShare(request),
     listTemplateImports: (request) => rpc.listTemplateImports(request),
     executeTemplateImport: (request) => rpc.executeTemplateImport(request),
+    readVoiceAssistant: (request) => rpc.readVoiceAssistant(request),
   };
 }
 
@@ -1451,6 +1461,25 @@ function openVoiceDictation(
     .fetch(new Request(internal, { method: "GET", headers }));
 }
 
+function openVoiceAssistant(
+  env: Env,
+  userId: string,
+  request: Request,
+): Promise<Response> {
+  const incoming = new URL(request.url);
+  const internal = new URL(
+    `${VOICE_ASSISTANT_INTERNAL_PATH}${incoming.search}`,
+    "https://voice-session.internal",
+  );
+  const headers = new Headers(request.headers);
+  headers.delete("x-frockbot-user-id");
+  headers.set("x-frockbot-user-id", userId);
+  const namespace = env.VOICE_SESSIONS;
+  return namespace
+    .get(namespace.idFromName(userId))
+    .fetch(new Request(internal, { method: "GET", headers }));
+}
+
 /**
  * One published template, for the unauthenticated `GET /templates/v1/:shareId`.
  *
@@ -1718,6 +1747,13 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             }),
           ),
         ),
+      readVoiceAssistant: (userId) =>
+        userConfigurationStub(env, userId).readVoiceAssistant({
+          schemaVersion: 1,
+          userId,
+        }),
+      openVoiceAssistant: (userId, request) =>
+        openVoiceAssistant(env, userId, request),
       // The `mcp-oauth` gateway seams. The Contribution reads the signing
       // secret through `readSecret` and refuses to serve its routes at all
       // when this deployment has none, so a Worker without the secret has no

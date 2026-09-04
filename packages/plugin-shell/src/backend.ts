@@ -5276,6 +5276,12 @@ export class ShellBotBackendContribution {
     };
   }
 
+  /** Count inputs waiting for the next conversational Turn without draining them. */
+  async pendingInputCount(identity: BotIdentity): Promise<number> {
+    await this.validateIdentity(identity);
+    return (await this.routineInbox.pending()).length;
+  }
+
   /**
    * Acknowledge inbox entries. An explicit command, never a side effect of
    * reading: a background poll must not clear the badge.
