@@ -1118,6 +1118,7 @@
     /* `calc` so the declaration is a length the checker can type; `env` alone
        is not one it knows. */
     padding-top: calc(var(--frock-safe-top) + 0px);
+    padding-bottom: calc(10px + var(--frock-safe-bottom));
     box-shadow: var(--frock-shadow-panel);
     transform: translateX(-100%);
     visibility: hidden;
@@ -1189,12 +1190,27 @@
   /* No window chrome to clear, but the panel toggle still sits at the
      trailing edge, so the row ends before it rather than under it. */
   .topbar {
+    height: calc(var(--frock-titlebar-height) + var(--frock-safe-top));
     gap: 8px;
     padding: 0 52px 0 4px;
+    padding-top: calc(var(--frock-safe-top) + 0px);
   }
 
   .window-actions {
+    height: calc(var(--frock-titlebar-height) + var(--frock-safe-top));
     padding: 0 8px;
+    padding-top: calc(var(--frock-safe-top) + 0px);
+  }
+
+  .right-panel-header,
+  .panel-surface-header {
+    height: calc(var(--frock-titlebar-height) + var(--frock-safe-top));
+    padding-top: calc(var(--frock-safe-top) + 0px);
+  }
+
+  .right-panel-body,
+  .panel-surface-content {
+    padding-bottom: calc(16px + var(--frock-safe-bottom));
   }
 
   .brand-mark {
@@ -1211,6 +1227,7 @@
    * vertical anchors all clear the home indicator.
    */
   .thread {
+    top: calc(var(--frock-titlebar-height) + var(--frock-safe-top));
     bottom: calc(76px + var(--frock-safe-bottom));
     padding: 12px 12px 20px;
   }
