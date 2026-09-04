@@ -443,6 +443,7 @@ import {
   optionalSidebarMessagePreviewV1,
   optionalUnreadStateV1,
   projectBotUnreadViewV1,
+  sidebarMessagePreviewFromRunsV1,
   SIDEBAR_PREVIEW_KEY,
   unreadReceiptKeyV1,
   UNREAD_COUNT_CAP,
@@ -450,6 +451,8 @@ import {
   type BotUnreadCommandV1,
   type BotUnreadReceiptV1,
   type BotUnreadViewV1,
+  type SidebarMessagePreviewV1,
+  type SidebarPreviewRunV1,
 } from "./unread.js";
 import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
@@ -5294,7 +5297,6 @@ export class ShellBotBackendContribution {
         ]),
     );
     const state = optionalUnreadStateV1(storedState);
-    const preview = optionalSidebarMessagePreviewV1(storedPreview);
     const index = await this.authority.listRunIndex({
       limit: UNREAD_COUNT_CAP + 1,
     });
@@ -5320,9 +5322,40 @@ export class ShellBotBackendContribution {
       identity.botId,
       state,
       index.map((entry) => entry.cursor),
-      preview,
+      await this.sidebarPreview(storedPreview, index),
       failures,
     );
+  }
+
+  /**
+   * How many stored runs a read will open to recover a missing preview. The
+   * newest settled chat Turn is almost always the first entry; the bound is
+   * what keeps a Bot whose recent Turns are all automations from turning one
+   * sidebar read into a scan of its whole history.
+   */
+  private static readonly SIDEBAR_PREVIEW_BACKFILL_RUNS_V1 = 5;
+
+  /**
+   * The preview record, or the same line derived from the runs when there is
+   * none. A Bot whose Turns settled before the preview projection existed has
+   * a full transcript and no record, and the row read "No messages yet" over
+   * it. A read never writes what it derives: the next settlement stores it.
+   */
+  private async sidebarPreview(
+    storedPreview: unknown,
+    index: readonly { runId: string }[],
+  ): Promise<SidebarMessagePreviewV1 | undefined> {
+    const stored = optionalSidebarMessagePreviewV1(storedPreview);
+    if (stored) return stored;
+    const runs: SidebarPreviewRunV1[] = [];
+    for (const entry of index.slice(
+      0,
+      ShellBotBackendContribution.SIDEBAR_PREVIEW_BACKFILL_RUNS_V1,
+    )) {
+      const run = await this.authority.readRun(entry.runId);
+      if (run) runs.push(run);
+    }
+    return sidebarMessagePreviewFromRunsV1(runs);
   }
 
   /**
@@ -5353,9 +5386,7 @@ export class ShellBotBackendContribution {
         }
         return {
           state: optionalUnreadStateV1(existing.state),
-          preview: optionalSidebarMessagePreviewV1(
-            await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
-          ),
+          preview: await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
         };
       }
       const current = optionalUnreadStateV1(
@@ -5379,9 +5410,7 @@ export class ShellBotBackendContribution {
       });
       return {
         state: next,
-        preview: optionalSidebarMessagePreviewV1(
-          await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
-        ),
+        preview: await transaction.get<unknown>(SIDEBAR_PREVIEW_KEY),
       };
     });
     const index = await this.authority.listRunIndex({
@@ -5395,7 +5424,10 @@ export class ShellBotBackendContribution {
         identity.botId,
         stored.state,
         index.map((entry) => entry.cursor),
-        stored.preview,
+        // The open Bot is the one that gets marked read, so this receipt is
+        // the sidebar row it renders from: it owes the same derived preview
+        // the fan-out gives every other Bot.
+        await this.sidebarPreview(stored.preview, index),
       ),
     };
   }

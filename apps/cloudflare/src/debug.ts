@@ -1,5 +1,6 @@
 import {
-  BOT_DEBUG_RUN_LIMIT_V1,
+  decodeBotDebugQueryV1,
+  isBotDebugQueryRefusalV1,
   type BotDebugQueryV1,
 } from "@frockbot/plugin-shell/debug-protocol";
 import { decodeBotIdV1 } from "@frockbot/configuration-core";
@@ -58,35 +59,23 @@ function presentedToken(request: Request): string | undefined {
 }
 
 /**
- * A caller's mistake, not the server's. Thrown where the request is parsed and
- * caught at the route boundary, so a bad query string answers 400 with a
- * sentence instead of 500 with a stack trace of the build.
+ * The query the URL carries, decoded here rather than inside the Bot: the same
+ * decoder the Durable Object applies, run in the gateway so a query the
+ * operator got wrong is answered as a 400 and never becomes an uncaught
+ * failure in the Bot's isolate.
  */
-class DebugRequestError extends Error {}
-
 function debugQuery(url: URL): BotDebugQueryV1 {
-  const query: BotDebugQueryV1 = { schemaVersion: 1 };
   const limit = url.searchParams.get("limit");
-  if (limit !== null) {
-    const parsed = Number(limit);
-    // The same bounds the Bot enforces on decode, checked here so the caller
-    // is told the accepted range rather than shown an invariant.
-    if (
-      !Number.isSafeInteger(parsed) ||
-      parsed < 1 ||
-      parsed > BOT_DEBUG_RUN_LIMIT_V1
-    ) {
-      throw new DebugRequestError(
-        `limit must be a whole number between 1 and ${BOT_DEBUG_RUN_LIMIT_V1}`,
-      );
-    }
-    query.limit = parsed;
-  }
   const before = url.searchParams.get("before");
-  if (before !== null) query.before = before;
   const events = url.searchParams.get("events");
-  if (events !== null) query.events = events === "true" || events === "1";
-  return query;
+  return decodeBotDebugQueryV1({
+    schemaVersion: 1,
+    // `Number("nonsense")` is `NaN`, which the decoder refuses with the same
+    // sentence a limit past the cap gets — one message for one bad field.
+    ...(limit === null ? {} : { limit: Number(limit) }),
+    ...(before === null ? {} : { before }),
+    ...(events === null ? {} : { events: events === "true" || events === "1" }),
+  });
 }
 
 /**
@@ -145,18 +134,20 @@ export function createDebugRoute(
         decodeURIComponent((runMatch ?? botMatch)![1]!),
       );
       const query = runMatch
-        ? {
-            schemaVersion: 1 as const,
+        ? decodeBotDebugQueryV1({
+            schemaVersion: 1,
             runId: decodeURIComponent(runMatch[2]!),
-          }
+          })
         : debugQuery(url);
       return Response.json(await surface.snapshot(userId, botId, query));
     } catch (error) {
-      // A malformed request is the caller's mistake. It answers 400 with the
-      // sentence and no stack — a stack here would say nothing about the Bot
-      // and everything about the build's file layout.
-      if (error instanceof DebugRequestError) {
-        return jsonError(400, error.message);
+      // A query the caller got wrong is their 400, not the deployment's 500 —
+      // and the message says the range so the next attempt can be right.
+      if (isBotDebugQueryRefusalV1(error)) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "debug query is invalid",
+        );
       }
       // The operator is the audience: the message is the finding, and a stack
       // that reached here is more useful than a generic 500.
