@@ -247,15 +247,36 @@ jobs:
           path: apps/cloudflare/e2e/test-results
           retention-days: 7
 
+      - name: Print the tail of the harness log
+        # The `[WebServer]` stream in the job log stops the moment Playwright
+        # tears the server down, so a crash at the end of a shard leaves no
+        # visible cause. This is the last of what both `wrangler dev` processes
+        # said, in the job log itself, before anybody downloads an artifact.
+        if: failure()
+        run: |
+          shopt -s nullglob
+          logs=(apps/cloudflare/e2e/wrangler-logs/harness-*.log)
+          if [[ ${#logs[@]} -eq 0 ]]; then
+            echo "No harness log was written."
+            exit 0
+          fi
+          for log in "${logs[@]}"; do
+            echo "::group::Last 200 lines of $log"
+            tail -n 200 "$log"
+            echo "::endgroup::"
+          done
+
       - name: Upload wrangler logs
-        # `wrangler dev` writes its debug log — including everything workerd
-        # printed — to this directory whatever `--log-level` says. When the
-        # runtime dies mid-suite, this is the only record of why.
+        # Both halves of a crash: the harness's own tee of everything the two
+        # `wrangler dev` processes printed, and wrangler's debug log, which
+        # `WRANGLER_LOG_PATH` puts in the same directory. It used to point at
+        # `~/.config/.wrangler/logs` and upload nothing at all —
+        # `actions/upload-artifact` does not expand `~`.
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wrangler-logs-${{ matrix.shard }}
-          path: ~/.config/.wrangler/logs
+          path: apps/cloudflare/e2e/wrangler-logs
           retention-days: 7
           if-no-files-found: warn
 
