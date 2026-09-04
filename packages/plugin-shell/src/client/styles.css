@@ -499,9 +499,19 @@
   background: var(--frock-action-primary);
 }
 
+/*
+ * The User's bubble and its "via" line share a column anchored at the end.
+ * It spans the whole thread: the bubble's max-width is a percentage, and
+ * against a wrapper that shrink-wraps the bubble that percentage resolves to
+ * less than the bubble itself, which is how "Hi" came out one letter per
+ * line (2026-09-05).
+ */
 .message-user-column {
-  display: grid;
-  justify-items: end;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 4px;
 }
 

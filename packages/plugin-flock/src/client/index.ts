@@ -122,6 +122,11 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
   let unreadRefresh: Promise<void> | undefined;
   /** A beat that arrived while one was in flight, replayed once it finishes. */
   let unreadRefreshQueued = false;
+  /**
+   * The last flock the unread read disagreed with, so one disagreement is one
+   * reload and not a reload on every beat.
+   */
+  let reconciledFlockSignature: string | undefined;
 
   /**
    * One unread read at a time, with at most one more behind it.
@@ -383,6 +388,32 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       const directory = decodeBotUnreadDirectoryViewV1(
         await request("/api/bots/unread"),
       );
+      // The unread read fans out over the whole non-archived flock, so it is
+      // also this tab's cheapest view of which Bots still exist. A Bot deleted
+      // or created from another tab or the phone leaves this tab's list
+      // stale, and a stale list can keep the conversation open on a Bot the
+      // server no longer has — every read of it answers 404 and the person
+      // cannot chat (2026-09-05: a day-old tab on a deleted Bob). A flock
+      // that differs from the list on screen is read again, which also moves
+      // the selection off a Bot that is gone. One disagreement is one reload.
+      if (state.value.loaded) {
+        const known = new Set(
+          state.value.directory.bots
+            .map((bot) => bot.botId)
+            .filter((botId) => state.value.lifecycles[botId] !== "archived"),
+        );
+        const seen = new Set(directory.unread.map((view) => view.botId));
+        const differs =
+          known.size !== seen.size ||
+          [...seen].some((botId) => !known.has(botId));
+        const signature = [...seen].sort().join("\n");
+        if (differs && signature !== reconciledFlockSignature) {
+          reconciledFlockSignature = signature;
+          await state.value.load();
+          return;
+        }
+        if (!differs) reconciledFlockSignature = undefined;
+      }
       // A Turn that settles in the conversation the User is looking at has
       // been read by the time it arrives, so the badge that counted it is
       // wrong the instant it appears — and painting it for the beat before the
