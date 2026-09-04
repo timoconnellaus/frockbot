@@ -1647,25 +1647,38 @@ exec "$APPLET" "$@"
 `;
 
 /**
- * Installs the Applets SDK when, and only when, it is absent.
+ * Installs the Applets SDK when it is absent and verifies its shared imports.
  *
  * Guarded, and deliberately not fatal: a Computer that cannot fetch the SDK
  * is still a Computer — it browses, execs, and syncs — so the failure is
  * recorded as a file the doctor reports under `applets-sdk` rather than as a
  * phase that fails and leaves the whole run resumable-but-unfinished.
  *
- * The `[ ! -d ]` guard is also what makes this safe inside an in-place
- * update. The only thing that runs out of `${APPLETS_ROOT}` is `applet dev`,
- * and the shim refuses to start it while the SDK is missing, so an install
- * that runs only when the SDK is missing never touches a tree a process is
- * using. Once the SDK is present neither provisioning nor an update installs
- * again; a newer SDK arrives with the next provisioning adoption.
+ * The React fallback repairs SDK releases published before those build-time
+ * dependencies moved from development/peer metadata into dependencies. It is
+ * idempotent and runs only when Node cannot resolve `react-dom/client` from
+ * the shared prefix. The final probe covers React, React DOM, and the SDK's
+ * client entry; its concise failure is durable input to box-doctor.
+ *
+ * Changing this script changes the runtime document digest, which is the
+ * version marker that causes every existing Computer to run UPDATE_PHASES on
+ * its next open.
  */
 export const appletSdkInstallScript = `if [ ! -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]; then
   if npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund @frockbot/applet-sdk@${APPLET_SDK_VERSION}; then
     rm -f ${APPLETS_SDK_FAILURE_PATH}
   else
     printf '%s\\n' "npm could not install @frockbot/applet-sdk@${APPLET_SDK_VERSION}" > ${APPLETS_SDK_FAILURE_PATH}
+  fi
+fi
+if [ -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]; then
+  if ! (cd ${APPLETS_ROOT} && node -e "require.resolve('react-dom/client')") >/dev/null 2>&1; then
+    npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund react@19.2.8 react-dom@19.2.8 @types/react@19.2.18 @types/react-dom@19.2.4 || true
+  fi
+  if SDK_RESOLUTION_ERROR=$(cd ${APPLETS_ROOT} && node -e "for (const id of ['react-dom/client', 'react', '@frockbot/applet-sdk/client']) { try { require.resolve(id) } catch { console.error('could not resolve ' + id); process.exitCode = 1 } }" 2>&1); then
+    rm -f ${APPLETS_SDK_FAILURE_PATH}
+  else
+    printf '%s\\n' "Applets SDK dependency resolution failed: $SDK_RESOLUTION_ERROR" > ${APPLETS_SDK_FAILURE_PATH}
   fi
 fi`;
 
@@ -1887,13 +1900,12 @@ elif [ -x ${APPLET_SHIM_PATH} ]; then
 else
   record applets fail "no ${APPLET_SHIM_PATH}; provisioning installs it, and no Applet can be checked, built, or previewed without it"
 fi
-# Named and non-fatal on purpose: \`@frockbot/applet-sdk\` is not published
-# yet, so the provisioning phase's guarded install is expected to fail and
-# leave this file rather than fail the whole run. This is where that shows up.
-if [ -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]; then
-  record applets-sdk pass "the Applets SDK is installed under ${APPLETS_ROOT}"
-elif [ -f ${APPLETS_SDK_FAILURE_PATH} ]; then
+# Named and non-fatal on purpose: an install or dependency-resolution failure
+# leaves this file rather than failing the whole Computer run.
+if [ -f ${APPLETS_SDK_FAILURE_PATH} ]; then
   record applets-sdk fail "$(head -n 1 ${APPLETS_SDK_FAILURE_PATH} 2>/dev/null); everything else on this Computer is unaffected"
+elif [ -d ${APPLETS_ROOT}/node_modules/@frockbot/applet-sdk ]; then
+  record applets-sdk pass "the Applets SDK and its shared imports resolve under ${APPLETS_ROOT}"
 else
   record applets-sdk fail "no Applets SDK under ${APPLETS_ROOT} and no record of an attempt; it installs when this Computer is next provisioned"
 fi
