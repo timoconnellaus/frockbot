@@ -671,11 +671,39 @@ Retention is two durable bounds, both visible: at most 20 000 rows per User and 
 
 The WebUI surface is an "Audit log" section under Advanced in Bot settings, mounted on `frockbot.bot-settings-sections`. Rows are time, kind badge, target, redacted preview and outcome, newest first, with filter chips per kind and a cursor-paged "Load more". Two states are rendered rather than hidden: a truncation banner when the table has been trimmed to a retention bound, and an `unknown` outcome shown in the same place a success or a failure would be. The Rebuild button answers with the receipt itself — how many entries the Bots' own runs account for, how many outcomes the turn log cannot explain, and how many effects the Computer host reported that no turn does — so a repair reports what it found rather than only that it ran.
 
+## Voice
+
+The platform-owned Voice Package supplies an app-wide assistant without making
+it a Bot or adding another Agent loop. `VoiceSession` is one socket-only Durable
+Object per User: its browser leg is hibernatable, its upstream leg connects to
+Gemini Live, and it holds no authority. The User Durable Object owns the on/off
+state, bounded text/tool ledger, resumption handle, pending-answer seam, and
+60-minute monthly quota. A refresh detaches the browser observer without
+cancelling the Gemini session, `goAway` reconnects server-side from the durable
+handle, and the newest connecting device replaces the previous one. Audio is
+never persisted.
+
+The assistant uses `gemini-3.1-flash-live-preview`, PCM16 mono input at 16 kHz,
+PCM16 mono output at 24 kHz, automatic VAD, barge-in, and a two-minute silence
+ceiling. Its B1 Gemini declarations are the bounded read-only `list_bots`,
+`bot_activity`, `memory_search`, and `pending_answers` tools. They read User and
+Bot Durable Object projections plus User/Bot Memory object storage without a
+Computer call. The table is the seam B2 extends with `ask_bot`; B1 has no
+effectful Voice tool and writes no Memory.
+
+The Voice Package fills the shell's global header slot and mounts a panel for
+listening/speaking/offline state, current-session transcript, plain-language
+tool activity, quota, microphone refusals, and quota/error notifications. The
+browser receives neither provider credential: the socket object prefers the
+direct Gemini Worker secret, then the `/google` AI Gateway realtime route with
+BYOK and `cf-aig-authorization`. Android and iOS declare their microphone
+permissions for the same hosted WebView path.
+
 ## Usage and spend
 
 The Billing Package turns content-free `model/usage` events into the User's authoritative usage ledger ([ADR 0036](adr/0036-user-owned-spend-ledger.md)). The Bot Durable Object projects a stopping Turn into a bounded durable outbox only after its session events are durable, and retries delivery on its alarm. The User Durable Object inserts idempotent detail rows and updates day, month, Bot, model, and lifetime aggregates in one SQL transaction. This path is shared by chat, Routine, recovery, and Subagent Turns; it does not branch on the client or wake the Computer.
 
-Each entry keeps the model price-table version and integer micro-dollar cost used when it was written. Provider token counts are preferred; missing counts are visibly estimated from the exact normalized request and assembled response. Voice duration comes from the existing durable quota receipt and is priced into the same ledger. Detailed rows and day rollups retain 45 days (also capped at 50,000 details), month rollups retain 120 months, and the lifetime aggregate survives both bounds. There is no Computer charge until the Computer interface supplies a reconciled duration receipt.
+Each entry keeps the model price-table version and integer micro-dollar cost used when it was written. Provider token counts are preferred; missing counts are visibly estimated from the exact normalized request and assembled response. Voice duration comes from a durable quota receipt. OpenAI dictation uses its published duration price; Gemini Live assistant seconds are recorded under the actual provider/model with an explicit unknown price because the provider bills audio tokens rather than wall time. Detailed rows and day rollups retain 45 days (also capped at 50,000 details), month rollups retain 120 months, and the lifetime aggregate survives both bounds. There is no Computer charge until the Computer interface supplies a reconciled duration receipt.
 
 `GET /api/usage` asks the authenticated User Durable Object for the current-month total, Bot and model breakdowns, a dense 30-day series, estimate and unknown-price counts, and the lifetime cost. Billing mounts that projection as **Usage** in User settings and as a single current-month line in Bot settings. `/api/debug/usage` exposes the same report through the development-only debug surface. None of these reads holds authority or includes model request or response content.
 

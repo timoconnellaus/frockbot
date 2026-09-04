@@ -14,6 +14,8 @@ import type { VoiceDictationServerFrameV1 } from "@frockbot/protocol";
 export const VOICE_TRANSCRIPTION_MODEL_V1 = "gpt-live-transcribe";
 
 export interface VoiceSessionEnvV1 {
+  /** Direct Google AI Studio fallback for the Gemini Live assistant. */
+  GEMINI_API_KEY?: string;
   /**
    * The direct OpenAI path. Present, it is the one that runs: the AI Gateway's
    * realtime path has not yet been exercised with a transcription-only
@@ -35,6 +37,8 @@ export interface VoiceSessionEnvV1 {
    * there — the same shape the Workspace seed door has.
    */
   VOICE_UPSTREAM_URL?: string;
+  /** Local/e2e Gemini Live stand-in; production leaves this unset. */
+  VOICE_ASSISTANT_UPSTREAM_URL?: string;
 }
 
 export type VoiceUpstreamTargetV1 =

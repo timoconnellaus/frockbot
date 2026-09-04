@@ -22,3 +22,6 @@ export const E2E_DICTATION_FRAMES_PER_WORD_V1 = 3;
 /** What production returned when a beta Realtime handshake reached GA. */
 export const E2E_REALTIME_BETA_REMOVED_ERROR_V1 =
   "The Realtime Beta API is no longer supported. Please use /v1/realtime for the GA API.";
+
+export const E2E_VOICE_INPUT_V1 = "Which Bots do I have?";
+export const E2E_VOICE_ANSWER_V1 = "You have a Bot ready to help.";

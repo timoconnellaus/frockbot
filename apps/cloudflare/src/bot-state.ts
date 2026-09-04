@@ -165,6 +165,17 @@ import {
   type MemoryChunkIndexWriterV1,
 } from "@frockbot/plugin-memory/chunk-index";
 import {
+  botMemoryRootV1,
+  buildMemoryIndexV1,
+  readAllMemoryDocumentsV1,
+  searchMemoryV1,
+  userMemoryRootV1,
+} from "@frockbot/plugin-memory";
+import type {
+  VoiceBotActivityV1,
+  VoiceMemoryHitV1,
+} from "@frockbot/plugin-voice/tools";
+import {
   searchRowsFromClientRunV1,
   type SearchSinkV1,
 } from "@frockbot/plugin-search";
@@ -206,6 +217,7 @@ import {
   rpcAppletIdOrNull,
   rpcBotId,
   rpcDecoded,
+  rpcEnum,
   rpcIdentifier,
   rpcInteger,
   rpcObject,
@@ -2110,6 +2122,93 @@ export class BotState extends DurableObject<BotStateEnv> {
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return shell.listRuns(request.query as ClientRunListQueryV1);
+  }
+
+  /**
+   * Bounded Bot activity for Voice. Every source is this object's durable
+   * run/task/inbox state; no Computer interface is touched.
+   */
+  async readVoiceActivity(input: unknown): Promise<VoiceBotActivityV1> {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      { userId: rpcIdentifier, botId: rpcBotId },
+      { since: rpcString(64) },
+    );
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const since = request.since as string | undefined;
+    if (since && !Number.isFinite(Date.parse(since))) {
+      throw new Error("Voice activity since must be an ISO timestamp");
+    }
+    const [runs, tasks, pendingInbox] = await Promise.all([
+      shell.listRuns({ schemaVersion: 1 }),
+      shell.listTasks(identity),
+      shell.pendingInputCount(identity),
+    ]);
+    return {
+      botId: identity.botId,
+      since: since ?? "all",
+      runs: runs.runs
+        .filter((run) => !since || run.admittedAt >= since)
+        .slice(0, 12)
+        .map((run) => ({
+          runId: run.runId,
+          status: run.status,
+          startedAt: run.admittedAt,
+          ...(run.partialText
+            ? { partialText: run.partialText.slice(0, 1_000) }
+            : {}),
+        })),
+      tasks: tasks.tasks
+        .filter((task) => task.status === "queued" || task.status === "running")
+        .slice(0, 12)
+        .map((task) => ({
+          taskId: task.taskId,
+          title: task.description.slice(0, 240),
+          status: task.status,
+        })),
+      pendingInbox: Math.min(pendingInbox, 128),
+    };
+  }
+
+  /** Search one Memory tier from durable Workspace files, never a Computer. */
+  async searchVoiceMemory(input: unknown): Promise<VoiceMemoryHitV1[]> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      query: rpcString(512),
+      scope: rpcEnum(["user", "bot"]),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const files = this.backendEnv.MEMORY_WORKSPACE_FILES;
+    if (!files) return [];
+    const scope = request.scope as "user" | "bot";
+    const root =
+      scope === "user" ? userMemoryRootV1(identity) : botMemoryRootV1(identity);
+    const listing = await readAllMemoryDocumentsV1(files, [root]);
+    const index = await buildMemoryIndexV1(listing.documents);
+    const results = await searchMemoryV1({
+      index,
+      query: request.query as string,
+      maxResults: 12,
+      scope,
+    });
+    return results.map((result) => ({
+      scope,
+      ...(scope === "bot" ? { botId: identity.botId } : {}),
+      path: result.path.slice(0, 512),
+      snippet: result.snippet.slice(0, 700),
+      score: result.score ?? 0,
+    }));
   }
 
   /**

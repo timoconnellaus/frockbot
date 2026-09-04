@@ -24,6 +24,9 @@ interface VoiceEntryInputV1 {
   sessionSeconds: number;
   recordedSeconds: number;
   at: string;
+  provider?: string;
+  model?: string;
+  pricing?: "openai-transcription" | "unpriced";
 }
 
 export class BillingUserBackendContribution {
@@ -59,17 +62,29 @@ export class BillingUserBackendContribution {
       !Number.isSafeInteger(input.recordedSeconds) ||
       input.recordedSeconds <= 0 ||
       input.recordedSeconds > input.sessionSeconds ||
+      (input.provider !== undefined &&
+        (typeof input.provider !== "string" ||
+          input.provider.length === 0 ||
+          input.provider.length > 256)) ||
+      (input.model !== undefined &&
+        (typeof input.model !== "string" ||
+          input.model.length === 0 ||
+          input.model.length > 256)) ||
+      (input.pricing !== undefined &&
+        input.pricing !== "openai-transcription" &&
+        input.pricing !== "unpriced") ||
       !Number.isFinite(Date.parse(input.at))
     ) {
       throw new Error("voice usage is invalid");
     }
+    const priced = input.pricing !== "unpriced";
     return {
       schemaVersion: 1,
       entryId: `voice:${input.day}:${input.sessionId}:${input.sessionSeconds}`,
       kind: "voice",
       at: input.at,
-      provider: "openai",
-      model: "gpt-live-transcribe",
+      provider: input.provider ?? "openai",
+      model: input.model ?? "gpt-live-transcribe",
       inputTokens: 0,
       outputTokens: 0,
       cachedInputTokens: 0,
@@ -77,12 +92,14 @@ export class BillingUserBackendContribution {
       voiceSeconds: input.recordedSeconds,
       latencyMs: 0,
       estimated: false,
-      unknownPrice: false,
+      unknownPrice: !priced,
       priceTableVersion: MODEL_PRICE_TABLE_VERSION_V1,
-      costMicros: voiceIncrementCostMicrosV1(
-        input.sessionSeconds,
-        input.recordedSeconds,
-      ),
+      costMicros: priced
+        ? voiceIncrementCostMicrosV1(
+            input.sessionSeconds,
+            input.recordedSeconds,
+          )
+        : 0,
     };
   }
 

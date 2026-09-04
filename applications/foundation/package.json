@@ -61,6 +61,7 @@
     "@frockbot/plugin-search": "workspace:*",
     "@frockbot/plugin-settings": "workspace:*",
     "@frockbot/plugin-shell": "workspace:*",
+    "@frockbot/plugin-voice": "workspace:*",
     "@frockbot/plugin-skills": "workspace:*",
     "@frockbot/plugin-subagents": "workspace:*",
     "@frockbot/plugin-ui-theme": "workspace:*",

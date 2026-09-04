@@ -119,6 +119,7 @@
       "version": "0.0.1",
       "grants": ["memory:read", "memory:write"]
     },
+    { "specifier": "@frockbot/plugin-voice", "version": "0.0.1", "grants": [] },
     {
       "specifier": "@frockbot/plugin-image",
       "version": "0.0.1",

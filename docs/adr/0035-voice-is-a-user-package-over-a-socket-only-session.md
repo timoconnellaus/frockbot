@@ -11,9 +11,9 @@ authority. Dictation produces an ordinary editable chat draft. The assistant
 is a first-party, User-scoped **Voice Package**, not a Bot and not another
 Agent loop.
 
-This records decisions D1–D10 from the accepted Voice plan. Slice A has already
-landed the dictation half. B0 lands the agent lane the assistant will use;
-slices B1 and B2 add the Voice Package and its assistant workflow.
+This records decisions D1–D10 from the accepted Voice plan. Slice A landed the
+dictation half, B0 landed the agent lane, and B1 lands the Voice Package core.
+B2 remains the effectful ask-and-deliver workflow.
 
 ## Authority and durable state
 
@@ -31,40 +31,47 @@ the transcript exposes the question with a `via Voice` marker. B0 establishes
 the same route for `bot_message`, using a `via <Bot>` marker, so B2 adds no
 second execution path.
 
-The `VoiceSession` Durable Object owns no product state and no authority. It is
-a hibernatable socket proxy between a browser and AI Gateway. It may hold the
-browser and upstream sockets, a resumption handle, timers, and transient audio
-buffers. Every durable fact is written through the User Durable Object. This
+The `VoiceSession` Durable Object owns no product state and no authority. Its
+browser leg is a hibernatable socket proxy and its server-side upstream leg
+connects to Gemini Live. It may hold sockets, timers, and transient audio
+buffers, and may relay a resumption handle; the durable handle itself is in the
+User Durable Object. Every durable fact is written through that object. This
 is the Subagent Durable Object rule from ADR 0017 applied to transport: losing
 the proxy can lose a live audio moment, but cannot lose a question, an answer,
 an entitlement, or a budget decision.
 
 ## Provider and credential path
 
-OpenAI and Google realtime sessions are reached over the platform's `flock` AI
-Gateway with platform BYOK keys and `cf-aig-authorization`. No provider
-credential or opaque credential lease reaches a browser, a Bot, or the
-Computer. If a realtime gateway path proves unavailable, the allowed fallback
-is the same server-side `VoiceSession` proxy opening the provider WebSocket
-with a Worker secret; browser-direct tokens are not an allowed second product
-path. A User-supplied provider override, if wanted later, is a separate
-disabled-by-default Package and does not turn the ambient provider into a
-Connection prompt.
+OpenAI and Google realtime sessions use server-side platform credentials. The
+transport prefers the direct `OPENAI_API_KEY` or `GEMINI_API_KEY` Worker secret,
+then uses the platform's `flock` AI Gateway BYOK key and
+`cf-aig-authorization`. Cloudflare's current realtime routes are `/openai` and
+`/google`; the accepted plan's `/google-ai-studio` name is the provider-native
+REST route, not the documented realtime WebSocket route. No provider credential
+or opaque credential lease reaches a browser, a Bot, or the Computer.
+Browser-direct tokens are not an allowed second product path. A User-supplied
+provider override, if wanted later, is a separate disabled-by-default Package
+and does not turn the ambient provider into a Connection prompt.
 
 Dictation uses an OpenAI Realtime transcription session with
 `gpt-live-transcribe`, because it streams transcript deltas and `whisper-1`
-does not. The assistant uses Gemini 3.1 Flash Live with audio output, Gemini
-VAD, barge-in, context-window compression, and session resumption. A `goAway`
-opens a replacement upstream socket using the latest resumption handle. The
+does not. The assistant uses `gemini-3.1-flash-live-preview`, PCM16 mono input
+at 16 kHz, PCM16 mono output at 24 kHz, Gemini VAD, barge-in,
+context-window compression, and session resumption. A `goAway` opens a
+replacement upstream socket using the latest User-owned resumption handle. The
 gateway routes still require a real deployed smoke test before either upstream
 claim is treated as proven.
 
-Cost is bounded in authoritative User state. The v1 daily allowance is one
-constant—60 minutes of captured audio per User per UTC day—and has no setting.
-The existing dictation meter charges idempotently by session total rather than
-by repeated deltas. The assistant uses the same durable budget family; a later
-commercial policy may replace the number without moving authority into the
-socket object.
+Cost is bounded in authoritative User state. Dictation has one 60-minute daily
+allowance; the assistant has one 60-minute monthly allowance. Neither has a
+setting. Both meters charge idempotently by cumulative session total rather
+than repeated deltas. Each new total settles quota KV and the Billing SQL row
+inside one User Durable Object `transactionSync`. Dictation keeps its published
+OpenAI duration price. Gemini bills live audio in tokens, not elapsed seconds,
+so B1 records exact assistant seconds under
+`google-ai-studio/gemini-3.1-flash-live-preview` with `unknownPrice: true` and
+zero guessed cost. A later token receipt can price it without moving authority
+into the socket object.
 
 ## Product behaviour
 
@@ -77,29 +84,31 @@ completion, then invokes the ordinary chat send; if a Bot is working, ADR
 The assistant is one live session per User. The newest device wins; observer
 sockets are deferred. An explicit shell-chrome toggle starts and stops it, and
 two minutes of silence takes it offline automatically. A disconnect detaches
-the live transport and never cancels an already admitted Bot Turn. Pending
-answers are delivered both ways: a client notification while Voice is off,
-and kickoff text on the next connection so the assistant speaks them first.
+the browser observer without cancelling the live upstream. The B1 kickoff asks
+Gemini to check the durable pending-answer table first. B2 will fill that table
+and add notification plus live-session delivery when a Bot answers.
 
-The v1 assistant tools are read-only `list_bots`, `bot_activity`,
-`memory_search`, and `pending_answers`, plus `ask_bot`. `bot_activity` and
-Memory reads are projections of durable state and wake no Computer.
-`ask_bot` is the one effectful tool: it writes the User ledger first and may
-address only a Bot in that User's Flock. Routines and Computer captures are
-deferred.
+The B1 assistant tools are read-only `list_bots`, `bot_activity`,
+`memory_search`, and `pending_answers`. `bot_activity` and Memory reads are
+bounded projections of durable state and wake no Computer. The transport calls
+a table-driven tool seam; B2 extends that table with `ask_bot`, the one
+effectful tool, which writes the User ledger first and may address only a Bot in
+that User's Flock. Routines and Computer captures are deferred.
 
-The Voice surface owns its session history, pending-answer state, and visible
-failures. The Voice Package fills one declared shell slot for the global
-toggle. Dictation stays in the composer owned by the Shell Package. There is no
-per-Bot voice control and no duplicated setting. Browser is the complete path;
-Electron and mobile microphone permission adapters are progressive
-enhancements.
+The Voice surface renders current-session history, plain-language tool use,
+quota, and visible failures from the User-owned ledger. The Voice Package fills
+one declared shell slot for the global toggle. Dictation stays in the composer
+owned by the Shell Package. There is no per-Bot voice control and no duplicated
+setting. Browser is the complete path; Android `RECORD_AUDIO` and iOS
+`NSMicrophoneUsageDescription` let their hosted WebViews request the same
+browser microphone path.
 
 ## Failure, retry, and recovery
 
-Quota exhaustion, upstream refusal, failed resumption, unanswered questions,
-and failed answer delivery are durable visible outcomes, not socket logs. A
-retried `ask_bot` reuses its ledger key and deterministic agent run id. Bot
+Quota exhaustion, upstream refusal, and failed resumption settle the B1 session
+as durable visible outcomes, not socket logs. In B2, unanswered questions and
+failed answer delivery join that ledger, and a retried `ask_bot` reuses its
+ledger key and deterministic agent run id. Bot
 execution uses the existing durable cursor, effect admissions, cancellation,
 and reconciliation rules. Agent-lane admission is bounded to eight outstanding
 Turns per User and a FIFO of 32 pending agent Turns per target Bot; the former

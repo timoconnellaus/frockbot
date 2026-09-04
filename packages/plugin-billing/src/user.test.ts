@@ -44,4 +44,41 @@ describe("BillingUserBackendContribution", () => {
     });
     database.close();
   });
+
+  test("records Gemini Live duration without inventing a duration price", () => {
+    const database = new Database(":memory:");
+    const billing = new BillingUserBackendContribution({
+      sql: sqlV1(database),
+      now: () => Date.parse("2026-09-04T12:00:00.000Z"),
+    });
+
+    expect(
+      billing.recordVoice({
+        day: "2026-09-04",
+        sessionId: "assistant-one",
+        sessionSeconds: 30,
+        recordedSeconds: 30,
+        at: "2026-09-04T12:00:30.000Z",
+        provider: "google-ai-studio",
+        model: "gemini-3.1-flash-live-preview",
+        pricing: "unpriced",
+      }),
+    ).toEqual({ recorded: 1 });
+
+    expect(billing.report()).toMatchObject({
+      currentMonthCostMicros: 0,
+      lifetimeCostMicros: 0,
+      currentMonthVoiceSeconds: 30,
+      unknownPriceCalls: 1,
+      models: [
+        {
+          id: "google-ai-studio/gemini-3.1-flash-live-preview",
+          voiceSeconds: 30,
+          costMicros: 0,
+          unknownPriceCalls: 1,
+        },
+      ],
+    });
+    database.close();
+  });
 });

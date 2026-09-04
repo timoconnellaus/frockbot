@@ -45,6 +45,10 @@ import {
 import { type OllamaCloudUserBackendContribution } from "@frockbot/plugin-provider-ollama-cloud/user";
 import { type FrockAiUserBackendContribution } from "@frockbot/plugin-provider-frock-ai/user";
 import {
+  type VoiceUserBackendContributionV1,
+  type VoiceUserBackendHostV1,
+} from "@frockbot/plugin-voice/user";
+import {
   type UserPackageCatalogHost,
   type UserSettingsBackendContribution,
   type UserSettingsStorage,
@@ -65,6 +69,7 @@ import {
   packagePublisherUserContribution,
   searchUserContribution,
   settingsUserContribution,
+  voiceUserContribution,
   type FoundationUserBackendHostV1,
 } from "./contributions.js";
 
@@ -160,6 +165,8 @@ export interface MountedFoundationUserBackend {
    * is a User asset, so its authority is here rather than on any Bot.
    */
   machines: MachineUserBackendContribution;
+  /** Voice's User-scoped ledger and bounded read-only tool executor. */
+  voice: VoiceUserBackendContributionV1;
   dispose(): Promise<void>;
 }
 
@@ -270,6 +277,8 @@ export async function createFoundationUserBackendContributions(
       maxRows?: number;
       maxAgeMs?: number;
     };
+    /** Durable Voice ledger storage and reads over User-owned Bot state. */
+    voice: VoiceUserBackendHostV1;
     billing: BillingUserBackendHostV1;
   },
 ): Promise<MountedFoundationUserBackend> {
@@ -454,6 +463,9 @@ export async function createFoundationUserBackendContributions(
         readBotLifecycle: host.readBotLifecycle,
       };
     },
+    get voice() {
+      return host.voice;
+    },
   };
 
   const mounted = await createFoundationBackendContributions<
@@ -469,6 +481,7 @@ export async function createFoundationUserBackendContributions(
     | AuditUserBackendContribution
     | BillingUserBackendContribution
     | MachineUserBackendContribution
+    | VoiceUserBackendContributionV1
   >(plan, applicationHost);
 
   const settings = mounted.get(settingsUserContribution);
@@ -483,6 +496,7 @@ export async function createFoundationUserBackendContributions(
   const audit = mounted.get(auditUserContribution);
   const billing = mounted.get(billingUserContribution);
   const machines = mounted.get(machineUserContribution);
+  const voice = mounted.get(voiceUserContribution);
   if (
     !settings ||
     !credentials ||
@@ -495,11 +509,12 @@ export async function createFoundationUserBackendContributions(
     !search ||
     !audit ||
     !billing ||
-    !machines
+    !machines ||
+    !voice
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Frock AI, MCP, Flock, Bot Templates, Search, Audit, Billing, Machines, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Frock AI, MCP, Flock, Bot Templates, Search, Audit, Billing, Machines, Voice, and Package Publisher User Contributions",
     );
   }
 
@@ -531,6 +546,7 @@ export async function createFoundationUserBackendContributions(
     audit,
     billing,
     machines,
+    voice,
     async dispose() {
       for (const undo of unregister) undo();
       await mounted.dispose();

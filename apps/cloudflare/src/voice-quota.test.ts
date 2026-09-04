@@ -1,13 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import {
+  decodeVoiceAssistantQuotaReceiptV1,
   decodeVoiceQuotaReceiptV1,
+  recordVoiceAssistantUsageV1,
+  recordVoiceAssistantUsageSyncV1,
   recordVoiceUsageV1,
+  reserveVoiceAssistantV1,
   recordVoiceUsageSyncV1,
   reserveVoiceCaptureV1,
+  VOICE_ASSISTANT_MINUTES_PER_MONTH_V1,
+  VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
   VOICE_MINUTES_PER_DAY_V1,
   VOICE_SECONDS_PER_DAY_V1,
   voiceQuotaDayV1,
   voiceQuotaKeyV1,
+  voiceQuotaMonthV1,
   voiceSessionKeyV1,
   type VoiceQuotaStorage,
   type VoiceQuotaTransaction,
@@ -186,5 +193,74 @@ describe("the durable per-User voice budget", () => {
     expect(() =>
       decodeVoiceQuotaReceiptV1({ ...receipt, status: "maybe" }),
     ).toThrow();
+  });
+});
+
+describe("the durable monthly Voice assistant budget", () => {
+  const MONTH = "2026-09";
+
+  test("charges idempotent session totals and refuses a spent month", async () => {
+    const storage = memoryStorage();
+    await reserveVoiceAssistantV1(storage, { month: MONTH, sessionId: "one" });
+    await recordVoiceAssistantUsageV1(storage, {
+      month: MONTH,
+      sessionId: "one",
+      seconds: VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
+    });
+    await recordVoiceAssistantUsageV1(storage, {
+      month: MONTH,
+      sessionId: "one",
+      seconds: VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
+    });
+    const refused = await reserveVoiceAssistantV1(storage, {
+      month: MONTH,
+      sessionId: "two",
+    });
+    expect(refused).toMatchObject({
+      status: "refused",
+      usedSeconds: VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
+    });
+    expect(refused.reason).toContain(
+      String(VOICE_ASSISTANT_MINUTES_PER_MONTH_V1),
+    );
+    expect(refused.reason).toContain("next month");
+    expect(decodeVoiceAssistantQuotaReceiptV1(refused)).toEqual(refused);
+  });
+
+  test("the synchronous assistant receipt reports only newly charged seconds", () => {
+    const values = new Map<string, unknown>();
+    const storage: VoiceQuotaSyncStorage = {
+      get: <T>(key: string) => values.get(key) as T | undefined,
+      put: <T>(key: string, value: T) => void values.set(key, value),
+    };
+    expect(
+      recordVoiceAssistantUsageSyncV1(storage, {
+        month: MONTH,
+        sessionId: "sync-one",
+        seconds: 30,
+      }),
+    ).toMatchObject({
+      usedSeconds: 30,
+      sessionSeconds: 30,
+      recordedSeconds: 30,
+    });
+    expect(
+      recordVoiceAssistantUsageSyncV1(storage, {
+        month: MONTH,
+        sessionId: "sync-one",
+        seconds: 30,
+      }),
+    ).toMatchObject({ usedSeconds: 30, recordedSeconds: 0 });
+    expect(
+      recordVoiceAssistantUsageSyncV1(storage, {
+        month: MONTH,
+        sessionId: "sync-one",
+        seconds: 45,
+      }),
+    ).toMatchObject({ usedSeconds: 45, recordedSeconds: 15 });
+  });
+
+  test("uses a UTC month key", () => {
+    expect(voiceQuotaMonthV1(new Date("2026-09-30T23:59:59.000Z"))).toBe(MONTH);
   });
 });

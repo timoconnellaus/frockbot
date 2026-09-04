@@ -33,11 +33,28 @@ export const VOICE_MINUTES_PER_DAY_V1 = 60;
 
 export const VOICE_SECONDS_PER_DAY_V1 = VOICE_MINUTES_PER_DAY_V1 * 60;
 
+/**
+ * The assistant is an open-microphone conversation rather than a brief
+ * composer capture, so it has its own monthly ceiling. The number remains one
+ * platform constant and not a setting; product policy can replace it later
+ * without moving authority out of the User Durable Object.
+ */
+export const VOICE_ASSISTANT_MINUTES_PER_MONTH_V1 = 60;
+export const VOICE_ASSISTANT_SECONDS_PER_MONTH_V1 =
+  VOICE_ASSISTANT_MINUTES_PER_MONTH_V1 * 60;
+export const VOICE_ASSISTANT_QUOTA_PREFIX_V1 = "voice:assistant:quota:";
+export const VOICE_ASSISTANT_USAGE_PREFIX_V1 = "voice:assistant:usage:";
+export const VOICE_QUOTA_MONTH = /^\d{4}-\d{2}$/;
+
 /** `YYYY-MM-DD`, the same shape the authoring quota's day key has. */
 export const VOICE_QUOTA_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 export function voiceQuotaDayV1(at: Date = new Date()): string {
   return at.toISOString().slice(0, 10);
+}
+
+export function voiceQuotaMonthV1(at: Date = new Date()): string {
+  return at.toISOString().slice(0, 7);
 }
 
 export function voiceQuotaKeyV1(day: string): string {
@@ -55,12 +72,62 @@ export function voiceSessionKeyV1(day: string, sessionId: string): string {
   return `${VOICE_SESSION_PREFIX}${day}:${sessionId}`;
 }
 
+export function voiceAssistantQuotaKeyV1(month: string): string {
+  if (!VOICE_QUOTA_MONTH.test(month)) {
+    throw new Error("voice assistant quota month is invalid");
+  }
+  return `${VOICE_ASSISTANT_QUOTA_PREFIX_V1}${month}`;
+}
+
+export function voiceAssistantUsageKeyV1(
+  month: string,
+  sessionId: string,
+): string {
+  if (!VOICE_QUOTA_MONTH.test(month)) {
+    throw new Error("voice assistant quota month is invalid");
+  }
+  if (!SESSION_ID.test(sessionId)) {
+    throw new Error("voice assistant session id is invalid");
+  }
+  return `${VOICE_ASSISTANT_USAGE_PREFIX_V1}${month}:${sessionId}`;
+}
+
 /** The refusal a person reads. Plain English, and it says when it lifts. */
 export function voiceQuotaRefusalV1(): string {
   return (
     `You've used up today's ${VOICE_MINUTES_PER_DAY_V1} minutes of dictation. ` +
     `Type your message for now — the microphone comes back tomorrow.`
   );
+}
+
+export function voiceAssistantQuotaRefusalV1(): string {
+  return (
+    `You've used this month's ${VOICE_ASSISTANT_MINUTES_PER_MONTH_V1} minutes of Voice. ` +
+    "Voice will be ready again next month."
+  );
+}
+
+export interface VoiceAssistantQuotaReceiptV1 {
+  schemaVersion: 1;
+  status: "reserved" | "refused";
+  month: string;
+  sessionId: string;
+  usedSeconds: number;
+  limitSeconds: number;
+  reason?: string;
+}
+
+export interface VoiceAssistantUsageReceiptV1 {
+  schemaVersion: 1;
+  status: "recorded";
+  month: string;
+  sessionId: string;
+  usedSeconds: number;
+  /** The greatest running total this assistant session has reported. */
+  sessionSeconds: number;
+  /** Newly charged seconds; zero for a duplicate or out-of-order report. */
+  recordedSeconds: number;
+  limitSeconds: number;
 }
 
 export interface VoiceQuotaReceiptV1 {
@@ -222,6 +289,171 @@ export async function recordVoiceUsageV1(
   });
 }
 
+/** Admits one assistant session against the User's current UTC month. */
+export async function reserveVoiceAssistantV1(
+  storage: VoiceQuotaStorage,
+  request: { month: string; sessionId: string },
+): Promise<VoiceAssistantQuotaReceiptV1> {
+  const quotaKey = voiceAssistantQuotaKeyV1(request.month);
+  return storage.transaction(async (transaction) => {
+    const used = storedSeconds(
+      await transaction.get<StoredVoiceDayV1>(quotaKey),
+    );
+    if (used >= VOICE_ASSISTANT_SECONDS_PER_MONTH_V1) {
+      return {
+        schemaVersion: 1,
+        status: "refused",
+        month: request.month,
+        sessionId: request.sessionId,
+        usedSeconds: used,
+        limitSeconds: VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
+        reason: voiceAssistantQuotaRefusalV1(),
+      };
+    }
+    await sweepOldAssistantMonthsV1(transaction, request.month);
+    // Do not retain a session key until it reports positive usage. A refused
+    // or failed zero-second setup must not grow authoritative state forever.
+    return {
+      schemaVersion: 1,
+      status: "reserved",
+      month: request.month,
+      sessionId: request.sessionId,
+      usedSeconds: used,
+      limitSeconds: VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
+    };
+  });
+}
+
+/** Charges the largest reported whole-second total for this assistant session. */
+export async function recordVoiceAssistantUsageV1(
+  storage: VoiceQuotaStorage,
+  request: { month: string; sessionId: string; seconds: number },
+): Promise<VoiceAssistantUsageReceiptV1> {
+  const quotaKey = voiceAssistantQuotaKeyV1(request.month);
+  const usageKey = voiceAssistantUsageKeyV1(request.month, request.sessionId);
+  const reported = Number.isSafeInteger(request.seconds)
+    ? Math.max(0, request.seconds)
+    : 0;
+  return storage.transaction(async (transaction) => {
+    const session = await transaction.get<StoredVoiceSessionV1>(usageKey);
+    const charged = storedSeconds(session);
+    const delta = Math.max(0, reported - charged);
+    const used = storedSeconds(
+      await transaction.get<StoredVoiceDayV1>(quotaKey),
+    );
+    const total = used + delta;
+    if (delta > 0) {
+      await transaction.put(quotaKey, {
+        schemaVersion: 1,
+        day: request.month,
+        seconds: total,
+      } satisfies StoredVoiceDayV1);
+      await transaction.put(usageKey, {
+        schemaVersion: 1,
+        day: request.month,
+        sessionId: request.sessionId,
+        seconds: reported,
+      } satisfies StoredVoiceSessionV1);
+    }
+    return {
+      schemaVersion: 1,
+      status: "recorded",
+      month: request.month,
+      sessionId: request.sessionId,
+      usedSeconds: total,
+      sessionSeconds: Math.max(charged, reported),
+      recordedSeconds: delta,
+      limitSeconds: VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
+    };
+  });
+}
+
+/**
+ * Commits assistant quota beside the Billing SQL row in one User-DO
+ * `transactionSync`. Gemini reports audio tokens rather than a duration price,
+ * so the paired Billing entry records exact elapsed seconds with unknown cost.
+ */
+export function recordVoiceAssistantUsageSyncV1(
+  storage: VoiceQuotaSyncStorage,
+  request: { month: string; sessionId: string; seconds: number },
+): VoiceAssistantUsageReceiptV1 {
+  const quotaKey = voiceAssistantQuotaKeyV1(request.month);
+  const usageKey = voiceAssistantUsageKeyV1(request.month, request.sessionId);
+  const reported = Number.isSafeInteger(request.seconds)
+    ? Math.max(0, request.seconds)
+    : 0;
+  const session = storage.get<StoredVoiceSessionV1>(usageKey);
+  const charged = storedSeconds(session);
+  const delta = Math.max(0, reported - charged);
+  const used = storedSeconds(storage.get<StoredVoiceDayV1>(quotaKey));
+  const total = used + delta;
+  if (delta > 0) {
+    storage.put(quotaKey, {
+      schemaVersion: 1,
+      day: request.month,
+      seconds: total,
+    } satisfies StoredVoiceDayV1);
+    storage.put(usageKey, {
+      schemaVersion: 1,
+      day: request.month,
+      sessionId: request.sessionId,
+      seconds: reported,
+    } satisfies StoredVoiceSessionV1);
+  }
+  return {
+    schemaVersion: 1,
+    status: "recorded",
+    month: request.month,
+    sessionId: request.sessionId,
+    usedSeconds: total,
+    sessionSeconds: Math.max(charged, reported),
+    recordedSeconds: delta,
+    limitSeconds: VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
+  };
+}
+
+export async function readVoiceAssistantQuotaV1(
+  storage: VoiceQuotaTransaction,
+  month: string,
+): Promise<{
+  schemaVersion: 1;
+  month: string;
+  usedSeconds: number;
+  limitSeconds: number;
+  remainingSeconds: number;
+}> {
+  const usedSeconds = storedSeconds(
+    await storage.get<StoredVoiceDayV1>(voiceAssistantQuotaKeyV1(month)),
+  );
+  return {
+    schemaVersion: 1,
+    month,
+    usedSeconds,
+    limitSeconds: VOICE_ASSISTANT_SECONDS_PER_MONTH_V1,
+    remainingSeconds: Math.max(
+      0,
+      VOICE_ASSISTANT_SECONDS_PER_MONTH_V1 - usedSeconds,
+    ),
+  };
+}
+
+async function sweepOldAssistantMonthsV1(
+  transaction: VoiceQuotaTransaction,
+  currentMonth: string,
+): Promise<void> {
+  for (const prefix of [
+    VOICE_ASSISTANT_QUOTA_PREFIX_V1,
+    VOICE_ASSISTANT_USAGE_PREFIX_V1,
+  ]) {
+    const held = await transaction.list<unknown>({ prefix, limit: 256 });
+    for (const key of held.keys()) {
+      if (!key.startsWith(`${prefix}${currentMonth}`)) {
+        await transaction.delete(key);
+      }
+    }
+  }
+}
+
 /**
  * The synchronous form used to commit voice quota and priced ledger rows in
  * one `DurableObjectStorage.transactionSync` callback.
@@ -264,7 +496,6 @@ export function recordVoiceUsageSyncV1(
     limitSeconds: VOICE_SECONDS_PER_DAY_V1,
   };
 }
-
 /** Drops every day counter and session record that is not today's. */
 async function sweepOldDaysV1(
   transaction: VoiceQuotaTransaction,
@@ -312,6 +543,49 @@ export function decodeVoiceQuotaReceiptV1(
     status: value.status,
     day,
     sessionId,
+    usedSeconds: integer("usedSeconds"),
+    limitSeconds: integer("limitSeconds"),
+    ...(typeof value.reason === "string" && value.reason
+      ? { reason: value.reason }
+      : {}),
+  };
+}
+
+export function decodeVoiceAssistantQuotaReceiptV1(
+  input: unknown,
+  label = "voice assistant quota receipt",
+): VoiceAssistantQuotaReceiptV1 {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const value = input as Record<string, unknown>;
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  if (value.status !== "reserved" && value.status !== "refused") {
+    throw new Error(`${label}.status is invalid`);
+  }
+  if (typeof value.month !== "string" || !VOICE_QUOTA_MONTH.test(value.month)) {
+    throw new Error(`${label}.month is invalid`);
+  }
+  if (
+    typeof value.sessionId !== "string" ||
+    !SESSION_ID.test(value.sessionId)
+  ) {
+    throw new Error(`${label}.sessionId is invalid`);
+  }
+  const integer = (name: string): number => {
+    const candidate = value[name];
+    if (!Number.isSafeInteger(candidate) || (candidate as number) < 0) {
+      throw new Error(`${label}.${name} is invalid`);
+    }
+    return candidate as number;
+  };
+  return {
+    schemaVersion: 1,
+    status: value.status,
+    month: value.month,
+    sessionId: value.sessionId,
     usedSeconds: integer("usedSeconds"),
     limitSeconds: integer("limitSeconds"),
     ...(typeof value.reason === "string" && value.reason

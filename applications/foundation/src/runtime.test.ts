@@ -70,6 +70,7 @@ describe("foundation application", () => {
       "search",
       "skills",
       "subagents",
+      "voice",
     ]);
     expect(first.contributions).toEqual({
       backend: [
@@ -90,6 +91,7 @@ describe("foundation application", () => {
         "routines",
         "search",
         "subagents",
+        "voice",
       ],
       runtime: [
         "shell",
@@ -135,6 +137,7 @@ describe("foundation application", () => {
         "package-publisher",
         "routines",
         "search",
+        "voice",
       ],
       desktop: [
         "auth",
@@ -488,6 +491,10 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       readTask: () => Promise.reject(new Error("not used while composing")),
       stopTask: () => Promise.reject(new Error("not used while composing")),
+      readVoiceAssistant: () =>
+        Promise.reject(new Error("not used while composing")),
+      openVoiceAssistant: () =>
+        Promise.reject(new Error("not used while composing")),
     });
     expect(
       backend.contributions
@@ -507,6 +514,7 @@ describe("foundation application", () => {
       "settings",
       "subagents",
       "user-machine",
+      "voice",
     ]);
     interface TestContribution {
       specifier: string;
@@ -526,7 +534,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(3);
-    expect(userBackend.contributions).toHaveLength(12);
+    expect(userBackend.contributions).toHaveLength(13);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );

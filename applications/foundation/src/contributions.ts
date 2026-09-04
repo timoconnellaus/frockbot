@@ -77,6 +77,10 @@ import {
   type SearchGatewayHost,
 } from "@frockbot/plugin-search/backend";
 import {
+  backendContribution as voiceGatewayContribution,
+  type VoiceGatewayHostV1,
+} from "@frockbot/plugin-voice/backend";
+import {
   backendContribution as settingsGatewayContribution,
   type SettingsGatewayHost,
 } from "@frockbot/plugin-settings/backend";
@@ -137,6 +141,10 @@ import {
   userContribution as flockUserContribution,
   type FlockUserApplicationHostV1,
 } from "@frockbot/plugin-flock/user";
+import {
+  userContribution as voiceUserContribution,
+  type VoiceUserApplicationHostV1,
+} from "@frockbot/plugin-voice/user";
 
 import {
   backendContribution as shellBotContribution,
@@ -162,6 +170,7 @@ export {
   packagePublisherGatewayContribution,
   routinesGatewayContribution,
   searchGatewayContribution,
+  voiceGatewayContribution,
   settingsGatewayContribution,
   subagentsGatewayContribution,
   machineGatewayContribution,
@@ -177,6 +186,7 @@ export {
   auditUserContribution,
   billingUserContribution,
   flockUserContribution,
+  voiceUserContribution,
   shellBotContribution,
   flockBotContribution,
   computerBotContribution,
@@ -254,7 +264,8 @@ export type FoundationGatewayHost = {
   SearchGatewayHost &
   AuditGatewayHost &
   BillingGatewayHostV1 &
-  PackagePublisherGatewayHost;
+  PackagePublisherGatewayHost &
+  VoiceGatewayHostV1;
 
 /**
  * Every User Durable Object host slice, in one object. Each Package names its
@@ -278,7 +289,8 @@ export type FoundationUserBackendHostV1 = {
   SearchUserApplicationHostV1 &
   AuditUserApplicationHostV1 &
   BillingUserApplicationHostV1 &
-  FlockUserApplicationHostV1;
+  FlockUserApplicationHostV1 &
+  VoiceUserApplicationHostV1;
 
 /** Every Bot Durable Object host slice, in one object. */
 export type FoundationBotBackendHostV1 = {
@@ -339,6 +351,7 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     packagePublisherGatewayContribution,
     routinesGatewayContribution,
     searchGatewayContribution,
+    voiceGatewayContribution,
     settingsGatewayContribution,
     subagentsGatewayContribution,
     machineGatewayContribution,
@@ -354,6 +367,7 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     auditUserContribution,
     billingUserContribution,
     flockUserContribution,
+    voiceUserContribution,
     shellBotContribution,
     flockBotContribution,
     computerBotContribution,

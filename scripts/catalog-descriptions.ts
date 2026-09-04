@@ -72,6 +72,8 @@ export const CATALOG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   "ui-theme": "Choose how the app looks, including light and dark mode.",
   "user-machine":
     "Register your own computer, so the Bot can run commands and move files on it once you approve.",
+  voice:
+    "Talk to an app-wide voice assistant that can check your Bots, their activity, and memory.",
   web: "Search the web and read pages, so the Bot can answer with current information.",
 };
 
