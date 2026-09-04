@@ -109,6 +109,48 @@ describe("billing entitlement", () => {
     database.close();
   });
 
+  test("an event stays idempotent after it ages out of visible history", () => {
+    const database = new Database(":memory:");
+    const billing = new BillingUserBackendContribution({
+      sql: sqlV1(database),
+    });
+    const first = {
+      id: "evt_credit_first",
+      type: "checkout.session.completed",
+      created: 1_788_523_200,
+      data: {
+        object: {
+          id: "cs_credit_first",
+          mode: "payment",
+          payment_status: "paid",
+          payment_intent: "pi_credit_first",
+          amount_total: 500,
+          metadata: { frockbot_kind: "credit" },
+        },
+      },
+    } as const;
+    expect(billing.applyStripeEvent(first)).toEqual({ applied: true });
+    for (let index = 0; index < 200; index += 1) {
+      billing.applyStripeEvent({
+        id: `evt_subscription_${String(index)}`,
+        type: "customer.subscription.updated",
+        created: 1_788_523_201 + index,
+        data: {
+          object: {
+            id: "sub_basic",
+            status: "canceled",
+            metadata: {},
+          },
+        },
+      });
+    }
+
+    expect(billing.readBilling().history).toHaveLength(200);
+    expect(billing.applyStripeEvent(first)).toEqual({ applied: false });
+
+    database.close();
+  });
+
   test("Basic resets to $20 each paid period and settlement spends allowance before credits", () => {
     const database = new Database(":memory:");
     const billing = new BillingUserBackendContribution({

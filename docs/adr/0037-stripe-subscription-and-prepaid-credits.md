@@ -56,9 +56,11 @@ The registered webhook events are `checkout.session.completed`,
 `invoice.paid`, `customer.subscription.updated`,
 `customer.subscription.deleted`, and `charge.refunded`. Each verified event is
 forwarded to the User Durable Object named in server-written Stripe metadata.
-The history row is keyed by Stripe event id and the state change and history
-insert share one synchronous SQL transaction, so redelivery applies nothing.
-Credit purchases additionally reconcile by PaymentIntent. Refund events carry
+The permanent Stripe-event journal is keyed by event id, while the separate
+User-visible history is bounded to its newest 200 entries. The journal insert,
+state change, and history insert share one synchronous SQL transaction, so an
+event remains idempotent even after it ages out of visible history. Credit
+purchases additionally reconcile by PaymentIntent. Refund events carry
 Stripe's cumulative `amount_refunded`; the stored credited, refunded, and
 already-applied amounts make duplicate and out-of-order delivery converge on
 one net purchased-credit value. Only a `charge.refunded` event carrying the

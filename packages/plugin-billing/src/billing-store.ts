@@ -70,6 +70,10 @@ export class BillingStoreV1 {
         "amount_micros INTEGER NOT NULL, description TEXT NOT NULL)",
     );
     this.sql.exec(
+      "CREATE TABLE IF NOT EXISTS billing_stripe_events (" +
+        "event_id TEXT PRIMARY KEY, applied_at TEXT NOT NULL)",
+    );
+    this.sql.exec(
       "CREATE TABLE IF NOT EXISTS billing_credit_payments (" +
         "payment_intent_id TEXT PRIMARY KEY, checkout_session_id TEXT NOT NULL, " +
         "credited_micros INTEGER NOT NULL, refunded_micros INTEGER NOT NULL, " +
@@ -89,7 +93,7 @@ export class BillingStoreV1 {
       const alreadyApplied = Number(
         this.sql
           .exec<{ n: number }>(
-            "SELECT count(*) AS n FROM billing_history WHERE event_id = ?",
+            "SELECT count(*) AS n FROM billing_stripe_events WHERE event_id = ?",
             event.id,
           )
           .toArray()[0]?.n ?? 0,
@@ -216,12 +220,18 @@ export class BillingStoreV1 {
         }
       }
 
+      const appliedAt = new Date(event.created * 1_000).toISOString();
+      this.sql.exec(
+        "INSERT INTO billing_stripe_events (event_id, applied_at) VALUES (?, ?)",
+        this.identifier(event.id, "event id"),
+        appliedAt,
+      );
       this.sql.exec(
         "INSERT INTO billing_history (event_id, type, occurred_at, amount_micros, description) " +
           "VALUES (?, ?, ?, ?, ?)",
         this.identifier(event.id, "event id"),
         this.identifier(event.type, "event type"),
-        new Date(event.created * 1_000).toISOString(),
+        appliedAt,
         amountMicros,
         description,
       );
