@@ -448,3 +448,81 @@ describe("the conversation prompt section", () => {
     }
   });
 });
+
+// Two ends of one defect. The prompt tells the model to acknowledge with the
+// call; the promotion catches the model that acknowledges in text anyway. The
+// verification run watched a real model do exactly that — "On it — building
+// the 2027 countdown applet now." as plain assistant text, then three tool
+// calls — and nobody ever saw the line.
+describe("the acknowledgement reaches the user", () => {
+  test("the prompt names the call, not just the line", () => {
+    expect(CONVERSATION_PROMPT_TEXT_V1).toContain(
+      "Your own text is not shown to the user",
+    );
+    expect(CONVERSATION_PROMPT_TEXT_V1).toContain(
+      "your first action is a `send_to_user` call",
+    );
+  });
+
+  test("assistant text in a tool-calling step is promoted to one send", async () => {
+    const mounted = await mount();
+    try {
+      await mounted.root.serial(
+        "agent/assistant-text",
+        { session: mounted.session } as never,
+        "On it — building the 2027 countdown applet now.",
+        { turn: 4, step: 2, requestId: "request-1" },
+      );
+
+      const sends = mounted.session.events.filter(
+        (event) => event.type === "send/to-user",
+      );
+      expect(sends).toHaveLength(1);
+      expect(sends[0]).toMatchObject({
+        turn: 4,
+        step: 2,
+        occurrenceId: "assistant-text:request-1",
+        payload: {
+          type: "text",
+          text: "On it — building the 2027 countdown applet now.",
+        },
+      });
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("a step that already spoke is left alone, and a replay adds nothing", async () => {
+    const mounted = await mount();
+    try {
+      await invoke(
+        mounted,
+        "chat",
+        call(SEND_TO_USER_TOOL_V1, {
+          payload: { type: "text", text: "On it." },
+        }),
+      );
+      await mounted.root.serial(
+        "agent/assistant-text",
+        { session: mounted.session } as never,
+        "On it — building the countdown applet now.",
+        { turn: 4, step: 2, requestId: "request-1" },
+      );
+      // The same step replayed after an eviction promotes nothing new either.
+      await mounted.root.serial(
+        "agent/assistant-text",
+        { session: mounted.session } as never,
+        "On it — building the countdown applet now.",
+        { turn: 4, step: 2, requestId: "request-1" },
+      );
+
+      const sends = mounted.session.events.filter(
+        (event) => event.type === "send/to-user",
+      );
+      expect(sends).toHaveLength(1);
+      expect(sends[0]).toMatchObject({ payload: { text: "On it." } });
+    } finally {
+      await mounted.dispose();
+    }
+  });
+});

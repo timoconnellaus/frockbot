@@ -107,6 +107,26 @@ declare module "cordis" {
       outcome: "completed" | "not-started",
     ) => Promise<void>;
     "agent/turn-stopping": (agent: Agent, turn: number) => Promise<void>;
+    /**
+     * A step where the model wrote something *and* called tools, raised the
+     * moment the assistant message is journaled and before any tool runs.
+     *
+     * The kernel has no opinion about what that text is for — a Package that
+     * gives the Bot a voice does. In the Shell, the only thing a person sees
+     * is a `send_to_user` call, so a model that writes "On it — building the
+     * countdown applet now." and then goes on to call three tools has said it
+     * to nobody: the client draws one bubble per send, and there was no send.
+     * The prompt asks for the call, and this is what catches the model that
+     * narrates its acknowledgement in text anyway.
+     *
+     * Serial, and before the tools, so the promoted line lands ahead of the
+     * first tool result rather than after the work it was announcing.
+     */
+    "agent/assistant-text": (
+      agent: Agent,
+      text: string,
+      position: { turn: number; step: number; requestId: string },
+    ) => Promise<void>;
   }
 }
 

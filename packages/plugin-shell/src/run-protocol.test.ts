@@ -3,6 +3,7 @@ import { type SessionEvent } from "@frockbot/kernel-contracts";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import type { StoredRun } from "./backend-contracts.js";
 import { planBotRunRecovery } from "./backend-recovery.js";
+import { RUN_FAILURE_COPY_V1 } from "./run-failure-copy.js";
 import {
   createClientRunStopReceiptV1,
   decodeClientNotificationAcknowledgementCommandV1,
@@ -10,6 +11,7 @@ import {
   decodeClientRunLookupQueryV1,
   decodeClientRunReconciliationCommandV1,
   decodeClientRunStopCommandV1,
+  RESUMABLE_RUN_MESSAGE_V1,
   decodeClientRunStopReceiptV1,
   decodeClientTurnCommandV1,
   decodeClientRunLookupV1,
@@ -285,7 +287,7 @@ describe("client run protocol v1", () => {
       stopRequestedAt: "2026-08-28T00:00:05.000Z",
       outcome: {
         type: "cancelled",
-        message: "Stopped by an authenticated Stop command.",
+        message: "You stopped this.",
       },
     });
     expect(projectClientRunLookupV1(storedRun([], "cancelled"))).toMatchObject({
@@ -297,7 +299,7 @@ describe("client run protocol v1", () => {
       ).run,
     ).toMatchObject({
       status: "cancelled",
-      failure: "Stopped by an authenticated Stop command.",
+      failure: "You stopped this.",
     });
 
     expect(() =>
@@ -745,7 +747,7 @@ describe("client run protocol v1", () => {
           ],
           recovery: {
             action: "resume",
-            message: "Provider confirmation required",
+            message: RESUMABLE_RUN_MESSAGE_V1,
           },
         },
       ],
@@ -758,10 +760,10 @@ describe("client run protocol v1", () => {
         input: "continue",
         status: "reconciliation-required",
         events: projected.runs[0]?.events,
-        failure: "Provider confirmation required",
+        failure: RESUMABLE_RUN_MESSAGE_V1,
         recovery: {
           action: "resume",
-          message: "Provider confirmation required",
+          message: RESUMABLE_RUN_MESSAGE_V1,
         },
       },
     ]);
@@ -1278,14 +1280,18 @@ describe("client run protocol v1", () => {
       events,
       failure: plan.failure,
     });
+    // The provider's own words — its name, its status code — stay on the
+    // stored record, which is what the debug surface reads. What crosses to a
+    // chat bubble is the sentence for the outcome, and nothing else.
     expect(decodeClientRunLookupV1(structuredClone(lookup))).toMatchObject({
       state: "terminal",
       run: {
         status: "failed",
-        failure:
-          "Bot turn ended with outcome model-error: Ollama Cloud responded 401: invalid api key",
+        failure: RUN_FAILURE_COPY_V1["model-error"],
       },
     });
+    expect(JSON.stringify(lookup)).not.toContain("Ollama Cloud");
+    expect(JSON.stringify(lookup)).not.toContain("model-error");
   });
 
   test("carries rename announcements beside the Turns, and refuses a bad one", () => {

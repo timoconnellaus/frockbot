@@ -85,28 +85,33 @@ describe("a Turn through the gateway, the loaded artifact and the Bot", () => {
       "hello",
       "turn-command-401",
     );
-    // A failed Turn is a JSON failure with a reason, not a transport error and
-    // not an HTML page.
-    expect(response.status).toBe(500);
+    // A Turn the provider refused settles itself — a `turn/end`, a durable
+    // `failed` record, the provider's own words on it — and the request that
+    // started it answers with that settlement. It used to answer 500 over the
+    // top of it, which logged `Uncaught Error: Bot turn ended with outcome
+    // model-error: Model request failed (401)` in the Worker and told the
+    // person their connection was at fault.
+    expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/json");
-    const reason = (body as { error?: string }).error ?? "";
-    expect(reason).not.toBe("");
-    // The reason names what the provider said. `plugin-provider-ollama-cloud`
-    // reports the transport status rather than the response body, so `401` is
-    // the provider's text that reaches the client today; the assertion is on
-    // the status the stub returned, not on a generic "failed".
-    expect(reason).toContain("model-error");
-    expect(reason).toContain("401");
+    expect((body as { error?: string }).error).toBeUndefined();
 
-    // And the same reason is durable, so the client can read it again after a
-    // reload rather than only seeing it on the failing request.
+    // The failure is durable, so the client reads it again after a reload
+    // rather than only on the request that produced it.
     const list = (await expectOkJson(
       await asUser(userId, `/api/bots/${botId}/turns`),
     )) as { runs: RunView[] };
     const run = list.runs.find((entry) => entry.runId === "turn-command-401");
     expect(run).toBeDefined();
     expect(run?.status).toBe("failed");
-    expect(run?.outcome?.message ?? "").toBe(reason);
+
+    // And what it says is written for the person. The provider's status code
+    // and the outcome's name stay on the stored record, which is what the
+    // debug surface reads; neither belongs in a chat bubble.
+    const message = run?.outcome?.message ?? "";
+    expect(message).not.toBe("");
+    expect(message).not.toContain("model-error");
+    expect(message).not.toContain("401");
+    expect(message).not.toContain("Ollama");
   });
 });
 
