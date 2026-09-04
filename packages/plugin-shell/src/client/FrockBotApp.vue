@@ -575,14 +575,43 @@ const prefersReducedMotion =
   typeof window !== "undefined" &&
   typeof window.matchMedia === "function" &&
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+/*
+ * A conversation opens at its end, not at its start with a scroll after it.
+ *
+ * While this is true the thread is laid out and measured but not painted, so
+ * the frames where it sits at the top — and where a late-measuring code block
+ * or image moves it — are never shown. It is turned off inside a
+ * `requestAnimationFrame` callback, which runs after layout and before the
+ * paint of that same frame, so the first frame the reader sees is the last
+ * Turn and there is no animation between the two.
+ */
+const threadSettling = ref(true);
+/*
+ * True until this Bot's transcript has arrived. A Bot the cache was not
+ * holding opens empty and fills in from the read, and that arrival is an
+ * opening rather than new content: it is placed without a paint in between,
+ * the same as a restored one, instead of scrolling down where it can be seen.
+ */
+const threadOpening = ref(true);
 
 function onThreadScroll(): void {
   const element = thread.value;
   if (!element) return;
+  // A scroll the settling pass caused is not the reader moving.
+  if (threadSettling.value) return;
   pinnedToLatest.value =
     element.scrollHeight - element.scrollTop - element.clientHeight <=
     nearBottomThreshold;
   if (pinnedToLatest.value) hasUnseenBelow.value = false;
+}
+
+/** Puts the thread at its end now, without a scroll the reader can see. */
+function pinToLatest(): void {
+  const element = thread.value;
+  if (!element) return;
+  element.scrollTop = element.scrollHeight;
+  pinnedToLatest.value = true;
+  hasUnseenBelow.value = false;
 }
 
 async function scrollToLatest(
@@ -597,6 +626,66 @@ async function scrollToLatest(
   });
   pinnedToLatest.value = true;
   hasUnseenBelow.value = false;
+}
+
+/**
+ * Opens a transcript where the reader left it, before the first paint.
+ *
+ * `viewport` is where they were when they switched away from this Bot;
+ * without one — or with one that was at the end — the thread opens at the
+ * end, which is where a conversation is read from.
+ */
+async function settleThread(viewport?: {
+  scrollTop: number;
+  pinnedToLatest: boolean;
+}): Promise<void> {
+  threadSettling.value = true;
+  await nextTick();
+  const place = (): void => {
+    const element = thread.value;
+    if (!element) return;
+    if (viewport && !viewport.pinnedToLatest) {
+      element.scrollTop = viewport.scrollTop;
+      pinnedToLatest.value = false;
+      return;
+    }
+    pinToLatest();
+  };
+  place();
+  if (typeof requestAnimationFrame !== "function") {
+    threadSettling.value = false;
+    return;
+  }
+  requestAnimationFrame(() => {
+    // Layout has happened: anything that measured late — a rendered code
+    // block, an avatar — has its real height now, so this is the placement
+    // the reader actually sees.
+    place();
+    threadSettling.value = false;
+  });
+}
+
+/** Where the reader has this Bot's thread, for the cache to hold. */
+function threadViewport(): { scrollTop: number; pinnedToLatest: boolean } {
+  const element = thread.value;
+  return {
+    scrollTop: element?.scrollTop ?? 0,
+    pinnedToLatest: pinnedToLatest.value,
+  };
+}
+
+/*
+ * Content that changes height after it is drawn — a loaded image, Markdown
+ * that reflowed — must not move a reader who is at the end away from it.
+ * Every message is observed, because the one that grows is usually the last
+ * but is not always.
+ */
+let threadResize: ResizeObserver | undefined;
+function observeThreadContent(): void {
+  const element = thread.value;
+  if (!element || !threadResize) return;
+  threadResize.disconnect();
+  for (const child of element.children) threadResize.observe(child);
 }
 
 /*
@@ -624,7 +713,18 @@ const applySettingsDeepLink = (): void => {
 
 onMounted(() => {
   void web.value.loadPluginCatalog();
-  void scrollToLatest("auto");
+  if (typeof ResizeObserver === "function") {
+    threadResize = new ResizeObserver(() => {
+      if (pinnedToLatest.value || threadSettling.value) pinToLatest();
+    });
+    observeThreadContent();
+  }
+  threadOpening.value = messages.value.length === 0;
+  void settleThread(
+    state.value.activeBotId
+      ? web.value.transcripts.viewportFor(state.value.activeBotId)
+      : undefined,
+  );
   void nextTick(syncComposerHeight);
   applySettingsDeepLink();
   window.addEventListener("popstate", applySettingsDeepLink);
@@ -634,6 +734,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  threadResize?.disconnect();
+  threadResize = undefined;
   window.removeEventListener("popstate", applySettingsDeepLink);
   window.removeEventListener("hashchange", applySettingsDeepLink);
   phoneLayoutMedia?.removeEventListener("change", onPhoneLayoutChange);
@@ -646,6 +748,19 @@ watch(
   () =>
     [messages.value.length, messages.value.at(-1)?.text.length ?? 0] as const,
   ([count], [previousCount]) => {
+    void nextTick(observeThreadContent);
+    // A transcript still settling is placed by `settleThread`, which is the
+    // path that never shows the move.
+    if (threadSettling.value) return;
+    if (threadOpening.value && count > 0) {
+      threadOpening.value = false;
+      void settleThread(
+        state.value.activeBotId
+          ? web.value.transcripts.viewportFor(state.value.activeBotId)
+          : undefined,
+      );
+      return;
+    }
     if (!pinnedToLatest.value) {
       hasUnseenBelow.value = true;
       return;
@@ -656,12 +771,21 @@ watch(
 );
 watch(
   () => state.value.activeBotId,
-  () => {
+  (botId, previousBotId) => {
     // Choosing a Bot is what the drawer is for, so it closes behind the choice
     // rather than covering the conversation it just opened.
     closeNav();
-    pinnedToLatest.value = true;
-    void scrollToLatest("auto");
+    // Pre-flush: the thread on screen is still the Bot being left, so this is
+    // the scroll position to come back to.
+    if (previousBotId) {
+      web.value.transcripts.rememberViewport(previousBotId, threadViewport());
+    }
+    // A restored transcript is already here, so this switch is not opening on
+    // an empty thread and the arrival below is not one either.
+    threadOpening.value = messages.value.length === 0;
+    void settleThread(
+      botId ? web.value.transcripts.viewportFor(botId) : undefined,
+    );
     // A Skill belongs to one Bot's instruction root, so a switch drops both
     // the attached refs and the catalog they came from.
     skillStore.take();
@@ -904,6 +1028,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         <section
           ref="thread"
           class="thread"
+          :class="{ 'thread-settling': threadSettling }"
           aria-live="polite"
           @scroll.passive="onThreadScroll"
         >

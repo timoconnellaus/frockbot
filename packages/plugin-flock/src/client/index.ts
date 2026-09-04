@@ -391,6 +391,9 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         }
         state.value.overlay = undefined;
         state.value.lifecyclePending = undefined;
+        // An archived Bot's transcript is no longer something to open
+        // instantly: the next time it is read it is read from the Bot.
+        shell?.value.transcripts.forget(botId);
         await state.value.load();
       } catch (error) {
         state.value.error =
@@ -417,6 +420,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           state.value.error = "Still restoring — this will finish shortly.";
           return;
         }
+        shell?.value.transcripts.forget(botId);
         await state.value.load();
       } catch (error) {
         state.value.error =

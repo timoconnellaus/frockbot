@@ -15,7 +15,9 @@ import {
   expect,
   assistantMessages,
   composerInput,
+  createBot,
   provisionThroughUi,
+  revealSidebar,
   sendMessage,
   setFakeOllamaChatMode,
 } from "./fixtures.ts";
@@ -422,4 +424,100 @@ test("a Bot the client cannot reach settles with a reason and a Retry", async ({
   await expect(page.getByRole("button", { name: /Stop/ })).toHaveCount(0);
   await expect(composer).toHaveValue(prompt);
   await expect(page.getByRole("button", { name: "Retry" })).toBeEnabled();
+});
+
+test("a conversation opens at its end, and switching back to it does not reload it", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Long",
+  });
+
+  // Long enough that the thread has to scroll: an opening that is already at
+  // the end proves nothing on a transcript that fits.
+  const prompts = Array.from(
+    { length: 6 },
+    (_, index) => `Turn number ${index + 1}`,
+  );
+  for (const prompt of prompts) await sendMessage(page, prompt);
+
+  const thread = page.locator("section.thread");
+  await expect
+    .poll(() =>
+      thread.evaluate((element) => element.scrollHeight > element.clientHeight),
+    )
+    .toBe(true);
+
+  await createBot(page, "Other");
+  await expect(composerInput(page)).toHaveValue("");
+
+  /*
+   * The thread is laid out but not painted while it carries `thread-settling`,
+   * so the frame in which that class is removed is the first frame the reader
+   * sees. A `MutationObserver` callback runs before that frame is painted,
+   * which makes this the position that reaches the screen — and not a position
+   * sampled after a scroll, which is the effect being removed.
+   */
+  await page.evaluate(() => {
+    const element = document.querySelector("section.thread");
+    if (!element) throw new Error("the thread is missing");
+    const samples: { atEnd: boolean; distance: number }[] = [];
+    (window as unknown as { threadOpenings: typeof samples }).threadOpenings =
+      samples;
+    let settling = element.classList.contains("thread-settling");
+    new MutationObserver(() => {
+      const now = element.classList.contains("thread-settling");
+      if (settling && !now) {
+        const distance =
+          element.scrollHeight - element.scrollTop - element.clientHeight;
+        samples.push({ atEnd: distance <= 1, distance });
+      }
+      settling = now;
+    }).observe(element, { attributes: true, attributeFilter: ["class"] });
+  });
+
+  // Every `/turns` read from here on, so "did switching back reload it?" is a
+  // count rather than an impression.
+  const turnReads: string[] = [];
+  page.on("request", (request) => {
+    const { pathname } = new URL(request.url());
+    if (pathname.endsWith("/turns") && request.method() === "GET")
+      turnReads.push(pathname);
+  });
+
+  await revealSidebar(page);
+  await page
+    .locator(".flock-bot-row", { has: page.getByText("Long", { exact: true }) })
+    .click();
+
+  // The transcript is held in the client, so it is here with no read behind
+  // it: no empty thread, no spinner, no round trip.
+  await expect(thread.getByText(prompts[0] ?? "")).toBeVisible();
+  await expect(thread.getByText(prompts.at(-1) ?? "")).toBeVisible();
+
+  const openings = await page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          threadOpenings: { atEnd: boolean; distance: number }[];
+        }
+      ).threadOpenings,
+  );
+  expect(openings.length).toBeGreaterThan(0);
+  expect(openings.every((sample) => sample.atEnd)).toBe(true);
+
+  // And it is still there once it is visible, rather than having settled there
+  // where the reader could watch it happen.
+  const distance = await thread.evaluate(
+    (element) =>
+      element.scrollHeight - element.scrollTop - element.clientHeight,
+  );
+  expect(distance).toBeLessThanOrEqual(1);
+
+  expect(turnReads).toEqual([]);
 });

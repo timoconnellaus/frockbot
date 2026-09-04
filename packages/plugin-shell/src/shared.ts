@@ -222,6 +222,29 @@ export function withoutConnectionReturnV1(search: string): string {
   return rest ? `?${rest}` : "";
 }
 
+/**
+ * What the shell holds of the conversations the User is not looking at, as
+ * everything outside the shell may address it.
+ *
+ * Two callers: the thread, which records and reads back where the reader had
+ * each Bot scrolled, and any surface that changes a Bot enough that its held
+ * transcript would be a lie rather than merely old — archive, delete, and a
+ * change of signed-in User.
+ */
+export interface TranscriptMemoryV1 {
+  /** Records where the reader had this Bot's thread. */
+  rememberViewport(
+    botId: string,
+    viewport: { scrollTop: number; pinnedToLatest: boolean },
+  ): void;
+  /** Where the reader had this Bot's thread, if it is still held. */
+  viewportFor(
+    botId: string,
+  ): { scrollTop: number; pinnedToLatest: boolean } | undefined;
+  /** Drops what is held for one Bot, or — with no argument — for every Bot. */
+  forget(botId?: string): void;
+}
+
 export interface FrockBotWebData {
   connection: WebConnection;
   modelLabel: string;
@@ -328,6 +351,11 @@ export interface FrockBotWebData {
    * cancelled or failed grant is reported rather than silently discarded.
    */
   connectionReturn?: ConnectionReturnV1;
+  /**
+   * The conversations this client is still holding, so switching back to a
+   * Bot is a paint rather than a reload.
+   */
+  transcripts: TranscriptMemoryV1;
   selectBot(botId: string): Promise<void>;
   loadBotSettings(): Promise<void>;
   saveBotProfile(profile: BotProfile): Promise<void>;

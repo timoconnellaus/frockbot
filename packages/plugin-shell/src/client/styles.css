@@ -209,6 +209,20 @@
   background-image: var(--frock-thread-gradient);
   scrollbar-color: var(--frock-scrollbar) transparent;
   scrollbar-width: thin;
+  /*
+   * New content is added at the end, so the browser keeps the reader where
+   * they are rather than letting the growth push the view.
+   */
+  overflow-anchor: auto;
+}
+
+/*
+ * Laid out and measured, deliberately not painted. A conversation is put at
+ * its end while this holds, so it opens there instead of opening at the top
+ * and scrolling down where the reader can see it.
+ */
+.thread-settling {
+  visibility: hidden;
 }
 
 .empty-thread {
