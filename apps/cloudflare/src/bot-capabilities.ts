@@ -273,8 +273,15 @@ export class BotCapabilities extends WorkerEntrypoint<
       return await this.rpc.isolateApplets(
         this.scope(decodeIsolateAppletsRequestV1(request)),
       );
-    } catch {
-      return unavailable("Applets are unavailable");
+    } catch (error) {
+      // The reason is the whole answer: "Applet owner id is invalid" tells an
+      // operator what broke, where a bare "unavailable" sent Bob round in
+      // circles for twenty steps.
+      const reason =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message.slice(0, 200)
+          : "Applets are unavailable";
+      return unavailable(reason);
     }
   }
 

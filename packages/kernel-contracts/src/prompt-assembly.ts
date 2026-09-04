@@ -14,6 +14,14 @@ export interface PromptAssemblyContext {
    * what an absent turn type meant.
    */
   turnType: TurnTypeV1;
+  /**
+   * Where this request sits in the Turn's step budget: `current` is the step
+   * being assembled (1-based) and `max` the last step the loop will run. A
+   * section can tell the model it is about to be stopped, which is how a
+   * long tool-driven reply learns to send a status instead of going silent.
+   * Absent when the assembler is not inside a Turn.
+   */
+  step?: { current: number; max: number };
 }
 
 /** What a host assembles as when it is not running an admitted Turn. */

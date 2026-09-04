@@ -142,10 +142,23 @@ class ToolEffectReconciliationRequiredError extends Error {
  */
 class StepLimitReachedError extends Error {
   constructor(readonly steps: number) {
-    super(`stopped after ${steps} steps`);
+    // The sentence is written for the person, the way the Turn deadline's is:
+    // it is what reaches the chat bubble once `kernel-do` wraps it into the
+    // run's failure. The step count stays on the error for the log.
+    super(STEP_LIMIT_REASON_V1);
     this.name = "StepLimitReachedError";
   }
 }
+
+/**
+ * What a person is told when a reply used every step it was allowed. Bob
+ * (2026-09-04) ran a to-do applet build to the 64-step ceiling and the thread
+ * showed the generic "stopped before it finished" under a spinner that never
+ * ended; this names what happened and what to do, and stays true whatever
+ * the ceiling is.
+ */
+export const STEP_LIMIT_REASON_V1 =
+  "This Bot used all the steps it had for one reply and stopped. What it finished is saved. Send another message to carry on.";
 
 /**
  * The longest a single Turn may run before the loop stops waiting for it.
@@ -1030,6 +1043,9 @@ class LoopAgent implements Agent {
       // The same turn type the tool catalog is trimmed to. A section that
       // renders what a Turn may do would otherwise have to guess it.
       turnType: this.#turnType,
+      // Where the Turn is in its budget, so a section can warn the model
+      // before the loop stops it.
+      step: { current: step, max: this.#maxSteps },
     });
 
     // One automatic retry, and only for a failure the provider itself

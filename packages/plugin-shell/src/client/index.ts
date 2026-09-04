@@ -3082,6 +3082,14 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
    * and the one-bubble-per-send contract is untouched.
    */
   let stopRunChannel: (() => void) | undefined;
+  // The channel's own health, for the observation below: `fallback` means the
+  // socket is gone and the transcript is flying blind, and each return to
+  // `open` means it was gone for a while. Either is a reason to read the
+  // running Turn from authority rather than trust a POST that may have died
+  // with the same connection — which is how a phone kept drawing the working
+  // trail for a Turn the server had already settled (2026-09-04).
+  const channelFallback = ref(false);
+  const channelReconnects = ref(0);
   const stopRunChannelWatch = watch(
     () => web.value.activeBotId,
     (botId) => {
@@ -3108,10 +3116,14 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           restoredWithoutRead = undefined;
           await deliverNotifications(botId, generation);
         },
-        status() {
+        status(status) {
           // The channel's health is not the transcript's: an unavailable
           // socket falls back to the observation below, which is what a
           // client without one uses anyway.
+          if (generation !== selectionGeneration) return;
+          const wasDown = channelFallback.value;
+          channelFallback.value = status === "fallback";
+          if (status === "open" && wasDown) channelReconnects.value += 1;
         },
       });
     },
@@ -3119,12 +3131,21 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   );
 
   const stopRunObservation = watch(
-    () => [web.value.activeBotId, web.value.activeRunId] as const,
-    ([botId, runId]) => {
+    () =>
+      [
+        web.value.activeBotId,
+        web.value.activeRunId,
+        channelFallback.value,
+        channelReconnects.value,
+      ] as const,
+    ([botId, runId, fallback]) => {
       // The send path owns the run it started: its POST is the observation,
       // and `stopRun` starts its own. This is for every other way a client
-      // finds itself watching a Turn it is not holding open.
-      if (!botId || !runId || activeRequest || runObserver) return;
+      // finds itself watching a Turn it is not holding open — and, once the
+      // state channel has dropped or come back, for the Turn it *is* holding
+      // open, because that POST shared the connection that just failed.
+      if (!botId || !runId || runObserver) return;
+      if (activeRequest && !fallback && channelReconnects.value === 0) return;
       const generation = selectionGeneration;
       const observer = new AbortController();
       runObserver = observer;
