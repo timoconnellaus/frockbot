@@ -52,6 +52,8 @@ import {
   RUN_ADMISSION_FENCE_PREFIX,
   RUN_INDEX_PREFIX,
   RUN_PREFIX,
+  CONVERSATION_BUSY_MESSAGE_V1,
+  isConversationBusyV1,
   type BotIdentity,
   type BotDurableAuthorityOptions,
   type BotTurnExecutionInput,
@@ -410,6 +412,7 @@ import {
   projectClientTurnV1,
   type ClientRunLookupV1,
   type ClientConversationListV1,
+  type ClientConversationOutcomeV1,
   type ClientRunListV1,
   type ClientRunStopReceiptV1,
   type ClientRunV1,
@@ -5755,10 +5758,26 @@ export class ShellBotBackendContribution {
    */
   async startConversation(
     identity: BotIdentity,
-  ): Promise<ClientConversationListV1> {
+  ): Promise<ClientConversationOutcomeV1> {
     await this.validateIdentity(identity);
-    await this.authority.startConversation(identity);
-    return this.listConversations();
+    try {
+      await this.authority.startConversation(identity);
+    } catch (error) {
+      // The one refusal this can give travels as data. Everything else is a
+      // genuine failure and still throws, so the boundary above answers 500.
+      if (isConversationBusyV1(error)) {
+        return {
+          status: "refused",
+          schemaVersion: 1,
+          reason:
+            error instanceof Error
+              ? error.message
+              : CONVERSATION_BUSY_MESSAGE_V1,
+        };
+      }
+      throw error;
+    }
+    return { status: "started", ...(await this.listConversations()) };
   }
 
   async lookupRun(input: unknown): Promise<ClientRunLookupV1> {

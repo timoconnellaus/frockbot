@@ -38,6 +38,7 @@ import {
   type ClientRunLookupQueryV1,
   type ClientRunLookupV1,
   type ClientConversationListV1,
+  type ClientConversationOutcomeV1,
   type ClientRunListQueryV1,
   type ClientRunListV1,
   type ClientRunStopCommandV1,
@@ -309,7 +310,7 @@ interface BotStateRpc extends BotConfigurationBinding {
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
   listConversations(): Promise<ClientConversationListV1>;
-  startConversation(): Promise<ClientConversationListV1>;
+  startConversation(): Promise<ClientConversationOutcomeV1>;
   debugSnapshot(query: BotDebugQueryV1): Promise<unknown>;
   readFocusedApplet(input: unknown): Promise<unknown>;
   setFocusedApplet(input: unknown): Promise<unknown>;
@@ -752,7 +753,9 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     ).listConversations();
   }
 
-  async startConversation(input: unknown): Promise<ClientConversationListV1> {
+  async startConversation(
+    input: unknown,
+  ): Promise<ClientConversationOutcomeV1> {
     const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
     return botStateStub(
       this.env,

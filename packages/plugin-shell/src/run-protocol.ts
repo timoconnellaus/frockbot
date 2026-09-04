@@ -302,6 +302,19 @@ export interface ClientConversationListV1 {
   conversations: ClientConversationV1[];
 }
 
+/**
+ * The answer to "start a new conversation": the list, or the reason not now.
+ *
+ * A refusal is a value, not an exception. The request crosses a Durable Object
+ * boundary and a Worker boundary to get here, and an exception that crosses
+ * either is logged by workerd as `Uncaught Error` — the log then showed the
+ * isolate going down with a broken pipe behind it. Carrying the refusal as
+ * data means the only thing that reaches the client is the 409 it expects.
+ */
+export type ClientConversationOutcomeV1 =
+  | ({ status: "started" } & ClientConversationListV1)
+  | { status: "refused"; schemaVersion: 1; reason: string };
+
 export function decodeClientConversationListV1(
   input: unknown,
 ): ClientConversationListV1 {
