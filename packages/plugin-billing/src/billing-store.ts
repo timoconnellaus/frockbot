@@ -196,19 +196,24 @@ export class BillingStoreV1 {
         description = "Basic monthly allowance renewed";
       } else if (event.type === "charge.refunded") {
         const object = event.data.object;
-        const paymentIntentId = this.identifier(
-          object.payment_intent,
-          "payment_intent",
-        );
-        const refundedCents = this.nonNegativeInteger(
-          object.amount_refunded,
-          "amount_refunded",
-        );
-        amountMicros = this.reconcileCreditPayment({
-          paymentIntentId,
-          refundedMicros: refundedCents * 10_000,
-        });
-        description = `${this.formatDollars(refundedCents)} credit refund`;
+        const metadata = this.metadata(object.metadata);
+        if (metadata.frockbot_kind === "credit") {
+          const paymentIntentId = this.identifier(
+            object.payment_intent,
+            "payment_intent",
+          );
+          const refundedCents = this.nonNegativeInteger(
+            object.amount_refunded,
+            "amount_refunded",
+          );
+          amountMicros = this.reconcileCreditPayment({
+            paymentIntentId,
+            refundedMicros: refundedCents * 10_000,
+          });
+          description = `${this.formatDollars(refundedCents)} credit refund`;
+        } else {
+          description = "Charge refunded";
+        }
       }
 
       this.sql.exec(

@@ -223,6 +223,44 @@ describe("billing entitlement", () => {
     database.close();
   });
 
+  test("a non-credit charge refund does not alter purchased credit", () => {
+    const database = new Database(":memory:");
+    const billing = new BillingUserBackendContribution({
+      sql: sqlV1(database),
+    });
+
+    expect(
+      billing.applyStripeEvent({
+        id: "evt_subscription_refund",
+        type: "charge.refunded",
+        created: 1_788_523_300,
+        data: {
+          object: {
+            id: "ch_subscription",
+            payment_intent: "pi_subscription",
+            amount_refunded: 2_000,
+            metadata: {
+              frockbot_user_id: "alice",
+              frockbot_kind: "subscription",
+            },
+          },
+        },
+      }),
+    ).toEqual({ applied: true });
+    expect(billing.readBilling()).toMatchObject({
+      creditBalanceMicros: 0,
+      history: [
+        expect.objectContaining({
+          eventId: "evt_subscription_refund",
+          amountMicros: 0,
+          description: "Charge refunded",
+        }),
+      ],
+    });
+
+    database.close();
+  });
+
   test("a deleted subscription removes the monthly entitlement", () => {
     const database = new Database(":memory:");
     const billing = new BillingUserBackendContribution({

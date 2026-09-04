@@ -187,7 +187,12 @@ describe("Stripe webhook", () => {
 
 describe("Stripe Checkout and Portal", () => {
   test("creates one Customer and opens hosted Checkout for a fixed credit pack", async () => {
-    const calls: Array<{ url: string; body: URLSearchParams }> = [];
+    const calls: Array<{
+      url: string;
+      body: URLSearchParams;
+      idempotencyKey: string | null;
+    }> = [];
+    const userId = "u".repeat(256);
     let customerId: string | undefined;
     const contribution = createBillingBackendContribution({
       stripeSecretKey: "sk_test_fixture",
@@ -217,7 +222,11 @@ describe("Stripe Checkout and Portal", () => {
       stripeFetch: (async (input, init) => {
         const url = String(input);
         const body = new URLSearchParams(String(init?.body ?? ""));
-        calls.push({ url, body });
+        calls.push({
+          url,
+          body,
+          idempotencyKey: new Headers(init?.headers).get("idempotency-key"),
+        });
         if (url.endsWith("/v1/customers")) {
           return Response.json({ id: "cus_alice" });
         }
@@ -243,7 +252,7 @@ describe("Stripe Checkout and Portal", () => {
         }),
       }),
       new URL("https://bot.frockbot.com/api/billing/checkout"),
-      { userId: "alice" },
+      { userId },
     );
 
     expect(response?.status).toBe(200);
@@ -257,7 +266,9 @@ describe("Stripe Checkout and Portal", () => {
       "/v1/checkout/sessions",
     ]);
     expect(calls[1]?.url).toContain("frockbot_credit_25");
-    expect(calls[2]?.body.get("metadata[frockbot_user_id]")).toBe("alice");
+    expect(calls[0]?.idempotencyKey?.length).toBeLessThanOrEqual(255);
+    expect(calls[0]?.idempotencyKey).not.toContain(userId);
+    expect(calls[2]?.body.get("metadata[frockbot_user_id]")).toBe(userId);
     expect(calls[2]?.body.get("line_items[0][price]")).toBe("price_credit_25");
   });
 

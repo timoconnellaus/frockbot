@@ -211,9 +211,18 @@ async function stripeCustomerV1(input: {
   stripe: ReturnType<typeof createStripeClientV1>;
 }): Promise<string> {
   if (input.preparation.customerId) return input.preparation.customerId;
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(input.userId),
+    ),
+  );
+  const customerKey = Array.from(digest, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
   const customerId = await input.stripe.createCustomer({
     userId: input.userId,
-    idempotencyKey: `frockbot-customer-${input.userId}`,
+    idempotencyKey: `frockbot-customer-${customerKey}`,
   });
   await input.host.recordStripeCustomer(input.userId, customerId);
   return customerId;
