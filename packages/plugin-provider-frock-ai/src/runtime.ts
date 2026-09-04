@@ -2,6 +2,7 @@ import {
   boundedModelProviderReasonV1,
   type LlmProvider,
   type LlmReconciliationCapability,
+  type LlmStreamEvent,
   ModelProviderFailureError,
   type ModelProviderFailureClassV1,
   ModelRequestDeadlineError,
@@ -10,7 +11,7 @@ import {
 import {
   classifyOpenAICompatibleFailureV1,
   type ModelRequestDeadlineOptionsV1,
-  requestToWire,
+  planOpenAICompatibleRequestV1,
   streamWithModelRequestDeadlinesV1,
 } from "@frockbot/provider-openai-compatible";
 import type { Agent } from "@frockbot/kernel-agent-loop/agent";
@@ -18,7 +19,8 @@ import type { Plugin } from "cordis";
 import {
   FROCK_AI_DEFAULT_MODEL,
   FROCK_AI_PROVIDER_TYPE,
-  gatewayModelForFrockIdV1,
+  gatewayModelForFrockRequestV1,
+  normalizeFrockModelIdV1,
 } from "./catalog.js";
 
 export type OpenAICompatibleChatCompletionBodyV1 = Record<string, unknown>;
@@ -125,6 +127,7 @@ export interface FrockAiRuntimeConfig {
 
 class FrockAiProvider implements LlmProvider {
   readonly id = FROCK_AI_PROVIDER_TYPE;
+  readonly supports = { structuredOutput: "json_schema" } as const;
   readonly autoFallbackFailures = new WeakSet<ModelProviderFailureError>();
 
   /**
@@ -143,7 +146,10 @@ class FrockAiProvider implements LlmProvider {
 
   constructor(private readonly config: FrockAiRuntimeConfig) {}
 
-  async *stream(request: NormalizedModelRequest, signal: AbortSignal) {
+  async *stream(
+    request: NormalizedModelRequest,
+    signal: AbortSignal,
+  ): AsyncIterable<LlmStreamEvent> {
     const binding = request.modelBinding;
     if (
       binding?.connectionId !== this.config.connectionId ||
@@ -155,10 +161,17 @@ class FrockAiProvider implements LlmProvider {
       });
     }
     signal.throwIfAborted();
-    const wire = requestToWire(request);
-    const { model: _model, ...body } = wire;
-    const gatewayModel = gatewayModelForFrockIdV1(
+    const auto =
+      normalizeFrockModelIdV1(request.model) === FROCK_AI_DEFAULT_MODEL;
+    const plan = planOpenAICompatibleRequestV1(request, {
+      structuredOutput: auto ? "json_schema" : "none",
+      responseFormatDialect: "workers-ai",
+    });
+    if (plan.note) yield { type: "response-format-note", note: plan.note };
+    const { model: _model, ...body } = plan.body;
+    const gatewayModel = gatewayModelForFrockRequestV1(
       request.model,
+      request.responseFormat !== undefined,
       this.config.autoRoute,
     );
     // A rejection here happened before a stream existed, so no provider effect

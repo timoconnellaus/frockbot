@@ -11,6 +11,7 @@ export * from "./remote.js";
 export * from "./send-to-user.js";
 export * from "./session.js";
 export * from "./skills.js";
+export * from "./structured-output.js";
 export * from "./tool-execution.js";
 export * from "./turn-deadline.js";
 export * from "./turn-history.js";

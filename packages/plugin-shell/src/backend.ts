@@ -47,12 +47,13 @@ import {
   ACTIVE_RUN_KEY,
   BotDurableAuthority,
   IDENTITY_KEY,
-  LATEST_EVENTS_KEY,
   NOTIFICATION_PREFIX,
   RECOVERY_ALARM_DELAY_MS,
   RUN_ADMISSION_FENCE_PREFIX,
   RUN_INDEX_PREFIX,
   RUN_PREFIX,
+  SessionEventLog,
+  storedRunRecordV2,
   CONVERSATION_BUSY_MESSAGE_V1,
   isConversationBusyV1,
   type BotIdentity,
@@ -1159,8 +1160,10 @@ export class ShellBotBackendContribution {
     const announcements = [...stored.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([, value]) => decodeSessionEvent(value));
-    const session =
-      (await this.ctx.storage.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+    const sessionId = await this.authority.readConversationSessionId();
+    const session = sessionId
+      ? await this.authority.readSessionEvents(sessionId)
+      : [];
     for (const event of session) {
       if (event.type === "conversation/compacted") announcements.push(event);
     }
@@ -1174,8 +1177,10 @@ export class ShellBotBackendContribution {
    * timestamp of the place it belongs rather than the moment it was written.
    */
   private async projectAnnouncementPage() {
-    const session =
-      (await this.ctx.storage.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+    const sessionId = await this.authority.readConversationSessionId();
+    const session = sessionId
+      ? await this.authority.readSessionEvents(sessionId)
+      : [];
     return projectClientAnnouncementsV1(
       await this.listAnnouncements(),
       session,
@@ -6018,10 +6023,13 @@ export class ShellBotBackendContribution {
     let budget = BOT_DEBUG_EVENT_BYTES_V1;
     const runs: BotDebugRunV1[] = [];
     for (const candidate of candidates) {
-      const stored = await this.authority.readStoredRun(candidate.runId);
-      if (!stored) continue;
+      const projected = await this.authority.readRunEventProjections(
+        candidate.runId,
+      );
+      if (!projected) continue;
+      const { run: stored } = projected;
       const bounded = includeEvents
-        ? boundDebugEventsV1(stored.events, budget)
+        ? boundDebugEventsV1(projected.events, budget)
         : undefined;
       if (bounded) budget = Math.max(0, budget - bounded.spent);
       runs.push({
@@ -6034,7 +6042,7 @@ export class ShellBotBackendContribution {
         commandFingerprint: stored.commandFingerprint,
         compositionGenerationId: stored.compositionGenerationId,
         previousEventCount: stored.previousEventCount,
-        eventCount: stored.events.length,
+        eventCount: projected.eventCount,
         ...(stored.responseText === undefined
           ? {}
           : { responseText: stored.responseText }),
@@ -6395,7 +6403,24 @@ export class ShellBotBackendContribution {
         transaction.get<BotIdentity>(IDENTITY_KEY),
         transaction.get<unknown>(`${RUN_PREFIX}${runId}`),
       ]);
-      const run = optionalStoredRun(candidate);
+      const storedRun = optionalStoredRun(candidate);
+      let run = storedRun;
+      if (storedRun?.eventRange) {
+        const events = await new SessionEventLog(transaction).readRange(
+          storedRun.sessionId,
+          storedRun.eventRange.startSeq,
+          storedRun.eventRange.endSeq,
+        );
+        if (
+          events.length !==
+          storedRun.eventRange.endSeq - storedRun.eventRange.startSeq
+        ) {
+          throw new Error(
+            `run "${storedRun.runId}" has an incomplete event range`,
+          );
+        }
+        run = requireStoredRunV1({ ...storedRun, events });
+      }
       if (
         activeRunId !== runId ||
         !run ||
@@ -6455,7 +6480,10 @@ export class ShellBotBackendContribution {
           { kind: effect.kind, effectId: effect.effectId, outcome },
         ],
       } satisfies StoredRun);
-      await transaction.put(`${RUN_PREFIX}${runId}`, structuredClone(next));
+      await transaction.put(
+        `${RUN_PREFIX}${runId}`,
+        structuredClone(storedRunRecordV2(next)),
+      );
       return outcome === "admitted";
     });
   }

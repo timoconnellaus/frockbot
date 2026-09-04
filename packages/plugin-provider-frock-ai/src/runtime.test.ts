@@ -346,6 +346,67 @@ describe("Frock AI runtime Contribution", () => {
     await root.fiber.dispose();
   });
 
+  test("sends Auto schemas in Workers AI's direct non-stream shape", async () => {
+    let call:
+      { gatewayModel: string; body: Record<string, unknown> } | undefined;
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    await root.plugin(
+      createFrockAiRuntimePlugin(
+        runtimeConfig((gatewayModel, body) => {
+          call = { gatewayModel, body };
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                choices: [
+                  {
+                    message: { content: '{"answer":"yes"}' },
+                    finish_reason: "stop",
+                  },
+                ],
+              }),
+            ).body!,
+          );
+        }),
+      ),
+    );
+    const events = [];
+    for await (const event of root.llm.stream(
+      {
+        ...request,
+        responseFormat: {
+          type: "json_schema",
+          name: "answer",
+          schema: {
+            type: "object",
+            properties: { answer: { type: "string" } },
+            required: ["answer"],
+            additionalProperties: false,
+          },
+        },
+      },
+      new AbortController().signal,
+    )) {
+      events.push(event);
+    }
+    expect(call?.gatewayModel).toContain("llama-3.3-70b-instruct-fp8-fast");
+    expect(call?.body.stream).toBe(false);
+    expect(call?.body.response_format).toEqual({
+      type: "json_schema",
+      json_schema: {
+        type: "object",
+        properties: { answer: { type: "string" } },
+        required: ["answer"],
+        additionalProperties: false,
+      },
+    });
+    expect(events).toEqual([
+      { type: "text-delta", text: '{"answer":"yes"}' },
+      { type: "finish", reason: "completed" },
+    ]);
+    await root.fiber.dispose();
+  });
+
   test("refuses a request outside its pinned Connection generation", async () => {
     let calls = 0;
     const root = new Context();

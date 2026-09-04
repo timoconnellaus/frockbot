@@ -17,6 +17,8 @@ import {
   defaultRunLaneV1,
   storedRunAdmissionV1,
   storedRunLaneV1,
+  storedRunEventFieldsV2,
+  storedRunRecordV2,
   storedRunSubagentRoleV1,
   storedRunTurnTypeV1,
   type BotNotificationIntent,
@@ -42,6 +44,10 @@ import {
   unresolvedModelRequestFailure,
 } from "./run-recovery.js";
 import { runLivenessV1, STALE_RUNNING_RUN_FAILURE_V1 } from "./run-liveness.js";
+import {
+  SessionEventLog,
+  type SessionEventLogStorage,
+} from "./session-event-log.js";
 import {
   BotTurnReconciliationRequiredError,
   BotTurnRecoveryRequiredError,
@@ -415,9 +421,8 @@ export class BotDurableAuthority<Snapshot> {
       if (await transaction.get<string>(ACTIVE_RUN_KEY)) {
         return "blocked" as const;
       }
-      const storedEvents = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
+      const eventLog = new SessionEventLog(transaction);
+      const storedEvents = await eventLog.migrate(run.sessionId);
       // A queued Turn was admitted while another was executing, so admission
       // could not repair the log: something was still entitled to close that
       // Turn. Here the active-run marker is gone and nothing is, so the same
@@ -428,17 +433,12 @@ export class BotDurableAuthority<Snapshot> {
         ...run,
         phase: "admitted",
         previousEventCount: latestEvents.length,
+        ...storedRunEventFieldsV2(latestEvents.length, []),
       } satisfies StoredRunV1<Snapshot>);
+      if (repaired) await eventLog.rewrite(run.sessionId, latestEvents);
       await transaction.put({
-        [key]: structuredClone(promoted),
+        [key]: structuredClone(storedRunRecordV2(promoted)),
         [ACTIVE_RUN_KEY]: runId,
-        ...(repaired
-          ? {
-              [LATEST_EVENTS_KEY]: structuredClone(
-                repaired.map(decodeSessionEvent),
-              ),
-            }
-          : {}),
       });
       if (lane === "agent" && firstPendingAgentEntry) {
         await transaction.delete(firstPendingAgentEntry[0]);
@@ -461,7 +461,7 @@ export class BotDurableAuthority<Snapshot> {
     await this.assertIdentity(identity);
     const key = `${RUN_PREFIX}${runId}`;
     const recovery = await this.ctx.storage.transaction(async (transaction) => {
-      const run = this.codec.optional(await transaction.get<unknown>(key));
+      const run = await this.readRunFrom(transaction, runId);
       const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
       if (
         !run ||
@@ -470,9 +470,7 @@ export class BotDurableAuthority<Snapshot> {
       ) {
         throw new Error(`run "${runId}" does not require reconciliation`);
       }
-      const latest = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
+      const latest = await new SessionEventLog(transaction).read(run.sessionId);
       const settings = run.configurationSnapshot;
       // The failure is *removed*, not set to `undefined`: a running run that
       // carries a `failure` key is a shape the run record does not allow, and
@@ -480,15 +478,14 @@ export class BotDurableAuthority<Snapshot> {
       // read afterwards. `require` checks it here, where the write is, rather
       // than leaving the projector to fail on every later read.
       const { failure: _failure, ...resumed } = run;
+      const resumedRun = this.codec.require({
+        ...resumed,
+        status: "running",
+        phase: "executing",
+      } satisfies StoredRunV1<Snapshot>);
       await transaction.put(
         key,
-        structuredClone(
-          this.codec.require({
-            ...resumed,
-            status: "running",
-            phase: "executing",
-          } satisfies StoredRunV1<Snapshot>),
-        ),
+        structuredClone(storedRunRecordV2(resumedRun)),
       );
       await this.refreshRecoveryAlarm(transaction);
       return { run, latest, settings };
@@ -501,9 +498,7 @@ export class BotDurableAuthority<Snapshot> {
         recovery.settings,
       );
     } catch (error) {
-      const current = this.codec.optional(
-        await this.ctx.storage.get<unknown>(key),
-      );
+      const current = await this.readRun(runId);
       if (current?.status === "reconciliation-required") {
         const previous = recovery.latest.slice(0, current.previousEventCount);
         const failure =
@@ -535,9 +530,7 @@ export class BotDurableAuthority<Snapshot> {
   private async settledTerminalRunResult(
     runId: string,
   ): Promise<BotTurnCompletion | undefined> {
-    const run = this.codec.optional(
-      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
-    );
+    const run = await this.readRun(runId);
     if (
       run?.status !== "failed" &&
       run?.status !== "cancelled" &&
@@ -596,10 +589,13 @@ export class BotDurableAuthority<Snapshot> {
         if (!run || run.status !== "running") {
           throw new Error(`run "${command.runId}" is not resumable`);
         }
-        await transaction.put(key, {
-          ...run,
-          phase: "executing",
-        } satisfies StoredRunV1<Snapshot>);
+        await transaction.put(
+          key,
+          storedRunRecordV2({
+            ...run,
+            phase: "executing",
+          } satisfies StoredRunV1<Snapshot>),
+        );
         await this.refreshRecoveryAlarm(transaction);
       });
       const result = await this.hooks.executeTurn({
@@ -616,9 +612,7 @@ export class BotDurableAuthority<Snapshot> {
       await this.completeRun(command.runId, previous, completed, settings);
       return completed;
     } catch (error) {
-      const durableRun = this.codec.optional(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${command.runId}`),
-      );
+      const durableRun = await this.readRun(command.runId);
       const events = eventsForFailedRun(durableRun, error);
       const message =
         error instanceof Error ? error.message : "Bot turn failed";
@@ -676,9 +670,7 @@ export class BotDurableAuthority<Snapshot> {
   private async discardedRunResult(
     runId: string,
   ): Promise<BotTurnCompletion | undefined> {
-    const run = this.codec.optional(
-      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
-    );
+    const run = await this.readRun(runId);
     if (run?.status !== "superseded" && run?.status !== "cancelled") {
       return undefined;
     }
@@ -693,9 +685,7 @@ export class BotDurableAuthority<Snapshot> {
   private async terminalRunResult(
     runId: string,
   ): Promise<BotTurnCompletion | undefined> {
-    const run = this.codec.optional(
-      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
-    );
+    const run = await this.readRun(runId);
     if (run?.status === "superseded" || run?.status === "cancelled") {
       return { runId, text: "", events: structuredClone(run.events) };
     }
@@ -755,9 +745,7 @@ export class BotDurableAuthority<Snapshot> {
           ? { admittedRequest: modelState.request.request }
           : {}),
       });
-      const durableRun = this.codec.optional(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${run.runId}`),
-      );
+      const durableRun = await this.readRun(run.runId);
       if (!durableRun) throw new Error(`run "${run.runId}" was not accepted`);
       const fullResult = {
         ...result,
@@ -767,9 +755,7 @@ export class BotDurableAuthority<Snapshot> {
       await this.completeRun(run.runId, previous, completed, settings);
       return completed;
     } catch (error) {
-      const durableRun = this.codec.optional(
-        await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${run.runId}`),
-      );
+      const durableRun = await this.readRun(run.runId);
       const events = durableRun?.events ?? run.events;
       const message =
         error instanceof Error ? error.message : "Bot turn failed";
@@ -805,16 +791,17 @@ export class BotDurableAuthority<Snapshot> {
 
   private async deferRunRecovery(runId: string): Promise<void> {
     await this.ctx.storage.transaction(async (transaction) => {
-      const run = this.codec.optional(
-        await transaction.get<unknown>(`${RUN_PREFIX}${runId}`),
-      );
+      const run = await this.readRunFrom(transaction, runId);
       if (!run || run.status !== "running") {
         throw new Error(`run "${runId}" is not resumable`);
       }
-      await transaction.put(`${RUN_PREFIX}${runId}`, {
-        ...run,
-        phase: "executing",
-      } satisfies StoredRunV1<Snapshot>);
+      await transaction.put(
+        `${RUN_PREFIX}${runId}`,
+        storedRunRecordV2({
+          ...run,
+          phase: "executing",
+        } satisfies StoredRunV1<Snapshot>),
+      );
       await this.refreshRecoveryAlarm(transaction);
     });
   }
@@ -823,9 +810,7 @@ export class BotDurableAuthority<Snapshot> {
     command: OwnedBotTurnCommand,
   ): Promise<BotTurnCompletion | undefined> {
     const { runId } = command;
-    const run = this.codec.optional(
-      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
-    );
+    const run = await this.readRun(runId);
     if (!run) return undefined;
     if (run.commandFingerprint !== botTurnCommandFingerprintV1(command)) {
       throw new BotTurnRefusedError(
@@ -925,10 +910,13 @@ export class BotDurableAuthority<Snapshot> {
         throw new Error(`run "${runId}" is not resumable`);
       }
       if (run.compositionGenerationId === compositionGenerationId) return;
-      await transaction.put(key, {
-        ...run,
-        compositionGenerationId,
-      } satisfies StoredRunV1<Snapshot>);
+      await transaction.put(
+        key,
+        storedRunRecordV2({
+          ...run,
+          compositionGenerationId,
+        } satisfies StoredRunV1<Snapshot>),
+      );
     });
   }
 
@@ -1132,12 +1120,17 @@ export class BotDurableAuthority<Snapshot> {
         ordinal: current.ordinal + 1,
         startedAt: endedAt,
       };
+      const currentSessionId = conversationSessionIdV1(base, current.ordinal);
+      const nextSessionId = conversationSessionIdV1(base, next.ordinal);
+      const eventLog = new SessionEventLog(transaction);
+      await eventLog.migrate(currentSessionId);
+      await eventLog.clearCurrent(nextSessionId);
       await transaction.put({
         [CONVERSATION_KEY]: next,
         [CONVERSATION_INDEX_KEY]: [
           {
             schemaVersion: 1 as const,
-            sessionId: conversationSessionIdV1(base, current.ordinal),
+            sessionId: currentSessionId,
             ordinal: current.ordinal,
             startedAt: current.startedAt,
             endedAt,
@@ -1146,13 +1139,10 @@ export class BotDurableAuthority<Snapshot> {
         ]
           .sort((left, right) => right.ordinal - left.ordinal)
           .slice(0, MAX_LISTED_CONVERSATIONS),
-        // The next Turn derives its messages from an empty log. Nothing is
-        // deleted: `run:<id>` still holds every event of every Turn.
-        [LATEST_EVENTS_KEY]: [],
       });
       return {
         schemaVersion: 1 as const,
-        sessionId: conversationSessionIdV1(base, next.ordinal),
+        sessionId: nextSessionId,
         ordinal: next.ordinal,
         startedAt: next.startedAt,
       };
@@ -1184,9 +1174,64 @@ export class BotDurableAuthority<Snapshot> {
   async readStoredRun(
     runId: string,
   ): Promise<StoredRunV1<Snapshot> | undefined> {
-    return this.codec.optional(
+    return this.readRunFrom(this.ctx.storage, runId);
+  }
+
+  private async readRunFrom(
+    storage: SessionEventLogStorage,
+    runId: string,
+  ): Promise<StoredRunV1<Snapshot> | undefined> {
+    const run = this.codec.optional(
+      await storage.get<unknown>(`${RUN_PREFIX}${runId}`),
+    );
+    if (!run?.eventRange) return run;
+    const events = await new SessionEventLog(storage).readRange(
+      run.sessionId,
+      run.eventRange.startSeq,
+      run.eventRange.endSeq,
+    );
+    if (events.length !== run.eventRange.endSeq - run.eventRange.startSeq) {
+      throw new Error(`run "${run.runId}" has an incomplete event range`);
+    }
+    return this.codec.require({ ...run, events });
+  }
+
+  /** Exact Session history, reconstructed through the paged durable log. */
+  async readSessionEvents(sessionId: string): Promise<SessionEvent[]> {
+    return new SessionEventLog(this.ctx.storage).read(sessionId);
+  }
+
+  /**
+   * The bounded durable event projections for a run. This is the inspection
+   * path: recovery and client transcript projection use `readStoredRun` and
+   * therefore receive exact events, while a debug snapshot never hydrates a
+   * multi-megabyte prompt merely to cut it again.
+   */
+  async readRunEventProjections(runId: string): Promise<
+    | {
+        run: StoredRunV1<Snapshot>;
+        events: unknown[];
+        eventCount: number;
+      }
+    | undefined
+  > {
+    const run = this.codec.optional(
       await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
     );
+    if (!run) return undefined;
+    if (!run.eventRange) {
+      return { run, events: run.events, eventCount: run.events.length };
+    }
+    const events = await new SessionEventLog(this.ctx.storage).readProjections(
+      run.sessionId,
+      run.eventRange.startSeq,
+      run.eventRange.endSeq,
+    );
+    const eventCount = run.eventRange.endSeq - run.eventRange.startSeq;
+    if (events.length !== eventCount) {
+      throw new Error(`run "${run.runId}" has an incomplete event range`);
+    }
+    return { run, events, eventCount };
   }
 
   /** Durable run record, checked against the key it was looked up by. */
@@ -1232,9 +1277,9 @@ export class BotDurableAuthority<Snapshot> {
     if (runId === this.executingRunId) return true;
     const run = await this.readRun(runId);
     if (!run || run.status !== "running") return false;
-    const sessionEvents = (
-      (await this.ctx.storage.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-    ).map(decodeSessionEvent);
+    const sessionEvents = await new SessionEventLog(this.ctx.storage).read(
+      run.sessionId,
+    );
     if (runLivenessV1({ run, sessionEvents }).working) return true;
     await this.settleStaleRun(runId);
     return false;
@@ -1251,13 +1296,9 @@ export class BotDurableAuthority<Snapshot> {
   private async settleStaleRun(runId: string): Promise<void> {
     await this.ctx.storage.transaction(async (transaction) => {
       if (runId === this.executingRunId) return;
-      const run = this.codec.optional(
-        await transaction.get<unknown>(`${RUN_PREFIX}${runId}`),
-      );
+      const run = await this.readRunFrom(transaction, runId);
       if (!run || run.runId !== runId || run.status !== "running") return;
-      const latest = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
+      const latest = await new SessionEventLog(transaction).read(run.sessionId);
       if (runLivenessV1({ run, sessionEvents: latest }).working) return;
       await failStoredRun(
         this.codec,
@@ -1496,9 +1537,8 @@ export class BotDurableAuthority<Snapshot> {
           `bot agent queue is full (${MAX_PENDING_AGENT_RUNS_V1} Turns)`,
         );
       }
-      const storedEvents = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
+      const eventLog = new SessionEventLog(transaction);
+      const storedEvents = await eventLog.migrate(command.sessionId);
       // A Turn that died between `turn/start` and `turn/end` — an event the
       // encoder refused, a durable write that failed — left the log open, and
       // every later Turn failed validation with "turn N started while turn
@@ -1528,12 +1568,7 @@ export class BotDurableAuthority<Snapshot> {
         ? undefined
         : repairedSessionLogV1(command.sessionId, storedEvents);
       const latestEvents = repaired ?? storedEvents;
-      if (repaired) {
-        await transaction.put(
-          LATEST_EVENTS_KEY,
-          structuredClone(latestEvents.map(decodeSessionEvent)),
-        );
-      }
+      if (repaired) await eventLog.rewrite(command.sessionId, latestEvents);
       const admittedSettings = await this.hooks.admittedSnapshot(
         transaction,
         settings,
@@ -1566,7 +1601,7 @@ export class BotDurableAuthority<Snapshot> {
           : {}),
       } satisfies StoredRunV1<Snapshot>);
       await transaction.put({
-        [key]: admittedRun,
+        [key]: storedRunRecordV2(admittedRun),
         [runIndexKey(command.acceptedAt, command.runId)]: command.runId,
         ...(queued
           ? lane === "agent"
@@ -1630,9 +1665,7 @@ export class BotDurableAuthority<Snapshot> {
     if (lane !== "user" || !command.supersedes) {
       throw new BotTurnRefusedError("busy", "bot already has an active run");
     }
-    const active = this.codec.optional(
-      await transaction.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
-    );
+    const active = await this.readRunFrom(transaction, activeRunId);
     if (!active)
       throw new BotTurnRefusedError("busy", "bot already has an active run");
     if (active.status === "reconciliation-required") {
@@ -1660,15 +1693,14 @@ export class BotDurableAuthority<Snapshot> {
       }
       if (!dispatched) return false;
       if (active.supersededAt) return true;
+      const superseded = this.codec.require({
+        ...active,
+        supersededAt: new Date().toISOString(),
+        supersededBy,
+      } satisfies StoredRunV1<Snapshot>);
       await transaction.put(
         `${RUN_PREFIX}${activeRunId}`,
-        structuredClone(
-          this.codec.require({
-            ...active,
-            supersededAt: new Date().toISOString(),
-            supersededBy,
-          } satisfies StoredRunV1<Snapshot>),
-        ),
+        structuredClone(storedRunRecordV2(superseded)),
       );
       return true;
     };
@@ -1689,18 +1721,14 @@ export class BotDurableAuthority<Snapshot> {
       return;
     }
     const { responseText: _text, failure: _failure, ...settled } = queued;
-    await transaction.put(
-      key,
-      structuredClone(
-        this.codec.require({
-          ...settled,
-          status: "superseded",
-          phase: "admitted",
-          supersededAt: new Date().toISOString(),
-          supersededBy,
-        } satisfies StoredRunV1<Snapshot>),
-      ),
-    );
+    const superseded = this.codec.require({
+      ...settled,
+      status: "superseded",
+      phase: "admitted",
+      supersededAt: new Date().toISOString(),
+      supersededBy,
+    } satisfies StoredRunV1<Snapshot>);
+    await transaction.put(key, structuredClone(storedRunRecordV2(superseded)));
   }
 
   private async persistRunEvents(
@@ -1713,11 +1741,10 @@ export class BotDurableAuthority<Snapshot> {
     if (durableEvents.length === 0) return;
     const key = `${RUN_PREFIX}${runId}`;
     await this.ctx.storage.transaction(async (transaction) => {
-      const run = this.codec.optional(await transaction.get<unknown>(key));
+      const run = await this.readRunFrom(transaction, runId);
       if (!run) throw new Error(`run "${runId}" was not accepted`);
-      const latest = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
+      const eventLog = new SessionEventLog(transaction);
+      const latest = await eventLog.read(run.sessionId);
       for (const [index, event] of durableEvents.entries()) {
         if (event.seq !== latest.length + index) {
           throw new Error(
@@ -1727,12 +1754,13 @@ export class BotDurableAuthority<Snapshot> {
       }
       const next = this.codec.require({
         ...run,
-        events: [...run.events, ...durableEvents],
+        ...storedRunEventFieldsV2(run.previousEventCount, [
+          ...run.events,
+          ...durableEvents,
+        ]),
       } satisfies StoredRunV1<Snapshot>);
-      await transaction.put({
-        [key]: structuredClone(next),
-        [LATEST_EVENTS_KEY]: structuredClone([...latest, ...durableEvents]),
-      });
+      await eventLog.append(run.sessionId, durableEvents);
+      await transaction.put(key, structuredClone(storedRunRecordV2(next)));
     });
   }
 
@@ -1960,7 +1988,7 @@ export class BotDurableAuthority<Snapshot> {
     const recovery = await this.ctx.storage.transaction(async (transaction) => {
       const current = await transaction.get<string>(ACTIVE_RUN_KEY);
       if (!current || current === this.executingRunId) return undefined;
-      const run = this.codec.optional(await transaction.get<unknown>(key));
+      const run = await this.readRunFrom(transaction, activeRunId);
       if (run?.status === "reconciliation-required") {
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
@@ -1969,9 +1997,8 @@ export class BotDurableAuthority<Snapshot> {
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
       }
-      const latest = (
-        (await transaction.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? []
-      ).map(decodeSessionEvent);
+      const eventLog = new SessionEventLog(transaction);
+      const latest = await eventLog.read(run.sessionId);
       // A Turn the User stopped, or one a later message replaced, is terminal
       // in intent before recovery ever looks at it. There is nothing to
       // recover: no answer is owed, and the provider outcome cannot change what
@@ -2047,14 +2074,20 @@ export class BotDurableAuthority<Snapshot> {
       }
       if (plan.kind === "restart") {
         const settings = run.configurationSnapshot;
-        await transaction.put({
-          [key]: {
+        await eventLog.rewrite(run.sessionId, plan.previous);
+        await transaction.put(
+          key,
+          storedRunRecordV2({
             ...run,
             events: [],
+            eventRange: {
+              startSeq: plan.previous.length,
+              endSeq: plan.previous.length,
+            },
+            previousEventCount: plan.previous.length,
             phase: "admitted",
-          } satisfies StoredRunV1<Snapshot>,
-          [LATEST_EVENTS_KEY]: plan.previous,
-        });
+          } satisfies StoredRunV1<Snapshot>),
+        );
         await this.refreshRecoveryAlarm(transaction);
         return {
           kind: "restart" as const,
@@ -2065,24 +2098,31 @@ export class BotDurableAuthority<Snapshot> {
       }
       if (plan.kind === "resume") {
         const settings = run.configurationSnapshot;
-        await transaction.put(key, {
-          ...run,
-          phase: "executing",
-        } satisfies StoredRunV1<Snapshot>);
+        await transaction.put(
+          key,
+          storedRunRecordV2({
+            ...run,
+            phase: "executing",
+          } satisfies StoredRunV1<Snapshot>),
+        );
         await this.refreshRecoveryAlarm(transaction);
         return { kind: "resume" as const, run, latest, settings };
       }
-      await transaction.put({
-        [key]: {
+      await eventLog.append(run.sessionId, plan.repairs);
+      await transaction.put(
+        key,
+        storedRunRecordV2({
           ...run,
-          events: [...run.events, ...plan.repairs],
+          ...storedRunEventFieldsV2(run.previousEventCount, [
+            ...run.events,
+            ...plan.repairs,
+          ]),
           status: "reconciliation-required",
           phase: "reconciliation-required",
           failure:
             "Execution outcome requires reconciliation before it can resume",
-        } satisfies StoredRunV1<Snapshot>,
-        [LATEST_EVENTS_KEY]: [...latest, ...plan.repairs],
-      });
+        } satisfies StoredRunV1<Snapshot>),
+      );
       await this.refreshRecoveryAlarm(transaction);
       return undefined;
     });

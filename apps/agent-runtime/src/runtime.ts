@@ -46,7 +46,9 @@ import { Context, type Fiber, type Plugin } from "cordis";
  * Steps (model calls) one Turn may take before the loop gives up. Tool-heavy
  * Turns routinely need dozens; the earlier cap of 8 cut real work short.
  */
-const AGENT_LOOP_MAX_STEPS_V1 = 50;
+// Long tool-driven Turns remain bounded, while a sixty-step workflow can
+// complete instead of being interrupted at the former fifty-step ceiling.
+const AGENT_LOOP_MAX_STEPS_V1 = 64;
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 

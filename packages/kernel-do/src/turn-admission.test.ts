@@ -10,6 +10,7 @@ import {
   type BotTurnExecutionInput,
 } from "./authority.ts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
+import { SessionEventLog } from "./session-event-log.ts";
 import {
   botTurnCommandFingerprintV1,
   createStoredRunCodecV1,
@@ -382,9 +383,14 @@ function command(runId: string, turnType?: TurnTypeV1) {
   };
 }
 
-function admittedEvent(storage: MemoryStorage, runId: string) {
+async function admittedEvent(storage: MemoryStorage, runId: string) {
   const run = storage.values.get(`run:${runId}`) as StoredRunV1<undefined>;
-  return run.events.find((event) => event.type === "turn/admission");
+  const events = await new SessionEventLog(storage).readRange(
+    run.sessionId,
+    run.eventRange!.startSeq,
+    run.eventRange!.endSeq,
+  );
+  return events.find((event) => event.type === "turn/admission");
 }
 
 describe("an admitted Turn re-mounts on its recorded turn type", () => {
@@ -412,7 +418,7 @@ describe("an admitted Turn re-mounts on its recorded turn type", () => {
       turnType: "automation",
     });
     expect(probe.observed[0]?.command.turnType).toBe("automation");
-    expect(admittedEvent(storage, "run-1")).toMatchObject({
+    expect(await admittedEvent(storage, "run-1")).toMatchObject({
       turnType: "automation",
     });
   });
@@ -446,17 +452,17 @@ describe("an admitted Turn re-mounts on its recorded turn type", () => {
       status: "running",
       phase: "executing",
       responseText: undefined,
-      events: [],
+      eventRange: { startSeq: 0, endSeq: 0 },
     });
     storage.values.set("active-run", "run-1");
     storage.values.set("identity", { userId: "user-1", botId: "primary" });
-    storage.values.set("latest-events", []);
+    await new SessionEventLog(storage).rewrite("user-1:primary", []);
 
     const resumed = createAuthority(storage);
     await resumed.authority.recoverActiveRun();
 
     expect(resumed.observed.at(-1)?.command.turnType).toBe("automation");
-    expect(admittedEvent(storage, "run-1")).toMatchObject({
+    expect(await admittedEvent(storage, "run-1")).toMatchObject({
       turnType: "automation",
     });
   });
@@ -472,17 +478,17 @@ describe("an admitted Turn re-mounts on its recorded turn type", () => {
       status: "running",
       phase: "executing",
       responseText: undefined,
-      events: [],
+      eventRange: { startSeq: 0, endSeq: 0 },
     });
     storage.values.set("active-run", "run-1");
     storage.values.set("identity", { userId: "user-1", botId: "primary" });
-    storage.values.set("latest-events", []);
+    await new SessionEventLog(storage).rewrite("user-1:primary", []);
 
     const resumed = createAuthority(storage);
     await resumed.authority.recoverActiveRun();
 
     expect(resumed.observed.at(-1)?.command.turnType).toBe("chat");
-    expect(admittedEvent(storage, "run-1")).toMatchObject({
+    expect(await admittedEvent(storage, "run-1")).toMatchObject({
       turnType: "chat",
     });
   });

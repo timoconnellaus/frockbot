@@ -1,6 +1,10 @@
 import { electron } from "@better-auth/electron";
 import { betterAuth } from "better-auth";
 import { bearer } from "better-auth/plugins";
+import {
+  verifyGoogleIdToken,
+  type VerifyGoogleIdTokenOptions,
+} from "better-auth/social-providers";
 import type { GatewayAuth } from "./contracts.js";
 
 export interface AuthEnvironment {
@@ -13,7 +17,26 @@ export interface AuthEnvironment {
 
 export const HOSTED_AUTH_TRUSTED_ORIGINS = ["com.frockbot.desktop:/"] as const;
 
-export function createAuth(environment: AuthEnvironment) {
+export type GoogleIdTokenVerifier = (
+  options: VerifyGoogleIdTokenOptions,
+) => Promise<unknown | null>;
+
+export interface AuthDependencies {
+  readonly verifyGoogleIdToken?: GoogleIdTokenVerifier;
+}
+
+export function createGoogleIdTokenVerifier(
+  audience: string,
+  verifier: GoogleIdTokenVerifier = verifyGoogleIdToken,
+) {
+  return async (token: string, nonce?: string): Promise<boolean> =>
+    (await verifier({ token, audience, nonce })) !== null;
+}
+
+export function createAuth(
+  environment: AuthEnvironment,
+  dependencies: AuthDependencies = {},
+) {
   return betterAuth({
     appName: "FrockBot",
     baseURL: environment.BETTER_AUTH_URL,
@@ -25,6 +48,10 @@ export function createAuth(environment: AuthEnvironment) {
         clientId: environment.GOOGLE_CLIENT_ID,
         clientSecret: environment.GOOGLE_CLIENT_SECRET,
         prompt: "select_account",
+        verifyIdToken: createGoogleIdTokenVerifier(
+          environment.GOOGLE_CLIENT_ID,
+          dependencies.verifyGoogleIdToken,
+        ),
       },
     },
     account: {
@@ -51,7 +78,10 @@ function configuredEnvironment(
     : null;
 }
 
-export function gatewayAuth(environment: RuntimeAuthEnvironment): GatewayAuth {
+export function gatewayAuth(
+  environment: RuntimeAuthEnvironment,
+  dependencies: AuthDependencies = {},
+): GatewayAuth {
   const configured = configuredEnvironment(environment);
   if (!configured) {
     return {
@@ -66,7 +96,7 @@ export function gatewayAuth(environment: RuntimeAuthEnvironment): GatewayAuth {
     };
   }
 
-  const auth = createAuth(configured);
+  const auth = createAuth(configured, dependencies);
   return {
     handler: (request) => auth.handler(request),
     getSession: async (headers) => {

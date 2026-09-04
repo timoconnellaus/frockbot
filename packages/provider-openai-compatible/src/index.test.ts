@@ -7,6 +7,7 @@ import { LlmRegistry } from "@frockbot/plugin-models";
 import { Context } from "cordis";
 import {
   OpenAICompatibleProvider,
+  planOpenAICompatibleRequestV1,
   requestToWire,
   retryAfterMillisecondsV1,
 } from "./index.js";
@@ -41,6 +42,76 @@ const request: NormalizedModelRequest = {
 };
 
 describe("OpenAICompatibleProvider", () => {
+  test("maps schemas for OpenAI and OpenRouter-compatible endpoints", () => {
+    const structured = {
+      ...request,
+      responseFormat: {
+        type: "json_schema" as const,
+        name: "answer",
+        schema: {
+          type: "object" as const,
+          properties: { answer: { type: "string" as const } },
+          required: ["answer"],
+          additionalProperties: false,
+        },
+      },
+    };
+    const plan = planOpenAICompatibleRequestV1(structured, {
+      structuredOutput: "json_schema",
+      responseFormatDialect: "openai",
+    });
+    expect(plan.note).toBeUndefined();
+    expect(plan.body.response_format).toEqual({
+      type: "json_schema",
+      json_schema: {
+        name: "answer",
+        strict: true,
+        schema: structured.responseFormat.schema,
+      },
+    });
+    expect(plan.body.stream).toBe(true);
+  });
+
+  test("maps the direct Workers AI schema and disables streaming", () => {
+    const structured: NormalizedModelRequest = {
+      ...request,
+      responseFormat: {
+        type: "json_schema",
+        name: "answer",
+        schema: { type: "string" },
+      },
+    };
+    const plan = planOpenAICompatibleRequestV1(structured, {
+      structuredOutput: "json_schema",
+      responseFormatDialect: "workers-ai",
+    });
+    expect(plan.body.response_format).toEqual({
+      type: "json_schema",
+      json_schema: { type: "string" },
+    });
+    expect(plan.body.stream).toBe(false);
+  });
+
+  test("downgrades unsupported schemas explicitly and adds prompt guidance", () => {
+    const plan = planOpenAICompatibleRequestV1(
+      {
+        ...request,
+        responseFormat: {
+          type: "json_schema",
+          name: "answer",
+          schema: { type: "string" },
+        },
+      },
+      { structuredOutput: "none" },
+    );
+    expect(plan.note).toMatchObject({
+      code: "structured-output-downgraded",
+      effective: "prompt",
+    });
+    expect(JSON.stringify(plan.body.messages)).toContain("Return only JSON");
+    expect(plan.body.response_format).toBeUndefined();
+  });
+
   test("normalizes FrockBot messages and tools to the wire format", () => {
     expect(requestToWire(request)).toMatchObject({
       model: "test-model",
@@ -129,6 +200,43 @@ describe("OpenAICompatibleProvider", () => {
         },
       },
       { type: "finish", reason: "tool-calls" },
+    ]);
+  });
+
+  test("normalizes a non-streaming structured response", async () => {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://models.example/v1",
+      structuredOutput: "json_schema",
+      responseFormatDialect: "workers-ai",
+      fetch: () =>
+        Promise.resolve(
+          Response.json({
+            choices: [
+              {
+                message: { content: '{"answer":"yes"}' },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+        ),
+    });
+    const events = [];
+    for await (const event of provider.stream(
+      {
+        ...request,
+        responseFormat: {
+          type: "json_schema",
+          name: "answer",
+          schema: { type: "object", additionalProperties: true },
+        },
+      },
+      new AbortController().signal,
+    )) {
+      events.push(event);
+    }
+    expect(events).toEqual([
+      { type: "text-delta", text: '{"answer":"yes"}' },
+      { type: "finish", reason: "completed" },
     ]);
   });
 

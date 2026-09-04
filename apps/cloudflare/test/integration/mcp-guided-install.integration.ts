@@ -19,7 +19,7 @@ import {
   type CatalogIndexV1,
 } from "@frockbot/catalog-core";
 import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
-import { env, runInDurableObject, SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   mcpOAuthAcceptEndpoint,
@@ -37,6 +37,7 @@ import {
   ORIGIN,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   toolCallTriggerPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
@@ -119,10 +120,6 @@ interface StoredRun {
   events: { type: string; [key: string]: unknown }[];
 }
 
-function botStub(userId: string, botId: string) {
-  return env.BOT_STATES.get(env.BOT_STATES.idFromName(`${userId}:${botId}`));
-}
-
 async function readUserSettings(userId: string): Promise<UserSettingsViewV1> {
   return (await expectOkJson(
     await asUser(userId, "/api/settings"),
@@ -134,10 +131,7 @@ async function offeredTools(
   botId: string,
   runId: string,
 ): Promise<string[]> {
-  const run = await runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => state.storage.get<StoredRun>(`run:${runId}`),
-  );
+  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
   const request = run?.events.find((event) => event.type === "model/request");
   return (
     (request as { request?: { tools?: { name: string }[] } } | undefined)
@@ -150,10 +144,7 @@ async function toolResult(
   botId: string,
   runId: string,
 ): Promise<{ content: string; isError: boolean } | undefined> {
-  const run = await runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => state.storage.get<StoredRun>(`run:${runId}`),
-  );
+  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
   return run?.events.find((event) => event.type === "tool/result") as
     { content: string; isError: boolean } | undefined;
 }

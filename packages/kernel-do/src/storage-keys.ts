@@ -20,7 +20,11 @@ export const PENDING_RUN_KEY = "pending-run";
 export const PENDING_AGENT_RUN_PREFIX = "pending-agent-run:";
 /** A Bot cannot accumulate an unbounded cross-Bot inbox. */
 export const MAX_PENDING_AGENT_RUNS_V1 = 32;
+/** Legacy pre-ADR-0033 Session value, read only for transparent migration. */
 export const LATEST_EVENTS_KEY = "latest-events";
+export const SESSION_EVENT_LOG_INDEX_PREFIX = "session-events:index:";
+export const SESSION_EVENT_LOG_PAGE_PREFIX = "session-events:page:";
+export const SESSION_EVENT_PAYLOAD_PREFIX = "session-events:payload:";
 export const IDENTITY_KEY = "identity";
 export const NOTIFICATION_PREFIX = "notification:";
 export const COMPOSITION_CURRENT_KEY = "composition:current";

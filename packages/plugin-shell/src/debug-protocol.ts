@@ -20,9 +20,10 @@ export const BOT_DEBUG_RUN_LIMIT_V1 = 20;
 export const BOT_DEBUG_DEFAULT_RUN_LIMIT_V1 = 5;
 export const BOT_DEBUG_GENERATION_LIMIT_V1 = 5;
 /**
- * The event budget one snapshot spends. Session events carry whole prompts, so
- * a handful of runs can be megabytes; past this the *oldest* events of a run
- * are dropped, because a failure is described by the tail of its log.
+ * The event budget one snapshot spends. Large durable events are already
+ * bounded diagnostic projections, but a handful of runs can still accumulate
+ * many of them; past this the *oldest* events of a run are dropped, because a
+ * failure is described by the tail of its log.
  */
 export const BOT_DEBUG_EVENT_BYTES_V1 = 512_000;
 

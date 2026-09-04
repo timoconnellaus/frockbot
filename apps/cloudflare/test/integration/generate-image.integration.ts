@@ -13,7 +13,7 @@
 //     `image/generated` event names the generation it was written under;
 //  3. replaying the same Turn command produces no second `run()` — "recovery
 //     never silently duplicates ... tool calls", and this effect is billed.
-import { env, runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { generatedImageRootV1 } from "@frockbot/plugin-image/root";
 import { workspaceObjectKeyV1 } from "@frockbot/workspace-store/keys";
@@ -22,15 +22,14 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   toolCallTriggerPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
 useApplicationArtifact();
 
-interface StoredRun {
-  events?: unknown[];
-}
+interface StoredRun {}
 
 interface TurnView {
   runId: string;
@@ -42,21 +41,13 @@ interface TurnView {
   }>;
 }
 
-function botStub(userId: string, botId: string) {
-  return env.BOT_STATES.get(env.BOT_STATES.idFromName(`${userId}:${botId}`));
-}
-
 async function runEvents(
   userId: string,
   botId: string,
   runId: string,
 ): Promise<Array<Record<string, unknown>>> {
-  return runInDurableObject(botStub(userId, botId), async (_object, state) => {
-    const stored = await state.storage.get<StoredRun>(`run:${runId}`);
-    return Array.isArray(stored?.events)
-      ? (stored.events as Array<Record<string, unknown>>)
-      : [];
-  });
+  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
+  return (run?.events ?? []) as unknown as Array<Record<string, unknown>>;
 }
 
 /** What the fake `AI` binding has been asked to generate so far. */

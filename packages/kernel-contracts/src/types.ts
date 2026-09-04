@@ -8,6 +8,13 @@ import {
   decodeSkillRefsV1,
   type SkillRefV1,
 } from "./skills.js";
+import {
+  decodeModelResponseFormatV1,
+  STRUCTURED_OUTPUT_ISSUE_LIMIT_V1,
+  type ModelResponseFormatV1,
+  type ResponseFormatNoteV1,
+  type StructuredOutputFailureV1,
+} from "./structured-output.js";
 
 export interface ToolCall {
   id: string;
@@ -134,12 +141,18 @@ export interface NormalizedModelRequest {
   system: string;
   messages: LlmMessage[];
   tools: ToolSchema[];
+  responseFormat?: ModelResponseFormatV1;
   modelBinding?: ModelBindingSnapshot;
 }
 
 export type LlmStreamEvent =
   | { type: "text-delta"; text: string }
   | { type: "tool-call"; call: ToolCall }
+  | { type: "response-format-note"; note: ResponseFormatNoteV1 }
+  | {
+      type: "structured-output-failure";
+      failure: StructuredOutputFailureV1;
+    }
   | { type: "finish"; reason: "completed" | "tool-calls" | "max-tokens" };
 
 export type StepOutcome =
@@ -322,6 +335,18 @@ export interface SessionEventMap {
     step: number;
     requestId: string;
     reason: string;
+  };
+  "model/response-format-note": {
+    turn: number;
+    step: number;
+    requestId: string;
+    note: ResponseFormatNoteV1;
+  };
+  "model/response-failed": {
+    turn: number;
+    step: number;
+    requestId: string;
+    failure: StructuredOutputFailureV1;
   };
   "assistant/chunk": {
     turn: number;
@@ -1084,6 +1109,44 @@ function requireToolSchema(value: unknown, label: string): void {
   requireJsonValue(schema, `${label}.inputSchema`);
 }
 
+function requireStructuredOutputFailureV1(value: unknown, label: string): void {
+  const failure = eventRecord(value, label);
+  if (failure.code === "invalid-json") {
+    requireEventKeys(failure, ["code", "message"], label);
+    eventString(failure.message, `${label}.message`);
+    return;
+  }
+  if (failure.code !== "schema-mismatch") {
+    throw new Error(`${label}.code is invalid`);
+  }
+  requireEventKeys(failure, ["code", "message", "issues"], label);
+  eventString(failure.message, `${label}.message`);
+  if (!Array.isArray(failure.issues)) {
+    throw new Error(`${label}.issues must be an array`);
+  }
+  if (failure.issues.length > STRUCTURED_OUTPUT_ISSUE_LIMIT_V1) {
+    throw new Error(`${label}.issues exceeds its limit`);
+  }
+  for (const [index, candidate] of failure.issues.entries()) {
+    const issue = eventRecord(candidate, `${label}.issues[${index}]`);
+    requireEventKeys(
+      issue,
+      ["path", "code", "message"],
+      `${label}.issues[${index}]`,
+    );
+    eventString(issue.path, `${label}.issues[${index}].path`);
+    eventString(issue.message, `${label}.issues[${index}].message`);
+    if (
+      issue.code !== "type" &&
+      issue.code !== "enum" &&
+      issue.code !== "required" &&
+      issue.code !== "additional-property"
+    ) {
+      throw new Error(`${label}.issues[${index}].code is invalid`);
+    }
+  }
+}
+
 /**
  * The exact v1 decoder for a normalized model request. Exported because the
  * request crosses the Bot isolate boundary inbound — a Bot-authored model
@@ -1109,6 +1172,7 @@ function requireNormalizedModelRequest(value: unknown, label: string): void {
       "system",
       "messages",
       "tools",
+      ...(Object.hasOwn(request, "responseFormat") ? ["responseFormat"] : []),
       ...(Object.hasOwn(request, "modelBinding") ? ["modelBinding"] : []),
     ],
     label,
@@ -1126,6 +1190,12 @@ function requireNormalizedModelRequest(value: unknown, label: string): void {
   request.tools.forEach((tool, index) =>
     requireToolSchema(tool, `${label}.tools[${index}]`),
   );
+  if (request.responseFormat !== undefined) {
+    decodeModelResponseFormatV1(
+      request.responseFormat,
+      `${label}.responseFormat`,
+    );
+  }
   if (request.modelBinding !== undefined) {
     const binding = eventRecord(request.modelBinding, `${label}.modelBinding`);
     requireEventKeys(
@@ -1281,6 +1351,45 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       requestId();
       eventString(event.reason, "session event.reason");
       break;
+    case "model/response-format-note": {
+      requireEventKeys(
+        event,
+        keys("turn", "step", "requestId", "note"),
+        "session event",
+      );
+      turn();
+      step();
+      requestId();
+      const note = eventRecord(event.note, "session event.note");
+      requireEventKeys(
+        note,
+        keys("code", "requested", "effective", "message"),
+        "session event.note",
+      );
+      if (note.code !== "structured-output-downgraded") {
+        throw new Error("session event.note.code is invalid");
+      }
+      if (note.requested !== "json_schema" && note.requested !== "json") {
+        throw new Error("session event.note.requested is invalid");
+      }
+      if (note.effective !== "json" && note.effective !== "prompt") {
+        throw new Error("session event.note.effective is invalid");
+      }
+      eventString(note.message, "session event.note.message");
+      break;
+    }
+    case "model/response-failed": {
+      requireEventKeys(
+        event,
+        keys("turn", "step", "requestId", "failure"),
+        "session event",
+      );
+      turn();
+      step();
+      requestId();
+      requireStructuredOutputFailureV1(event.failure, "session event.failure");
+      break;
+    }
     case "model/retry":
       requireEventKeys(
         event,

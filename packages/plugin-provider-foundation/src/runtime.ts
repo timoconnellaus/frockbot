@@ -107,6 +107,7 @@ async function* classifiedFoundationStream(
 
 export const foundationProvider: LlmProvider = {
   id: FOUNDATION_PROVIDER,
+  supports: { structuredOutput: "none" },
   stream: classifiedFoundationStream,
   reconciliation: {
     retrieve: async (effect, signal) =>

@@ -9,6 +9,8 @@ import {
   ModelProviderFailureError,
   type ModelProviderFailureClassV1,
   type NormalizedModelRequest,
+  type ResponseFormatNoteV1,
+  type StructuredOutputSupportV1,
 } from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 
@@ -137,6 +139,10 @@ export interface OpenAICompatibleConfig {
    * model id decides through {@link modelAcceptsImagesV1}.
    */
   acceptsImages?: boolean;
+  /** The strongest structured-output mode this endpoint accepts. */
+  structuredOutput?: StructuredOutputSupportV1;
+  /** Workers AI takes the schema directly; OpenAI/OpenRouter wrap it by name. */
+  responseFormatDialect?: "openai" | "workers-ai";
   /** Overrides {@link MODEL_REQUEST_DEADLINES_V1}. */
   deadlines?: Partial<ModelRequestDeadlinesV1>;
   /**
@@ -341,8 +347,27 @@ function messageToWire(
 
 export function requestToWire(
   request: NormalizedModelRequest,
-  options: { acceptsImages?: boolean } = {},
+  options: OpenAIRequestOptionsV1 = {},
 ): Record<string, unknown> {
+  return planOpenAICompatibleRequestV1(request, options).body;
+}
+
+export interface OpenAIRequestOptionsV1 {
+  acceptsImages?: boolean;
+  structuredOutput?: StructuredOutputSupportV1;
+  responseFormatDialect?: "openai" | "workers-ai";
+}
+
+export interface OpenAIRequestPlanV1 {
+  body: Record<string, unknown>;
+  note?: ResponseFormatNoteV1;
+}
+
+/** Maps the provider-neutral format and records any fidelity downgrade. */
+export function planOpenAICompatibleRequestV1(
+  request: NormalizedModelRequest,
+  options: OpenAIRequestOptionsV1 = {},
+): OpenAIRequestPlanV1 {
   const acceptsImages =
     options.acceptsImages ?? modelAcceptsImagesV1(request.model);
   const messages: Record<string, unknown>[] = [];
@@ -351,22 +376,80 @@ export function requestToWire(
   for (const message of request.messages) {
     messages.push(...messageToWire(message, acceptsImages));
   }
-  return {
-    model: request.model,
-    stream: true,
-    messages,
-    ...(request.tools.length > 0
-      ? {
-          tools: request.tools.map((tool) => ({
-            type: "function",
-            function: {
-              name: tool.name,
-              description: tool.description,
-              parameters: tool.inputSchema,
+  const support = options.structuredOutput ?? "none";
+  const format = request.responseFormat;
+  let responseFormat: Record<string, unknown> | undefined;
+  let note: ResponseFormatNoteV1 | undefined;
+  if (format?.type === "json_schema" && support === "json_schema") {
+    responseFormat =
+      options.responseFormatDialect === "workers-ai"
+        ? { type: "json_schema", json_schema: format.schema }
+        : {
+            type: "json_schema",
+            json_schema: {
+              name: format.name,
+              strict: true,
+              schema: format.schema,
             },
-          })),
-        }
-      : {}),
+          };
+  } else if (format && support !== "none") {
+    responseFormat = { type: "json_object" };
+    if (format.type === "json_schema") {
+      note = {
+        code: "structured-output-downgraded",
+        requested: "json_schema",
+        effective: "json",
+        message: `Provider ${request.provider} supports JSON mode but not JSON Schema; the shared validator remains authoritative`,
+      };
+    }
+  } else if (format) {
+    note = {
+      code: "structured-output-downgraded",
+      requested: format.type,
+      effective: "prompt",
+      message: `Provider ${request.provider} has no native structured-output mode; the request uses prompt guidance and shared validation`,
+    };
+  }
+  if (format) {
+    const instruction =
+      format.type === "json_schema"
+        ? `Return only JSON matching this schema exactly: ${JSON.stringify(format.schema)}`
+        : "Return only one valid JSON value, with no Markdown or commentary.";
+    if (request.system) {
+      messages[0] = {
+        role: "system",
+        content: `${request.system}\n\n${instruction}`,
+      };
+    } else {
+      messages.unshift({ role: "system", content: instruction });
+    }
+  }
+  return {
+    body: {
+      model: request.model,
+      // Workers AI documents JSON mode as non-streaming. The decoder accepts
+      // both response shapes while the contract remains an event stream.
+      stream: !(
+        format &&
+        support !== "none" &&
+        options.responseFormatDialect === "workers-ai"
+      ),
+      messages,
+      ...(responseFormat ? { response_format: responseFormat } : {}),
+      ...(request.tools.length > 0
+        ? {
+            tools: request.tools.map((tool) => ({
+              type: "function",
+              function: {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.inputSchema,
+              },
+            })),
+          }
+        : {}),
+    },
+    ...(note ? { note } : {}),
   };
 }
 
@@ -475,11 +558,39 @@ export async function* streamOpenAICompatibleBody(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
 ): AsyncIterable<LlmStreamEvent> {
+  const [probeBody, replayBody] = body.tee();
+  const probeReader = probeBody.getReader();
+  const probeDecoder = new TextDecoder();
+  let prefix = "";
+  const cancelProbe = (): void => {
+    void probeReader.cancel(signal.reason).catch(() => undefined);
+    if (!replayBody.locked) {
+      void replayBody.cancel(signal.reason).catch(() => undefined);
+    }
+  };
+  signal.addEventListener("abort", cancelProbe, { once: true });
+  try {
+    signal.throwIfAborted();
+    while (!prefix.trimStart() && prefix.length < 4_096) {
+      const { done, value } = await probeReader.read();
+      signal.throwIfAborted();
+      if (done) break;
+      prefix += probeDecoder.decode(value, { stream: true });
+    }
+  } finally {
+    signal.removeEventListener("abort", cancelProbe);
+    void probeReader.cancel().catch(() => undefined);
+    probeReader.releaseLock();
+  }
+  if (prefix.trimStart().startsWith("{")) {
+    yield* readOpenAICompatibleJsonV1(replayBody, signal);
+    return;
+  }
   const tools = new Map<number, ToolAccumulator>();
   let finishReason: string | undefined;
   let terminal = false;
   let sawChoice = false;
-  for await (const data of readSseData(body, signal)) {
+  for await (const data of readSseData(replayBody, signal)) {
     if (data === "[DONE]") {
       terminal = true;
       break;
@@ -529,6 +640,81 @@ export async function* streamOpenAICompatibleBody(
       tools.size > 0 || finishReason === "tool_calls"
         ? "tool-calls"
         : finishReason === "length"
+          ? "max-tokens"
+          : "completed",
+  };
+}
+
+async function* readOpenAICompatibleJsonV1(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+): AsyncIterable<LlmStreamEvent> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      signal.throwIfAborted();
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_SSE_RESPONSE_BYTES) await rejectOversizedSse(reader);
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const combined = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const payload = asRecord(
+    parseJson(
+      new TextDecoder().decode(combined),
+      "Model returned an invalid response",
+    ),
+  );
+  const choices = payload?.choices;
+  const choice = Array.isArray(choices) ? asRecord(choices[0]) : undefined;
+  const message = asRecord(choice?.message);
+  if (!choice || !message) {
+    throw new Error("Model response did not include a valid choice");
+  }
+  if (typeof message.content === "string" && message.content) {
+    yield { type: "text-delta", text: message.content };
+  }
+  const tools = new Map<number, ToolAccumulator>();
+  if (Array.isArray(message.tool_calls)) {
+    applyToolDeltas(
+      message.tool_calls.map((candidate, index) => ({
+        ...(asRecord(candidate) ?? {}),
+        index,
+      })),
+      tools,
+    );
+  }
+  for (const tool of [...tools.values()].sort(
+    (left, right) => left.index - right.index,
+  )) {
+    if (!tool.name)
+      throw new Error("Model returned a tool call without a name");
+    yield {
+      type: "tool-call",
+      call: {
+        id: tool.id || crypto.randomUUID(),
+        name: tool.name,
+        input: parseToolInput(tool.arguments),
+      },
+    };
+  }
+  yield {
+    type: "finish",
+    reason:
+      tools.size > 0 || choice.finish_reason === "tool_calls"
+        ? "tool-calls"
+        : choice.finish_reason === "length"
           ? "max-tokens"
           : "completed",
   };
@@ -621,12 +807,16 @@ export async function* streamWithModelRequestDeadlinesV1(
 
 export class OpenAICompatibleProvider implements LlmProvider {
   readonly id: string;
+  readonly supports;
   private config: OpenAICompatibleConfig;
 
   constructor(config: OpenAICompatibleConfig) {
     if (!config.baseUrl.trim())
       throw new Error("OpenAI-compatible baseUrl is required");
     this.id = config.providerId ?? "openai-compatible";
+    this.supports = {
+      structuredOutput: config.structuredOutput ?? "none",
+    } as const;
     this.config = { ...config, baseUrl: config.baseUrl.replace(/\/$/, "") };
   }
 
@@ -634,6 +824,16 @@ export class OpenAICompatibleProvider implements LlmProvider {
     request: NormalizedModelRequest,
     signal: AbortSignal,
   ): AsyncIterable<LlmStreamEvent> {
+    const plan = planOpenAICompatibleRequestV1(request, {
+      ...(this.config.acceptsImages === undefined
+        ? {}
+        : { acceptsImages: this.config.acceptsImages }),
+      structuredOutput: this.supports.structuredOutput,
+      ...(this.config.responseFormatDialect
+        ? { responseFormatDialect: this.config.responseFormatDialect }
+        : {}),
+    });
+    if (plan.note) yield { type: "response-format-note", note: plan.note };
     // Workerd rejects a detached global `fetch` ("Illegal invocation"), so the
     // default fetcher forwards through a closure rather than aliasing it.
     const fetcher =
@@ -658,13 +858,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
             {
               method: "POST",
               headers,
-              body: JSON.stringify(
-                requestToWire(request, {
-                  ...(this.config.acceptsImages === undefined
-                    ? {}
-                    : { acceptsImages: this.config.acceptsImages }),
-                }),
-              ),
+              body: JSON.stringify(plan.body),
               signal: deadlineSignal,
             },
           );

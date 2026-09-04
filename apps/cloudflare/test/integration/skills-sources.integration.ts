@@ -24,7 +24,7 @@ import {
   catalogIndexKeyV1,
   CATALOG_POINTER_KEY_V1,
 } from "@frockbot/catalog-core";
-import { env, runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   asUser,
@@ -32,6 +32,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -103,13 +104,7 @@ beforeAll(async () => {
   );
 });
 
-interface StoredRun {
-  events?: unknown[];
-}
-
-function botStub(userId: string, botId: string) {
-  return env.BOT_STATES.get(env.BOT_STATES.idFromName(`${userId}:${botId}`));
-}
+interface StoredRun {}
 
 /** The session events the Bot Durable Object durably recorded for one run. */
 async function runEvents(
@@ -117,12 +112,8 @@ async function runEvents(
   botId: string,
   runId: string,
 ): Promise<Array<Record<string, unknown>>> {
-  return runInDurableObject(botStub(userId, botId), async (_i, state) => {
-    const events = (await state.storage.get<StoredRun>(`run:${runId}`))?.events;
-    return Array.isArray(events)
-      ? (events as Array<Record<string, unknown>>)
-      : [];
-  });
+  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
+  return (run?.events ?? []) as unknown as Array<Record<string, unknown>>;
 }
 
 function systemPromptOfStep(

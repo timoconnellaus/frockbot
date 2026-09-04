@@ -1,6 +1,19 @@
 // Importing the augmented module is what merges these declarations into cordis.
 import type {} from "cordis";
 import type { LlmStreamEvent, NormalizedModelRequest } from "./types.js";
+import type {
+  JsonSchemaResponseFormatV1,
+  ModelProviderSupportsV1,
+  StructuredOutputFailureV1,
+  StructuredModelResultV1,
+} from "./structured-output.js";
+
+export class StructuredOutputValidationError extends Error {
+  constructor(readonly failure: StructuredOutputFailureV1) {
+    super(failure.message);
+    this.name = "StructuredOutputValidationError";
+  }
+}
 
 export interface DurableModelEffect {
   providerEffectId: string;
@@ -160,6 +173,8 @@ export interface LlmReconciliationCapability {
 
 export interface LlmProvider {
   id: string;
+  /** Legacy/test adapters that omit this are treated as supporting nothing. */
+  supports?: ModelProviderSupportsV1;
   stream(
     request: NormalizedModelRequest,
     signal: AbortSignal,
@@ -173,6 +188,11 @@ export interface ModelInvocation {
     request: NormalizedModelRequest,
     signal: AbortSignal,
   ): AsyncIterable<LlmStreamEvent>;
+  structured<T>(
+    request: NormalizedModelRequest,
+    format: Omit<JsonSchemaResponseFormatV1, "type">,
+    signal: AbortSignal,
+  ): Promise<StructuredModelResultV1<T>>;
   reconcile(
     request: NormalizedModelRequest,
     signal: AbortSignal,

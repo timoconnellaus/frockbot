@@ -27,10 +27,11 @@ import {
   ORIGIN,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   toolCallTriggerPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
-import { env, runInDurableObject, SELF } from "cloudflare:test";
+import { SELF } from "cloudflare:test";
 
 useApplicationArtifact();
 
@@ -79,19 +80,12 @@ async function readUserSettings(userId: string): Promise<UserSettingsView> {
   )) as UserSettingsView;
 }
 
-function botStub(userId: string, botId: string) {
-  return env.BOT_STATES.get(env.BOT_STATES.idFromName(`${userId}:${botId}`));
-}
-
 async function offeredTools(
   userId: string,
   botId: string,
   runId: string,
 ): Promise<string[]> {
-  const run = await runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => state.storage.get<StoredRun>(`run:${runId}`),
-  );
+  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
   const request = run?.events.find((event) => event.type === "model/request");
   return (
     (request as { request?: { tools?: { name: string }[] } } | undefined)
@@ -104,10 +98,7 @@ async function toolResult(
   botId: string,
   runId: string,
 ): Promise<{ name: string; content: string; isError: boolean } | undefined> {
-  const run = await runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => state.storage.get<StoredRun>(`run:${runId}`),
-  );
+  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
   return run?.events.find((event) => event.type === "tool/result") as
     { name: string; content: string; isError: boolean } | undefined;
 }

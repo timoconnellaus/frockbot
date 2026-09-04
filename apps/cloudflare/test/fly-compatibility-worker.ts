@@ -13,6 +13,7 @@ import {
   DurableCompositionStore,
   DurableWorkspaceGenerations,
   DurableWorkspaceSyncEffects,
+  SessionEventLog,
   type BotTurnExecutionInput,
 } from "@frockbot/kernel-do";
 import {
@@ -745,7 +746,15 @@ export class WorkerdBotState extends BotState {
   }
 
   async durableSessionEvents(): Promise<SessionEvent[]> {
-    return (await this.ctx.storage.get<SessionEvent[]>("latest-events")) ?? [];
+    const identity = await this.ctx.storage.get<{
+      userId: string;
+      botId: string;
+    }>("identity");
+    return identity
+      ? new SessionEventLog(this.ctx.storage).read(
+          `${identity.userId}:${identity.botId}`,
+        )
+      : [];
   }
 
   async scheduleRecoveryProbe(): Promise<void> {
