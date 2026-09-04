@@ -148,6 +148,13 @@ export function createFrockAiGatewayHostV1(
         }
         // The `AI` binding takes no signal, so the deadline is raced against
         // the call rather than cancelling it.
+        //
+        // The loser of that race is cleaned up rather than left hanging. Once
+        // the deadline stopped firing on the success path there was nothing
+        // left to settle this promise or drop its listener, so every request
+        // that answered normally left one of each attached to a signal that
+        // lives as long as the Turn. `abandonRace` is what ends it.
+        const abandonRace = new AbortController();
         let response: Response;
         try {
           response = await Promise.race([
@@ -161,12 +168,14 @@ export function createFrockAiGatewayHostV1(
               requestSignal.addEventListener(
                 "abort",
                 () => reject(requestSignal.reason),
-                { once: true },
+                { once: true, signal: abandonRace.signal },
               );
             }),
           ]);
         } catch (error) {
           return timedOut(error);
+        } finally {
+          abandonRace.abort();
         }
         return streamOrThrowV1(response);
       };
