@@ -389,6 +389,7 @@ import {
   projectPackageIframeCompositionV1,
 } from "./composition-views.js";
 import { executeBotTurn, executeDirectToolTurn } from "./backend-runner.js";
+import { yieldCompactionWorkV1 } from "./compaction-scheduler.js";
 import {
   shellTerminalRecordsV1,
   supersededTurnRecordsV1,
@@ -1161,6 +1162,19 @@ export class ShellBotBackendContribution {
       .slice(-BOT_ANNOUNCEMENT_RETENTION);
   }
 
+  /**
+   * The announcements as the transcript reads them, each already carrying the
+   * timestamp of the place it belongs rather than the moment it was written.
+   */
+  private async projectAnnouncementPage() {
+    const session =
+      (await this.ctx.storage.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+    return projectClientAnnouncementsV1(
+      await this.listAnnouncements(),
+      session,
+    );
+  }
+
   private async refreshRecoveryAlarm(
     transaction: DurableObjectTransaction,
   ): Promise<void> {
@@ -1174,6 +1188,9 @@ export class ShellBotBackendContribution {
   }
 
   async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
+    // Before the authority reads the session log, so a compaction detached
+    // from the previous Turn has already handed the log back (ADR 0030).
+    await yieldCompactionWorkV1(command.sessionId);
     // Before admission, so the pin this Turn takes already carries whatever the
     // User's Applet directory says now.
     await this.resolveAppletComposition(
@@ -1609,6 +1626,10 @@ export class ShellBotBackendContribution {
   private async executeTurn(
     input: BotTurnExecutionInput<BotSettingsViewV1>,
   ): Promise<BotTurnCompletion> {
+    // ADR 0030: a compaction detached from the previous Turn yields to this
+    // one rather than holding it. Free when none is running, and an abort when
+    // one is, so this Turn is the only writer of the session log.
+    await yieldCompactionWorkV1(input.command.sessionId);
     const settings = input.configurationSnapshot;
     const turn = {
       runId: input.command.runId,
@@ -5722,9 +5743,7 @@ export class ShellBotBackendContribution {
         : { truncated: false },
       // Announcements belong to the Session, not to a page of Turns, so only
       // the newest page carries them.
-      query.before
-        ? []
-        : projectClientAnnouncementsV1(await this.listAnnouncements()),
+      query.before ? [] : await this.projectAnnouncementPage(),
     );
     if (clientRunListWireBytes(page) > CLIENT_RUN_LIST_MAX_BYTES) {
       throw new Error("required run projections exceed the wire byte limit");

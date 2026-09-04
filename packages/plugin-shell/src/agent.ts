@@ -47,6 +47,7 @@ import {
   turnTypesByTurnV1,
 } from "./history.js";
 import { runCompactionV1 } from "./compaction.js";
+import { compactionWorkV1 } from "./compaction-scheduler.js";
 import type { Plugin } from "cordis";
 import manifest from "../frockbot.json" with { type: "json" };
 
@@ -363,18 +364,20 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
     // ADR 0030. `ctx.inject` rather than a declared dependency: a host that
     // mounts the Shell without a model still gets its tools and its transcript
     // seam, and simply never compacts. The hook is evaluated after `turn/end`
-    // is on the log and flushed, so a compaction never sits in the user's
-    // latency path — the Turn they were waiting on is already over. Nothing
-    // here may throw: the loop awaits this inside its `finally`, and a
-    // compaction that fails is a Turn that carries on under ADR 0027's
-    // eviction, not a Turn that failed.
+    // is on the log and flushed — but `agent/turn-stopping` is a hook the loop
+    // *awaits* inside its `finally`, so running the summariser here is exactly
+    // the latency ADR 0030 says a compaction never costs. It is handed to the
+    // detached scheduler instead and this returns at once: the Turn ends, the
+    // run settles, the response goes out, and the summariser carries on behind
+    // it. Nothing here may throw, and nothing here may wait.
     disposeFiber(
       ctx.inject(["llm"], (scoped) => {
         scoped.on("agent/turn-stopping", async (agent, turn) => {
-          try {
-            const session = agent.session;
-            const types = turnTypesByTurnV1(session.events);
-            if ((types.get(turn) ?? "chat") !== "chat") return;
+          const session = agent.session;
+          const types = turnTypesByTurnV1(session.events);
+          if ((types.get(turn) ?? "chat") !== "chat") return;
+          compactionWorkV1(session.id).start(async (signal) => {
+            if (signal.aborted) return;
             await runCompactionV1({
               session,
               window: chatWindowV1(session.events, session.deriveMessages()),
@@ -383,6 +386,9 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
               newEffectId: () => `compaction-${crypto.randomUUID()}`,
               summarise: async (request) => {
                 let text = "";
+                // Two deadlines, one call: the compaction's own, and the abort
+                // a newly admitted Turn raises when it takes the log back.
+                const cancelled = AbortSignal.any([request.signal, signal]);
                 for await (const event of scoped.llm.stream(
                   {
                     requestId: `compaction-${crypto.randomUUID()}`,
@@ -395,17 +401,14 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
                       ? { modelBinding: request.modelBinding }
                       : {}),
                   },
-                  request.signal,
+                  cancelled,
                 )) {
                   if (event.type === "text-delta") text += event.text;
                 }
                 return text;
               },
             });
-          } catch {
-            // A compaction that could not even be attempted leaves the log
-            // exactly as ADR 0027 left it: nothing to repair, nothing to say.
-          }
+          });
         });
       }),
     ),
