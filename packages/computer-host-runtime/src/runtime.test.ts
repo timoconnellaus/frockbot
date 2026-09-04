@@ -28,10 +28,15 @@ import {
   BROWSER_ENSURE_ACTION,
   BROWSER_FOCUS_ACTION,
   BROWSER_SURVEY_ACTION,
+  browserWatchdogScript,
   CHROME_LAUNCHER,
   CHROME_PROFILE,
   chromeLauncherScript,
+  CHROMIUM_DISABLED_FEATURES,
+  CHROMIUM_FLAGS,
+  CHROMIUM_MAX_OLD_SPACE_MIB,
   CHROMIUM_PATH,
+  CHROMIUM_RENDERER_PROCESS_LIMIT,
   COMPUTER_CDP_PORT,
   COMPUTER_DISPLAY,
   DESKTOP_SLOTS,
@@ -89,6 +94,8 @@ import {
   SLOT_IDLE_SECONDS,
   UPDATE_PHASES,
   updateLaunchScript,
+  WATCHDOG_LOG,
+  WATCHDOG_RENDERER_RSS_LIMIT_KIB,
   WORKSPACES_ROOT,
 } from "./runtime.ts";
 
@@ -720,6 +727,84 @@ describe("installed shell scripts", () => {
     expect(launcher).not.toContain(`rm -rf ${CHROME_PROFILE}`);
   });
 
+  test("bounds Chromium renderers without disabling background timer throttling", () => {
+    expect(CHROMIUM_FLAGS).toContain(
+      `--renderer-process-limit=${CHROMIUM_RENDERER_PROCESS_LIMIT}`,
+    );
+    expect(CHROMIUM_FLAGS).toContain(
+      `--js-flags=--max-old-space-size=${CHROMIUM_MAX_OLD_SPACE_MIB}`,
+    );
+    expect(CHROMIUM_FLAGS).toContain(
+      `--disable-features=${CHROMIUM_DISABLED_FEATURES.join(",")}`,
+    );
+    expect(CHROMIUM_DISABLED_FEATURES).not.toContain(
+      "IntensiveWakeUpThrottling",
+    );
+  });
+
+  test("the watchdog kills an oversized renderer and leaves a bounded one running", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "frockbot-watchdog-"));
+    const oversized = Bun.spawn(["sleep", "60"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    const bounded = Bun.spawn(["sleep", "60"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    try {
+      const procRoot = join(directory, "proc");
+      const renderer = async (pid: number, rssKiB: number) => {
+        const root = join(procRoot, String(pid));
+        await mkdir(root, { recursive: true });
+        await writeFile(
+          join(root, "cmdline"),
+          `/home/box/bin/chromium\0--type=renderer\0--renderer-client-id=${pid}\0`,
+        );
+        await writeFile(
+          join(root, "status"),
+          `Name:\tchromium\nState:\tS (sleeping)\nVmRSS:\t${rssKiB} kB\n`,
+        );
+      };
+      await mkdir(procRoot, { recursive: true });
+      await writeFile(
+        join(procRoot, "meminfo"),
+        "MemTotal:       8388608 kB\nMemAvailable:   4194304 kB\n",
+      );
+      await renderer(oversized.pid, WATCHDOG_RENDERER_RSS_LIMIT_KIB + 524_288);
+      await renderer(bounded.pid, WATCHDOG_RENDERER_RSS_LIMIT_KIB - 1);
+      const logPath = join(directory, "watchdog.log");
+      const watchdog = Bun.spawn(["bash"], {
+        stdin: new Blob([browserWatchdogScript]),
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          FROCKBOT_WATCHDOG_ONCE: "1",
+          FROCKBOT_WATCHDOG_PROC_ROOT: procRoot,
+          FROCKBOT_WATCHDOG_LOG: logPath,
+        },
+      });
+
+      const [watchdogExit, watchdogError] = await Promise.all([
+        watchdog.exited,
+        new Response(watchdog.stderr).text(),
+      ]);
+      expect(watchdogError).toBe("");
+      expect(watchdogExit).toBe(0);
+      expect(await oversized.exited).not.toBe(0);
+      expect(bounded.exitCode).toBeNull();
+      const log = await readFile(logPath, "utf8");
+      expect(log).toContain(`pid=${oversized.pid}`);
+      expect(log).toContain("reason=renderer-rss");
+      expect(log).not.toContain(`pid=${bounded.pid}`);
+    } finally {
+      oversized.kill();
+      bounded.kill();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("one screen carries every slot, and each viewer is clipped to one", () => {
     const screen = installedScript(
       provisionScript,
@@ -1333,6 +1418,8 @@ describe("box-doctor", () => {
         "scratch",
         "desktop-gateway",
         "sync-watcher",
+        "watchdog",
+        "memory-top",
         "browser-process",
         "browser-cdp",
         "screen",

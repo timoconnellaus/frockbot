@@ -386,6 +386,22 @@ export function shellGuiCommandV1(command: string): string | undefined {
 /** The one browser profile every Bot of one User shares (ADR 0012). */
 export const CHROME_PROFILE = `${HOME_ROOT}/chrome-profile`;
 
+/** Maximum Chromium renderer processes on one shared 8 GiB Computer. */
+export const CHROMIUM_RENDERER_PROCESS_LIMIT = 8;
+/** V8 old-space ceiling in each renderer; native allocations remain possible. */
+export const CHROMIUM_MAX_OLD_SPACE_MIB = 1024;
+/**
+ * Features disabled for a shared unattended desktop.
+ *
+ * Native window occlusion is meaningless under Xvfb and can stop painting a
+ * window that is visible only through VNC. Background timer throttling stays
+ * enabled: an unattended preview tab must not earn more CPU merely because a
+ * Bot left it open.
+ */
+export const CHROMIUM_DISABLED_FEATURES = [
+  "CalculateNativeWinOcclusion",
+] as const;
+
 /** The browser flags the Computer runs chromium under, in one place. */
 export const CHROMIUM_FLAGS: readonly string[] = [
   "--no-sandbox",
@@ -401,6 +417,9 @@ export const CHROMIUM_FLAGS: readonly string[] = [
   "--window-position=0,0",
   "--no-first-run",
   "--no-default-browser-check",
+  `--renderer-process-limit=${CHROMIUM_RENDERER_PROCESS_LIMIT}`,
+  `--js-flags=--max-old-space-size=${CHROMIUM_MAX_OLD_SPACE_MIB}`,
+  `--disable-features=${CHROMIUM_DISABLED_FEATURES.join(",")}`,
 ];
 
 export const CHROME_LAUNCHER = `${BIN_ROOT}/frockbot-chrome`;
@@ -548,6 +567,82 @@ if ! xdpyinfo -display ${COMPUTER_DISPLAY} >/dev/null 2>&1; then
   exit 69
 fi
 exec ${CHROME_LAUNCHER} about:blank
+`;
+
+/** The renderer watchdog, supervised independently of Chromium. */
+export const WATCHDOG_SERVICE = "frockbot-browser-watchdog";
+/** The installed watchdog executable. */
+export const WATCHDOG_SCRIPT = `${RUNTIME_ROOT}/browser-watchdog.sh`;
+/** Its bounded, durable-on-the-Computer action log. */
+export const WATCHDOG_LOG = `${RUNTIME_ROOT}/watchdog.log`;
+/** 1.5 GiB RSS: one renderer may not consume a material fraction of the box. */
+export const WATCHDOG_RENDERER_RSS_LIMIT_KIB = 1_572_864;
+/** Keep 512 MiB available for the Agent transport and ordinary commands. */
+export const WATCHDOG_MEM_AVAILABLE_FLOOR_KIB = 524_288;
+/** How often the supervised watchdog samples `/proc`. */
+export const WATCHDOG_INTERVAL_SECONDS = 30;
+/** Bound the durable diagnostic log without requiring logrotate. */
+export const WATCHDOG_LOG_MAX_LINES = 200;
+
+/**
+ * Kills only Chromium renderer processes, never the shared browser process.
+ *
+ * Every renderer over the individual ceiling is killed. Under box-wide
+ * pressure, the largest remaining renderers are killed until their reclaimed
+ * RSS would restore the available-memory floor. Chromium owns renderer crash
+ * recovery, so the browser, profile, and other Bots' windows remain resident.
+ */
+export const browserWatchdogScript = `#!/usr/bin/env bash
+set -u
+PROC_ROOT="\${FROCKBOT_WATCHDOG_PROC_ROOT:-/proc}"
+LOG="\${FROCKBOT_WATCHDOG_LOG:-${WATCHDOG_LOG}}"
+mkdir -p "$(dirname "$LOG")"
+touch "$LOG"
+
+trim_log() {
+  LINES=$(wc -l < "$LOG" 2>/dev/null || echo 0)
+  if [ "$LINES" -gt ${WATCHDOG_LOG_MAX_LINES} ]; then
+    tail -n ${WATCHDOG_LOG_MAX_LINES} "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+  fi
+}
+
+while true; do
+  MEM_AVAILABLE=$(awk '/^MemAvailable:/ { print $2; exit }' "$PROC_ROOT/meminfo" 2>/dev/null || true)
+  case "$MEM_AVAILABLE" in (''|*[!0-9]*) MEM_AVAILABLE=0;; esac
+  CANDIDATES=$(
+    for STATUS in "$PROC_ROOT"/[0-9]*/status; do
+      [ -f "$STATUS" ] || continue
+      PID=$(basename "$(dirname "$STATUS")")
+      CMDLINE=$(tr '\\000' ' ' < "$(dirname "$STATUS")/cmdline" 2>/dev/null || true)
+      printf '%s' "$CMDLINE" | grep -q -- '--type=renderer' || continue
+      RSS=$(awk '/^VmRSS:/ { print $2; exit }' "$STATUS" 2>/dev/null || true)
+      case "$RSS" in (''|*[!0-9]*) continue;; esac
+      printf '%s %s\\n' "$RSS" "$PID"
+    done | sort -rn
+  )
+  PROJECTED_AVAILABLE=$MEM_AVAILABLE
+  while read -r RSS PID; do
+    [ -n "\${PID:-}" ] || continue
+    REASON=""
+    if [ "$RSS" -gt ${WATCHDOG_RENDERER_RSS_LIMIT_KIB} ]; then
+      REASON=renderer-rss
+    elif [ "$PROJECTED_AVAILABLE" -lt ${WATCHDOG_MEM_AVAILABLE_FLOOR_KIB} ]; then
+      REASON=low-mem-available
+    else
+      break
+    fi
+    if kill -9 "$PID" 2>/dev/null; then
+      PROJECTED_AVAILABLE=$((PROJECTED_AVAILABLE + RSS))
+      printf '%s action=closed-renderer pid=%s rssMiB=%s memAvailableMiB=%s reason=%s\\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PID" "$((RSS / 1024))" "$((MEM_AVAILABLE / 1024))" "$REASON" >> "$LOG"
+    fi
+  done <<EOF
+$CANDIDATES
+EOF
+  trim_log
+  [ "\${FROCKBOT_WATCHDOG_ONCE:-}" = 1 ] && exit 0
+  sleep ${WATCHDOG_INTERVAL_SECONDS}
+done
 `;
 
 /**
@@ -1265,7 +1360,7 @@ export const CLOCK_FLOOR_EPOCH = 1_756_684_800;
  * corrected. The version is compared on every adoption instead, and the whole
  * set is rewritten when it moves. Bump it whenever a document below changes.
  */
-export const REFERENCE_DOCS_VERSION = "2026-09-04.1";
+export const REFERENCE_DOCS_VERSION = "2026-09-05.1";
 
 /**
  * What a Bot reads to debug its own Computer.
@@ -1398,6 +1493,16 @@ more: it holds the flag set and starts the Computer's one browser on the one
 display and the one CDP port. The \`${BROWSER_SERVICE}\` service calls it, and
 nothing else needs to know the flags exist.
 
+The launcher limits Chromium to ${CHROMIUM_RENDERER_PROCESS_LIMIT} renderer
+processes and caps each renderer's V8 old space at
+${CHROMIUM_MAX_OLD_SPACE_MIB} MiB. It disables only
+\`${CHROMIUM_DISABLED_FEATURES.join(",")}\`; background-tab timer throttling
+remains enabled. Native allocations can still exceed V8's heap ceiling, so
+the separately supervised \`${WATCHDOG_SERVICE}\` samples memory every
+${WATCHDOG_INTERVAL_SECONDS} seconds. It closes a renderer above 1.5 GiB RSS,
+or the largest renderer when the Computer has less than 512 MiB available,
+and records the action in \`${WATCHDOG_LOG}\`.
+
 ## What is never run from the shell
 
 ${COMPUTER_GUI_SHELL_COMMANDS.map((name) => `\`${name}\``).join(", ")}.
@@ -1420,7 +1525,8 @@ tools do.
 \`computer_doctor\` runs \`${DOCTOR_SCRIPT}\` and hands back a report: disk on
 \`/\` and \`${HOME_ROOT}\`, the size of \`${SCRATCH_ROOT}\`, the viewer
 gateway, the durable-root watcher, the shared screen, the one browser process
-and its CDP port, every Bot's window and whether it sits over that Bot's own
+and its CDP port, the renderer watchdog's recent actions, the top memory
+consumers, every Bot's window and whether it sits over that Bot's own
 slot, the browser build and its profile, the sync signal and any conflicting
 generations, this reference
 set's version, the launcher and its shims, the clock, DNS, and whether a
@@ -1448,6 +1554,9 @@ Computer rather than of one run.
 - **browser-process** — none, or more than one. One is the whole design: the
   profile's lock admits exactly one browser, and a second one is a Bot with a
   black screen.
+- **watchdog** — the renderer memory guard is not running. Its last actions
+  remain in \`${WATCHDOG_LOG}\`; opening the Computer repairs its supervised
+  service.
 - **reference-docs** — this set is stale and refreshes when the Computer is
   next opened. Nothing you can do on the box fixes it.
 - **browser** — the browser build is missing. It is installed by provisioning,
@@ -1469,7 +1578,7 @@ is dropped.
 
 ## Logs on the box
 
-\`${DOCTOR_LOG}\`, and per-Bot under \`${BOTS_ROOT}/<botKey>\`:
+\`${DOCTOR_LOG}\`, \`${WATCHDOG_LOG}\`, and per-Bot under \`${BOTS_ROOT}/<botKey>\`:
 \`chromium.log\`, \`fluxbox.log\`, \`x11vnc.log\`, and \`processes/<id>/log.*\`.
 Provisioning's own log is \`${RUNTIME_ROOT}/provision/provision.log\`.
 `,
@@ -1781,6 +1890,14 @@ if pgrep -f watch-workspace.sh >/dev/null 2>&1; then
 else
   record sync-watcher fail "no durable-root watcher is running; on-Computer writes will not signal a sync"
 fi
+WATCHDOG_ACTIONS=$(tail -n 5 ${WATCHDOG_LOG} 2>/dev/null | tr '\n' ';' || true)
+if pgrep -f -- ${WATCHDOG_SCRIPT} >/dev/null 2>&1; then
+  record watchdog pass "the renderer watchdog is running; recent actions: \${WATCHDOG_ACTIONS:-none}"
+else
+  record watchdog fail "the renderer watchdog is not running; recent actions: \${WATCHDOG_ACTIONS:-none}"
+fi
+TOP_MEMORY=$(ps -eo pid=,rss=,comm=,args= --sort=-rss 2>/dev/null | head -n 5 | tr '\n' ';' || true)
+record memory-top pass "top resident-memory consumers (pid rssKiB command): \${TOP_MEMORY:-unavailable}"
 SLOT=""
 if [ -n "$KEY" ] && [ -s ${BOTS_ROOT}/"$KEY"/slot ]; then SLOT=$(cat ${BOTS_ROOT}/"$KEY"/slot); fi
 # One browser, one CDP port (ADR 0031). A second main process would mean a
@@ -1966,6 +2083,7 @@ export const COMPUTER_RUNTIME_FILES: readonly {
     content: startBrowserScript,
     mode: 0o700,
   },
+  { path: WATCHDOG_SCRIPT, content: browserWatchdogScript, mode: 0o700 },
   {
     path: `${RUNTIME_ROOT}/start-view.sh`,
     content: startViewScript,
