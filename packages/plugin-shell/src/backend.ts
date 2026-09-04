@@ -214,6 +214,12 @@ import {
 } from "./backend-routines.js";
 import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
 import {
+  ROUTINE_INBOX_LIMIT,
+  ROUTINE_INBOX_PREFIX,
+} from "@frockbot/plugin-routines/storage-keys";
+import {
+  decodeRoutineInboxEntryV1,
+  routineFailureSentenceV1,
   subagentAttributionV1,
   ROUTINE_INBOX_TEXT_MAX,
   ROUTINE_WAKE_TITLE_MAX,
@@ -3105,10 +3111,10 @@ export class ShellBotBackendContribution {
       runId: fire.fireId,
       createdAt: new Date().toISOString(),
       title: `${settings.profile.name} could not run a Routine`,
-      body: (outcome.summary ?? "The firing ended without saying why.").slice(
-        0,
-        240,
-      ),
+      // The same sentence the inbox entry carries. A notification is the one
+      // surface a person reads without asking for it, so it is the last place
+      // a kernel invariant belongs.
+      body: routineFailureSentenceV1(outcome.summary).slice(0, 240),
     });
   }
   // -------------------------------------------------------------------------
@@ -3348,11 +3354,38 @@ export class ShellBotBackendContribution {
     }
     if (admission.status === "replayed") {
       // The same tool call, reconciled or retried: the task it already
-      // dispatched is the answer, never a second child.
+      // dispatched is the answer, never a second child. A foreground call
+      // still waits for it — the caller asked for the result, and returning
+      // "dispatched" the instant a replay is recognised is what made a
+      // `background:false` Task look like it completed with no output.
+      const replayed = admission.record;
+      const settled =
+        replayed.outcome ??
+        (request.background
+          ? undefined
+          : await this.awaitBlockingTask(
+              identity,
+              taskAnchorIdV1(replayed.childSessionId),
+              replayed.taskId,
+            ));
+      if (settled) {
+        return {
+          status: "settled",
+          taskId: replayed.taskId,
+          model: replayed.model.slug,
+          taskStatus: settled.status,
+          ...(settled.summary === undefined
+            ? {}
+            : { summary: settled.summary }),
+          ...(settled.failure === undefined
+            ? {}
+            : { failure: settled.failure }),
+        };
+      }
       return {
         status: "dispatched",
-        taskId: admission.record.taskId,
-        model: admission.record.model.slug,
+        taskId: replayed.taskId,
+        model: replayed.model.slug,
       };
     }
     const reservation = await this.subagentSlots(identity).reserve({
@@ -3454,20 +3487,27 @@ export class ShellBotBackendContribution {
    * Durable Object already does inside a Turn, and the outbound probe is the
    * same call reconciliation makes.
    */
-  private async awaitBlockingTask(
+  protected async awaitBlockingTask(
     identity: BotIdentity,
     anchorTaskId: string,
     taskId: string,
   ): Promise<TaskOutcomeV1 | undefined> {
     const binding = this.subagentBinding;
     const deadline = Date.now() + TASK_BLOCKING_TIMEOUT_MS_V1;
+    // A read that fails once is transient storage contention, not an answer:
+    // abandoning the wait on the first one returned "still running" for a
+    // child that was about to settle, and taught the model to poll. Only a
+    // record that stays unreadable ends the wait early.
+    const readFailureLimit = 3;
+    let readFailures = 0;
     for (;;) {
       try {
         const record = await this.tasks.read(taskId);
+        readFailures = 0;
         if (record.outcome) return record.outcome;
       } catch {
-        // A record that cannot be read is not a reason to hold the Turn.
-        return undefined;
+        readFailures += 1;
+        if (readFailures >= readFailureLimit) return undefined;
       }
       if (binding) {
         try {
@@ -5260,11 +5300,30 @@ export class ShellBotBackendContribution {
     const index = await this.authority.listRunIndex({
       limit: UNREAD_COUNT_CAP + 1,
     });
+    // Counted straight off the keys rather than through `RoutineInboxStore`:
+    // its `list()` trims the inbox, and the unread fan-out is a read every
+    // sidebar poll makes for every Bot — it must not write, least of all into
+    // an object that is running a Turn. An undecodable row is skipped, because
+    // a badge is never worth failing a read for.
+    const stored = await this.ctx.storage.list<unknown>({
+      prefix: ROUTINE_INBOX_PREFIX,
+      limit: ROUTINE_INBOX_LIMIT,
+    });
+    let failures = 0;
+    for (const value of stored.values()) {
+      try {
+        const entry = decodeRoutineInboxEntryV1(value);
+        if (entry.failure === true && !entry.acknowledged) failures += 1;
+      } catch {
+        continue;
+      }
+    }
     return projectBotUnreadViewV1(
       identity.botId,
       state,
       index.map((entry) => entry.cursor),
       await this.sidebarPreview(storedPreview, index),
+      failures,
     );
   }
 

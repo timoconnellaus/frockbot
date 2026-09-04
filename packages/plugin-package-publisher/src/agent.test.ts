@@ -156,6 +156,78 @@ describe("Package Publisher Agent contribution", () => {
     await harness.dispose();
   });
 
+  // A deployment with no Computer registers no Computer tool, so a prompt that
+  // still promises one sends the model hunting for a sandbox it cannot reach.
+  test("promises no Computer when the deployment has none", async () => {
+    const harness = await createPluginHarness([
+      ComputerRegistry,
+      SystemPromptRegistry,
+      ToolRegistry,
+    ]);
+    const fiber = await harness.mount(
+      createPackagePublisherAgentPlugin(
+        {
+          read: () => Promise.resolve(history),
+          publish: () => {
+            throw new Error("not called");
+          },
+          rollback: () => {
+            throw new Error("not called");
+          },
+        },
+        {
+          userId: "user-1",
+          defaultProviderId: "fixture",
+          configured: false,
+        },
+      ),
+    );
+    const prompt = await harness.root.systemPrompt.assemble({
+      sessionId: "session-1",
+      provider: "fixture",
+      model: "fixture",
+      turnType: "chat",
+    });
+    expect(prompt.text).not.toContain("Computer");
+    expect(prompt.text).not.toContain("/home/box");
+    // The Package Publisher still says what it does; only the Computer
+    // sentence goes.
+    expect(prompt.text).toContain("publish_setup");
+    await fiber.dispose();
+    await harness.dispose();
+  });
+
+  test("keeps the Computer sentence when a Computer is configured", async () => {
+    const harness = await createPluginHarness([
+      ComputerRegistry,
+      SystemPromptRegistry,
+      ToolRegistry,
+    ]);
+    const fiber = await harness.mount(
+      createPackagePublisherAgentPlugin(
+        {
+          read: () => Promise.resolve(history),
+          publish: () => {
+            throw new Error("not called");
+          },
+          rollback: () => {
+            throw new Error("not called");
+          },
+        },
+        { userId: "user-1", defaultProviderId: "fixture" },
+      ),
+    );
+    const prompt = await harness.root.systemPrompt.assemble({
+      sessionId: "session-1",
+      provider: "fixture",
+      model: "fixture",
+      turnType: "chat",
+    });
+    expect(prompt.text).toContain("/home/box/setup using the Computer");
+    await fiber.dispose();
+    await harness.dispose();
+  });
+
   test("satisfies built-in Package conventions", () => {
     expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
       name: "@frockbot/plugin-package-publisher",

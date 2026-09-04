@@ -101,6 +101,10 @@ function markAllRead(): void {
             <time :datetime="entry.createdAt">{{
               formatRelativeMomentV1(entry.createdAt)
             }}</time>
+            <!-- One thing going wrong repeatedly is one entry and a count. -->
+            <span v-if="(entry.repeatCount ?? 1) > 1"
+              >Happened {{ entry.repeatCount }} times</span
+            >
             <UiButton
               v-if="!entry.acknowledged"
               variant="ghost"

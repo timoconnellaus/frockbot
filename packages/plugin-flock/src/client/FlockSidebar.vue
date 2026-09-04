@@ -89,7 +89,13 @@ onMounted(() => void flock.value.load());
       {{ flock.showArchived ? "Hide archived" : "Manage" }}
     </button>
   </div>
-  <div v-if="flock.loading" class="flock-skeleton" aria-busy="true">
+  <!--
+    The skeleton is for a list nobody has yet, not for every request: the first
+    paint happens before `load()` is even called, and a reload after creating a
+    Bot must keep the list already on screen rather than blanking it. "No Bots
+    yet." is a fact about the account, so it waits for an answer.
+  -->
+  <div v-if="!flock.loaded" class="flock-skeleton" aria-busy="true">
     <span class="flock-skeleton-label">Loading your flock…</span>
     <div v-for="row in 3" :key="row" class="flock-skeleton-row">
       <UiSkeleton shape="circle" />

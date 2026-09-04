@@ -404,7 +404,7 @@ describe("the lifecycle tools", () => {
     expect(result.content).toContain("It changed on Tuesday.");
   });
 
-  test("a blocking dispatch that did not settle says it is still running, by id", async () => {
+  test("a blocking dispatch that did not settle is honest that it only dispatched", async () => {
     const result = await tool(() =>
       Promise.resolve({ status: "dispatched", taskId: "tk-1", model: "m" }),
     ).execute(
@@ -416,7 +416,11 @@ describe("the lifecycle tools", () => {
       context(),
     );
     expect(result.isError).toBe(false);
-    expect(result.content).toContain("still running, id tk-1");
+    expect(result.content).toContain("did not finish inside the wait, id tk-1");
+    // The Turn is told to answer, not to go looking: this wording is what
+    // stopped the model calling task_check and then task_resume on it.
+    expect(result.content).toContain("do not poll for it");
+    expect(result.content).toContain("Answer the User now");
   });
 });
 

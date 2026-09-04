@@ -894,6 +894,9 @@ export function createFoundationHostedRuntimePackages(
       createPackagePublisherAgentPlugin(host.packagePublisher, {
         userId: host.userId,
         defaultProviderId: "fly-sprite",
+        // Read from the same place the Computer plugin reads it, so no
+        // section of the prompt promises a Computer this host does not have.
+        configured: computerConfiguredV1(host),
       }),
     ),
     runtimePackage(plan, "fly-sprite", computerProviderPlugin(host)),
