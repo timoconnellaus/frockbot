@@ -10,12 +10,10 @@ import {
 } from "./wrapper";
 import { dispatchStubCall, registerStubReentry } from "./loopback";
 import { aiAnswerText } from "./ai-answer";
+import { performHttpGrant } from "./http";
 import type {
   AiTextInput,
   FilesOperation,
-  HttpGrantResponse,
-  HttpOperation,
-  HttpRequestOptions,
   HttpServices,
   ScheduleOperation,
 } from "@frockbot/compose-core/grants";
@@ -78,6 +76,10 @@ export interface CloudflareHostOptions {
   services?: HttpServices;
   /** Optional service bindings keyed by the same HTTP service names. */
   serviceBindings?: Readonly<Record<string, Fetcher>>;
+  /** Wall-clock deadline for an HTTP grant call. Defaults to 5000 ms. */
+  httpTimeoutMs?: number;
+  /** Maximum HTTP response body size. Defaults to 1 MiB. */
+  httpResponseMaxBytes?: number;
   /** The Worker's `AI` binding used by `ai.text`. */
   ai?: TextAiBinding;
   /** The Worker's R2 bucket used by `files`. */
@@ -135,43 +137,6 @@ const string = (value: unknown, what: string): string => {
     throw new Error(`@frockbot/compose-cloudflare: ${what} must be a string`);
   }
   return value;
-};
-
-const httpFetch = async (
-  services: HttpServices,
-  bindings: Readonly<Record<string, Fetcher>>,
-  value: unknown,
-): Promise<HttpGrantResponse> => {
-  const input = value as HttpOperation | null;
-  if (input?.method !== "fetch") {
-    throw new Error("@frockbot/compose-cloudflare: unknown http operation");
-  }
-  const [service, path, requestOptions] = input.args;
-  const name = string(service, "HTTP service");
-  const policy = services[name];
-  if (!policy) throw new Error(`no service named "${name}" is granted`);
-  const base = new URL(policy.origin);
-  const url = new URL(string(path, "HTTP path"), base);
-  if (url.origin !== base.origin) {
-    throw new Error(`HTTP path leaves the granted "${name}" origin`);
-  }
-  const request = (requestOptions ?? {}) as HttpRequestOptions;
-  const headers = new Headers(request.headers);
-  if (policy.credential) {
-    headers.set(policy.credential.header, policy.credential.value);
-  }
-  const init = { ...request, headers };
-  const binding = bindings[name];
-  const outgoing = new Request(url.toString(), init);
-  const response = binding
-    ? await binding.fetch(outgoing)
-    : await fetch(outgoing);
-  return {
-    status: response.status,
-    ok: response.ok,
-    headers: Object.fromEntries(response.headers),
-    body: await response.text(),
-  };
 };
 
 const aiText = async (binding: TextAiBinding | undefined, value: unknown) => {
@@ -453,9 +418,13 @@ export function createCloudflareHost(options: CloudflareHostOptions): Host {
       if ("http" in request.stubs) {
         registered.http = (input: unknown) =>
           through("http", input, (approved) =>
-            httpFetch(
-              options.services ?? {},
-              options.serviceBindings ?? {},
+            performHttpGrant(
+              {
+                services: options.services ?? {},
+                bindings: options.serviceBindings,
+                timeoutMs: options.httpTimeoutMs,
+                maxResponseBytes: options.httpResponseMaxBytes,
+              },
               approved,
             ),
           );
@@ -725,9 +694,13 @@ export function createFacetHost(options: FacetHostOptions): FacetHost {
       if ("http" in request.stubs) {
         registered.http = (input: unknown) =>
           through("http", input, (approved) =>
-            httpFetch(
-              options.services ?? {},
-              options.serviceBindings ?? {},
+            performHttpGrant(
+              {
+                services: options.services ?? {},
+                bindings: options.serviceBindings,
+                timeoutMs: options.httpTimeoutMs,
+                maxResponseBytes: options.httpResponseMaxBytes,
+              },
               approved,
             ),
           );

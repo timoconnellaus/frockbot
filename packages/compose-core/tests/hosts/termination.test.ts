@@ -160,6 +160,7 @@ describe("stopping a hosted instance", () => {
         {
           id: "a",
           source: `export default async function ({ stubs }) { await stubs.note('start') }`,
+          host: "in-process",
           stubs: [noteStub],
         },
       ],

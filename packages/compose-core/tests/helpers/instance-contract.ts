@@ -156,15 +156,12 @@ const gateStub = createStub<void, string>({
 
 /** Builds the probe as plugin source started through a host. */
 export const sourceArm = (host?: string, hosts?: Record<string, Host>) => ({
-  name:
-    host === undefined
-      ? "plugin source in-process"
-      : `plugin source in ${host}`,
+  name: `plugin source in ${host ?? "in-process"}`,
   hosts,
   entry: (id: string, options: ProbeOptions): PluginEntry => ({
     id,
     source: probeSource,
-    ...(host === undefined ? {} : { host }),
+    host: host ?? "in-process",
     stubs: options.needs
       ? [noteStub, holdStub, exposeStub, gateStub]
       : [noteStub, holdStub, exposeStub],

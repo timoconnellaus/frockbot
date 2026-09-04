@@ -230,7 +230,7 @@ export const buildComposer = async (setup: {
             ...(setup.viewSlots === undefined
               ? {}
               : { viewSlots: setup.viewSlots }),
-            ...(setup.host === undefined ? {} : { host: setup.host }),
+            host: setup.host ?? "in-process",
           } as unknown),
       },
     ],

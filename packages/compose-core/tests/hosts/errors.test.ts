@@ -39,7 +39,7 @@ const write = async (source: string, checker?: SourceChecker) => {
     ...(checker ? { checker } : {}),
     plugins: [
       { id: "registry", plugin: registry },
-      { id: "a", source, stubs: [exposeStub] },
+      { id: "a", source, host: "in-process", stubs: [exposeStub] },
     ],
   });
   await client.settled();
@@ -276,9 +276,14 @@ describe("the source checker seam", () => {
         {
           id: "granted",
           source: "export default function () {}",
+          host: "in-process",
           stubs: [exposeStub],
         },
-        { id: "bare", source: "export default function () {}" },
+        {
+          id: "bare",
+          source: "export default function () {}",
+          host: "in-process",
+        },
       ],
     });
     await client.settled();

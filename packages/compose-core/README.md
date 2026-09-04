@@ -230,11 +230,15 @@ const toolsStub = createStub({
 await client.addPlugin({
   id: "greeter",
   source,
+  host: "in-process",
   stubs: [logStub, toolsStub],
   options: { label: "greeter" },
-  // host: 'worker',  ← omit for in-process
 });
 ```
+
+Source entries must name a host. Omitting `host` is a refused activation; use
+`host: "in-process"` only when running that code in the client process is an
+explicitly reviewed choice.
 
 Every stub call is a dispatch of `stubCallAction` carrying the calling
 instance's id, attached where the plugin's code cannot read or forge it, so

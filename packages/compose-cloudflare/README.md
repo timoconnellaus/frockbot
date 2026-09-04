@@ -72,8 +72,9 @@ export default {
 };
 ```
 
-An entry that names `host: 'cloudflare'` runs in an isolate of its own; an entry
-that names no host runs in-process, unchanged.
+An entry that names `host: "cloudflare"` runs in an isolate of its own. Every
+source entry must name its host; omission is refused rather than silently
+falling back to in-process execution.
 
 ## What the written plugin sees
 
@@ -98,17 +99,24 @@ export async function add({ a, b }) {
 
 ## Options
 
-| Option               | Default                           | What it is                                                     |
-| -------------------- | --------------------------------- | -------------------------------------------------------------- |
-| `loader`             | —                                 | the Worker Loader binding                                      |
-| `compatibilityDate`  | —                                 | the date every loaded isolate runs under                       |
-| `compatibilityFlags` | none                              | flags for every loaded isolate                                 |
-| `limits`             | `{ cpuMs: 200, subRequests: 50 }` | the platform limits set on every load                          |
-| `callTimeoutMs`      | `5000`                            | the client-side wall clock on every `setup`, `call` and `stop` |
-| `name`               | `'cloudflare'`                    | the name entries use to ask for this host                      |
-| `hostId`             | the name                          | which host a loopback belongs to, if you run more than one     |
+| Option                 | Default                           | What it is                                                     |
+| ---------------------- | --------------------------------- | -------------------------------------------------------------- |
+| `loader`               | —                                 | the Worker Loader binding                                      |
+| `compatibilityDate`    | —                                 | the date every loaded isolate runs under                       |
+| `compatibilityFlags`   | none                              | flags for every loaded isolate                                 |
+| `limits`               | `{ cpuMs: 200, subRequests: 50 }` | the platform limits set on every load                          |
+| `callTimeoutMs`        | `5000`                            | the client-side wall clock on every `setup`, `call` and `stop` |
+| `httpTimeoutMs`        | `5000`                            | the wall-clock deadline for one HTTP grant call                |
+| `httpResponseMaxBytes` | `1048576`                         | the maximum HTTP response body read through the grant          |
+| `name`                 | `'cloudflare'`                    | the name entries use to ask for this host                      |
+| `hostId`               | the name                          | which host a loopback belongs to, if you run more than one     |
 
 Outbound network is off unconditionally and is not an option.
+
+The `http` grant accepts only `method`, string-valued `headers`, and a string or
+`ArrayBuffer` `body`. It pins requests to the configured service origin,
+attaches the service credential inside the host, uses manual redirects and
+refuses every redirect response so credentials never follow to another origin.
 
 ## A model, with no credential
 

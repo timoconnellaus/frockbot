@@ -13,7 +13,12 @@ describe("serializable plugin catalogs", () => {
     const catalog = { plugins: { safe: trusted }, stubs: { note } };
     const entries = [
       { id: "safe", plugin: trusted },
-      { id: "written", source: "export default function () {}", stubs: [note] },
+      {
+        id: "written",
+        source: "export default function () {}",
+        host: "in-process",
+        stubs: [note],
+      },
     ];
 
     const serialized = serializePluginList(entries, catalog);
@@ -31,6 +36,7 @@ describe("serializable plugin catalogs", () => {
         options: undefined,
         enabled: undefined,
         stubs: ["note"],
+        host: "in-process",
       },
     ]);
     expect(resolvePluginList(serialized, catalog)).toEqual(entries);

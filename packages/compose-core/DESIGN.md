@@ -315,7 +315,8 @@ own package, and core stays dependency-free.
 
 A **host** is the environment a plugin's code executes in. A plugin entry that
 carries **plugin source** — a string — instead of a `plugin` reference is started
-through a host: the in-process one by default, or the one the entry names.
+through the host the entry names. Omitting the host is a refused activation;
+in-process execution must be selected explicitly.
 
 ```ts
 { id: 'greeter', source: '…', host: 'worker', stubs: [toolsStub, logStub] }
@@ -768,7 +769,7 @@ parity oracle, and the two have different jobs.
 
 | Id  | Test file                             | `it()` title                                                                                                                                                                                                                                                                                                                                                   |
 | --- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A1  | `tests/hosts/contract.test.ts`        | `starts an entry with no host in-process and one that names a host there`                                                                                                                                                                                                                                                                                      |
+| A1  | `tests/hosts/contract.test.ts`        | `starts entries only in the host they name` / `refuses a source entry that omits its host`                                                                                                                                                                                                                                                                     |
 | A2  | `tests/hosts/instance-parity.test.ts` | every title under `plugin source in-process`, from `tests/helpers/instance-contract.ts`                                                                                                                                                                                                                                                                        |
 | A3  | `tests/hosts/contract.test.ts`        | `restarts the instance in the new host when an entry changes host` / `leaves an entry naming a host the client does not have in error`                                                                                                                                                                                                                         |
 | A4  | `tests/hosts/contract.test.ts`        | `hands a hosted plugin exactly the stubs its entry was granted` / `takes deps and provides for a hosted entry from the stubs it was granted`                                                                                                                                                                                                                   |

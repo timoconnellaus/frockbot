@@ -51,7 +51,7 @@ const fakeHost = (name: string) => {
 };
 
 describe("the host contract", () => {
-  it("starts an entry with no host in-process and one that names a host there", async () => {
+  it("starts entries only in the host they name", async () => {
     const elsewhere = fakeHost("elsewhere");
     const client = createClient({
       hosts: { elsewhere: elsewhere.host },
@@ -60,6 +60,7 @@ describe("the host contract", () => {
         {
           id: "here",
           source: `export default async function ({ stubs }) { await stubs.note('here') }`,
+          host: "in-process",
           stubs: [noteStub],
         },
         {
@@ -80,6 +81,24 @@ describe("the host contract", () => {
     expect(elsewhere.started.map((one) => one.instanceId)).toEqual(["there"]);
 
     await client.destroy();
+  });
+
+  it("refuses a source entry that omits its host", async () => {
+    const client = createClient({
+      plugins: [
+        {
+          id: "unhosted",
+          source: "export default function () {}",
+        } as never,
+      ],
+    });
+    await client.settled();
+
+    const [snapshot] = client.inspect();
+    expect(snapshot?.status).toBe("error");
+    expect(String((snapshot?.error as Error).message)).toContain(
+      "must name a host explicitly",
+    );
   });
 
   it("leaves an entry naming a host the client does not have in error", async () => {
@@ -131,6 +150,7 @@ describe("the host contract", () => {
               await stubs.note(typeof stubs.secret)
             }
           `,
+          host: "in-process",
           stubs: [noteStub],
         },
       ],
@@ -169,6 +189,7 @@ describe("the host contract", () => {
         {
           id: "a",
           source: `export default async function ({ stubs }) { await stubs.publish('hello') }`,
+          host: "in-process",
           stubs: [noteStub, publishStub],
         },
         { id: "reader", plugin: reader },
@@ -200,6 +221,7 @@ describe("the host contract", () => {
               await stubs.note(options.greeting + ':' + (await stubs.note('inner')))
             }
           `,
+          host: "in-process",
           options: { greeting: "hi" },
           stubs: [noteStub],
         },
@@ -211,6 +233,7 @@ describe("the host contract", () => {
     await client.addPlugin({
       id: "smuggler",
       source: `export default async function ({ stubs }) { await stubs.note(() => 1) }`,
+      host: "in-process",
       stubs: [noteStub],
     });
 
@@ -231,8 +254,8 @@ describe("the host contract", () => {
     const client = createClient({
       plugins: [
         { id: "recorder", plugin: recorder },
-        { id: "a", source, stubs: [noteStub] },
-        { id: "b", source, stubs: [noteStub] },
+        { id: "a", source, host: "in-process", stubs: [noteStub] },
+        { id: "b", source, host: "in-process", stubs: [noteStub] },
       ],
     });
     client.use(stubCallAction, ({ input, next }) => {
@@ -268,6 +291,7 @@ describe("the host contract", () => {
               await stubs.note({ instanceId: 'someone-else', input: 'forged' })
             }
           `,
+          host: "in-process",
           stubs: [noteStub],
         },
       ],

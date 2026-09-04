@@ -48,7 +48,7 @@ const client = createClient({
   checker: createTypeScriptChecker(),
   plugins: [
     { id: "tools", plugin: toolsPlugin },
-    { id: "adder", source, stubs: [toolsStub] },
+    { id: "adder", source, host: "in-process", stubs: [toolsStub] },
   ],
 });
 await client.settled();

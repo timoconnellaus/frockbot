@@ -22,6 +22,7 @@ describe("defineGrant", () => {
           source: `let data
 export default function ({ stubs }) { data = stubs.data }
 export function read(prefix) { return data.rows(prefix) }`,
+          host: "in-process",
           stubs: [data],
         },
       ],

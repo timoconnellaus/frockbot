@@ -343,8 +343,8 @@ export interface PluginSourceEntry extends PluginEntryBase<unknown> {
    * whose other named exports are the handlers the client may call.
    */
   source: string;
-  /** The host to start `source` in. Omitted means the in-process host. */
-  host?: string;
+  /** The explicitly selected host that starts `source`. */
+  host: string;
   /** The stubs this entry is granted; the only authority its source receives. */
   stubs?: ReadonlyArray<AnyStubGrant>;
 }

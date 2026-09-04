@@ -61,7 +61,7 @@ export async function write(
     checker: createTypeScriptChecker(),
     plugins: [
       { id: "registry", plugin: registryPlugin },
-      { id: "written", source, stubs: grants },
+      { id: "written", source, host: "in-process", stubs: grants },
     ],
   });
   await client.settled();

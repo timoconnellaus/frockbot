@@ -58,6 +58,7 @@ export default ({ stubs }) => { http = stubs.http }
 export const rates = () => http.fetch('currency', '/rates')
 export const bank = () => http.fetch('bank', '/rates')
 `,
+          host: "in-process",
           stubs: [httpStub],
         },
       ],
@@ -102,8 +103,8 @@ export const rates = () => http.fetch('currency', '/rates')
       hosts: { "in-process": host() },
       plugins: [
         { id: "policy", plugin: policy },
-        { id: "blocked", source, stubs: [httpStub] },
-        { id: "allowed", source, stubs: [httpStub] },
+        { id: "blocked", source, host: "in-process", stubs: [httpStub] },
+        { id: "allowed", source, host: "in-process", stubs: [httpStub] },
       ],
     });
     await client.settled();
@@ -133,7 +134,14 @@ export const names = () => api.files.list()
 `;
     const client = createClient({
       hosts: { "in-process": host() },
-      plugins: [{ id: "writer", source, stubs: [aiStub, filesStub] }],
+      plugins: [
+        {
+          id: "writer",
+          source,
+          host: "in-process",
+          stubs: [aiStub, filesStub],
+        },
+      ],
     });
     await client.settled();
 
@@ -154,6 +162,7 @@ export const names = () => api.files.list()
     await client.addPlugin({
       id: "writer",
       source,
+      host: "in-process",
       stubs: [aiStub, filesStub],
     });
     await expect(client.callSource("writer", "names")).resolves.toEqual([]);
@@ -174,6 +183,7 @@ let ai
 export default ({ stubs }) => { ai = stubs.ai }
 export const run = () => ai.text({ prompt: 'hello' })
 `,
+          host: "in-process",
           stubs: [aiStub],
         },
       ],

@@ -234,7 +234,14 @@ describe("the plugins the agent writes", () => {
 
   it("reads and rewrites only what it wrote itself", async () => {
     const { agent, session } = await buildComposer({
-      plugins: [{ id: "operators", source: alpha, stubs: [toolsStub] }],
+      plugins: [
+        {
+          id: "operators",
+          source: alpha,
+          host: "in-process",
+          stubs: [toolsStub],
+        },
+      ],
       script: [
         { toolCalls: [read("operators")] },
         { toolCalls: [write("operators", beta, true)] },

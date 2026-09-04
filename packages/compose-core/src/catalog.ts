@@ -91,7 +91,9 @@ export function resolvePluginList(
         if (!stub) throw new Error(`no stub named "${name}" in the catalog`);
         return stub;
       }),
-      ...(entry.host === undefined ? {} : { host: entry.host }),
+      // Older serialized rows may omit this field; resolve them to an empty
+      // host so the runtime records a visible fail-closed activation error.
+      host: entry.host ?? "",
     };
   });
 }

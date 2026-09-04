@@ -506,7 +506,7 @@ export function createComposerTools(
           id,
           source,
           stubs,
-          ...(given.host === undefined ? {} : { host: given.host }),
+          host: given.host ?? "",
         },
       ]);
       if (failed) return failure(failed, [id]);
@@ -593,7 +593,7 @@ export function createComposerTools(
                 options: item.options,
                 enabled: item.enabled,
                 stubs,
-                ...(given.host === undefined ? {} : { host: given.host }),
+                host: given.host ?? "",
               }
             : item,
         ),

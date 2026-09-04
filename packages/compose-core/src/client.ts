@@ -407,7 +407,7 @@ class ClientImpl implements Client {
     }
     return (
       entry.source === record.source &&
-      (entry.host ?? inProcessHost.name) === record.hostName &&
+      entry.host === record.hostName &&
       sameGrants(entry.stubs, record.grants)
     );
   }
@@ -420,7 +420,7 @@ class ClientImpl implements Client {
       ...(hosted
         ? {
             source: entry.source,
-            hostName: entry.host ?? inProcessHost.name,
+            hostName: entry.host,
             grants: entry.stubs ?? [],
           }
         : {}),
@@ -489,7 +489,12 @@ class ClientImpl implements Client {
     instance: Instance,
     options: unknown,
   ): Promise<void> {
-    const hostName = entry.host ?? inProcessHost.name;
+    const hostName = entry.host;
+    if (typeof hostName !== "string" || hostName === "") {
+      throw new Error(
+        `@frockbot/compose-core: source entry "${entry.id}" must name a host explicitly`,
+      );
+    }
     const host = this.#hosts.get(hostName);
     if (!host) {
       throw new Error(
@@ -1299,8 +1304,8 @@ export function createClient(options?: {
   /** The source checker to apply to every source entry, regardless of order. */
   checker?: SourceChecker;
   /**
-   * Hosts an entry may name, by name. The in-process host is always present as
-   * `in-process` and is what an entry with no `host` runs in.
+   * Hosts an entry may name, by name. The in-process host is available as
+   * `in-process`, but source entries must select every host explicitly.
    */
   hosts?: Record<string, Host>;
   /** Called for every failure the client contained rather than propagated. */

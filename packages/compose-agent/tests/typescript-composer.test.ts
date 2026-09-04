@@ -142,6 +142,7 @@ describe("an agent writing a plugin against the real type checker", () => {
           options: {
             protected: ["session", "tools", "prompt", "models", "loop"],
             stubs: [...agentStubs],
+            host: "in-process",
           },
         },
       ],

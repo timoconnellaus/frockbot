@@ -41,6 +41,7 @@ describe("in-process stateful grants", () => {
         {
           id: "stateful-test",
           source: storedSource(),
+          host: "in-process",
           options: { step: 1 },
           stubs: [storageStub],
         },
@@ -56,6 +57,7 @@ describe("in-process stateful grants", () => {
       {
         id: "stateful-test",
         source: storedSource("// rewritten"),
+        host: "in-process",
         options: { step: 10 },
         stubs: [storageStub],
       },
@@ -66,6 +68,7 @@ describe("in-process stateful grants", () => {
     await client.addPlugin({
       id: "stateful-test",
       source: storedSource(),
+      host: "in-process",
       options: { step: 4 },
       stubs: [storageStub],
     });
@@ -95,6 +98,7 @@ export default async ({ stubs }) => {
 }
 export const wake = (input) => note(input)
 `,
+          host: "in-process",
           stubs: [scheduleStub, note],
         },
       ],

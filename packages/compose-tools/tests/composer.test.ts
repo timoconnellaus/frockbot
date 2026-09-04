@@ -291,7 +291,11 @@ describe("the framework-neutral composer definitions", () => {
       checker,
       hosts: { "in-process": createInProcessHost({ grants: {} }) },
     });
-    const tools = createComposerTools({ client, stubs: [granted] });
+    const tools = createComposerTools({
+      client,
+      host: "in-process",
+      stubs: [granted],
+    });
 
     const listed = await run(tools, "list_plugins", {});
     const written = await run(tools, "write_plugin", {
