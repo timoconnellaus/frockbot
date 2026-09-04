@@ -442,9 +442,32 @@ export function projectAnnouncements(
     const index = messages.findIndex(
       (candidate) => candidate.id === announcement.announcementId,
     );
-    if (index >= 0) messages[index] = message;
-    else messages.push(message);
+    // Removed before it is placed, so a marker that already sits in the thread
+    // is re-seated rather than frozen wherever the first poll put it.
+    if (index >= 0) messages.splice(index, 1);
+    messages.splice(announcementIndex(messages, message.at ?? ""), 0, message);
   }
+}
+
+/**
+ * Where a system line belongs among the Turns.
+ *
+ * Only the user message of a Turn carries a timestamp; everything the Bot
+ * wrote for that Turn follows it untimed. So an untimed message inherits the
+ * last timestamp seen, and the line is placed before the first message that is
+ * genuinely later than it. A marker for a range that has scrolled out of the
+ * transcript sorts before everything, which puts it at the top of what remains.
+ */
+function announcementIndex(
+  messages: readonly WebChatMessage[],
+  at: string,
+): number {
+  let seen = "";
+  for (const [index, candidate] of messages.entries()) {
+    if (candidate.at) seen = candidate.at;
+    if (seen > at) return index;
+  }
+  return messages.length;
 }
 
 export function projectDurableRuns(

@@ -23,6 +23,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
+import { STALLED_SUMMARISER_SENTINEL } from "./harness/miniflare.ts";
 
 function bot(name: string) {
   return env.BOT_STATES.getByName(name);
@@ -141,5 +142,96 @@ describe("conversation compaction in Workerd", () => {
       }),
     );
     expect(JSON.stringify(announcements)).not.toContain(compacted.summary);
+
+    // AND IT SITS WHERE THE SUMMARY ENDS. The marker is dated by the end of the
+    // Turn it covers through, not by the Turn that triggered it — so the
+    // transcript draws it between the last compacted Turn and the first
+    // verbatim one instead of under the newest reply.
+    const marker = (
+      announcements as Array<{ type: string; at: string; throughTurn: number }>
+    ).find((entry) => entry.type === "conversation/compacted");
+    const boundary = after.find(
+      (event) =>
+        event.type === "turn/end" && event.turn === compacted.throughTurn,
+    );
+    expect(marker?.at).toBe(boundary?.timestamp);
+    // Between the two Turns that bound the range, on the log's own clock. (The
+    // runs' `admittedAt` cannot be compared with it here: this suite hands the
+    // object a synthetic `acceptedAt`, so the two clocks are years apart.)
+    const started = after.find(
+      (event) =>
+        event.type === "turn/start" && event.turn === compacted.throughTurn,
+    );
+    const next = after.find(
+      (event) =>
+        event.type === "turn/start" && event.turn === compacted.throughTurn + 1,
+    );
+    expect(started!.timestamp <= marker!.at).toBe(true);
+    expect(marker!.at <= next!.timestamp).toBe(true);
+    // And never the newest line in the thread, which is where it used to sit.
+    const newest = after.findLast((event) => event.type === "turn/end");
+    expect(marker!.at < newest!.timestamp).toBe(true);
+  });
+
+  // The defect this replaces: `agent/turn-stopping` is a hook the agent loop
+  // awaits inside `#runTurn`'s `finally`, so a 40-second summariser held the
+  // run's terminal record, the `runs` broadcast, and the HTTP response. The
+  // summariser here hangs for five seconds; nothing a person does may notice.
+  test("a stalled summariser delays neither the Turn it follows nor the next one", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `stalled-user-${suffix}`,
+      botId: `stalled-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const name = `${identity.userId}:${identity.botId}`;
+    const stub = bot(name);
+
+    async function turn(index: number): Promise<number> {
+      const started = Date.now();
+      const result = await stub.run({
+        ...identity,
+        command: {
+          runId: `run-${index}`,
+          sessionId: name,
+          acceptedAt: new Date(1_800_000_000_000 + index * 1_000).toISOString(),
+          // Carried into the summariser's own request, which is how the stub
+          // knows to hang on this conversation and no other.
+          text: `${STALLED_SUMMARISER_SENTINEL} ${say(index)}`,
+        },
+      });
+      expect(result.text).toBe("Ollama reply");
+      return Date.now() - started;
+    }
+
+    const durations: number[] = [];
+    for (let index = 1; index <= 12; index += 1) {
+      durations.push(await turn(index));
+    }
+    const events = await stub.durableSessionEvents();
+    const intents = events.filter(
+      (event) => event.type === "conversation/compaction-intent",
+    );
+    // The threshold was crossed and the summariser was reached: without this
+    // the timings below would prove nothing.
+    expect(intents.length).toBeGreaterThan(0);
+    // Nobody waited five seconds. Every Turn is within a second of the median,
+    // which is the assertion the 50s Turn on main would have failed.
+    const median = [...durations].sort((left, right) => left - right)[
+      Math.floor(durations.length / 2)
+    ]!;
+    for (const duration of durations) {
+      expect(duration).toBeLessThan(median + 2_000);
+    }
+    // …and the summariser really did hang: every attempt yielded to the Turn
+    // behind it rather than holding it, so none of them recorded a summary.
+    expect(
+      events.filter((event) => event.type === "conversation/compacted"),
+    ).toHaveLength(0);
+    expect(
+      events.filter((event) => event.type === "conversation/compaction-failed")
+        .length,
+    ).toBeGreaterThan(0);
   });
 });

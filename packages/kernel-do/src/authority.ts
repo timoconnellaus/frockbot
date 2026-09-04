@@ -48,6 +48,7 @@ import {
 } from "./turn-errors.js";
 import {
   botConversationBaseSessionIdV1,
+  ConversationBusyError,
   conversationSessionIdV1,
   decodeConversationRecordV1,
   decodeStoredConversationV1,
@@ -1058,9 +1059,10 @@ export class BotDurableAuthority<Snapshot> {
       const active = await transaction.get<string>(ACTIVE_RUN_KEY);
       const pending = await transaction.get<string>(PENDING_RUN_KEY);
       if (active || pending) {
-        throw new Error(
-          "This Bot is still working on a Turn. Wait for it to finish, then start a new conversation.",
-        );
+        // A typed refusal, not a bare Error: the Durable Object boundary turns
+        // this one case into a 409 value rather than letting it escape the
+        // object's entry frame as an uncaught exception.
+        throw new ConversationBusyError();
       }
       const current =
         decodeStoredConversationV1(

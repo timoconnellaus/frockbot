@@ -419,10 +419,16 @@ export class BotState extends DurableObject<BotStateEnv> {
               // The Computer Contribution's projection cache and its share of
               // the authority's one durable alarm, reached through the table
               // once it has mounted.
-              invalidateComputerProjectionFile: (userId, botId, kind) =>
+              invalidateComputerProjectionFile: (userId, botId, kind) => {
                 mountedContributions
                   .get(computerBotContribution)
-                  ?.invalidateProjectionFile(userId, botId, kind),
+                  ?.invalidateProjectionFile(userId, botId, kind);
+                // Dropping the resident cache only makes the next read
+                // honest. The notice is what makes an attached browser take
+                // that read, so a capture filed mid-Turn reaches the card in
+                // about a second instead of at the next projection poll.
+                this.stateChannel.noticeComputer();
+              },
               scheduledDeadlines: (transaction) =>
                 mountedContributions
                   .get(computerBotContribution)

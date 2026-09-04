@@ -248,6 +248,10 @@ export class BotStateChannel {
   /** When the last `runs` notice was appended; the throttle's only clock. */
   private runsNoticeAt = 0;
   private readonly runsNoticeIntervalMs: number;
+  /** The same coalescing pair for `computer`, which a Turn writes as often. */
+  private computerNotice: Promise<void> | undefined;
+  private computerPending = false;
+  private computerNoticeAt = 0;
 
   constructor(
     private readonly state: DurableObjectState,
@@ -377,6 +381,42 @@ export class BotStateChannel {
       })
       .finally(() => {
         this.runsNotice = undefined;
+      });
+  }
+
+  /**
+   * Append and broadcast one `computer` invalidation for a write the Bot made
+   * outside this Durable Object's storage.
+   *
+   * A screenshot the Bot files mid-Turn lands in the Workspace, not in DO
+   * storage, so no `ChannelComputerStorage` write announces it and an
+   * attached browser would not read the fresher capture until its next poll.
+   * Coalesced on the same interval as `runs`: a Turn running Computer actions
+   * back to back only ever needs the browser to know it should read again.
+   */
+  noticeComputer(): void {
+    this.computerPending = true;
+    if (this.computerNotice) return;
+    this.computerNotice = (async () => {
+      while (this.computerPending) {
+        const wait =
+          this.runsNoticeIntervalMs - (Date.now() - this.computerNoticeAt);
+        if (wait > 0) await delay(wait);
+        this.computerPending = false;
+        this.computerNoticeAt = Date.now();
+        let event: StoredChannelEventV1 | undefined;
+        await this.state.storage.transaction(async (transaction) => {
+          event = await this.append(transaction, "computer");
+        });
+        this.broadcast(event);
+      }
+    })()
+      .catch(() => {
+        // An observer notice is never authority. A dropped one costs the
+        // client its next poll, and the capture it described stands.
+      })
+      .finally(() => {
+        this.computerNotice = undefined;
       });
   }
 
