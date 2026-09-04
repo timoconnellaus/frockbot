@@ -252,6 +252,8 @@ export class BotStateChannel {
   private computerNotice: Promise<void> | undefined;
   private computerPending = false;
   private computerNoticeAt = 0;
+  /** Set once the Bot is torn down; no notice may write storage after that. */
+  private silenced = false;
 
   constructor(
     private readonly state: DurableObjectState,
@@ -354,6 +356,7 @@ export class BotStateChannel {
    * that it should read again.
    */
   private noticeRuns(): void {
+    if (this.silenced) return;
     this.runsPending = true;
     if (this.runsNotice) return;
     this.runsNotice = (async () => {
@@ -368,6 +371,7 @@ export class BotStateChannel {
         if (wait > 0) await delay(wait);
         this.runsPending = false;
         this.runsNoticeAt = Date.now();
+        if (this.silenced) return;
         let event: StoredChannelEventV1 | undefined;
         await this.state.storage.transaction(async (transaction) => {
           event = await this.append(transaction, "runs");
@@ -395,6 +399,7 @@ export class BotStateChannel {
    * back to back only ever needs the browser to know it should read again.
    */
   noticeComputer(): void {
+    if (this.silenced) return;
     this.computerPending = true;
     if (this.computerNotice) return;
     this.computerNotice = (async () => {
@@ -404,6 +409,7 @@ export class BotStateChannel {
         if (wait > 0) await delay(wait);
         this.computerPending = false;
         this.computerNoticeAt = Date.now();
+        if (this.silenced) return;
         let event: StoredChannelEventV1 | undefined;
         await this.state.storage.transaction(async (transaction) => {
           event = await this.append(transaction, "computer");
@@ -418,6 +424,30 @@ export class BotStateChannel {
       .finally(() => {
         this.computerNotice = undefined;
       });
+  }
+
+  /**
+   * Stops this channel writing, for good. Called by the Bot's teardown before
+   * it wipes storage.
+   *
+   * A notice is deliberately deferred — the throttle is what stops a streaming
+   * answer writing one channel event per token — so at any moment there can be
+   * a notice waiting out its interval with a `transaction` still to run. A
+   * delete landing in that window let the wait finish against an object that no
+   * longer exists, and `append` recreated `bot-state-channel:meta:v1` and an
+   * event *after* `deleteAll()`. The Bot was tombstoned and holding storage
+   * again, which is exactly what the teardown exists to prevent.
+   *
+   * The notice is worth nothing by then in any case: it says "the runs moved,
+   * read them again", about runs that have been deleted, to observers whose
+   * next read is a 404. So the flag is checked both before scheduling and
+   * again after the wait, which is the only place the object can be torn down
+   * underneath an in-flight notice.
+   */
+  silence(): void {
+    this.silenced = true;
+    this.runsPending = false;
+    this.computerPending = false;
   }
 
   /** The configured callback belongs to the kernel; Packages contribute only deadlines. */

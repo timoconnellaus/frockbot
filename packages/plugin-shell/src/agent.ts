@@ -124,6 +124,60 @@ function openStepPositionV1(
   return { turn: started.turn, step: started.step };
 }
 
+/** The longest acknowledgement worth promoting; longer is not an ack. */
+export const PROMOTED_ASSISTANT_TEXT_LIMIT_V1 = 600;
+
+/** The occurrence id a promoted send is recorded under, per model request. */
+export function promotedSendOccurrenceIdV1(requestId: string): string {
+  return `assistant-text:${requestId}`;
+}
+
+/**
+ * Promotes a step's assistant text to a send when the model wrote to the
+ * person and then called tools without sending.
+ *
+ * The verification run is the whole argument for this. The model did exactly
+ * what the contract asks — "On it — building the 2027 countdown applet now.",
+ * one short line, no narration — and then called its tools. It went nowhere:
+ * the thread draws one bubble per send (issue 153) and there was no send, so
+ * the person watched a spinner and then a failure, with the acknowledgement
+ * they were owed sitting in the log where only the debug surface could see it.
+ *
+ * A step that already sent is left alone: the model's own text is scratch
+ * space once it has spoken, and promoting it there is how the same line
+ * arrives twice. The occurrence id is derived from the model request, so a
+ * step replayed after an eviction promotes the same text to the same
+ * occurrence rather than a second bubble.
+ *
+ * The prompt asks for the call and this does not replace it — a model that
+ * calls `send_to_user` never reaches here.
+ */
+export async function promoteAssistantTextToSendV1(
+  session: Session,
+  text: string,
+  position: { turn: number; step: number; requestId: string },
+): Promise<void> {
+  const trimmed = text.trim();
+  if (trimmed.length === 0 || trimmed.length > PROMOTED_ASSISTANT_TEXT_LIMIT_V1)
+    return;
+  const occurrenceId = promotedSendOccurrenceIdV1(position.requestId);
+  const spokeThisStep = session.events.some(
+    (event) =>
+      event.type === "send/to-user" &&
+      event.turn === position.turn &&
+      event.step === position.step,
+  );
+  if (spokeThisStep) return;
+  session.append({
+    type: "send/to-user",
+    turn: position.turn,
+    step: position.step,
+    occurrenceId,
+    payload: { type: "text", text: trimmed },
+  });
+  await session.flush();
+}
+
 /** What a recorded send tells the model it did. */
 function sendAcknowledgement(payload: SendToUserPayloadV1): string {
   switch (payload.type) {
@@ -160,7 +214,11 @@ export const CONVERSATION_PROMPT_TEXT_V1 = [
   "## Talking to the user",
   "",
   "Everything the user sees is a `send_to_user` call; nothing else reaches them.",
-  'When a request will take more than a moment, send one short line first — "On it." or "Looking into that." — then go quiet and work.',
+  // The first line said sends are the only thing the user sees, and a model
+  // still wrote its acknowledgement as plain assistant text and went straight
+  // on to call tools — nobody saw it. So the acknowledgement names the call.
+  "Your own text is not shown to the user. Writing a line in your reply instead of calling `send_to_user` means nobody reads it.",
+  'When a request will take more than a moment, your first action is a `send_to_user` call with one short line — "On it." or "Looking into that." — and then you go quiet and work.',
   "After that, send only on a real beat: the result, a decision only the user can make, or a blocker you cannot get past.",
   "Never narrate what you are doing, what you are about to do, or which tool you are using.",
   "Never leave a question or a request hanging: before you stop, the user must have the answer, the result, or the reason there isn't one.",
@@ -361,6 +419,12 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
       createWakeParentTool(ctx.sessions),
       parentHandoff ? { admissionCeiling: parentHandoff } : undefined,
     ),
+    // The safety net under the prompt: a model that acknowledges the request
+    // in its own text instead of calling `send_to_user` still reaches the
+    // person. See `promoteAssistantTextToSendV1`.
+    ctx.on("agent/assistant-text", async (agent, text, position) => {
+      await promoteAssistantTextToSendV1(agent.session, text, position);
+    }),
     // ADR 0030. `ctx.inject` rather than a declared dependency: a host that
     // mounts the Shell without a model still gets its tools and its transcript
     // seam, and simply never compacts. The hook is evaluated after `turn/end`
