@@ -23,9 +23,9 @@ jobs:
     # workflow never ran stays pending forever, while a job skipped by its
     # `if` reports `skipped`, which the ruleset accepts.
     #
-    # "Documentation" is `docs/**` and the Markdown files at the repository
-    # root. Markdown elsewhere is deliberately code: a Package may ship a
-    # Skill or a prompt as `.md`, and nothing here reads a path to find out.
+    # What counts as documentation is decided by `scripts/docs-only.sh`, the
+    # same script the pre-commit hook runs, so a commit the hook waved through
+    # as documentation is one this job classifies the same way.
     name: Classify changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -69,24 +69,13 @@ jobs:
               ;;
           esac
 
-          mapfile -t changed < <(git diff --name-only "$range")
-          printf 'Changed: %s\n' "${changed[@]:-<none>}"
+          changed="$(git diff --name-only "$range")"
+          printf 'Changed:\n%s\n' "${changed:-<none>}"
 
-          # An empty diff is not documentation; it is a run with nothing to
-          # classify, and the full suite is the safe answer.
-          if (( ${#changed[@]} == 0 )); then
-            echo "docs-only=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          docs_only=false
+          if printf '%s\n' "$changed" | bash scripts/docs-only.sh; then
+            docs_only=true
           fi
-
-          docs_only=true
-          for path in "${changed[@]}"; do
-            case "$path" in
-              docs/*) ;;
-              *.md) [[ "$path" == */* ]] && docs_only=false ;;
-              *) docs_only=false ;;
-            esac
-          done
 
           echo "docs-only=$docs_only"
           echo "docs-only=$docs_only" >> "$GITHUB_OUTPUT"
