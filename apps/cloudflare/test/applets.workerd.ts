@@ -215,11 +215,31 @@ async function publishGeneration(
   return { outcome, generation, serverHash, uiHash };
 }
 
-async function invoke(applet: string, tool: string, input: unknown) {
+/** The generation the object says is current, as a Turn's Composition pins it. */
+async function currentGenerationId(applet: string): Promise<string> {
+  const view = await stateFor(applet).read({
+    schemaVersion: 1,
+    userId: OWNER,
+    appletId: applet,
+  });
+  return view.current?.generationId ?? "none";
+}
+
+/**
+ * One Applet tool call. `generationId` is the pin the caller's Turn carries;
+ * it defaults to whatever is current, which is what an uneventful Turn does.
+ */
+async function invoke(
+  applet: string,
+  tool: string,
+  input: unknown,
+  generationId?: string,
+) {
   return stateFor(applet).invokeTool({
     schemaVersion: 1,
     userId: OWNER,
     appletId: applet,
+    generationId: generationId ?? (await currentGenerationId(applet)),
     tool,
     toolInput: input,
   });
@@ -603,6 +623,67 @@ describe("an activation trial cannot change the previous generation's data", () 
     expect(await invoke(applet, "list_todos", {})).toMatchObject({
       content: "B:",
     });
+  });
+});
+
+// ADR 0038's second half. A Turn's Composition advertises one Applet generation
+// to the model — its tools, their schemas, and its provenance — and the call it
+// makes names that generation. The instance runs it or refuses.
+describe("Applet tool calls execute the generation the Turn pinned", () => {
+  test("a call pinned to a superseded generation is refused, and nothing runs", async () => {
+    const applet = appletId("pinned");
+    const first = await publishGeneration(applet, {
+      version: "A",
+      tools: ["add_todo", "list_todos"],
+    });
+    await invoke(
+      applet,
+      "add_todo",
+      { title: "milk" },
+      first.generation.generationId,
+    );
+
+    // A publish lands while the Turn pinned to A is still running.
+    const second = await publishGeneration(applet, {
+      version: "B",
+      tools: ["add_todo", "list_todos"],
+    });
+    expect(second.outcome).toMatchObject({ status: "active" });
+
+    const refused = await invoke(
+      applet,
+      "add_todo",
+      { title: "written-by-the-wrong-version" },
+      first.generation.generationId,
+    );
+    expect(refused.status).toBe("error");
+    expect(refused.content).toContain(first.generation.generationId);
+    expect(refused.content).toContain(second.generation.generationId);
+
+    // The refusal really is a refusal: B never ran the tool.
+    expect(
+      await invoke(applet, "list_todos", {}, second.generation.generationId),
+    ).toMatchObject({ status: "ok", content: "B:milk" });
+  });
+
+  test("the next Turn, pinned to the new generation, runs it", async () => {
+    const applet = appletId("pinned-next");
+    await publishGeneration(applet, {
+      version: "A",
+      tools: ["add_todo", "list_todos"],
+    });
+    const second = await publishGeneration(applet, {
+      version: "B",
+      tools: ["add_todo", "list_todos"],
+    });
+    expect(
+      await invoke(
+        applet,
+        "add_todo",
+        { title: "eggs" },
+        second.generation.generationId,
+      ),
+    ).toMatchObject({ status: "ok", content: "B:added:eggs" });
   });
 });
 

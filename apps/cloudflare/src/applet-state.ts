@@ -690,6 +690,13 @@ export class AppletState extends DurableObject<AppletStateEnv> {
    * Route one Applet tool call to the facet. The facet stub never leaves this
    * object (`DOMDataCloneError: Stubs pointing to Durable Object facets are not
    * serializable`), and the call is bounded exactly like an isolate tool's.
+   *
+   * The caller names the generation its Turn pinned, and this object runs that
+   * generation or none (ADR 0038). A Turn's Composition advertises one Applet
+   * generation's tools, schemas, and provenance to the model; executing a
+   * different generation behind that description would make the Turn
+   * unreconstructable, so a mismatch is a plain refusal the Turn can read and
+   * the model can act on, not a silent upgrade.
    */
   async invokeTool(input: unknown): Promise<{
     status: "ok" | "error";
@@ -698,6 +705,7 @@ export class AppletState extends DurableObject<AppletStateEnv> {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
       appletId: rpcString(129),
+      generationId: rpcString(128),
       tool: rpcString(64),
       toolInput: rpcDecodedValue,
     });
@@ -708,6 +716,16 @@ export class AppletState extends DurableObject<AppletStateEnv> {
       return {
         status: "error",
         content: `Applet "${request.appletId}" has no active generation`,
+      };
+    }
+    if (resident.generationId !== request.generationId) {
+      return {
+        status: "error",
+        content:
+          `This Turn is pinned to generation "${request.generationId}" of Applet ` +
+          `"${request.appletId}", and generation "${resident.generationId}" is now ` +
+          `the one that is published. The tool was not run, and nothing changed. ` +
+          `The next Turn picks up the new generation; retry there.`,
       };
     }
     try {
