@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# Spend Is a User-Owned Priced Event Ledger
+# Spend Is a User-Owned Priced Usage Ledger
 
 ## Context
 
