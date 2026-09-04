@@ -457,37 +457,87 @@ test("a conversation opens at its end, and switching back to it does not reload 
   await expect(composerInput(page)).toHaveValue("");
 
   /*
-   * The thread is laid out but not painted while it carries `thread-settling`,
-   * so the frame in which that class is removed is the first frame the reader
-   * sees. A `MutationObserver` callback runs before that frame is painted,
-   * which makes this the position that reaches the screen — and not a position
-   * sampled after a scroll, which is the effect being removed.
+   * Everything this test asks about is true or false at one instant — the
+   * moment the thread stops carrying `thread-settling`, which is when it goes
+   * from laid-out-but-unpainted to on screen. So it is all sampled there, in
+   * the page, rather than read back afterwards from Node where a background
+   * revalidation could have landed in between and changed the answer.
+   *
+   * What is sampled: where the thread is scrolled, how much of the transcript
+   * is in it, and how many `GET /turns` reads have *answered* this client. A
+   * transcript drawn from the cache is whole and at its end with that count
+   * still at zero — it cannot have come from a read that has not returned. The
+   * count is of answers rather than of requests on purpose: the design says a
+   * restored transcript may be revalidated behind the paint, so a read in
+   * flight at this instant is the feature and not the bug.
+   *
+   * The class is read from each mutation record's `oldValue` rather than from
+   * the element, so a slow runner that batches the add and the remove into one
+   * callback is still seen as the transition it was.
    */
   await page.evaluate(() => {
     const element = document.querySelector("section.thread");
     if (!element) throw new Error("the thread is missing");
-    const samples: { atEnd: boolean; distance: number }[] = [];
-    (window as unknown as { threadOpenings: typeof samples }).threadOpenings =
-      samples;
-    let settling = element.classList.contains("thread-settling");
-    new MutationObserver(() => {
-      const now = element.classList.contains("thread-settling");
-      if (settling && !now) {
-        const distance =
-          element.scrollHeight - element.scrollTop - element.clientHeight;
-        samples.push({ atEnd: distance <= 1, distance });
-      }
-      settling = now;
-    }).observe(element, { attributes: true, attributeFilter: ["class"] });
-  });
+    const marker = "thread-settling";
+    const samples: {
+      atEnd: boolean;
+      distance: number;
+      messages: number;
+      turnReads: number;
+    }[] = [];
+    const scope = window as unknown as {
+      threadOpenings: typeof samples;
+      threadTurnReads: number;
+    };
+    scope.threadOpenings = samples;
+    scope.threadTurnReads = 0;
 
-  // Every `/turns` read from here on, so "did switching back reload it?" is a
-  // count rather than an impression.
-  const turnReads: string[] = [];
-  page.on("request", (request) => {
-    const { pathname } = new URL(request.url());
-    if (pathname.endsWith("/turns") && request.method() === "GET")
-      turnReads.push(pathname);
+    const fetchImpl = window.fetch.bind(window);
+    const counting = (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      const method = (
+        init?.method ?? (input instanceof Request ? input.method : "GET")
+      ).toUpperCase();
+      const answer = fetchImpl(input, init);
+      if (
+        method === "GET" &&
+        new URL(url, location.href).pathname.endsWith("/turns")
+      )
+        return answer.then((response) => {
+          scope.threadTurnReads += 1;
+          return response;
+        });
+      return answer;
+    };
+    // The counter stands in for `fetch` itself, so anything hung off the real
+    // one — `preconnect` — is carried across rather than dropped.
+    window.fetch = Object.assign(counting, window.fetch) as typeof window.fetch;
+
+    new MutationObserver((records) => {
+      const left = records.some(
+        (record) =>
+          record.attributeName === "class" &&
+          (record.oldValue ?? "").includes(marker),
+      );
+      if (!left || element.classList.contains(marker)) return;
+      const distance =
+        element.scrollHeight - element.scrollTop - element.clientHeight;
+      samples.push({
+        atEnd: distance <= 1,
+        distance,
+        messages: element.querySelectorAll("article.message-user").length,
+        turnReads: scope.threadTurnReads,
+      });
+    }).observe(element, {
+      attributes: true,
+      attributeFilter: ["class"],
+      attributeOldValue: true,
+    });
   });
 
   await revealSidebar(page);
@@ -495,8 +545,6 @@ test("a conversation opens at its end, and switching back to it does not reload 
     .locator(".flock-bot-row", { has: page.getByText("Long", { exact: true }) })
     .click();
 
-  // The transcript is held in the client, so it is here with no read behind
-  // it: no empty thread, no spinner, no round trip.
   await expect(thread.getByText(prompts[0] ?? "")).toBeVisible();
   await expect(thread.getByText(prompts.at(-1) ?? "")).toBeVisible();
 
@@ -504,20 +552,31 @@ test("a conversation opens at its end, and switching back to it does not reload 
     () =>
       (
         window as unknown as {
-          threadOpenings: { atEnd: boolean; distance: number }[];
+          threadOpenings: {
+            atEnd: boolean;
+            distance: number;
+            messages: number;
+            turnReads: number;
+          }[];
         }
       ).threadOpenings,
   );
-  expect(openings.length).toBeGreaterThan(0);
-  expect(openings.every((sample) => sample.atEnd)).toBe(true);
+  const opening = openings[0];
+  expect(opening).toBeDefined();
+  if (!opening) throw new Error("the thread never opened");
+  // The conversation is on screen at its end in the first frame that shows it:
+  // no top-of-thread frame, and no scroll for the reader to watch.
+  expect(opening.atEnd).toBe(true);
+  // Whole, and drawn from the client's own memory: every Turn is on screen
+  // while no read of them has answered. That is the reload the User asked not
+  // to have — the thread was never empty and never waited on the network.
+  expect(opening.messages).toBe(prompts.length);
+  expect(opening.turnReads).toBe(0);
 
-  // And it is still there once it is visible, rather than having settled there
-  // where the reader could watch it happen.
+  // It stays at the end once visible, rather than settling there afterwards.
   const distance = await thread.evaluate(
     (element) =>
       element.scrollHeight - element.scrollTop - element.clientHeight,
   );
   expect(distance).toBeLessThanOrEqual(1);
-
-  expect(turnReads).toEqual([]);
 });
