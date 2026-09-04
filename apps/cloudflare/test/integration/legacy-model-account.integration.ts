@@ -19,7 +19,7 @@ import {
 useApplicationArtifact();
 
 describe("legacy model account migration through the gateway", () => {
-  it("enables Custom models and admits the Bot's next Turn on Flock AI", async () => {
+  it("enables Custom models and admits the Bot's next Turn on Frock AI", async () => {
     const userId = freshUserId("legacy-model");
     const botId = "primary";
     await runInDurableObject(
@@ -41,7 +41,7 @@ describe("legacy model account migration through the gateway", () => {
     };
     expect(migrated.platformModel).toEqual({
       connectionId: "flock-ai-ambient",
-      providerModelId: "@flock/auto",
+      providerModelId: "@frock/auto",
     });
     expect(migrated.packages).not.toContainEqual(
       expect.objectContaining({ packageId: "provider-workers-ai" }),
@@ -90,6 +90,6 @@ describe("legacy model account migration through the gateway", () => {
       text: "hello",
     });
     expect(turn.status).toBe(200);
-    expect(JSON.stringify(await turn.json())).toContain("Flock AI reply");
+    expect(JSON.stringify(await turn.json())).toContain("Frock AI reply");
   });
 });

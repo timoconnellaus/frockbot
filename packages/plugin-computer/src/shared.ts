@@ -45,6 +45,17 @@ export interface ComputerState {
   connect(): Promise<void>;
   /** Explicit User open. An idle Computer may wake; rendering never does. */
   openViewer(): Promise<void>;
+  /**
+   * Declares that a view-only card preview is on screen.
+   *
+   * Held, the one minted viewer session is kept alive by the same heartbeat
+   * the full-screen viewer uses, so a card watching a working Bot does not
+   * lose the desktop to session expiry. Releasing it lets the session lapse,
+   * which is what stops an idle Bot from holding a VNC connection. It mints
+   * nothing and wakes nothing: a Computer with no session stays on the
+   * stored capture (P1).
+   */
+  holdLivePreview?(held: boolean): void;
   /** Closes the viewer, releasing human control before it disappears. */
   closeViewer(): Promise<void>;
   takeControl(): Promise<void>;

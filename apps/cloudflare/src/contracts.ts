@@ -85,6 +85,7 @@ import type {
 } from "@frockbot/plugin-package-publisher/shared";
 import type {
   ClientConversationListV1,
+  ClientConversationOutcomeV1,
   ClientRunLookupQueryV1,
   ClientRunLookupV1,
   ClientRunListQueryV1,
@@ -245,7 +246,7 @@ export interface UserBotStateBinding {
   startConversation(input: {
     schemaVersion: 1;
     botId: string;
-  }): Promise<ClientConversationListV1>;
+  }): Promise<ClientConversationOutcomeV1>;
   lookupRun(input: {
     schemaVersion: 1;
     botId: string;

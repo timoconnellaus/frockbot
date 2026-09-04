@@ -21,6 +21,7 @@ import {
   ClientApplication,
   decodeAcknowledgement,
   decodeNotificationList,
+  readJsonResponseV1,
   decodeRevocationResult,
   decodeStartConnectionResult,
   type ClientTurnResponse,
@@ -83,67 +84,15 @@ async function apiRequest(
         headers: body ? { "content-type": "application/json" } : undefined,
         body,
       });
-  const answer = await readApiBody(response);
-  if (!response.ok) throw apiFailure(response, answer, "Hosted request failed");
-  if (answer.value === undefined) {
-    throw new Error("Hosted request returned a body that is not JSON");
-  }
-  return answer.value;
-}
-
-/**
- * A gateway answer, decoded without assuming it is JSON.
- *
- * The gateway answers JSON for everything it decides, but a failure below it —
- * a Worker that would not start, an edge error page — is text. Parsing that as
- * JSON reported `Unexpected token 'I'` to the User instead of what broke, so a
- * body that will not parse is carried through as its own text.
- */
-async function readApiBody(
-  response: Response,
-): Promise<{ value: unknown; text?: string }> {
-  const text = await response.text();
-  if (text === "") return { value: null };
-  try {
-    return { value: JSON.parse(text) as unknown };
-  } catch {
-    return { value: undefined, text };
-  }
-}
-
-function apiFailure(
-  response: Response,
-  answer: { value: unknown; text?: string },
-  fallback: string,
-): Error & { definitive?: boolean; status?: number } {
-  const value = answer.value;
-  const message =
-    typeof value === "object" &&
-    value !== null &&
-    "error" in value &&
-    typeof value.error === "string"
-      ? value.error
-      : (answer.text?.trim().slice(0, 200) ??
-        `${fallback} (${String(response.status)})`);
-  const failure = new Error(message || fallback) as Error & {
-    definitive?: boolean;
-    status?: number;
-  };
-  // The status rides along because "what went wrong" and "is it settled" are
-  // different questions and only the code answers the second: a 4xx is the
-  // server having read the request and refused it, while a 5xx leaves the send
-  // genuinely uncertain. Flattening both to a message sent an oversized
-  // message — refused 413, never admitted — down the reconciliation path.
-  failure.status = response.status;
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "definitive" in value &&
-    value.definitive === true
-  ) {
-    failure.definitive = true;
-  }
-  return failure;
+  /*
+   * Every read of a response goes through the shared reader: it classifies a
+   * failed or non-JSON reply rather than letting `JSON.parse` speak for it,
+   * and the failure it throws carries the status. "What went wrong" and "is it
+   * settled" are different questions and only the code answers the second: a
+   * 4xx is the server having read the request and refused it, while a 5xx
+   * leaves a send genuinely uncertain.
+   */
+  return await readJsonResponseV1(response);
 }
 
 const botStateChannel = new BrowserBotStateChannel();
@@ -195,20 +144,23 @@ const application = new ClientApplication({
           signal,
         });
     signal.throwIfAborted();
-    const answer = await readApiBody(response);
+    /*
+     * A refusal is the Bot answering, with a reason of its own, so it keeps
+     * its typed error: flattening a 409 to a message sent the client down the
+     * uncertain-admission path, which fenced the run and reported that the
+     * message had not gone through over the top of what the Bot had said.
+     * Every other failure is the shared reader's to classify.
+     */
     if (!response.ok) {
-      // A 409 is the Bot saying no, with a reason. Flattening it to a bare
-      // message sent the client down the uncertain-admission path, which
-      // fenced the run and reported "Turn was not admitted." over the top of
-      // whatever the Bot had actually said.
-      const refusal = decodeClientTurnRefusalV1(answer.value);
+      const refusal = decodeClientTurnRefusalV1(
+        await response
+          .clone()
+          .json()
+          .catch(() => undefined),
+      );
       if (refusal) throw new ClientTurnRefusedErrorV1(refusal);
-      throw apiFailure(response, answer, "Agent request failed");
     }
-    if (answer.value === undefined) {
-      throw new Error("The Turn returned a body that is not JSON");
-    }
-    return decodeClientTurnV1(answer.value);
+    return decodeClientTurnV1(await readJsonResponseV1(response));
   },
   readConfiguration(query: ConfigurationQueryV1) {
     const path =

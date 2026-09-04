@@ -833,7 +833,7 @@ describe("User settings backend Contribution", () => {
           expectedRevision: 2,
           model: {
             connectionId: "flock-default",
-            providerModelId: "@flock/auto",
+            providerModelId: "@frock/auto",
           },
         },
         storage,
@@ -841,7 +841,7 @@ describe("User settings backend Contribution", () => {
     ).resolves.toMatchObject({ status: "applied", revision: 3 });
     expect((await settings.read("user-1")).platformModel).toEqual({
       connectionId: "flock-default",
-      providerModelId: "@flock/auto",
+      providerModelId: "@frock/auto",
     });
   });
 

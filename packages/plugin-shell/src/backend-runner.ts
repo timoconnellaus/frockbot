@@ -17,6 +17,10 @@ import {
   BotTurnRecoveryRequiredError,
 } from "@frockbot/kernel-do";
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
+import {
+  compactionInFlightV1,
+  whenCompactionSettledV1,
+} from "./compaction-scheduler.js";
 
 export {
   BotTurnExecutionError,
@@ -370,11 +374,24 @@ export async function executeBotTurn(
     await runtime.agent.agent.whenIdle();
     return settleBotTurn(runtime.agent, command, previousEvents);
   } catch (error) {
-    turnExecutionError(error, previousEvents, [
+    return turnExecutionError(error, previousEvents, [
       ...runtime.agent.agent.session.events,
     ]);
   } finally {
-    await composition.dispose();
+    // ADR 0030: a compaction outlives the Turn that triggered it, and it runs
+    // on this Composition's model binding — so the Composition outlives the
+    // Turn too, and only by as long as the compaction does. Awaiting the
+    // disposal here would put the summariser back in the latency path, which
+    // is the whole defect. The next admission aborts anything still running,
+    // so this can never stack up.
+    if (compactionInFlightV1(command.sessionId)) {
+      void whenCompactionSettledV1(command.sessionId).then(
+        () => composition.dispose(),
+        () => composition.dispose(),
+      );
+    } else {
+      await composition.dispose();
+    }
   }
 }
 

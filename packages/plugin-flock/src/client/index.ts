@@ -25,7 +25,18 @@ import {
   decodeBotUnreadDirectoryViewV1,
   decodeBotUnreadReceiptV1,
 } from "@frockbot/plugin-shell/unread";
+import {
+  isBotFocusedV1,
+  readViewerFocusV1,
+  shouldNotifyForBotV1,
+  suppressUnreadWhileFocusedV1,
+} from "@frockbot/plugin-shell/focus";
 import { showClientNotificationV1 } from "@frockbot/plugin-shell/client/notify";
+import {
+  claimNotificationDeliveryV1,
+  deliveredNotificationKeyV1,
+  releaseNotificationDeliveryV1,
+} from "./delivered-notifications.js";
 import {
   clearPendingCreate,
   clearPendingSheep,
@@ -39,6 +50,10 @@ import { flockWebDataKey, type FlockWebData } from "./state.js";
 import "../../assets/layers.css";
 import "./styles.css";
 import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
+import {
+  clientFailureDetailV1,
+  presentClientFailureV1,
+} from "@frockbot/client-core";
 
 function slug(name: string): string {
   const base =
@@ -95,6 +110,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
   let stopNameWatch: (() => void) | undefined;
   /** Stops the watcher that refreshes the row on the transcript's own beat. */
   let stopTranscriptWatch: (() => void) | undefined;
+  /** Stops the visibility/focus listeners that re-decide what is being read. */
+  let stopFocusListeners: (() => void) | undefined;
   let authenticatedUserId: string | undefined;
   let loadGeneration = 0;
   let selectionGeneration = 0;
@@ -220,6 +237,26 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           void refreshUnreadCoalesced();
         },
       );
+      // Coming back to the window is the other moment the answer changes.
+      // Nothing about the transcript moved — the Bot replied while the tab was
+      // hidden, and both the badge and the notification were right to appear —
+      // but the User is now looking at that very chat, so the badge has to go
+      // without waiting for a poll. The same beat covers looking away: the row
+      // the rule was suppressing becomes an honest badge again.
+      if (typeof document !== "undefined" && !stopFocusListeners) {
+        const refresh = (): void => {
+          if (!state.value.directory.bots.length) return;
+          void refreshUnreadCoalesced();
+        };
+        document.addEventListener("visibilitychange", refresh);
+        window.addEventListener("focus", refresh);
+        window.addEventListener("blur", refresh);
+        stopFocusListeners = () => {
+          document.removeEventListener("visibilitychange", refresh);
+          window.removeEventListener("focus", refresh);
+          window.removeEventListener("blur", refresh);
+        };
+      }
     },
     async load() {
       const generation = ++loadGeneration;
@@ -237,6 +274,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         authenticatedUserId = userId;
         state.value.directory = directory;
         state.value.loaded = true;
+        if (shell) shell.value.botsUnavailable = false;
         state.value.lifecycles = Object.fromEntries(
           lifecycleDirectory.lifecycles.map((item) => [
             item.botId,
@@ -328,8 +366,14 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         else if (!selected && state.value.directory.bots.length === 0)
           state.value.openCreate();
       } catch (error) {
-        state.value.error =
-          error instanceof Error ? error.message : "Could not load your flock";
+        // The list already on screen is the last thing known to be true, so a
+        // failed refresh leaves it alone and says so instead. A transport
+        // failure that emptied the sidebar would read as data loss.
+        state.value.error = presentClientFailureV1(error, "load your Bots");
+        console.debug("flock load failed", clientFailureDetailV1(error));
+        // Tell the workspace the list is unknown, so it stops offering the
+        // first-run empty state to a User who may already have Bots.
+        if (shell && !state.value.loaded) shell.value.botsUnavailable = true;
       } finally {
         if (generation === loadGeneration) state.value.loading = false;
       }
@@ -338,22 +382,31 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       const directory = decodeBotUnreadDirectoryViewV1(
         await request("/api/bots/unread"),
       );
-      state.value.unread = Object.fromEntries(
-        directory.unread.map((view) => [view.botId, view]),
-      );
       // A Turn that settles in the conversation the User is looking at has
       // been read by the time it arrives, so the badge that counted it is
-      // wrong the instant it appears. Reading up to it is still the explicit
-      // authenticated command; what the poll refreshed is only which cursor it
-      // names. Every other Bot's badge is left exactly as the fan-out said.
-      const openBotId = shell?.value.activeBotId;
+      // wrong the instant it appears — and painting it for the beat before the
+      // receipt lands is exactly the flicker the rule forbids. The row for a
+      // focused Bot therefore renders no count at all, whatever the fan-out
+      // says. Every other Bot's badge is left exactly as it came.
+      const focus = readViewerFocusV1(shell?.value.activeBotId);
+      state.value.unread = Object.fromEntries(
+        directory.unread.map((view) => [
+          view.botId,
+          isBotFocusedV1(focus, view.botId)
+            ? suppressUnreadWhileFocusedV1(view)
+            : view,
+        ]),
+      );
+      // Suppression is what the row shows; the read receipt is what makes it
+      // stay shown — on the next reload, and in the other tab. It is still the
+      // explicit authenticated command, never a side effect of the read.
+      const openBotId = focus.activeBotId;
       if (
         openBotId &&
-        (state.value.unread[openBotId]?.count ?? 0) > 0 &&
-        !state.value.unread[openBotId]?.manuallyUnread &&
-        typeof document !== "undefined" &&
-        document.visibilityState === "visible" &&
-        document.hasFocus()
+        isBotFocusedV1(focus, openBotId) &&
+        (directory.unread.find((view) => view.botId === openBotId)?.count ??
+          0) > 0 &&
+        !state.value.unread[openBotId]?.manuallyUnread
       ) {
         try {
           await state.value.markRead(openBotId);
@@ -363,7 +416,27 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       }
     },
     async markRead(botId) {
-      const cursor = state.value.unread[botId]?.lastActivityCursor;
+      let cursor = state.value.unread[botId]?.lastActivityCursor;
+      // Only when this page has never seen the Bot's row at all. A row that is
+      // present without a cursor is a Bot nothing has ever settled on — a Bot
+      // just created, most often — and asking again would put a round trip in
+      // front of every first open to learn what it already knows.
+      if (!cursor && !state.value.unread[botId]) {
+        // Opening a chat has to clear its badge even when this page has not
+        // read the fan-out yet: the first click after a reload. One read names
+        // the cursor; without it the badge sat there until the next poll.
+        try {
+          const directory = decodeBotUnreadDirectoryViewV1(
+            await request("/api/bots/unread"),
+          );
+          for (const view of directory.unread) {
+            state.value.unread[view.botId] ??= view;
+            if (view.botId === botId) cursor = view.lastActivityCursor;
+          }
+        } catch {
+          // Fall through: with no cursor there is nothing to read up to.
+        }
+      }
       // Nothing has ever settled on this Bot: there is no cursor to read up to.
       if (!cursor) return;
       const receipt = decodeBotUnreadReceiptV1(
@@ -412,13 +485,17 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       if (generation !== selectionGeneration) return;
       if (!shell) throw new Error("Shell selection is unavailable");
       await shell.value.selectBot(botId);
-      // Selecting a thread while looking at it is what "read" means. A
-      // background poll that refreshed the same runs must never do this.
-      if (
-        generation === selectionGeneration &&
-        typeof document !== "undefined" &&
-        document.visibilityState === "visible"
-      ) {
+      // Selecting a thread while looking at it is what "read" means, and it
+      // is the whole of "opening a chat clears its badge". Focus is not
+      // required — opening is the User's own act, and a window that has just
+      // been clicked may not report focus yet — but a visible tab is: a page
+      // restoring `?bot=` in a background tab has not been read.
+      if (generation === selectionGeneration && readViewerFocusV1().visible) {
+        // The row clears now rather than on the next poll, so the badge never
+        // outlives the click. The receipt below is what makes it durable.
+        const view = state.value.unread[botId];
+        if (view)
+          state.value.unread[botId] = suppressUnreadWhileFocusedV1(view);
         try {
           await state.value.markRead(botId);
         } catch {
@@ -478,8 +555,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         shell?.value.transcripts.forget(botId);
         await state.value.load();
       } catch (error) {
-        state.value.error =
-          error instanceof Error ? error.message : "Could not archive Bot";
+        state.value.error = presentClientFailureV1(error, "archive this Bot");
+        console.debug("bot archive failed", clientFailureDetailV1(error));
       }
     },
     async restore(botId) {
@@ -505,8 +582,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         shell?.value.transcripts.forget(botId);
         await state.value.load();
       } catch (error) {
-        state.value.error =
-          error instanceof Error ? error.message : "Could not restore Bot";
+        state.value.error = presentClientFailureV1(error, "restore this Bot");
+        console.debug("bot restore failed", clientFailureDetailV1(error));
       }
     },
     async openEdit() {
@@ -546,10 +623,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           );
           state.value.identities[botId] = identity;
         } catch (error) {
-          state.value.error =
-            error instanceof Error
-              ? error.message
-              : "Couldn't finish saving your last change.";
+          state.value.error = presentClientFailureV1(error, "load this sheep");
+          console.debug("sheep refresh failed", clientFailureDetailV1(error));
           return;
         }
       }
@@ -600,8 +675,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
       } catch (error) {
         if (isDefinitiveFlockFailure(error) && authenticatedUserId)
           clearPendingCreate(authenticatedUserId);
-        state.value.error =
-          error instanceof Error ? error.message : "Could not create Bot";
+        state.value.error = presentClientFailureV1(error, "create the Bot");
+        console.debug("bot creation failed", clientFailureDetailV1(error));
       }
     },
     async saveSheep() {
@@ -662,8 +737,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
             /* Keep the exact pending command when reconciliation is uncertain. */
           }
         }
-        state.value.error =
-          error instanceof Error ? error.message : "Could not save sheep";
+        state.value.error = presentClientFailureV1(error, "save the sheep");
+        console.debug("sheep save failed", clientFailureDetailV1(error));
       }
     },
   });
@@ -686,20 +761,41 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           notificationId: intent.notificationId,
         }),
       );
+    const focus = readViewerFocusV1(shell?.value.activeBotId);
     for (const intent of directory.notifications) {
       // The open Bot's intents belong to the Shell: it projects the Turn into
-      // the conversation and acknowledges it there.
-      if (intent.botId === shell?.value.activeBotId) continue;
-      const key = `${intent.botId}:${intent.notificationId}`;
-      if (deliveredNotifications.has(key)) {
+      // the conversation, decides whether the tab was being looked at, and
+      // acknowledges it there. Deciding again here would be a second answer to
+      // the same question, and a second notification when they disagreed.
+      if (intent.botId === focus.activeBotId) continue;
+      // Every other Bot is out of focus by definition — the sentence this
+      // implements — so the intent is one notification, once.
+      if (!shouldNotifyForBotV1(focus, intent.botId)) continue;
+      const key = deliveredNotificationKeyV1(
+        intent.botId,
+        intent.notificationId,
+      );
+      if (deliveredNotifications.has(key)) continue;
+      // Claimed before it is shown, and claimed in storage every tab of this
+      // browser shares: the acknowledgement that finally closes the intent
+      // lands after the notification, and a second tab polling in that gap
+      // used to speak the same message twice.
+      if (!claimNotificationDeliveryV1(key)) {
+        deliveredNotifications.add(key);
         continue;
       }
+      deliveredNotifications.add(key);
       const delivery = await showClientNotificationV1({
         title: intent.title,
         body: intent.body,
       });
-      if (delivery === "unavailable") continue;
-      deliveredNotifications.add(key);
+      if (delivery === "unavailable") {
+        // Nothing was said, so nothing was spent: the intent stays pending and
+        // is spoken once the User grants permission.
+        deliveredNotifications.delete(key);
+        releaseNotificationDeliveryV1(key);
+        continue;
+      }
       await acknowledge(intent);
     }
   }
@@ -721,6 +817,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
     () => clearInterval(poll),
     () => stopNameWatch?.(),
     () => stopTranscriptWatch?.(),
+    () => stopFocusListeners?.(),
     ctx.provide(flockWebDataKey, state),
     ctx.slot({
       slot: "frockbot.sidebar-bots",

@@ -302,7 +302,11 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     listConversations: () =>
       Promise.resolve({ schemaVersion: 1 as const, conversations: [] }),
     startConversation: () =>
-      Promise.resolve({ schemaVersion: 1 as const, conversations: [] }),
+      Promise.resolve({
+        status: "started" as const,
+        schemaVersion: 1 as const,
+        conversations: [],
+      }),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
     fenceRunAdmission: ({ botId, query }) =>
       state.fenceRunAdmission(botId, query),
@@ -1599,7 +1603,7 @@ describe("Cloudflare user application gateway", () => {
           expectedRevision: 0,
           model: {
             connectionId: "flock-default",
-            providerModelId: "@flock/auto",
+            providerModelId: "@frock/auto",
           },
         }),
       }),

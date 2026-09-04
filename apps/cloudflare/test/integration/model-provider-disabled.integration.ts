@@ -5,7 +5,7 @@
 // that Connection. Switching the provider off — directly, or as the cascade
 // from disabling a Package it depends on — used to leave the next Turn with no
 // binding at all, and the turn handler answered 500. The platform bootstrap now
-// stands in, so the Turn runs on `@flock/auto` and the User is told which model
+// stands in, so the Turn runs on `@frock/auto` and the User is told which model
 // answered rather than being handed an error.
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
@@ -21,7 +21,7 @@ import {
 useApplicationArtifact();
 
 /** What the fake `AI` binding has been asked for so far. */
-async function flockModelCalls(): Promise<Array<{ model: string }>> {
+async function frockModelCalls(): Promise<Array<{ model: string }>> {
   // SAFETY: the suite binds the same RPC entrypoint a second time under
   // `AI_PROBE` so the call log is reachable without widening production Env.
   const probe = (
@@ -52,11 +52,11 @@ async function disablePackage(
 }
 
 /**
- * The wire name `@flock/auto` takes on the AI Gateway. Asserting it is what
+ * The wire name `@frock/auto` takes on the AI Gateway. Asserting it is what
  * proves the Turn ran on the platform default rather than merely producing a
  * reply from somewhere.
  */
-const FLOCK_AUTO_GATEWAY_MODEL = "dynamic/flock-auto";
+const FROCK_AUTO_GATEWAY_MODEL = "dynamic/flock-auto";
 
 /** The account's platform bootstrap, as the settings surface reports it. */
 async function platformModel(
@@ -90,18 +90,18 @@ describe("a Bot whose model's provider is switched off", () => {
       "disabled",
     );
 
-    const before = (await flockModelCalls()).length;
+    const before = (await frockModelCalls()).length;
     const turn = await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId: "turn-after-provider-disabled",
       text: "hello",
     });
     expect(turn.status).toBe(200);
-    expect(JSON.stringify(await turn.json())).toContain("Flock AI reply");
+    expect(JSON.stringify(await turn.json())).toContain("Frock AI reply");
     expect(
-      (await flockModelCalls()).slice(before).map((call) => call.model),
-    ).toContain(FLOCK_AUTO_GATEWAY_MODEL);
-    expect((await platformModel(userId))?.providerModelId).toBe("@flock/auto");
+      (await frockModelCalls()).slice(before).map((call) => call.model),
+    ).toContain(FROCK_AUTO_GATEWAY_MODEL);
+    expect((await platformModel(userId))?.providerModelId).toBe("@frock/auto");
   });
 
   it("cascades a dependency's disable to the provider and still answers", async () => {
@@ -117,17 +117,17 @@ describe("a Bot whose model's provider is switched off", () => {
     expect(states["custom-models"]).toBe("disabled");
     expect(states["provider-ollama-cloud"]).toBe("disabled");
 
-    const before = (await flockModelCalls()).length;
+    const before = (await frockModelCalls()).length;
     const turn = await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId: "turn-after-cascade",
       text: "hello",
     });
     expect(turn.status).toBe(200);
-    expect(JSON.stringify(await turn.json())).toContain("Flock AI reply");
+    expect(JSON.stringify(await turn.json())).toContain("Frock AI reply");
     expect(
-      (await flockModelCalls()).slice(before).map((call) => call.model),
-    ).toContain(FLOCK_AUTO_GATEWAY_MODEL);
-    expect((await platformModel(userId))?.providerModelId).toBe("@flock/auto");
+      (await frockModelCalls()).slice(before).map((call) => call.model),
+    ).toContain(FROCK_AUTO_GATEWAY_MODEL);
+    expect((await platformModel(userId))?.providerModelId).toBe("@frock/auto");
   });
 });
