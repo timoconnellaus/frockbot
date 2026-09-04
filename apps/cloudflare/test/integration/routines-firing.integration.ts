@@ -17,6 +17,7 @@ import {
   dueAtWithFiringHeadroomV1,
   expectOkJson,
   freshUserId,
+  listStoredRunsWithEventsV1,
   postAsUser,
   provisionThroughGateway,
   settledRoutineFiringV1,
@@ -63,14 +64,7 @@ async function storedRuns(
   userId: string,
   botId: string,
 ): Promise<StoredRunProbe[]> {
-  return runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => [
-      ...(
-        await state.storage.list<StoredRunProbe>({ prefix: "run:" })
-      ).values(),
-    ],
-  );
+  return listStoredRunsWithEventsV1<StoredRunProbe>(userId, botId);
 }
 
 /** The text one Turn was actually run on: its own `user/message` events. */

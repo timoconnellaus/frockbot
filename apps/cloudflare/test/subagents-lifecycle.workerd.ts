@@ -25,6 +25,11 @@ import type {
   TaskListViewV1,
   TaskViewV1,
 } from "@frockbot/plugin-subagents/shared";
+import {
+  hydrateStoredRunEventsV1,
+  hydratedStoredRunsV1,
+  rewindStoredRunEventsV1,
+} from "./session-log-probe.ts";
 
 interface Identity {
   userId: string;
@@ -63,7 +68,7 @@ interface StoredRunProbe {
   sessionId: string;
   status: string;
   responseText?: string;
-  previousEventCount?: number;
+  previousEventCount: number;
   events: Array<{ type: string; text?: string }>;
   admission?: { turnType: string };
 }
@@ -71,9 +76,9 @@ interface StoredRunProbe {
 async function storedRuns(
   stub: ReturnType<typeof bot>,
 ): Promise<StoredRunProbe[]> {
-  return runInDurableObject(stub, async (_instance, state) => [
-    ...(await state.storage.list<StoredRunProbe>({ prefix: "run:" })).values(),
-  ]);
+  return runInDurableObject(stub, (_instance, state) =>
+    hydratedStoredRunsV1<StoredRunProbe>(state.storage),
+  );
 }
 
 async function tasks(identity: Identity): Promise<TaskListViewV1> {
@@ -150,26 +155,15 @@ describe("the subagent lifecycle across two Durable Objects", () => {
         const stored = (await state.storage.get<
           StoredRunProbe & { responseText?: string; failure?: string }
         >(key))!;
-        const { responseText: _text, failure: _failure, ...run } = stored;
+        const run = await hydrateStoredRunEventsV1(state.storage, stored);
         const interrupted = run.events.filter(
           (event) => event.type !== "turn/end",
         );
-        const latest =
-          (await state.storage.get<Array<{ type: string }>>("latest-events")) ??
-          [];
-        await state.storage.put({
-          [key]: {
-            ...run,
-            events: interrupted,
-            status: "running",
-            phase: "executing",
-          },
-          "latest-events": [
-            ...latest.slice(0, run.previousEventCount ?? 0),
-            ...interrupted,
-          ],
-          "active-run": taskId,
+        await rewindStoredRunEventsV1(state.storage, key, stored, interrupted, {
+          status: "running",
+          phase: "executing",
         });
+        await state.storage.put("active-run", taskId);
       },
     );
     await evictDurableObject(child(identity, taskId));

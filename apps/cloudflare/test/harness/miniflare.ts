@@ -109,6 +109,9 @@ function bearerKey(request: Request): string {
  */
 export const TOOL_CALL_TRIGGER = "frockbot-test-tool-call:";
 
+/** A test-only script for one tool call on each model step. */
+export const REPEATED_TOOL_CALL_TRIGGER = "frockbot-test-repeated-tool-call:";
+
 /** Builds the trigger message for one or more scripted calls. */
 export function toolCallTriggerPrompt(
   ...calls: Array<[name: string, input?: unknown]>
@@ -119,6 +122,22 @@ export function toolCallTriggerPrompt(
         `${TOOL_CALL_TRIGGER}${name}:${JSON.stringify(input ?? {})}`,
     )
     .join("\n");
+}
+
+/**
+ * Makes the outbound fake call one tool `count` times, then answer in prose.
+ * The call id is derived from the current Turn transcript, so eviction and
+ * replay produce the same occurrence ids without mutable fake-side state.
+ */
+export function repeatedToolCallPrompt(
+  count: number,
+  name: string,
+  input: unknown = {},
+): string {
+  if (!Number.isSafeInteger(count) || count < 1 || count > 63) {
+    throw new Error("repeated tool-call count must be from 1 to 63");
+  }
+  return `${REPEATED_TOOL_CALL_TRIGGER}${JSON.stringify({ count, name, input })}`;
 }
 
 interface WireMessage {
@@ -166,18 +185,48 @@ function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
 /** The scripted tool calls one request asks for, empty when it asks for none. */
 function scriptedToolCalls(
   body: unknown,
-): Array<{ name: string; arguments: string }> {
+): Array<{ id?: string; name: string; arguments: string }> {
   if (!body || typeof body !== "object") return [];
   const messages = (body as { messages?: unknown }).messages;
   if (!Array.isArray(messages)) return [];
-  // A tool result must fall through to prose, or the loop would call the same
-  // tool forever and exhaust its step budget.
+  const userIndex = (messages as WireMessage[]).findLastIndex(
+    (message) => message.role === "user",
+  );
+  const user = (messages as WireMessage[])[userIndex];
+  const content = typeof user?.content === "string" ? user.content : "";
+  const current = (messages as WireMessage[]).slice(userIndex + 1);
+  for (const line of content.split("\n")) {
+    if (!line.startsWith(REPEATED_TOOL_CALL_TRIGGER)) continue;
+    try {
+      const script = JSON.parse(
+        line.slice(REPEATED_TOOL_CALL_TRIGGER.length),
+      ) as { count?: unknown; name?: unknown; input?: unknown };
+      const completed = current.filter(
+        (message) => message.role === "tool",
+      ).length;
+      if (
+        Number.isSafeInteger(script.count) &&
+        (script.count as number) > completed &&
+        typeof script.name === "string" &&
+        script.name.length > 0
+      ) {
+        return [
+          {
+            id: `repeat-call-${completed + 1}`,
+            name: script.name,
+            arguments: JSON.stringify(script.input ?? {}),
+          },
+        ];
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+  // An ordinary scripted tool result falls through to prose. Repeating is an
+  // explicit separate trigger so an existing test can never loop by accident.
   const last = messages.at(-1) as WireMessage | undefined;
   if (last?.role === "tool") return [];
-  const user = [...(messages as WireMessage[])]
-    .reverse()
-    .find((message) => message.role === "user");
-  const content = typeof user?.content === "string" ? user.content : "";
   // Trigger lines are found wherever they sit in the message, because a Turn
   // the product itself composes — a Routine cue, or a chat Turn carrying a
   // drained hand-off — wraps the text a test wrote in framing of its own.
@@ -196,7 +245,7 @@ function scriptedToolCalls(
 }
 
 function toolCallStream(
-  calls: ReadonlyArray<{ name: string; arguments: string }>,
+  calls: ReadonlyArray<{ id?: string; name: string; arguments: string }>,
 ): Response {
   const event = {
     choices: [
@@ -204,7 +253,7 @@ function toolCallStream(
         delta: {
           tool_calls: calls.map((call, index) => ({
             index,
-            id: `call-${index + 1}`,
+            id: call.id ?? `call-${index + 1}`,
             function: { name: call.name, arguments: call.arguments },
           })),
         },

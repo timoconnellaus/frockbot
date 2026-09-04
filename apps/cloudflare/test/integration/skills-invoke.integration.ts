@@ -20,6 +20,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -30,11 +31,6 @@ const SKILL_BODY = "INVOKED-STANDUP-BODY: ask each Bot for its blockers.";
 
 interface StoredRun {
   runId?: string;
-  events?: unknown[];
-}
-
-function botStub(userId: string, botId: string) {
-  return env.BOT_STATES.get(env.BOT_STATES.idFromName(`${userId}:${botId}`));
 }
 
 /** The session events the Bot Durable Object durably recorded for one run. */
@@ -43,16 +39,8 @@ async function runEvents(
   botId: string,
   runId: string,
 ): Promise<Array<Record<string, unknown>>> {
-  return runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => {
-      const stored = await state.storage.get<StoredRun>(`run:${runId}`);
-      const events = stored?.events;
-      return Array.isArray(events)
-        ? (events as Array<Record<string, unknown>>)
-        : [];
-    },
-  );
+  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
+  return (run?.events ?? []) as unknown as Array<Record<string, unknown>>;
 }
 
 async function writeSkill(userId: string, botId: string): Promise<void> {

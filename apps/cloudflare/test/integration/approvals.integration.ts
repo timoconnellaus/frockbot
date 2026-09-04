@@ -21,6 +21,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   toolCallTriggerPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
@@ -128,15 +129,11 @@ async function storedRun(
   botId: string,
   runId: string,
 ): Promise<StoredRunProbe> {
-  const runs = await runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => [
-      ...(
-        await state.storage.list<StoredRunProbe>({ prefix: "run:" })
-      ).values(),
-    ],
+  const run = await readStoredRunWithEventsV1<StoredRunProbe>(
+    userId,
+    botId,
+    runId,
   );
-  const run = runs.find((candidate) => candidate.runId === runId);
   if (!run) throw new Error(`no stored run "${runId}"`);
   return run;
 }

@@ -28,6 +28,7 @@ import {
   STALE_RUNNING_RUN_FAILURE_V1,
   STALE_RUNNING_RUN_GRACE_MS_V1,
 } from "./run-liveness.ts";
+import { SessionEventLog } from "./session-event-log.ts";
 import {
   ACTIVE_RUN_KEY,
   IDENTITY_KEY,
@@ -255,7 +256,7 @@ describe("the read that repairs what it finds", () => {
     // The Bot is free: nothing holds the object, and the next Turn admits
     // against a log that reads as a complete history.
     expect(await storage.get<string>(ACTIVE_RUN_KEY)).toBeUndefined();
-    const log = (await storage.get<SessionEvent[]>(LATEST_EVENTS_KEY)) ?? [];
+    const log = await new SessionEventLog(storage).read("user-1:primary");
     expect(log.some((entry) => entry.type === "turn/end")).toBe(true);
   });
 

@@ -1,10 +1,9 @@
 // Tool result attachments: what may be recorded, and what may not.
 //
 // The one rule worth a suite of its own is that resolved bytes are never
-// durable. The session event log is one Durable Object value; a base64
-// screenshot recorded in it would be a record that grows past what the object
-// can hold, so the decoder refuses `dataBase64` on the durable side rather
-// than trimming it somewhere further down.
+// durable. A base64 screenshot recorded in the paged session log would still
+// multiply durable storage and model-request size, so the decoder refuses
+// `dataBase64` on the durable side rather than trimming it further down.
 import { describe, expect, test } from "bun:test";
 import {
   decodeToolAttachmentsV1,

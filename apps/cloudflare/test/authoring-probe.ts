@@ -13,6 +13,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   BotDurableAuthority,
   createStoredRunCodecV1,
+  SessionEventLog,
   type BotTurnExecutionInput,
 } from "@frockbot/kernel-do";
 import {
@@ -512,8 +513,15 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
   }
 
   async sessionEventTypes(): Promise<string[]> {
-    const events =
-      (await this.ctx.storage.get<{ type: string }[]>("latest-events")) ?? [];
+    const identity = await this.ctx.storage.get<{
+      userId: string;
+      botId: string;
+    }>("identity");
+    const events = identity
+      ? await new SessionEventLog(this.ctx.storage).read(
+          `${identity.userId}:${identity.botId}`,
+        )
+      : [];
     return events.map((event) => event.type);
   }
 

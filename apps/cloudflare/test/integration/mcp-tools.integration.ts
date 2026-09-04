@@ -6,7 +6,6 @@
 // reaches it with the Package's own `fetch`, so a test that stubs
 // `https://mcp.example.test` proves the production request shapes and nothing
 // crosses a Package boundary to make it work.
-import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { MCP_ENDPOINT, MCP_GOOD_API_KEY } from "../harness/miniflare.ts";
 import {
@@ -15,6 +14,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -42,10 +42,6 @@ interface UserSettingsView {
 interface StoredRun {
   runId: string;
   events: { type: string; [key: string]: unknown }[];
-}
-
-function botStub(userId: string, botId: string) {
-  return env.BOT_STATES.get(env.BOT_STATES.idFromName(`${userId}:${botId}`));
 }
 
 async function readUserSettings(userId: string): Promise<UserSettingsView> {
@@ -108,10 +104,7 @@ async function offeredTools(
   botId: string,
   runId: string,
 ): Promise<string[]> {
-  const run = await runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => state.storage.get<StoredRun>(`run:${runId}`),
-  );
+  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
   expect(run).toBeDefined();
   const request = run!.events.find((event) => event.type === "model/request");
   expect(request).toBeDefined();
@@ -127,10 +120,7 @@ async function toolResult(
   botId: string,
   runId: string,
 ): Promise<{ name: string; content: string; isError: boolean } | undefined> {
-  const run = await runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => state.storage.get<StoredRun>(`run:${runId}`),
-  );
+  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
   return run?.events.find((event) => event.type === "tool/result") as
     { name: string; content: string; isError: boolean } | undefined;
 }

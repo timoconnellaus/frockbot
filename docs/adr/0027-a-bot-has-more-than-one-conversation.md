@@ -6,7 +6,7 @@ status: accepted
 
 Until now a Bot had exactly one Session for its whole life. Its id was `<userId>:<botId>`, minted at the gateway on every Turn; `session/created` was appended once, when the durable event log was empty; and nothing anywhere ended a Session or started another. Three consequences followed, and testing hit all three.
 
-The Journey 6 step "start a new conversation with the same Bot" could not be performed at all. The memory-recall proof it exists to make was confounded even when it appeared to pass: the fact the Bot "remembered" was still sitting in message history, because `deriveMessages()` re-sends every `user/message`, `assistant/message` and `tool/result` in the log on every step, and `turnScopedMessagesV1` — the Package policy that narrows a request — filtered by turn type and truncated nothing. And the log itself is one Durable Object value that `persistRunEvents` rewrites in full on every flush, so a long-lived Bot gets quadratically slower and eventually hits the 2 MiB per-value ceiling, at which point every Turn on that Bot fails permanently with no repair.
+The Journey 6 step "start a new conversation with the same Bot" could not be performed at all. The memory-recall proof it exists to make was confounded even when it appeared to pass: the fact the Bot "remembered" was still sitting in message history, because `deriveMessages()` re-sends every `user/message`, `assistant/message` and `tool/result` in the log on every step, and `turnScopedMessagesV1` — the Package policy that narrows a request — filtered by turn type and truncated nothing. At the time of this decision the log was also one Durable Object value that `persistRunEvents` rewrote in full on every flush. [ADR 0033](0033-page-the-durable-session-log.md) later replaced that storage layout with bounded pages and exact-payload chunks; this ADR continues to own the conversation boundary and model-context budget, not the durable-value bound.
 
 ## Considered options
 
@@ -21,7 +21,7 @@ The Journey 6 step "start a new conversation with the same Bot" could not be per
 
 **The client does not name the conversation.** The gateway keeps sending `<userId>:<botId>`, exactly as it did; the object rewrites that one id — and only that one — from its own durable state before admission. A Routine's `routine:<id>` and a subagent's Session are not conversations and are never rewritten.
 
-**Starting a new conversation empties the log the next Turn derives from, and deletes nothing.** The `latest-events` value is reset; `run:<id>` still holds every event of every Turn, and the run index still holds every run. The boundary is recorded in a bounded conversation index, so a conversation is listable even when its runs have aged out of a page. `session/created` is appended again by the ordinary path — the log is empty, which is what that event has always meant.
+**Starting a new conversation empties the log the next Turn derives from, and deletes nothing.** In the original layout the `latest-events` value was reset and `run:<id>` still held every event. Under ADR 0033 the ended Session's pages remain and the new Session begins with an empty page index; runs name their event ranges in those pages. The boundary is recorded in a bounded conversation index, so a conversation is listable even when its runs have aged out of a page. `session/created` is appended again by the ordinary path — the log is empty, which is what that event has always meant.
 
 **It is refused while a Turn is admitted.** The log a running Turn is appending to is not something a click may pull out from under it. The refusal names the reason and the composer's button is disabled while a Turn runs, so this is a guard, not a race the User can lose.
 
@@ -35,7 +35,7 @@ The budget is in characters, not tokens, on purpose. Its job is to stop a reques
 
 ## Consequences
 
-- A Bot's context and its per-Turn write amplification are bounded by the conversation, not by its lifetime. The 2 MiB wedge is now reachable only within one conversation, and the budget makes reaching it far slower.
+- A Bot's model context is bounded by the conversation, not by its lifetime. This decision did not ultimately make durable storage safe; ADR 0033 supplies that independent per-value bound.
 - An old conversation stays readable and is named by its Session id. The client ships the action and the current conversation; a fuller history picker is a UI addition on the same list, not another decision.
 - The exact history each Turn ran on remains reconstructable: the narrowing is deterministic from the durable log, and the `model/request` event still records the exact normalized request.
 - A conversation ordinal past 1 changes the Session id a Turn records, so a reader that assumed `sessionId === "<userId>:<botId>"` now sees a suffixed id. Nothing durable is rewritten by the change.

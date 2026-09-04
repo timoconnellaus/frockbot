@@ -6,6 +6,7 @@ import type {
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
+import { SessionEventLog } from "@frockbot/kernel-do";
 import { createShellBotBackendContribution } from "./backend.js";
 import { createIsolateCapabilityHost } from "./backend-isolate.js";
 import { notificationIdV1 } from "./notification-id.js";
@@ -549,11 +550,12 @@ describe("generic per-Turn model resolution", () => {
     });
 
     expect(result.text).toBe("Cordis runtime: hello");
-    const durableEvents = storage.values.get("latest-events") as
-      Array<{ seq: number }> | undefined;
-    expect(durableEvents?.length).toBeGreaterThan(0);
-    expect(durableEvents?.map((event) => event.seq)).toEqual(
-      durableEvents?.map((_, index) => index),
+    const durableEvents = await new SessionEventLog(storage).read(
+      "user-1:primary",
+    );
+    expect(durableEvents.length).toBeGreaterThan(0);
+    expect(durableEvents.map((event) => event.seq)).toEqual(
+      durableEvents.map((_, index) => index),
     );
     const settings = await contribution.getSettings(identity);
     expect(settings).toMatchObject({ revision: 0, packageValues: {} });
