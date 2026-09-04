@@ -735,3 +735,108 @@ describe("Flock sidebar rows follow the transcript", () => {
     });
   });
 });
+
+describe("Flock list follows the account", () => {
+  test("a Bot deleted elsewhere moves this tab's selection on the next unread beat", async () => {
+    installStorage();
+    const location = { href: "https://app.example/?bot=alpha" };
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location,
+        history: {
+          state: null,
+          replaceState: (_state: unknown, _title: string, url: URL) => {
+            location.href = url.href;
+          },
+        },
+      },
+    });
+    const sheep = randomSheepRecipeV1(() => 0);
+    // The directory this tab read yesterday still has alpha; the account has
+    // since deleted it (from the phone, say) and made gamma.
+    let bots = ["alpha", "beta"];
+    let directoryReads = 0;
+    const state = mount((path) => {
+      if (path === "/api/bots/identities")
+        return Promise.resolve({ schemaVersion: 1, identities: [] });
+      if (path === "/api/bots") {
+        directoryReads += 1;
+        return Promise.resolve({
+          schemaVersion: 1,
+          revision: directoryReads,
+          bots: bots.map((botId) => ({
+            schemaVersion: 1,
+            botId,
+            registeredAt: new Date(0).toISOString(),
+            initialName: botId,
+            sheep,
+          })),
+        });
+      }
+      if (path === "/api/bots/lifecycles")
+        return Promise.resolve({
+          schemaVersion: 1,
+          lifecycles: bots.map((botId) => ({
+            schemaVersion: 1,
+            botId,
+            status: "active",
+            revision: 0,
+          })),
+        });
+      if (path === "/api/bots/unread")
+        return Promise.resolve({
+          schemaVersion: 1,
+          unread: bots.map((botId) => ({
+            schemaVersion: 1,
+            botId,
+            count: 0,
+            capped: false,
+            unread: false,
+            manuallyUnread: false,
+          })),
+        });
+      if (path.endsWith("/sheep")) {
+        const botId = path.split("/")[3]!;
+        return Promise.resolve({ schemaVersion: 1, botId, revision: 0, sheep });
+      }
+      return Promise.reject(new Error(`unexpected request: ${path}`));
+    });
+    const selected: string[] = [];
+    const shell = ref({
+      activeBotId: undefined as string | undefined,
+      selectBot: (botId: string) => {
+        selected.push(botId);
+        shell.value.activeBotId = botId;
+        return Promise.resolve();
+      },
+      transcripts: {
+        rememberViewport: () => undefined,
+        viewportFor: () => undefined,
+        forget: () => undefined,
+      },
+    });
+    state.value.bindShell(shell as unknown as Ref<FrockBotWebData>);
+    await state.value.load();
+    expect(selected).toEqual(["alpha"]);
+    expect(directoryReads).toBe(1);
+
+    // A beat that agrees with the list on screen reads nothing again.
+    await state.value.refreshUnread();
+    expect(directoryReads).toBe(1);
+
+    bots = ["beta", "gamma"];
+    await state.value.refreshUnread();
+    expect(directoryReads).toBe(2);
+    expect(state.value.directory.bots.map((bot) => bot.botId)).toEqual([
+      "beta",
+      "gamma",
+    ]);
+    expect(selected.at(-1)).toBe("beta");
+    expect(new URL(location.href).searchParams.get("bot")).toBe("beta");
+
+    // The same disagreement twice is still one reload.
+    await state.value.refreshUnread();
+    expect(directoryReads).toBe(2);
+  });
+});

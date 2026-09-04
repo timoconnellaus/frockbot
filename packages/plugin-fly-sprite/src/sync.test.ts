@@ -1332,7 +1332,7 @@ describe("the durable-root sync on the Computer handle", () => {
     }
   });
 
-  test("reports a bounded dependency exclusion as degraded while source still syncs", async () => {
+  test("a by-design dependency exclusion is still an ok sync, counted but not narrated", async () => {
     const { sprite, open } = providerHarness([APPLET_SOURCE_PACKAGE_ROOT]);
     const handle = await open();
     sprite.shellWrite(
@@ -1349,15 +1349,13 @@ describe("the durable-root sync on the Computer handle", () => {
     const summary = await handle.sync!.reconcile("turn-end");
 
     expect(summary).toMatchObject({
-      status: "degraded",
+      status: "ok",
       pushed: 1,
       ignored: 1,
       omitted: 0,
       failures: 0,
     });
-    expect(summary.detail).toBe(
-      "Excluded 1 reproducible Workspace item from sync.",
-    );
+    expect(summary.detail).toBe("");
   });
 
   // The sync-now seam of ADR 0022 decision 7, provider side: an Applet publish
