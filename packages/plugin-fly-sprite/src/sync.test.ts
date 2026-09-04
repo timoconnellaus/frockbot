@@ -84,6 +84,8 @@ class FakeSyncSprite {
   readonly files = new Map<string, Uint8Array>();
   /** Set to fail every storage call, as a paused Sprite does. */
   paused = false;
+  /** Simulates the shared host truncating an oversized storage response. */
+  maxScanOutputBytes?: number;
   /** Drops the next sidecar write, as a pause between store and Computer does. */
   dropNextMaterialize = false;
 
@@ -92,7 +94,18 @@ class FakeSyncSprite {
     // A paused Sprite answers nothing, and the host reports the failed exit;
     // the provider turns that into `Sprite storage operation failed: …`.
     if (this.paused) return { exitCode: 1, stderr: "Sprite is paused" };
-    return { stdout: this.interpret(script) };
+    const stdout = this.interpret(script);
+    if (
+      script.includes('printf "F\\t') &&
+      this.maxScanOutputBytes !== undefined &&
+      stdout.length > this.maxScanOutputBytes
+    ) {
+      return {
+        stdout: stdout.slice(0, this.maxScanOutputBytes),
+        outputTruncated: true,
+      };
+    }
+    return { stdout };
   };
 
   /** Writes a file the way a shell command on the Computer would: no sidecar. */
@@ -685,6 +698,44 @@ describe("the durable-root sync, Package-declared roots", () => {
     // is data the publish reads, never provenance.
     expect(built.file.generation.writer).toEqual({ kind: "unattributed" });
     expect(pushed.failures).toEqual([]);
+  });
+
+  test("a large node_modules tree cannot prevent Applet source from syncing", async () => {
+    const { sprite, store, sync } = harness({
+      packageRoots: [APPLET_SOURCE_PACKAGE_ROOT],
+    });
+    const appletId = "to-dos";
+    sprite.maxScanOutputBytes = 10_000;
+    sprite.shellWrite(
+      MOUNTS.appletSource,
+      `${appletId}/server.ts`,
+      "export class TodoApplet {}",
+    );
+    for (let index = 0; index < 200; index += 1) {
+      sprite.shellWrite(
+        MOUNTS.appletSource,
+        `${appletId}/node_modules/dependency-${index}/package.json`,
+        JSON.stringify({ name: `dependency-${index}` }),
+      );
+    }
+
+    const report = await sync();
+
+    expect(report.failures).toEqual([]);
+    const source = await store.read({
+      root: appletSourceRoot,
+      path: `${appletId}/server.ts`,
+    });
+    if (source.status !== "ok") throw new Error(source.reason);
+    expect(decoder.decode(source.file.bytes)).toBe(
+      "export class TodoApplet {}",
+    );
+    expect(
+      await store.read({
+        root: appletSourceRoot,
+        path: `${appletId}/node_modules/dependency-0/package.json`,
+      }),
+    ).toMatchObject({ status: "not-found" });
   });
 });
 
