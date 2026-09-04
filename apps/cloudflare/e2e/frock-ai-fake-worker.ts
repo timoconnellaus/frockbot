@@ -35,6 +35,16 @@ export class FrockAiFake extends WorkerEntrypoint {
   }
 }
 
+/**
+ * The name the deployed `frockbot-flock-ai-e2e` Worker was bound under before
+ * the provider was renamed. An RPC entrypoint name is part of a deployed
+ * Worker's surface, and this Worker and the app Worker that binds it are
+ * deployed separately, so exporting both names means neither order of the two
+ * deploys breaks the end-to-end environment. Remove it once the deployed
+ * Worker is renamed.
+ */
+export { FrockAiFake as FlockAiFake };
+
 export default {
   fetch(): Response {
     return new Response("Frock AI fake speaks RPC only", { status: 404 });
