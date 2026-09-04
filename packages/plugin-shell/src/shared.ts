@@ -98,6 +98,9 @@ export interface WebChatMessage {
     | "error"
     | "interrupted"
     | "reconciliation-required";
+  via?:
+    | { kind: "bot"; name: string; botId: string }
+    | { kind: "voice"; name: "Voice" };
   /**
    * True while this line's Turn is admitted but has not started, because the
    * User sent it while the Bot was still on the previous one. The thread

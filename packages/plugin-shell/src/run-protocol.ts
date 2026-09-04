@@ -219,12 +219,12 @@ export interface ClientRunRecoveryV1 {
 }
 
 /**
- * The run projection. Version 2 adds `send/to-user` and `wake/parent` to
- * `events`; a version 1 body is a version 2 body that carries neither, so the
- * decoder accepts both and the projection emits 2.
+ * The run projection. Version 2 added structured `send/to-user` and
+ * `wake/parent` events; version 3 adds the bounded `via` marker for agent and
+ * Voice Turns without exposing the internal origin record.
  */
 export interface ClientRunV1 {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   runId: string;
   admittedAt: string;
   input: string;
@@ -248,6 +248,10 @@ export interface ClientRunV1 {
   partialText?: string;
   outcome?: ClientRunOutcomeV1;
   recovery?: ClientRunRecoveryV1;
+  /** Where an agent-lane question entered this Bot's transcript. */
+  via?:
+    | { kind: "bot"; name: string; botId: string }
+    | { kind: "voice"; name: "Voice" };
 }
 
 export interface ClientRunPageV1 {
@@ -883,10 +887,20 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
           message: RESUMABLE_RUN_MESSAGE_V1,
         } satisfies ClientRunRecoveryV1)
       : undefined;
+  const origin = run.admission?.origin;
+  const via =
+    origin?.kind === "bot"
+      ? {
+          kind: "bot" as const,
+          name: truncateWireString(origin.fromBotName, 100),
+          botId: truncate(origin.fromBotId, 128),
+        }
+      : origin?.kind === "voice"
+        ? { kind: "voice" as const, name: "Voice" as const }
+        : undefined;
   return {
-    // Version 2: the projection may now carry `send/to-user` and
-    // `wake/parent`. A client pinned to 1 keeps decoding a stored list.
-    schemaVersion: 2,
+    // Version 3 adds the origin marker for an agent-lane message.
+    schemaVersion: 3,
     runId: truncate(run.runId, MAX_RUN_ID_LENGTH),
     admittedAt: truncate(run.acceptedAt, MAX_TIMESTAMP_LENGTH),
     input: truncateWireString(run.input, MAX_INPUT_BYTES),
@@ -903,6 +917,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
       : {}),
     ...(outcome ? { outcome } : {}),
     ...(recovery ? { recovery } : {}),
+    ...(via ? { via } : {}),
   };
 }
 
@@ -928,7 +943,8 @@ function lookupState(
 export function isVisibleRunV1(run: {
   admission?: { turnType?: string };
 }): boolean {
-  return (run.admission?.turnType ?? "chat") === "chat";
+  const type = run.admission?.turnType ?? "chat";
+  return type === "chat" || type === "agent";
 }
 
 export function projectClientRunLookupV1(
@@ -1436,13 +1452,40 @@ function decodeRun(value: unknown): ClientRun {
       "partialText",
       "outcome",
       "recovery",
+      "via",
     ],
     "run",
   );
   // 1 and 2 differ only by the event types a version 2 body may carry, and a
   // version 1 body carries a subset of them, so one walk decodes both.
-  if (run.schemaVersion !== 1 && run.schemaVersion !== 2) {
+  if (
+    run.schemaVersion !== 1 &&
+    run.schemaVersion !== 2 &&
+    run.schemaVersion !== 3
+  ) {
     throw new Error("run.schemaVersion is invalid");
+  }
+  let via: ClientRunV1["via"];
+  if (run.via !== undefined) {
+    if (run.schemaVersion !== 3) {
+      throw new Error("run.via requires schemaVersion 3");
+    }
+    const candidate = record(run.via, "run.via");
+    if (candidate.kind === "bot") {
+      exactKeys(candidate, ["kind", "name", "botId"], "run.via");
+      via = {
+        kind: "bot",
+        name: wireString(candidate, "name", 100, "run.via"),
+        botId: string(candidate, "botId", 128, "run.via"),
+      };
+    } else if (candidate.kind === "voice") {
+      exactKeys(candidate, ["kind", "name"], "run.via");
+      if (candidate.name !== "Voice")
+        throw new Error("run.via.name is invalid");
+      via = { kind: "voice", name: "Voice" };
+    } else {
+      throw new Error("run.via.kind is invalid");
+    }
   }
   let runId: string;
   try {
@@ -1514,6 +1557,7 @@ function decodeRun(value: unknown): ClientRun {
         }
       : {}),
     ...(recovery ? { failure: recovery.message, recovery } : {}),
+    ...(via ? { via } : {}),
   };
 }
 

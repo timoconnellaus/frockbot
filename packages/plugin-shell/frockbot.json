@@ -56,7 +56,7 @@
         "kind": "tool",
         "connectionTypes": [],
         "admission": {
-          "turnTypes": ["chat"]
+          "turnTypes": ["chat", "agent"]
         }
       },
       {

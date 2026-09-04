@@ -25,7 +25,13 @@ One run of an agent that begins when queued input is durably admitted and ends w
 _Avoid_: Message, request
 
 **Lane**:
-The queue a turn is admitted on. `user` is the conversation and may supersede what is running; `background` is work the bot started for itself — a routine firing, a subagent dispatch — and always waits. A turn's lane is what its turn type says unless its record names another.
+The queue a turn is admitted on. `user` is the conversation and may supersede what is running; `agent` is a question from another Bot or Voice and waits FIFO behind user work; `background` is work the bot started for itself — a routine firing, a subagent dispatch — and retries when the Bot is busy. A turn's lane is what its turn type says unless its record names another.
+
+**Agent Turn**
+: A non-user conversational Turn admitted by another Bot or the Voice Package. It runs in the target Bot Durable Object on the `agent` lane, is visible in that Bot's thread with its origin, and answers its caller through `send_to_user`.
+
+**Bot message**
+: A same-User question sent with the Flock Package's `bot_message` tool. It is not a Channel: the target Bot's answer returns as the asking Turn's tool result, while the target's own Session records the exchange.
 _Avoid_: Priority, queue, channel
 
 **Supersede**:

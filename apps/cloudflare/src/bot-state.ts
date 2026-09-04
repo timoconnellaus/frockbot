@@ -200,6 +200,7 @@ import {
   type FrockAiGatewayHostV1,
 } from "./frock-ai.js";
 import {
+  decodeBotAgentRunRpcV1,
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
   rpcAppletIdOrNull,
@@ -1140,6 +1141,25 @@ export class BotState extends DurableObject<BotStateEnv> {
     const identity = { userId: request.userId, botId: request.botId };
     const { shell } = await this.materialized(identity);
     const turn = await shell.run({ ...identity, ...request.command });
+    await this.projectSettledRun(shell, identity, request.command.runId);
+    await this.projectSettledAudit(shell, identity, request.command.runId);
+    return turn;
+  }
+
+  async runAgent(input: unknown) {
+    const request = decodeBotAgentRunRpcV1(input);
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    const turn = await shell.run({
+      ...identity,
+      runId: request.command.runId,
+      sessionId: request.command.sessionId,
+      acceptedAt: request.command.acceptedAt,
+      text: request.command.text,
+      turnType: "agent",
+      lane: "agent",
+      origin: request.command.source,
+    });
     await this.projectSettledRun(shell, identity, request.command.runId);
     await this.projectSettledAudit(shell, identity, request.command.runId);
     return turn;

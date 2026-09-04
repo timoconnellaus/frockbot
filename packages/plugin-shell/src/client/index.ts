@@ -563,6 +563,7 @@ export function projectDurableRuns(
           ? { at: existingUser.at }
           : {}),
       status: "completed",
+      ...(run.via ? { via: run.via } : {}),
       // Greyed while its Turn waits, ordinary the moment it is running. The
       // flag comes from durable run state, so a reload draws the same thing.
       ...(run.queued ? { pending: true } : {}),

@@ -1,17 +1,17 @@
 // The Bot Durable Object's half of the Bot self-management seam.
 //
-// The Flock Package offers a Bot two tools over its own identity and its
-// User's flock. This module decides, for one admitted Turn, what provenance
-// those writes record and which authorities they may reach. It implements
-// neither: the profile write is the Bot Durable Object's own configuration
-// command, and the create is the User Durable Object's `bot/create` — the
-// same two paths the hosted client drives.
+// The Flock Package offers a Bot self-management and direct messaging over its
+// own identity and its User's flock. This module decides, for one admitted
+// Turn, what provenance those effects record and which authorities they may
+// reach. The profile write is the Bot Durable Object's own configuration
+// command, create is the User Durable Object's `bot/create`, and messaging
+// admits an agent Turn through the target Bot's Durable Object.
 //
 // AUTHORITY. "Self-modification never widens authority." The host handed to
-// the Package exposes exactly four calls, all of them things the User's own
-// surfaces already do, and the `botId` on every one of them is fixed here
-// rather than taken from the model's arguments. A Bot cannot address another
-// Bot's settings through this seam because the seam never accepts a target.
+// the Package exposes only narrow authority calls. The `botId` on every
+// mutation is fixed here rather than taken from the model's arguments. A Bot
+// cannot address another Bot's settings through this seam; a message target is
+// instead resolved from the same User's Flock directory before admission.
 //
 // HIBERNATION. Nothing here reaches the Computer registry, a Computer
 // provider, or a Sprite: identity is Durable Object state, so self-management
@@ -26,7 +26,9 @@ import type {
   CreateBotCommandV1,
   FlockReceiptV1,
   FlockSelfRuntimeHostV1,
+  BotMessageOutcomeV1,
 } from "@frockbot/plugin-flock/agent";
+import type { AgentTurnSlotReceiptV1 } from "@frockbot/plugin-flock/quota";
 
 /** The Bot and User whose identity a Turn may change. */
 export interface BotSelfManagementIdentity {
@@ -39,6 +41,9 @@ export interface BotSelfManagementTurn {
   runId: string;
   turnId: string;
   sessionId: string;
+  /** This Turn's pinned profile name, stable across effect recovery. */
+  fromBotName: string;
+  inboundAgent?: FlockSelfRuntimeHostV1["inboundAgent"];
 }
 
 /**
@@ -57,6 +62,51 @@ export interface BotSelfManagementAuthorities {
     userId: string,
     command: CreateBotCommandV1,
   ): Promise<FlockReceiptV1>;
+  reserveAgentTurn(request: {
+    schemaVersion: 1;
+    userId: string;
+    requesterId: string;
+    runId: string;
+    reservedAt: string;
+  }): Promise<AgentTurnSlotReceiptV1>;
+  releaseAgentTurn(request: {
+    schemaVersion: 1;
+    userId: string;
+    requesterId: string;
+    runId: string;
+  }): Promise<void>;
+  runAgent(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: {
+      runId: string;
+      sessionId: string;
+      acceptedAt: string;
+      text: string;
+      source: {
+        kind: "bot";
+        fromBotId: string;
+        fromBotName: string;
+        messageId: string;
+      };
+    };
+  }): Promise<{ text: string }>;
+}
+
+async function agentRunIdV1(
+  identity: BotSelfManagementIdentity,
+  targetBotId: string,
+  effectId: string,
+): Promise<string> {
+  const bytes = new TextEncoder().encode(
+    `${identity.userId}\u0000${identity.botId}\u0000${targetBotId}\u0000${effectId}`,
+  );
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hex = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `agent-${hex.slice(0, 32)}`;
 }
 
 /**
@@ -92,5 +142,64 @@ export function createBotSelfManagementHost(
     },
     listBots: () => authorities.listBots(identity.userId),
     createBot: (command) => authorities.createBot(identity.userId, command),
+    ...(turn.inboundAgent ? { inboundAgent: turn.inboundAgent } : {}),
+    messageBot: async (request): Promise<BotMessageOutcomeV1> => {
+      if (request.targetBotId === identity.botId) {
+        throw new Error("a Bot cannot message itself");
+      }
+      const directory = await authorities.listBots(identity.userId);
+      const target = directory.bots.find(
+        (bot) => bot.botId === request.targetBotId,
+      );
+      if (!target)
+        throw new Error("the target Bot is not in this User's flock");
+      const runId = await agentRunIdV1(
+        identity,
+        request.targetBotId,
+        request.effectId,
+      );
+      const reservation = await authorities.reserveAgentTurn({
+        schemaVersion: 1,
+        userId: identity.userId,
+        requesterId: identity.botId,
+        runId,
+        reservedAt: new Date().toISOString(),
+      });
+      if (reservation.status === "refused") {
+        throw new Error(reservation.reason);
+      }
+      try {
+        const turnResult = await authorities.runAgent({
+          schemaVersion: 1,
+          userId: identity.userId,
+          botId: request.targetBotId,
+          command: {
+            runId,
+            sessionId: `${identity.userId}:${request.targetBotId}`,
+            acceptedAt: new Date().toISOString(),
+            text: request.message,
+            source: {
+              kind: "bot",
+              fromBotId: identity.botId,
+              fromBotName: turn.fromBotName,
+              messageId: runId,
+            },
+          },
+        });
+        return {
+          targetBotId: request.targetBotId,
+          targetBotName: target.initialName,
+          runId,
+          text: turnResult.text,
+        };
+      } finally {
+        await authorities.releaseAgentTurn({
+          schemaVersion: 1,
+          userId: identity.userId,
+          requesterId: identity.botId,
+          runId,
+        });
+      }
+    },
   };
 }

@@ -121,6 +121,9 @@ describe("user application security headers", () => {
       securityEnv,
     );
     const html = await response.text();
+    expect(html).toContain(
+      '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
+    );
     expect(html).toContain('data-frockbot-auth-mode="development"');
     expect(html).toContain('data-frockbot-is-admin="true"');
     for (const attribute of HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1) {

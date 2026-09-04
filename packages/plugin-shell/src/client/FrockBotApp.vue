@@ -1490,7 +1490,12 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                 </div>
               </div>
             </template>
-            <div v-else class="message-bubble">{{ message.text }}</div>
+            <div v-else class="message-user-column">
+              <div class="message-bubble">{{ message.text }}</div>
+              <span v-if="message.via" class="message-via">
+                via {{ message.via.name }}
+              </span>
+            </div>
           </article>
           <!--
             The working row: the Bot's own avatar on its own line at the end of
