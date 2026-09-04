@@ -2,9 +2,9 @@
 
 ## Status
 
-Design accepted in conversation on 2026-09-04; tracked in [issue #179](https://github.com/timoconnellaus/frockbot/issues/179) and [ADR 0035](../adr/0035-voice-is-a-user-package-over-a-socket-only-session.md). **Slice A (dictation) and B0 (the ADR and agent lane) are implemented**; B1 and B2 are not. Both voice capabilities are **beyond parity** (Feature rule 8): the parity register has only a "microphone" settings row (`docs/research/grokbot-computer.md`, §Per-user settings).
+Design accepted in conversation on 2026-09-04; tracked in [issue #179](https://github.com/timoconnellaus/frockbot/issues/179) and [ADR 0035](../adr/0035-voice-is-a-user-package-over-a-socket-only-session.md). **Slice A (dictation), B0 (the ADR and agent lane), and B1 (the Voice Package core) are implemented**; B2 is not. Both voice capabilities are **beyond parity** (Feature rule 8): the parity register has only a "microphone" settings row (`docs/research/grokbot-computer.md`, §Per-user settings).
 
-Everything below was verified against `main` at `b359d096`. Line numbers drift; verify before relying on them.
+Everything below was verified against `main` at `43cae29a`. Line numbers drift; verify before relying on them.
 
 ## The two capabilities
 
@@ -13,8 +13,8 @@ Everything below was verified against `main` at `b359d096`. Line numbers drift; 
 
 ## Decisions (accepted in conversation, 2026-09-04)
 
-- **D1 Platform-ambient keys.** FrockBot's OpenAI and Google keys are stored BYOK on the `flock` AI Gateway. Both realtime APIs are reached over AI Gateway's realtime WebSockets (`wss://gateway.ai.cloudflare.com/v1/<account>/flock/{openai|google-ai-studio}`) with `cf-aig-authorization`. A durable per-User voice-minutes quota bounds cost. _Why:_ "works out of the box", one Models surface, no new Connection Types, no credential ever reaches a client. User BYOK is a later override Package.
-- **D2 One transport for both: a per-User `VoiceSession` Durable Object proxy.** Browser ↔ hibernatable socket ↔ DO ↔ AI Gateway. The DO holds sockets and **no authority**; every durable fact goes to the User DO by RPC, the same rule Subagent Durable Objects follow (ADR 0017). _Why:_ a Bot's answer can be pushed into the live session by RPC; resumption, `goAway`, and idle-offline are server-owned and survive a refresh; one session across devices; browser-direct would need ephemeral tokens and cannot use AI Gateway.
+- **D1 Platform-ambient keys.** FrockBot's OpenAI and Google keys are server-side platform credentials. Each realtime transport prefers its direct Worker secret, then uses a BYOK key on the `flock` AI Gateway with `cf-aig-authorization`; Cloudflare's current realtime routes are `/openai` and `/google`. A durable per-User voice-minutes quota bounds cost. _Why:_ "works out of the box", one Models surface, no new Connection Types, no credential ever reaches a client. User BYOK is a later override Package.
+- **D2 One transport for both: a per-User `VoiceSession` Durable Object proxy.** Browser ↔ hibernatable socket ↔ DO ↔ platform realtime upstream. The DO holds sockets and **no authority**; every durable fact goes to the User DO by RPC, the same rule Subagent Durable Objects follow (ADR 0017). _Why:_ a Bot's answer can be pushed into the live session by RPC; resumption, `goAway`, and idle-offline are server-owned and survive a refresh; one session across devices; browser-direct would need ephemeral tokens and cannot use AI Gateway.
 - **D3 Dictation uses OpenAI Realtime transcription sessions** (`gpt-live-transcribe`; `conversation.item.input_audio_transcription.delta` / `.completed`). `whisper-1` cannot stream deltas. _Why:_ best dictation quality; the transport is shared anyway.
 - **D4 Dictation streams into the textarea** as the draft, through `ComposerDraftStore`, so it is editable and a rejected send restores it. Bin discards the draft; Send commits the audio buffer, waits for `.completed`, then calls the ordinary `sendMessage` (mid-Turn it supersedes, ADR 0024). The wave button shows only while `draft === ""`; while recording, bin + send replace it. _Why:_ reuses the existing send/stop slot switch and draft persistence.
 - **D5 The voice assistant is not a Bot.** It is a first-party, User-scoped **Voice Package**: no Agent loop, no Memory writes in v1, its own durable ledger in the User DO. _Why:_ a Bot DO is the text-model Agent loop; Gemini Live does not belong inside it.
@@ -68,16 +68,46 @@ the worklet source is a string in `plugin-shell` and the application Worker
 answers `GET /voice-capture-worklet.js` with it. The Content-Security-Policy is
 unchanged.
 
-The budget is **60 minutes of captured audio per User per day**, one constant
+The dictation budget is **60 minutes of captured audio per User per day**, one constant
 (`VOICE_MINUTES_PER_DAY_V1`), counted in whole seconds against a UTC day and
 swept on the next day's first capture. Exhausted, the composer says so in
 plain English and the person types instead.
 
-### Where each key goes
+## Slice B1 status (implemented 2026-09-04)
 
-Two upstream paths, chosen by configuration and not by a deploy of different
-code (`voiceUpstreamTargetV1`). Precedence is: local override, then the direct
-OpenAI key, then the AI Gateway.
+The first-party, platform-owned Voice Package now mounts User, gateway, and
+hosted-client Contributions. The User Durable Object owns its bounded session
+ledger, on/off state, Gemini resumption handle, pending-answer seam, and monthly
+quota. The `VoiceSession` object owns only the hibernatable browser socket and
+live Gemini transport. It reconnects the upstream after `goAway`, resumes from
+the User-owned handle, leaves the session alive across a browser refresh, and
+replaces the older device when a newer one connects.
+
+Gemini runs as `gemini-3.1-flash-live-preview` with PCM16 mono input at 16 kHz
+and PCM16 mono output at 24 kHz. Automatic VAD and
+`START_OF_ACTIVITY_INTERRUPTS` provide open-mic turn taking and barge-in; two
+quiet minutes take Voice offline. The four B1 tools are the bounded, read-only
+`list_bots`, `bot_activity`, `memory_search`, and `pending_answers`. They read
+User/Bot Durable Object state and Memory object storage without calling the
+Computer. The table-driven tool seam is ready for B2's `ask_bot`, but the
+effectful tool is deliberately absent from Gemini's declarations in B1.
+
+The hosted shell receives a header toggle and a Voice panel with listening,
+speaking, and offline states; current-session transcript, plain-language tool
+activity, quota remaining, playback, microphone refusals, and quota/error
+notifications. Android declares `RECORD_AUDIO`, iOS declares
+`NSMicrophoneUsageDescription`, and Capacitor's WebView permission bridge owns
+the runtime prompt. The assistant budget is **60 minutes per User per UTC
+month**, one constant (`VOICE_ASSISTANT_MINUTES_PER_MONTH_V1`). Session seconds
+settle atomically with the Billing ledger; Gemini audio is token-priced, so the
+duration is recorded under the actual provider/model with an explicitly
+unknown price instead of a false duration estimate.
+
+## Where each key goes
+
+Each capability has two production upstream paths, chosen by configuration and
+not by a deploy of different code. Precedence is: local test override, direct
+provider key, then AI Gateway.
 
 1. **Direct OpenAI (the path production takes).** `OPENAI_API_KEY` as a
    **Worker secret**. Tim added it as a **GitHub repository secret on
@@ -98,15 +128,23 @@ OpenAI key, then the AI Gateway.
    with `cf-aig-authorization: Bearer …` and no beta header. Nothing new has to
    be placed for this path beyond the BYOK provider key on the gateway.
 
-`GEMINI_API_KEY` is also a GitHub repository secret as of 2026-09-04 and is
-carried in both optional lists already. Nothing reads it yet; slice B will read
-it the same way.
+3. **Direct Gemini Live (the assistant's preferred path).** `GEMINI_API_KEY`
+   is a Worker secret carried in both workflow secret lists. The Durable Object
+   opens the Google AI Studio v1beta bidi WebSocket with `?key=…`; the key never
+   reaches the browser.
+4. **AI Gateway Google (assistant fallback).** Without the direct key, the
+   Worker uses the same Gateway token and account id and opens
+   `wss://gateway.ai.cloudflare.com/v1/<account>/flock/google`. The accepted
+   design originally called this route `/google-ai-studio`; Cloudflare's
+   current realtime WebSocket documentation names it `/google`, while
+   `google-ai-studio` is its provider-native REST route.
 
 The end-to-end layer takes neither: the harness sets a `VOICE_UPSTREAM_URL` var
-pointing at its own fake transcription Worker, so the browser suite spends
-nothing and needs no credential. Production sets no such var.
+and a `VOICE_ASSISTANT_UPSTREAM_URL` var pointing at its fake provider Worker,
+so the browser suite spends nothing and needs no credential. Production sets
+neither var.
 
-### Still unverified
+## Still unverified
 
 - **Assumption 1 of "Verify before slice A" is still open.** Nobody has proved
   that AI Gateway's OpenAI realtime path accepts a _transcription-only_ session
@@ -120,9 +158,9 @@ nothing and needs no credential. Production sets no such var.
   everything proved locally is against the fake. The first real capture after
   deployment is the proof.
 - The AudioWorklet resample path has been exercised in headless Chromium only.
-  Safari (which ignores a requested `sampleRate`) and the Capacitor and Electron
-  shells are untested; the native shells still need their microphone permission
-  entries.
+  Android and iOS now carry their microphone permission declarations, but real
+  Safari, Capacitor, and Electron microphone/playback sessions remain device
+  smoke tests.
 - The budget is metered on wall-clock seconds of an open capture, not on audio
   the upstream actually billed. It is a bound, not an invoice.
 
@@ -161,7 +199,7 @@ These gate D1 and D3. Each is a short spike, not a design question.
 
 - **A — Dictation.** AI Gateway OpenAI realtime WS through a minimal `VoiceSession` DO; composer wave / bin / send states; worklet and animation; e2e with a fake transcription service. Proves the gateway WebSocket path.
 - **B0 — ADR + #151 (landed 2026-09-04).** ADR 0035 records the Voice Package and socket-only `VoiceSession` seam. The kernel `agent` lane, Flock's chat-only `bot_message`, same-User dispatch, per-User lease, teammate and sender prompt sections, and transcript origin marker are implemented.
-- **B1 — Voice Package core.** Gemini Live via the DO proxy, the ledger in the User DO, read-only tools (`list_bots`, `bot_activity`, `memory_search`, `pending_answers`), the shell toggle, the Voice surface, the quota, the e2e fake.
+- **B1 — Voice Package core (implemented 2026-09-04).** Gemini Live via the DO proxy, the ledger in the User DO, read-only tools (`list_bots`, `bot_activity`, `memory_search`, `pending_answers`), the shell toggle, the Voice surface, the quota, Billing settlement, native microphone declarations, and the e2e fake.
 - **B2 — Ask a Bot.** `ask_bot` on the agent lane, answer push into the live session, offline notification, connect-time briefing, the "via voice" marker in the thread.
 
 Depends on #151 and #153.
@@ -189,6 +227,10 @@ Depends on #151 and #153.
 | Tasks / subagents                                                                     | `packages/plugin-subagents/src/agent.ts` (`Task`, `task_check`, `task_message`, `task_stop`, `task_resume`)                                                                                                                                              |
 | `send_to_user` contract                                                               | `packages/plugin-shell/src/agent.ts`; `packages/kernel-contracts/src/send-to-user.ts`; rendered by `packages/plugin-shell/src/client/SendPayloadView.vue`                                                                                                |
 | Client notifications                                                                  | `showClientNotificationV1` (plugin-shell client)                                                                                                                                                                                                         |
+| Voice Package manifest, prompt, ledger, tools, and UI                                 | `packages/plugin-voice/{frockbot.json,src}`                                                                                                                                                                                                              |
+| Gemini Live setup, provider selection, and frame translation                          | `apps/cloudflare/src/voice-assistant-upstream.ts`; pure tests in `voice-assistant-upstream.test.ts`                                                                                                                                                      |
+| Assistant socket, durable User RPCs, and browser transport                            | `apps/cloudflare/src/{voice-session.ts,user-configuration.ts,client/voice-assistant.ts}`; `/api/voice/assistant`                                                                                                                                         |
+| Assistant browser fake and end-to-end spec                                            | `apps/cloudflare/e2e/{frock-ai-fake-worker.ts,voice-fake-protocol.ts,voice-assistant.e2e.ts}`                                                                                                                                                            |
 | Icons (an unused `mic` is already drawn)                                              | `packages/client-ui/src/icons.ts`                                                                                                                                                                                                                        |
 | UI style gate (no literal colours or sizes)                                           | `scripts/check-ui-styles.ts`; `bun run lint:ui-styles`                                                                                                                                                                                                   |
 | Kernel import gate; rule → test map                                                   | `scripts/check-kernel-imports.ts`; `docs/architecture-checks.md`                                                                                                                                                                                         |

@@ -55,14 +55,18 @@ conservative `$10 / $10 / $50` input/cached/output fallback and records
 time-of-day DeepSeek prices use its published peak rate so a static ledger does
 not understate the call.
 
-Voice usage enters the same User-owned ledger from the existing durable quota
-receipt. The SQLite-backed User Durable Object commits the synchronous quota KV
-update and the SQL ledger entry inside one `transactionSync`, so neither can
-survive without the other. The receipt carries cumulative session seconds; the
-ledger id is made from that cumulative value while the entry charges only newly
+Voice usage enters the same User-owned ledger from a durable quota receipt. The
+SQLite-backed User Durable Object commits the synchronous quota KV update and
+the SQL ledger entry inside one `transactionSync`, so neither can survive
+without the other. The receipt carries cumulative session seconds; the ledger
+id is made from that cumulative value while the entry charges only newly
 recorded seconds, so retries are idempotent and incremental reports do not
-double-charge. It uses OpenAI's published `gpt-live-transcribe` duration rate
-and is provider-reported, not estimated.
+double-charge. Dictation uses OpenAI's published `gpt-live-transcribe` duration
+rate and is provider-reported, not estimated. The Gemini Live assistant also
+records its exact session seconds, provider, and model, but Gemini prices audio
+tokens rather than elapsed duration. Until its upstream usage receipt carries
+those tokens, the entry stores zero cost and `unknownPrice: true` instead of
+inventing a duration conversion.
 
 Detailed rows and daily rollups are retained for 45 days and detail is also
 bounded at 50,000 rows. Monthly dimension rollups survive detail eviction for
