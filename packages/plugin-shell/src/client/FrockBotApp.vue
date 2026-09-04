@@ -285,6 +285,8 @@ const hasBot = computed(() => Boolean(state.value.activeBotId));
  * inventing "Model unavailable" of its own.
  */
 const threadHeading = computed(() => {
+  // An unreadable Bot list is not an empty one.
+  if (state.value.botsUnavailable) return "Couldn't load your Bots.";
   if (!hasBot.value) return "No Bots yet.";
   if (!botName.value) return state.value.modelReady ? "Ready." : "Not ready.";
   return state.value.modelReady
@@ -292,6 +294,9 @@ const threadHeading = computed(() => {
     : `${botName.value} isn't ready.`;
 });
 const threadHint = computed(() => {
+  if (state.value.botsUnavailable) {
+    return "Check your connection, then try again.";
+  }
   if (!hasBot.value) return "Add your first sheep to start a conversation.";
   if (state.value.modelReady) {
     return "Say anything to get started.";
@@ -899,6 +904,17 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             <small>{{ state.modelLabel }}</small>
           </div>
           <k-slot name="frockbot.header-actions" />
+          <!--
+            A phone has no right panel on screen, so the controls that live in
+            its header — the settings gear above all, the only route to
+            Routines, the audit log and template import — have nowhere to be.
+            They come here instead, where the panel's own header would be at a
+            desktop width. The panel keeps them at every other size, so they
+            are never drawn twice.
+          -->
+          <div v-if="phoneLayout && !rightPanelOpen" class="topbar-bot-actions">
+            <k-slot name="frockbot.bot-actions" />
+          </div>
         </header>
 
         <section
@@ -923,9 +939,24 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               { 'message-pending': message.pending },
             ]"
           >
-            <p v-if="message.role === 'system'" class="message-system-line">
-              {{ message.text }}
-            </p>
+            <!--
+              A system line is the product speaking, not the Bot, so it has no
+              avatar and no bubble — and when the thing it reports is something
+              the person can act on, it carries the same Retry the failed
+              assistant row does rather than leaving them to find the composer.
+            -->
+            <template v-if="message.role === 'system'">
+              <p class="message-system-line">{{ message.text }}</p>
+              <button
+                v-if="message.retry === 'resend'"
+                type="button"
+                class="message-retry"
+                :disabled="!canSend"
+                @click="sendMessage()"
+              >
+                Retry
+              </button>
+            </template>
             <template v-else-if="message.role === 'assistant'">
               <!--
                 The Bot's own avatar comes from whichever Package owns Bot
@@ -956,9 +987,26 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                   <UiMarkdown :text="message.text" />
                 </div>
                 <!--
-                Why the Turn ends where it does, under whatever it had already
-                said rather than in place of it.
-              -->
+                  The working state. Until the model has produced a word there
+                  was nothing beside the avatar at all, for twenty seconds and
+                  occasionally for two minutes, and the only other signal — the
+                  composer's stop button — is at the far end of the window from
+                  where the reply will appear.
+                -->
+                <div
+                  v-else-if="message.status === 'streaming'"
+                  class="message-bubble message-working"
+                  role="status"
+                  aria-label="Working on a reply"
+                >
+                  <span class="working-dots" aria-hidden="true">
+                    <i></i><i></i><i></i>
+                  </span>
+                </div>
+                <!--
+                  Why the Turn ends where it does, under whatever it had
+                  already said rather than in place of it.
+                -->
                 <p v-if="message.notice" class="message-notice">
                   {{ message.notice }}
                 </p>
@@ -1309,7 +1357,18 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               -->
               <AppletCanvas v-if="appletCanvasOpen" />
               <template v-else>
-                <header class="right-panel-header">
+                <!--
+                  The Bot's own controls sit wherever they can actually be
+                  pressed, and in exactly one place: here at desktop widths and
+                  whenever the panel is over the conversation, in the topbar on
+                  a phone with the panel closed. Two gears with the same name
+                  is two answers to "where is Bot settings", and one of them is
+                  always the one behind the open drawer.
+                -->
+                <header
+                  v-if="!phoneLayout || rightPanelOpen"
+                  class="right-panel-header"
+                >
                   <k-slot name="frockbot.bot-actions" />
                 </header>
                 <div class="right-panel-body">
@@ -1341,6 +1400,14 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         </div>
       </aside>
 
+      <!--
+        The panel's own toggle. It stays at every width: on a phone the panel
+        is a drawer, and this is the only way to open it — the Bot's own
+        controls moved to the topbar (above), but the panel holds more than
+        they do. What made it read wrongly on a phone was being the *only*
+        survivor of that pair, saying "hide" beside a gear that had nowhere
+        to be.
+      -->
       <div class="window-actions">
         <UiIconButton
           class="panel-toggle"

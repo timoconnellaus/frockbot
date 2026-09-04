@@ -245,6 +245,16 @@ body,
 
 body {
   background: var(--frock-surface-window);
+
+  /*
+   * The working size, on the document as well as on the shell root. Anything
+   * rendered outside `.frockbot-root` — an auth gate, a package page's own
+   * body — otherwise inherits the browser's 16px and reads a size larger than
+   * the rest of the product. Inputs keep their own alias, which is 16px on a
+   * phone so focusing a field does not zoom the page in.
+   */
+  font-size: var(--frock-text-base);
+  line-height: var(--frock-leading-normal);
 }
 
 button,
