@@ -1177,19 +1177,58 @@ export class BotDurableAuthority<Snapshot> {
     return this.readRunFrom(this.ctx.storage, runId);
   }
 
+  /**
+   * The run record alone, with no journal behind it.
+   *
+   * Deciding whether a Turn belongs to the conversation being read, and
+   * whether a person is meant to see it, needs the record and nothing else. A
+   * transcript page scans many more candidates than it keeps, and hydrating
+   * every candidate's events to discard it was the whole cost of that scan.
+   * The returned record carries an empty `events` array and its `eventRange`;
+   * anything that reads the journal calls {@link readStoredRun} or
+   * {@link readStoredRunForDisplay}.
+   */
+  async readRunHeader(
+    runId: string,
+  ): Promise<StoredRunV1<Snapshot> | undefined> {
+    return this.codec.optional(
+      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
+    );
+  }
+
+  /**
+   * A run hydrated for the conversation surface: exact for everything the
+   * transcript renders, and each normalized model request left as its durable
+   * projection. See `SessionEventLog.readDisplayRange`.
+   */
+  async readStoredRunForDisplay(
+    runId: string,
+  ): Promise<StoredRunV1<Snapshot> | undefined> {
+    return this.readRunFrom(this.ctx.storage, runId, "display");
+  }
+
   private async readRunFrom(
     storage: SessionEventLogStorage,
     runId: string,
+    fidelity: "exact" | "display" = "exact",
   ): Promise<StoredRunV1<Snapshot> | undefined> {
     const run = this.codec.optional(
       await storage.get<unknown>(`${RUN_PREFIX}${runId}`),
     );
     if (!run?.eventRange) return run;
-    const events = await new SessionEventLog(storage).readRange(
-      run.sessionId,
-      run.eventRange.startSeq,
-      run.eventRange.endSeq,
-    );
+    const log = new SessionEventLog(storage);
+    const events =
+      fidelity === "display"
+        ? await log.readDisplayRange(
+            run.sessionId,
+            run.eventRange.startSeq,
+            run.eventRange.endSeq,
+          )
+        : await log.readRange(
+            run.sessionId,
+            run.eventRange.startSeq,
+            run.eventRange.endSeq,
+          );
     if (events.length !== run.eventRange.endSeq - run.eventRange.startSeq) {
       throw new Error(`run "${run.runId}" has an incomplete event range`);
     }
@@ -1203,9 +1242,10 @@ export class BotDurableAuthority<Snapshot> {
 
   /**
    * The bounded durable event projections for a run. This is the inspection
-   * path: recovery and client transcript projection use `readStoredRun` and
-   * therefore receive exact events, while a debug snapshot never hydrates a
-   * multi-megabyte prompt merely to cut it again.
+   * path: recovery, compaction and audit use `readStoredRun` and therefore
+   * receive exact events, the transcript uses `readStoredRunForDisplay`, and a
+   * debug snapshot never hydrates a multi-megabyte prompt merely to cut it
+   * again (ADR 0038).
    */
   async readRunEventProjections(runId: string): Promise<
     | {
