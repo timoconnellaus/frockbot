@@ -557,7 +557,7 @@ describe("open", () => {
     const response = await host.handle(request({ kind: "open" }));
     const result = decodeComputerHostOpenResultV1(await response.json());
     expect(result.generation).toBe(4);
-    // One screen per Computer (ADR 0030): every Bot's window is on it, and a
+    // One screen per Computer (ADR 0031): every Bot's window is on it, and a
     // slot is a rectangle of it rather than a display number of its own.
     expect(result.display).toBe(COMPUTER_DISPLAY);
     expect(result.directory).toBe(
@@ -651,7 +651,7 @@ describe("open", () => {
   });
 
   test("retires the superseded per-slot desktop services, and never the profile", async () => {
-    // The migration (ADR 0030). An existing Computer carries one
+    // The migration (ADR 0031). An existing Computer carries one
     // `frockbot-desktop-<botKey>` per tenant, and one of their browsers is
     // holding the shared profile's singleton lock right now: the new browser
     // service cannot take the profile until they are stopped. What must survive
@@ -1519,7 +1519,7 @@ describe("control", () => {
     expect(
       sprite.commands.some((command) => command.stdin.includes(CONTROL_SCRIPT)),
     ).toBe(true);
-    // Every Bot's window is on one screen now (ADR 0030), so a takeover that
+    // Every Bot's window is on one screen now (ADR 0031), so a takeover that
     // raised nothing hands the human whichever window Chromium last focused.
     expect(sprite.commands.at(-1)?.stdin).toContain(FOCUS_WINDOW_SCRIPT);
     const controlCommand = sprite.commands.find((command) =>

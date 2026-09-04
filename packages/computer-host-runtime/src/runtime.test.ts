@@ -635,7 +635,7 @@ describe("installed shell scripts", () => {
   });
 
   test("one browser holds the shared profile, and the launcher takes no Bot key", () => {
-    // ADR 0030. Chromium's singleton lock is per `--user-data-dir`, so a
+    // ADR 0031. Chromium's singleton lock is per `--user-data-dir`, so a
     // per-slot launch could only ever produce one browser: the first Bot to
     // ask got a screen and the rest got "Opening in existing browser session"
     // and a dead CDP port. One browser, one display, one port.
@@ -1035,7 +1035,7 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
     }
   }, 30_000);
   test("prunes a slot from the superseded hundred-display layout", async () => {
-    // The migration's registry half (ADR 0030). A Computer that allocated
+    // The migration's registry half (ADR 0031). A Computer that allocated
     // displays 0-99 carries slots the one screen has no rectangle for; a window
     // pinned past its last slot is a window nobody can see. They are pruned
     // under the same lock that allocates, so the tenant re-allocates in range
