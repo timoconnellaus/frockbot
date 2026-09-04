@@ -159,6 +159,10 @@ export interface ClientRun {
    */
   partialText?: string;
   recovery?: { action: "resume"; message: string };
+  /** Source marker for a message admitted on the agent lane. */
+  via?:
+    | { kind: "bot"; name: string; botId: string }
+    | { kind: "voice"; name: "Voice" };
 }
 
 /**

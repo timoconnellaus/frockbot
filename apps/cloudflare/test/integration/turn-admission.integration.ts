@@ -203,7 +203,7 @@ describe("turn admission through the gateway and the Bot", () => {
     const run = (await listRuns(userId, botId)).find(
       (candidate) => candidate.runId === "admission-widget-1",
     );
-    expect(run).toMatchObject({ schemaVersion: 2, status: "completed" });
+    expect(run).toMatchObject({ schemaVersion: 3, status: "completed" });
     expect(
       run?.events.filter((event) => event.type === "send/to-user"),
     ).toHaveLength(1);

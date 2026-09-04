@@ -230,11 +230,12 @@ export function turnFailureMessage(
  * isolate contract, and the durable run record: adding one later is a wire
  * change in three places.
  */
-export type TurnTypeV1 = "chat" | "automation" | "subagent";
+export type TurnTypeV1 = "chat" | "agent" | "automation" | "subagent";
 
 /** The declared turn types, in their canonical order. */
 export const TURN_TYPES_V1: readonly TurnTypeV1[] = [
   "chat",
+  "agent",
   "automation",
   "subagent",
 ];

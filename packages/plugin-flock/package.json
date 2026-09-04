@@ -14,6 +14,7 @@
     "./client/state": "./src/client/state.ts",
     "./frockbot.json": "./frockbot.json",
     "./manifest": "./src/manifest.ts",
+    "./quota": "./src/quota.ts",
     "./package.json": "./package.json",
     "./shared": "./src/shared.ts",
     "./user": "./src/user.ts"

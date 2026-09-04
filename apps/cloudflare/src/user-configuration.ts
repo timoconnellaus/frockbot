@@ -53,6 +53,11 @@ import {
   reserveSubagentSlotV1,
   type SubagentSlotReceiptV1,
 } from "@frockbot/plugin-subagents/quota";
+import {
+  releaseAgentTurnSlotV1,
+  reserveAgentTurnSlotV1,
+  type AgentTurnSlotReceiptV1,
+} from "@frockbot/plugin-flock/quota";
 import { machineTokenClaimsV1 } from "@frockbot/machine-protocol";
 import {
   appletStateNameV1,
@@ -793,6 +798,39 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return releaseSubagentSlotV1(this.ctx.storage, {
       botId: request.botId as string,
       taskId: request.taskId as string,
+    });
+  }
+
+  /** User-wide agent-lane budget shared by every Bot and Voice session. */
+  async reserveAgentTurnSlot(input: unknown): Promise<AgentTurnSlotReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      requesterId: rpcString(256),
+      runId: rpcString(256),
+      reservedAt: rpcString(64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return reserveAgentTurnSlotV1(this.ctx.storage, {
+      schemaVersion: 1,
+      userId: request.userId as string,
+      requesterId: request.requesterId as string,
+      runId: request.runId as string,
+      reservedAt: request.reservedAt as string,
+    });
+  }
+
+  async releaseAgentTurnSlot(
+    input: unknown,
+  ): Promise<{ schemaVersion: 1; status: "released"; held: number }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      requesterId: rpcString(256),
+      runId: rpcString(256),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return releaseAgentTurnSlotV1(this.ctx.storage, {
+      requesterId: request.requesterId as string,
+      runId: request.runId as string,
     });
   }
 

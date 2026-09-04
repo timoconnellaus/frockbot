@@ -37,6 +37,13 @@ const SUBAGENT_ORIGIN: StoredRunOriginV1 = {
   parentRunId: "run-parent",
 };
 
+const BOT_ORIGIN: StoredRunOriginV1 = {
+  kind: "bot",
+  fromBotId: "researcher",
+  fromBotName: "Researcher",
+  messageId: "agent-message-1",
+};
+
 const codec = createStoredRunCodecV1<undefined>({
   decodeRunId: (value) => value as string,
   decodeConfigurationSnapshot: () => undefined,
@@ -155,6 +162,22 @@ describe("the admission record names what produced the Turn", () => {
     );
 
     expect(decoded.admission?.origin).toEqual(SUBAGENT_ORIGIN);
+    expect(codec.require(structuredClone(decoded))).toEqual(decoded);
+  });
+
+  test("round-trips an agent Turn and its sending Bot", () => {
+    const decoded = codec.require(
+      legacyRun({
+        admission: {
+          schemaVersion: 1,
+          turnType: "agent",
+          origin: BOT_ORIGIN,
+        },
+      }),
+    );
+
+    expect(decoded.admission?.origin).toEqual(BOT_ORIGIN);
+    expect(storedRunTurnTypeV1(decoded)).toBe("agent");
     expect(codec.require(structuredClone(decoded))).toEqual(decoded);
   });
 
@@ -398,6 +421,22 @@ describe("an admitted Turn re-mounts on its recorded turn type", () => {
     expect(await admittedEvent(storage, "run-1")).toMatchObject({
       turnType: "automation",
     });
+  });
+
+  test("an agent Turn defaults to the agent admission lane", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+
+    await probe.authority.run(command("run-agent", "agent"));
+
+    const stored = storage.values.get(
+      "run:run-agent",
+    ) as StoredRunV1<undefined>;
+    expect(stored.admission).toEqual({
+      schemaVersion: 1,
+      turnType: "agent",
+    });
+    expect(probe.observed[0]?.command.turnType).toBe("agent");
   });
 
   test("after eviction the resumed run re-mounts on the recorded type", async () => {

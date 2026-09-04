@@ -3,7 +3,8 @@
   width: 100%;
   height: 100%;
   place-items: center;
-  padding: 32px;
+  padding: calc(32px + var(--frock-safe-top)) 32px
+    calc(32px + var(--frock-safe-bottom));
   color: var(--frock-text);
   background: var(--frock-auth-background), var(--frock-surface-window);
   font-family:

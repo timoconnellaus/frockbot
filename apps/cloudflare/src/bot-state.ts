@@ -200,6 +200,7 @@ import {
   type FrockAiGatewayHostV1,
 } from "./frock-ai.js";
 import {
+  decodeBotAgentRunRpcV1,
   decodeBotRunRpcV1,
   decodeRpcEnvelopeV1,
   rpcAppletIdOrNull,
@@ -1145,6 +1146,25 @@ export class BotState extends DurableObject<BotStateEnv> {
     return turn;
   }
 
+  async runAgent(input: unknown) {
+    const request = decodeBotAgentRunRpcV1(input);
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    const turn = await shell.run({
+      ...identity,
+      runId: request.command.runId,
+      sessionId: request.command.sessionId,
+      acceptedAt: request.command.acceptedAt,
+      text: request.command.text,
+      turnType: "agent",
+      lane: "agent",
+      origin: request.command.source,
+    });
+    await this.projectSettledRun(shell, identity, request.command.runId);
+    await this.projectSettledAudit(shell, identity, request.command.runId);
+    return turn;
+  }
+
   /** This object's bounded, durable audit outbox. */
   private auditOutbox(): AuditOutboxV1 {
     return new AuditOutboxV1(this.ctx.storage);
@@ -1158,9 +1178,9 @@ export class BotState extends DurableObject<BotStateEnv> {
   /**
    * Queues the exact `model/usage` events from one just-settled Turn.
    *
-   * This callback runs for chat, Routine, recovery, and Subagent Turns at the
-   * Shell's common loop boundary. Queueing precedes the cross-object call;
-   * ledger ids make every retry idempotent.
+   * This callback runs for chat, Routine, recovery, Subagent, and agent-lane
+   * Turns at the Shell's common loop boundary. Queueing precedes the
+   * cross-object call; ledger ids make every retry idempotent.
    */
   private async recordSettledUsage(input: {
     botId: string;
