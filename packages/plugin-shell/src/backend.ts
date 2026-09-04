@@ -589,7 +589,8 @@ export interface BotStateEnv {
    * Bot authoring still compiles; `package_author` then refuses visibly.
    */
   PACKAGE_BUNDLER?: PackageBundlerBinding;
-  MEMORY_INDEX: VectorizeIndex;
+  /** Optional in local and workerd hosts, which have no Vectorize simulator. */
+  MEMORY_INDEX?: VectorizeIndex;
   /** The native AI binding consumed through the image Package adapter. */
   AI?: NativeAiBindingV1;
   /** The Frock AI Gateway adapter constructed by the Cloudflare host. */

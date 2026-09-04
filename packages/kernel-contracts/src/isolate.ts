@@ -31,6 +31,7 @@ import {
   type NormalizedModelRequest,
   type ToolSchema,
 } from "./types.js";
+import { STRUCTURED_OUTPUT_ISSUE_LIMIT_V1 } from "./structured-output.js";
 
 /**
  * The wire contract version the kernel wrapper emits. Version 2 added
@@ -1340,6 +1341,98 @@ export function decodeIsolateModelEventV1(
         id: boundedString(call.id, `${label}.call.id`, 256),
         name: boundedString(call.name, `${label}.call.name`, 128),
         input: call.input,
+      },
+    };
+  }
+  if (value.type === "response-format-note") {
+    exactKeys(value, ["type", "note"], label);
+    const note = record(value.note, `${label}.note`);
+    exactKeys(
+      note,
+      ["code", "requested", "effective", "message"],
+      `${label}.note`,
+    );
+    if (
+      note.code !== "structured-output-downgraded" ||
+      (note.requested !== "json_schema" && note.requested !== "json") ||
+      (note.effective !== "json" && note.effective !== "prompt")
+    ) {
+      throw new Error(`${label}.note is invalid`);
+    }
+    return {
+      type: "response-format-note",
+      note: {
+        code: note.code,
+        requested: note.requested,
+        effective: note.effective,
+        message: boundedString(note.message, `${label}.note.message`, 1_024),
+      },
+    };
+  }
+  if (value.type === "structured-output-failure") {
+    exactKeys(value, ["type", "failure"], label);
+    const failure = record(value.failure, `${label}.failure`);
+    if (failure.code === "invalid-json") {
+      exactKeys(failure, ["code", "message"], `${label}.failure`);
+      return {
+        type: "structured-output-failure",
+        failure: {
+          code: "invalid-json",
+          message: boundedString(
+            failure.message,
+            `${label}.failure.message`,
+            1_024,
+          ),
+        },
+      };
+    }
+    exactKeys(failure, ["code", "message", "issues"], `${label}.failure`);
+    if (failure.code !== "schema-mismatch" || !Array.isArray(failure.issues)) {
+      throw new Error(`${label}.failure is invalid`);
+    }
+    if (failure.issues.length > STRUCTURED_OUTPUT_ISSUE_LIMIT_V1) {
+      throw new Error(`${label}.failure.issues exceeds its limit`);
+    }
+    return {
+      type: "structured-output-failure",
+      failure: {
+        code: "schema-mismatch",
+        message: boundedString(
+          failure.message,
+          `${label}.failure.message`,
+          1_024,
+        ),
+        issues: failure.issues.map((candidate, index) => {
+          const issue = record(candidate, `${label}.failure.issues[${index}]`);
+          exactKeys(
+            issue,
+            ["path", "code", "message"],
+            `${label}.failure.issues[${index}]`,
+          );
+          if (
+            issue.code !== "type" &&
+            issue.code !== "enum" &&
+            issue.code !== "required" &&
+            issue.code !== "additional-property"
+          ) {
+            throw new Error(
+              `${label}.failure.issues[${index}].code is invalid`,
+            );
+          }
+          return {
+            path: boundedString(
+              issue.path,
+              `${label}.failure.issues[${index}].path`,
+              1_024,
+            ),
+            code: issue.code,
+            message: boundedString(
+              issue.message,
+              `${label}.failure.issues[${index}].message`,
+              1_024,
+            ),
+          };
+        }),
       },
     };
   }

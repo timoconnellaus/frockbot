@@ -70,6 +70,10 @@ export const OLLAMA_GOOD_API_KEY = "workerd-test-key";
  */
 export const OLLAMA_REVOKED_API_KEY = "workerd-revoked-key";
 
+/** A key whose first completion is a 503 and whose next one succeeds. */
+export const OLLAMA_FLAKY_API_KEY = "workerd-flaky-key";
+let ollamaFlakyCompletionCalls = 0;
+
 /** Anything else is rejected by both authenticated endpoints. */
 export const OLLAMA_BAD_API_KEY = "workerd-not-a-key";
 
@@ -143,6 +147,31 @@ function summariserStallMs(body: unknown): number {
   return JSON.stringify(messages).includes(STALLED_SUMMARISER_SENTINEL)
     ? 5_000
     : 0;
+}
+
+function structuredCompactionStream(body: unknown): Response | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const messages = (body as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) return undefined;
+  const system = (messages as WireMessage[]).find(
+    (message) => message.role === "system",
+  );
+  const instruction = typeof system?.content === "string" ? system.content : "";
+  if (!instruction.includes("Return only JSON matching this schema exactly:")) {
+    return undefined;
+  }
+  const content = JSON.stringify({
+    summary: "Ollama summary",
+    decisions: [],
+    openItems: [],
+    identifiers: [],
+  });
+  return new Response(
+    `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n` +
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n` +
+      "data: [DONE]\n\n",
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  );
 }
 
 function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
@@ -447,7 +476,11 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     return webSearchStub(request, key);
   }
   if (url.pathname === "/api/chat") {
-    if (key !== OLLAMA_GOOD_API_KEY && key !== OLLAMA_REVOKED_API_KEY) {
+    if (
+      key !== OLLAMA_GOOD_API_KEY &&
+      key !== OLLAMA_REVOKED_API_KEY &&
+      key !== OLLAMA_FLAKY_API_KEY
+    ) {
       return new Response(UNAUTHORIZED, {
         status: 401,
         headers: { "content-type": "application/json" },
@@ -462,7 +495,15 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     });
   }
   if (url.pathname === "/v1/chat/completions") {
-    if (key !== OLLAMA_GOOD_API_KEY) {
+    if (key === OLLAMA_FLAKY_API_KEY) {
+      ollamaFlakyCompletionCalls += 1;
+      if (ollamaFlakyCompletionCalls === 1) {
+        return Response.json(
+          { error: { message: "temporarily unavailable", code: "overloaded" } },
+          { status: 503 },
+        );
+      }
+    } else if (key !== OLLAMA_GOOD_API_KEY) {
       return new Response(UNAUTHORIZED, {
         status: 401,
         headers: { "content-type": "application/json" },
@@ -476,6 +517,8 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     }
     const stall = summariserStallMs(body);
     if (stall > 0) await sleep(stall, request.signal);
+    const compaction = structuredCompactionStream(body);
+    if (compaction) return compaction;
     const calls = scriptedToolCalls(body);
     if (calls.length > 0) return toolCallStream(calls);
     return new Response(

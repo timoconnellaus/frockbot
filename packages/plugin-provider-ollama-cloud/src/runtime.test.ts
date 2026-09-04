@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  LlmEffectNotStartedError,
+  ModelProviderFailureError,
   MODEL_FIRST_BYTE_DEADLINE_MS_V1,
   MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
   MODEL_IDLE_DEADLINE_MS_V1,
@@ -20,6 +20,7 @@ import { Context, Service } from "cordis";
 import {
   createOllamaCloudRuntimePlugin,
   ollamaChatBaseUrl,
+  ollamaNativeChatBodyV1,
 } from "./runtime.js";
 
 function serializedKeyring(): string {
@@ -93,6 +94,30 @@ const request: NormalizedModelRequest = {
 };
 
 describe("Ollama Cloud runtime Contribution", () => {
+  test("maps a schema to Ollama's native format field", () => {
+    const body = ollamaNativeChatBodyV1({
+      ...request,
+      responseFormat: {
+        type: "json_schema",
+        name: "answer",
+        schema: {
+          type: "object",
+          properties: { answer: { type: "string" } },
+          required: ["answer"],
+          additionalProperties: false,
+        },
+      },
+    });
+    expect(body.format).toEqual({
+      type: "object",
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+      additionalProperties: false,
+    });
+    expect(body.stream).toBe(false);
+    expect(body.response_format).toBeUndefined();
+  });
+
   test("resolves one credential generation per effect inside the provider", async () => {
     const keyringText = serializedKeyring();
     const envelope = await sealCredentialV1({
@@ -247,7 +272,7 @@ describe("Ollama Cloud runtime Contribution", () => {
         failure = error;
       }
 
-      expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+      expect(failure).toBeInstanceOf(ModelProviderFailureError);
       expect(openCount).toBe(0);
       expect(settled).toEqual(["effect-1"]);
       await root.fiber.dispose();
@@ -361,7 +386,7 @@ describe("Ollama Cloud runtime Contribution", () => {
       failure = error;
     }
 
-    expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+    expect(failure).toBeInstanceOf(ModelProviderFailureError);
     expect(leaseCount).toBe(0);
     await root.fiber.dispose();
   });
@@ -449,7 +474,10 @@ describe("Ollama Cloud runtime Contribution", () => {
       } catch (error) {
         failure = error;
       }
-      expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+      expect(failure).toBeInstanceOf(ModelProviderFailureError);
+      expect((failure as ModelProviderFailureError).classification).toBe(
+        "permanent",
+      );
       expect(settled).toEqual([]);
       await root.serial(
         "agent/model-outcome-committed",
@@ -516,7 +544,10 @@ describe("Ollama Cloud runtime Contribution", () => {
         failure = error;
       }
 
-      expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+      expect(failure).toBeInstanceOf(ModelProviderFailureError);
+      expect((failure as ModelProviderFailureError).classification).toBe(
+        "transient",
+      );
       expect(settled).toEqual([]);
       await root.fiber.dispose();
     },
@@ -730,7 +761,7 @@ describe("Ollama Cloud deadlines", () => {
     // before the first event as definitive. That matters more than the class
     // name — a deadline reported as uncertain would park the run on a
     // retrieval nobody can perform. The reason still reaches the person.
-    expect(failure).toBeInstanceOf(LlmEffectNotStartedError);
+    expect(failure).toBeInstanceOf(ModelProviderFailureError);
     expect((failure as Error).message).toBe(
       MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
     );

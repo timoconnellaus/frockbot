@@ -36,6 +36,7 @@ import {
 } from "./voice-quota.js";
 import {
   translateVoiceUpstreamFrameV1,
+  VOICE_UPSTREAM_REFUSAL_MESSAGE_V1,
   voiceUpstreamSessionUpdateV1,
   voiceUpstreamTargetV1,
   type VoiceSessionEnvV1,
@@ -189,12 +190,15 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     try {
       upstream = await this.#connectUpstream(target);
     } catch (error) {
-      return this.#refuse(
-        client,
-        `Dictation couldn't reach the transcription service: ${
-          error instanceof Error ? error.message : "the connection failed"
-        }`,
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error(
+        JSON.stringify({
+          message: "voice upstream connection failed",
+          reason,
+          sessionId,
+        }),
       );
+      return this.#refuse(client, VOICE_UPSTREAM_REFUSAL_MESSAGE_V1);
     }
 
     const capture: LiveCapture = {
@@ -231,8 +235,25 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     upstream.addEventListener("close", () => {
       void loggedEntryV1("voice upstream close", () => this.#settle(capture));
     });
-    upstream.addEventListener("error", () => {
-      void loggedEntryV1("voice upstream error", () => this.#settle(capture));
+    upstream.addEventListener("error", (event: Event) => {
+      void loggedEntryV1("voice upstream error", async () => {
+        console.error(
+          JSON.stringify({
+            message: "voice upstream socket error",
+            reason:
+              "message" in event && typeof event.message === "string"
+                ? event.message
+                : "the upstream socket failed",
+            sessionId: capture.sessionId,
+          }),
+        );
+        this.#send(capture.client, {
+          schemaVersion: 1,
+          type: "error",
+          message: VOICE_UPSTREAM_REFUSAL_MESSAGE_V1,
+        });
+        await this.#settle(capture);
+      });
     });
     client.addEventListener("message", (event: MessageEvent) => {
       void loggedEntryV1("voice client message", () =>
@@ -316,6 +337,15 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     if (this.#capture !== capture || typeof data !== "string") return;
     const translated = translateVoiceUpstreamFrameV1(data);
     if (!translated) return;
+    if (translated.upstreamError) {
+      console.error(
+        JSON.stringify({
+          message: "voice upstream refused the session",
+          reason: translated.upstreamError,
+          sessionId: capture.sessionId,
+        }),
+      );
+    }
     this.#send(capture.client, translated.frame);
     if (translated.frame.type === "error") {
       await this.#settle(capture);

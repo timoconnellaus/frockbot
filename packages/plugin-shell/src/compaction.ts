@@ -26,6 +26,7 @@ import {
   type ModelBindingSnapshot,
   type Session,
   type SessionEvent,
+  type StructuredOutputSchemaV1,
 } from "@frockbot/kernel-contracts";
 
 /**
@@ -262,26 +263,57 @@ export function assessCompactionV1(input: {
  * ids in passing, and the list is what the event stores.
  */
 export const COMPACTION_SYSTEM_PROMPT_V1 = [
-  "You are compressing the earlier part of a conversation so it can be carried forward in a smaller prompt. Write the summary, and nothing else.",
+  "You are compressing the earlier part of a conversation so it can be carried forward in a smaller prompt.",
   "",
   "CRITICAL: You MUST preserve ALL opaque identifiers exactly as they appear. That includes UUIDs, hashes, full URLs with their query parameters, file and Workspace paths, Package ids, Applet ids, Bot ids, Session ids, tool call ids, model names and version strings. Do NOT paraphrase, abbreviate, or generalise an identifier. Copy it exactly.",
   "",
-  "Use exactly these headings, in this order, and omit none of them:",
-  "",
-  "## Summary",
-  "What the conversation is about and what has happened, in a few short paragraphs or bullets.",
-  "",
-  "## Decisions",
-  "Decisions made and the reason for each. Where a decision was later changed, keep only the latest and say it superseded an earlier one.",
-  "",
-  "## Open items",
-  "Work that is pending, promised, or unfinished. Be specific about what is owed and by whom.",
-  "",
-  "## Identifiers mentioned",
-  "A bullet list of every opaque identifier that appeared, one per line, copied exactly. Write `- none` if there were none.",
+  "Put the gist in `summary`, decisions and their reasons in `decisions`, pending work in `openItems`, and every opaque identifier copied exactly in `identifiers`. Keep only the latest decision where one superseded another.",
   "",
   "Leave out pleasantries, repetition, and superseded detail. Do not invent anything that is not in the transcript. Do not address the user.",
 ].join("\n");
+
+export interface CompactionSummaryPayloadV1 {
+  summary: string;
+  decisions: string[];
+  openItems: string[];
+  identifiers: string[];
+}
+
+/** The actual production consumer of the shared structured-output seam. */
+export const COMPACTION_RESPONSE_SCHEMA_V1 = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    decisions: { type: "array", items: { type: "string" } },
+    openItems: { type: "array", items: { type: "string" } },
+    identifiers: { type: "array", items: { type: "string" } },
+  },
+  required: ["summary", "decisions", "openItems", "identifiers"],
+  additionalProperties: false,
+} as const satisfies StructuredOutputSchemaV1;
+
+/** Keeps the durable summary format readable while model I/O stays typed. */
+export function renderCompactionSummaryV1(
+  payload: CompactionSummaryPayloadV1,
+): string {
+  const bullets = (values: readonly string[]) =>
+    values.length > 0
+      ? values.map((value) => `- ${value}`).join("\n")
+      : "- none";
+  return [
+    "## Summary",
+    payload.summary,
+    "",
+    "## Decisions",
+    bullets(payload.decisions),
+    "",
+    "## Open items",
+    bullets(payload.openItems),
+    "",
+    "## Identifiers mentioned",
+    bullets(payload.identifiers),
+  ].join("\n");
+}
 
 /** The transcript one summariser call is given, flattened to plain text. */
 export function compactionTranscriptV1(

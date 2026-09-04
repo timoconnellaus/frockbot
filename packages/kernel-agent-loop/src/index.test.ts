@@ -151,6 +151,77 @@ afterEach(async () => {
 });
 
 describe("AgentLoop", () => {
+  test("journals a structured-output downgrade and typed validation failure", async () => {
+    const provider: LlmProvider = {
+      id: "structured-failure",
+      supports: { structuredOutput: "none" },
+      async *stream() {
+        yield {
+          type: "response-format-note",
+          note: {
+            code: "structured-output-downgraded",
+            requested: "json_schema",
+            effective: "prompt",
+            message: "Fake provider used prompt guidance",
+          },
+        };
+        yield { type: "text-delta", text: '{"answer":4}' };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const root = await mountRuntime(provider);
+    root.on("agent/request", async (_agent, _request, _signal, next) => ({
+      ...(await next()),
+      responseFormat: {
+        type: "json_schema",
+        name: "answer",
+        schema: {
+          type: "object",
+          properties: { answer: { type: "string" } },
+          required: ["answer"],
+          additionalProperties: false,
+        },
+      },
+    }));
+    const handle = await root.agents.create({
+      ...allowEffectOptions,
+      botId: "bot-structured-failure",
+      sessionId: "structured-failure",
+      provider: provider.id,
+      model: "fake",
+    });
+
+    handle.agent.send("answer as an object");
+    await handle.agent.whenIdle();
+
+    expect(
+      handle.agent.session.events.find(
+        (event) => event.type === "model/response-format-note",
+      ),
+    ).toMatchObject({
+      type: "model/response-format-note",
+      note: { effective: "prompt" },
+    });
+    expect(
+      handle.agent.session.events.find(
+        (event) => event.type === "model/response-failed",
+      ),
+    ).toMatchObject({
+      type: "model/response-failed",
+      failure: { code: "schema-mismatch" },
+    });
+    expect(
+      handle.agent.session.events.some(
+        (event) => event.type === "model/reconciliation-required",
+      ),
+    ).toBe(false);
+    expect(
+      handle.agent.session.events.findLast(
+        (event) => event.type === "turn/end",
+      ),
+    ).toMatchObject({ type: "turn/end", outcome: "model-error" });
+  });
+
   test("records exactly the hook-shaped request received by the provider", async () => {
     let received: NormalizedModelRequest | undefined;
     const provider: LlmProvider = {

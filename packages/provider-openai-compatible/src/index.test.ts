@@ -1,8 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { type NormalizedModelRequest } from "@frockbot/kernel-contracts";
+import {
+  ModelProviderFailureError,
+  type NormalizedModelRequest,
+} from "@frockbot/kernel-contracts";
 import { LlmRegistry } from "@frockbot/plugin-models";
 import { Context } from "cordis";
-import { OpenAICompatibleProvider, requestToWire } from "./index.js";
+import {
+  OpenAICompatibleProvider,
+  planOpenAICompatibleRequestV1,
+  requestToWire,
+  retryAfterMillisecondsV1,
+} from "./index.js";
 
 const request: NormalizedModelRequest = {
   requestId: "request-1",
@@ -34,6 +42,76 @@ const request: NormalizedModelRequest = {
 };
 
 describe("OpenAICompatibleProvider", () => {
+  test("maps schemas for OpenAI and OpenRouter-compatible endpoints", () => {
+    const structured = {
+      ...request,
+      responseFormat: {
+        type: "json_schema" as const,
+        name: "answer",
+        schema: {
+          type: "object" as const,
+          properties: { answer: { type: "string" as const } },
+          required: ["answer"],
+          additionalProperties: false,
+        },
+      },
+    };
+    const plan = planOpenAICompatibleRequestV1(structured, {
+      structuredOutput: "json_schema",
+      responseFormatDialect: "openai",
+    });
+    expect(plan.note).toBeUndefined();
+    expect(plan.body.response_format).toEqual({
+      type: "json_schema",
+      json_schema: {
+        name: "answer",
+        strict: true,
+        schema: structured.responseFormat.schema,
+      },
+    });
+    expect(plan.body.stream).toBe(true);
+  });
+
+  test("maps the direct Workers AI schema and disables streaming", () => {
+    const structured: NormalizedModelRequest = {
+      ...request,
+      responseFormat: {
+        type: "json_schema",
+        name: "answer",
+        schema: { type: "string" },
+      },
+    };
+    const plan = planOpenAICompatibleRequestV1(structured, {
+      structuredOutput: "json_schema",
+      responseFormatDialect: "workers-ai",
+    });
+    expect(plan.body.response_format).toEqual({
+      type: "json_schema",
+      json_schema: { type: "string" },
+    });
+    expect(plan.body.stream).toBe(false);
+  });
+
+  test("downgrades unsupported schemas explicitly and adds prompt guidance", () => {
+    const plan = planOpenAICompatibleRequestV1(
+      {
+        ...request,
+        responseFormat: {
+          type: "json_schema",
+          name: "answer",
+          schema: { type: "string" },
+        },
+      },
+      { structuredOutput: "none" },
+    );
+    expect(plan.note).toMatchObject({
+      code: "structured-output-downgraded",
+      effective: "prompt",
+    });
+    expect(JSON.stringify(plan.body.messages)).toContain("Return only JSON");
+    expect(plan.body.response_format).toBeUndefined();
+  });
+
   test("normalizes FrockBot messages and tools to the wire format", () => {
     expect(requestToWire(request)).toMatchObject({
       model: "test-model",
@@ -122,6 +200,43 @@ describe("OpenAICompatibleProvider", () => {
         },
       },
       { type: "finish", reason: "tool-calls" },
+    ]);
+  });
+
+  test("normalizes a non-streaming structured response", async () => {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://models.example/v1",
+      structuredOutput: "json_schema",
+      responseFormatDialect: "workers-ai",
+      fetch: () =>
+        Promise.resolve(
+          Response.json({
+            choices: [
+              {
+                message: { content: '{"answer":"yes"}' },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+        ),
+    });
+    const events = [];
+    for await (const event of provider.stream(
+      {
+        ...request,
+        responseFormat: {
+          type: "json_schema",
+          name: "answer",
+          schema: { type: "object", additionalProperties: true },
+        },
+      },
+      new AbortController().signal,
+    )) {
+      events.push(event);
+    }
+    expect(events).toEqual([
+      { type: "text-delta", text: '{"answer":"yes"}' },
+      { type: "finish", reason: "completed" },
     ]);
   });
 
@@ -251,11 +366,29 @@ describe("OpenAICompatibleProvider", () => {
     await root.fiber.dispose();
   });
 
-  test("redacts provider response bodies from HTTP errors", async () => {
+  test.each([
+    [400, "permanent"],
+    [401, "permanent"],
+    [403, "permanent"],
+    [404, "permanent"],
+    [413, "permanent"],
+    [429, "transient"],
+    [500, "transient"],
+    [503, "transient"],
+    [418, "unknown"],
+  ] as const)("classifies HTTP %i as %s", async (status, classification) => {
     const provider = new OpenAICompatibleProvider({
       baseUrl: "https://models.example/v1",
       fetch: () =>
-        Promise.resolve(new Response("bad credentials", { status: 401 })),
+        Promise.resolve(
+          Response.json(
+            { error: { message: "provider reason", code: "provider_code" } },
+            {
+              status,
+              headers: status === 429 ? { "retry-after": "3" } : {},
+            },
+          ),
+        ),
     });
 
     let failure: unknown;
@@ -269,11 +402,70 @@ describe("OpenAICompatibleProvider", () => {
     } catch (error) {
       failure = error;
     }
-    expect(failure instanceof Error ? failure.message : "").toBe(
-      "Model request failed (401)",
+    expect(failure).toBeInstanceOf(ModelProviderFailureError);
+    expect((failure as ModelProviderFailureError).classification).toBe(
+      classification,
+    );
+    expect((failure as ModelProviderFailureError).providerReason).toContain(
+      "provider reason",
+    );
+    expect((failure as ModelProviderFailureError).retryAfterMs).toBe(
+      status === 429 ? 3_000 : undefined,
     );
   });
+
+  test("classifies content policy and network reset shapes", async () => {
+    const content = new OpenAICompatibleProvider({
+      baseUrl: "https://models.example/v1",
+      fetch: () =>
+        Promise.resolve(
+          Response.json(
+            {
+              error: {
+                message: "blocked",
+                code: "content_policy_violation",
+              },
+            },
+            { status: 422 },
+          ),
+        ),
+    });
+    const reset = new OpenAICompatibleProvider({
+      baseUrl: "https://models.example/v1",
+      fetch: () => Promise.reject(new TypeError("socket reset")),
+    });
+    for (const [provider, classification] of [
+      [content, "permanent"],
+      [reset, "transient"],
+    ] as const) {
+      const failure = await collectFailure(provider);
+      expect((failure as ModelProviderFailureError).classification).toBe(
+        classification,
+      );
+    }
+  });
+
+  test("parses both Retry-After forms", () => {
+    expect(retryAfterMillisecondsV1("1.5", 0)).toBe(1_500);
+    expect(
+      retryAfterMillisecondsV1("Thu, 01 Jan 1970 00:00:05 GMT", 2_000),
+    ).toBe(3_000);
+  });
 });
+
+async function collectFailure(provider: OpenAICompatibleProvider) {
+  try {
+    for await (const event of provider.stream(
+      request,
+      new AbortController().signal,
+    )) {
+      void event;
+    }
+  } catch (error) {
+    return error;
+  }
+  throw new Error("provider did not fail");
+}
 
 // An image a tool produced, on the wire.
 //

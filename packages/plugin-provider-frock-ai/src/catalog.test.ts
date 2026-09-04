@@ -5,6 +5,8 @@ import {
   frockAiStaticCatalogV1,
   frockModelIdForCloudflareIdV1,
   gatewayModelForFrockIdV1,
+  gatewayModelForFrockRequestV1,
+  FROCK_AI_STRUCTURED_MODEL,
   normalizeFrockModelIdV1,
 } from "./catalog.js";
 
@@ -41,6 +43,15 @@ describe("Frock AI catalog", () => {
     expect(
       gatewayModelForFrockIdV1(FROCK_AI_DEFAULT_MODEL, "production-auto"),
     ).toBe("dynamic/production-auto");
+  });
+
+  test("pins Auto schema work to a Workers AI model that supports it", () => {
+    expect(gatewayModelForFrockRequestV1(FROCK_AI_DEFAULT_MODEL, true)).toBe(
+      FROCK_AI_STRUCTURED_MODEL,
+    );
+    expect(gatewayModelForFrockRequestV1(FROCK_AI_DEFAULT_MODEL, false)).toBe(
+      "dynamic/flock-auto",
+    );
   });
 
   test("rejects ids outside the Frock AI namespace", () => {

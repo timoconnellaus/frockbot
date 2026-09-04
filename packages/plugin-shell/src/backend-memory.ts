@@ -25,6 +25,7 @@ import type {
   MemoryRuntimeHostV1,
 } from "@frockbot/plugin-memory/agent";
 import { MemoryStore } from "@frockbot/plugin-memory/store";
+import type { MemoryChunkIndexWriterV1 } from "@frockbot/plugin-memory/chunk-index";
 
 /** The Bot and User whose Memory a Turn may read and write. */
 export interface BotMemoryIdentity {
@@ -50,6 +51,8 @@ export interface BotMemoryEnv {
   MEMORY_PROJECTS?: MemoryProjectsV1;
   /** Display names per Bot id, for the `[via …]` tag on a shared fact. */
   MEMORY_BOT_NAMES?: Readonly<Record<string, string>>;
+  /** Bot-scoped vector-id ledger supplied by the Durable Object host. */
+  MEMORY_CHUNK_INDEX?: MemoryChunkIndexWriterV1;
 }
 
 /**
@@ -85,5 +88,8 @@ export function createBotMemoryHost(
       runId: turn.runId,
     },
     ...(bindings.MEMORY_PROJECTS ? { projects: bindings.MEMORY_PROJECTS } : {}),
+    ...(bindings.MEMORY_CHUNK_INDEX
+      ? { chunkIndex: bindings.MEMORY_CHUNK_INDEX }
+      : {}),
   };
 }

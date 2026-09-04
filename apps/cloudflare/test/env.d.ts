@@ -16,6 +16,10 @@ interface FlyTestEnv {
   AI: Ai;
   BOT_ISOLATES: DurableObjectNamespace<BotIsolateProbe>;
   BOT_STATES: DurableObjectNamespace<WorkerdBotState>;
+  MEMORY_INDEX_PROBE: {
+    deletedBatches(): Promise<string[][]>;
+    reset(): Promise<boolean>;
+  };
   CREDENTIAL_KEYRING: string;
   SECRET_TOKEN: string;
   APPLET_VIEWER_SECRET: string;

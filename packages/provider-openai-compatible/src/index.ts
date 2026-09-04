@@ -1,11 +1,16 @@
 import {
+  boundedModelProviderReasonV1,
   type LlmMessage,
   type LlmProvider,
   type LlmStreamEvent,
   MODEL_REQUEST_DEADLINES_V1,
   type ModelRequestDeadlinesV1,
   ModelRequestDeadlineError,
+  ModelProviderFailureError,
+  type ModelProviderFailureClassV1,
   type NormalizedModelRequest,
+  type ResponseFormatNoteV1,
+  type StructuredOutputSupportV1,
 } from "@frockbot/kernel-contracts";
 import type { Plugin } from "cordis";
 
@@ -17,11 +22,110 @@ export type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-export class OpenAICompatibleHttpError extends Error {
-  constructor(readonly status: number) {
-    super(`Model request failed (${status})`);
+export class OpenAICompatibleHttpError extends ModelProviderFailureError {
+  constructor(
+    readonly status: number,
+    reason = `Model request failed (${status})`,
+    retryAfterMs?: number,
+    errorCode?: string,
+  ) {
+    super({
+      classification: classifyOpenAICompatibleFailureV1(status, errorCode),
+      reason,
+      ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+    });
     this.name = "OpenAICompatibleHttpError";
   }
+}
+
+const CONTENT_POLICY_CODES = new Set([
+  "content_filter",
+  "content_policy_violation",
+  "moderation_blocked",
+  "safety_violation",
+]);
+
+export function classifyOpenAICompatibleFailureV1(
+  status: number,
+  errorCode?: string,
+): ModelProviderFailureClassV1 {
+  if (errorCode && CONTENT_POLICY_CODES.has(errorCode.toLowerCase())) {
+    return "permanent";
+  }
+  if (status === 408 || status === 429 || status >= 500) return "transient";
+  if ([400, 401, 403, 404, 413].includes(status)) return "permanent";
+  return "unknown";
+}
+
+export function retryAfterMillisecondsV1(
+  value: string | null,
+  now = Date.now(),
+): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.ceil(seconds * 1000);
+  }
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
+}
+
+function openAIErrorDetailV1(text: string): {
+  reason?: string;
+  code?: string;
+} {
+  if (!text.trim()) return {};
+  try {
+    const payload = JSON.parse(text) as unknown;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return { reason: text };
+    }
+    const error = (payload as Record<string, unknown>).error;
+    if (typeof error === "string") return { reason: error };
+    if (!error || typeof error !== "object" || Array.isArray(error)) return {};
+    const record = error as Record<string, unknown>;
+    return {
+      ...(typeof record.message === "string" ? { reason: record.message } : {}),
+      ...(typeof record.code === "string"
+        ? { code: record.code }
+        : typeof record.type === "string"
+          ? { code: record.type }
+          : {}),
+    };
+  } catch {
+    return { reason: text };
+  }
+}
+
+function networkFailureV1(error: unknown): ModelProviderFailureError {
+  const message = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error ? error.name : "";
+  const transient =
+    error instanceof TypeError ||
+    ["NetworkError", "TimeoutError"].includes(name) ||
+    /\b(?:ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|network|socket|gateway timeout)\b/i.test(
+      message,
+    );
+  return new ModelProviderFailureError({
+    classification: transient ? "transient" : "unknown",
+    reason: message,
+  });
+}
+
+async function httpFailureV1(response: Response): Promise<never> {
+  const text = (await response.text().catch(() => "")).slice(0, 2_000);
+  const detail = openAIErrorDetailV1(text);
+  const reason = boundedModelProviderReasonV1(
+    detail.reason
+      ? `Model request failed (${response.status}): ${detail.reason}`
+      : `Model request failed (${response.status})`,
+  );
+  throw new OpenAICompatibleHttpError(
+    response.status,
+    reason,
+    retryAfterMillisecondsV1(response.headers.get("retry-after")),
+    detail.code,
+  );
 }
 
 export interface OpenAICompatibleConfig {
@@ -35,6 +139,10 @@ export interface OpenAICompatibleConfig {
    * model id decides through {@link modelAcceptsImagesV1}.
    */
   acceptsImages?: boolean;
+  /** The strongest structured-output mode this endpoint accepts. */
+  structuredOutput?: StructuredOutputSupportV1;
+  /** Workers AI takes the schema directly; OpenAI/OpenRouter wrap it by name. */
+  responseFormatDialect?: "openai" | "workers-ai";
   /** Overrides {@link MODEL_REQUEST_DEADLINES_V1}. */
   deadlines?: Partial<ModelRequestDeadlinesV1>;
   /**
@@ -239,8 +347,27 @@ function messageToWire(
 
 export function requestToWire(
   request: NormalizedModelRequest,
-  options: { acceptsImages?: boolean } = {},
+  options: OpenAIRequestOptionsV1 = {},
 ): Record<string, unknown> {
+  return planOpenAICompatibleRequestV1(request, options).body;
+}
+
+export interface OpenAIRequestOptionsV1 {
+  acceptsImages?: boolean;
+  structuredOutput?: StructuredOutputSupportV1;
+  responseFormatDialect?: "openai" | "workers-ai";
+}
+
+export interface OpenAIRequestPlanV1 {
+  body: Record<string, unknown>;
+  note?: ResponseFormatNoteV1;
+}
+
+/** Maps the provider-neutral format and records any fidelity downgrade. */
+export function planOpenAICompatibleRequestV1(
+  request: NormalizedModelRequest,
+  options: OpenAIRequestOptionsV1 = {},
+): OpenAIRequestPlanV1 {
   const acceptsImages =
     options.acceptsImages ?? modelAcceptsImagesV1(request.model);
   const messages: Record<string, unknown>[] = [];
@@ -249,22 +376,80 @@ export function requestToWire(
   for (const message of request.messages) {
     messages.push(...messageToWire(message, acceptsImages));
   }
-  return {
-    model: request.model,
-    stream: true,
-    messages,
-    ...(request.tools.length > 0
-      ? {
-          tools: request.tools.map((tool) => ({
-            type: "function",
-            function: {
-              name: tool.name,
-              description: tool.description,
-              parameters: tool.inputSchema,
+  const support = options.structuredOutput ?? "none";
+  const format = request.responseFormat;
+  let responseFormat: Record<string, unknown> | undefined;
+  let note: ResponseFormatNoteV1 | undefined;
+  if (format?.type === "json_schema" && support === "json_schema") {
+    responseFormat =
+      options.responseFormatDialect === "workers-ai"
+        ? { type: "json_schema", json_schema: format.schema }
+        : {
+            type: "json_schema",
+            json_schema: {
+              name: format.name,
+              strict: true,
+              schema: format.schema,
             },
-          })),
-        }
-      : {}),
+          };
+  } else if (format && support !== "none") {
+    responseFormat = { type: "json_object" };
+    if (format.type === "json_schema") {
+      note = {
+        code: "structured-output-downgraded",
+        requested: "json_schema",
+        effective: "json",
+        message: `Provider ${request.provider} supports JSON mode but not JSON Schema; the shared validator remains authoritative`,
+      };
+    }
+  } else if (format) {
+    note = {
+      code: "structured-output-downgraded",
+      requested: format.type,
+      effective: "prompt",
+      message: `Provider ${request.provider} has no native structured-output mode; the request uses prompt guidance and shared validation`,
+    };
+  }
+  if (format) {
+    const instruction =
+      format.type === "json_schema"
+        ? `Return only JSON matching this schema exactly: ${JSON.stringify(format.schema)}`
+        : "Return only one valid JSON value, with no Markdown or commentary.";
+    if (request.system) {
+      messages[0] = {
+        role: "system",
+        content: `${request.system}\n\n${instruction}`,
+      };
+    } else {
+      messages.unshift({ role: "system", content: instruction });
+    }
+  }
+  return {
+    body: {
+      model: request.model,
+      // Workers AI documents JSON mode as non-streaming. The decoder accepts
+      // both response shapes while the contract remains an event stream.
+      stream: !(
+        format &&
+        support !== "none" &&
+        options.responseFormatDialect === "workers-ai"
+      ),
+      messages,
+      ...(responseFormat ? { response_format: responseFormat } : {}),
+      ...(request.tools.length > 0
+        ? {
+            tools: request.tools.map((tool) => ({
+              type: "function",
+              function: {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.inputSchema,
+              },
+            })),
+          }
+        : {}),
+    },
+    ...(note ? { note } : {}),
   };
 }
 
@@ -373,11 +558,39 @@ export async function* streamOpenAICompatibleBody(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
 ): AsyncIterable<LlmStreamEvent> {
+  const [probeBody, replayBody] = body.tee();
+  const probeReader = probeBody.getReader();
+  const probeDecoder = new TextDecoder();
+  let prefix = "";
+  const cancelProbe = (): void => {
+    void probeReader.cancel(signal.reason).catch(() => undefined);
+    if (!replayBody.locked) {
+      void replayBody.cancel(signal.reason).catch(() => undefined);
+    }
+  };
+  signal.addEventListener("abort", cancelProbe, { once: true });
+  try {
+    signal.throwIfAborted();
+    while (!prefix.trimStart() && prefix.length < 4_096) {
+      const { done, value } = await probeReader.read();
+      signal.throwIfAborted();
+      if (done) break;
+      prefix += probeDecoder.decode(value, { stream: true });
+    }
+  } finally {
+    signal.removeEventListener("abort", cancelProbe);
+    void probeReader.cancel().catch(() => undefined);
+    probeReader.releaseLock();
+  }
+  if (prefix.trimStart().startsWith("{")) {
+    yield* readOpenAICompatibleJsonV1(replayBody, signal);
+    return;
+  }
   const tools = new Map<number, ToolAccumulator>();
   let finishReason: string | undefined;
   let terminal = false;
   let sawChoice = false;
-  for await (const data of readSseData(body, signal)) {
+  for await (const data of readSseData(replayBody, signal)) {
     if (data === "[DONE]") {
       terminal = true;
       break;
@@ -427,6 +640,81 @@ export async function* streamOpenAICompatibleBody(
       tools.size > 0 || finishReason === "tool_calls"
         ? "tool-calls"
         : finishReason === "length"
+          ? "max-tokens"
+          : "completed",
+  };
+}
+
+async function* readOpenAICompatibleJsonV1(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+): AsyncIterable<LlmStreamEvent> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      signal.throwIfAborted();
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_SSE_RESPONSE_BYTES) await rejectOversizedSse(reader);
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const combined = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const payload = asRecord(
+    parseJson(
+      new TextDecoder().decode(combined),
+      "Model returned an invalid response",
+    ),
+  );
+  const choices = payload?.choices;
+  const choice = Array.isArray(choices) ? asRecord(choices[0]) : undefined;
+  const message = asRecord(choice?.message);
+  if (!choice || !message) {
+    throw new Error("Model response did not include a valid choice");
+  }
+  if (typeof message.content === "string" && message.content) {
+    yield { type: "text-delta", text: message.content };
+  }
+  const tools = new Map<number, ToolAccumulator>();
+  if (Array.isArray(message.tool_calls)) {
+    applyToolDeltas(
+      message.tool_calls.map((candidate, index) => ({
+        ...(asRecord(candidate) ?? {}),
+        index,
+      })),
+      tools,
+    );
+  }
+  for (const tool of [...tools.values()].sort(
+    (left, right) => left.index - right.index,
+  )) {
+    if (!tool.name)
+      throw new Error("Model returned a tool call without a name");
+    yield {
+      type: "tool-call",
+      call: {
+        id: tool.id || crypto.randomUUID(),
+        name: tool.name,
+        input: parseToolInput(tool.arguments),
+      },
+    };
+  }
+  yield {
+    type: "finish",
+    reason:
+      tools.size > 0 || choice.finish_reason === "tool_calls"
+        ? "tool-calls"
+        : choice.finish_reason === "length"
           ? "max-tokens"
           : "completed",
   };
@@ -519,12 +807,16 @@ export async function* streamWithModelRequestDeadlinesV1(
 
 export class OpenAICompatibleProvider implements LlmProvider {
   readonly id: string;
+  readonly supports;
   private config: OpenAICompatibleConfig;
 
   constructor(config: OpenAICompatibleConfig) {
     if (!config.baseUrl.trim())
       throw new Error("OpenAI-compatible baseUrl is required");
     this.id = config.providerId ?? "openai-compatible";
+    this.supports = {
+      structuredOutput: config.structuredOutput ?? "none",
+    } as const;
     this.config = { ...config, baseUrl: config.baseUrl.replace(/\/$/, "") };
   }
 
@@ -532,6 +824,16 @@ export class OpenAICompatibleProvider implements LlmProvider {
     request: NormalizedModelRequest,
     signal: AbortSignal,
   ): AsyncIterable<LlmStreamEvent> {
+    const plan = planOpenAICompatibleRequestV1(request, {
+      ...(this.config.acceptsImages === undefined
+        ? {}
+        : { acceptsImages: this.config.acceptsImages }),
+      structuredOutput: this.supports.structuredOutput,
+      ...(this.config.responseFormatDialect
+        ? { responseFormatDialect: this.config.responseFormatDialect }
+        : {}),
+    });
+    if (plan.note) yield { type: "response-format-note", note: plan.note };
     // Workerd rejects a detached global `fetch` ("Illegal invocation"), so the
     // default fetcher forwards through a closure rather than aliasing it.
     const fetcher =
@@ -548,37 +850,44 @@ export class OpenAICompatibleProvider implements LlmProvider {
     // request and then went quiet held the Turn open for as long as the socket
     // stayed up — seventeen minutes, in the incident this exists for, with
     // nothing on the person's screen the whole time.
-    yield* streamWithModelRequestDeadlinesV1(
-      async (deadlineSignal) => {
-        const response = await fetcher(
-          `${this.config.baseUrl}/chat/completions`,
-          {
-            method: "POST",
-            headers,
-            body: JSON.stringify(
-              requestToWire(request, {
-                ...(this.config.acceptsImages === undefined
-                  ? {}
-                  : { acceptsImages: this.config.acceptsImages }),
-              }),
-            ),
-            signal: deadlineSignal,
-          },
-        );
-        if (!response.ok) {
-          await response.body?.cancel();
-          throw new OpenAICompatibleHttpError(response.status);
-        }
-        if (!response.body)
-          throw new Error("Model response did not include a stream");
-        return response.body;
-      },
-      signal,
-      {
-        ...(this.config.deadlines ? { deadlines: this.config.deadlines } : {}),
-        ...(this.config.schedule ? { schedule: this.config.schedule } : {}),
-      },
-    );
+    try {
+      yield* streamWithModelRequestDeadlinesV1(
+        async (deadlineSignal) => {
+          const response = await fetcher(
+            `${this.config.baseUrl}/chat/completions`,
+            {
+              method: "POST",
+              headers,
+              body: JSON.stringify(plan.body),
+              signal: deadlineSignal,
+            },
+          );
+          if (!response.ok) await httpFailureV1(response);
+          if (!response.body)
+            throw new Error("Model response did not include a stream");
+          return response.body;
+        },
+        signal,
+        {
+          ...(this.config.deadlines
+            ? { deadlines: this.config.deadlines }
+            : {}),
+          ...(this.config.schedule ? { schedule: this.config.schedule } : {}),
+        },
+      );
+    } catch (error) {
+      if (signal.aborted || error instanceof ModelProviderFailureError) {
+        throw error;
+      }
+      if (error instanceof ModelRequestDeadlineError) {
+        if (error.phase === "idle") throw error;
+        throw new ModelProviderFailureError({
+          classification: "transient",
+          reason: error.message,
+        });
+      }
+      throw networkFailureV1(error);
+    }
   }
 }
 

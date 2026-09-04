@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
+    "./chunk-index": "./src/chunk-index.ts",
     "./manifest": "./src/manifest.ts",
     "./projects": "./src/projects.ts",
     "./roots": "./src/roots.ts",
