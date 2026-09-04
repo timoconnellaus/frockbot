@@ -45,6 +45,8 @@ export interface UsageStoreOptionsV1 {
   detailRetentionDays?: number;
   detailMaxRows?: number;
   monthRetention?: number;
+  /** Runs only for an entry newly inserted, inside the same transaction. */
+  onEntryRecorded?(entry: UsageEntryV1): void;
 }
 
 function utcDayV1(at: string): string {
@@ -74,6 +76,7 @@ export class UsageStoreV1 {
   private readonly detailRetentionDays: number;
   private readonly detailMaxRows: number;
   private readonly monthRetention: number;
+  private readonly onEntryRecorded?: (entry: UsageEntryV1) => void;
   private opened = false;
 
   constructor(options: UsageStoreOptionsV1) {
@@ -84,6 +87,7 @@ export class UsageStoreV1 {
       options.detailRetentionDays ?? USAGE_DETAIL_RETENTION_DAYS_V1;
     this.detailMaxRows = options.detailMaxRows ?? USAGE_DETAIL_MAX_ROWS_V1;
     this.monthRetention = options.monthRetention ?? USAGE_MONTH_RETENTION_V1;
+    this.onEntryRecorded = options.onEntryRecorded;
   }
 
   open(): void {
@@ -186,6 +190,7 @@ export class UsageStoreV1 {
           "ON CONFLICT(id) DO UPDATE SET cost_micros = cost_micros + excluded.cost_micros",
         entry.costMicros,
       );
+      this.onEntryRecorded?.(entry);
       inserted += 1;
     }
     this.evict();

@@ -6,6 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./backend": "./src/backend.ts",
+    "./billing": "./src/billing.ts",
+    "./billing-store": "./src/billing-store.ts",
     "./bot": "./src/bot.ts",
     "./client": "./src/client/index.ts",
     "./manifest": "./src/manifest.ts",

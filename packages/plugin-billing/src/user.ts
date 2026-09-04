@@ -11,6 +11,8 @@ import {
   type UsageReportV1,
 } from "./shared.js";
 import { UsageStoreV1, type UsageSqlV1 } from "./store.js";
+import { BillingStoreV1 } from "./billing-store.js";
+import type { BillingViewV1, StripeEventV1 } from "./billing.js";
 
 export interface BillingUserBackendHostV1 {
   sql: UsageSqlV1;
@@ -29,9 +31,14 @@ interface VoiceEntryInputV1 {
 export class BillingUserBackendContribution {
   readonly packageId = "billing";
   private readonly store: UsageStoreV1;
+  private readonly billing: BillingStoreV1;
 
   constructor(host: BillingUserBackendHostV1) {
-    this.store = new UsageStoreV1(host);
+    this.billing = new BillingStoreV1(host);
+    this.store = new UsageStoreV1({
+      ...host,
+      onEntryRecorded: (entry) => this.billing.debit(entry.costMicros),
+    });
   }
 
   recordEntries(input: unknown): { recorded: number; quarantined: number } {
@@ -102,6 +109,14 @@ export class BillingUserBackendContribution {
 
   report(): UsageReportV1 {
     return this.store.report();
+  }
+
+  readBilling(): BillingViewV1 {
+    return this.billing.read();
+  }
+
+  applyStripeEvent(event: StripeEventV1): { applied: boolean } {
+    return this.billing.applyStripeEvent(event);
   }
 }
 
