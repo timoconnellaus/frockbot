@@ -67,6 +67,14 @@ import {
   textWithoutSkillTriggerV1,
   type SkillPopoverStateV1,
 } from "./skill-invocation.js";
+import {
+  DEPLOYMENT_RELOAD_LABEL_V1,
+  DEPLOYMENT_UPDATED_MESSAGE_V1,
+  deploymentFollowV1,
+  deploymentReloadStoreV1,
+  readDeploymentReloadV1,
+  writeDeploymentReloadV1,
+} from "./deployment.js";
 
 const injectedWeb = inject(frockBotWebDataKey);
 if (!injectedWeb) throw new Error("shell client data was not provided");
@@ -411,6 +419,57 @@ let voiceTail = "";
 let voiceSendOnFinal = false;
 
 const dictating = computed(() => voiceState.value !== "idle");
+
+/*
+ * Following a release.
+ *
+ * A reload is destructive, so the shell only does it on its own when there is
+ * nothing to lose, and otherwise says so and waits. The bar is not an alert:
+ * nothing is wrong, there is just newer code to pick up.
+ */
+const reloadStore = deploymentReloadStoreV1();
+const lastReloadedAt = readDeploymentReloadV1(reloadStore);
+const updateBarVisible = ref(false);
+
+function followDeployment(): void {
+  const decision = deploymentFollowV1({
+    stale: state.value.deploymentStale,
+    turnRunning: Boolean(state.value.runningRunId),
+    draft: draft.value,
+    overlayOpen: Boolean(overlaySurface.value),
+    listening: dictating.value,
+    holds: state.value.reloadHolds,
+    now: Date.now(),
+    ...(lastReloadedAt === undefined ? {} : { reloadedAt: lastReloadedAt }),
+  });
+  updateBarVisible.value = decision === "offer";
+  if (decision !== "reload") return;
+  reloadNow();
+}
+
+function reloadNow(): void {
+  writeDeploymentReloadV1(reloadStore, Date.now());
+  /*
+   * `location.reload()` and nothing else. The Android shell runs this very
+   * bundle inside a WebView served from its own origin, so re-navigating to a
+   * URL this code built would leave that origin behind; reloading in place
+   * works the same way in both.
+   */
+  window.location.reload();
+}
+
+watch(
+  [
+    () => state.value.deploymentStale,
+    () => state.value.runningRunId,
+    () => state.value.reloadHolds,
+    draft,
+    overlaySurface,
+    dictating,
+  ],
+  () => followDeployment(),
+  { immediate: true },
+);
 const voiceButtonLabel = computed(() => voiceButtonLabelV1(voiceState.value));
 /**
  * The wave button takes the slot only when the slot is otherwise idle: an
@@ -1570,6 +1629,23 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               @click="web.resumeRun(state.activeRun.runId)"
             >
               Try again
+            </button>
+          </div>
+        </Transition>
+
+        <Transition name="banner">
+          <!--
+            One bar at a time in this spot. A failed Turn is the more urgent
+            thing to read, and newer code is still there once it is dealt with.
+          -->
+          <div
+            v-if="updateBarVisible && !state.error && !state.activeRun"
+            class="update-banner"
+            role="status"
+          >
+            <span>{{ DEPLOYMENT_UPDATED_MESSAGE_V1 }}</span>
+            <button type="button" @click="reloadNow()">
+              {{ DEPLOYMENT_RELOAD_LABEL_V1 }}
             </button>
           </div>
         </Transition>
