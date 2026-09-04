@@ -269,6 +269,20 @@ export interface FrockBotWebData {
    * changes shape and nothing about it moves.
    */
   voiceAvailable: boolean;
+  /**
+   * The application answering is no longer the one this page was served, so
+   * the code running here is behind a release. FrockBot ships several times a
+   * day and a tab stays open for days, so this is ordinary rather than rare.
+   */
+  deploymentStale: boolean;
+  /**
+   * Live work a reload would throw away, held by whichever Package holds the
+   * work. Counted rather than flagged so two holders at once do not release
+   * each other. The shell reloads on its own only at zero.
+   */
+  reloadHolds: number;
+  /** Keeps the shell from reloading. Call the result to let go. */
+  holdReload(): () => void;
   activeBotId?: string;
   composerContext?: unknown;
   messages: WebChatMessage[];

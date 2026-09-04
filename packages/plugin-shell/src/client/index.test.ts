@@ -328,6 +328,77 @@ describe("application manifest protocol", () => {
   });
 });
 
+describe("following a release", () => {
+  async function mountWithDeployment(servedDeployment?: string): Promise<{
+    web: Ref<FrockBotWebData>;
+    answer: (deployment: string) => void;
+  }> {
+    let provided: Ref<FrockBotWebData> | undefined;
+    let observer: ((deployment: string) => void) | undefined;
+    await shellClientPlugin({
+      transport: {
+        ...(servedDeployment ? { servedDeployment } : {}),
+        observeDeployment: (candidate) => {
+          observer = candidate;
+          return () => {
+            observer = undefined;
+          };
+        },
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    if (!observer) throw new Error("the deployment was not observed");
+    const answer = observer;
+    return { web: provided, answer };
+  }
+
+  test("the same application answering leaves the page alone", async () => {
+    const { web, answer } = await mountWithDeployment("hash-a");
+
+    expect(web.value.deploymentStale).toBe(false);
+    answer("hash-a");
+    expect(web.value.deploymentStale).toBe(false);
+  });
+
+  test("another application answering puts the page behind", async () => {
+    const { web, answer } = await mountWithDeployment("hash-a");
+
+    answer("hash-b");
+    expect(web.value.deploymentStale).toBe(true);
+  });
+
+  test("a document that names no application is never behind", async () => {
+    // The vite development document stamps none, and there the page reloads
+    // itself already.
+    const { web, answer } = await mountWithDeployment();
+
+    answer("hash-b");
+    expect(web.value.deploymentStale).toBe(false);
+  });
+
+  test("holds are counted, and letting go twice does not count twice", async () => {
+    const { web } = await mountWithDeployment("hash-a");
+
+    const first = web.value.holdReload();
+    const second = web.value.holdReload();
+    expect(web.value.reloadHolds).toBe(2);
+    first();
+    first();
+    expect(web.value.reloadHolds).toBe(1);
+    second();
+    expect(web.value.reloadHolds).toBe(0);
+  });
+});
+
 describe("composer hydration context", () => {
   test("hides Connection controls when the platform cannot authorize", async () => {
     let provided: Ref<FrockBotWebData> | undefined;

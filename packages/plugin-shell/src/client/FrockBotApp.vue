@@ -56,6 +56,7 @@ import {
 } from "./turn-limits.js";
 import SendPayloadView from "./SendPayloadView.vue";
 import AppletCanvas from "./AppletCanvas.vue";
+import { appletProgressToolsV1, appletProgressV1 } from "./applet-progress.js";
 import PackageIframeHost from "./PackageIframeHost.vue";
 import type { ClientSkillCatalogEntryV1 } from "../skill-protocol.js";
 import {
@@ -67,6 +68,14 @@ import {
   textWithoutSkillTriggerV1,
   type SkillPopoverStateV1,
 } from "./skill-invocation.js";
+import {
+  DEPLOYMENT_RELOAD_LABEL_V1,
+  DEPLOYMENT_UPDATED_MESSAGE_V1,
+  deploymentFollowV1,
+  deploymentReloadStoreV1,
+  readDeploymentReloadV1,
+  writeDeploymentReloadV1,
+} from "./deployment.js";
 
 const injectedWeb = inject(frockBotWebDataKey);
 if (!injectedWeb) throw new Error("shell client data was not provided");
@@ -265,6 +274,25 @@ const appletChip = computed(() =>
     : undefined,
 );
 /*
+ * What the Bot is doing to it, on the phone.
+ *
+ * There is no room beside the conversation here, so the chip carries the line
+ * the canvas would have shown and opens the canvas over the whole screen. It
+ * is the same projection and the same words: a person who moves between their
+ * phone and a laptop reads one story, not two.
+ */
+const appletChipStatus = computed(() => {
+  if (!appletChip.value) return undefined;
+  const progress = appletProgressV1({
+    applet: state.value.focusedApplet ?? null,
+    source: state.value.appletSource,
+    build: state.value.appletBuild,
+    tools: appletProgressToolsV1(state.value.messages),
+    running: Boolean(state.value.activeRunId),
+  });
+  return progress && progress.stage !== "published" ? progress : undefined;
+});
+/*
  * Skill invocation. `/` or `@` at a word boundary opens a popover over the
  * Bot's catalog; choosing one attaches a ref chip and removes the trigger from
  * the message. The Skill's text is never pasted: the backend resolves the ref
@@ -411,6 +439,57 @@ let voiceTail = "";
 let voiceSendOnFinal = false;
 
 const dictating = computed(() => voiceState.value !== "idle");
+
+/*
+ * Following a release.
+ *
+ * A reload is destructive, so the shell only does it on its own when there is
+ * nothing to lose, and otherwise says so and waits. The bar is not an alert:
+ * nothing is wrong, there is just newer code to pick up.
+ */
+const reloadStore = deploymentReloadStoreV1();
+const lastReloadedAt = readDeploymentReloadV1(reloadStore);
+const updateBarVisible = ref(false);
+
+function followDeployment(): void {
+  const decision = deploymentFollowV1({
+    stale: state.value.deploymentStale,
+    turnRunning: Boolean(state.value.runningRunId),
+    draft: draft.value,
+    overlayOpen: Boolean(overlaySurface.value),
+    listening: dictating.value,
+    holds: state.value.reloadHolds,
+    now: Date.now(),
+    ...(lastReloadedAt === undefined ? {} : { reloadedAt: lastReloadedAt }),
+  });
+  updateBarVisible.value = decision === "offer";
+  if (decision !== "reload") return;
+  reloadNow();
+}
+
+function reloadNow(): void {
+  writeDeploymentReloadV1(reloadStore, Date.now());
+  /*
+   * `location.reload()` and nothing else. The Android shell runs this very
+   * bundle inside a WebView served from its own origin, so re-navigating to a
+   * URL this code built would leave that origin behind; reloading in place
+   * works the same way in both.
+   */
+  window.location.reload();
+}
+
+watch(
+  [
+    () => state.value.deploymentStale,
+    () => state.value.runningRunId,
+    () => state.value.reloadHolds,
+    draft,
+    overlaySurface,
+    dictating,
+  ],
+  () => followDeployment(),
+  { immediate: true },
+);
 const voiceButtonLabel = computed(() => voiceButtonLabelV1(voiceState.value));
 /**
  * The wave button takes the slot only when the slot is otherwise idle: an
@@ -1574,6 +1653,23 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           </div>
         </Transition>
 
+        <Transition name="banner">
+          <!--
+            One bar at a time in this spot. A failed Turn is the more urgent
+            thing to read, and newer code is still there once it is dealt with.
+          -->
+          <div
+            v-if="updateBarVisible && !state.error && !state.activeRun"
+            class="update-banner"
+            role="status"
+          >
+            <span>{{ DEPLOYMENT_UPDATED_MESSAGE_V1 }}</span>
+            <button type="button" @click="reloadNow()">
+              {{ DEPLOYMENT_RELOAD_LABEL_V1 }}
+            </button>
+          </div>
+        </Transition>
+
         <!--
           No Bot, no composer. A disabled input under a made-up Bot name reads
           as a broken Bot; the first-run pane above points at making one.
@@ -1618,11 +1714,24 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             v-if="appletChip"
             type="button"
             class="applet-chip"
+            data-testid="applet-chip"
             @click="toggleRightPanel"
           >
             <UiIcon name="applets" size="sm" />
-            <span class="applet-chip-name">Applet: {{ appletChip }}</span>
-            <span class="applet-chip-action">Open</span>
+            <span class="applet-chip-text">
+              <span class="applet-chip-name">Applet: {{ appletChip }}</span>
+              <span v-if="appletChipStatus" class="applet-chip-status">
+                <span
+                  v-if="appletChipStatus.working"
+                  class="applet-chip-dot"
+                  aria-hidden="true"
+                />
+                {{ appletChipStatus.failure ?? appletChipStatus.label }}
+              </span>
+            </span>
+            <span class="applet-chip-action">{{
+              appletChipStatus ? "Watch" : "Open"
+            }}</span>
           </button>
           <div class="composer-body">
             <ul v-if="attachedSkills.length > 0" class="skill-chips">

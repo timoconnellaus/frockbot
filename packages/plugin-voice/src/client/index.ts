@@ -11,8 +11,9 @@ import {
   type VoiceMicrophoneV1,
 } from "@frockbot/plugin-shell/client/voice-microphone";
 import { showClientNotificationV1 } from "@frockbot/plugin-shell/client/notify";
+import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { VOICE_ASSISTANT_INPUT_SAMPLE_RATE_V1 } from "@frockbot/protocol";
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import {
   decodeVoiceAssistantViewV1,
   VOICE_MAX_TOOL_CALLS_V1,
@@ -299,6 +300,28 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
     if (state.value.status === "offline") void refresh();
   }, VOICE_PENDING_POLL_INTERVAL_MS_V1);
 
+  /*
+   * A live session is work a reload would throw away, and the Voice surface
+   * is a panel rather than an overlay, so the shell cannot see it any other
+   * way. Holding is how a Package says "not right now" without the shell
+   * knowing anything about Voice.
+   */
+  const web = ctx.inject(frockBotWebDataKey);
+  let releaseHold: (() => void) | undefined;
+  const stopHold = watch(
+    () => state.value.status !== "offline",
+    (live) => {
+      if (live && !releaseHold) releaseHold = web.value.holdReload();
+      else if (!live && releaseHold) {
+        releaseHold();
+        releaseHold = undefined;
+      }
+    },
+    // Synchronous: the hold has to be up before anything can act on the
+    // status change, or a reload could land in the gap.
+    { immediate: true, flush: "sync" },
+  );
+
   return [
     ctx.provide(voiceClientStateKey, state),
     surfaces.register({
@@ -313,6 +336,9 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
       component: VoiceToggle,
     }),
     () => {
+      stopHold();
+      releaseHold?.();
+      releaseHold = undefined;
       clearInterval(pendingPoll);
       attempt += 1;
       session?.close();
