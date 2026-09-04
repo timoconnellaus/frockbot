@@ -248,15 +248,18 @@ describe("the Computer Package as the sync's caller", () => {
     ).toBe(true);
     expect(
       syncEvents(events).map((event) => [event.reason, event.status]),
-    ).toEqual([["open", "unavailable"]]);
+    ).toEqual([
+      ["open", "unavailable"],
+      ["turn-end", "unavailable"],
+    ]);
     expect(syncEvents(events)[0]?.detail).toContain("paused");
   });
 
-  test("records an incomplete sync only once in one Turn", async () => {
+  test("records every incomplete sync operation in one Turn", async () => {
     const { provider, signal } = fixture(() => ({
       ...computerSyncSummaryV1(
         "degraded",
-        "Excluded 1 reproducible directory from Workspace sync.",
+        "Excluded 1 reproducible Workspace item from sync.",
       ),
       ignored: 1,
     }));
@@ -266,13 +269,18 @@ describe("the Computer Package as the sync's caller", () => {
 
     const events = await runTurn(provider, model);
 
-    expect(syncEvents(events)).toHaveLength(1);
-    expect(syncEvents(events)[0]).toMatchObject({
-      reason: "open",
-      status: "degraded",
-      ignored: 1,
-      omitted: 0,
-    });
+    expect(
+      syncEvents(events).map((event) => ({
+        reason: event.reason,
+        status: event.status,
+        ignored: event.ignored,
+        omitted: event.omitted,
+      })),
+    ).toEqual([
+      { reason: "open", status: "degraded", ignored: 1, omitted: 0 },
+      { reason: "signal", status: "degraded", ignored: 1, omitted: 0 },
+      { reason: "turn-end", status: "degraded", ignored: 1, omitted: 0 },
+    ]);
   });
 });
 

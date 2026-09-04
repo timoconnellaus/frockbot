@@ -142,7 +142,10 @@ class FakeSyncSprite {
     if (shell.includes("append_manifest") && shell.includes("sha256sum")) {
       const encoded = quoted(shell, "REQUIRED_PATHS") ?? "W10=";
       const required = new Set<string>(
-        JSON.parse(Buffer.from(encoded, "base64").toString("utf8")),
+        Buffer.from(encoded, "base64")
+          .toString("utf8")
+          .split("\n")
+          .filter(Boolean),
       );
       return this.scan(root ?? "", required);
     }
@@ -758,6 +761,7 @@ describe("the durable-root sync, Package-declared roots", () => {
       "todo/dist/server.js",
       "todo/dist/ui.html",
       "todo/dist/manifest.json",
+      "todo/dist/it's-$(not-a-command).js",
     ]);
 
     expect(sprite.lastScanScript).toBeString();
@@ -1352,7 +1356,7 @@ describe("the durable-root sync on the Computer handle", () => {
       failures: 0,
     });
     expect(summary.detail).toBe(
-      "Excluded 1 reproducible directory from Workspace sync.",
+      "Excluded 1 reproducible Workspace item from sync.",
     );
   });
 

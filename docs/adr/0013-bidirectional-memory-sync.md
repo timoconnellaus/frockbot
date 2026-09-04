@@ -91,9 +91,10 @@ summary `degraded`; a partial operation failure does too, while every root
 failing remains `unavailable`. The durable `computer/sync` event adds the same
 `degraded` status and `ignored`/`omitted` counts. Those two fields are optional
 only while decoding records written by older releases; every new event writes
-both. The first non-`ok` sync is recorded and projected once per Turn, with its
-plain-language detail beneath the reply, so watcher and turn-end retries do not
-repeat one warning.
+both. Every reconciliation outcome stays in the durable event log, while the
+client projects the first non-`ok` sync once per Turn with its plain-language
+detail beneath the reply, so watcher and turn-end retries do not repeat one
+warning.
 
 Excluded store generations are retained rather than deleted, but are not
 materialized onto a replacement Computer. Ordinary Applet source remains under

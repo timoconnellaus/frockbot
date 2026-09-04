@@ -97,7 +97,7 @@ test("a degraded Computer sync records bounded exclusions and decodes legacy row
   const degraded = {
     ...legacy,
     status: "degraded",
-    detail: "Excluded 1 reproducible directory from Workspace sync.",
+    detail: "Excluded 1 reproducible Workspace item from sync.",
     ignored: 1,
     omitted: 0,
   } as const;

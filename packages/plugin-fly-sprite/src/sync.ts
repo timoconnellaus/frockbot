@@ -996,7 +996,7 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     const script = [
       "set -eu",
       `ROOT=${shellQuote(mount)}`,
-      `REQUIRED_PATHS=${shellQuote(Buffer.from(JSON.stringify(requiredIgnoredPaths)).toString("base64"))}`,
+      `REQUIRED_PATHS=${shellQuote(Buffer.from(requiredIgnoredPaths.join("\n")).toString("base64"))}`,
       `mkdir -p "$ROOT" "$ROOT/${WORKSPACE_GENERATIONS_DIR}" "$ROOT/${WORKSPACE_SYNC_DIR}/${SYNC_TOMBSTONES_DIR}"`,
       "MANIFEST=$(mktemp)",
       "trap 'rm -f \"$MANIFEST\"' EXIT",
@@ -1040,15 +1040,15 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
       // Required artifact files go first: the source manifest may be full,
       // but an explicit one-root publisher must still receive the exact bytes
       // it named. They remain subject to the same byte and entry bounds.
-      ...requiredIgnoredPaths.flatMap((path) => [
-        `FILE="$ROOT/${path}"`,
-        'if [ -f "$FILE" ]; then',
-        `  REL=${shellQuote(path)}`,
-        `  META="$ROOT/${WORKSPACE_GENERATIONS_DIR}/$REL"`,
-        '  printf -v ROW "F\\t%s\\t%s\\t%s\\t%s" "$(printf %s "$REL" | base64 -w0)" "$({ cat "$META" 2>/dev/null || printf \'\'; } | base64 -w0)" "$(sha256sum "$FILE" | cut -d" " -f1)" "$(stat -c %s "$FILE")"',
-        '  append_manifest "$ROW"',
-        "fi",
-      ]),
+      "while IFS= read -r REL; do",
+      '  [ -n "$REL" ] || continue',
+      '  FILE="$ROOT/$REL"',
+      '  if [ -f "$FILE" ]; then',
+      `  META="$ROOT/${WORKSPACE_GENERATIONS_DIR}/$REL"`,
+      '  printf -v ROW "F\\t%s\\t%s\\t%s\\t%s" "$(printf %s "$REL" | base64 -w0)" "$({ cat "$META" 2>/dev/null || printf \'\'; } | base64 -w0)" "$(sha256sum "$FILE" | cut -d" " -f1)" "$(stat -c %s "$FILE")"',
+      '  append_manifest "$ROW"',
+      "  fi",
+      'done < <(printf %s "$REQUIRED_PATHS" | base64 -d)',
       // Count pruned directory roots, not every file below them: the count is
       // useful and bounded work even when a dependency tree holds millions.
       `while IFS= read -r -d "" DIR; do REL=\${DIR#"$ROOT"/}; required_directory "$REL" || IGNORED=$((IGNORED + 1)); done < <(find "$ROOT" \\( -path "$ROOT/${WORKSPACE_GENERATIONS_DIR}" -o -path "$ROOT/${WORKSPACE_SYNC_DIR}" -o -path "$ROOT/.frockbot-locks" \\) -prune -o -type d \\( ${ignoredExpression} \\) -print0 -prune)`,

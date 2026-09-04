@@ -305,7 +305,7 @@ function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
   const detail: string[] = [];
   if (ignored > 0) {
     detail.push(
-      `Excluded ${ignored} reproducible ${ignored === 1 ? "directory" : "directories"} from Workspace sync.`,
+      `Excluded ${ignored} reproducible Workspace ${ignored === 1 ? "item" : "items"} from sync.`,
     );
   }
   if (omitted > 0) {

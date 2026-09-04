@@ -1623,7 +1623,7 @@ describe("Computer sync degradation in the run projection", () => {
     turn: 1,
     reason: "open",
     status: "degraded",
-    detail: "Excluded 2 reproducible directories from Workspace sync.",
+    detail: "Excluded 2 reproducible Workspace items from sync.",
     pulled: 0,
     pushed: 1,
     restored: 0,
@@ -1643,7 +1643,7 @@ describe("Computer sync degradation in the run projection", () => {
       {
         type: "computer/sync",
         status: "degraded",
-        message: "Excluded 2 reproducible directories from Workspace sync.",
+        message: "Excluded 2 reproducible Workspace items from sync.",
       },
     ]);
     const page = createClientRunListV1([projected], { truncated: false });

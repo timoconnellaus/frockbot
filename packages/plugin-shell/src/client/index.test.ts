@@ -114,7 +114,7 @@ test("a degraded Computer sync is a notice beneath the Turn once", () => {
           {
             type: "computer/sync",
             status: "degraded",
-            message: "Excluded 1 reproducible directory from Workspace sync.",
+            message: "Excluded 1 reproducible Workspace item from sync.",
           },
         ],
       },
@@ -125,7 +125,7 @@ test("a degraded Computer sync is a notice beneath the Turn once", () => {
   expect(state.messages[1]).toMatchObject({
     role: "assistant",
     text: "The Applet is ready.",
-    notice: "Excluded 1 reproducible directory from Workspace sync.",
+    notice: "Excluded 1 reproducible Workspace item from sync.",
   });
 });
 
