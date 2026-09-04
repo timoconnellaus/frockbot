@@ -16,6 +16,7 @@ import {
   OLLAMA_REVOKED_API_KEY,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -64,30 +65,29 @@ describe("a Turn through the gateway, the loaded artifact and the Bot", () => {
     expect(response.status).toBe(200);
     expect(JSON.stringify(body)).toContain("Ollama reply");
 
-    const stored = await runInDurableObject(
-      botStub(userId, botId),
-      (_instance, state) =>
-        state.storage.get<{
-          events: Array<{
-            type: string;
-            classification?: string;
-            delayMs?: number;
-          }>;
-        }>("run:turn-command-503"),
+    // Run records carry a sequence range since ADR 0033; the fixture hydrates
+    // the journal from the paged session log.
+    const stored = await readStoredRunWithEventsV1(
+      userId,
+      botId,
+      "turn-command-503",
     );
+    const events = (stored?.events ?? []) as Array<{
+      type: string;
+      classification?: string;
+      delayMs?: number;
+    }>;
     expect(
-      stored?.events.filter((event) => event.type === "model/request"),
+      events.filter((event) => event.type === "model/request"),
     ).toHaveLength(2);
     expect(
-      stored?.events.filter((event) => event.type === "assistant/message"),
+      events.filter((event) => event.type === "assistant/message"),
     ).toHaveLength(1);
-    const retries = stored?.events.filter(
-      (event) => event.type === "model/retry",
-    );
+    const retries = events.filter((event) => event.type === "model/retry");
     expect(retries).toHaveLength(1);
-    expect(retries?.[0]).toMatchObject({ classification: "transient" });
-    expect(retries?.[0]?.delayMs).toBeGreaterThanOrEqual(250);
-    expect(retries?.[0]?.delayMs).toBeLessThanOrEqual(500);
+    expect(retries[0]).toMatchObject({ classification: "transient" });
+    expect(retries[0]?.delayMs).toBeGreaterThanOrEqual(250);
+    expect(retries[0]?.delayMs).toBeLessThanOrEqual(500);
   });
 
   it("answers with the provider's reply and lists the run afterwards", async () => {
@@ -149,19 +149,18 @@ describe("a Turn through the gateway, the loaded artifact and the Bot", () => {
     expect(run).toBeDefined();
     expect(run?.status).toBe("failed");
 
-    const stored = await runInDurableObject(
-      botStub(userId, botId),
-      (_instance, state) =>
-        state.storage.get<{ events: Array<{ type: string }> }>(
-          "run:turn-command-401",
-        ),
+    const stored = await readStoredRunWithEventsV1(
+      userId,
+      botId,
+      "turn-command-401",
     );
+    const events = (stored?.events ?? []) as Array<{ type: string }>;
     expect(
-      stored?.events.filter((event) => event.type === "model/request"),
+      events.filter((event) => event.type === "model/request"),
     ).toHaveLength(1);
-    expect(
-      stored?.events.filter((event) => event.type === "model/retry"),
-    ).toHaveLength(0);
+    expect(events.filter((event) => event.type === "model/retry")).toHaveLength(
+      0,
+    );
 
     // And what it says is written for the person. The provider's status code
     // and the outcome's name stay on the stored record, which is what the
