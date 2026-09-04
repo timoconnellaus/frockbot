@@ -42,12 +42,36 @@ export interface FlockBotBackendHost {
     userId: string,
   ): Promise<void>;
   archiveEligible(storage: FlockBotTransaction): Promise<boolean>;
+  /**
+   * Destroy everything this Bot owns: every durable key in its own Durable
+   * Object, its scheduled alarm, and any object-store root keyed to it.
+   *
+   * The host owns this rather than the Contribution because the surfaces are
+   * the application's — `deleteAll()` and `deleteAlarm()` are not part of the
+   * transaction seam this Package writes against, and the object store is not
+   * named here at all. It must be idempotent: the delete saga replays, and a
+   * Bot torn down twice is torn down once.
+   */
+  tearDown(identity: { userId: string; botId: string }): Promise<void>;
 }
 
 export class BotArchivedError extends Error {
   constructor(readonly botId: string) {
     super(`Bot "${botId}" is archived`);
     this.name = "BotArchivedError";
+  }
+}
+
+/**
+ * A Bot that has been permanently deleted. Distinct from `BotNotFoundError`
+ * because the tombstone is the one thing a deleted Bot still knows about
+ * itself: the registration may already be gone from the User's directory, or
+ * it may not be gone yet, and either way no Turn, command or routine may run.
+ */
+export class BotDeletedError extends Error {
+  constructor(readonly botId: string) {
+    super(`Bot "${botId}" is deleted`);
+    this.name = "BotDeletedError";
   }
 }
 
@@ -59,6 +83,10 @@ export class FlockBotBackendContribution {
     userId: string,
   ): Promise<SheepIdentityViewV1> {
     const registration = decodeBotRegistrationV1(registrationInput);
+    // A tombstone is checked before anything is written back: materializing a
+    // deleted Bot would recreate the very rows the delete removed.
+    const tombstone = await this.deletedLifecycle();
+    if (tombstone) throw new BotDeletedError(registration.botId);
     await this.host.materializeSettings(registration, userId);
     return this.host.storage.transaction(async (storage) => {
       const existingValue = await storage.get<unknown>(IDENTITY_KEY);
@@ -155,10 +183,28 @@ export class FlockBotBackendContribution {
     });
   }
 
+  /**
+   * The tombstone, if this Bot has been deleted.
+   *
+   * The delete teardown wipes every key and then writes the lifecycle back as
+   * `deleted`, so this single read is the whole of what a deleted Bot is.
+   */
+  private async deletedLifecycle(): Promise<BotLifecycleViewV1 | undefined> {
+    const stored = await this.host.storage.get<unknown>(LIFECYCLE_KEY);
+    if (stored === undefined) return undefined;
+    const lifecycle = decodeBotLifecycleViewV1(stored);
+    return lifecycle.status === "deleted" ? lifecycle : undefined;
+  }
+
   async readLifecycle(
     registration: BotRegistrationV1,
     userId: string,
   ): Promise<BotLifecycleViewV1> {
+    // The saga reconciles an uncertain delete by reading the lifecycle back,
+    // so a tombstone answers here rather than throwing: it is the proof the
+    // teardown ran.
+    const tombstone = await this.deletedLifecycle();
+    if (tombstone) return structuredClone(tombstone);
     await this.materialize(registration, userId);
     const stored = await this.host.storage.get<unknown>(LIFECYCLE_KEY);
     if (stored === undefined)
@@ -174,8 +220,25 @@ export class FlockBotBackendContribution {
     const command = decodeBotLifecycleCommandV1(input);
     if (registration.botId !== command.botId)
       throw new Error("lifecycle command does not match Bot registration");
-    await this.materialize(registration, userId);
     const fingerprint = flockCommandFingerprint(command);
+    // Deletion is terminal, so the tombstone is read before the Bot is
+    // materialized: a replayed `bot/delete` settles from it, and archive or
+    // restore is refused instead of resurrecting the Bot.
+    const tombstone = await this.deletedLifecycle();
+    if (tombstone)
+      return {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        botId: command.botId,
+        status: command.type === "bot/delete" ? "applied" : "rejected",
+        lifecycle: structuredClone(tombstone),
+        ...(command.type === "bot/delete"
+          ? {}
+          : { failure: `Bot "${command.botId}" is deleted` }),
+      } satisfies BotLifecycleReceiptV1;
+    if (command.type === "bot/delete")
+      return this.delete(registration, userId, command, fingerprint);
+    await this.materialize(registration, userId);
     return this.host.storage.transaction(async (storage) => {
       const receiptKey = `${LIFECYCLE_RECEIPT_PREFIX}${command.commandId}`;
       const storedReceipt = await storage.get<unknown>(receiptKey);
@@ -229,6 +292,52 @@ export class FlockBotBackendContribution {
     });
   }
 
+  /**
+   * Permanent deletion, as one replayable step.
+   *
+   * The teardown runs first and the tombstone is written after it, so a crash
+   * anywhere in between leaves an empty Durable Object that the saga's retry
+   * tears down again — `tearDown` is idempotent, and an empty object has
+   * nothing left to remove. Writing the tombstone first would be the unsafe
+   * order: `deleteAll` would take it out again and the Bot would look alive.
+   */
+  private async delete(
+    registration: BotRegistrationV1,
+    userId: string,
+    command: BotLifecycleCommandV1,
+    fingerprint: string,
+  ): Promise<BotLifecycleReceiptV1> {
+    const currentValue = await this.host.storage.get<unknown>(LIFECYCLE_KEY);
+    const current =
+      currentValue === undefined
+        ? undefined
+        : decodeBotLifecycleViewV1(currentValue);
+    if (current && current.botId !== registration.botId)
+      throw new Error("Bot lifecycle identity does not match");
+    await this.host.tearDown({ userId, botId: registration.botId });
+    const lifecycle = {
+      schemaVersion: 1,
+      botId: command.botId,
+      status: "deleted",
+      revision: (current?.revision ?? 0) + 1,
+    } satisfies BotLifecycleViewV1;
+    const receipt = {
+      schemaVersion: 1,
+      commandId: command.commandId,
+      botId: command.botId,
+      status: "applied",
+      lifecycle,
+    } satisfies BotLifecycleReceiptV1;
+    await this.host.storage.put({
+      [LIFECYCLE_KEY]: lifecycle,
+      [`${LIFECYCLE_RECEIPT_PREFIX}${command.commandId}`]: {
+        fingerprint,
+        receipt,
+      },
+    });
+    return decodeBotLifecycleReceiptV1(receipt);
+  }
+
   async assertActive(
     storage: FlockBotTransaction,
     botId: string,
@@ -238,6 +347,7 @@ export class FlockBotBackendContribution {
     const lifecycle = decodeBotLifecycleViewV1(value);
     if (lifecycle.botId !== botId)
       throw new Error("Bot lifecycle identity does not match");
+    if (lifecycle.status === "deleted") throw new BotDeletedError(botId);
     if (lifecycle.status === "archived") throw new BotArchivedError(botId);
   }
 }

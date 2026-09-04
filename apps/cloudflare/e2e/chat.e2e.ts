@@ -299,6 +299,151 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   expect(edges.column).toBeCloseTo(edges.row, 0);
 });
 
+// The settled case above, from the other end of a Turn. The avatar used to sit
+// in a gutter to the left of the running Turn's bubbles and then vanish when
+// the Turn ended, which took the bubble sideways with it. The working row is
+// under the bubbles now, so a bubble is at the transcript's left edge while
+// the Bot is still writing, the sheep is below it rather than beside it, and
+// the end of the Turn moves nothing horizontally.
+test("the working avatar sits below the bubbles and never shifts them", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Stacker",
+  });
+  await page.setViewportSize({ width: 1351, height: 831 });
+
+  // The provider writes half the answer, waits, then writes the rest, which is
+  // the window where a bubble and the working row are both on screen.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
+
+  const composer = composerInput(page);
+  await composer.fill("say it slowly");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(composer).toHaveValue("", { timeout: 120_000 });
+
+  // Latched rather than asserted at an instant: the geometry is read the first
+  // time a bubble and the working row are both drawn, whenever that happens.
+  let running: {
+    bubbleLeft: number;
+    threadLeft: number;
+    gap: number;
+    trails: number;
+  } | null = null;
+  await expect
+    .poll(
+      async () => {
+        running = await page.evaluate(() => {
+          const thread = document.querySelector(".thread");
+          const row = document.querySelector(".bot-working");
+          const bubbles = document.querySelectorAll(
+            ".message-assistant .message-bubble",
+          );
+          const bubble = bubbles[bubbles.length - 1];
+          if (!thread || !row || !bubble) return null;
+          const bubbleBox = bubble.getBoundingClientRect();
+          if (bubbleBox.width === 0) return null;
+          return {
+            bubbleLeft: bubbleBox.left,
+            threadLeft: thread.getBoundingClientRect().left,
+            // How far the row's top is below the bubble's bottom. Negative
+            // would mean the two overlap, which is the old side-by-side row.
+            gap: row.getBoundingClientRect().top - bubbleBox.bottom,
+            // The indicator is beside the avatar, on the row — not beside the
+            // bubble, where it would be another thing pushing the text along.
+            trails: row.querySelectorAll(".ui-activity-trail").length,
+          };
+        });
+        return running !== null;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+  const midTurn = running as unknown as {
+    bubbleLeft: number;
+    threadLeft: number;
+    gap: number;
+    trails: number;
+  };
+
+  // The transcript pads its own edge, so "at the left edge" is the padding —
+  // what matters is that the bubble is not indented past it by an avatar
+  // gutter, and that it lands where a settled bubble lands.
+  const padding = await page.evaluate(() => {
+    const thread = document.querySelector(".thread");
+    if (!thread) return 0;
+    return Number.parseFloat(getComputedStyle(thread).paddingLeft);
+  });
+  expect(midTurn.bubbleLeft).toBeCloseTo(midTurn.threadLeft + padding, 0);
+  // Below, not beside.
+  expect(midTurn.gap).toBeGreaterThanOrEqual(0);
+  expect(midTurn.trails).toBe(1);
+
+  await expect(assistantMessages(page).last()).toContainText(
+    "Reply from the local Ollama stub.",
+    { timeout: 120_000 },
+  );
+  await expect(
+    assistantMessages(page).last().locator(".bot-working"),
+  ).toHaveCount(0, { timeout: 120_000 });
+
+  // The Turn ended and the row went; the bubble did not move.
+  const settledLeft = await page.evaluate(() => {
+    const bubbles = document.querySelectorAll(
+      ".message-assistant .message-bubble",
+    );
+    const bubble = bubbles[bubbles.length - 1];
+    return bubble ? bubble.getBoundingClientRect().left : Number.NaN;
+  });
+  expect(settledLeft).toBeCloseTo(midTurn.bubbleLeft, 0);
+
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+});
+
+// Tim's report, as the thread: a Bot that says three things in one Turn leaves
+// three messages behind, in the order it said them. Each one used to land in
+// the same bubble, so the newest overwrote the one before it and a person
+// watching an acknowledgement followed by a result was left with only the
+// result.
+test("every message the Bot sends is its own bubble, in order", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Sayer",
+  });
+
+  const said = ["On it.", "Looking now.", "Booked."];
+  await sendMessage(
+    page,
+    [
+      "book it",
+      ...said.map((text) =>
+        e2eToolCallPrompt("send_to_user", { payload: { type: "text", text } }),
+      ),
+    ].join("\n"),
+    { replies: said.length },
+  );
+
+  const bubbles = page.locator("article.message-assistant .send-text");
+  await expect(bubbles).toHaveCount(said.length, { timeout: 120_000 });
+  await expect(bubbles).toHaveText(said);
+
+  // Durable order is display order: the thread a reload draws is the thread
+  // that was watched being written, and no send has been folded into another.
+  await page.reload();
+  await expect(bubbles).toHaveText(said, { timeout: 120_000 });
+});
+
 // The owner's ask, from the other side: a Turn that spends its time making
 // tool calls has to look like it is working without naming one. The comet
 // trail off the Bot's avatar is that — a working row labelled "Working" while

@@ -30,6 +30,19 @@ import { machineIntentKeyV1 } from "@frockbot/plugin-user-machine/intent";
 import { provisionBot } from "./provision-bot.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
 
+/**
+ * How far ahead a test arms an alarm it is about to fire by hand.
+ *
+ * A deadline already in the past can be delivered by the runtime before
+ * `runDurableObjectAlarm` asks for it; that helper then finds nothing
+ * scheduled, returns without running anything, and does not await the handler
+ * already in flight — so the assertions below could read the record
+ * mid-settlement. `runDurableObjectAlarm` fires whatever alarm is scheduled
+ * whether or not it is due, so a deadline out of the runtime's reach makes the
+ * hand-fired run the only delivery, and an awaited one.
+ */
+const HAND_FIRED_ALARM_DELAY_MS = 60_000;
+
 interface BotRpc {
   run(command: unknown): Promise<{ runId: string }>;
   listApprovals(input: unknown): Promise<{
@@ -294,7 +307,7 @@ describe("a machine command's approval in Workerd", () => {
         ...stored,
         expiresAt: new Date(Date.now() - 60_000).toISOString(),
       });
-      await state.storage.setAlarm(Date.now());
+      await state.storage.setAlarm(Date.now() + HAND_FIRED_ALARM_DELAY_MS);
     });
     await evictDurableObject(bot(identity));
     await runDurableObjectAlarm(bot(identity));

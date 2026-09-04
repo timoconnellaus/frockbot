@@ -279,6 +279,14 @@ onMounted(() => void flock.value.load());
             >
               Archive
             </button>
+            <button
+              v-if="flock.showArchived"
+              type="button"
+              class="flock-lifecycle flock-lifecycle--danger"
+              @click="flock.openDelete(bot.botId)"
+            >
+              Delete
+            </button>
           </div>
         </TransitionGroup>
       </section>

@@ -31,7 +31,7 @@ export interface FlockWebData {
    */
   loaded: boolean;
   error?: string;
-  overlay?: "create" | "edit" | "archive";
+  overlay?: "create" | "edit" | "archive" | "delete";
   lifecycles: Record<string, BotLifecycleStatusV1>;
   showArchived: boolean;
   lifecyclePending?: string;
@@ -52,6 +52,9 @@ export interface FlockWebData {
   toggleHidden(): void;
   openArchive(botId: string): void;
   archive(): Promise<void>;
+  /** Confirmation first: deleting a Bot destroys its chat history. */
+  openDelete(botId: string): void;
+  deleteBot(): Promise<void>;
   restore(botId: string): Promise<void>;
   closeOverlay(): void;
   reroll(): void;

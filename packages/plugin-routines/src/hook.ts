@@ -318,14 +318,14 @@ export async function routineDeliveryIdV1(
     return hex(
       await crypto.subtle.digest(
         "SHA-256",
-        TEXT.encode(`key ${routineId} ${trimmed}`),
+        TEXT.encode(`key\u0000${routineId}\u0000${trimmed}`),
       ),
     );
   }
   return hex(
     await crypto.subtle.digest(
       "SHA-256",
-      TEXT.encode(`delivery ${routineId} ${crypto.randomUUID()}`),
+      TEXT.encode(`delivery\u0000${routineId}\u0000${crypto.randomUUID()}`),
     ),
   );
 }

@@ -20,6 +20,7 @@ import type {
 } from "@frockbot/kernel-contracts";
 import {
   createObjectWorkspaceFilesV1,
+  workspaceObjectPrefixV1,
   type ObjectBucketV1,
   type ObjectHeadV1,
   type WorkspaceStoreSurfaceV1,
@@ -130,4 +131,52 @@ export function createDurableWorkspaceFilesV1(
     ...(options.owner ? { owner: options.owner } : {}),
     ...(options.surface ? { surface: options.surface } : {}),
   });
+}
+
+/**
+ * Every object of the two durable roots one Bot owns, removed from the bucket.
+ *
+ * A Bot owns exactly two roots — `bot-instructions` and `bot-memory` — and
+ * both are keyed by `<kind>:<userId>:<botId>`, so a prefix listing names this
+ * Bot's objects and nobody else's. The User's own Skills root, User and
+ * Project Memory, and every `package-declared` root are User-scoped and are
+ * deliberately left alone: another Bot of the same User still reads them.
+ *
+ * This is a bulk removal rather than `WorkspaceStore.delete`, which is
+ * generation-fenced per file and leaves a tombstone marker. A deleted Bot has
+ * no generation ledger left to fence against and nothing to preserve a losing
+ * write for, so the bytes go. Conflict objects live under the same prefix and
+ * go with them.
+ *
+ * Idempotent: a second call over an empty prefix removes nothing.
+ */
+export async function deleteBotWorkspaceRootsV1(
+  env: WorkspaceStoreEnv,
+  identity: { userId: string; botId: string },
+): Promise<number> {
+  const bucket = env.MEMORY_FILES;
+  if (!bucket) return 0;
+  const store = createR2ObjectBucketV1(bucket);
+  let removed = 0;
+  for (const kind of ["bot-instructions", "bot-memory"] as const) {
+    const prefix = workspaceObjectPrefixV1({
+      kind,
+      userId: identity.userId,
+      botId: identity.botId,
+    });
+    let cursor: string | undefined;
+    do {
+      const page = await store.list({
+        prefix,
+        ...(cursor === undefined ? {} : { cursor }),
+        limit: 1_000,
+      });
+      for (const object of page.objects) {
+        await store.delete(object.key);
+        removed += 1;
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor !== undefined);
+  }
+  return removed;
 }

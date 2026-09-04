@@ -559,7 +559,16 @@ const workingSample = computed(() => {
   return activityTrailSampleV1({
     text: message.text,
     toolStatuses: message.tools.map((tool) => tool.status),
-    sends: message.sends.length,
+    // Counted across the whole Turn, because every send the Bot delivers is a
+    // message of its own and the working line carries none of them. A send is
+    // still a beat the trail has to feel.
+    sends: messages.value.reduce(
+      (total, candidate) =>
+        candidate.runId === message.runId
+          ? total + candidate.sends.length
+          : total,
+      0,
+    ),
     status: message.status,
   });
 });

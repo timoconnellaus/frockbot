@@ -11,6 +11,7 @@ import {
   decodeStoredBotLifecycleReceiptV1,
   decodeStoredFlockReceiptV1,
   flockCommandFingerprint,
+  lifecycleTargetStatusV1,
   migrateStoredBotDirectoryV1,
   randomSheepRecipeV1,
   type BotDirectoryViewV1,
@@ -30,6 +31,18 @@ const LIFECYCLE_PREFIX = "flock:lifecycle:";
 const LIFECYCLE_RECEIPT_PREFIX = "flock:lifecycle-receipt:";
 const LIFECYCLE_SAGA_PREFIX = "flock:lifecycle-saga:";
 const LIFECYCLE_OPERATION_PREFIX = "flock:lifecycle-operation:";
+/**
+ * One key per Bot whose registration this object has removed, and whose
+ * User-scoped projections — the transcript index and the audit table — have
+ * not yet been swept.
+ *
+ * The saga can settle a delete on its alarm rather than on the command that
+ * started it, and the projections live outside this Package. Without a durable
+ * to-do list the sweep would be lost with the call that missed it, so the
+ * removal writes one and the application clears it once the projections are
+ * gone.
+ */
+const DELETED_PREFIX = "flock:deleted:";
 export interface FlockUserTransaction {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
@@ -207,6 +220,53 @@ export class FlockUserBackendContribution {
     });
   }
 
+  /**
+   * Drops one Bot out of the directory and out of the lifecycle projection,
+   * and records that its User-scoped projections still need sweeping.
+   *
+   * Idempotent by construction: a directory that no longer holds the Bot is
+   * left at its current revision, and both deletes and the tombstone write are
+   * safe to repeat.
+   */
+  private async removeRegistration(
+    storage: FlockUserTransaction,
+    botId: string,
+  ): Promise<void> {
+    const currentValue = await storage.get<unknown>(DIRECTORY_KEY);
+    const current =
+      currentValue === undefined
+        ? initialDirectory()
+        : decodeDirectoryViewV1(migrateStoredBotDirectoryV1(currentValue));
+    if (current.bots.some((bot) => bot.botId === botId)) {
+      await storage.put(DIRECTORY_KEY, {
+        ...current,
+        revision: current.revision + 1,
+        bots: current.bots.filter((bot) => bot.botId !== botId),
+      } satisfies BotDirectoryViewV1);
+    }
+    await storage.delete(`${LIFECYCLE_PREFIX}${botId}`);
+    await storage.put(`${DELETED_PREFIX}${botId}`, {
+      schemaVersion: 1,
+      botId,
+    });
+  }
+
+  /**
+   * Bots whose registration is gone but whose User-scoped projections have not
+   * been swept yet. The application sweeps and then calls `forgetDeletedBot`.
+   */
+  async listDeletedBotIds(): Promise<string[]> {
+    const entries = await this.host.storage.list<unknown>({
+      prefix: DELETED_PREFIX,
+    });
+    return [...entries.keys()].map((key) => key.slice(DELETED_PREFIX.length));
+  }
+
+  /** The sweep is done; drop the to-do entry. */
+  async forgetDeletedBot(botId: string): Promise<void> {
+    await this.host.storage.delete(`${DELETED_PREFIX}${botId}`);
+  }
+
   async listBotLifecycles(): Promise<BotLifecycleDirectoryViewV1> {
     const directory = await this.listBots();
     const lifecycles = await Promise.all(
@@ -317,7 +377,7 @@ export class FlockUserBackendContribution {
       return decodeStoredBotLifecycleReceiptV1(receipt).receipt;
     }
     const saga = decodeStoredLifecycleSagaV1(sagaValue);
-    const target = saga.command.type === "bot/archive" ? "archived" : "active";
+    const target = lifecycleTargetStatusV1(saga.command.type);
     let outcome: BotLifecycleReceiptV1 | undefined;
     let reconcileMarker = false;
     try {
@@ -383,12 +443,21 @@ export class FlockUserBackendContribution {
       const currentSaga = decodeStoredLifecycleSagaV1(currentSagaValue);
       if (currentSaga.fingerprint !== saga.fingerprint)
         throw new FlockDecodeError(`command ID collision: ${commandId}`);
-      await storage.put({
-        [`${LIFECYCLE_PREFIX}${saga.command.botId}`]: outcome!.lifecycle,
-        [`${LIFECYCLE_RECEIPT_PREFIX}${commandId}`]: {
-          fingerprint: saga.fingerprint,
-          receipt: outcome,
-        },
+      if (outcome!.lifecycle.status === "deleted") {
+        // The Bot has torn itself down, so the registration leaves the
+        // directory in the same transaction that settles the receipt: the
+        // sidebar, every fan-out and the debug surface all read the directory,
+        // and none of them may see a Bot whose history is already gone.
+        await this.removeRegistration(storage, saga.command.botId);
+      } else {
+        await storage.put(
+          `${LIFECYCLE_PREFIX}${saga.command.botId}`,
+          outcome!.lifecycle,
+        );
+      }
+      await storage.put(`${LIFECYCLE_RECEIPT_PREFIX}${commandId}`, {
+        fingerprint: saga.fingerprint,
+        receipt: outcome,
       });
       await storage.delete(`${LIFECYCLE_SAGA_PREFIX}${commandId}`);
       await storage.delete(
