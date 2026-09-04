@@ -163,7 +163,7 @@ export interface AppletInstanceBindingV1 {
   >;
   /**
    * `generationId` is the Applet generation the calling Turn pinned. The
-   * instance runs that generation or refuses the call (ADR 0038).
+   * instance runs that generation or refuses the call (ADR 0041).
    */
   invokeTool(input: {
     appletId: string;

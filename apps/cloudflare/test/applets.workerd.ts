@@ -506,7 +506,7 @@ describe("Applet authority", () => {
 
 // The counterexample the 2026-09-05 review reproduced, and its three siblings.
 //
-// Before ADR 0038 the kernel mounted a candidate generation against the live
+// Before ADR 0041 the kernel mounted a candidate generation against the live
 // facet and treated a health failure as a rollback. It was not one: the
 // candidate's constructor, the SDK's migration step, and `health()` itself all
 // run against the Applet's real rows first, so a generation could delete the
@@ -626,7 +626,7 @@ describe("an activation trial cannot change the previous generation's data", () 
   });
 });
 
-// ADR 0038's second half. A Turn's Composition advertises one Applet generation
+// ADR 0041's second half. A Turn's Composition advertises one Applet generation
 // to the model — its tools, their schemas, and its provenance — and the call it
 // makes names that generation. The instance runs it or refuses.
 describe("Applet tool calls execute the generation the Turn pinned", () => {

@@ -69,7 +69,7 @@ export const APPLET_MOUNT_INPUT_KEY = "applet:mount-input";
  * Applet Durable Object: the open activation trial, if one is in flight.
  *
  * An activation is a commit boundary the kernel owns, not a mount the candidate
- * is trusted to survive (ADR 0038). While this key exists the facet's storage is
+ * is trusted to survive (ADR 0041). While this key exists the facet's storage is
  * provisional: a byte copy of it is parked in the rollback facet, and whatever
  * reads the Applet next either finds the trial committed — the key deleted — or
  * rolls it back before answering. That is what makes an interrupted publish
