@@ -19,6 +19,7 @@ import {
   type Session,
   type SessionEvent,
   type StepOutcome,
+  StructuredOutputValidationError,
   type ToolCall,
   type ToolCallOccurrence,
   type ToolExecutionResult,
@@ -397,6 +398,8 @@ class LoopAgent implements Agent {
     let unresolvedRequest: NormalizedModelRequest | undefined;
     let definitiveNoEffect:
       Extract<SessionEvent, { type: "model/effect-not-started" }> | undefined;
+    let definitiveResponseFailure:
+      Extract<SessionEvent, { type: "model/response-failed" }> | undefined;
     for (const event of this.session.events) {
       if (event.type === "turn/start") {
         openTurn = event.turn;
@@ -405,6 +408,7 @@ class LoopAgent implements Agent {
         latestStepOutcome = undefined;
         unresolvedRequest = undefined;
         definitiveNoEffect = undefined;
+        definitiveResponseFailure = undefined;
       }
       if (event.type === "turn/end" && event.turn === openTurn)
         openTurn = undefined;
@@ -424,12 +428,19 @@ class LoopAgent implements Agent {
       if (event.type === "model/request" && event.turn === openTurn) {
         unresolvedRequest = event.request;
         definitiveNoEffect = undefined;
+        definitiveResponseFailure = undefined;
       }
       if (
         event.type === "model/effect-not-started" &&
         event.requestId === unresolvedRequest?.requestId
       ) {
         definitiveNoEffect = event;
+      }
+      if (
+        event.type === "model/response-failed" &&
+        event.requestId === unresolvedRequest?.requestId
+      ) {
+        definitiveResponseFailure = event;
       }
       if (
         event.type === "assistant/message" &&
@@ -464,6 +475,22 @@ class LoopAgent implements Agent {
       let nextStep = latestStep === 0 ? 1 : latestStep + 1;
       if (unresolvedRequest) {
         openStep = latestStep;
+        if (definitiveResponseFailure) {
+          await this.#notifyModelOutcome(
+            definitiveResponseFailure.requestId,
+            "completed",
+          );
+          turnOutcome = "model-error";
+          turnReason = turnEndReason(definitiveResponseFailure.failure.message);
+          this.#ctx.emit(
+            "agent/error",
+            this,
+            new StructuredOutputValidationError(
+              definitiveResponseFailure.failure,
+            ),
+          );
+          return;
+        }
         if (definitiveNoEffect) {
           await this.#notifyModelOutcome(
             definitiveNoEffect.requestId,
@@ -1054,6 +1081,11 @@ class LoopAgent implements Agent {
       try {
         return await this.#consumeStream(request, turn, step, signal);
       } catch (error) {
+        if (error instanceof StructuredOutputValidationError) {
+          await this.session.flush();
+          await this.#notifyModelOutcome(request.requestId, "completed");
+          throw error;
+        }
         if (signal.aborted) {
           const reason = `Model response outcome is uncertain after cancellation: ${modelFailureMessage(error)}`;
           this.session.append({
@@ -1140,10 +1172,16 @@ class LoopAgent implements Agent {
   ): Promise<ModelResponse> {
     let text = "";
     const toolCalls: ToolCall[] = [];
+    let structuredFailure:
+      | Extract<
+          LlmStreamEvent,
+          { type: "structured-output-failure" }
+        >["failure"]
+      | undefined;
     let receivedProviderEvent = false;
     try {
       for await (const event of this.#ctx.llm.stream(request, signal)) {
-        receivedProviderEvent = true;
+        if (event.type !== "response-format-note") receivedProviderEvent = true;
         signal.throwIfAborted();
         this.#applyStreamEvent(
           event,
@@ -1155,6 +1193,9 @@ class LoopAgent implements Agent {
             text += delta;
           },
         );
+        if (event.type === "structured-output-failure") {
+          structuredFailure = event.failure;
+        }
       }
     } catch (error) {
       if (receivedProviderEvent && error instanceof ModelProviderFailureError) {
@@ -1164,6 +1205,9 @@ class LoopAgent implements Agent {
         );
       }
       throw error;
+    }
+    if (structuredFailure) {
+      throw new StructuredOutputValidationError(structuredFailure);
     }
     return { request, text, toolCalls };
   }
@@ -1211,6 +1255,12 @@ class LoopAgent implements Agent {
     }
     let text = "";
     const toolCalls: ToolCall[] = [];
+    let structuredFailure:
+      | Extract<
+          LlmStreamEvent,
+          { type: "structured-output-failure" }
+        >["failure"]
+      | undefined;
     let textDeltaIndex = 0;
     for (const event of reconciliation.events) {
       signal.throwIfAborted();
@@ -1228,6 +1278,14 @@ class LoopAgent implements Agent {
         journalTextDelta,
       );
       if (event.type === "text-delta") textDeltaIndex += 1;
+      if (event.type === "structured-output-failure") {
+        structuredFailure = event.failure;
+      }
+    }
+    if (structuredFailure) {
+      await this.session.flush();
+      await this.#notifyModelOutcome(request.requestId, "completed");
+      throw new StructuredOutputValidationError(structuredFailure);
     }
     return {
       status: "recovered",
@@ -1257,6 +1315,22 @@ class LoopAgent implements Agent {
       }
     } else if (event.type === "tool-call") {
       toolCalls.push(event.call);
+    } else if (event.type === "response-format-note") {
+      this.session.append({
+        type: "model/response-format-note",
+        turn,
+        step,
+        requestId,
+        note: event.note,
+      });
+    } else if (event.type === "structured-output-failure") {
+      this.session.append({
+        type: "model/response-failed",
+        turn,
+        step,
+        requestId,
+        failure: event.failure,
+      });
     }
   }
 

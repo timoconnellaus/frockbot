@@ -1,6 +1,7 @@
 import {
   type LlmProvider,
   type LlmReconciliationCapability,
+  type LlmStreamEvent,
   ModelProviderFailureError,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
@@ -10,6 +11,8 @@ import {
   type ModelRequestDeadlineOptionsV1,
   OpenAICompatibleHttpError,
   OpenAICompatibleProvider,
+  planOpenAICompatibleRequestV1,
+  streamWithModelRequestDeadlinesV1,
 } from "@frockbot/provider-openai-compatible";
 import type { Plugin } from "cordis";
 import {
@@ -73,6 +76,33 @@ export function ollamaChatBaseUrl(apiBaseUrl?: string): string {
   return `${decodeOllamaApiBaseUrl(apiBaseUrl ?? DEFAULT_OLLAMA_API_BASE_URL)}/v1`;
 }
 
+/** Native Ollama accepts either `"json"` or the schema itself as `format`. */
+export function ollamaFormatForRequestV1(
+  request: NormalizedModelRequest,
+): "json" | Record<string, unknown> | undefined {
+  if (request.responseFormat?.type === "json") return "json";
+  return request.responseFormat?.type === "json_schema"
+    ? request.responseFormat.schema
+    : undefined;
+}
+
+/** Maps a normalized request onto Ollama's native `/api/chat` shape. */
+export function ollamaNativeChatBodyV1(
+  request: NormalizedModelRequest,
+): Record<string, unknown> {
+  const openAi = planOpenAICompatibleRequestV1(request, {
+    structuredOutput: "json_schema",
+  }).body;
+  const { response_format: _responseFormat, ...body } = openAi;
+  return {
+    ...body,
+    stream: false,
+    ...(ollamaFormatForRequestV1(request)
+      ? { format: ollamaFormatForRequestV1(request) }
+      : {}),
+  };
+}
+
 interface AuthorizedRequest {
   lease: CredentialLeaseV1;
   apiKey: string;
@@ -80,12 +110,27 @@ interface AuthorizedRequest {
 
 class OllamaCloudProvider implements LlmProvider {
   readonly id = OLLAMA_CLOUD_PROVIDER;
+  readonly supports;
   private readonly authorized = new Map<string, AuthorizedRequest>();
 
   constructor(
     private readonly config: OllamaCloudRuntimeConfig,
     private readonly credentialLease: CredentialLeaseOpener,
-  ) {}
+  ) {
+    this.supports = {
+      structuredOutput: this.usesNativeStructuredOutput()
+        ? "json_schema"
+        : "none",
+    } as const;
+  }
+
+  private chatBaseUrl(): string {
+    return this.config.chatBaseUrl ?? ollamaChatBaseUrl();
+  }
+
+  private usesNativeStructuredOutput(): boolean {
+    return new URL(this.chatBaseUrl()).hostname !== "ollama.com";
+  }
 
   async authorize(request: NormalizedModelRequest): Promise<void> {
     const binding = request.modelBinding;
@@ -177,10 +222,15 @@ class OllamaCloudProvider implements LlmProvider {
         reason: "Ollama Cloud request authorization is unavailable",
       });
     }
+    if (request.responseFormat && this.usesNativeStructuredOutput()) {
+      yield* this.streamNativeStructured(request, authorization.apiKey, signal);
+      return;
+    }
     const provider = new OpenAICompatibleProvider({
-      baseUrl: this.config.chatBaseUrl ?? ollamaChatBaseUrl(),
+      baseUrl: this.chatBaseUrl(),
       apiKey: authorization.apiKey,
       providerId: this.id,
+      structuredOutput: "none",
       fetch: this.config.fetch,
       ...(this.config.deadlines?.deadlines
         ? { deadlines: this.config.deadlines.deadlines }
@@ -212,6 +262,83 @@ class OllamaCloudProvider implements LlmProvider {
       });
     }
   }
+
+  private async *streamNativeStructured(
+    request: NormalizedModelRequest,
+    apiKey: string,
+    signal: AbortSignal,
+  ): AsyncIterable<LlmStreamEvent> {
+    const fetcher =
+      this.config.fetch ??
+      ((input: RequestInfo | URL, init?: RequestInit) =>
+        globalThis.fetch(input, init));
+    const apiRoot = this.chatBaseUrl().replace(/\/v1\/?$/, "");
+    yield* streamWithModelRequestDeadlinesV1(
+      async (deadlineSignal) => {
+        const response = await fetcher(`${apiRoot}/api/chat`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(ollamaNativeChatBodyV1(request)),
+          signal: deadlineSignal,
+        });
+        if (!response.ok) {
+          await response.body?.cancel();
+          throw new OpenAICompatibleHttpError(response.status);
+        }
+        const text = await boundedOllamaModelResponseV1(response);
+        const parsed = JSON.parse(text) as {
+          message?: { content?: unknown };
+          done_reason?: unknown;
+        };
+        if (typeof parsed.message?.content !== "string") {
+          throw new Error("Ollama response did not include message content");
+        }
+        const translated = JSON.stringify({
+          choices: [
+            {
+              message: { content: parsed.message.content },
+              finish_reason:
+                parsed.done_reason === "length" ? "length" : "stop",
+            },
+          ],
+        });
+        return new Response(translated).body!;
+      },
+      signal,
+      this.config.deadlines ?? {},
+    );
+  }
+}
+
+const MAX_OLLAMA_MODEL_RESPONSE_BYTES_V1 = 16_777_216;
+
+async function boundedOllamaModelResponseV1(
+  response: Response,
+): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Ollama response did not include a body");
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > MAX_OLLAMA_MODEL_RESPONSE_BYTES_V1) {
+      await reader.cancel();
+      throw new Error("Ollama response exceeded its size limit");
+    }
+    chunks.push(value);
+  }
+  const combined = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(combined);
 }
 
 export function createOllamaCloudRuntimePlugin(

@@ -20,6 +20,7 @@ import { Context, Service } from "cordis";
 import {
   createOllamaCloudRuntimePlugin,
   ollamaChatBaseUrl,
+  ollamaNativeChatBodyV1,
 } from "./runtime.js";
 
 function serializedKeyring(): string {
@@ -93,6 +94,30 @@ const request: NormalizedModelRequest = {
 };
 
 describe("Ollama Cloud runtime Contribution", () => {
+  test("maps a schema to Ollama's native format field", () => {
+    const body = ollamaNativeChatBodyV1({
+      ...request,
+      responseFormat: {
+        type: "json_schema",
+        name: "answer",
+        schema: {
+          type: "object",
+          properties: { answer: { type: "string" } },
+          required: ["answer"],
+          additionalProperties: false,
+        },
+      },
+    });
+    expect(body.format).toEqual({
+      type: "object",
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+      additionalProperties: false,
+    });
+    expect(body.stream).toBe(false);
+    expect(body.response_format).toBeUndefined();
+  });
+
   test("resolves one credential generation per effect inside the provider", async () => {
     const keyringText = serializedKeyring();
     const envelope = await sealCredentialV1({

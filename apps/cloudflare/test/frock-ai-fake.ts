@@ -59,6 +59,17 @@ class FakeGateway extends RpcTarget {
     const messages = Array.isArray(query.messages) ? query.messages : [];
     const prompt = String(messages.at(-1)?.content ?? "");
     calls.push({ model: String(query.model ?? ""), prompt });
+    if (query.response_format?.type === "json_schema") {
+      const content = JSON.stringify({
+        summary: "Frock AI summary",
+        decisions: [],
+        openItems: [],
+        identifiers: [],
+      });
+      return Response.json({
+        choices: [{ message: { content }, finish_reason: "stop" }],
+      });
+    }
     const payload =
       'data: {"choices":[{"delta":{"content":"Frock AI reply"}}]}\\n\\n' +
       'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\\n\\n' +

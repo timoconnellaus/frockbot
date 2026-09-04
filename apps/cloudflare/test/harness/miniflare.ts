@@ -168,6 +168,31 @@ function summariserStallMs(body: unknown): number {
     : 0;
 }
 
+function structuredCompactionStream(body: unknown): Response | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const messages = (body as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) return undefined;
+  const system = (messages as WireMessage[]).find(
+    (message) => message.role === "system",
+  );
+  const instruction = typeof system?.content === "string" ? system.content : "";
+  if (!instruction.includes("Return only JSON matching this schema exactly:")) {
+    return undefined;
+  }
+  const content = JSON.stringify({
+    summary: "Ollama summary",
+    decisions: [],
+    openItems: [],
+    identifiers: [],
+  });
+  return new Response(
+    `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n` +
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n` +
+      "data: [DONE]\n\n",
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  );
+}
+
 function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, ms);
@@ -541,6 +566,8 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     }
     const stall = summariserStallMs(body);
     if (stall > 0) await sleep(stall, request.signal);
+    const compaction = structuredCompactionStream(body);
+    if (compaction) return compaction;
     const calls = scriptedToolCalls(body);
     if (calls.length > 0) return toolCallStream(calls);
     return new Response(

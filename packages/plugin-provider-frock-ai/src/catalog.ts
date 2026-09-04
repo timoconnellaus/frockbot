@@ -17,6 +17,9 @@ export const FROCK_AI_DEFAULT_MODEL = "@frock/auto";
  * named `flock-auto`; the value is the resource's name, not ours.
  */
 export const FROCK_AI_DEFAULT_AUTO_ROUTE = "flock-auto";
+/** Workers AI model selected when Auto must honor a JSON Schema request. */
+export const FROCK_AI_STRUCTURED_MODEL =
+  "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 /** The pre-rename model-id prefix. Bots bound before the rename still carry it. */
 export const FROCK_AI_LEGACY_MODEL_PREFIX = "@flock/";
@@ -84,6 +87,18 @@ export function gatewayModelForFrockIdV1(
     return `dynamic/${autoRoute}`;
   }
   return `workers-ai/${cloudflareModelIdForFrockIdV1(id)}`;
+}
+
+/** Auto routes ordinary chat dynamically and pins schema work to a capable model. */
+export function gatewayModelForFrockRequestV1(
+  input: string,
+  structured: boolean,
+  autoRoute = FROCK_AI_DEFAULT_AUTO_ROUTE,
+): string {
+  const id = normalizeFrockModelIdV1(input);
+  return structured && id === FROCK_AI_DEFAULT_MODEL
+    ? FROCK_AI_STRUCTURED_MODEL
+    : gatewayModelForFrockIdV1(id, autoRoute);
 }
 
 const STATIC_CATALOG: ConnectionModelCatalogV1 = {
