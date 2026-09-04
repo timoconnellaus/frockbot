@@ -20,10 +20,11 @@ import {
   computerBotKey,
   type ComputerHostFactoryV1,
   FlySpriteComputer,
+  MAX_STORAGE_OUTPUT,
 } from "./computer.ts";
 import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
 import { FLY_WORKSPACE_LAYOUT, FlySpriteComputerProvider } from "./provider.ts";
-import { FlyComputerWorkspace } from "./workspace.ts";
+import { FlyComputerWorkspace, WORKSPACE_CHUNK_BYTES_V1 } from "./workspace.ts";
 
 const USER = "owner";
 const BOT = "health";
@@ -69,6 +70,19 @@ function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/**
+ * Bytes of an exact length whose every chunk differs from every other, so a
+ * chunk carried twice, dropped, or reordered changes the bytes rather than
+ * hiding inside a repeated pattern.
+ */
+function largeBytes(length: number): Uint8Array {
+  let text = "";
+  for (let index = 0; text.length < length; index += 1) {
+    text += `${index}:${"abcdefghijklmnopqrstuvwxyz".repeat(3)}\n`;
+  }
+  return new TextEncoder().encode(text.slice(0, length));
+}
+
 function quoted(shell: string, name: string): string | undefined {
   return new RegExp(`${name}='([^']*)'`).exec(shell)?.[1];
 }
@@ -83,28 +97,39 @@ class FakeWorkspaceDisk {
   offline = false;
   modifiedSeconds = 1_700_000_000;
 
+  /** Every script this disk was handed, in order. */
+  readonly scripts: string[] = [];
+  /** Rewrites the file at this path between two chunk commands of one read. */
+  midReadRewrite?: { path: string; bytes: Uint8Array };
+
   /** The runner the shared host double hands every script to. */
   readonly run = (script: string): FakeComputerRunV1 => {
+    this.scripts.push(script);
     if (this.offline) return { exitCode: 1, stderr: "Sprite is paused" };
+    // The real host's storage surface refuses an answer past this, so a double
+    // that returned one would let a suite prove a read works at a size the
+    // Computer would never have carried.
+    const bounded = (stdout: string): FakeComputerRunV1 =>
+      stdout.length > MAX_STORAGE_OUTPUT
+        ? { stdout: stdout.slice(0, MAX_STORAGE_OUTPUT), outputTruncated: true }
+        : { stdout };
+    if (script.includes("__STAGED__")) {
+      return bounded(this.stageChunk(script));
+    }
     const root = quoted(script, "ROOT");
     const relative = quoted(script, "REL");
     if (!root) return {};
     if (script.includes("__WRITTEN__") && relative) {
-      return { stdout: this.write(`${root}/${relative}`, script) };
+      return bounded(this.write(`${root}/${relative}`, script));
     }
     if (script.includes("__DELETED__") && relative) {
-      return { stdout: this.remove(`${root}/${relative}`, script) };
+      return bounded(this.remove(`${root}/${relative}`, script));
     }
     if (script.includes('find "$ROOT"')) {
-      return { stdout: this.list(root, script) };
+      return bounded(this.list(root, script));
     }
     if (relative) {
-      return {
-        stdout: this.load(
-          `${root}/${relative}`,
-          script.includes('base64 -w0 "$TARGET"'),
-        ),
-      };
+      return bounded(this.load(`${root}/${relative}`, script));
     }
     return {};
   };
@@ -122,14 +147,47 @@ class FakeWorkspaceDisk {
     return /if \[ "\$CURRENT" != '([^']*)' \]/.exec(shell)?.[1] ?? "";
   }
 
-  private write(path: string, shell: string): string {
-    if (this.current(path) !== this.expected(shell)) return "__CONFLICT__\n";
-    const bytes = /printf %s '([^']*)' \| base64 -d > "\$TMP"/.exec(shell)?.[1];
-    const meta = /printf %s '([^']*)' \| base64 -d > "\$MTMP"/.exec(shell)?.[1];
+  /** One appended chunk of a staged file, as the write stages it. */
+  private stageChunk(shell: string): string {
+    const path = quoted(shell, "STAGE") ?? "";
+    const encoded =
+      /printf %s '([^']*)' \| base64 -d >> "\$STAGE"/.exec(shell)?.[1] ?? "";
+    const chunk = Buffer.from(encoded, "base64");
+    const held = shell.includes('rm -f "$STAGE"')
+      ? undefined
+      : this.files.get(path)?.bytes;
     this.files.set(path, {
-      bytes: Uint8Array.from(Buffer.from(bytes ?? "", "base64")),
-      meta,
+      bytes: Uint8Array.from(
+        held ? Buffer.concat([Buffer.from(held), chunk]) : chunk,
+      ),
     });
+    return "__STAGED__\n";
+  }
+
+  private write(path: string, shell: string): string {
+    const stage = quoted(shell, "STAGE");
+    if (this.current(path) !== this.expected(shell)) {
+      if (stage) this.files.delete(stage);
+      return "__CONFLICT__\n";
+    }
+    const meta = /printf %s '([^']*)' \| base64 -d > "\$MTMP"/.exec(shell)?.[1];
+    let bytes: Uint8Array;
+    if (stage) {
+      // The staged bytes are digest-checked exactly as the emitted
+      // `sha256sum` line checks them, so a torn staging file is __CORRUPT__
+      // here for the same reason it would be on the Sprite.
+      const staged = this.files.get(stage)?.bytes ?? new Uint8Array();
+      this.files.delete(stage);
+      const expected = /f1\)" != '([0-9a-f]{64})'/.exec(shell)?.[1];
+      if (expected && sha256(staged) !== expected) return "__CORRUPT__\n";
+      bytes = staged;
+    } else {
+      const inline = /printf %s '([^']*)' \| base64 -d > "\$TMP"/.exec(
+        shell,
+      )?.[1];
+      bytes = Uint8Array.from(Buffer.from(inline ?? "", "base64"));
+    }
+    this.files.set(path, { bytes, meta });
     return "__WRITTEN__\n";
   }
 
@@ -140,7 +198,28 @@ class FakeWorkspaceDisk {
     return "__DELETED__\n";
   }
 
-  private load(path: string, withBytes: boolean): string {
+  /**
+   * The chunked file read: a header of sidecar, digest, size, and mtime with
+   * the first chunk, then one chunk per further command. `head -c` and
+   * `tail -c +N` are the coreutils the Workspace emits; the arithmetic is
+   * theirs, not an approximation.
+   */
+  private load(path: string, shell: string): string {
+    const chunk = /tail -c \+(\d+) "\$TARGET" \| head -c (\d+)/.exec(shell);
+    if (chunk) {
+      // A rewrite between two chunk commands is what makes a read report
+      // rather than stitch, so the double performs one where a test asks.
+      const rewrite = this.midReadRewrite;
+      if (rewrite) {
+        this.midReadRewrite = undefined;
+        this.files.set(rewrite.path, { bytes: rewrite.bytes });
+      }
+      const offset = Number(chunk[1]) - 1;
+      const limit = Number(chunk[2]);
+      const bytes = this.files.get(path)?.bytes;
+      const slice = bytes?.subarray(offset, offset + limit) ?? new Uint8Array();
+      return `${Buffer.from(slice).toString("base64")}\n`;
+    }
     const entry = this.files.get(path);
     if (!entry) return "__MISSING__\n";
     if (entry.bytes.byteLength > WORKSPACE_MAX_FILE_BYTES) {
@@ -152,7 +231,14 @@ class FakeWorkspaceDisk {
       String(entry.bytes.byteLength),
       String(this.modifiedSeconds),
     ];
-    if (withBytes) lines.push(Buffer.from(entry.bytes).toString("base64"));
+    const head = /head -c (\d+) "\$TARGET" \| base64 -w0/.exec(shell);
+    if (head) {
+      lines.push(
+        Buffer.from(entry.bytes.subarray(0, Number(head[1]))).toString(
+          "base64",
+        ),
+      );
+    }
     return `${lines.join("\n")}\n`;
   }
 
@@ -163,6 +249,9 @@ class FakeWorkspaceDisk {
     const rows = [...this.files.entries()]
       .filter(([path]) => path.startsWith(`${root}/`))
       .map(([path, entry]) => [path.slice(root.length + 1), entry] as const)
+      // The emitted `find` prunes the lock, generation, and sync directories,
+      // so a listing never shows a staging file mid-write.
+      .filter(([relative]) => !relative.startsWith(".frockbot-"))
       .filter(
         ([relative]) =>
           !prefix || relative === prefix || relative.startsWith(`${prefix}/`),
@@ -947,5 +1036,173 @@ describe("the Computer's sidecar is a hint; the Durable Object is the authority"
     });
     if (read.status !== "ok") throw new Error(read.reason);
     expect(read.file.generation.writer).toEqual({ kind: "unattributed" });
+  });
+});
+
+/**
+ * The Workspace's own per-file rule is what bounds a file; the shape of the
+ * commands that carry it never is.
+ *
+ * A Bot's file tools read and write through this surface, and both directions
+ * used to be one command carrying the whole file as base64: a 470 KB built
+ * Applet page is 627 KB of base64, past what a storage command may answer, so
+ * a Bot could not read a file it had just built. These prove the transport is
+ * no longer the constraint, in both directions, at sizes the Workspace admits.
+ */
+describe("Fly Workspace files past one storage command", () => {
+  const mount = workspaceMountPathV1(
+    FLY_WORKSPACE_LAYOUT,
+    packageRoot,
+    computerBotKey,
+  );
+
+  test("reads a file far larger than one storage command can answer, byte for byte", async () => {
+    const disk = new FakeWorkspaceDisk();
+    const bytes = largeBytes(900 * 1024);
+    disk.files.set(`${mount}/dist/ui.html`, { bytes });
+    const { workspace } = await openWorkspace(BOT, disk);
+
+    const read = await workspace.read({
+      root: packageRoot,
+      path: "dist/ui.html",
+    });
+
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(read.file.bytes).toEqual(bytes);
+    expect(read.file.generation.contentHash).toBe(sha256(bytes));
+    // The first command answers the size, the digest, and one chunk; the rest
+    // of the file is one command per further chunk.
+    expect(
+      disk.scripts.filter((script) => script.includes("$TARGET")).length,
+    ).toBe(Math.ceil(bytes.byteLength / WORKSPACE_CHUNK_BYTES_V1));
+  });
+
+  test("writes a file far larger than one storage command can carry, byte for byte", async () => {
+    const disk = new FakeWorkspaceDisk();
+    const { workspace } = await openWorkspace(BOT, disk);
+    const bytes = largeBytes(700 * 1024);
+
+    const written = await workspace.write({
+      path: { root: packageRoot, path: "dist/bundle.js" },
+      bytes,
+      writer: BOT_WRITER,
+      expectedGenerationId: null,
+    });
+
+    if (written.status !== "ok") throw new Error(written.reason);
+    expect(written.generation.contentHash).toBe(sha256(bytes));
+    expect(disk.files.get(`${mount}/dist/bundle.js`)?.bytes).toEqual(bytes);
+    // The staging file is gone the moment its bytes are in place, so nothing
+    // half-written is left under a durable root.
+    expect(
+      [...disk.files.keys()].filter((path) => path.includes("/staging/")),
+    ).toEqual([]);
+    const read = await workspace.read({
+      root: packageRoot,
+      path: "dist/bundle.js",
+    });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(read.file.bytes).toEqual(bytes);
+  });
+
+  test("a file that fits in one command still takes one command, in each direction", async () => {
+    const disk = new FakeWorkspaceDisk();
+    const { workspace } = await openWorkspace(BOT, disk);
+
+    const written = await workspace.write({
+      path: { root: packageRoot, path: "note.md" },
+      bytes: new TextEncoder().encode("small"),
+      writer: BOT_WRITER,
+      expectedGenerationId: null,
+    });
+    if (written.status !== "ok") throw new Error(written.reason);
+    expect(disk.scripts.filter((script) => script.includes("$STAGE"))).toEqual(
+      [],
+    );
+    expect(
+      disk.scripts.filter((script) => script.includes("__WRITTEN__")),
+    ).toHaveLength(1);
+
+    disk.scripts.length = 0;
+    const read = await workspace.read({ root: packageRoot, path: "note.md" });
+    if (read.status !== "ok") throw new Error(read.reason);
+    expect(new TextDecoder().decode(read.file.bytes)).toBe("small");
+    expect(disk.scripts).toHaveLength(1);
+  });
+
+  test("reports a rewrite between two chunks rather than stitching two versions", async () => {
+    const disk = new FakeWorkspaceDisk();
+    const path = `${mount}/dist/ui.html`;
+    disk.files.set(path, { bytes: largeBytes(900 * 1024) });
+    // A shell on the Computer replaces the file after its size and digest were
+    // answered but before the last chunk arrives.
+    disk.midReadRewrite = { path, bytes: largeBytes(900 * 1024).reverse() };
+    const { workspace } = await openWorkspace(BOT, disk);
+
+    expect(
+      await workspace.read({ root: packageRoot, path: "dist/ui.html" }),
+    ).toMatchObject({
+      status: "unavailable",
+      reason: `"dist/ui.html" changed on the Computer while it was being read`,
+    });
+  });
+
+  // The write used to hold the lock across the whole script, which was fine
+  // while the whole file arrived inside it. Chunks arrive in commands of their
+  // own, and holding the lock across all of them would keep one writer's file
+  // open for as long as its bytes take to travel.
+  test("stages the chunks unlocked and holds the lock only around the final verify-and-rename", async () => {
+    const disk = new FakeWorkspaceDisk();
+    const { workspace } = await openWorkspace(BOT, disk);
+
+    const written = await workspace.write({
+      path: { root: packageRoot, path: "dist/bundle.js" },
+      bytes: largeBytes(700 * 1024),
+      writer: BOT_WRITER,
+      expectedGenerationId: null,
+    });
+
+    if (written.status !== "ok") throw new Error(written.reason);
+    const staging = disk.scripts.filter((script) =>
+      script.includes("__STAGED__"),
+    );
+    expect(staging.length).toBeGreaterThan(1);
+    for (const script of staging) expect(script).not.toContain("flock");
+    const commit = disk.scripts.filter((script) =>
+      script.includes("__WRITTEN__"),
+    );
+    expect(commit).toHaveLength(1);
+    expect(commit[0]).toContain("flock -x 9");
+    // Under the lock: the expected generation, the staged bytes' digest, and
+    // the rename. No file bytes travel inside it.
+    expect(commit[0]).toContain('mv "$STAGE" "$TMP"');
+    expect(commit[0]).not.toContain('base64 -d > "$TMP"');
+    expect(commit[0]!.length).toBeLessThan(WORKSPACE_CHUNK_BYTES_V1);
+  });
+
+  test("refuses a file past the Workspace's own limit in plain words, in each direction", async () => {
+    const disk = new FakeWorkspaceDisk();
+    disk.files.set(`${mount}/huge.bin`, {
+      bytes: new Uint8Array(WORKSPACE_MAX_FILE_BYTES + 1),
+    });
+    const { workspace } = await openWorkspace(BOT, disk);
+
+    expect(
+      await workspace.read({ root: packageRoot, path: "huge.bin" }),
+    ).toMatchObject({
+      status: "refused",
+      reason: `"huge.bin" is past the 1 MB limit on a Workspace file`,
+    });
+    expect(
+      await workspace.write({
+        path: { root: packageRoot, path: "other.bin" },
+        bytes: new Uint8Array(WORKSPACE_MAX_FILE_BYTES + 1),
+        writer: BOT_WRITER,
+        expectedGenerationId: null,
+      }),
+    ).toMatchObject({
+      status: "refused",
+      reason: `"other.bin" is past the 1 MB limit on a Workspace file`,
+    });
   });
 });

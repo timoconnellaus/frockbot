@@ -53,7 +53,14 @@ import type {
 export { SLOT_IDLE_SECONDS, WORKSPACE_SYNC_SERVICE };
 
 const MAX_OUTPUT = 30_000;
-const MAX_STORAGE_OUTPUT = 500_000;
+/**
+ * The most a Workspace or sync command may answer with.
+ *
+ * Exported because it is the ceiling those commands are written to stay under,
+ * and a test double that answered past it would prove a read works at a size
+ * the Computer would have refused.
+ */
+export const MAX_STORAGE_OUTPUT = 500_000;
 const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
 /** Largest screenshot this provider will carry back off a Computer. */
 export const SCREENSHOT_MAX_BYTES = 8 * 1024 * 1024;

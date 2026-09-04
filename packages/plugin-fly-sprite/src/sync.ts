@@ -105,9 +105,12 @@ import {
   SYNC_CONFLICTS_DIR,
   SYNC_STAGING_DIR,
   SYNC_TOMBSTONES_DIR,
+  WORKSPACE_CHUNK_BYTES_V1,
   WORKSPACE_EMPTY_SHA256,
   WORKSPACE_GENERATIONS_DIR,
   WORKSPACE_SYNC_DIR,
+  workspaceChunkOffsetsV1,
+  workspaceStagingNameV1,
 } from "./workspace.js";
 
 /** Where the sync keeps notes that are not scoped to one root. */
@@ -147,17 +150,6 @@ export const WORKSPACE_SYNC_MANIFEST_MAX_BYTES_V1 = 400_000;
 export const WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1 = 2_000;
 
 /**
- * The most file bytes one storage command carries, in either direction.
- *
- * A command's answer travels as base64, so a chunk this size comes back as
- * roughly 350 KB — inside the 500 KB an answer may be — and goes out inside a
- * script well inside the 1 MB a script may be. A file larger than one chunk
- * travels as several commands rather than as one command that would be refused
- * for its size, which is the whole reason the sync reads and writes in chunks.
- */
-export const WORKSPACE_SYNC_CHUNK_BYTES_V1 = 256 * 1024;
-
-/**
  * The largest durable-root file the sync carries between the Computer and the
  * store.
  *
@@ -167,25 +159,6 @@ export const WORKSPACE_SYNC_CHUNK_BYTES_V1 = 256 * 1024;
  * of the commands that would have moved it.
  */
 export const WORKSPACE_SYNC_MAX_FILE_BYTES_V1 = 4 * 1024 * 1024;
-
-/** Every chunk offset after the first, in bytes, for a file of this size. */
-function chunkOffsets(size: number): number[] {
-  const offsets: number[] = [];
-  for (
-    let offset = WORKSPACE_SYNC_CHUNK_BYTES_V1;
-    offset < size;
-    offset += WORKSPACE_SYNC_CHUNK_BYTES_V1
-  ) {
-    offsets.push(offset);
-  }
-  return offsets;
-}
-
-/** A staging file name that is one path segment whatever the id looks like. */
-function stagingName(generationId: string, kind: string): string {
-  const safe = generationId.replaceAll(/[^A-Za-z0-9._-]/g, "-").slice(0, 128);
-  return `${safe}.${kind}`;
-}
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
@@ -1205,7 +1178,7 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     const head = await this.run(
       [
         ...prelude,
-        `CHUNK=${WORKSPACE_SYNC_CHUNK_BYTES_V1}`,
+        `CHUNK=${WORKSPACE_CHUNK_BYTES_V1}`,
         'if [ ! -f "$FILE" ]; then echo __MISSING__; exit 0; fi',
         'SIZE=$(stat -c %s "$FILE")',
         `if [ "$SIZE" -gt ${WORKSPACE_SYNC_MAX_FILE_BYTES_V1} ]; then echo __TOO_LARGE__; exit 0; fi`,
@@ -1230,13 +1203,13 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
       return failure("unavailable", "Invalid Fly Workspace sync response");
     }
     const chunks = [Buffer.from(first.trim(), "base64")];
-    for (const offset of chunkOffsets(size)) {
+    for (const offset of workspaceChunkOffsetsV1(size)) {
       const next = await this.run(
         [
           ...prelude,
           // `tail -c +N` counts from one, so the offset is one past the bytes
           // already carried.
-          `tail -c +${offset + 1} "$FILE" | head -c ${WORKSPACE_SYNC_CHUNK_BYTES_V1} | base64 -w0; echo`,
+          `tail -c +${offset + 1} "$FILE" | head -c ${WORKSPACE_CHUNK_BYTES_V1} | base64 -w0; echo`,
         ].join("\n"),
       );
       if (typeof next !== "string") return next;
@@ -1271,17 +1244,14 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     name: string,
     bytes: Uint8Array,
   ): Promise<string | WorkspaceFailureV1 | undefined> {
-    if (bytes.byteLength <= WORKSPACE_SYNC_CHUNK_BYTES_V1) return undefined;
+    if (bytes.byteLength <= WORKSPACE_CHUNK_BYTES_V1) return undefined;
     const staged = `${mount}/${WORKSPACE_SYNC_DIR}/${SYNC_STAGING_DIR}/${name}`;
     for (
       let offset = 0;
       offset < bytes.byteLength;
-      offset += WORKSPACE_SYNC_CHUNK_BYTES_V1
+      offset += WORKSPACE_CHUNK_BYTES_V1
     ) {
-      const chunk = bytes.subarray(
-        offset,
-        offset + WORKSPACE_SYNC_CHUNK_BYTES_V1,
-      );
+      const chunk = bytes.subarray(offset, offset + WORKSPACE_CHUNK_BYTES_V1);
       const output = await this.run(
         [
           "set -eu",
@@ -1315,7 +1285,7 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     if (oversized) return oversized;
     const staged = await this.stage(
       mount,
-      stagingName(generation.generationId, "pull"),
+      workspaceStagingNameV1(generation.generationId, "pull"),
       bytes,
     );
     if (staged && typeof staged !== "string") return staged;
@@ -1462,7 +1432,7 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     if (oversized) return oversized;
     const staged = await this.stage(
       mount,
-      stagingName(generation.generationId, "conflict"),
+      workspaceStagingNameV1(generation.generationId, "conflict"),
       bytes,
     );
     if (staged && typeof staged !== "string") return staged;
