@@ -720,7 +720,7 @@ export interface ComputerSyncV1 {
   reconcileRoot?(
     root: WorkspaceRootV1,
     reason: ComputerSyncReasonV1,
-    options?: ComputerOperationOptions,
+    options?: ComputerRootSyncOptionsV1,
   ): Promise<ComputerSyncSummaryV1>;
   /**
    * The Computer-side watcher's change signal, or `undefined` when it cannot
@@ -728,6 +728,18 @@ export interface ComputerSyncV1 {
    * every root on every tool call.
    */
   signal(options?: ComputerOperationOptions): Promise<string | undefined>;
+}
+
+/** Options for the one-root reconciliation used by artifact publishers. */
+export interface ComputerRootSyncOptionsV1 extends ComputerOperationOptions {
+  /**
+   * Exact root-relative files that are required even when they live below a
+   * reproducible directory the ordinary Workspace sync excludes.
+   *
+   * This is a path selection, not a Package exception: the Computer provider
+   * does not learn which caller or Package needs the bytes.
+   */
+  requiredPaths?: readonly string[];
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   type ComputerHandle,
   type ComputerIdentityV1,
   type ComputerOperationOptions,
+  type ComputerRootSyncOptionsV1,
   type ComputerProvider,
   type ComputerSyncHostV1,
   type ComputerSyncReasonV1,
@@ -254,7 +255,7 @@ class FlySpriteComputerSync implements ComputerSyncV1 {
   async reconcileRoot(
     root: WorkspaceRootV1,
     _reason: ComputerSyncReasonV1,
-    options?: ComputerOperationOptions,
+    options?: ComputerRootSyncOptionsV1,
   ): Promise<ComputerSyncSummaryV1> {
     if (options?.signal?.aborted) {
       return computerSyncSummaryV1("skipped", "the Turn was cancelled");
@@ -267,7 +268,7 @@ class FlySpriteComputerSync implements ComputerSyncV1 {
       );
     }
     try {
-      const report = await this.sync.syncRoot(root);
+      const report = await this.sync.syncRoot(root, options?.requiredPaths);
       return summarize({
         roots: [report],
         conflicts: report.conflicts,

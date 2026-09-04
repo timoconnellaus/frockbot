@@ -134,6 +134,7 @@ import {
 import {
   createAppletCapabilityHostV1,
   createAppletInstanceBindingV1,
+  APPLET_DIST_FILES_V1,
   appletRpcSnapshotV1 as rpcJsonSnapshotV1,
   resolveAppletCompositionV1,
   type AppletCapabilityHostV1,
@@ -2414,7 +2415,7 @@ export class ShellBotBackendContribution {
       // User with no Computer assignment has no root to pull, and the Bot that
       // just built on its Computer has it open already.
       syncSourceRootNow: active
-        ? async () => {
+        ? async (appletId) => {
             const root = active.mounted.runtime.root as unknown as {
               computers?: ComputerRegistry;
               sessions: typeof active.mounted.runtime.root.sessions;
@@ -2437,6 +2438,9 @@ export class ShellBotBackendContribution {
               sessionId: active.sessionId,
               turn,
               root: appletsSourceRootV1(identity.userId),
+              requiredPaths: APPLET_DIST_FILES_V1.map(
+                (path) => `${appletId}/${path}`,
+              ),
               signal: active.signal,
             });
           }

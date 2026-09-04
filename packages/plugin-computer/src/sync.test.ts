@@ -298,8 +298,9 @@ describe("syncWorkspaceRootNowV1", () => {
         calls.push("reconcile");
         return Promise.resolve(computerSyncSummaryV1("ok"));
       },
-      reconcileRoot: (asked, reason) => {
+      reconcileRoot: (asked, reason, options) => {
         calls.push(`reconcileRoot:${reason}:${asked.kind}`);
+        calls.push(`required:${options?.requiredPaths?.join(",") ?? ""}`);
         return Promise.resolve({ ...computerSyncSummaryV1("ok"), pushed: 1 });
       },
       signal: () => Promise.resolve(undefined),
@@ -312,12 +313,16 @@ describe("syncWorkspaceRootNowV1", () => {
       sessionId: "session-1",
       turn: 3,
       root: appletsRoot,
+      requiredPaths: ["todo/dist/server.js", "todo/dist/ui.html"],
     });
 
     expect(summary.status).toBe("ok");
     // One root, never the whole Workspace: the Turn's own policy still owns
     // `open`, `signal`, and `turn-end`, and this borrows none of them.
-    expect(calls).toEqual(["reconcileRoot:publish:package-declared"]);
+    expect(calls).toEqual([
+      "reconcileRoot:publish:package-declared",
+      "required:todo/dist/server.js,todo/dist/ui.html",
+    ]);
     const recorded = syncEvents([...harness.session.events]);
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({
