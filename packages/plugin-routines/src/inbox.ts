@@ -507,6 +507,10 @@ export function pendingBotInputPreambleV1(
     if (input.kind === "superseded-turn") {
       lines.push(
         "[Superseded] Your previous Turn was interrupted because the User sent this message before it finished. What you had already sent and the tool results you had already received are above; anything still in flight was abandoned and must not be assumed to have happened.",
+        // A Bot answering "hi" with thirty steps of the interrupted job is
+        // what this line prevents (2026-09-04): the new message is the Turn's
+        // subject; the old job resumes only when the message asks for it.
+        "Answer this message. Do not pick the interrupted work back up unless this message asks you to; if it is unrelated, say in one sentence where that work stopped and ask whether to continue.",
         ...(input.unfinishedWork
           ? [
               "Subagents that Turn dispatched are still running and will report when they finish.",

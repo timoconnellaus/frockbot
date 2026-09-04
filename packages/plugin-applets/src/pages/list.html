@@ -88,6 +88,16 @@
         cursor: pointer;
       }
 
+      /* A draft has nothing to open yet; the row says so in the button's place. */
+      .pending {
+        flex: 0 0 auto;
+        padding: 6px 12px;
+        border: 1px solid var(--frockbot-border);
+        border-radius: 999px;
+        color: var(--frockbot-text-muted);
+        font-size: 13px;
+      }
+
       .empty {
         padding: 24px 12px;
         color: var(--frockbot-text-muted);
@@ -117,14 +127,17 @@
         const host = document.getElementById("applets");
 
         function meta(applet) {
-          const generation = applet.currentGenerationId
-            ? `generation ${applet.currentGenerationId}`
-            : "not published yet";
           const tools =
             applet.tools.length === 0
               ? "no tools"
               : `${applet.tools.length} tool${applet.tools.length === 1 ? "" : "s"}`;
-          return `${applet.status} · ${generation} · ${tools}`;
+          // A draft is an Applet the Bot is still writing: it has no build to
+          // show, so the row says what is happening rather than reciting the
+          // record's status and generation, which meant nothing to the person
+          // reading it (2026-09-05).
+          if (!applet.currentGenerationId)
+            return "Still being built · not published yet";
+          return `Published · ${tools}`;
         }
 
         function render(state) {
@@ -155,16 +168,23 @@
             detail.className = "meta";
             detail.textContent = meta(applet);
             grow.append(name, detail);
-            const open = document.createElement("button");
-            open.type = "button";
-            open.textContent =
-              state.focused && state.focused.appletId === applet.appletId
-                ? "Showing"
-                : "Open";
-            open.addEventListener("click", () => {
-              window.frockbot.focus(applet.appletId);
-            });
-            row.append(grow, open);
+            let action;
+            if (applet.currentGenerationId) {
+              action = document.createElement("button");
+              action.type = "button";
+              action.textContent =
+                state.focused && state.focused.appletId === applet.appletId
+                  ? "Showing"
+                  : "Open";
+              action.addEventListener("click", () => {
+                window.frockbot.focus(applet.appletId);
+              });
+            } else {
+              action = document.createElement("span");
+              action.className = "pending";
+              action.textContent = "Not ready yet";
+            }
+            row.append(grow, action);
             host.append(row);
           }
           window.frockbot.resize();

@@ -491,6 +491,7 @@ describe("a Turn the User's next message replaced", () => {
 
     expect(preamble).toContain("[Superseded]");
     expect(preamble).toContain("must not be assumed to have happened");
+    expect(preamble).toContain("Do not pick the interrupted work back up");
     expect(preamble).toContain("Subagents that Turn dispatched are still");
     // With nothing left running the reminder says nothing about subagents.
     expect(
