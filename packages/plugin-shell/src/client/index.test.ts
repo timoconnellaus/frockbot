@@ -3294,11 +3294,14 @@ describe("a message sent while a Turn is running", () => {
     expect(state.messages.every((message) => !message.pending)).toBe(true);
     expect(state.activeRunId).toBe("run-2");
     expect(state.runningRunId).toBe("run-2");
-    // The superseded Turn keeps the quiet treatment a stopped one gets.
-    expect(state.messages[1]).toMatchObject({
-      status: "aborted",
-      notice: "Interrupted by your next message.",
-    });
+    // The superseded Turn is left unlabelled: the message that replaced it is
+    // right underneath, and it says why the Turn ends there better than a
+    // notice of ours would.
+    expect(state.messages[1]).toMatchObject({ status: "aborted" });
+    expect(state.messages[1]?.notice).toBeUndefined();
+    expect(state.messages.some((message) => message.notice !== undefined)).toBe(
+      false,
+    );
   });
 
   test("a reload reconstructs the greyed state from durable runs alone", () => {
@@ -3333,6 +3336,11 @@ describe("a message sent while a Turn is running", () => {
       text: "second",
       pending: true,
     });
+    // The durable record still says why the Turn ended; the transcript does
+    // not repeat it at the reader.
+    expect(
+      reloaded.messages.some((message) => message.notice !== undefined),
+    ).toBe(false);
     expect(reloaded.runningRunId).toBeUndefined();
     expect(reloaded.activeRunId).toBe("run-2");
   });

@@ -388,9 +388,9 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
     "Reply from the local Ollama stub.",
     { timeout: 120_000 },
   );
-  await expect(
-    assistantMessages(page).last().locator(".bot-working"),
-  ).toHaveCount(0, { timeout: 120_000 });
+  await expect(page.locator(".bot-working")).toHaveCount(0, {
+    timeout: 120_000,
+  });
 
   // The Turn ended and the row went; the bubble did not move.
   const settledLeft = await page.evaluate(() => {
@@ -401,6 +401,81 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
     return bubble ? bubble.getBoundingClientRect().left : Number.NaN;
   });
   expect(settledLeft).toBeCloseTo(midTurn.bubbleLeft, 0);
+
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+});
+
+// Tim's report: sending while the Bot is working put the new message *under*
+// the working sheep, because the sheep belonged to the running Turn's article
+// and the new message was appended after it. The reader watched their own words
+// arrive below the animation that was supposedly about to answer them — and the
+// Turn they had just replaced was labelled "Interrupted by your next message.",
+// which said nothing their own message did not already say.
+test("a message sent mid-Turn lands above the working sheep, unlabelled", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Stepper",
+  });
+
+  // The gap in the middle of the streamed reply is the window to send into.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
+
+  const composer = composerInput(page);
+  await composer.fill("first");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(composer).toHaveValue("", { timeout: 120_000 });
+  // Wait until the Turn is visibly running before superseding it.
+  await expect(page.locator(".bot-working")).toHaveCount(1, {
+    timeout: 60_000,
+  });
+
+  await composer.fill("second");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(composer).toHaveValue("", { timeout: 120_000 });
+
+  // The order the reader sees: their new message, then the sheep, with nothing
+  // of the thread after it.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const thread = document.querySelector(".thread");
+          const row = thread?.querySelector(".bot-working");
+          if (!thread || !row) return null;
+          const children = [...thread.children];
+          const userIndex = children.findLastIndex(
+            (child) =>
+              child.classList.contains("message-user") &&
+              (child.textContent ?? "").includes("second"),
+          );
+          if (userIndex < 0) return null;
+          return {
+            userBeforeRow: userIndex < children.indexOf(row),
+            rowIsLast: children.at(-1) === row,
+          };
+        }),
+      { timeout: 60_000 },
+    )
+    .toEqual({ userBeforeRow: true, rowIsLast: true });
+
+  // The superseded Turn is not labelled: the message above explains itself.
+  await expect(page.locator(".thread")).not.toContainText(
+    "Interrupted by your next message.",
+  );
+
+  await expect(assistantMessages(page).last()).toContainText(
+    "Reply from the local Ollama stub.",
+    { timeout: 120_000 },
+  );
+  await expect(page.locator(".thread")).not.toContainText(
+    "Interrupted by your next message.",
+  );
 
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
