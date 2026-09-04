@@ -652,17 +652,27 @@ async function settleThread(viewport?: {
     pinToLatest();
   };
   place();
-  if (typeof requestAnimationFrame !== "function") {
-    threadSettling.value = false;
-    return;
-  }
-  requestAnimationFrame(() => {
+  /*
+   * Whichever comes first. The frame callback is the one that matters — it
+   * runs after layout and before that frame is painted, which is what makes
+   * the opening invisible. The timer is a floor under it: a thread that is
+   * hidden is a thread nobody can read or measure, so a browser that
+   * withholds frames from a backgrounded or throttled page must not be able
+   * to leave it that way.
+   */
+  let revealed = false;
+  const reveal = (): void => {
+    if (revealed) return;
+    revealed = true;
     // Layout has happened: anything that measured late — a rendered code
     // block, an avatar — has its real height now, so this is the placement
     // the reader actually sees.
     place();
     threadSettling.value = false;
-  });
+  };
+  if (typeof requestAnimationFrame === "function")
+    requestAnimationFrame(reveal);
+  setTimeout(reveal, 120);
 }
 
 /** Where the reader has this Bot's thread, for the cache to hold. */
