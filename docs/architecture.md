@@ -671,6 +671,10 @@ Each entry keeps the model price-table version and integer micro-dollar cost use
 
 `GET /api/usage` asks the authenticated User Durable Object for the current-month total, Bot and model breakdowns, a dense 30-day series, estimate and unknown-price counts, and the lifetime cost. Billing mounts that projection as **Usage** in User settings and as a single current-month line in Bot settings. `/api/debug/usage` exposes the same report through the development-only debug surface. None of these reads holds authority or includes model request or response content.
 
+Stripe funds that ledger through the Billing Package ([ADR 0037](adr/0037-stripe-subscription-and-prepaid-credits.md)). Basic is $20/month and renews a $20 usage allowance each paid billing period; unused allowance expires. Purchased $25, $50, $100, $500, or custom $5–$1,000 credits do not expire and are consumed after the allowance. The User Durable Object owns the Stripe Customer reference, subscription period and status, allowance use, purchased balance, command journal, webhook idempotency, and billing history. Stripe Checkout and Portal run at the gateway, which records command intent before calling Stripe and owns no resulting state. The signed webhook handles Checkout completion, paid invoices, subscription changes/deletion, and cumulative charge refunds.
+
+The hosted client Turn route reads the User entitlement before asking the Bot Durable Object to admit a new conversational Turn. An available amount above zero admits; the settled Turn may cross below zero, after which the next Turn receives the typed `billing-required` refusal. Existing Sessions and Bot management remain available without funds. Billing's User settings section is the sole control surface for plan management and credit purchases, while its composer notice links there when available credit is at or below $2. Neither entitlement reads nor settlement wakes the Computer.
+
 ## Trust model
 
 | Trust tier              | Desktop contribution                 | Backend contribution                                 | WebUI contribution                                          |

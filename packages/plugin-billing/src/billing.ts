@@ -70,10 +70,14 @@ function safeIntegerV1(value: unknown, label: string): number {
 export function decodeStripeEventV1(value: unknown): StripeEventV1 {
   const source = recordV1(value, "Stripe event");
   const data = recordV1(source.data, "Stripe event data");
+  const created = safeIntegerV1(source.created, "Stripe event created");
+  if (created <= 0 || !Number.isFinite(new Date(created * 1_000).getTime())) {
+    throw new Error("Stripe event created is invalid");
+  }
   return {
     id: boundedTextV1(source.id, "Stripe event id"),
     type: boundedTextV1(source.type, "Stripe event type"),
-    created: safeIntegerV1(source.created, "Stripe event created"),
+    created,
     data: { object: recordV1(data.object, "Stripe event object") },
   };
 }

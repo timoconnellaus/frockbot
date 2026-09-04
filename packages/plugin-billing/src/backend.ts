@@ -9,7 +9,7 @@ import {
   type StripeCommandPreparationV1,
   type StripeEventV1,
 } from "./billing.js";
-import { createStripeClientV1 } from "./stripe.js";
+import { createStripeClientV1, StripeApiError } from "./stripe.js";
 
 const STRIPE_WEBHOOK_PATH_V1 = "/api/billing/stripe/webhook";
 const STRIPE_SIGNATURE_TOLERANCE_SECONDS_V1 = 300;
@@ -72,13 +72,6 @@ export interface BillingBackendRouteContributionV1 {
 
 function jsonError(status: number, error: string): Response {
   return Response.json({ error }, { status });
-}
-
-function boundedText(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0 || value.length > 512) {
-    throw new Error(`${label} is invalid`);
-  }
-  return value;
 }
 
 function metadataUserId(value: unknown): string | undefined {
@@ -382,7 +375,11 @@ export function createBillingBackendContribution(
             throw new Error("A subscription does not accept an amount.");
           }
           const current = await host.readBilling(userId);
-          if (["active", "trialing"].includes(current.subscriptionStatus)) {
+          if (
+            !["none", "canceled", "incomplete_expired"].includes(
+              current.subscriptionStatus,
+            )
+          ) {
             return jsonError(409, "Basic is already active.");
           }
         } else {
@@ -427,7 +424,7 @@ export function createBillingBackendContribution(
         return Response.json({ schemaVersion: 1, url: resultUrl });
       } catch (error) {
         return jsonError(
-          error instanceof SyntaxError ? 400 : 400,
+          error instanceof StripeApiError ? 502 : 400,
           error instanceof Error ? error.message : "Billing request failed.",
         );
       }

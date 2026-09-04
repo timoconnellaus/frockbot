@@ -130,6 +130,11 @@ describe("billing entitlement", () => {
         },
       },
     });
+    expect(billing.readBilling()).toMatchObject({
+      subscriptionStatus: "active",
+      allowanceMicros: 0,
+      canStartTurn: false,
+    });
     billing.applyStripeEvent({
       id: "evt_invoice",
       type: "invoice.paid",

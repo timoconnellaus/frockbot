@@ -15,6 +15,7 @@ interface BillingAccountRow extends Record<
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   subscription_status: string;
+  subscription_event_created: number;
   period_start: string | null;
   period_end: string | null;
   allowance_used_micros: number;
@@ -55,12 +56,13 @@ export class BillingStoreV1 {
       "CREATE TABLE IF NOT EXISTS billing_account (" +
         "id INTEGER PRIMARY KEY CHECK (id = 1), stripe_customer_id TEXT, " +
         "stripe_subscription_id TEXT, subscription_status TEXT NOT NULL, " +
+        "subscription_event_created INTEGER NOT NULL, " +
         "period_start TEXT, period_end TEXT, allowance_used_micros INTEGER NOT NULL, " +
         "credit_balance_micros INTEGER NOT NULL)",
     );
     this.sql.exec(
-      "INSERT OR IGNORE INTO billing_account (id, subscription_status, allowance_used_micros, credit_balance_micros) " +
-        "VALUES (1, 'none', 0, 0)",
+      "INSERT OR IGNORE INTO billing_account (id, subscription_status, subscription_event_created, allowance_used_micros, credit_balance_micros) " +
+        "VALUES (1, 'none', 0, 0, 0)",
     );
     this.sql.exec(
       "CREATE TABLE IF NOT EXISTS billing_history (" +
@@ -139,32 +141,57 @@ export class BillingStoreV1 {
         }
       } else if (event.type === "customer.subscription.updated") {
         const object = event.data.object;
-        this.updateSubscription(object, false);
+        const account = this.account();
+        if (event.created >= Number(account.subscription_event_created)) {
+          this.sql.exec(
+            "UPDATE billing_account SET stripe_customer_id = COALESCE(stripe_customer_id, ?), " +
+              "stripe_subscription_id = ?, subscription_status = ?, subscription_event_created = ? WHERE id = 1",
+            this.optionalIdentifier(object.customer),
+            this.identifier(object.id, "subscription id"),
+            this.identifier(object.status, "subscription status"),
+            event.created,
+          );
+        }
         description = `Basic subscription ${String(object.status ?? "updated")}`;
       } else if (event.type === "customer.subscription.deleted") {
         const object = event.data.object;
-        this.sql.exec(
-          "UPDATE billing_account SET stripe_customer_id = COALESCE(stripe_customer_id, ?), " +
-            "stripe_subscription_id = ?, subscription_status = 'canceled' WHERE id = 1",
-          this.optionalIdentifier(object.customer),
-          this.identifier(object.id, "subscription id"),
-        );
+        const account = this.account();
+        if (event.created >= Number(account.subscription_event_created)) {
+          this.sql.exec(
+            "UPDATE billing_account SET stripe_customer_id = COALESCE(stripe_customer_id, ?), " +
+              "stripe_subscription_id = ?, subscription_status = 'canceled', " +
+              "subscription_event_created = ? WHERE id = 1",
+            this.optionalIdentifier(object.customer),
+            this.identifier(object.id, "subscription id"),
+            event.created,
+          );
+        }
         description = "Basic subscription canceled";
       } else if (event.type === "invoice.paid") {
         const object = event.data.object;
         const period = this.invoicePeriod(object);
         const account = this.account();
-        const resetsAllowance =
-          String(account.period_start ?? "") !== period.start;
+        const subscriptionId = this.invoiceSubscriptionId(object);
+        if (!subscriptionId)
+          throw new Error("Stripe invoice has no subscription");
+        const previousPeriod = String(account.period_start ?? "");
+        const newerPeriod = period.start > previousPeriod;
+        const currentPeriod = period.start === previousPeriod;
+        const newerStatus =
+          event.created >= Number(account.subscription_event_created);
         this.sql.exec(
           "UPDATE billing_account SET stripe_customer_id = COALESCE(stripe_customer_id, ?), " +
-            "stripe_subscription_id = COALESCE(?, stripe_subscription_id), subscription_status = 'active', " +
+            "stripe_subscription_id = ?, subscription_status = ?, subscription_event_created = ?, " +
             "period_start = ?, period_end = ?, allowance_used_micros = ? WHERE id = 1",
           this.optionalIdentifier(object.customer),
-          this.invoiceSubscriptionId(object),
-          period.start,
-          period.end,
-          resetsAllowance ? 0 : Number(account.allowance_used_micros),
+          subscriptionId,
+          newerStatus ? "active" : String(account.subscription_status),
+          newerStatus
+            ? event.created
+            : Number(account.subscription_event_created),
+          newerPeriod ? period.start : account.period_start,
+          newerPeriod || currentPeriod ? period.end : account.period_end,
+          newerPeriod ? 0 : Number(account.allowance_used_micros),
         );
         description = "Basic monthly allowance renewed";
       } else if (event.type === "charge.refunded") {
@@ -313,7 +340,7 @@ export class BillingStoreV1 {
     this.open();
     this.sql.exec(
       "UPDATE billing_commands SET status = 'complete', result_url = ? WHERE command_id = ?",
-      this.identifier(resultUrl, "result URL"),
+      this.identifier(resultUrl, "result URL", 2_048),
       this.identifier(commandId, "command id"),
     );
   }
@@ -327,7 +354,7 @@ export class BillingStoreV1 {
     return this.sql
       .exec<BillingAccountRow>(
         "SELECT stripe_customer_id, stripe_subscription_id, subscription_status, " +
-          "period_start, period_end, allowance_used_micros, credit_balance_micros " +
+          "subscription_event_created, period_start, period_end, allowance_used_micros, credit_balance_micros " +
           "FROM billing_account WHERE id = 1",
       )
       .toArray()[0]!;
@@ -422,35 +449,6 @@ export class BillingStoreV1 {
     return adjustment;
   }
 
-  private updateSubscription(
-    object: Record<string, unknown>,
-    resetAllowance: boolean,
-  ): void {
-    const periodStart = this.epochTimestamp(
-      object.current_period_start,
-      "subscription period start",
-    );
-    const periodEnd = this.epochTimestamp(
-      object.current_period_end,
-      "subscription period end",
-    );
-    const account = this.account();
-    const changedPeriod = String(account.period_start ?? "") !== periodStart;
-    this.sql.exec(
-      "UPDATE billing_account SET stripe_customer_id = COALESCE(stripe_customer_id, ?), " +
-        "stripe_subscription_id = ?, subscription_status = ?, period_start = ?, period_end = ?, " +
-        "allowance_used_micros = ? WHERE id = 1",
-      this.optionalIdentifier(object.customer),
-      this.identifier(object.id, "subscription id"),
-      this.identifier(object.status, "subscription status"),
-      periodStart,
-      periodEnd,
-      resetAllowance || changedPeriod
-        ? 0
-        : Number(account.allowance_used_micros),
-    );
-  }
-
   private invoicePeriod(object: Record<string, unknown>): {
     start: string;
     end: string;
@@ -510,8 +508,12 @@ export class BillingStoreV1 {
     );
   }
 
-  private identifier(value: unknown, label: string): string {
-    if (typeof value !== "string" || value.length === 0 || value.length > 512) {
+  private identifier(value: unknown, label: string, maximum = 512): string {
+    if (
+      typeof value !== "string" ||
+      value.length === 0 ||
+      value.length > maximum
+    ) {
       throw new Error(`Stripe ${label} is invalid`);
     }
     return value;

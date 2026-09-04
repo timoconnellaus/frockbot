@@ -26,6 +26,13 @@ interface StripeClientOptionsV1 {
   fetch?: typeof fetch;
 }
 
+export class StripeApiError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StripeApiError";
+  }
+}
+
 function boundedStripeId(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0 || value.length > 512) {
     throw new Error(`Stripe returned an invalid ${label}.`);
@@ -46,19 +53,24 @@ export function createStripeClientV1(
       idempotencyKey?: string;
     },
   ): Promise<Record<string, unknown>> {
-    const response = await fetchStripe(`https://api.stripe.com${path}`, {
-      method: init.method ?? "POST",
-      headers: {
-        authorization: `Bearer ${options.secretKey}`,
-        ...(init.body
-          ? { "content-type": "application/x-www-form-urlencoded" }
-          : {}),
-        ...(init.idempotencyKey
-          ? { "idempotency-key": init.idempotencyKey }
-          : {}),
-      },
-      ...(init.body ? { body: init.body } : {}),
-    });
+    let response: Response;
+    try {
+      response = await fetchStripe(`https://api.stripe.com${path}`, {
+        method: init.method ?? "POST",
+        headers: {
+          authorization: `Bearer ${options.secretKey}`,
+          ...(init.body
+            ? { "content-type": "application/x-www-form-urlencoded" }
+            : {}),
+          ...(init.idempotencyKey
+            ? { "idempotency-key": init.idempotencyKey }
+            : {}),
+        },
+        ...(init.body ? { body: init.body } : {}),
+      });
+    } catch {
+      throw new StripeApiError("Stripe is unavailable.");
+    }
     const value = (await response.json()) as Record<string, unknown>;
     if (!response.ok) {
       const stripeError = value.error;
@@ -66,7 +78,7 @@ export function createStripeClientV1(
         stripeError && typeof stripeError === "object"
           ? (stripeError as Record<string, unknown>).message
           : undefined;
-      throw new Error(
+      throw new StripeApiError(
         typeof message === "string" ? message : "Stripe request failed.",
       );
     }
