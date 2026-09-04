@@ -1178,9 +1178,9 @@ export class BotState extends DurableObject<BotStateEnv> {
   /**
    * Queues the exact `model/usage` events from one just-settled Turn.
    *
-   * This callback runs for chat, Routine, recovery, and Subagent Turns at the
-   * Shell's common loop boundary. Queueing precedes the cross-object call;
-   * ledger ids make every retry idempotent.
+   * This callback runs for chat, Routine, recovery, Subagent, and agent-lane
+   * Turns at the Shell's common loop boundary. Queueing precedes the
+   * cross-object call; ledger ids make every retry idempotent.
    */
   private async recordSettledUsage(input: {
     botId: string;

@@ -172,6 +172,11 @@ export type ClientRunEventV1 =
       type: "wake/parent";
       message: string;
     }
+  | {
+      type: "computer/sync";
+      status: "degraded" | "unavailable" | "refused" | "skipped";
+      message: string;
+    }
   /**
    * A subagent this Turn dispatched (ADR 0017). The child's Session never
    * enters the visible transcript, so this chip is the whole of what the
@@ -635,6 +640,7 @@ function projectionUnits(
   const units: ProjectionUnitV1[] = [];
   const byOccurrence = new Map<string, ProjectionUnitV1>();
   let callCount = 0;
+  let projectedIncompleteSync = false;
   for (const event of events) {
     if (event.type === "tool/call") {
       if (byOccurrence.has(event.occurrenceId)) {
@@ -705,6 +711,22 @@ function projectionUnits(
         ],
         droppable: true,
       });
+    } else if (
+      event.type === "computer/sync" &&
+      event.status !== "ok" &&
+      !projectedIncompleteSync
+    ) {
+      projectedIncompleteSync = true;
+      units.push({
+        events: [
+          {
+            type: "computer/sync",
+            status: event.status,
+            message: computerSyncCopyV1(event),
+          },
+        ],
+        droppable: true,
+      });
     } else if (event.type === "task/dispatched") {
       units.push({
         events: [
@@ -745,6 +767,24 @@ function projectionUnits(
     }
   }
   return units;
+}
+
+function computerSyncCopyV1(
+  event: Extract<SessionEvent, { type: "computer/sync" }>,
+): string {
+  if (event.status === "degraded") {
+    return (
+      event.detail.trim() ||
+      "Some Workspace files did not sync during this turn."
+    );
+  }
+  if (event.status === "unavailable") {
+    return "Workspace files could not sync during this turn. Sync will retry the next time the Computer is used.";
+  }
+  if (event.status === "refused") {
+    return "Workspace sync could not run for this turn.";
+  }
+  return "Workspace sync was skipped for this turn.";
 }
 
 function visibleEvents(
@@ -1271,6 +1311,27 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
       ),
     };
   }
+  if (event.type === "computer/sync") {
+    exactKeys(event, ["type", "status", "message"], "run event");
+    if (
+      event.status !== "degraded" &&
+      event.status !== "unavailable" &&
+      event.status !== "refused" &&
+      event.status !== "skipped"
+    ) {
+      throw new Error("run event.status is invalid");
+    }
+    return {
+      type: "computer/sync",
+      status: event.status,
+      message: wireString(
+        event,
+        "message",
+        MAX_EVENT_CONTENT_BYTES,
+        "run event",
+      ),
+    };
+  }
   if (event.type === "task/dispatched") {
     exactKeys(
       event,
@@ -1322,12 +1383,13 @@ function decodeEvents(values: unknown[]): ClientTurnEvent[] {
   const callIds = new Set<string>();
   while (index < events.length) {
     const call = events[index];
-    // A send and a hand-off stand alone: they pair with nothing, so the
-    // call/result walk steps straight over them.
+    // Sends, hand-offs, task chips, and sync notices stand alone: they pair
+    // with nothing, so the call/result walk steps straight over them.
     if (
       call?.type === "send/to-user" ||
       call?.type === "wake/parent" ||
-      call?.type === "task/dispatched"
+      call?.type === "task/dispatched" ||
+      call?.type === "computer/sync"
     ) {
       index += 1;
       continue;

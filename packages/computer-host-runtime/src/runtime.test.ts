@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
   APPLET_SDK_VERSION,
+  appletSdkInstallScript,
   APPLET_SHIM_PATH,
   appletShimScript,
   APPLETS_ROOT,
@@ -507,6 +508,24 @@ describe("the applets phase", () => {
       `npm install --prefix ${APPLETS_ROOT} --no-audit --no-fund @frockbot/applet-sdk@${APPLET_SDK_VERSION}`,
     );
     expect(APPLETS_ROOT.startsWith(`${RUNTIME_ROOT}/`)).toBe(true);
+  });
+
+  test("recreates shared Applet dependencies outside every durable source root", () => {
+    const provision = PROVISION_PHASES.find(
+      (phase) => phase.name === "applets",
+    )!.body;
+    const update = UPDATE_PHASES.find(
+      (phase) => phase.name === "applets",
+    )!.body;
+
+    expect(APPLETS_ROOT).toBe(`${RUNTIME_ROOT}/applets`);
+    expect(APPLETS_ROOT).not.toContain("/agent-data/");
+    expect(provision).toContain(appletSdkInstallScript);
+    expect(update).toContain(appletSdkInstallScript);
+    expect(appletSdkInstallScript).toContain(
+      `npm install --prefix ${APPLETS_ROOT}`,
+    );
+    expect(appletSdkInstallScript).not.toContain("user-packages");
   });
 
   test("an SDK that cannot be fetched leaves a record and not a failed run", () => {

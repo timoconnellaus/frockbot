@@ -663,7 +663,7 @@ export type ComputerSyncReasonV1 = "open" | "signal" | "turn-end" | "publish";
  * answers `unavailable` and a Turn continues.
  */
 export interface ComputerSyncSummaryV1 {
-  status: "ok" | "unavailable" | "refused" | "skipped";
+  status: "ok" | "degraded" | "unavailable" | "refused" | "skipped";
   /** Human-readable reason, empty when the run had nothing to say. */
   detail: string;
   pulled: number;
@@ -671,6 +671,10 @@ export interface ComputerSyncSummaryV1 {
   restored: number;
   removed: number;
   adopted: number;
+  /** Reproducible directories and durable entries excluded by policy. */
+  ignored: number;
+  /** Manifest entries left out after the scan reached its hard bound. */
+  omitted: number;
   conflicts: number;
   failures: number;
 }
@@ -687,6 +691,8 @@ export function computerSyncSummaryV1(
     restored: 0,
     removed: 0,
     adopted: 0,
+    ignored: 0,
+    omitted: 0,
     conflicts: 0,
     failures: 0,
   };
@@ -720,7 +726,7 @@ export interface ComputerSyncV1 {
   reconcileRoot?(
     root: WorkspaceRootV1,
     reason: ComputerSyncReasonV1,
-    options?: ComputerOperationOptions,
+    options?: ComputerRootSyncOptionsV1,
   ): Promise<ComputerSyncSummaryV1>;
   /**
    * The Computer-side watcher's change signal, or `undefined` when it cannot
@@ -728,6 +734,18 @@ export interface ComputerSyncV1 {
    * every root on every tool call.
    */
   signal(options?: ComputerOperationOptions): Promise<string | undefined>;
+}
+
+/** Options for the one-root reconciliation used by artifact publishers. */
+export interface ComputerRootSyncOptionsV1 extends ComputerOperationOptions {
+  /**
+   * Exact root-relative files that are required even when they live below a
+   * reproducible directory the ordinary Workspace sync excludes.
+   *
+   * This is a path selection, not a Package exception: the Computer provider
+   * does not learn which caller or Package needs the bytes.
+   */
+  requiredPaths?: readonly string[];
 }
 
 /**
