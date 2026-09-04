@@ -10,10 +10,11 @@ if (!provided) throw new Error("billing client service was not provided");
 const billing = provided;
 const customDollars = ref("50");
 const anchorHref = settingsLinkV1({ anchor: "billing" });
-const hasSubscription = computed(() =>
-  ["active", "trialing", "past_due", "unpaid"].includes(
-    billing.value.billing?.subscriptionStatus ?? "none",
-  ),
+const hasSubscription = computed(
+  () =>
+    !["none", "canceled", "incomplete_expired"].includes(
+      billing.value.billing?.subscriptionStatus ?? "none",
+    ),
 );
 
 onMounted(() => {
