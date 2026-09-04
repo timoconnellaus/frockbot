@@ -79,7 +79,7 @@ describe("Stripe webhook", () => {
     );
 
     expect(response?.status).toBe(400);
-    expect(await response?.json()).toEqual({
+    expect(await response?.json<unknown>()).toEqual({
       error: "Invalid Stripe signature.",
     });
   });
@@ -167,7 +167,7 @@ describe("Stripe webhook", () => {
       {},
     );
 
-    expect(await retryResponse?.json()).toEqual({
+    expect(await retryResponse?.json<unknown>()).toEqual({
       received: true,
       applied: false,
     });
@@ -247,7 +247,7 @@ describe("Stripe Checkout and Portal", () => {
     );
 
     expect(response?.status).toBe(200);
-    expect(await response?.json()).toEqual({
+    expect(await response?.json<unknown>()).toEqual({
       schemaVersion: 1,
       url: "https://checkout.stripe.test/cs_test",
     });

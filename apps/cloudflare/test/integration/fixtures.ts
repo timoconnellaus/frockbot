@@ -215,6 +215,8 @@ export const APPLICATION_HASH = "foundation-v1";
 
 /** Any origin works; this one matches the deployed route. */
 export const ORIGIN = "https://bot.frockbot.com";
+const STRIPE_WEBHOOK_SECRET =
+  "whsec_workerd-stripe-webhook-secret-0123456789abcdef";
 
 export const PROVISIONED_MODEL = {
   packageId: "provider-ollama-cloud",
@@ -223,6 +225,57 @@ export const PROVISIONED_MODEL = {
 } as const;
 
 export const CUSTOM_MODELS_PACKAGE_ID = "custom-models";
+
+/** Deliver the paid-Checkout event through the same signed public route Stripe uses. */
+export async function creditWithFakeCheckout(
+  userId: string,
+  amountCents: number,
+): Promise<void> {
+  const timestamp = Math.floor(Date.now() / 1_000);
+  const suffix = crypto.randomUUID();
+  const body = JSON.stringify({
+    id: `evt_${suffix}`,
+    type: "checkout.session.completed",
+    created: timestamp,
+    data: {
+      object: {
+        id: `cs_${suffix}`,
+        mode: "payment",
+        payment_status: "paid",
+        payment_intent: `pi_${suffix}`,
+        amount_total: amountCents,
+        customer: `cus_${suffix.replaceAll("-", "")}`,
+        metadata: {
+          frockbot_user_id: userId,
+          frockbot_kind: "credit",
+        },
+      },
+    },
+  });
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(STRIPE_WEBHOOK_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signed = new Uint8Array(
+    await crypto.subtle.sign(
+      "HMAC",
+      key,
+      new TextEncoder().encode(`${String(timestamp)}.${body}`),
+    ),
+  );
+  const signature = Array.from(signed, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  const response = await SELF.fetch(`${ORIGIN}/api/billing/stripe/webhook`, {
+    method: "POST",
+    headers: { "stripe-signature": `t=${String(timestamp)},v1=${signature}` },
+    body,
+  });
+  expect(response.status).toBe(200);
+}
 
 let seeded: Promise<void> | undefined;
 
@@ -346,6 +399,8 @@ export async function provisionThroughGateway(options: {
   userId: string;
   botId: string;
   apiKey?: string;
+  /** Most integration scenarios start funded; billing tests may opt out. */
+  funded?: boolean;
 }): Promise<{ connectionId: string }> {
   const { userId, botId } = options;
   const apiKey = options.apiKey ?? OLLAMA_GOOD_API_KEY;
@@ -406,6 +461,10 @@ export async function provisionThroughGateway(options: {
     status: created.status,
     value: await readJson(created),
   }).toMatchObject({ status: 201 });
+
+  if (options.funded !== false) {
+    await creditWithFakeCheckout(userId, 100_000);
+  }
 
   return { connectionId: receipt.connectionId };
 }

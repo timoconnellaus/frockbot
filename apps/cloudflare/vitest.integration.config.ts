@@ -140,6 +140,8 @@ export default defineConfig({
           // mint the token a machine presents and forge one that must be
           // refused.
           MACHINE_TOKEN_SECRET: "workerd-machine-token-secret-0123456789ab",
+          STRIPE_WEBHOOK_SECRET:
+            "whsec_workerd-stripe-webhook-secret-0123456789abcdef",
         },
         // Deliberately absent, and why:
         //

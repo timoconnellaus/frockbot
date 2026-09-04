@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
   "id": "billing",
-  "displayName": "Usage",
+  "displayName": "Billing",
   "version": "0.0.1",
   "defaultEnablement": "enabled",
   "compatibility": { "frockbot": ">=0.0.1" },
@@ -19,7 +19,9 @@
       "entry": "./client",
       "mounts": [
         { "slot": "frockbot.user-settings-primary-sections", "order": 20 },
-        { "slot": "frockbot.bot-settings-primary-sections", "order": 30 }
+        { "slot": "frockbot.user-settings-primary-sections", "order": 30 },
+        { "slot": "frockbot.bot-settings-primary-sections", "order": 30 },
+        { "slot": "frockbot.composer-notices", "order": 20 }
       ],
       "outlets": []
     }

@@ -35,20 +35,57 @@ const REPORT = {
   })),
 };
 
+const BILLING = {
+  schemaVersion: 1,
+  plan: "basic",
+  subscriptionStatus: "active",
+  currentPeriodStart: "2026-09-01T00:00:00.000Z",
+  currentPeriodEnd: "2026-10-01T00:00:00.000Z",
+  allowanceMicros: 20_000_000,
+  allowanceUsedMicros: 1_250_000,
+  allowanceRemainingMicros: 18_750_000,
+  creditBalanceMicros: 25_000_000,
+  availableMicros: 43_750_000,
+  canStartTurn: true,
+  history: [
+    {
+      eventId: "evt_credit",
+      type: "checkout.session.completed",
+      occurredAt: "2026-09-04T12:00:00.000Z",
+      amountMicros: 25_000_000,
+      description: "$25 credit purchase",
+    },
+  ],
+} as const;
+
 function mount(): {
   state: { value: UsageClientStateV1 };
   slots: ClientSlotRegistration[];
   calls: string[];
+  opened: string[];
 } {
   const slots: ClientSlotRegistration[] = [];
   const calls: string[] = [];
+  const opened: string[] = [];
   let state: unknown;
   const context: ClientPluginContext = {
     transport: {
       turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
-      hostedRequest: (path) => {
+      hostedRequest: (path, method, body) => {
         calls.push(path);
-        return Promise.resolve(REPORT);
+        if (path === "/api/usage") return Promise.resolve(REPORT);
+        if (path === "/api/billing") return Promise.resolve(BILLING);
+        if (method === "POST" && body) {
+          return Promise.resolve({
+            schemaVersion: 1,
+            url: "https://checkout.stripe.test/session",
+          });
+        }
+        return Promise.reject(new Error("unexpected request"));
+      },
+      openExternalAuthorization: (url) => {
+        opened.push(url);
+        return Promise.resolve();
       },
     },
     inject: () => {
@@ -64,23 +101,39 @@ function mount(): {
     },
   };
   billingClientPlugin(context);
-  return { state: state as { value: UsageClientStateV1 }, slots, calls };
+  return {
+    state: state as { value: UsageClientStateV1 },
+    slots,
+    calls,
+    opened,
+  };
 }
 
 describe("billing client contribution", () => {
   test("mounts the account report and per-Bot line in Settings", () => {
     expect(mount().slots.map((slot) => slot.slot)).toEqual([
       "frockbot.user-settings-primary-sections",
+      "frockbot.user-settings-primary-sections",
       "frockbot.bot-settings-primary-sections",
+      "frockbot.composer-notices",
     ]);
   });
 
   test("loads and decodes the Usage report", async () => {
     const mounted = mount();
     await mounted.state.value.load();
-    expect(mounted.calls).toEqual(["/api/usage"]);
+    expect(mounted.calls).toEqual(["/api/usage", "/api/billing"]);
     expect(mounted.state.value.report?.currentMonthCostMicros).toBe(1_250_000);
     expect(mounted.state.value.report?.bots[0]?.id).toBe("bot-a");
+    expect(mounted.state.value.billing?.creditBalanceMicros).toBe(25_000_000);
+  });
+
+  test("opens hosted Checkout from the Billing view", async () => {
+    const mounted = mount();
+    await mounted.state.value.buyCredits(2_500);
+
+    expect(mounted.calls).toEqual(["/api/billing/checkout"]);
+    expect(mounted.opened).toEqual(["https://checkout.stripe.test/session"]);
   });
 
   test("formats dollars and compact model names for the rendered view", () => {

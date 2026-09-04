@@ -174,6 +174,12 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
     scope: "user",
   },
   {
+    anchor: "billing",
+    surface: "user-settings",
+    label: "Billing",
+    scope: "user",
+  },
+  {
     anchor: "user-default-model",
     surface: "models",
     label: "Default model",

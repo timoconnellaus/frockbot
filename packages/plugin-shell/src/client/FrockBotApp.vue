@@ -1579,6 +1579,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           :class="{ 'composer-busy': isRunning }"
           @submit.prevent="sendMessage"
         >
+          <k-slot name="frockbot.composer-notices" />
           <ul
             v-if="skillPopoverOpen"
             ref="skillPopoverList"
