@@ -26,6 +26,10 @@ const {
   shellClientPlugin,
 } = await import("./index.js");
 import type { FrockBotWebData } from "../shared.js";
+import {
+  UNCERTAIN_ADMISSION_MAX_ATTEMPTS_V1,
+  UNREACHABLE_BOT_MESSAGE_V1,
+} from "./uncertain-admission.js";
 import type { Ref } from "vue";
 
 const originalLocalStorage = Object.getOwnPropertyDescriptor(
@@ -2223,6 +2227,134 @@ describe("uncertain Turn admission", () => {
       text: "Done successfully",
       status: "completed",
     });
+  });
+
+  test("refuses a send the server answered 4xx, keeping the draft and the thread clean", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=primary" } },
+    });
+    let provided: Ref<FrockBotWebData> | undefined;
+    let lookups = 0;
+    const tooLong =
+      "Your message is too long. Keep it under 32,000 characters.";
+    await shellClientPlugin({
+      transport: {
+        // What the transport throws for a 413: the answer was read, so the
+        // status rides on the error beside the sentence the person should see.
+        turn: () =>
+          Promise.reject(Object.assign(new Error(tooLong), { status: 413 })),
+        lookupRun: () => {
+          lookups += 1;
+          return Promise.resolve(undefined);
+        },
+        fenceRunAdmission: () => Promise.resolve(undefined),
+      },
+      slot: () => () => {},
+      inject: () => {
+        throw new Error("unexpected client provider injection");
+      },
+      provide: (_key, value) => {
+        provided = value as Ref<FrockBotWebData>;
+        return () => {};
+      },
+    });
+    if (!provided) throw new Error("shell data was not provided");
+    provided.value.activeBotId = "primary";
+    provided.value.composerContext = "primary";
+
+    const result = await provided.value.sendPrompt("x".repeat(120_000));
+
+    // A refusal, so the composer keeps the draft — and the thread shows
+    // neither the message that was never sent nor a placeholder about it.
+    expect(result).toEqual({ accepted: false, error: tooLong });
+    expect(provided.value.error).toBe(tooLong);
+    expect(provided.value.messages).toEqual([]);
+    expect(provided.value.activeRun).toBeUndefined();
+    expect(provided.value.activeRunId).toBeUndefined();
+    expect(provided.value.runningRunId).toBeUndefined();
+    // Nothing to reconcile: the Turn was refused, not lost.
+    expect(lookups).toBe(0);
+  });
+
+  test("settles an unreachable backend after the retry bound, under the message it reports on", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { href: "https://app.example/?bot=primary" } },
+    });
+    // The bound is spent by waiting, and this test is about how the wait ends
+    // rather than about how long each one is.
+    const originalSetTimeout = globalThis.setTimeout;
+    Object.defineProperty(globalThis, "setTimeout", {
+      configurable: true,
+      writable: true,
+      value: ((callback: () => void) => {
+        queueMicrotask(callback);
+        return 0 as unknown as ReturnType<typeof originalSetTimeout>;
+      }) as unknown as typeof originalSetTimeout,
+    });
+    let provided: Ref<FrockBotWebData> | undefined;
+    let lookups = 0;
+    try {
+      await shellClientPlugin({
+        transport: {
+          // No status: the answer never arrived, so admission is genuinely
+          // unknown and reconciliation is right to start.
+          turn: () => Promise.reject(new TypeError("Failed to fetch")),
+          lookupRun: () => {
+            lookups += 1;
+            return Promise.reject(new TypeError("Failed to fetch"));
+          },
+          fenceRunAdmission: () =>
+            Promise.reject(new TypeError("Failed to fetch")),
+        },
+        slot: () => () => {},
+        inject: () => {
+          throw new Error("unexpected client provider injection");
+        },
+        provide: (_key, value) => {
+          provided = value as Ref<FrockBotWebData>;
+          return () => {};
+        },
+      });
+      if (!provided) throw new Error("shell data was not provided");
+      provided.value.activeBotId = "primary";
+      provided.value.composerContext = "primary";
+
+      const result = await provided.value.sendPrompt("are you there");
+
+      expect(lookups).toBe(UNCERTAIN_ADMISSION_MAX_ATTEMPTS_V1);
+      expect(result).toEqual({
+        accepted: false,
+        error: UNREACHABLE_BOT_MESSAGE_V1,
+      });
+      const [user, placeholder] = provided.value.messages;
+      expect(user).toMatchObject({ role: "user", text: "are you there" });
+      expect(placeholder).toMatchObject({
+        role: "assistant",
+        text: UNREACHABLE_BOT_MESSAGE_V1,
+        status: "error",
+        retry: "resend",
+      });
+      // Strictly after the message it reports on, so the thread's ordering by
+      // time cannot lift it above that message.
+      expect((placeholder?.at ?? "") > (user?.at ?? "")).toBe(true);
+      // Nothing is running any more, so no Stop stands for it, and the banner
+      // stops saying the client is still checking. It does not repeat the
+      // bubble's sentence either: the bubble is the report, and it is the one
+      // carrying the Retry.
+      expect(provided.value.error).toBeUndefined();
+      expect(provided.value.settingsError).toBeUndefined();
+      expect(provided.value.activeRun).toBeUndefined();
+      expect(provided.value.activeRunId).toBeUndefined();
+      expect(provided.value.runningRunId).toBeUndefined();
+    } finally {
+      Object.defineProperty(globalThis, "setTimeout", {
+        configurable: true,
+        writable: true,
+        value: originalSetTimeout,
+      });
+    }
   });
 
   test("detaches a rejected Turn without starting a stale observer after Bot switch", async () => {

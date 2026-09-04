@@ -1,3 +1,13 @@
 bun run lint-staged
+
+# A documentation-only commit — a plan, an ADR, a root README — owes Prettier
+# (lint-staged above) and nothing else. `scripts/docs-only.sh` is the same
+# definition CI's `Classify changes` job uses, so a commit the hook waves
+# through is one CI will also run only the documentation check for.
+if git diff --cached --name-only --diff-filter=ACMRD | bash scripts/docs-only.sh; then
+  echo "pre-commit: documentation only; skipping typecheck and tests"
+  exit 0
+fi
+
 bun run typecheck
 bun test

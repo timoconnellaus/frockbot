@@ -3,6 +3,7 @@ import {
   BOT_DEBUG_RUN_LIMIT_V1,
   boundDebugEventsV1,
   decodeBotDebugQueryV1,
+  isBotDebugQueryRefusalV1,
 } from "./debug-protocol.js";
 
 describe("debug query", () => {
@@ -36,13 +37,48 @@ describe("debug query", () => {
     ).toThrow("debug query has invalid fields");
   });
 
-  test("rejects a limit past the page bound", () => {
+  test("rejects a limit past the page bound, in words that name the range", () => {
     expect(() =>
       decodeBotDebugQueryV1({
         schemaVersion: 1,
         limit: BOT_DEBUG_RUN_LIMIT_V1 + 1,
       }),
-    ).toThrow("debug query limit is invalid");
+    ).toThrow(
+      `debug query limit must be a whole number from 1 to ${BOT_DEBUG_RUN_LIMIT_V1}`,
+    );
+  });
+
+  // The refusal rides on the error's name, which is all a Durable Object RPC
+  // preserves: a bad query has to arrive at the gateway as a 400 and not as
+  // an uncaught failure in the Bot's isolate.
+  test("refuses a bad query as a refusal, not as an ordinary failure", () => {
+    for (const input of [
+      { schemaVersion: 1, limit: 0 },
+      { schemaVersion: 1, limit: BOT_DEBUG_RUN_LIMIT_V1 + 1 },
+      { schemaVersion: 1, limit: 1.5 },
+      { schemaVersion: 1, limit: Number.NaN },
+      { schemaVersion: 1, sql: "select 1" },
+      { schemaVersion: 2 },
+      "not a query",
+    ]) {
+      let refusal: unknown;
+      try {
+        decodeBotDebugQueryV1(input);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(isBotDebugQueryRefusalV1(refusal)).toBe(true);
+    }
+  });
+
+  test("accepts both ends of the allowed range", () => {
+    expect(decodeBotDebugQueryV1({ schemaVersion: 1, limit: 1 }).limit).toBe(1);
+    expect(
+      decodeBotDebugQueryV1({
+        schemaVersion: 1,
+        limit: BOT_DEBUG_RUN_LIMIT_V1,
+      }).limit,
+    ).toBe(BOT_DEBUG_RUN_LIMIT_V1);
   });
 
   test("rejects a wrong schema version", () => {
