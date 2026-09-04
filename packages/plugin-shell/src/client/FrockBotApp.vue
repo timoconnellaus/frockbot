@@ -46,6 +46,7 @@ import AppletCanvas from "./AppletCanvas.vue";
 import PackageIframeHost from "./PackageIframeHost.vue";
 import type { ClientSkillCatalogEntryV1 } from "../skill-protocol.js";
 import {
+  keptSkillHighlightV1,
   nextSkillHighlightV1,
   rankSkillCandidatesV1,
   SkillAttachmentStore,
@@ -262,6 +263,20 @@ const skillStore = new SkillAttachmentStore();
 const attachedSkills = ref<readonly ClientSkillCatalogEntryV1[]>([]);
 const skillPopover = ref<SkillPopoverStateV1 | undefined>(undefined);
 const skillHighlight = ref(0);
+/*
+ * The trigger the User has dismissed with Escape, by its index in the text.
+ *
+ * The popover is derived from the composer's text on every keyup, so closing it
+ * while the `/` is still typed used to last exactly until the Escape key came
+ * back up and the derivation opened it again. A dismissal is state the text
+ * cannot express, so it is held here: that one trigger stays shut, and typing
+ * on past it keeps it shut, until the `/` itself goes and a new trigger begins.
+ *
+ * Declared beside the state it guards rather than beside the functions that
+ * read it: `closeSkillPopover` is called from a watcher that runs during setup,
+ * so a `const` further down the file is still in its dead zone by then.
+ */
+const skillDismissedAt = ref<number | undefined>(undefined);
 const skillCandidates = computed(() =>
   skillPopover.value
     ? rankSkillCandidatesV1(
@@ -902,15 +917,49 @@ function syncAttachedSkills(): void {
 function closeSkillPopover(): void {
   skillPopover.value = undefined;
   skillHighlight.value = 0;
+  skillDismissedAt.value = undefined;
+}
+
+function dismissSkillPopover(): void {
+  const at = skillPopover.value?.at;
+  closeSkillPopover();
+  skillDismissedAt.value = at;
 }
 
 function refreshSkillPopover(): void {
   const element = composerInput.value;
   if (!element) return closeSkillPopover();
+  // Read the highlighted Skill before the query moves, so the refilter below
+  // can put the highlight back on the same Skill rather than on row zero.
+  const highlighted = skillCandidates.value[skillHighlight.value]?.entry.ref;
   const open = skillPopoverForV1(draft.value, element.selectionStart ?? 0);
+  if (!open) return closeSkillPopover();
+  if (skillDismissedAt.value === open.at) {
+    skillPopover.value = undefined;
+    skillHighlight.value = 0;
+    return;
+  }
   skillPopover.value = open;
-  skillHighlight.value = 0;
+  skillHighlight.value = keptSkillHighlightV1(
+    highlighted,
+    skillCandidates.value,
+  );
 }
+
+/*
+ * The popover is bounded and scrolls, so a highlight moved past its edge has
+ * to bring its row with it; `nearest` leaves a row that is already visible
+ * exactly where it is.
+ */
+const skillPopoverList = ref<HTMLUListElement | undefined>(undefined);
+watch(skillHighlight, (index) => {
+  void nextTick(() => {
+    const option = skillPopoverList.value?.children.item(index);
+    if (option instanceof HTMLElement && option.scrollIntoView) {
+      option.scrollIntoView({ block: "nearest" });
+    }
+  });
+});
 
 function attachSkill(entry: ClientSkillCatalogEntryV1): void {
   const open = skillPopover.value;
@@ -986,7 +1035,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      closeSkillPopover();
+      dismissSkillPopover();
       return;
     }
     if (event.key === "Enter" || event.key === "Tab") {
@@ -1361,6 +1410,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
         >
           <ul
             v-if="skillPopoverOpen"
+            ref="skillPopoverList"
             id="skill-popover"
             class="skill-popover"
             role="listbox"
