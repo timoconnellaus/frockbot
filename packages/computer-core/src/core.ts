@@ -895,6 +895,29 @@ function guardedHandle(
             guardedOperation(assertCurrent, () =>
               sync.reconcile(reason, options),
             ),
+          // Forwarded when the provider offers it. Dropping it here is how a
+          // publish's required `dist/` pull was "refused: this Computer cannot
+          // reconcile a single durable root" on production (Bob, 2026-09-04)
+          // while the provider underneath could — and once ordinary sync
+          // stopped carrying `dist/`, that refusal was the whole failure.
+          ...(sync.reconcileRoot
+            ? {
+                reconcileRoot: (
+                  root: Parameters<
+                    NonNullable<ComputerSyncV1["reconcileRoot"]>
+                  >[0],
+                  reason: Parameters<
+                    NonNullable<ComputerSyncV1["reconcileRoot"]>
+                  >[1],
+                  options?: Parameters<
+                    NonNullable<ComputerSyncV1["reconcileRoot"]>
+                  >[2],
+                ) =>
+                  guardedOperation(assertCurrent, () =>
+                    sync.reconcileRoot!(root, reason, options),
+                  ),
+              }
+            : {}),
           signal: (options) =>
             guardedOperation(assertCurrent, () => sync.signal(options)),
         }
