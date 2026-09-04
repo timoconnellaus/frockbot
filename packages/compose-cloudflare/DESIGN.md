@@ -2,10 +2,10 @@
 
 A **host** that runs **plugin source** in a Cloudflare Dynamic Worker and
 presents it to the client as an ordinary **plugin instance**. It meets
-[`docs/acceptance/hosts.md`](../../docs/acceptance/hosts.md) §B, §D and §E,
-under the contract core owns ([ADR-0004](../../docs/adr/0004-host-contract-in-core.md))
-and the transport [ADR-0005](../../docs/adr/0005-stubs-cross-a-host-boundary-as-loopbacks.md)
-fixed. The in-process host in core is the oracle; nothing here changes how a
+upstream `docs/acceptance/hosts.md` §B, §D and §E, under the contract core owns
+(upstream ADR-0004) and the transport upstream ADR-0005 fixed. Neither document
+was vendored with the code; see
+[ADR-0038](../../docs/adr/0038-frockbot-compose-is-a-vendored-copy.md). The in-process host in core is the oracle; nothing here changes how a
 plugin is written.
 
 ## The shape of the thing
@@ -175,8 +175,9 @@ object with one function per declared method. A method function sends
 `{ method, args }` through the same loopback, so identity, limits, revocation,
 re-entry, and error handling remain unchanged. No `Proxy` or extra binding is
 introduced, and `storage` and `schedule` retain their host-local implementations.
-`tests/loopback.test.ts` exercises that generated method object in a Dynamic
-Worker; the showcase workerd suite exercises the same shape through a facet.
+Upstream's `tests/loopback.test.ts` exercised that generated method object in a
+Dynamic Worker, and its showcase workerd suite exercised the same shape through
+a facet; neither was vendored with this copy.
 
 Generated per instance from the granted stub names, loaded as the isolate's
 `mainModule` beside the written module as `plugin.js`. It is the only code in
@@ -329,12 +330,13 @@ instance's status cannot wait for a log to arrive.
 
 ## What B5 covers, and what it cannot
 
-`tests/parity.test.ts` runs core's `runInstanceContract` against the standalone
-Dynamic Worker host. `tests/facet-parity.test.ts` runs the same source arm
-against `createFacetHost`, inside `runInDurableObject` so every assertion owns a
-real supervisor context. The shared helper's optional `scope` wraps a complete
-test without changing any assertion. It is imported across the package boundary
-by path rather than copied, so all three implementations use one contract.
+Upstream ran core's `runInstanceContract` against the standalone Dynamic Worker
+host (`tests/parity.test.ts`) and the same source arm against `createFacetHost`
+inside `runInDurableObject` (`tests/facet-parity.test.ts`), importing the shared
+helper across the package boundary by path so all three implementations used one
+contract. Both arms need workerd and were not vendored with this copy, so the
+in-process host in `@frockbot/compose-core` is the only implementation the
+contract is run against here.
 
 What it does not reach:
 
@@ -345,7 +347,7 @@ What it does not reach:
 - **Synchronous observation.** Every arm is already asynchronous, but this one
   is asynchronous _and_ remote; a criterion phrased about what is true
   immediately after a synchronous call is not one this arm can be asked.
-- **Type inference.** `tests/H-types.test-d.ts` is about what a builder infers,
+- **Type inference.** `@frockbot/compose-core`'s `tests/H-types.test-d.ts` is about what a builder infers,
   which is a client-side question a host has no part in.
 
 ## Named grant providers
@@ -369,27 +371,23 @@ unchanged.
 
 ## Local and CI
 
-One vitest project, `@cloudflare/vitest-pool-workers` over `wrangler.jsonc`,
-which declares `worker_loaders` and points `main` at `dev/worker.ts` — the same
-file `wrangler dev` runs, and the file whose `ComposeStubLoopback` re-export the
-loopbacks are minted from. `additionalExports` tells the pool the re-export is a
-`WorkerEntrypoint`.
+`bun test tests` runs this package's suite: the pure protocol, frames, HTTP
+grant boundary, and Workers AI provider tests, which need no Cloudflare runtime.
+Upstream's in-workerd suite rode on `@cloudflare/vitest-pool-workers` and was
+not vendored with the copy (see
+[ADR-0038](../../docs/adr/0038-frockbot-compose-is-a-vendored-copy.md)), so the
+isolate and facet behavior it proved — storage retained across an options or
+source restart, cleared on remove, an alarm calling a named export with no
+request in flight, and the parity arms — is not exercised here. `dev/worker.ts`
+and `dev/facet-test-object.ts` are still the `wrangler dev` entry and its test
+supervisor, and `wrangler.jsonc` still declares `worker_loaders` and points
+`main` at that Worker, whose `ComposeStubLoopback` re-export the loopbacks are
+minted from.
 
 **The compatibility date is 2026-05-01**, which is lower than the repo's
 elsewhere. The workerd bundled with the wrangler in this workspace refuses
-anything later than 2026-05-25 locally, and the date has to be one that both the
-test pool and `wrangler dev` accept. Production supports later dates; raise it
-when the bundled runtime does.
-
-Coverage is not collected for this package: the pool runs the suite inside
-workerd, where the coverage provider the rest of the workspace uses does not
-instrument.
-
-`dev/facet-test-object.ts` is the test supervisor exported from the same Worker.
-`tests/facets.test.ts` proves that options and source restarts retain storage,
-remove/delete clears it, and an alarm calls a named export with no request in
-flight. The lifecycle sequence doubles as the facet host's stop-versus-destroy
-proof. `tests/facet-parity.test.ts` is the third parity arm.
+anything later than 2026-05-25 locally. Production supports later dates; raise
+it when the bundled runtime does.
 
 ## Workers AI
 
@@ -500,14 +498,11 @@ $0.011 per 1,000 neurons, with 10,000 neurons a day free
 ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)).
 
 That has one consequence for the suite. An `ai` binding is _always_ a remote
-binding, so the vitest pool would open a remote proxy session for it and every
-test in this package would need an account. `vitest.config.ts` therefore passes
-`remoteBindings: false` on an ordinary run: `env.AI` is declared but inert, and
-every test drives a **fake binding** — a `run` that answers with a scripted
-stream — instead. `COMPOSE_WORKERS_AI_SMOKE=1` turns remote bindings back on and
-un-skips `tests/workers-ai-smoke.test.ts`, which is the one test that runs a real
-model. The pool prints a warning per test file about AI bindings being remote;
-silencing it means marking the binding remote, which is the thing being avoided.
+binding, so any test that used the declared `env.AI` would need an account.
+Every test therefore drives a **fake binding** instead — `fakeAi` in
+`tests/helpers/ai.ts`, a `run` that answers with a scripted stream — and no test
+in this package touches a real model. Upstream's opt-in smoke test against the
+real binding rode on the Vitest pool and was not vendored with the copy.
 
 `self` is a factory, not a stub: an RPC stub is bound to the request that minted it, and the schedule loopback runs in
 the facet's request, so the host mints a fresh stub per operation (`options.self()`).

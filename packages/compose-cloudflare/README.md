@@ -19,8 +19,14 @@ model and holds no **credential** to get it. See
 
 ## Installation
 
-```sh
-npm install @frockbot/compose-core @frockbot/compose-cloudflare
+Both packages are workspace-private. Depend on them from another workspace
+package:
+
+```jsonc
+"dependencies": {
+  "@frockbot/compose-core": "workspace:*",
+  "@frockbot/compose-cloudflare": "workspace:*",
+}
 ```
 
 It runs in a Cloudflare Worker on a paid plan and locally under `wrangler dev`.
@@ -113,10 +119,12 @@ export async function add({ a, b }) {
 
 Outbound network is off unconditionally and is not an option.
 
-The `http` grant accepts only `method`, string-valued `headers`, and a string or
-`ArrayBuffer` `body`. It pins requests to the configured service origin,
-attaches the service credential inside the host, uses manual redirects and
-refuses every redirect response so credentials never follow to another origin.
+The `http` grant runs through the hardened boundary shared by every host
+(`@frockbot/compose-core/grants`): it accepts only `method`, string-valued
+`headers`, and a string or `ArrayBuffer` `body`, pins requests to the configured
+service origin, attaches the service credential inside the host, and sends with
+`redirect: "manual"`, refusing a redirect response so credentials never follow
+to another origin.
 
 ## A model, with no credential
 
@@ -147,8 +155,8 @@ const provider = createWorkersAiModel({
 
 The provider has only `name` and `stream(request, signal)`. An agent runtime can
 register that structural value in its own model registry; the host package has
-no dependency on an agent loop. The deployed agent example supplies the small
-plugin wrapper under `examples/shared/agent`.
+no dependency on an agent loop. `@frockbot/compose-agent` supplies the
+framework-neutral agent primitives it can be registered into.
 
 | Option    | Default                     | What it is                                    |
 | --------- | --------------------------- | --------------------------------------------- |
@@ -175,17 +183,11 @@ if (new URL(request.url).pathname === "/ai/chat/completions") {
 }
 ```
 
-```ts
-// the page
-import { openaiModelPlugin } from '@frockbot/compose-agent'
-
-{
-  id: 'model',
-  plugin: openaiModelPlugin,
-  // `credential: null`: this endpoint needs none from the browser.
-  options: { model: 'workers-ai', baseUrl: '/ai', credential: null },
-}
-```
+The page then points any OpenAI-compatible client at `/ai` and needs no
+credential, because the Worker holds the binding. Upstream's
+`openaiModelPlugin` — the plugin that wraps such a client as a Compose model
+provider — was not vendored with this copy; see
+[ADR-0038](../../docs/adr/0038-frockbot-compose-is-a-vendored-copy.md).
 
 `handleChatCompletions(request, binding, options?)` takes `{ model, cors, stallMs }`.
 `model` is the model to run when the body names none. `stallMs` (default 30 000)
@@ -220,11 +222,7 @@ handler it registered through a stub, and reports what the plugin logged. It
 also exercises the structural provider at `/ask`, while
 `/ai/chat/completions` is the route a browser client talks to.
 
-The suite runs against a fake binding and needs no account. The one test that
-runs a real model asks for itself by name:
-
-```sh
-bunx wrangler login
-```
+The suite runs against a fake binding and needs no account; no test in this
+package calls a real model.
 
 How it all fits together is in [`DESIGN.md`](./DESIGN.md).

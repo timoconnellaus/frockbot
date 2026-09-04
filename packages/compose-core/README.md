@@ -15,8 +15,11 @@ changes shape, and the client makes sure nothing is left behind when it does.
 
 ## Installation
 
-```sh
-npm install @frockbot/compose-core
+This package is workspace-private. Depend on it from another workspace
+package:
+
+```jsonc
+"dependencies": { "@frockbot/compose-core": "workspace:*" }
 ```
 
 ## A plugin that provides something
@@ -180,10 +183,10 @@ await instance.emit(drained, undefined); // Promise<void>
 ## Plugins from source
 
 A plugin entry can carry **plugin source** — a string — instead of a plugin
-reference. The client starts it through a **host**: the in-process one that
-ships here by default, or the one the entry names. A hosted plugin is an
-ordinary instance, with an id, a status, options, cleanup and everything else on
-this page.
+reference. The client starts it through the **host** the entry names — the
+in-process one that ships here, or another the base registers. A hosted plugin
+is an ordinary instance, with an id, a status, options, cleanup and everything
+else on this page.
 
 Source is an ES module. Its default export is the setup function; its other
 named exports are handlers the client can call. The only thing it can reach is
@@ -299,6 +302,7 @@ through `instance.client`, which is how an application changes its own shape.
 ## Learn more
 
 - [`DESIGN.md`](./DESIGN.md) — the kernel's lifecycle, reconciliation and inspection model
-- [`CONTEXT.md`](../../CONTEXT.md) — the glossary these terms come from
-- [`docs/acceptance/kernel.md`](../../docs/acceptance/kernel.md) — the contract, criterion by criterion
-- [`docs/acceptance/hosts.md`](../../docs/acceptance/hosts.md) — what a host must do
+- upstream `CONTEXT.md`, `docs/acceptance/kernel.md` and `docs/acceptance/hosts.md` —
+  the glossary, the contract criterion by criterion, and what a host must do. None
+  were vendored with the code; see
+  [ADR-0038](../../docs/adr/0038-frockbot-compose-is-a-vendored-copy.md)

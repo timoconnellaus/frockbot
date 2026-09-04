@@ -16,8 +16,14 @@ entry's authority.
 
 ## Installation
 
-```sh
-npm install @frockbot/compose-core @frockbot/compose-typescript
+Both packages are workspace-private. Depend on them from another workspace
+package:
+
+```jsonc
+"dependencies": {
+  "@frockbot/compose-core": "workspace:*",
+  "@frockbot/compose-typescript": "workspace:*",
+}
 ```
 
 ## Usage
@@ -143,8 +149,9 @@ result into declarations, so nothing here knows what a view is.
 
 ## Where it runs, and what it costs
 
-The suite runs under Node, jsdom, and workerd in CI; the checker was also run by
-hand under Bun 1.3, with the same results and the same latency.
+The suite runs under Bun (`bun test tests`). Upstream also ran it under Node,
+jsdom, and workerd in CI; those arms rode on Vitest and were not vendored with
+the copy.
 
 |                                                            |             |
 | ---------------------------------------------------------- | ----------- |

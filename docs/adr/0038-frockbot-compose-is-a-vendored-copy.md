@@ -69,14 +69,19 @@ neither arbitrary state nor an ambient timer.
 The reviewed source had two unsafe defaults which FrockBot changes before any
 consumer can use it.
 
-The Cloudflare HTTP grant now accepts only a small decoded request shape:
-method, string headers, and a string or `ArrayBuffer` body. It resolves the URL
-under the service's granted origin, attaches the server-held credential, sends
-with `redirect: "manual"`, and refuses every redirect response. Consequently a
-cross-origin redirect cannot carry the credential in an automatically followed
-request. A wall-clock deadline bounds the request and a streaming byte limit
-bounds the response before it is decoded as text; the defaults are five seconds
-and one mebibyte.
+The HTTP grant now accepts only a small decoded request shape: method, string
+headers, and a string or `ArrayBuffer` body. It resolves the URL under the
+service's granted origin, attaches the server-held credential, sends with
+`redirect: "manual"`, and refuses the redirect statuses 301, 302, 303, 307 and
+308, so a cross-origin redirect cannot carry the credential in an automatically
+followed request. A non-redirect 3xx such as `304 Not Modified` is not a
+redirect and stays observable to the caller. A wall-clock deadline bounds the
+request and a streaming byte limit bounds the response before it is decoded as
+text; the defaults are five seconds and one mebibyte.
+
+This boundary lives once, in `packages/compose-core/src/grants/http.ts`, and
+both the Cloudflare host and the in-process reference grants execute through
+it, so neither host can quietly regain the unsafe defaults.
 
 A hosted source entry must also name its host. Omitting `host` is a visible
 refusal, including for legacy or untyped input. In-process execution remains

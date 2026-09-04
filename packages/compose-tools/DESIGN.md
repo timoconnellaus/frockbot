@@ -1,8 +1,8 @@
 # `@frockbot/compose-tools` — composer tool design
 
 This package is the part of Compose intended for an agent runtime to operate.
-It implements the stance fixed by
-[`ADR-0006`](../../docs/adr/0006-an-extension-surface-on-ordinary-code.md):
+It implements the stance fixed by upstream ADR-0006, an extension surface on
+ordinary code:
 Compose owns the tool surface over a **client**, while the conversation loop,
 session, prompt, registries, model providers, and credentials belong to the
 application using those tools.
@@ -84,13 +84,14 @@ tools when mounted in a conversation loop.
 
 ## Criterion → test
 
-| Criterion                       | Test file                                                                        | Coverage                                                                                                         |
-| ------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Self-modification A1–A3         | `tests/composer.test.ts`                                                         | All nine definitions, settled edit results, and the single plugin-list path.                                     |
-| Self-modification B1, B3–B4     | `tests/composer.test.ts`                                                         | Protected ids, catalog/options validation, schemas and operator-owned grants.                                    |
-| Self-modification D3, D6–D8     | `tests/composer.test.ts`                                                         | Source ownership, read-before-rewrite, exact granted stubs and checker declarations.                             |
-| Self-modification A4, C1–C4, E1 | `../../examples/shared/agent/tests/{composer,consequences,self-editing}.test.ts` | Definitions mounted in the example loop, including middleware, turn visibility and the end-to-end edit sequence. |
+| Criterion                       | Test file                                                             | Coverage                                                                                                                         |
+| ------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Self-modification A1–A3         | `tests/composer.test.ts`                                              | All nine definitions, settled edit results, and the single plugin-list path.                                                     |
+| Self-modification B1, B3–B4     | `tests/composer.test.ts`                                              | Protected ids, catalog/options validation, schemas and operator-owned grants.                                                    |
+| Self-modification D3, D6–D8     | `tests/composer.test.ts`                                              | Source ownership, read-before-rewrite, exact granted stubs and checker declarations.                                             |
+| Self-modification A4, C1–C4, E1 | `../compose-agent/tests/{composer,consequences,self-editing}.test.ts` | Definitions mounted in `@frockbot/compose-agent`'s loop, including middleware, turn visibility and the end-to-end edit sequence. |
 
-The deleted `@frockbot/compose-agent` packaging test is intentionally not
-restored: the package whose ESM/CommonJS export shape it checked no longer
-exists. `@frockbot/compose-tools` keeps its own package build/publint checks.
+Upstream's deleted `compose-agent` packaging test is intentionally not restored:
+the published package whose ESM/CommonJS export shape it checked no longer
+exists, and this copy is workspace-private with no build or publish step of its
+own.

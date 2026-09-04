@@ -16,7 +16,7 @@
   "vars": { "MODEL_CREDENTIAL": "binding-value" },
   // Workers AI. There is no local simulation of it — inference always runs on
   // Cloudflare — so the routes that use it need a logged-in account, even under
-  // `wrangler dev`. The suite runs against a fake binding and needs neither;
-  // see `vitest.config.ts` for how it keeps the real one out of the way.
+  // `wrangler dev`. The suite never uses this binding: it drives the fake in
+  // `tests/helpers/ai.ts` instead, so it needs no account.
   "ai": { "binding": "AI" },
 }

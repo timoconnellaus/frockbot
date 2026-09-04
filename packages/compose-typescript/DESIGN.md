@@ -2,13 +2,15 @@
 
 The source checker for written plugins: it type-checks **plugin source** against
 the **plugin declarations** derived from the entry's granted **stubs**, and
-returns the JavaScript the **host** starts. It meets
-[`docs/acceptance/self-modification.md`](../../docs/acceptance/self-modification.md)
-D7, D8 and D9. It is client infrastructure outside core — a client without it
-starts source unchecked (D9), while a client created with it checks the same way
-for every host and every plugin-list position.
+returns the JavaScript the **host** starts. It meets upstream
+`docs/acceptance/self-modification.md` D7, D8 and D9, which was not vendored
+with the code (see
+[ADR-0038](../../docs/adr/0038-frockbot-compose-is-a-vendored-copy.md)). It is
+client infrastructure outside core — a client without it starts source unchecked
+(D9), while a client created with it checks the same way for every host and
+every plugin-list position.
 
-Core owns the seam ([`compose/DESIGN.md` §The type-check seam](../compose/DESIGN.md));
+Core owns the seam ([`compose-core/DESIGN.md` §The type-check seam](../compose-core/DESIGN.md));
 this package is one implementation of it. Nothing here changes how a plugin is
 written, and nothing in core knows this package exists.
 
@@ -375,11 +377,13 @@ are in the README.
 | First check, cold (the declaration library is parsed once) | ~200 ms |
 | Each check after, ~30 lines, warm                          | ~15 ms  |
 
-The suite runs under `node`, `jsdom`, and workerd in CI. The workerd arm uses
-the same `nodejs_compat` and `2026-05-01` compatibility date as the Cloudflare
-host and checks passing and failing source against a real grant declaration.
-Bun is not a CI runner here, but the checker was run by hand under Bun 1.3 and
-gave the same answers at the same cost.
+The suite runs under Bun (`bun test tests`). Upstream ran it under `node`,
+`jsdom`, and workerd in CI; those arms rode on Vitest and were not vendored with
+the copy (see
+[ADR-0038](../../docs/adr/0038-frockbot-compose-is-a-vendored-copy.md)).
+`tests/workerd/checker.test.ts` keeps the workerd arm's assertions — passing and
+failing source checked against a real grant declaration — and runs them under
+Bun here.
 
 On workerd the checker compiles source in the tenant Worker; the separate
 Cloudflare host still starts the returned JavaScript in a Dynamic Worker. The
@@ -395,20 +399,22 @@ lying about that. Only this package depends on it; core does not, and must not.
 
 ## Criterion → test
 
+Upstream's view rows (`ui.md` D2, a module's exports with the type of each) and
+its loading-cost row were covered by `tests/views.test.ts` and
+`tests/loading.test.ts`, which belong to the React adapter work that was not
+vendored with this copy.
+
 | Criterion                                                                                               | Test                                                     |
 | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | D7 — source is checked before it is started; a failure leaves the entry as it was, with line and column | `tests/checking.test.ts`                                 |
 | D7 — checked against exactly the granted stubs                                                          | `tests/checking.test.ts` ("a stub that was not granted") |
-| D8 — the declarations shown are the declarations checked                                                | `tests/declarations.test.ts`, `tests/composer.test.ts`   |
+| D8 — the declarations shown are the declarations checked                                                | `tests/declarations.test.ts`                             |
 | D9 — a client checker; the checked output runs in the in-process host                                   | `tests/running.test.ts`                                  |
 | D4 — a syntax error is a diagnostic, in the same shape as every other failure                           | `tests/checking.test.ts`                                 |
 | The module shape the declarations describe is enforced, not just documented                             | `tests/checking.test.ts`                                 |
 | Budget — size and per-check latency                                                                     | `tests/budget.test.ts`                                   |
-| The whole agent loop against this checker, end to end                                                   | `tests/composer.test.ts`                                 |
-| `ui.md` D2 — a view is checked against its plugin's named exports                                       | `tests/views.test.ts`                                    |
-| The exports of one module, with the type of each                                                        | `tests/views.test.ts`                                    |
-| Import/factory stay cheap; the first check evaluates TypeScript                                         | `tests/loading.test.ts`                                  |
-| TypeScript evaluates and checks source under workerd                                                    | `tests/workerd/checker.test.ts`                          |
+| The whole agent loop against this checker, end to end                                                   | `@frockbot/compose-agent`'s `typescript-composer` suite  |
+| TypeScript evaluates and checks source against a real grant declaration                                 | `tests/workerd/checker.test.ts` (runs under Bun here)    |
 | Generated method declarations, named aliases, stable hashes, and source checks                          | `tests/generate.test.ts`                                 |
 
 ## What was decided here

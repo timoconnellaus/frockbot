@@ -1,11 +1,13 @@
 # `@frockbot/compose-core` — kernel design
 
-How the kernel meets [`docs/acceptance/kernel.md`](../../docs/acceptance/kernel.md).
-Terms are from [`CONTEXT.md`](../../CONTEXT.md) and are used exactly as defined
-there. Decisions already fixed: [ADR-0001](../../docs/adr/0001-types-by-inference-not-augmentation.md)
-(types from builders), [ADR-0002](../../docs/adr/0002-state-in-tanstack-store.md)
-(observable state is `@tanstack/store`), [ADR-0003](../../docs/adr/0003-middleware-for-interception.md)
-(middleware intercepts, events observe).
+How the kernel meets upstream `docs/acceptance/kernel.md`. Terms are from the
+upstream Compose glossary and are used exactly as defined there — not from
+FrockBot's own `CONTEXT.md`, which is a different glossary. Decisions already
+fixed upstream: ADR-0001 (types from builders), ADR-0002 (observable state is
+`@tanstack/store`), ADR-0003 (middleware intercepts, events observe). None of
+those acceptance or decision documents were vendored with the code; see
+[ADR-0038](../../docs/adr/0038-frockbot-compose-is-a-vendored-copy.md) for the
+source boundary.
 
 ## Public primitives
 
@@ -307,9 +309,9 @@ a middleware rewrote it, rewrote the result, or stopped the call (E1).
 
 ## Hosts and plugin source
 
-How the kernel meets [`docs/acceptance/hosts.md` §A](../../docs/acceptance/hosts.md)
-and the seam [`self-modification.md` §D](../../docs/acceptance/self-modification.md)
-plugs into. Fixed by [ADR-0004](../../docs/adr/0004-host-contract-in-core.md): the
+How the kernel meets upstream `docs/acceptance/hosts.md` §A and the seam
+upstream `docs/acceptance/self-modification.md` §D plugs into. Fixed by upstream
+ADR-0004: the
 contract and the in-process host live here, every isolation library lives in its
 own package, and core stays dependency-free.
 
@@ -477,10 +479,19 @@ succeeded; the other hooks preserve restart and removal semantics without
 putting state or grant names in core.
 
 `createInProcessGrants` is the behavioral oracle for the full standard set.
-`http` accepts a base-owned name-to-origin policy, overwrites its configured
+`http` accepts a base-owned name-to-origin policy and executes every approved
+call through `executeHttpGrantFetch`, the hardened boundary in
+`src/grants/http.ts` that the Cloudflare host shares, so neither host can drift
+from the other: it decodes only `method`, string `headers`, and a string or
+`ArrayBuffer` `body` from the approved init, overwrites its configured
 credential header after middleware approves the request, rejects a path whose
-resolved origin differs, and returns a structured-clone-safe response record
-rather than a `Response`. Its fetch function is injectable for deterministic
+resolved origin differs, sends with `redirect: "manual"` and refuses a redirect
+status (301, 302, 303, 307, 308) so a credential never follows to another
+origin, bounds the call with a wall-clock deadline and the streamed response
+with a byte limit (five seconds and one mebibyte by default, both overridable
+per host), and returns a structured-clone-safe response record rather than a
+`Response`. A non-redirect 3xx such as `304` is an ordinary observable
+response. Its fetch function is injectable for deterministic
 tests and defaults to the runtime's real `fetch`. `ai` accepts a base-owned
 responder and defaults to echoing the prompt. `files` stores body bytes and an
 optional content type in a `Map` under `${entryId}/`; stopping retains objects
@@ -759,13 +770,12 @@ parity oracle, and the two have different jobs.
 | H2  | `tests/H-types.test-d.ts`           | `payloads, action input and result, and options are inferred from the builders`                                                                                                                            |
 | H3  | `tests/H-types.test-d.ts`           | `a plugin authored in another package keeps full types with value imports only`                                                                                                                            |
 | I1  | `tests/I-runtime.test.ts`           | `the core has no framework dependencies and no runtime-specific imports`                                                                                                                                   |
-| I1  | `tests/workerd/smoke.test.ts`       | `the kernel assembles, provides and cleans up under workerd` / `reports a clear error for a source entry, because workerd forbids evaluating code`                                                         |
 | I2  | `tests/I-runtime.test.ts`           | `two copies of the package loaded at once interoperate`                                                                                                                                                    |
 | I3  | `tests/I-runtime.test.ts`           | `the core uses no Proxy on hot paths` / `the core stays within its 6 kB min+gzip size budget`                                                                                                              |
 | I4  | `tests/I-runtime.test.ts`           | `every public export has JSDoc and DESIGN.md maps every criterion`                                                                                                                                         |
 | J1  | `tests/J-end-to-end.test.ts`        | `assembles a client, swaps a provider, and edits its own plugin list`                                                                                                                                      |
 
-### `docs/acceptance/hosts.md` §A
+### Upstream `docs/acceptance/hosts.md` §A
 
 | Id  | Test file                             | `it()` title                                                                                                                                                                                                                                                                                                                                                   |
 | --- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -782,7 +792,7 @@ The host-local `storage` and `schedule` oracle is covered by
 removal destroys it, and an alarm invokes a named export with no request in
 flight.
 
-### `docs/acceptance/self-modification.md` §D — the parts core owns
+### Upstream `docs/acceptance/self-modification.md` §D — the parts core owns
 
 | Id  | Test file                             | `it()` title                                                                                                                                                                                                                                                                                                                    |
 | --- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -797,11 +807,12 @@ checker that proves it.
 
 ### Notes on coverage
 
-- **I1 runs in all three environments.** `pnpm --filter @frockbot/compose-core test:lib`
-  runs the suite under Node (`vitest.config.ts`) and jsdom
-  (`vitest.jsdom.config.ts`), then the workerd smoke test
-  (`vitest.workerd.config.ts`, `@cloudflare/vitest-pool-workers` with its
-  `cloudflareTest` plugin). No criterion is only partially met.
+- **I1 runs under Bun here.** `bun run --filter @frockbot/compose-core test`
+  runs the suite. Upstream's jsdom and workerd arms rode on Vitest and were not
+  vendored with the copy (see
+  [ADR-0038](../../docs/adr/0038-frockbot-compose-is-a-vendored-copy.md)), so the
+  environment-independence criterion is met here by the static checks in
+  `tests/I-runtime.test.ts` rather than by running the suite three times.
 - **I3 — size** is a test in `tests/I-runtime.test.ts`: a rolldown bundle of
   `src/index.ts`, minified and gzipped, with `@tanstack/store` external. The
   kernel, with the host contract and generic in-process host in it, is measured
