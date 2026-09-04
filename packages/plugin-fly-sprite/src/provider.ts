@@ -317,7 +317,7 @@ function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
   }
   if (failed) {
     detail.push(
-      `${report.failures.length} sync ${report.failures.length === 1 ? "operation" : "operations"} failed: ${failed.status}: ${failed.reason}.`,
+      `${report.failures.length} sync ${report.failures.length === 1 ? "operation" : "operations"} failed${failed.path ? ` at "${failed.path}"` : ""}: ${failed.status}: ${failed.reason}.`,
     );
   }
   const summary: ComputerSyncSummaryV1 = {

@@ -16,12 +16,13 @@
  * `host-client.test.ts`'s subject and the workerd suite's, and repeating it
  * here would test the transport three more times and the provider none.
  */
-import type {
-  ComputerHostControlResultV1,
-  ComputerHostFileReadResultV1,
-  ComputerHostOpenResultV1,
-  ComputerHostProvisioningV1,
-  ComputerHostViewerResultV1,
+import {
+  COMPUTER_HOST_LIMITS,
+  type ComputerHostControlResultV1,
+  type ComputerHostFileReadResultV1,
+  type ComputerHostOpenResultV1,
+  type ComputerHostProvisioningV1,
+  type ComputerHostViewerResultV1,
 } from "@frockbot/computer-host-protocol";
 import { DESKTOP_GUI_LEASE_KEY } from "@frockbot/computer-host-runtime";
 import {
@@ -136,6 +137,14 @@ export class FakeComputerHost {
         options?: ComputerHostCallOptions,
       ): Promise<ComputerHostExecOutcomeV1> {
         options?.signal?.throwIfAborted();
+        // The real host's decoder refuses an oversized script, and a double
+        // that accepted one would let a suite prove a push works at a size the
+        // Computer would never have been handed.
+        if (command.script.length > COMPUTER_HOST_LIMITS.script) {
+          throw new Error(
+            `script exceeds ${COMPUTER_HOST_LIMITS.script} characters`,
+          );
+        }
         host.commands.push({
           botId,
           script: command.script,

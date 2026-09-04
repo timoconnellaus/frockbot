@@ -71,6 +71,11 @@ export const WORKSPACE_SYNC_DIR = ".frockbot-sync";
 export const SYNC_TOMBSTONES_DIR = "tombstones";
 /** Where a losing write is preserved on the Computer, under `WORKSPACE_SYNC_DIR`. */
 export const SYNC_CONFLICTS_DIR = "conflicts";
+/**
+ * Where a file too large for one command is assembled chunk by chunk before it
+ * is moved into place, under `WORKSPACE_SYNC_DIR`.
+ */
+export const SYNC_STAGING_DIR = "staging";
 const GENERATIONS_DIR = WORKSPACE_GENERATIONS_DIR;
 const LOCKS_DIR = ".frockbot-locks";
 /** The sha-256 of no bytes; a deletion tombstone's content address. */

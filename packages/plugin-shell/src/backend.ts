@@ -2492,7 +2492,9 @@ export class ShellBotBackendContribution {
               sessions: typeof active.mounted.runtime.root.sessions;
             };
             const computerIdentity = { userId: identity.userId };
-            if (!root.computers?.assignment(computerIdentity)) return;
+            if (!root.computers?.assignment(computerIdentity)) {
+              return { status: "skipped", detail: "" } as const;
+            }
             const session = root.sessions.get(active.sessionId);
             const started = session?.events.findLast(
               (event) => event.type === "step/start",
@@ -2503,7 +2505,7 @@ export class ShellBotBackendContribution {
               { botId: identity.botId },
               { signal: active.signal },
             );
-            await syncWorkspaceRootNowV1({
+            const summary = await syncWorkspaceRootNowV1({
               computer,
               sessions: root.sessions,
               sessionId: active.sessionId,
@@ -2514,6 +2516,7 @@ export class ShellBotBackendContribution {
               ),
               signal: active.signal,
             });
+            return { status: summary.status, detail: summary.detail };
           }
         : undefined,
       composition: {

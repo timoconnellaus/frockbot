@@ -25,8 +25,10 @@ import {
   FlySpriteSyncSurface,
   isWorkspaceSyncIgnoredPathV1,
   WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1,
+  WORKSPACE_SYNC_CHUNK_BYTES_V1,
   WORKSPACE_SYNC_MANIFEST_MAX_BYTES_V1,
   WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1,
+  WORKSPACE_SYNC_MAX_FILE_BYTES_V1,
   type WorkspaceSyncReportV1,
 } from "./sync.ts";
 import { WORKSPACE_EMPTY_SHA256 } from "./workspace.ts";
@@ -65,6 +67,19 @@ function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/**
+ * Text of an exact length whose every chunk differs from every other, so a
+ * chunk carried twice, dropped, or reordered changes the bytes rather than
+ * hiding inside a repeated pattern.
+ */
+function largeText(length: number): string {
+  let text = "";
+  for (let index = 0; text.length < length; index += 1) {
+    text += `${index}:${"abcdefghijklmnopqrstuvwxyz".repeat(3)}\n`;
+  }
+  return text.slice(0, length);
+}
+
 function quoted(shell: string, name: string): string | undefined {
   return new RegExp(`${name}='([^']*)'`).exec(shell)?.[1];
 }
@@ -95,9 +110,12 @@ class FakeSyncSprite {
   lastScanScript?: string;
   /** Drops the next sidecar write, as a pause between store and Computer does. */
   dropNextMaterialize = false;
+  /** Every script this Computer was handed, in order. */
+  readonly scripts: string[] = [];
 
   /** Runs one script for the host double. */
   readonly run = (script: string): FakeComputerRunV1 => {
+    this.scripts.push(script);
     // A paused Sprite answers nothing, and the host reports the failed exit;
     // the provider turns that into `Sprite storage operation failed: …`.
     if (this.paused) return { exitCode: 1, stderr: "Sprite is paused" };
@@ -149,6 +167,7 @@ class FakeSyncSprite {
       );
       return this.scan(root ?? "", required);
     }
+    if (shell.includes("__STAGED__")) return this.stageChunk(shell);
     if (root && relative) {
       if (shell.includes("__SYNCED__")) {
         if (this.dropNextMaterialize) {
@@ -162,7 +181,7 @@ class FakeSyncSprite {
       if (shell.includes("__FORGOTTEN__")) return this.forget(root, relative);
       if (shell.includes("__PRESERVED__"))
         return this.preserve(root, relative, shell);
-      return this.read(`${root}/${relative}`);
+      return this.readFile(`${root}/${relative}`, shell);
     }
     const note = quoted(shell, "NOTE");
     if (note) {
@@ -180,6 +199,65 @@ class FakeSyncSprite {
     const signal = quoted(shell, "SIGNAL");
     if (signal) return this.read(signal, false);
     return "";
+  }
+
+  /**
+   * The chunked file read: a header of size and digest with the first chunk,
+   * then one chunk per further command. `head -c` and `tail -c +N` are the
+   * coreutils the sync emits; the arithmetic is theirs, not an approximation.
+   */
+  private readFile(path: string, shell: string): string {
+    const bytes = this.files.get(path);
+    const chunk = /tail -c \+(\d+) "\$FILE" \| head -c (\d+)/.exec(shell);
+    if (chunk) {
+      const offset = Number(chunk[1]) - 1;
+      const limit = Number(chunk[2]);
+      const slice = bytes?.subarray(offset, offset + limit) ?? new Uint8Array();
+      return `${Buffer.from(slice).toString("base64")}\n`;
+    }
+    if (!bytes) return "__MISSING__\n";
+    if (bytes.byteLength > WORKSPACE_SYNC_MAX_FILE_BYTES_V1) {
+      return "__TOO_LARGE__\n";
+    }
+    const head = bytes.subarray(0, WORKSPACE_SYNC_CHUNK_BYTES_V1);
+    return `${bytes.byteLength}\t${sha256(bytes)}\n${Buffer.from(head).toString("base64")}\n`;
+  }
+
+  /** One appended chunk of a staged file, as the push writes it. */
+  private stageChunk(shell: string): string {
+    const path = quoted(shell, "STAGE") ?? "";
+    const encoded =
+      /printf %s '([^']*)' \| base64 -d >> "\$STAGE"/.exec(shell)?.[1] ?? "";
+    const chunk = Buffer.from(encoded, "base64");
+    const held = shell.includes('rm -f "$STAGE"')
+      ? undefined
+      : this.files.get(path);
+    this.files.set(
+      path,
+      Uint8Array.from(held ? Buffer.concat([Buffer.from(held), chunk]) : chunk),
+    );
+    return "__STAGED__\n";
+  }
+
+  /**
+   * The bytes a commit command puts in place: written inline when they fitted
+   * in one command, otherwise the staged file it moves, digest-checked exactly
+   * as the emitted `sha256sum` line checks it.
+   */
+  private committed(
+    shell: string,
+    target: string,
+  ): Uint8Array | "corrupt" | undefined {
+    const stage = quoted(shell, "STAGE");
+    if (stage) {
+      const expected = /f1\)" != '([0-9a-f]{64})'/.exec(shell)?.[1];
+      const bytes = this.files.get(stage) ?? new Uint8Array();
+      this.files.delete(stage);
+      return expected && sha256(bytes) !== expected ? "corrupt" : bytes;
+    }
+    const encoded = payload(shell, target);
+    if (encoded === undefined) return undefined;
+    return Uint8Array.from(Buffer.from(encoded, "base64"));
   }
 
   private read(path: string, base64 = true): string {
@@ -280,12 +358,10 @@ class FakeSyncSprite {
   }
 
   private materialize(root: string, relative: string, shell: string): string {
-    const bytes = payload(shell, "TMP") ?? "";
+    const bytes = this.committed(shell, "TMP");
+    if (bytes === "corrupt") return "__CORRUPT__\n";
     const meta = payload(shell, "MTMP") ?? "";
-    this.files.set(
-      `${root}/${relative}`,
-      Uint8Array.from(Buffer.from(bytes, "base64")),
-    );
+    this.files.set(`${root}/${relative}`, bytes ?? new Uint8Array());
     this.files.set(
       `${root}/.frockbot-generations/${relative}`,
       Uint8Array.from(Buffer.from(meta, "base64")),
@@ -316,10 +392,11 @@ class FakeSyncSprite {
   private preserve(root: string, relative: string, shell: string): string {
     const generationId =
       /conflicts\/\$REL\/([^"]*)"/.exec(shell)?.[1] ?? "unknown";
-    const bytes = payload(shell, "KEPT") ?? "";
+    const bytes = this.committed(shell, "TMP");
+    if (bytes === "corrupt") return "__CORRUPT__\n";
     this.files.set(
       `${root}/.frockbot-sync/conflicts/${relative}/${generationId}`,
-      Uint8Array.from(Buffer.from(bytes, "base64")),
+      bytes ?? new Uint8Array(),
     );
     return "__PRESERVED__\n";
   }
@@ -1407,6 +1484,69 @@ describe("the durable-root sync on the Computer handle", () => {
       "publish",
     );
     expect(refused.status).toBe("refused");
+  });
+
+  // Production, 2026-09-04: `applet build` wrote a 470 KB `dist/ui.html`, and
+  // every publish that followed failed, because one `base64` of the file was
+  // 627 KB of answer and the storage command may answer 500 KB. Both directions
+  // are checked at 700 KB, which is past that ceiling and past the point where
+  // one script could carry the base64 either.
+  test("pushes a file far larger than one storage command can answer, byte for byte", async () => {
+    const { sprite, store, open } = providerHarness([
+      APPLET_SOURCE_PACKAGE_ROOT,
+    ]);
+    const handle = await open();
+    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const page = largeText(700_000);
+    sprite.shellWrite(MOUNTS.appletSource, `${appletId}/dist/ui.html`, page);
+
+    const summary = await handle.sync!.reconcileRoot!(
+      appletSourceRoot,
+      "publish",
+      { requiredPaths: [`${appletId}/dist/ui.html`] },
+    );
+
+    expect(summary).toMatchObject({ status: "ok", pushed: 1, failures: 0 });
+    const stored = await store.read({
+      root: appletSourceRoot,
+      path: `${appletId}/dist/ui.html`,
+    });
+    expect(stored.status).toBe("ok");
+    if (stored.status === "ok") {
+      expect(stored.file.bytes.byteLength).toBe(page.length);
+      expect(decoder.decode(stored.file.bytes)).toBe(page);
+    }
+  });
+
+  // The other direction has the other ceiling: the bytes travel out as base64
+  // inside the script, and a script may be 1 MB, so 900 KB of file is 1.2 MB of
+  // script and the whole command was refused before it ran.
+  test("pulls a file far larger than one storage command can carry, byte for byte", async () => {
+    const { sprite, store, open } = providerHarness();
+    const page = largeText(900_000);
+    await writeToStore(store, skillsRoot, "reference.md", page, BOT_WRITER);
+
+    const handle = await open();
+    const summary = await handle.sync!.reconcile("open");
+
+    expect(summary).toMatchObject({ status: "ok", pulled: 1, failures: 0 });
+    expect(sprite.text(`${MOUNTS.skills}/reference.md`)).toBe(page);
+    // The staging file the chunks were assembled in is moved into place, never
+    // left behind for the next scan to find.
+    expect(sprite.keys(`${MOUNTS.skills}/.frockbot-sync/staging`)).toEqual([]);
+  });
+
+  test("carries a file that fits in one command in one command", async () => {
+    const { sprite, store, open } = providerHarness();
+    await writeToStore(store, skillsRoot, "small.md", "# small", BOT_WRITER);
+    const handle = await open();
+
+    await handle.sync!.reconcile("open");
+
+    expect(sprite.text(`${MOUNTS.skills}/small.md`)).toBe("# small");
+    expect(
+      sprite.scripts.filter((script) => script.includes("__STAGED__")),
+    ).toEqual([]);
   });
 
   test("answers unavailable rather than throwing when the Sprite is paused", async () => {
