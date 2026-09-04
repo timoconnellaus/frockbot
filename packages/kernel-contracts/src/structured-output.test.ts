@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   decodeModelResponseFormatV1,
   decodeStructuredOutputSchemaV1,
+  parseStructuredOutputJsonV1,
   validateStructuredOutputV1,
 } from "./structured-output.js";
 
@@ -39,6 +40,28 @@ describe("the structured-output schema subset", () => {
       },
       raw: "not json",
     });
+  });
+
+  test("validates schema-free JSON mode", () => {
+    expect(parseStructuredOutputJsonV1('[1,"two",true]')).toEqual({
+      status: "completed",
+      value: [1, "two", true],
+      raw: '[1,"two",true]',
+    });
+    expect(parseStructuredOutputJsonV1("not json")).toMatchObject({
+      status: "failed",
+      failure: { code: "invalid-json" },
+    });
+  });
+
+  test("compares object enum members as JSON values, independent of key order", () => {
+    const enumSchema = decodeStructuredOutputSchemaV1({
+      type: "object",
+      enum: [{ first: 1, second: 2 }],
+    });
+    expect(
+      validateStructuredOutputV1('{"second":2,"first":1}', enumSchema),
+    ).toMatchObject({ status: "completed" });
   });
 
   test("reports required, type, enum and additional-property failures", () => {

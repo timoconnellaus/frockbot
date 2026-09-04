@@ -7,6 +7,7 @@ import {
   type ModelInvocation,
   type NormalizedModelRequest,
   type JsonSchemaResponseFormatV1,
+  parseStructuredOutputJsonV1,
   type StructuredModelResultV1,
   validateStructuredOutputV1,
 } from "@frockbot/kernel-contracts";
@@ -59,7 +60,7 @@ export class LlmRegistry extends Service implements ModelInvocation {
   ): AsyncIterable<LlmStreamEvent> {
     let text = "";
     let sawStructuredFailure = false;
-    let validatedStructuredOutput = false;
+    let validatedResponseFormat = false;
     for await (const event of events) {
       if (event.type === "text-delta") text += event.text;
       if (event.type === "structured-output-failure") {
@@ -67,32 +68,22 @@ export class LlmRegistry extends Service implements ModelInvocation {
       }
       if (
         event.type === "finish" &&
-        request.responseFormat?.type === "json_schema" &&
+        request.responseFormat &&
         !sawStructuredFailure
       ) {
-        validatedStructuredOutput = true;
-        const result = validateStructuredOutputV1(
-          text,
-          request.responseFormat.schema,
-        );
-        if (result.status === "failed") {
-          yield { type: "structured-output-failure", failure: result.failure };
-        }
+        validatedResponseFormat = true;
+        const failure = responseFormatFailureV1(request, text);
+        if (failure) yield { type: "structured-output-failure", failure };
       }
       yield event;
     }
     if (
-      request.responseFormat?.type === "json_schema" &&
+      request.responseFormat &&
       !sawStructuredFailure &&
-      !validatedStructuredOutput
+      !validatedResponseFormat
     ) {
-      const result = validateStructuredOutputV1(
-        text,
-        request.responseFormat.schema,
-      );
-      if (result.status === "failed") {
-        yield { type: "structured-output-failure", failure: result.failure };
-      }
+      const failure = responseFormatFailureV1(request, text);
+      if (failure) yield { type: "structured-output-failure", failure };
     }
   }
 
@@ -149,10 +140,7 @@ export class LlmRegistry extends Service implements ModelInvocation {
         { providerEffectId: request.requestId, request },
         signal,
       );
-      if (
-        outcome.status !== "recovered" ||
-        request.responseFormat?.type !== "json_schema"
-      ) {
+      if (outcome.status !== "recovered" || !request.responseFormat) {
         return outcome;
       }
       const raw = outcome.events
@@ -162,18 +150,15 @@ export class LlmRegistry extends Service implements ModelInvocation {
         )
         .map((event) => event.text)
         .join("");
-      const validated = validateStructuredOutputV1(
-        raw,
-        request.responseFormat.schema,
-      );
-      if (validated.status === "completed") return outcome;
+      const failure = responseFormatFailureV1(request, raw);
+      if (!failure) return outcome;
       const finish = outcome.events.findIndex(
         (event) => event.type === "finish",
       );
       const events = [...outcome.events];
       events.splice(finish < 0 ? events.length : finish, 0, {
         type: "structured-output-failure",
-        failure: validated.failure,
+        failure,
       });
       return { status: "recovered", events };
     } catch (error) {
@@ -187,4 +172,19 @@ export class LlmRegistry extends Service implements ModelInvocation {
       };
     }
   }
+}
+
+function responseFormatFailureV1(
+  request: NormalizedModelRequest,
+  text: string,
+):
+  | Extract<StructuredModelResultV1<unknown>, { status: "failed" }>["failure"]
+  | undefined {
+  const format = request.responseFormat;
+  if (!format) return undefined;
+  const result =
+    format.type === "json_schema"
+      ? validateStructuredOutputV1(text, format.schema)
+      : parseStructuredOutputJsonV1(text);
+  return result.status === "failed" ? result.failure : undefined;
 }

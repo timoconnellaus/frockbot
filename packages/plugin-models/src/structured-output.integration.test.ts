@@ -101,4 +101,34 @@ describe("structured output through a fake provider", () => {
     }
     await root.fiber.dispose();
   });
+
+  test("emits a typed invalid-JSON failure for schema-free JSON mode", async () => {
+    const root = new Context();
+    await root.plugin(LlmRegistry);
+    root.llm.register({
+      id: "fake-json",
+      supports: { structuredOutput: "json" },
+      async *stream(modelRequest) {
+        expect(modelRequest.responseFormat).toEqual({ type: "json" });
+        yield { type: "text-delta", text: "not json" };
+        yield { type: "finish", reason: "completed" };
+      },
+    });
+    const events = [];
+    for await (const event of root.llm.stream(
+      {
+        ...request(),
+        provider: "fake-json",
+        responseFormat: { type: "json" },
+      },
+      new AbortController().signal,
+    )) {
+      events.push(event);
+    }
+    expect(events.at(-2)).toMatchObject({
+      type: "structured-output-failure",
+      failure: { code: "invalid-json" },
+    });
+    await root.fiber.dispose();
+  });
 });

@@ -236,19 +236,9 @@ export function validateStructuredOutputV1(
   text: string,
   schema: StructuredOutputSchemaV1,
 ): StructuredModelResultV1<unknown> {
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    return {
-      status: "failed",
-      failure: {
-        code: "invalid-json",
-        message: "The model response was not valid JSON",
-      },
-      raw: text,
-    };
-  }
+  const parsed = parseStructuredOutputJsonV1(text);
+  if (parsed.status === "failed") return parsed;
+  const value = parsed.value;
   const issues: StructuredOutputIssueV1[] = [];
   validateValue(value, schema, "$", issues);
   return issues.length === 0
@@ -262,6 +252,24 @@ export function validateStructuredOutputV1(
         },
         raw: text,
       };
+}
+
+/** Parse-only validation for a request that asks for JSON without a schema. */
+export function parseStructuredOutputJsonV1(
+  text: string,
+): StructuredModelResultV1<unknown> {
+  try {
+    return { status: "completed", value: JSON.parse(text), raw: text };
+  } catch {
+    return {
+      status: "failed",
+      failure: {
+        code: "invalid-json",
+        message: "The model response was not valid JSON",
+      },
+      raw: text,
+    };
+  }
 }
 
 function validateValue(
@@ -334,7 +342,28 @@ function pushIssue(
 }
 
 function jsonEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((member, index) => jsonEqual(member, right[index]))
+    );
+  }
+  if (isRecord(left) || isRecord(right)) {
+    if (!isRecord(left) || !isRecord(right)) return false;
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    return (
+      leftKeys.length === rightKeys.length &&
+      leftKeys.every(
+        (key, index) =>
+          key === rightKeys[index] && jsonEqual(left[key], right[key]),
+      )
+    );
+  }
+  return false;
 }
 
 function requireExactKeys(
