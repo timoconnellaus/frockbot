@@ -36,6 +36,7 @@ import {
   type CatalogPointerV1,
 } from "../packages/catalog-core/src/index.ts";
 import { canonicalJson } from "../packages/kernel-composition/src/compiler.ts";
+import { catalogDescriptionFor } from "./catalog-descriptions.ts";
 import type { FrockBotManifest } from "../packages/kernel-composition/src/manifest.ts";
 
 export interface CatalogSourcePackage {
@@ -69,9 +70,10 @@ async function contentHash(value: unknown): Promise<string> {
 }
 
 /**
- * A one-line description of what a Package contributes. The manifest carries
- * no prose, and inventing marketing copy for a first-party Package would be a
- * lie the index then repeats; naming its Contributions is true and useful.
+ * The last-resort description, for a Package nobody has written a line for.
+ * Naming its Contributions is at least true, but it says nothing a person
+ * browsing the Catalog can act on and nothing `package_search` can match, so
+ * `scripts/catalog-descriptions.ts` should cover every Package we ship.
  */
 function describe(manifest: FrockBotManifest): string {
   const contributions = Object.keys(manifest.contributions).sort();
@@ -94,7 +96,11 @@ export async function buildCatalogGeneration(
   const rows: CatalogIndexEntryV1[] = [];
   for (const pkg of [...packages].sort((a, b) => a.id.localeCompare(b.id))) {
     const manifestHash = await contentHash(pkg.manifest);
-    const description = pkg.catalog?.description ?? describe(pkg.manifest);
+    // A Bot-authored publication brings its own copy; ours is looked up.
+    const description =
+      pkg.catalog?.description ??
+      catalogDescriptionFor(pkg.id) ??
+      describe(pkg.manifest);
     const row: CatalogIndexEntryV1 = {
       catalogId: pkg.id,
       packageId: pkg.id,

@@ -26,6 +26,7 @@ import {
   resolveEffectiveBotModelV1,
   type ExecutionPackageDefinition,
   type ModelBindingV1,
+  type UserSettingsViewV1,
 } from "./index.js";
 import {
   isApplicationDeploymentHash,
@@ -1655,6 +1656,144 @@ describe("effective Bot model resolution", () => {
       ),
     });
     expect(effective.model).toBeUndefined();
+  });
+
+  /**
+   * The real account shape: a platform provider that is always there, and a
+   * separate provider Package the User switched on and bound their model to.
+   */
+  const flockModel: ModelBindingV1 = {
+    connectionId: "flock-ai",
+    providerModelId: "@flock/auto",
+  };
+  const flockPackage: ExecutionPackageDefinition = {
+    packageId: "provider-flock-ai",
+    version: "0.0.1",
+    settings: [],
+    capabilities: [
+      {
+        id: "flock-ai-models",
+        kind: "model",
+        connectionTypes: ["flock-ai-account"],
+      },
+    ],
+    connectionTypes: [
+      { id: "flock-ai-account", capabilities: ["flock-ai-models"] },
+    ],
+  };
+  function withFlock(): UserSettingsViewV1 {
+    const base = user();
+    return {
+      ...base,
+      packages: [
+        ...base.packages,
+        {
+          packageId: "provider-flock-ai",
+          version: "0.0.1",
+          state: "installed",
+        },
+        {
+          packageId: "custom-models",
+          version: "0.0.1",
+          state: "installed",
+          values: { model: accountModel },
+        },
+      ],
+      connections: [
+        ...base.connections,
+        {
+          connectionId: "flock-ai",
+          packageId: "provider-flock-ai",
+          connectionTypeId: "flock-ai-account",
+          displayName: "Flock AI",
+          state: "ready",
+          providerType: "flock-ai",
+          modelCatalog: {
+            schemaVersion: 1,
+            generation: "flock-catalog-1",
+            state: "fresh",
+            models: [
+              {
+                providerModelId: "@flock/auto",
+                displayName: "Auto",
+                capabilities: { tools: true, vision: false, reasoning: true },
+                source: "discovered",
+              },
+            ],
+          },
+          safeMetadata: {},
+        },
+      ],
+      platformModel: flockModel,
+    };
+  }
+  const flockPackages = [...modelPackages, flockPackage];
+
+  test("falls back to the platform model when the bound provider is switched off", () => {
+    const providerOff = (() => {
+      const settings = withFlock();
+      return {
+        ...settings,
+        packages: settings.packages.map((pkg) =>
+          pkg.packageId === "provider-ollama-cloud"
+            ? { ...pkg, state: "disabled" as const }
+            : pkg,
+        ),
+      };
+    })();
+    const effective = resolveEffectiveBotModelV1({
+      bot: { packageValues: {} },
+      user: providerOff,
+      packages: flockPackages,
+    });
+    expect(effective.source).toBe("platform");
+    expect(effective.model).toEqual(flockModel);
+    expect(effective.binding?.state).toBe("ready");
+    expect(effective.fallback).toMatchObject({
+      from: "account",
+      model: accountModel,
+    });
+  });
+
+  test("falls back when a Bot's model has lost its Connection", () => {
+    const settings = withFlock();
+    const connectionGone: UserSettingsViewV1 = {
+      ...settings,
+      connections: settings.connections.filter(
+        (connection) => connection.connectionId !== "ollama-work",
+      ),
+    };
+    const effective = resolveEffectiveBotModelV1({
+      bot: { packageValues: { "custom-models": { model: accountModel } } },
+      user: connectionGone,
+      packages: flockPackages,
+    });
+    expect(effective).toMatchObject({ source: "platform", model: flockModel });
+    expect(effective.fallback?.from).toBe("bot");
+    expect(effective.binding?.state).toBe("ready");
+  });
+
+  test("keeps the failure when the platform model cannot stand in either", () => {
+    // Nothing to degrade to: the platform bootstrap is bound to the same
+    // switched-off Package, so the User still gets the repair sentence.
+    const settings = withFlock();
+    const bothOff: UserSettingsViewV1 = {
+      ...settings,
+      packages: settings.packages.map((pkg) =>
+        pkg.packageId === "provider-ollama-cloud"
+          ? { ...pkg, state: "disabled" as const }
+          : pkg,
+      ),
+      platformModel,
+    };
+    const effective = resolveEffectiveBotModelV1({
+      bot: { packageValues: {} },
+      user: bothOff,
+      packages: flockPackages,
+    });
+    expect(effective.source).toBe("account");
+    expect(effective.binding?.state).toBe("unavailable");
+    expect(effective.fallback).toBeUndefined();
   });
 
   test("reports none only when no Package or platform model supplies one", () => {

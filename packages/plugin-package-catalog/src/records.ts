@@ -34,7 +34,8 @@ export interface PackageCatalogChangeIntentV1 {
   version: string;
   catalogId: string;
   catalogGeneration: string;
-  contentHash: string;
+  /** Absent for a first-party entry, which publishes no bundle to pin. */
+  contentHash?: string;
   manifestHash: string;
   summary: string;
   missingConnectionTypes: string[];

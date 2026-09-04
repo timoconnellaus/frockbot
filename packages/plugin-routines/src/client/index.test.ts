@@ -3,6 +3,8 @@ import type {
   ClientPluginContext,
   ClientSlotRegistration,
 } from "@frockbot/client-core";
+import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
+import { ref } from "vue";
 import { routinesClientPlugin } from "./index.js";
 import { routinesStateKey, type RoutinesClientState } from "./state.js";
 
@@ -205,5 +207,89 @@ describe("Routines client contribution", () => {
       status: "running",
     });
     mounted.dispose();
+  });
+});
+
+describe("the completion badge and the state channel", () => {
+  /**
+   * A Routine that finishes cannot speak in the transcript, so the badge is
+   * the only place a completion becomes visible — and it used to read the
+   * inbox only on a Bot switch and on opening the drawer. A firing that
+   * completed while the app sat open left the count stale until something else
+   * happened to reload it, which for a `@every 1m` Routine is most of the day.
+   */
+  test("reads the inbox again when the Bot's runs change", async () => {
+    const inboxReads: string[] = [];
+    let invalidate:
+      ((topic: "computer" | "runs" | undefined) => Promise<void>) | undefined;
+    let stopped = 0;
+    const shell = ref({ activeBotId: "scout" });
+    const context: ClientPluginContext = {
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        hostedRequest: (path) => {
+          if (path.endsWith("/inbox")) {
+            inboxReads.push(path);
+            return Promise.resolve({
+              schemaVersion: 1,
+              botId: "scout",
+              entries: [],
+              unacknowledged: inboxReads.length,
+            });
+          }
+          return Promise.resolve({
+            schemaVersion: 1,
+            botId: "scout",
+            routines: [],
+          });
+        },
+        watchBotState: (_botId, listener) => {
+          invalidate = listener.invalidate;
+          return () => {
+            stopped += 1;
+          };
+        },
+      },
+      inject: (key) => {
+        if (key === frockBotWebDataKey) return shell as never;
+        throw new Error("unexpected client provider");
+      },
+      provide: () => () => {},
+      slot: () => () => {},
+    };
+    const disposers = routinesClientPlugin(context);
+    if (!Array.isArray(disposers)) throw new Error("expected registrations");
+
+    expect(invalidate).toBeDefined();
+    // A Turn settling on this Bot — an automation Turn is one — refreshes it.
+    await invalidate!("runs");
+    // A resynchronise carries no topic and must not be filtered out.
+    await invalidate!(undefined);
+    // Another subsystem's news is not the badge's business.
+    await invalidate!("computer");
+    expect(inboxReads).toHaveLength(2);
+
+    shell.value = { activeBotId: "other" };
+    await Promise.resolve();
+    expect(stopped).toBe(1);
+    for (const dispose of disposers.toReversed()) dispose();
+  });
+
+  test("does not reach for the shell when the client has no state channel", () => {
+    // The Cordis local host has no channel. Injecting the shell there would
+    // throw on mount and take the whole Contribution with it.
+    const context: ClientPluginContext = {
+      transport: {
+        turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
+        hostedRequest: () =>
+          Promise.resolve({ schemaVersion: 1, botId: "scout", routines: [] }),
+      },
+      inject: () => {
+        throw new Error("unexpected client provider");
+      },
+      provide: () => () => {},
+      slot: () => () => {},
+    };
+    expect(() => routinesClientPlugin(context)).not.toThrow();
   });
 });

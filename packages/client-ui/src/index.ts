@@ -16,3 +16,11 @@ export { default as UiMarkdown } from "./UiMarkdown.vue";
 export { renderMarkdown } from "./markdown.js";
 export { default as UiSkeleton } from "./UiSkeleton.vue";
 export { createClientSurfaceRegistry } from "./surfaces.js";
+export {
+  browserTimeZoneV1,
+  formatDayV1,
+  formatMomentV1,
+  formatRelativeMomentV1,
+  formatTimeOfDayV1,
+  type UiMomentOptionsV1,
+} from "./time.js";

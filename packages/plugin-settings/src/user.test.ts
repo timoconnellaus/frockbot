@@ -746,6 +746,51 @@ describe("User settings backend Contribution", () => {
         },
       }),
     ).resolves.toMatchObject({ status: "applied", revision: 4 });
+
+    // The mirror of the rule above, read the other way round. Disabling the
+    // dependency is allowed — refusing it would make a Package the User never
+    // chose able to pin one they did — and carries its dependents with it, so
+    // the account never lands in the state the enable path refuses:
+    // `custom-models=disabled provider-ollama-cloud=installed`.
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-enabled",
+          commandId: "disable-custom-models",
+          expectedRevision: 4,
+          packageId: "custom-models",
+          enabled: false,
+        },
+      }),
+    ).resolves.toMatchObject({ status: "applied", revision: 5 });
+    const cascaded = await settings.read("user-1");
+    expect(cascaded.packages[0]).toMatchObject({
+      packageId: "custom-models",
+      state: "disabled",
+    });
+    expect(cascaded.packages[1]).toMatchObject({
+      packageId: "provider-ollama-cloud",
+      state: "disabled",
+    });
+
+    // The cascade is not automatic re-enablement: turning the dependency back
+    // on leaves the dependent off until the User asks for it.
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "re-enable-custom-models",
+        expectedRevision: 5,
+        packageId: "custom-models",
+        enabled: true,
+      },
+    });
+    expect((await settings.read("user-1")).packages[1]?.state).toBe("disabled");
   });
 
   test("applies the platform model through the backend Contribution", async () => {

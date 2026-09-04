@@ -346,10 +346,13 @@ export class AuditStoreV1 {
   /**
    * One filtered, paged answer.
    *
-   * The cursor is an offset rather than a key range, matching the transcript
-   * index's, because the table is bounded at twenty thousand rows: the deepest
-   * possible page is cheap, and an opaque offset cannot be used to address a
-   * row the filters would have excluded.
+   * The cursor names the last row of the page it came from, not how many rows
+   * were skipped. An offset over a table written at the head is a window that
+   * moves under the reader: every row inserted between "Load more" and the
+   * page before it shifted the window down, so the next page repeated rows
+   * already on screen — visibly, as duplicate keys — and skipped exactly as
+   * many that nobody ever saw. A key range is stable under inserts because it
+   * addresses a row rather than a position.
    */
   query(request: {
     botId?: string;
@@ -364,7 +367,7 @@ export class AuditStoreV1 {
     // row past the 180-day bound simply because no insert came to evict them.
     this.evict();
     const limit = Math.min(Math.max(request.limit ?? 50, 1), 500);
-    const offset = decodeAuditOffsetV1(request.before);
+    const after = decodeAuditCursorV1(request.before);
     const clauses: string[] = [];
     const bindings: unknown[] = [];
     if (request.botId) {
@@ -388,20 +391,53 @@ export class AuditStoreV1 {
         )
         .toArray()[0]?.n ?? 0,
     );
+    // The predicate is the sort order spelled out: strictly after the cursor
+    // row under `at DESC, bot_id ASC, run_id ASC, occurrence_id ASC`.
+    const pageClauses = [...clauses];
+    const pageBindings = [...bindings];
+    if (after) {
+      pageClauses.push(
+        "(at < ?" +
+          " OR (at = ? AND bot_id > ?)" +
+          " OR (at = ? AND bot_id = ? AND run_id > ?)" +
+          " OR (at = ? AND bot_id = ? AND run_id = ? AND occurrence_id > ?))",
+      );
+      pageBindings.push(
+        after.at,
+        after.at,
+        after.botId,
+        after.at,
+        after.botId,
+        after.runId,
+        after.at,
+        after.botId,
+        after.runId,
+        after.occurrenceId,
+      );
+    }
+    const pageWhere =
+      pageClauses.length > 0 ? ` WHERE ${pageClauses.join(" AND ")}` : "";
     const rows = this.sql
       .exec<AuditRow>(
-        `SELECT * FROM ${TABLE}${where} ` +
-          "ORDER BY at DESC, bot_id ASC, run_id ASC, occurrence_id ASC LIMIT ? OFFSET ?",
-        ...bindings,
+        `SELECT * FROM ${TABLE}${pageWhere} ` +
+          "ORDER BY at DESC, bot_id ASC, run_id ASC, occurrence_id ASC LIMIT ?",
+        ...pageBindings,
         limit + 1,
-        offset,
       )
       .toArray();
-    const page = rows.slice(0, limit).map(fromRow);
+    const kept = rows.slice(0, limit);
+    const last = kept.at(-1);
     return {
-      entries: page,
-      ...(rows.length > limit
-        ? { nextCursor: `p${offset + page.length}` }
+      entries: kept.map(fromRow),
+      ...(rows.length > limit && last
+        ? {
+            nextCursor: encodeAuditCursorV1({
+              at: last.at,
+              botId: last.bot_id,
+              runId: last.run_id,
+              occurrenceId: last.occurrence_id,
+            }),
+          }
         : {}),
       total,
     };
@@ -473,16 +509,53 @@ export class AuditStoreV1 {
   }
 }
 
-const CURSOR_PATTERN = /^p([0-9]{1,9})$/;
+/** The row a page cursor addresses. */
+export interface AuditCursorV1 {
+  at: string;
+  botId: string;
+  runId: string;
+  occurrenceId: string;
+}
 
-/** The offset an opaque page cursor names. */
-export function decodeAuditOffsetV1(cursor: string | undefined): number {
-  if (cursor === undefined) return 0;
-  const match = CURSOR_PATTERN.exec(cursor);
-  if (!match) throw new Error("audit cursor is invalid");
-  const offset = Number(match[1]);
-  if (!Number.isSafeInteger(offset) || offset > 100_000) {
+const CURSOR_SEPARATOR = "\u0000";
+const CURSOR_MAX_FIELD = 256;
+
+/**
+ * The cursor is the sort key of the last row of a page, encoded opaquely.
+ *
+ * It addresses a row and not a position, so rows inserted at the head between
+ * one page and the next cannot shift the window: "Load more" continues from
+ * where the reader is, rather than from a count that has since moved.
+ */
+export function encodeAuditCursorV1(cursor: AuditCursorV1): string {
+  return btoa(
+    [cursor.at, cursor.botId, cursor.runId, cursor.occurrenceId].join(
+      CURSOR_SEPARATOR,
+    ),
+  );
+}
+
+export function decodeAuditCursorV1(
+  cursor: string | undefined,
+): AuditCursorV1 | undefined {
+  if (cursor === undefined) return undefined;
+  let decoded: string;
+  try {
+    decoded = atob(cursor);
+  } catch {
     throw new Error("audit cursor is invalid");
   }
-  return offset;
+  const fields = decoded.split(CURSOR_SEPARATOR);
+  if (fields.length !== 4) throw new Error("audit cursor is invalid");
+  for (const field of fields) {
+    if (field.length > CURSOR_MAX_FIELD) {
+      throw new Error("audit cursor is invalid");
+    }
+  }
+  return {
+    at: fields[0]!,
+    botId: fields[1]!,
+    runId: fields[2]!,
+    occurrenceId: fields[3]!,
+  };
 }

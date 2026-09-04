@@ -14,6 +14,7 @@ import {
   type CompositionQuarantineV1,
 } from "@frockbot/kernel-composition/activation";
 import {
+  COMPOSITION_FAILURE_STREAK_KEY,
   compositionFailureCountKey,
   compositionFailureKey,
   compositionFailurePrefix,
@@ -34,8 +35,11 @@ export interface DurableCompositionFailureLogOptions {
  * `composition:failure-count:<generationId>`, and
  * `composition:quarantine:<generationId>`.
  *
- * Quarantine is per generation, never per Bot: a later, unrelated generation is
- * unaffected by an earlier one being quarantined.
+ * Quarantine is *marked* per generation, never per Bot: a generation an earlier
+ * one's quarantine does not implicate is unaffected, and lifting a quarantine
+ * is a decision about one generation. What earns a quarantine is either
+ * counter reaching the threshold — this generation's own retries, or the Bot's
+ * consecutive failures across however many generations the repairs minted.
  */
 export class DurableCompositionFailureLog implements CompositionFailureLog {
   private readonly ctx: DurableObjectState;
@@ -60,10 +64,20 @@ export class DurableCompositionFailureLog implements CompositionFailureLog {
         )) ?? 0;
       const attempt = previous + 1;
       const recorded = decodeCompositionFailureV1({ ...failure, attempt });
-      const quarantined = attempt >= this.threshold;
+      // Two counters, one threshold. `attempt` is this generation's own
+      // retries; `streak` is the Bot's consecutive failures however many
+      // generations they are spread over. Only the second one ever moves when
+      // the model repairs by authoring a *new* generation, which is what it
+      // always does — so without it the safeguard never fired and the
+      // Composition grew one dead generation per repair attempt.
+      const streak =
+        ((await transaction.get<number>(COMPOSITION_FAILURE_STREAK_KEY)) ?? 0) +
+        1;
+      const quarantined = attempt >= this.threshold || streak >= this.threshold;
       const writes: Record<string, unknown> = {
         [compositionFailureKey(generationId, attempt)]: recorded,
         [compositionFailureCountKey(generationId)]: attempt,
+        [COMPOSITION_FAILURE_STREAK_KEY]: streak,
       };
       if (quarantined) {
         writes[compositionQuarantineKey(generationId)] =
@@ -71,7 +85,9 @@ export class DurableCompositionFailureLog implements CompositionFailureLog {
             generationId,
             quarantinedAt: this.now().toISOString(),
             reason: recorded.message,
-            failures: attempt,
+            // The count that earned it, which is the streak whenever the
+            // repairs were spread over generations.
+            failures: Math.max(attempt, streak),
           });
       }
       await transaction.put(writes);
@@ -103,6 +119,9 @@ export class DurableCompositionFailureLog implements CompositionFailureLog {
    * recorded failures survive: they are the repair history a User reads.
    */
   async clear(generationId: string): Promise<void> {
-    await this.ctx.storage.delete(compositionFailureCountKey(generationId));
+    await this.ctx.storage.delete([
+      compositionFailureCountKey(generationId),
+      COMPOSITION_FAILURE_STREAK_KEY,
+    ]);
   }
 }

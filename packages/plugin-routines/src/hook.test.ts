@@ -66,7 +66,19 @@ describe("the hook token", () => {
       (error: unknown) => error,
     );
     expect(refusal).toBeInstanceOf(RoutineHookError);
-    expect((refusal as RoutineHookError).status).toBe(500);
+    // A door that was never given a key is unavailable, not broken, and the
+    // caller is told that and nothing more: the reason names the deployment's
+    // secret variable and stays in the log.
+    expect((refusal as RoutineHookError).status).toBe(503);
+    expect((refusal as RoutineHookError).message).toContain(
+      "ROUTINE_HOOK_SECRET",
+    );
+    expect((refusal as RoutineHookError).publicMessage).toBe(
+      "webhook delivery is not configured",
+    );
+    expect((refusal as RoutineHookError).publicMessage).not.toContain(
+      "ROUTINE_HOOK_SECRET",
+    );
   });
 
   test("a key version is part of the token, so a rotation is a new token", async () => {
@@ -92,14 +104,13 @@ describe("the hook token", () => {
 });
 
 describe("delivery identity", () => {
-  test("is the content when the caller sent no idempotency key", async () => {
-    expect(await routineDeliveryIdV1("brief", '{"a":1}')).toBe(
-      await routineDeliveryIdV1("brief", '{"a":1}'),
+  test("is unique per request when the caller sent no idempotency key", async () => {
+    // Two real events with the same payload are two deliveries. Hashing the
+    // body used to turn the second one into a `duplicate` receipt and no
+    // firing, with nothing anywhere saying an event had been swallowed.
+    expect(await routineDeliveryIdV1("brief", '{"ping":true}')).not.toBe(
+      await routineDeliveryIdV1("brief", '{"ping":true}'),
     );
-    expect(await routineDeliveryIdV1("brief", '{"a":1}')).not.toBe(
-      await routineDeliveryIdV1("brief", '{"a":2}'),
-    );
-    // Two Routines receiving the same body are two deliveries.
     expect(await routineDeliveryIdV1("brief", "{}")).not.toBe(
       await routineDeliveryIdV1("other", "{}"),
     );
@@ -235,9 +246,11 @@ describe("the durable half of the check", () => {
     const receipt = await store.execute(create, USER);
     const token = (receipt as { hook: { token: string } }).hook.token;
 
-    const first = await deliver(store, token, '{"event":"push"}');
+    // A replay is a delivery the caller itself said was the same one, by
+    // sending the key twice.
+    const first = await deliver(store, token, '{"event":"push"}', "evt-1");
     expect(first.status).toBe("accepted");
-    const second = await deliver(store, token, '{"event":"push"}');
+    const second = await deliver(store, token, '{"event":"push"}', "evt-1");
     expect(second).toEqual({ status: "duplicate", fireId: first.fireId });
 
     const fired: string[] = [];
@@ -248,6 +261,29 @@ describe("the durable half of the check", () => {
       return { status: "ok" };
     });
     expect(fired).toEqual([first.fireId]);
+  });
+
+  test("two distinct deliveries with identical bodies are two firings", async () => {
+    const { scheduler, store, create } = harness();
+    const receipt = await store.execute(create, USER);
+    const token = (receipt as { hook: { token: string } }).hook.token;
+
+    // A provider that sends `{"event":"push"}` twice sent two events. Without
+    // an `Idempotency-Key` nothing has claimed they are the same delivery, and
+    // the second used to be answered `duplicate` and never fired — a swallowed
+    // event with no trace anywhere.
+    const first = await deliver(store, token, '{"event":"push"}');
+    const second = await deliver(store, token, '{"event":"push"}');
+    expect(first.status).toBe("accepted");
+    expect(second.status).toBe("accepted");
+    expect(second.fireId).not.toBe(first.fireId);
+
+    const fired: string[] = [];
+    await scheduler.settle(async (fire) => {
+      fired.push(fire.fireId);
+      return { status: "ok" };
+    });
+    expect(fired.sort()).toEqual([first.fireId, second.fireId].sort());
   });
 
   test("a rotated key retires the one before it", async () => {
