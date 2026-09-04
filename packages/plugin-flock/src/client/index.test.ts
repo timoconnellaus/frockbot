@@ -484,12 +484,18 @@ describe("Flock client reconciliation", () => {
       return Promise.reject(new Error(`unexpected request: ${path}`));
     });
     const selected: string[] = [];
+    const forgotten: (string | undefined)[] = [];
     state.value.bindShell(
       ref({
         activeBotId: "alpha",
         selectBot: (botId: string) => {
           selected.push(botId);
           return Promise.resolve();
+        },
+        transcripts: {
+          rememberViewport: () => undefined,
+          viewportFor: () => undefined,
+          forget: (botId?: string) => forgotten.push(botId),
         },
       }) as unknown as Ref<FrockBotWebData>,
     );
@@ -505,6 +511,9 @@ describe("Flock client reconciliation", () => {
     ]);
     expect(selected.at(-1)).toBe("beta");
     expect(new URL(location.href).searchParams.get("bot")).toBe("beta");
+    // The held transcript goes with the Bot: unlike an archive, there is no
+    // Bot left to read it back from.
+    expect(forgotten).toEqual(["alpha"]);
     // A Bot that is no longer in the directory cannot be confirmed for delete.
     state.value.openDelete("alpha");
     expect(state.value.overlay).toBeUndefined();

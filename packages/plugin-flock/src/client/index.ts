@@ -591,6 +591,9 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         }
         state.value.overlay = undefined;
         state.value.lifecyclePending = undefined;
+        // An archived Bot's cached transcript is merely stale; a deleted one's
+        // is a lie, and there is no Bot left to read it from again.
+        shell?.value.transcripts.forget(botId);
         // Move off the deleted Bot before anything else. Selecting aborts the
         // Shell's in-flight reads for it, and every one of those is now a 404
         // waiting to happen: the panels poll the Bot the User is looking at,
@@ -606,8 +609,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         // list, the selection and the `?bot=` parameter without a page reload.
         await state.value.load();
       } catch (error) {
-        state.value.error =
-          error instanceof Error ? error.message : "Could not delete Bot";
+        state.value.error = presentClientFailureV1(error, "delete this Bot");
+        console.debug("bot delete failed", clientFailureDetailV1(error));
       }
     },
     async restore(botId) {
