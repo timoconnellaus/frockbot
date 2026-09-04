@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FrockBot · Native phase 1</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family:
+          Manrope,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        color: #f4f2f6;
+        background: #1f1e24;
+        line-height: 1.6;
+      }
+      * {
+        box-sizing: border-box;
+        min-width: 0;
+      }
+      body {
+        margin: 0;
+      }
+      main {
+        max-width: 1120px;
+        margin: auto;
+        padding: 48px 24px 80px;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+      h1 {
+        font-size: clamp(32px, 5vw, 56px);
+        line-height: 1.1;
+        letter-spacing: -0.035em;
+        max-width: 780px;
+      }
+      h2 {
+        margin-top: 44px;
+        font-size: 25px;
+      }
+      h3 {
+        font-size: 19px;
+        margin-bottom: 8px;
+      }
+      p,
+      li,
+      td {
+        overflow-wrap: anywhere;
+      }
+      .eyebrow {
+        color: #f2a6bd;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .intro {
+        max-width: 820px;
+        font-size: 19px;
+        color: #aaa6b1;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .card,
+      details {
+        border: 1px solid #3a3742;
+        border-radius: 14px;
+        background: #26242c;
+        padding: 22px;
+      }
+      .card p {
+        margin-bottom: 0;
+        color: #aaa6b1;
+      }
+      .accent {
+        border-top: 3px solid #ec386b;
+      }
+      .tag {
+        display: inline-block;
+        border-radius: 6px;
+        padding: 2px 8px;
+        background: #432330;
+        color: #f2a6bd;
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 12px;
+      }
+      .warning {
+        border-left: 3px solid #f0c36a;
+        padding: 16px 20px;
+        background: #3a301e;
+        border-radius: 4px;
+      }
+      .table-wrap {
+        overflow-x: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-size: 15px;
+      }
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid #3a3742;
+        padding: 14px 12px;
+        overflow-wrap: anywhere;
+      }
+      th {
+        color: #aaa6b1;
+        font-size: 13px;
+      }
+      td:first-child {
+        color: #aaa6b1;
+      }
+      details {
+        margin-bottom: 12px;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 700;
+        font-size: 18px;
+      }
+      details p {
+        margin: 16px 0 0;
+        color: #aaa6b1;
+      }
+      strong {
+        color: #f4f2f6;
+      }
+      .budget {
+        font-size: 30px;
+        font-weight: 750;
+        line-height: 1.3;
+        margin-bottom: 8px;
+      }
+      footer {
+        margin-top: 40px;
+        font-size: 13px;
+        color: #aaa6b1;
+        border-top: 1px solid #3a3742;
+        padding-top: 20px;
+      }
+      a {
+        color: #f2a6bd;
+      }
+      :focus-visible {
+        outline: 2px solid #ec386b;
+        outline-offset: 5px;
+      }
+      @media (max-width: 700px) {
+        .grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        main {
+          padding: 28px 16px;
+        }
+        td,
+        th {
+          padding: 12px 6px;
+          font-size: 13px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">FrockBot / Accepted direction · 5 September 2026</p>
+      <h1>A native base.<br />Extensions at declared seams.</h1>
+      <p class="intro">
+        Phase 1 defines the constitution, shared wire contracts and delivery
+        gates. Flutter owns native interaction. The Bot Durable Object continues
+        to own execution. The Flutter application is the next slice.
+      </p>
+      <div class="grid">
+        <section class="card accent">
+          <span class="tag">Durable kernel</span>
+          <h3>One authority</h3>
+          <p>
+            Admission, events, cursor, cancellation, scheduling and immutable
+            generation activation stay in their Durable Objects.
+          </p>
+        </section>
+        <section class="card accent">
+          <span class="tag">Reviewed base</span>
+          <h3>Permanent product behavior</h3>
+          <p>
+            Flutter and browser renderers share commands and projections. Auth,
+            chat, settings, recovery, audit and trust chrome remain host-owned.
+          </p>
+        </section>
+        <section class="card accent">
+          <span class="tag">Runtime extensions</span>
+          <h3>Bounded and inspectable</h3>
+          <p>
+            A2UI uses a compiled catalog. Applets and the Computer viewer use an
+            isolated web fallback. Bindings expose only the allowed capability
+            subset.
+          </p>
+        </section>
+      </div>
+
+      <h2>The constitutional change</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Previous rule</th>
+              <th scope="col">Accepted replacement</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Every capability beyond the kernel is a Package</td>
+              <td>
+                Minimal kernel, reviewed base, Packages at narrow extension
+                seams
+              </td>
+            </tr>
+            <tr>
+              <td>Native clients wrap the hosted WebUI</td>
+              <td>
+                First-class native and browser renderers over the same backend
+              </td>
+            </tr>
+            <tr>
+              <td>Required core is a repaired Package set</td>
+              <td>Required core is compiled into the non-disableable base</td>
+            </tr>
+            <tr>
+              <td>A Bot changes anything above the kernel</td>
+              <td>
+                Only declared extensions and permitted configuration; no base,
+                chrome or grant changes
+              </td>
+            </tr>
+            <tr>
+              <td>Every Package receives the full Bot grant</td>
+              <td>
+                An inspectable allowed subset, uniform across the User’s Bots
+              </td>
+            </tr>
+            <tr>
+              <td>Code revert without a data compatibility boundary</td>
+              <td>
+                Runnable schema windows, guarded migration, visible
+                incompatible-revert refusal
+              </td>
+            </tr>
+            <tr>
+              <td>Pinned Composition can retain revoked access</td>
+              <td>
+                Pin implementation history; check live authorization before each
+                new external effect
+              </td>
+            </tr>
+            <tr>
+              <td>Client compatibility follows stored migrations</td>
+              <td>
+                Forward-only storage plus a bounded wire/catalog window and
+                minimum native version
+              </td>
+            </tr>
+            <tr>
+              <td>Shell, hosting and workflow tooling are constitutional</td>
+              <td>
+                Mechanisms live in architecture docs; temporary rollout gates
+                live in the plan
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="warning">
+        <strong>Guarantees retained:</strong> cloud authority, durable
+        admission, authenticated Stop, resumability, effect intent and
+        reconciliation, immutable artifacts and provenance, untrusted-code
+        isolation, Computer-independent Memory/Skills, one settings home,
+        visible recovery and undo.
+      </p>
+
+      <h2>The first device proof</h2>
+      <p class="intro">
+        Pixel 9a and macOS desktop: system-browser PKCE auth → select a Bot →
+        chat, send, Stop and reconnect → save a deterministic A2UI form → reject
+        a hostile document → use a real Applet in the isolated fallback.
+      </p>
+      <div class="grid">
+        <section class="card">
+          <h3>Pin and qualify</h3>
+          <p>
+            A2UI 0.9.1<br />GenUI 0.10.2<br />webview_flutter 4.14.1<br />Flutter
+            3.47.0 / Dart 3.13.0
+          </p>
+        </section>
+        <section class="card">
+          <h3>Preserve the phone install</h3>
+          <p>
+            Keep <strong>com.frockbot.mobile</strong>, the existing signer and
+            Google web client id. Compare APK certificates and installed version
+            before <strong>adb install -r</strong>.
+          </p>
+        </section>
+        <section class="card">
+          <h3>Protect the web boundary</h3>
+          <p>
+            No native session cookies, secrets, broad bridges or arbitrary
+            navigation. Scoped viewer access, exact frame/origin/epoch checks
+            and token renewal.
+          </p>
+        </section>
+      </div>
+
+      <h2>Proposed release-mode budgets</h2>
+      <p>
+        Acceptance targets to baseline on devices in phase 2; no benchmark is
+        claimed here.
+      </p>
+      <div class="grid">
+        <section class="card">
+          <div class="budget">16.7 ms</div>
+          <h3>p95 frame time</h3>
+          <p>
+            Typing, IME and lazy history against a 10,000-Turn fixture at
+            controlled 60 Hz.
+          </p>
+        </section>
+        <section class="card">
+          <div class="budget">50 ms</div>
+          <h3>p95 input to paint</h3>
+          <p>
+            Native editing, text selection, keyboard traversal and accessibility
+            remain responsive.
+          </p>
+        </section>
+        <section class="card">
+          <div class="budget">2 seconds</div>
+          <h3>p95 cold editable frame</h3>
+          <p>
+            Measure network authentication separately. Suspend and reconnect
+            retain stable command ids.
+          </p>
+        </section>
+      </div>
+
+      <h2>Six useful stopping points</h2>
+      <details>
+        <summary>0 · Repair and prove existing invariants</summary>
+        <p>
+          <strong>Exit:</strong> failed activation preserves data; publication
+          cannot alter a pinned call; revocation fences the next effect.
+          <strong>Proof:</strong> facet health/migration failures, concurrent
+          calls, restart and bounded history regressions.
+        </p>
+      </details>
+      <details open>
+        <summary>1 · Amend the constitution and define contracts</summary>
+        <p>
+          <strong>This phase:</strong> one JSON Schema source, TypeScript and
+          Dart generated output, shared valid/invalid fixtures, compatibility
+          refusal and the plan. <strong>Proof:</strong> generation freshness,
+          existing-decoder conformance, gateway refusal before loading,
+          typecheck, formatting and architecture checks.
+        </p>
+      </details>
+      <details>
+        <summary>
+          2 · Prove one native vertical slice on Pixel and desktop
+        </summary>
+        <p>
+          <strong>Exit:</strong> the complete auth/chat/A2UI/Applet flow works
+          with the exact pins, measured budgets and isolation.
+          <strong>Proof:</strong> real-device interaction, same-signer upgrade,
+          hostile WebView inspection, duplicate actions, suspension and DO
+          eviction.
+        </p>
+      </details>
+      <details>
+        <summary>3 · Deliver the native base alongside Vue</summary>
+        <p>
+          <strong>Exit:</strong> trusted settings, recovery, audit/undo,
+          extension management, voice/files and notifications have workflow
+          parity. <strong>Proof:</strong> paired renderer scenarios against one
+          backend; signed updates and the lowest supported device.
+        </p>
+      </details>
+      <details>
+        <summary>4 · Qualify A2UI and Compose independently</summary>
+        <p>
+          <strong>Exit:</strong> catalog/action admission is bounded and
+          reconstructable. Compose passes one real-extension proof behind its
+          own adapter. <strong>Proof:</strong> synthetic-credential redirects,
+          omitted-host refusal, live grants, immutable snapshots and recovery. A
+          wholesale Compose rewrite does not block Flutter.
+        </p>
+      </details>
+      <details>
+        <summary>5 · Make explicit retirement decisions</summary>
+        <p>
+          <strong>Exit:</strong> replace Capacitor/Electron only after parity
+          and upgrade evidence. Decide Flutter Web separately.
+          <strong>Proof:</strong> previous-client upgrade, minimum-version
+          response and continued Applet/Computer fallback.
+        </p>
+      </details>
+
+      <h2>Gates that remain open</h2>
+      <p class="warning">
+        <strong>Technology:</strong> the exact protocol/library/catalog
+        combination needs device qualification.
+        <strong>Backend:</strong> failed-activation data protection and live
+        authorization need recorded regression evidence.
+        <strong>Distribution:</strong> Apple 4.7 may require product changes;
+        A2UI is not an exemption. Windows/Linux remain deferred.
+      </p>
+      <footer>
+        Review companion to <strong>docs/plans/native-app.md</strong> and the
+        native-base ADR. Design source: FrockBot’s existing plugin-ui-theme
+        colors, type stack and card geometry. This page explains the accepted
+        architecture; it is not a mockup of the current application or evidence
+        of a running native app.
+      </footer>
+    </main>
+  </body>
+</html>
