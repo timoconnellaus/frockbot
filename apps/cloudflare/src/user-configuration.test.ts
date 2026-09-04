@@ -332,11 +332,19 @@ describe("UserConfiguration Connection routing", () => {
       packageId: "provider-ollama-cloud",
       enabled: false,
     });
-    const unavailable = resolveEffectiveBotModelV1({ bot, user, packages });
-    expect(unavailable).toMatchObject({
-      source: "account",
-      binding: {
-        state: "unavailable",
+    // Switching the provider Package off does not stop the Bot answering: the
+    // platform bootstrap stands in, and the choice that could not bind — with
+    // the reason — rides along so the shell can say so.
+    const degraded = resolveEffectiveBotModelV1({ bot, user, packages });
+    expect(degraded).toMatchObject({
+      source: "platform",
+      binding: { state: "ready", packageId: "provider-flock-ai" },
+      fallback: {
+        from: "account",
+        model: {
+          connectionId: LEGACY_OLLAMA_CONNECTION_ID,
+          providerModelId: LEGACY_OLLAMA_MODEL_ID,
+        },
         failure: "Turn this model's plugin back on in Plugins to use it.",
       },
     });
