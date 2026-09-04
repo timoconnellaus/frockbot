@@ -70,6 +70,19 @@ export interface AppletSourceSyncOutcomeV1 {
   status: "ok" | "degraded" | "unavailable" | "refused" | "skipped";
   /** What the sync said went wrong, empty when it had nothing to say. */
   detail: string;
+  /**
+   * What the sync saw for each `dist/` file the publish named required: the
+   * hash of the bytes on the Computer, and whether the store ended up holding
+   * them. It is the evidence behind the publish's own failure sentence — a
+   * build output that demonstrably exists is never answered with "run `applet
+   * build` first" (production, 2026-09-04).
+   */
+  required?: readonly {
+    /** The source-root-relative path, `<appletId>/dist/…`. */
+    path: string;
+    contentHash?: string;
+    durable: boolean;
+  }[];
 }
 
 /** The three files `applet build` writes, read from the durable root. */
@@ -627,6 +640,18 @@ export function createAppletCapabilityHostV1(
       appletDistPathV1(options.userId, appletId, file),
     );
     if (outcome.status !== "ok") {
+      // Verify before reporting. The sync was asked for these exact paths, so
+      // it can say whether the Computer held the file and whether the store
+      // took it. A build output that is on disk is never answered with "run
+      // `applet build` first": that sends a Bot round a loop that cannot end.
+      const seen = synced?.required?.find(
+        (entry) => entry.path === `${appletId}/${file}`,
+      );
+      if (seen?.contentHash !== undefined) {
+        return {
+          failure: `"${file}" is on the Computer (sha256 ${seen.contentHash.slice(0, 12)}) but the Workspace answered ${outcome.status}: the publish sync reported ${synced?.status ?? "nothing"} and did not carry it${synced?.detail ? ` — ${synced.detail}` : ""}`,
+        };
+      }
       // A pull that did not finish is the likelier explanation than an
       // unbuilt Applet, and telling the Bot to build again would send it
       // round a loop that cannot end.

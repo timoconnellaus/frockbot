@@ -664,6 +664,25 @@ export type ComputerSyncReasonV1 = "open" | "signal" | "turn-end" | "publish";
  * than treating a dropped connection as failure" — so an unreachable Computer
  * answers `unavailable` and a Turn continues.
  */
+/**
+ * What one run saw for one path its caller declared required.
+ *
+ * A required path is the only thing a sync caller asserts about: "these exact
+ * bytes must be readable from the store when this returns". Reporting it is
+ * what lets the caller's own failure be honest — an Applet publish that cannot
+ * read `dist/manifest.json` can say the Computer held it at hash X and the
+ * store answered `not-found`, instead of telling a Bot to run a build whose
+ * output is demonstrably on disk (production, 2026-09-04).
+ */
+export interface ComputerSyncRequiredPathV1 {
+  /** The root-relative path the caller named. */
+  path: string;
+  /** sha-256 of the bytes on the Computer, absent when it held no such file. */
+  contentHash?: string;
+  /** True when the store is known to hold exactly those bytes. */
+  durable: boolean;
+}
+
 export interface ComputerSyncSummaryV1 {
   status: "ok" | "degraded" | "unavailable" | "refused" | "skipped";
   /** Human-readable reason, empty when the run had nothing to say. */
@@ -679,6 +698,11 @@ export interface ComputerSyncSummaryV1 {
   omitted: number;
   conflicts: number;
   failures: number;
+  /**
+   * One row per path the caller declared required, absent when it declared
+   * none. Present even on a failed run: what the sync saw is the evidence.
+   */
+  required?: readonly ComputerSyncRequiredPathV1[];
 }
 
 export function computerSyncSummaryV1(

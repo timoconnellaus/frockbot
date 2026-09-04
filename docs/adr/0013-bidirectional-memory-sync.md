@@ -141,6 +141,27 @@ watches the durable roots and bumps a change signal, so the agent can tell
 service because "Only Computer-provider-declared services may be reattached;
 other processes are assumed dead after a cold pause."
 
+**An absence is not a delete, and a required path is authoritative.** Two
+refinements to the reconcile, both learned from an Applet publish that failed
+on 2026-09-04 for a file that was sitting on the Computer. First: "a delete on
+either side becomes a recorded removal on the other" is a statement about
+_deletes_, and a delete is a recorded generation, so the sync no longer reads
+every store-side absence as one. When the generation ledger is reachable and
+holds no tombstone for a path the Computer still holds under a sidecar, that is
+drift between the sidecar and the store; the sync re-pushes the bytes the
+Computer has rather than deleting the file. An unreachable ledger proves
+nothing either way, so there the removal still stands. Second: a caller that
+names `requiredPaths` has asserted that those exact bytes must be readable from
+the store when the run returns, so for those paths the Computer's copy decides
+and the sidecar does not. The sync asks the store what it holds, pushes
+whenever it holds something else or nothing (conditioning on the generation it
+just read, so the forced push cannot lose a race it started), repairs a stale
+or missing sidecar when the store already holds the bytes, and never turns a
+required path into a local removal. Every required path comes back on the
+report — the hash the Computer held and whether the store ended up holding it —
+so the caller's own failure can name the evidence instead of blaming a build
+whose output demonstrably exists.
+
 **The caller.** The sync has a production caller: the Computer Package
 (`packages/plugin-computer/src/agent.ts`) runs it through `ComputerSyncV1` on
 the provider-neutral Computer handle — pulling before a Turn's first Computer
