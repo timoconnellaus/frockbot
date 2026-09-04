@@ -39,6 +39,8 @@ interface AggregateRow extends Record<string, UsageSqlValueV1> {
 
 export interface UsageStoreOptionsV1 {
   sql: UsageSqlV1;
+  /** Production supplies DurableObjectStorage.transactionSync. */
+  transactionSync?<T>(closure: () => T): T;
   now?: () => number;
   detailRetentionDays?: number;
   detailMaxRows?: number;
@@ -67,6 +69,7 @@ function breakdownV1(row: AggregateRow): UsageBreakdownV1 {
 
 export class UsageStoreV1 {
   private readonly sql: UsageSqlV1;
+  private readonly transactionSync: <T>(closure: () => T) => T;
   private readonly now: () => number;
   private readonly detailRetentionDays: number;
   private readonly detailMaxRows: number;
@@ -75,6 +78,7 @@ export class UsageStoreV1 {
 
   constructor(options: UsageStoreOptionsV1) {
     this.sql = options.sql;
+    this.transactionSync = options.transactionSync ?? ((closure) => closure());
     this.now = options.now ?? (() => Date.now());
     this.detailRetentionDays =
       options.detailRetentionDays ?? USAGE_DETAIL_RETENTION_DAYS_V1;
@@ -114,72 +118,74 @@ export class UsageStoreV1 {
 
   record(entries: readonly UsageEntryV1[]): number {
     this.open();
-    let inserted = 0;
-    for (const entry of entries) {
-      const known = this.sql
-        .exec<{ n: number }>(
-          `SELECT count(*) AS n FROM ${ENTRY_TABLE} WHERE entry_id = ?`,
+    return this.transactionSync(() => {
+      let inserted = 0;
+      for (const entry of entries) {
+        const known = this.sql
+          .exec<{ n: number }>(
+            `SELECT count(*) AS n FROM ${ENTRY_TABLE} WHERE entry_id = ?`,
+            entry.entryId,
+          )
+          .toArray()[0]?.n;
+        if (Number(known ?? 0) > 0) continue;
+        this.sql.exec(
+          `INSERT INTO ${ENTRY_TABLE} (` +
+            "entry_id, kind, bot_id, run_id, turn_id, turn, request_id, at, provider, model, binding_id, " +
+            "input_tokens, output_tokens, cached_input_tokens, reasoning_tokens, voice_seconds, latency_ms, " +
+            "estimated, unknown_price, price_table_version, cost_micros) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           entry.entryId,
-        )
-        .toArray()[0]?.n;
-      if (Number(known ?? 0) > 0) continue;
-      this.sql.exec(
-        `INSERT INTO ${ENTRY_TABLE} (` +
-          "entry_id, kind, bot_id, run_id, turn_id, turn, request_id, at, provider, model, binding_id, " +
-          "input_tokens, output_tokens, cached_input_tokens, reasoning_tokens, voice_seconds, latency_ms, " +
-          "estimated, unknown_price, price_table_version, cost_micros) " +
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        entry.entryId,
-        entry.kind,
-        entry.botId ?? null,
-        entry.runId ?? null,
-        entry.turnId ?? null,
-        entry.turn ?? null,
-        entry.requestId ?? null,
-        entry.at,
-        entry.provider,
-        entry.model,
-        entry.bindingId ?? null,
-        entry.inputTokens,
-        entry.outputTokens,
-        entry.cachedInputTokens,
-        entry.reasoningTokens,
-        entry.voiceSeconds,
-        entry.latencyMs,
-        entry.estimated ? 1 : 0,
-        entry.unknownPrice ? 1 : 0,
-        entry.priceTableVersion,
-        entry.costMicros,
-      );
-      for (const [dimension, dimensionId] of [
-        ["all", "all"],
-        ...(entry.botId ? [["bot", entry.botId]] : []),
-        ["model", `${entry.provider}/${entry.model}`],
-      ] as const) {
-        this.addRollup(
-          "day",
-          utcDayV1(entry.at),
-          dimension,
-          dimensionId,
-          entry,
+          entry.kind,
+          entry.botId ?? null,
+          entry.runId ?? null,
+          entry.turnId ?? null,
+          entry.turn ?? null,
+          entry.requestId ?? null,
+          entry.at,
+          entry.provider,
+          entry.model,
+          entry.bindingId ?? null,
+          entry.inputTokens,
+          entry.outputTokens,
+          entry.cachedInputTokens,
+          entry.reasoningTokens,
+          entry.voiceSeconds,
+          entry.latencyMs,
+          entry.estimated ? 1 : 0,
+          entry.unknownPrice ? 1 : 0,
+          entry.priceTableVersion,
+          entry.costMicros,
         );
-        this.addRollup(
-          "month",
-          utcMonthV1(entry.at),
-          dimension,
-          dimensionId,
-          entry,
+        for (const [dimension, dimensionId] of [
+          ["all", "all"],
+          ...(entry.botId ? [["bot", entry.botId]] : []),
+          ["model", `${entry.provider}/${entry.model}`],
+        ] as const) {
+          this.addRollup(
+            "day",
+            utcDayV1(entry.at),
+            dimension,
+            dimensionId,
+            entry,
+          );
+          this.addRollup(
+            "month",
+            utcMonthV1(entry.at),
+            dimension,
+            dimensionId,
+            entry,
+          );
+        }
+        this.sql.exec(
+          `INSERT INTO ${TOTAL_TABLE} (id, cost_micros) VALUES (1, ?) ` +
+            "ON CONFLICT(id) DO UPDATE SET cost_micros = cost_micros + excluded.cost_micros",
+          entry.costMicros,
         );
+        inserted += 1;
       }
-      this.sql.exec(
-        `INSERT INTO ${TOTAL_TABLE} (id, cost_micros) VALUES (1, ?) ` +
-          "ON CONFLICT(id) DO UPDATE SET cost_micros = cost_micros + excluded.cost_micros",
-        entry.costMicros,
-      );
-      inserted += 1;
-    }
-    this.evict();
-    return inserted;
+      this.evict();
+      return inserted;
+    });
   }
 
   private addRollup(

@@ -1161,8 +1161,34 @@ class LoopAgent implements Agent {
       }
     } catch (error) {
       if (receivedProviderEvent && error instanceof LlmEffectNotStartedError) {
-        throw new Error(
+        const invalidNoEffectClaim = new Error(
           "Model provider reported no effect after returning response data",
+        );
+        await this.#recordModelUsage(
+          request,
+          turn,
+          step,
+          usage,
+          text,
+          toolCalls,
+          Math.max(0, Date.now() - startedAt),
+        );
+        throw invalidNoEffectClaim;
+      }
+      // Once dispatch may have begun, the call can have incurred spend even
+      // when its terminal response is lost. Preserve the provider's partial
+      // counts when present and otherwise write the same explicit estimate as
+      // a successful unmetered stream. A definitive no-effect result is the
+      // sole exception because the provider says no billable call occurred.
+      if (!(error instanceof LlmEffectNotStartedError)) {
+        await this.#recordModelUsage(
+          request,
+          turn,
+          step,
+          usage,
+          text,
+          toolCalls,
+          Math.max(0, Date.now() - startedAt),
         );
       }
       throw error;

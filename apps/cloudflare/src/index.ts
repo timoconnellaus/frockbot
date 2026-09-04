@@ -312,6 +312,8 @@ function debugSurface(env: Env): DebugGatewaySurface {
     },
     listBots: (userId) =>
       userConfigurationStub(env, userId).listBots({ schemaVersion: 1, userId }),
+    readUsage: (userId) =>
+      userUsageStub(env, userId).readUsage({ schemaVersion: 1, userId }),
     snapshot: (userId, botId, query) =>
       botStateStub(env, userId, botId).debugSnapshot(query),
     isAdminUser: async (userId) => {

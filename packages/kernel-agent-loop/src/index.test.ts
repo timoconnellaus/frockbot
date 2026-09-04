@@ -151,6 +151,88 @@ afterEach(async () => {
 });
 
 describe("AgentLoop", () => {
+  test("journals one reported usage event for a model request", async () => {
+    const provider: LlmProvider = {
+      id: "reported-usage",
+      async *stream() {
+        yield { type: "text-delta", text: "done" };
+        yield {
+          type: "usage",
+          usage: {
+            inputTokens: 41,
+            outputTokens: 9,
+            cachedInputTokens: 7,
+            reasoningTokens: 3,
+          },
+        };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const root = await mountRuntime(provider);
+    const handle = await root.agents.create({
+      ...allowEffectOptions,
+      botId: "bot-usage",
+      sessionId: "reported-usage",
+      provider: provider.id,
+      model: "priced-model",
+    });
+
+    handle.agent.send("count this");
+    await handle.agent.whenIdle();
+
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/usage",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        type: "model/usage",
+        provider: "reported-usage",
+        model: "priced-model",
+        inputTokens: 41,
+        outputTokens: 9,
+        cachedInputTokens: 7,
+        reasoningTokens: 3,
+        estimated: false,
+      }),
+    ]);
+  });
+
+  test("estimates and marks usage when a provider reports no counts", async () => {
+    const provider: LlmProvider = {
+      id: "estimated-usage",
+      async *stream() {
+        yield { type: "text-delta", text: "an answer" };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const root = await mountRuntime(provider);
+    const handle = await root.agents.create({
+      ...allowEffectOptions,
+      botId: "bot-usage",
+      sessionId: "estimated-usage",
+      provider: provider.id,
+      model: "unmetered-model",
+    });
+
+    handle.agent.send("count approximately");
+    await handle.agent.whenIdle();
+
+    const usage = handle.agent.session.events.filter(
+      (event) => event.type === "model/usage",
+    );
+    expect(usage).toHaveLength(1);
+    expect(usage[0]).toMatchObject({
+      type: "model/usage",
+      provider: "estimated-usage",
+      model: "unmetered-model",
+      estimated: true,
+    });
+    if (usage[0]?.type !== "model/usage") throw new Error("usage missing");
+    expect(usage[0].inputTokens).toBeGreaterThan(0);
+    expect(usage[0].outputTokens).toBeGreaterThan(0);
+  });
+
   test("records exactly the hook-shaped request received by the provider", async () => {
     let received: NormalizedModelRequest | undefined;
     const provider: LlmProvider = {
@@ -1355,6 +1437,16 @@ describe("AgentLoop", () => {
           "Model response outcome is uncertain: response lost after dispatch",
       }),
     );
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/usage",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        requestId: request.request.requestId,
+        estimated: true,
+      }),
+    ]);
     expect(
       handle.agent.session.events.some(
         (event) => event.type === "step/end" || event.type === "turn/end",

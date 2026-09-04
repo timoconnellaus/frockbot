@@ -295,7 +295,11 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
                 .then(rpcJsonSnapshotV1);
             },
           },
-          billing: { sql: this.ctx.storage.sql },
+          billing: {
+            sql: this.ctx.storage.sql,
+            transactionSync: (closure) =>
+              this.ctx.storage.transactionSync(closure),
+          },
           commandBotLifecycle: async (userId, command) => {
             const id = this.env.BOT_STATES.idFromName(
               `${userId}:${command.botId}`,

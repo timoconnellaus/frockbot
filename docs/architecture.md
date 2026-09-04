@@ -183,6 +183,7 @@ turn/admission
 step/start
 user/message
 model/request
+model/usage
 assistant/chunk
 assistant/message
 tool/call
@@ -201,6 +202,8 @@ session/disposed
 The inbox is a projection of durable input events. Starting a turn atomically appends `turn/start` and `input/admitted` before the claimed input disappears from that projection. A rejected proposal still closes a turn with a blocked outcome; it never leaves an empty or open turn.
 
 `model/request` records the exact normalized provider, model, system prompt, messages, tool schemas, and request options after all live waterfalls and immediately before external I/O. It carries stable source-event identifiers so replay can audit how the request was assembled even after plugins or configuration change.
+
+`model/usage` records one content-free accounting observation per dispatched request: provider, model, pinned binding, token categories, stream latency, and whether the counts were reported or estimated. OpenAI-compatible, Workers AI, and Ollama transports normalize their native usage shapes; the loop falls back to a bounded bytes-to-tokens estimate when a provider reports none. A definitive no-effect response records no spend.
 
 `assistant/chunk` preserves streaming and replay fidelity. `assistant/message` records the normalized completed provider response and request identifier. Tool calls and results are paired by a stable call identifier. Turn and step endings always record a typed outcome, including completion, cancellation, blocking, interruption, model failure, and tool failure.
 
@@ -241,6 +244,7 @@ input/queued wakes agent
   → append the final normalized model/request
   → stream through the selected LLM provider
   → append assistant/chunk events
+  → append one reported or estimated model/usage event
   → append assistant/message
   → journal and execute any guarded tool calls
   → append step/end in a finally path
@@ -647,6 +651,14 @@ Retention is two durable bounds, both visible: at most 20 000 rows per User and 
 `GET /api/audit?botId&kind&target&before&limit` and `POST /api/audit/rebuild` are the Audit Package's gateway Contribution, on the same host as `/api/search` and for the same reason: the gateway is where an authenticated `userId` exists. The route owns no state — it decodes the query string into the same exact `AuditQueryV1` every other caller uses and asks the User Durable Object, which applies the filters inside the table so the total a page reports is the filtered total. An unexpected or repeated parameter is a 400 rather than something quietly ignored, so a client that means something the route does not implement is not handed a page it will misread as filtered.
 
 The WebUI surface is an "Audit log" section under Advanced in Bot settings, mounted on `frockbot.bot-settings-sections`. Rows are time, kind badge, target, redacted preview and outcome, newest first, with filter chips per kind and a cursor-paged "Load more". Two states are rendered rather than hidden: a truncation banner when the table has been trimmed to a retention bound, and an `unknown` outcome shown in the same place a success or a failure would be. The Rebuild button answers with the receipt itself — how many entries the Bots' own runs account for, how many outcomes the turn log cannot explain, and how many effects the Computer host reported that no turn does — so a repair reports what it found rather than only that it ran.
+
+## Usage and spend
+
+The Billing Package turns content-free `model/usage` events into the User's authoritative usage ledger ([ADR 0033](adr/0033-user-owned-spend-ledger.md)). The Bot Durable Object projects a stopping Turn into a bounded durable outbox only after its session events are durable, and retries delivery on its alarm. The User Durable Object inserts idempotent detail rows and updates day, month, Bot, model, and lifetime aggregates in one SQL transaction. This path is shared by chat, Routine, recovery, and Subagent Turns; it does not branch on the client or wake the Computer.
+
+Each entry keeps the model price-table version and integer micro-dollar cost used when it was written. Provider token counts are preferred; missing counts are visibly estimated from the exact normalized request and assembled response. Voice duration comes from the existing durable quota receipt and is priced into the same ledger. Detailed rows and day rollups retain 45 days (also capped at 50,000 details), month rollups retain 120 months, and the lifetime aggregate survives both bounds. There is no Computer charge until the Computer interface supplies a reconciled duration receipt.
+
+`GET /api/usage` asks the authenticated User Durable Object for the current-month total, Bot and model breakdowns, a dense 30-day series, estimate and unknown-price counts, and the lifetime cost. Billing mounts that projection as **Usage** in User settings and as a single current-month line in Bot settings. `/api/debug/usage` exposes the same report through the development-only debug surface. None of these reads holds authority or includes model request or response content.
 
 ## Trust model
 

@@ -11,6 +11,7 @@ import { UsageStoreV1, type UsageSqlV1 } from "./store.js";
 
 export interface BillingUserBackendHostV1 {
   sql: UsageSqlV1;
+  transactionSync?<T>(closure: () => T): T;
   now?: () => number;
 }
 
