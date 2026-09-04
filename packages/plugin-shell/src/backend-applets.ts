@@ -161,8 +161,13 @@ export interface AppletInstanceBindingV1 {
         diagnostics: string[];
       }
   >;
+  /**
+   * `generationId` is the Applet generation the calling Turn pinned. The
+   * instance runs that generation or refuses the call (ADR 0038).
+   */
   invokeTool(input: {
     appletId: string;
+    generationId: string;
     tool: string;
     input: unknown;
   }): Promise<{ status: "ok" | "error"; content: string }>;
@@ -262,7 +267,11 @@ export function createAppletInstanceBindingV1(
         const answer = JSON.parse(
           JSON.stringify(
             await rpc.invokeTool(
-              envelope({ tool: input.tool, toolInput: input.input ?? null }),
+              envelope({
+                generationId: input.generationId,
+                tool: input.tool,
+                toolInput: input.input ?? null,
+              }),
             ),
           ),
         ) as { status?: unknown; content?: unknown };
