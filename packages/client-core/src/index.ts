@@ -17,6 +17,7 @@ export {
   clientFailureDetailV1,
   presentClientFailureV1,
   readJsonResponseV1,
+  serverRefusalMessageV1,
   TransportFailureV1,
   type ClientFailureKindV1,
   type ClientFailureV1,

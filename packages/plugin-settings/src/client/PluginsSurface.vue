@@ -203,8 +203,8 @@ function displayName(packageId: string): string {
 function rowFailure(error: unknown, action: string): string {
   const classified = classifyClientFailureV1(error);
   console.debug("plugin action failed", classified.detail);
-  return classified.kind === "rejected"
-    ? inPlainNames(classified.detail)
+  return classified.serverMessage
+    ? inPlainNames(classified.serverMessage)
     : presentClientFailureV1(error, action);
 }
 

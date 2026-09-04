@@ -314,6 +314,28 @@
 }
 
 /*
+ * The way back from an ending the thread cannot recover on its own: the client
+ * gave up reaching the Bot, and the draft it handed back is one click from
+ * being sent again.
+ */
+.message-retry {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--frock-danger-border);
+  border-radius: var(--frock-radius-control);
+  color: var(--frock-danger-text);
+  background: transparent;
+  font-size: var(--frock-text-xs);
+  cursor: pointer;
+}
+
+.message-retry:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/*
  * An assistant Turn is its avatar and, beside it, one column holding
  * everything the Turn produced. The row has exactly two children: bubbles,
  * notices, sends and chips stack inside the column, so a one-word reply is a
@@ -773,6 +795,18 @@
   flex-direction: column;
   align-self: stretch;
   gap: 6px;
+}
+
+/* Only ever on screen near the limit, so it sits under the text it counts. */
+.composer-counter {
+  margin: 0;
+  align-self: flex-end;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-xs);
+}
+
+.composer-counter-over {
+  color: var(--frock-danger-text);
 }
 
 .skill-chips {

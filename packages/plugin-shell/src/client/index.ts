@@ -4,6 +4,7 @@ import {
   clientFailureDetailV1,
   decodeExternalAuthorizationUrl,
   presentClientFailureV1,
+  serverRefusalMessageV1,
   type AgentTransport,
   type ClientAnnouncement,
   type ClientNotificationIntent,
@@ -64,6 +65,12 @@ import {
   decodeApprovalDecisionReceiptV1,
   decodeApprovalListViewV1,
 } from "../approvals.js";
+import {
+  isCertainSendRefusalV1,
+  momentAfterV1,
+  uncertainAdmissionDelayMsV1,
+  UNREACHABLE_BOT_MESSAGE_V1,
+} from "./uncertain-admission.js";
 import {
   decodeTaskListViewV1,
   decodeTaskViewV1,
@@ -1000,7 +1007,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     botId: string,
     runId: string,
     signal: AbortSignal,
-  ): Promise<"admitted" | "not-admitted" | "detached"> {
+  ): Promise<"admitted" | "not-admitted" | "detached" | "unreachable"> {
     web.value.activeRun = {
       runId,
       status: "running",
@@ -1010,7 +1017,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     if (!ctx.transport.lookupRun || !ctx.transport.fenceRunAdmission) {
       return "detached";
     }
-    let delayMs = 250;
     let reconciliationError: string | undefined;
     const clearReconciliationError = () => {
       if (web.value.settingsError === reconciliationError) {
@@ -1018,7 +1024,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       }
       reconciliationError = undefined;
     };
-    while (!signal.aborted) {
+    for (let attempt = 1; !signal.aborted; attempt += 1) {
       try {
         const observed = await observeWhileAttached(
           ctx.transport.lookupRun(botId, runId),
@@ -1047,8 +1053,16 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         )} Retrying…`;
         web.value.settingsError = reconciliationError;
       }
+      const delayMs = uncertainAdmissionDelayMsV1(attempt);
+      // The bound is spent. Asking again would only keep a placeholder
+      // spinning over a backend this tab cannot reach, so the caller settles
+      // the Turn and says so in the thread.
+      if (delayMs === undefined) {
+        clearReconciliationError();
+        web.value.activeRun = undefined;
+        return "unreachable";
+      }
       await waitForRunLookup(delayMs, signal);
-      delayMs = Math.min(delayMs * 2, 5_000);
     }
     return "detached";
   }
@@ -2570,14 +2584,41 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.error = refusal;
           return { accepted: false, error: refusal };
         }
+        // Every other 4xx is a refusal too, and the answer already says why —
+        // a message over the size limit is answered 413 with the sentence the
+        // person needs. Only 5xx and a lost connection leave admission in
+        // doubt, so anything else here is settled: no optimistic bubbles, no
+        // "checking" placeholder, no reconciliation, and the composer gets the
+        // draft back rather than the thread pretending it was sent.
+        if (isCertainSendRefusalV1(error)) {
+          removeMessages(web.value.messages, pendingRunId);
+          // A refusal's own sentence is the one the person needs — the send
+          // that was over the size limit is answered with the limit. Only a
+          // refusal carries one; anything else falls back to the shared line.
+          const refusal =
+            serverRefusalMessageV1(error) ??
+            presentClientFailureV1(error, "send that message");
+          web.value.error = refusal;
+          return { accepted: false, error: refusal };
+        }
         const aborted =
           error instanceof DOMException && error.name === "AbortError";
+        // Strictly after the message it reports on. The thread orders by time,
+        // and the durable projection gives the user's line the run's later
+        // `admittedAt`, so a placeholder carrying the moment the send began
+        // sorted above the message it belongs to.
+        const placeholderAt = momentAfterV1(
+          web.value.messages.find(
+            (message) =>
+              message.runId === pendingRunId && message.role === "user",
+          )?.at ?? optimisticAt,
+        );
         replaceMessage(web.value.messages, pendingRunId, {
           id: `${pendingRunId}:assistant`,
           runId: pendingRunId,
           role: "assistant",
           text: "Checking whether your message went through…",
-          at: optimisticAt,
+          at: placeholderAt,
           status: "interrupted",
           tools: [],
           sends: [],
@@ -2590,7 +2631,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         }
         const observer = new AbortController();
         admissionObserver = observer;
-        let disposition: "admitted" | "not-admitted" | "detached";
+        let disposition:
+          "admitted" | "not-admitted" | "detached" | "unreachable";
         try {
           disposition = await reconcileUncertainAdmission(
             botId,
@@ -2599,6 +2641,33 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           );
         } finally {
           if (admissionObserver === observer) admissionObserver = undefined;
+        }
+        // The reconciliation ran out of attempts: this tab cannot reach the
+        // backend at all. That is the app's own failure and it says so, in
+        // place of the placeholder, with the Retry the person would otherwise
+        // have to improvise — and with the Turn no longer running, so Stop
+        // stops standing for a Turn nobody is executing.
+        if (disposition === "unreachable") {
+          replaceMessage(web.value.messages, pendingRunId, {
+            id: `${pendingRunId}:assistant`,
+            runId: pendingRunId,
+            role: "assistant",
+            text: UNREACHABLE_BOT_MESSAGE_V1,
+            at: placeholderAt,
+            status: "error",
+            retry: "resend",
+            tools: [],
+            sends: [],
+          });
+          // The bubble is the report, and it is the one carrying the Retry.
+          // Saying the same sentence again in the banner above it is what the
+          // thread already looked like when it was broken — the same string
+          // three times over — so the banner is cleared rather than set.
+          web.value.error = undefined;
+          web.value.activeRun = undefined;
+          web.value.activeRunId = undefined;
+          web.value.runningRunId = undefined;
+          return { accepted: false, error: UNREACHABLE_BOT_MESSAGE_V1 };
         }
         if (disposition === "not-admitted") {
           // One affordance, not two. This used to be an assistant bubble
@@ -2614,8 +2683,11 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             runId: pendingRunId,
             role: "system",
             text: notAdmitted,
-            at: optimisticAt,
+            at: placeholderAt,
             status: "error",
+            // The same affordance an unreachable send gets: the draft is back
+            // in the composer, and this sends it again.
+            retry: "resend",
             tools: [],
             sends: [],
           });

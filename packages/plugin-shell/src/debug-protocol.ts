@@ -90,21 +90,50 @@ export interface BotDebugSnapshotV1 {
   nextCursor?: string;
 }
 
+/**
+ * A debug query the caller got wrong: an unknown field, a `limit` past the cap.
+ * The request is what is bad, not the Bot, so the surface owes a 400 rather
+ * than an uncaught failure in the isolate. The name is what carries that
+ * across the Durable Object RPC boundary — which keeps an error's `name` and
+ * `message` and drops everything else — exactly as `BotTurnRefusedError` does
+ * for a refused admission.
+ */
+export class BotDebugQueryRefusedErrorV1 extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BotDebugQueryRefusedErrorV1";
+  }
+}
+
+/** Whether an error — including one that has crossed RPC — is that refusal. */
+export function isBotDebugQueryRefusalV1(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    String((error as { name: unknown }).name) === "BotDebugQueryRefusedErrorV1"
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function boundedString(value: unknown, maximum: number, field: string): string {
   if (typeof value !== "string" || value.length < 1 || value.length > maximum) {
-    throw new Error(`debug query ${field} is invalid`);
+    throw new BotDebugQueryRefusedErrorV1(`debug query ${field} is invalid`);
   }
   return value;
 }
 
 export function decodeBotDebugQueryV1(input: unknown): BotDebugQueryV1 {
-  if (!isRecord(input)) throw new Error("debug query is invalid");
+  if (!isRecord(input)) {
+    throw new BotDebugQueryRefusedErrorV1("debug query is invalid");
+  }
   if (input.schemaVersion !== 1) {
-    throw new Error("debug query schemaVersion is invalid");
+    throw new BotDebugQueryRefusedErrorV1(
+      "debug query schemaVersion is invalid",
+    );
   }
   const allowed = new Set([
     "schemaVersion",
@@ -114,7 +143,7 @@ export function decodeBotDebugQueryV1(input: unknown): BotDebugQueryV1 {
     "events",
   ]);
   if (!Object.keys(input).every((key) => allowed.has(key))) {
-    throw new Error("debug query has invalid fields");
+    throw new BotDebugQueryRefusedErrorV1("debug query has invalid fields");
   }
   const query: BotDebugQueryV1 = { schemaVersion: 1 };
   if (input.runId !== undefined) {
@@ -129,13 +158,17 @@ export function decodeBotDebugQueryV1(input: unknown): BotDebugQueryV1 {
       (input.limit as number) < 1 ||
       (input.limit as number) > BOT_DEBUG_RUN_LIMIT_V1
     ) {
-      throw new Error("debug query limit is invalid");
+      throw new BotDebugQueryRefusedErrorV1(
+        `debug query limit must be a whole number from 1 to ${BOT_DEBUG_RUN_LIMIT_V1}`,
+      );
     }
     query.limit = input.limit as number;
   }
   if (input.events !== undefined) {
     if (typeof input.events !== "boolean") {
-      throw new Error("debug query events is invalid");
+      throw new BotDebugQueryRefusedErrorV1(
+        "debug query events must be true or false",
+      );
     }
     query.events = input.events;
   }

@@ -27,6 +27,14 @@ export interface ClientFailureV1 {
   readonly status?: number;
   /** The raw text — for the console and for tests, never for the screen. */
   readonly detail: string;
+  /**
+   * The sentence the deployment wrote for a person, when it wrote one: the
+   * `error` field of a refusal it decided on, like "Your message is too long."
+   * A refusal is the product explaining a rule it holds, so that sentence is
+   * the User's to read — unlike a fault's text, which is about plumbing. Only
+   * set for a 4xx, and only when the body actually carried one.
+   */
+  readonly serverMessage?: string;
 }
 
 /** A request that did not produce a usable JSON body. */
@@ -34,6 +42,7 @@ export class TransportFailureV1 extends Error implements ClientFailureV1 {
   readonly kind: ClientFailureKindV1;
   readonly status?: number;
   readonly detail: string;
+  readonly serverMessage?: string;
   /**
    * The server said this outcome is final, so a caller that retries pending
    * work must stop rather than try again. Carried through because the flock's
@@ -49,6 +58,9 @@ export class TransportFailureV1 extends Error implements ClientFailureV1 {
     this.kind = failure.kind;
     if (failure.status !== undefined) this.status = failure.status;
     this.detail = failure.detail;
+    if (failure.serverMessage !== undefined) {
+      this.serverMessage = failure.serverMessage;
+    }
     if (failure.definitive !== undefined) this.definitive = failure.definitive;
   }
 }
@@ -62,16 +74,17 @@ function kindForStatusV1(status: number): ClientFailureKindV1 {
   return "rejected";
 }
 
-function serverDetailV1(value: unknown, fallback: string): string {
+function serverErrorStringV1(value: unknown): string | undefined {
   if (
     typeof value === "object" &&
     value !== null &&
     "error" in value &&
     typeof (value as { error: unknown }).error === "string"
   ) {
-    return (value as { error: string }).error;
+    const written = (value as { error: string }).error.trim();
+    return written === "" ? undefined : written;
   }
-  return fallback;
+  return undefined;
 }
 
 function isDefinitiveV1(value: unknown): boolean {
@@ -99,12 +112,20 @@ export async function readJsonResponseV1(response: Response): Promise<unknown> {
     readable = false;
   }
   if (!response.ok) {
+    const written = readable ? serverErrorStringV1(parsed) : undefined;
     throw new TransportFailureV1({
       kind: kindForStatusV1(response.status),
       status: response.status,
-      detail: readable
-        ? serverDetailV1(parsed, `HTTP ${response.status}`)
-        : `HTTP ${response.status}: ${body.slice(0, 200)}`,
+      detail:
+        written ??
+        (readable
+          ? `HTTP ${response.status}`
+          : `HTTP ${response.status}: ${body.slice(0, 200)}`),
+      // A refusal the deployment decided on, in words it chose for a person.
+      // A fault's text is never that, whatever it happens to say.
+      ...(written !== undefined && response.status < 500
+        ? { serverMessage: written }
+        : {}),
       ...(readable && isDefinitiveV1(parsed) ? { definitive: true } : {}),
     });
   }
@@ -125,6 +146,28 @@ export function classifyClientFailureV1(error: unknown): ClientFailureV1 {
   if (error instanceof TransportFailureV1) return error;
   const detail =
     error instanceof Error ? error.message : String(error ?? "unknown error");
+  /*
+   * A transport that is not this one may still have read a status and put it
+   * on the error — the desktop bridge does, and so does anything that decodes
+   * a refusal before throwing. A 4xx there means the same thing it means here:
+   * the deployment read the request, refused it, and said why in words meant
+   * for a person.
+   */
+  const status =
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    typeof (error as { status: unknown }).status === "number"
+      ? (error as { status: number }).status
+      : undefined;
+  if (status !== undefined && status >= 400) {
+    return {
+      kind: kindForStatusV1(status),
+      status,
+      detail,
+      ...(status < 500 && detail !== "" ? { serverMessage: detail } : {}),
+    };
+  }
   // `fetch` rejects with a TypeError when the request never left, or never
   // came back. The browser's own offline flag is the only way to tell the two
   // apart, and it is advisory, so it only picks the wording.
@@ -180,6 +223,17 @@ export function presentClientFailureV1(
     classifyClientFailureV1(error).kind,
     action,
   );
+}
+
+/**
+ * The sentence the deployment wrote for a person, if it wrote one.
+ *
+ * Use it where a refusal's own reason is what the User needs — the send that
+ * was too long, the plugin that needs another turned on first — and fall back
+ * to `presentClientFailureV1`. A fault never carries one.
+ */
+export function serverRefusalMessageV1(error: unknown): string | undefined {
+  return classifyClientFailureV1(error).serverMessage;
 }
 
 /** The raw text, for a console line or a log — never for a surface. */

@@ -26,6 +26,12 @@ import {
   type WebToolActivity,
 } from "../shared.js";
 import { ComposerDraftStore } from "./composer-draft.js";
+import {
+  TURN_TEXT_MAX_CHARACTERS_V1,
+  turnTextCounterVisibleV1,
+  turnTextRemainingV1,
+  turnTextTooLongV1,
+} from "./turn-limits.js";
 import SendPayloadView from "./SendPayloadView.vue";
 import AppletCanvas from "./AppletCanvas.vue";
 import PackageIframeHost from "./PackageIframeHost.vue";
@@ -310,12 +316,31 @@ const composerPlaceholder = computed(() => {
   if (!state.value.modelReady) return state.value.modelLabel;
   return botName.value ? `Message ${botName.value}` : "Message";
 });
+/*
+ * The send route's size rule, enforced where the person can still do something
+ * about it. Past the limit the server answers 413 and nothing is sent, so the
+ * composer says how much is left before the button closes rather than letting
+ * a long message make the round trip to be refused.
+ */
+const draftText = computed(() => draft.value.trim());
+const draftTooLong = computed(() => turnTextTooLongV1(draftText.value));
+const draftCounterVisible = computed(() =>
+  turnTextCounterVisibleV1(draftText.value),
+);
+const draftCounterLabel = computed(() => {
+  const remaining = turnTextRemainingV1(draftText.value);
+  const count = Math.abs(remaining).toLocaleString("en-US");
+  return remaining < 0
+    ? `${count} characters over the ${TURN_TEXT_MAX_CHARACTERS_V1.toLocaleString("en-US")} limit`
+    : `${count} characters left`;
+});
 const canSend = computed(
   () =>
     state.value.connection === "ready" &&
     state.value.modelReady &&
     Boolean(state.value.activeBotId) &&
-    draft.value.trim().length > 0,
+    draftText.value.length > 0 &&
+    !draftTooLong.value,
 );
 /**
  * Stop takes the button only while there is nothing to send. The moment the
@@ -914,9 +939,24 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               { 'message-pending': message.pending },
             ]"
           >
-            <p v-if="message.role === 'system'" class="message-system-line">
-              {{ message.text }}
-            </p>
+            <!--
+              A system line is the product speaking, not the Bot, so it has no
+              avatar and no bubble — and when the thing it reports is something
+              the person can act on, it carries the same Retry the failed
+              assistant row does rather than leaving them to find the composer.
+            -->
+            <template v-if="message.role === 'system'">
+              <p class="message-system-line">{{ message.text }}</p>
+              <button
+                v-if="message.retry === 'resend'"
+                type="button"
+                class="message-retry"
+                :disabled="!canSend"
+                @click="sendMessage()"
+              >
+                Retry
+              </button>
+            </template>
             <template v-else-if="message.role === 'assistant'">
               <!--
                 The Bot's own avatar comes from whichever Package owns Bot
@@ -970,6 +1010,20 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                 <p v-if="message.notice" class="message-notice">
                   {{ message.notice }}
                 </p>
+                <!--
+                  The way out of an ending the person cannot otherwise act on:
+                  the client could not reach the Bot, their text is back in the
+                  composer, and this sends it again.
+                -->
+                <button
+                  v-if="message.retry === 'resend'"
+                  type="button"
+                  class="message-retry"
+                  :disabled="!canSend"
+                  @click="sendMessage()"
+                >
+                  Retry
+                </button>
                 <template v-for="tool in message.tools" :key="tool.id">
                   <PackageIframeHost
                     v-for="entry in iframeEntriesFor(tool)"
@@ -1221,6 +1275,19 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               @click="refreshSkillPopover"
               @blur="closeSkillPopover"
             />
+            <!--
+              Silent until the budget is nearly spent, then it says how much is
+              left — and, past the limit, how much has to go before the send
+              button opens again.
+            -->
+            <p
+              v-if="draftCounterVisible"
+              class="composer-counter"
+              :class="{ 'composer-counter-over': draftTooLong }"
+              aria-live="polite"
+            >
+              {{ draftCounterLabel }}
+            </p>
           </div>
           <!--
             Start a new conversation. Sits beside the composer because that is

@@ -4,6 +4,7 @@ import {
   clientFailureDetailV1,
   presentClientFailureV1,
   readJsonResponseV1,
+  serverRefusalMessageV1,
   TransportFailureV1,
 } from "./errors.js";
 
@@ -39,6 +40,33 @@ describe("readJsonResponseV1", () => {
       (error: unknown) => error,
     )) as TransportFailureV1;
     expect(failure.kind).toBe("unreachable");
+  });
+
+  test("a refusal's own sentence is offered, a fault's is not", async () => {
+    // A 4xx is the deployment explaining a rule it holds, in words it wrote
+    // for a person; a 5xx is a fault, and its text is about plumbing.
+    const refusal = (await readJsonResponseV1(
+      new Response(
+        JSON.stringify({ error: "Your message is too long. Keep it short." }),
+        { status: 413 },
+      ),
+    ).catch((error: unknown) => error)) as TransportFailureV1;
+    expect(serverRefusalMessageV1(refusal)).toBe(
+      "Your message is too long. Keep it short.",
+    );
+
+    const fault = (await readJsonResponseV1(
+      new Response(JSON.stringify({ error: "R2 is down" }), { status: 500 }),
+    ).catch((error: unknown) => error)) as TransportFailureV1;
+    expect(serverRefusalMessageV1(fault)).toBeUndefined();
+    expect(fault.detail).toBe("R2 is down");
+
+    // Nothing written, nothing to offer.
+    const bare = (await readJsonResponseV1(
+      new Response("{}", { status: 400 }),
+    ).catch((error: unknown) => error)) as TransportFailureV1;
+    expect(serverRefusalMessageV1(bare)).toBeUndefined();
+    expect(serverRefusalMessageV1(new Error("boom"))).toBeUndefined();
   });
 
   test("the server's error field is kept as detail, not as the message", async () => {

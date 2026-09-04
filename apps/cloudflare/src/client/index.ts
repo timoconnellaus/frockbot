@@ -84,8 +84,14 @@ async function apiRequest(
         headers: body ? { "content-type": "application/json" } : undefined,
         body,
       });
-  // Every read of a response goes through the shared reader: it classifies a
-  // failed or non-JSON reply rather than letting `JSON.parse` speak for it.
+  /*
+   * Every read of a response goes through the shared reader: it classifies a
+   * failed or non-JSON reply rather than letting `JSON.parse` speak for it,
+   * and the failure it throws carries the status. "What went wrong" and "is it
+   * settled" are different questions and only the code answers the second: a
+   * 4xx is the server having read the request and refused it, while a 5xx
+   * leaves a send genuinely uncertain.
+   */
   return await readJsonResponseV1(response);
 }
 
