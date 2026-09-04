@@ -61,7 +61,9 @@ insert share one synchronous SQL transaction, so redelivery applies nothing.
 Credit purchases additionally reconcile by PaymentIntent. Refund events carry
 Stripe's cumulative `amount_refunded`; the stored credited, refunded, and
 already-applied amounts make duplicate and out-of-order delivery converge on
-one net purchased-credit value.
+one net purchased-credit value. Only a `charge.refunded` event carrying the
+server-written `frockbot_kind=credit` metadata changes prepaid credit;
+subscription and unrelated charge refunds remain history-only.
 
 Every newly inserted usage-ledger entry debits billing in that entry's existing
 User Durable Object transaction. The current allowance is consumed first and
