@@ -229,6 +229,42 @@ export const CONVERSATION_PROMPT_SECTION_V1 = "conversation";
 /** Ordered after identity (0), before anything a Package contributes. */
 export const CONVERSATION_PROMPT_ORDER_V1 = 1;
 
+export const STEP_BUDGET_PROMPT_SECTION_V1 = "step-budget";
+/** Late in the prompt, where the model reads it last and heeds it most. */
+export const STEP_BUDGET_PROMPT_ORDER_V1 = 90;
+/** The section appears when this many steps or fewer remain after this one. */
+export const STEP_BUDGET_WARNING_STEPS_V1 = 3;
+
+/**
+ * What the model is told when its reply is about to be stopped.
+ *
+ * A Turn that reaches the loop's step ceiling ends `interrupted`, and a model
+ * that was mid-work says nothing: the person sees a notice and no status. Bob
+ * (2026-09-04) spent twenty steps retrying a failing publish and the thread
+ * went quiet. So the last few steps carry a countdown and one instruction —
+ * stop starting work, send a status — and the final step allows nothing else.
+ */
+export function stepBudgetPromptTextV1(context: {
+  step?: { current: number; max: number };
+}): string {
+  const step = context.step;
+  if (!step) return "";
+  const remaining = step.max - step.current;
+  if (remaining > STEP_BUDGET_WARNING_STEPS_V1 || remaining < 0) return "";
+  if (remaining === 0) {
+    return [
+      "<step_budget>",
+      `This is the last step of this reply; after it the reply is stopped automatically. Do nothing except call \`${SEND_TO_USER_TOOL_V1}\` once with a short status for the person: what is finished, what is not, and what they can do next.`,
+      "</step_budget>",
+    ].join("\n");
+  }
+  return [
+    "<step_budget>",
+    `This reply has ${remaining} ${remaining === 1 ? "step" : "steps"} left after this one before it is stopped automatically. Do not start new work. Call \`${SEND_TO_USER_TOOL_V1}\` now with a short status for the person: what is finished, what is not, and what they can do next.`,
+    "</step_budget>",
+  ].join("\n");
+}
+
 export const CONVERSATION_PROMPT_TEXT_V1 = [
   "## Talking to the user",
   "",
@@ -425,6 +461,13 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
       id: CONVERSATION_PROMPT_SECTION_V1,
       order: CONVERSATION_PROMPT_ORDER_V1,
       render: () => CONVERSATION_PROMPT_TEXT_V1,
+    }),
+    // Empty for most of a Turn; a countdown and one instruction at the end of
+    // its step budget. See `stepBudgetPromptTextV1`.
+    ctx.systemPrompt.register({
+      id: STEP_BUDGET_PROMPT_SECTION_V1,
+      order: STEP_BUDGET_PROMPT_ORDER_V1,
+      render: (context) => stepBudgetPromptTextV1(context),
     }),
     ctx.tools.register(
       createSendToUserTool(SEND_TO_USER_TOOL_V1, ctx.sessions),

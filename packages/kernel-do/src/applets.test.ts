@@ -58,7 +58,12 @@ describe("Applet ids", () => {
     expect(appletIdV1("user-42", "d".repeat(32))).toBe(
       `user-42.${"d".repeat(32)}`,
     );
-    expect(() => appletIdV1("User-42", "d".repeat(32))).toThrow();
+    // A User id as Better Auth mints it: mixed case, 32 characters.
+    expect(appletIdV1("vgpqfaCcwnPlzjYdb2mIfNcOW1YV0SkG", "d".repeat(32))).toBe(
+      `vgpqfaCcwnPlzjYdb2mIfNcOW1YV0SkG.${"d".repeat(32)}`,
+    );
+    expect(() => appletIdV1("user 42", "d".repeat(32))).toThrow();
+    expect(() => appletIdV1("", "d".repeat(32))).toThrow();
     expect(() => appletIdV1("user-42", "nope")).toThrow();
   });
 
