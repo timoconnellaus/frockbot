@@ -38,7 +38,7 @@ async function runNode(args: string[], cwd: string): Promise<Ran> {
 }
 
 describe("the published `applet` binary under plain Node", () => {
-  it("scaffolds and checks the template with no Bun anywhere", async () => {
+  it("scaffolds, checks, and builds the template with no Bun anywhere", async () => {
     // Built here rather than assumed: a stale `dist/` would make this test
     // green about a bundle nobody ships.
     const build = Bun.spawnSync({
@@ -57,5 +57,12 @@ describe("the published `applet` binary under plain Node", () => {
 
     expect(checked.output).toContain("applet check: no problems found");
     expect(checked.code).toBe(0);
+
+    const built = await runNode([cli, "build"], directory);
+
+    expect(built.output).toContain(join(directory, "dist/server.js"));
+    expect(built.output).toContain(join(directory, "dist/ui.html"));
+    expect(built.output).toContain("2 tool(s): add_todo, list_todos");
+    expect(built.code).toBe(0);
   }, 180_000);
 });
