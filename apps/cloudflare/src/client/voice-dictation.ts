@@ -103,7 +103,7 @@ export function openVoiceDictationV1(
     sendAudio(pcm16) {
       if (socket.readyState !== WebSocket.OPEN) return;
       if (!ready) {
-        // Bounded: about ten seconds of 16 kHz PCM16 at the worklet's frame
+        // Bounded: about ten seconds of 24 kHz PCM16 at the worklet's frame
         // size. A server that never says `ready` must not grow this forever.
         if (pending.length < 320) pending.push(pcm16);
         return;
