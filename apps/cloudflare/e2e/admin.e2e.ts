@@ -43,8 +43,23 @@ test("an admin changes the durable signup policy", async ({ page }) => {
   const toggle = page.getByLabel("Accept new signups");
   await expect(toggle).toBeEnabled();
   const initial = await toggle.isChecked();
-  await toggle.click();
-  await expect(toggle).toBeChecked({ checked: !initial });
+  // The same convergence `openAdmin` needs, for the same reason: this User owns
+  // no Bot, so the first-run dialog can arrive after the Admin page has opened
+  // and its backdrop then swallows this click — on a loaded CI runner it did,
+  // for the whole four-minute budget. Dismissing it and retrying the approach
+  // settles whichever order the shell arrives in; the subject of this test is
+  // the durable policy, not the dialog's timing.
+  //
+  // The click is guarded by the toggle's own reading rather than issued every
+  // attempt, because a retry that clicked again would toggle the policy back
+  // and the assertion would oscillate instead of settling.
+  await expect(async () => {
+    await dismissFirstRun(page);
+    if ((await toggle.isChecked()) === initial) {
+      await toggle.click({ timeout: 2_000 });
+    }
+    await expect(toggle).toBeChecked({ checked: !initial, timeout: 2_000 });
+  }).toPass({ timeout: 60_000 });
 
   await page.reload();
   await expect(
