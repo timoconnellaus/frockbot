@@ -318,7 +318,9 @@ export async function createdBotIdV1(
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 80) || "bot";
-  const digest = await sha256HexV1(`${owner.userId} ${owner.botId} ${effectId}`);
+  const digest = await sha256HexV1(
+    `${owner.userId}\u0000${owner.botId}\u0000${effectId}`,
+  );
   return `${base}-${digest.slice(0, 12)}`;
 }
 
