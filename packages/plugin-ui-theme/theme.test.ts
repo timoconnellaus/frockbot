@@ -53,4 +53,13 @@ describe("dark product theme", () => {
       expect(contrast(text, surface)).toBeGreaterThanOrEqual(4.5);
     },
   );
+
+  test("prefers Capacitor's corrected Android safe-area insets", () => {
+    expect(stylesheet).toMatch(
+      /--frock-safe-top:\s*var\(\s*--safe-area-inset-top,\s*env\(safe-area-inset-top,\s*0px\)\s*\)/,
+    );
+    expect(stylesheet).toMatch(
+      /--frock-safe-bottom:\s*var\(\s*--safe-area-inset-bottom,\s*env\(safe-area-inset-bottom,\s*0px\)\s*\)/,
+    );
+  });
 });
