@@ -57,6 +57,35 @@ programmatic API that Volar and the other template typecheckers need. When it
 lands, the Vue tier moves in one commit and this ADR's list shrinks to the root
 scripts.
 
+**Addendum (2026-09-04): the Vue tier now runs on a bridge, not on TS 5.9.**
+The 15 `vue-tsc` packages alias `typescript` to
+[`typescript-native-bridge`](https://github.com/johnsoncodehk/typescript-native-bridge)
+at `6.0.3-bridge.16.tsgo.7.0.2` — a drop-in `typescript` from the Vue Language
+Tools maintainer that keeps the TS 6 JS API Volar embeds while running the
+checker in-process on tsgo through a NAPI bridge. `vue-tsc` itself is unchanged.
+Measured here: `plugin-shell` 22.4s → 2.8s, `plugin-settings` 7.9s → 2.2s,
+`client-ui` 7.8s → 1.4s. Diagnostics were verified byte-identical to stock
+`vue-tsc` — same file, line, column, code and type name — for injected
+template-only errors in three packages, because a checker that silently skips
+`.vue` files also goes green.
+
+The bridge is TS 6, which removed `baseUrl` and resolves `paths` relative to the
+tsconfig. Three configs needed the relative form:
+`packages/plugin-shell/tsconfig.json`, `packages/plugin-computer/tsconfig.json`,
+and `apps/cloudflare/tsconfig.client.json`.
+
+A fourth config needed a different fix. `apps/cloudflare` runs three plain `tsc`
+passes alongside its `vue-tsc` one, and the alias is package-wide, so those
+passes moved off 5.9.3 too. `apps/cloudflare/test/tsconfig.json` replaces its
+parent's `types` wholesale, and without `vite/client` the CSS side-effect
+imports that `plugin-shell/src/client/index.ts` reaches raise TS2882 — a
+diagnostic TS 5.9 does not emit. `vite/client` is added there, matching the
+combination the config's own comment says `plugin-shell` compiles under.
+
+This is a stopgap, not the destination. Once TS 7.1 lands with content mappers
+(microsoft/typescript-go#4712), `tsc` checks `.vue` directly and `vue-tsc` is
+deprecated; the bridge alias comes out then. Revisit around October 2026.
+
 **Typechecking is bounded, not fanned out.** `scripts/typecheck.ts` runs the
 packages through a pool capped at `min(4, cores/2)`, overridable with
 `TYPECHECK_CONCURRENCY`. This costs nothing: measured on a 10-core machine, the

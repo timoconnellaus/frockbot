@@ -5,9 +5,8 @@
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
-    "baseUrl": ".",
     "paths": {
-      "@cordisjs/client": ["src/client/cordis-client-shim.d.ts"]
+      "@cordisjs/client": ["./src/client/cordis-client-shim.d.ts"]
     },
     "strict": true,
     "noEmit": true,

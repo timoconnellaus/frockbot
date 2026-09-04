@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ClientPluginContext } from "@frockbot/client-core";
 import type { FrockBotWebData } from "@frockbot/plugin-shell/shared";
-import { ref, type Ref } from "vue";
+import { nextTick, ref, type Ref } from "vue";
 import { randomSheepRecipeV1 } from "../shared.js";
 import { flockClientPlugin } from "./index.js";
 import { pendingCreateKey, pendingSheepKey } from "./pending-create.js";
@@ -482,12 +482,18 @@ describe("Flock client reconciliation", () => {
       return Promise.reject(new Error(`unexpected request: ${path}`));
     });
     const selected: string[] = [];
+    const forgotten: (string | undefined)[] = [];
     state.value.bindShell(
       ref({
         activeBotId: "alpha",
         selectBot: (botId: string) => {
           selected.push(botId);
           return Promise.resolve();
+        },
+        transcripts: {
+          rememberViewport: () => undefined,
+          viewportFor: () => undefined,
+          forget: (botId?: string) => forgotten.push(botId),
         },
       }) as unknown as Ref<FrockBotWebData>,
     );
@@ -497,6 +503,9 @@ describe("Flock client reconciliation", () => {
     expect(state.value.lifecycles.alpha).toBe("archived");
     expect(selected.at(-1)).toBe("beta");
     expect(new URL(location.href).searchParams.get("bot")).toBe("beta");
+    // The archived Bot's held transcript goes with it, so restoring it later
+    // reads from the Bot rather than redrawing what the cache still had.
+    expect(forgotten).toEqual(["alpha"]);
   });
 
   test("reconciles a lost sheep response and clears the exact pending command", async () => {
@@ -531,5 +540,90 @@ describe("Flock client reconciliation", () => {
     expect(state.value.identities.alpha?.sheep).toEqual(updated);
     expect(state.value.overlay).toBeUndefined();
     expect(storage.has(pendingSheepKey("user-a", "alpha"))).toBe(false);
+  });
+});
+
+describe("Flock sidebar rows follow the transcript", () => {
+  test("a settled Turn updates the row without waiting for the poll", async () => {
+    installStorage();
+    const reads: string[] = [];
+    let reply: string | undefined;
+    const state = mount((path) => {
+      if (path !== "/api/bots/unread")
+        return Promise.reject(new Error(`unexpected request: ${path}`));
+      reads.push(path);
+      return Promise.resolve({
+        schemaVersion: 1,
+        unread: [
+          {
+            schemaVersion: 1,
+            botId: "alpha",
+            count: 0,
+            capped: false,
+            unread: false,
+            manuallyUnread: false,
+            ...(reply === undefined
+              ? {}
+              : {
+                  lastMessage: {
+                    schemaVersion: 1,
+                    text: reply,
+                    at: "2026-08-31T00:00:01.000Z",
+                    role: "assistant",
+                  },
+                }),
+          },
+        ],
+      });
+    });
+    const shell = ref({
+      activeBotId: "alpha",
+      activeRunId: "run-1",
+      messages: [
+        {
+          id: "m1",
+          runId: "run-1",
+          role: "user",
+          text: "hello",
+          status: "completed",
+        },
+      ],
+    } as unknown as FrockBotWebData);
+    state.value.bindShell(shell as unknown as Ref<FrockBotWebData>);
+    // Binding a Shell is not itself a beat: nothing has settled, so nothing is
+    // re-read.
+    await nextTick();
+    expect(reads).toHaveLength(0);
+    expect(state.value.unread.alpha).toBeUndefined();
+
+    // The Turn settles: its reply is in the transcript, no run is in flight.
+    reply = "Ollama reply";
+    shell.value = {
+      ...shell.value,
+      activeRunId: undefined,
+      messages: [
+        ...shell.value.messages,
+        {
+          id: "m2",
+          runId: "run-1",
+          role: "assistant",
+          text: reply,
+          status: "completed",
+        },
+      ],
+    } as unknown as FrockBotWebData;
+    await nextTick();
+    // Draining the read the watcher started. A rendered frame does this on its
+    // own; the claim under test is that no 15-second poll was involved.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(reads).toHaveLength(1);
+    expect(state.value.unread.alpha?.lastMessage).toMatchObject({
+      text: "Ollama reply",
+      at: "2026-08-31T00:00:01.000Z",
+      role: "assistant",
+    });
   });
 });

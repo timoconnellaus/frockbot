@@ -595,10 +595,15 @@ describe("Bot isolate contribution host", () => {
     expect(registered[0]!.name).toBe("reverse_text");
     expect(registered[0]!.namespace).toBe("bot-authored");
     expect(registered[0]!.idempotent).toBe(true);
+    // Not external: this is the deployment's own reviewed code reached over no
+    // network, and the dispatch guard refuses an external call that carries no
+    // `mcpDetails.description` — a field nothing ever told the model to send
+    // for an isolate-hosted Package. Registering these as external meant the
+    // Applets Package could not be called by chat at all.
     expect(namespaces).toEqual([
       {
         name: "bot-authored",
-        external: true,
+        external: false,
         status: "ready",
       },
     ]);

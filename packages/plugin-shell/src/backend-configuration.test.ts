@@ -8,6 +8,7 @@ import type {
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import { createShellBotBackendContribution } from "./backend.js";
 import { createIsolateCapabilityHost } from "./backend-isolate.js";
+import { notificationIdV1 } from "./notification-id.js";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();
@@ -601,9 +602,14 @@ describe("generic per-Turn model resolution", () => {
     await expect(contribution.listNotifications()).resolves.toEqual([
       expect.objectContaining({
         // Colons would fail the acknowledge decoder, so the mint replaces
-        // them; a notification nobody can acknowledge 400s forever.
-        notificationId:
-          "package-connection-unavailable-run-1-bot-authored-flock-ai-ambient",
+        // them and folds in a digest of the raw parts; a notification nobody
+        // can acknowledge 400s forever.
+        notificationId: notificationIdV1(
+          "package-connection-unavailable",
+          "run-1",
+          "bot-authored",
+          "flock-ai-ambient",
+        ),
         title: "Connection unavailable",
       }),
     ]);

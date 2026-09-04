@@ -5,7 +5,10 @@ import {
   type SessionEvent,
   type SkillRefV1,
 } from "@frockbot/kernel-contracts";
-import { isPublicIdentifier } from "@frockbot/configuration-core";
+import {
+  isPublicIdentifier,
+  isRpcIdentifier,
+} from "@frockbot/configuration-core";
 import { decodeRunCursorV1, RUN_CURSOR_PATTERN } from "./run-cursor.js";
 export { decodeRunCursorV1, RUN_CURSOR_PATTERN };
 import type {
@@ -241,14 +244,30 @@ export interface ClientRunPageV1 {
  * A durable Session event that belongs to no Turn. The WebUI renders it as a
  * system line in the conversation.
  */
-export interface ClientAnnouncementV1 {
-  type: "bot/renamed";
-  announcementId: string;
-  at: string;
-  from: string;
-  to: string;
-  namedBy: "user" | "bot";
-}
+/**
+ * A session-level line in the transcript that belongs to neither party.
+ *
+ * `conversation/compacted` is ADR 0030's one user-visible surface: the earlier
+ * Turns are still there and still readable, and this says plainly that the
+ * model now carries a summary of them instead of the Turns themselves. ADR
+ * 0027's "not summarised" notice still stands where Turns were genuinely
+ * evicted, so the two never claim each other's ground.
+ */
+export type ClientAnnouncementV1 =
+  | {
+      type: "bot/renamed";
+      announcementId: string;
+      at: string;
+      from: string;
+      to: string;
+      namedBy: "user" | "bot";
+    }
+  | {
+      type: "conversation/compacted";
+      announcementId: string;
+      at: string;
+      throughTurn: number;
+    };
 
 export interface ClientRunListV1 {
   schemaVersion: 1;
@@ -984,20 +1003,37 @@ const MAX_ANNOUNCEMENT_NAME_BYTES = 400;
 export function projectClientAnnouncementsV1(
   events: readonly SessionEvent[],
 ): ClientAnnouncementV1[] {
-  return events.flatMap((event) =>
-    event.type === "bot/renamed"
-      ? [
-          {
-            type: "bot/renamed" as const,
-            announcementId: `announcement-${event.seq}`,
-            at: truncate(event.timestamp, MAX_TIMESTAMP_LENGTH),
-            from: truncateWireString(event.from, MAX_ANNOUNCEMENT_NAME_BYTES),
-            to: truncateWireString(event.to, MAX_ANNOUNCEMENT_NAME_BYTES),
-            namedBy: event.namedBy,
-          },
-        ]
-      : [],
-  );
+  return events.flatMap((event): ClientAnnouncementV1[] => {
+    if (event.type === "bot/renamed") {
+      return [
+        {
+          type: "bot/renamed" as const,
+          announcementId: `announcement-${event.seq}`,
+          at: truncate(event.timestamp, MAX_TIMESTAMP_LENGTH),
+          from: truncateWireString(event.from, MAX_ANNOUNCEMENT_NAME_BYTES),
+          to: truncateWireString(event.to, MAX_ANNOUNCEMENT_NAME_BYTES),
+          namedBy: event.namedBy,
+        },
+      ];
+    }
+    if (event.type === "conversation/compacted") {
+      // The summary itself is deliberately not on the wire. A person can read
+      // every Turn it covers, unchanged, immediately above this line; the
+      // summary is what the model carries, and it belongs to the audit view.
+      return [
+        {
+          type: "conversation/compacted" as const,
+          // A distinct prefix: a compaction is numbered by the session log and
+          // a rename by this Bot's announcement log, and the two counters would
+          // otherwise collide on an id the client upserts by.
+          announcementId: `compaction-${event.seq}`,
+          at: truncate(event.timestamp, MAX_TIMESTAMP_LENGTH),
+          throughTurn: event.throughTurn,
+        },
+      ];
+    }
+    return [];
+  });
 }
 
 export function clientRunListWireBytes(value: ClientRunListV1): number {
@@ -1648,7 +1684,15 @@ export function decodeClientNotificationAcknowledgementCommandV1(
     MAX_RUN_ID_LENGTH,
     "notification acknowledgement command",
   );
-  if (!isPublicIdentifier(notificationId)) {
+  // `isRpcIdentifier`, not `isPublicIdentifier`: the same bounded alphabet
+  // plus `:` and `@`. New ids are minted through `notificationIdV1` and carry
+  // neither, but Bots in the field are already holding notifications whose ids
+  // were interpolated by hand — `composition-failure:<generationId>:<attempt>`
+  // and three more like it. Under the stricter pattern those could never be
+  // acknowledged, so the client retried them forever and the Bot answered 400
+  // on every poll for the rest of its life. Accepting them here is what lets
+  // an already-wedged Bot recover without a storage sweep.
+  if (!isRpcIdentifier(notificationId)) {
     throw new Error(
       "notification acknowledgement command.notificationId is invalid",
     );
@@ -1817,14 +1861,19 @@ export function decodeClientRunLookupV1(input: unknown): ClientRunLookup {
 
 function decodeAnnouncement(value: unknown): ClientAnnouncementV1 {
   const announcement = record(value, "run list.announcement");
-  exactKeys(
-    announcement,
-    ["type", "announcementId", "at", "from", "to", "namedBy"],
-    "run list.announcement",
-  );
-  if (announcement.type !== "bot/renamed") {
+  if (
+    announcement.type !== "bot/renamed" &&
+    announcement.type !== "conversation/compacted"
+  ) {
     throw new Error("run list.announcement.type is invalid");
   }
+  exactKeys(
+    announcement,
+    announcement.type === "conversation/compacted"
+      ? ["type", "announcementId", "at", "throughTurn"]
+      : ["type", "announcementId", "at", "from", "to", "namedBy"],
+    "run list.announcement",
+  );
   const at = string(
     announcement,
     "at",
@@ -1834,20 +1883,35 @@ function decodeAnnouncement(value: unknown): ClientAnnouncementV1 {
   if (!Number.isFinite(Date.parse(at))) {
     throw new Error("run list.announcement.at is invalid");
   }
+  const announcementId = publicEventId(
+    string(
+      announcement,
+      "announcementId",
+      MAX_EVENT_ID_LENGTH,
+      "run list.announcement",
+    ),
+    "run list.announcement.announcementId",
+  );
+  if (announcement.type === "conversation/compacted") {
+    if (
+      !Number.isSafeInteger(announcement.throughTurn) ||
+      (announcement.throughTurn as number) < 1
+    ) {
+      throw new Error("run list.announcement.throughTurn is invalid");
+    }
+    return {
+      type: "conversation/compacted",
+      announcementId,
+      at,
+      throughTurn: announcement.throughTurn as number,
+    };
+  }
   if (announcement.namedBy !== "user" && announcement.namedBy !== "bot") {
     throw new Error("run list.announcement.namedBy is invalid");
   }
   return {
     type: "bot/renamed",
-    announcementId: publicEventId(
-      string(
-        announcement,
-        "announcementId",
-        MAX_EVENT_ID_LENGTH,
-        "run list.announcement",
-      ),
-      "run list.announcement.announcementId",
-    ),
+    announcementId,
     at,
     from: wireString(
       announcement,

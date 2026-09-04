@@ -106,6 +106,16 @@ export interface AuthoringProbeTurn {
 
 const PROBE_BOOTSTRAP_AT = "2026-08-31T00:00:00.000Z";
 
+/**
+ * A compiled-in Package in the probe's bootstrap, so a test can publish the
+ * Catalog entry that names it. The entry's `manifestHash` has to be taken over
+ * exactly this document, which is what an install checks against.
+ */
+export const PROBE_FIRST_PARTY_MANIFEST = {
+  id: "clock",
+  version: "0.0.1",
+} as const;
+
 function scriptedProviderPackage(
   tool: string,
   input: unknown,
@@ -194,6 +204,17 @@ export class AuthoringProbe extends DurableObject<AuthoringProbeEnv> {
                 specifier: "@frockbot/plugin-shell",
                 version: "0.0.1",
                 manifest: { id: "shell", version: "0.0.1" },
+              },
+              // A second required-core member, so the probe is shaped like
+              // production: there, the bootstrap is *every* compiled-in
+              // Package, so any seeded Catalog entry already names a member.
+              // With only `shell` here, a Catalog install of a first-party
+              // entry could never hit the guards a real Bot hits.
+              {
+                packageId: PROBE_FIRST_PARTY_MANIFEST.id,
+                specifier: "@frockbot/plugin-clock",
+                version: PROBE_FIRST_PARTY_MANIFEST.version,
+                manifest: PROBE_FIRST_PARTY_MANIFEST,
               },
             ],
             { createdAt: PROBE_BOOTSTRAP_AT },

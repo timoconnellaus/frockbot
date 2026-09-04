@@ -22,6 +22,7 @@ import {
   type ToolCallOccurrence,
   type ToolExecutionResult,
   type TurnTypeV1,
+  TURN_DEADLINE_MS_V1,
   toolCallOccurrences,
   turnEndReason,
   validateSettledToolOccurrenceJournal,
@@ -112,12 +113,12 @@ class StepLimitReachedError extends Error {
 /**
  * The longest a single Turn may run before the loop stops waiting for it.
  *
- * Nothing bounded a Turn's wall clock before this: one hung for seventeen
- * minutes with an animated avatar and nothing else, and would have hung until
- * the isolate died. Fifteen minutes is well past any Turn a person is watching
- * and well inside the point at which they have concluded the product is broken.
+ * Defined in the contracts, because the loop is not its only reader: anything
+ * deciding whether a run still marked `running` can still be running needs the
+ * same number. Re-exported here because this is where every caller looks for
+ * it.
  */
-export const TURN_DEADLINE_MS_V1 = 15 * 60 * 1000;
+export { TURN_DEADLINE_MS_V1 };
 
 /**
  * How many times one step will send its model request.
@@ -686,24 +687,8 @@ class LoopAgent implements Agent {
       throw new StepLimitReachedError(this.#maxSteps);
     } catch (error) {
       if (this.#turnDeadlineReached) {
-        // Ahead of both the reconciliation and the cancellation branch on
-        // purpose. Cancellation, because the deadline aborts the same
-        // controller Stop does and a Turn the clock ended must not be reported
-        // to the person as one they stopped. Reconciliation, because the
-        // reconciliation branch writes no `turn/end` on the promise that the
-        // run may still resume — and a run the deadline stopped never will.
-        // Deferring to it left `model/reconciliation-required` as the last
-        // event of an open Turn, and every later Turn on that Bot refused with
-        // `409` for the life of the Bot.
-        //
-        // The uncertainty is still recorded: whatever the model request wrote
-        // before the clock ran out stays in the journal. What changes is that
-        // the Turn is settled here — the open step's tool occurrences closed
-        // as `interrupted`, then `step/end` and `turn/end` — exactly as
-        // `kernel-do`'s `settledEventsV1` settles a Stop or a supersede.
         turnOutcome = "interrupted";
-        turnReason = turnEndReason(TURN_DEADLINE_REASON_V1);
-        this.#ctx.emit("agent/error", this, error);
+        turnReason = this.#deadlineTurnReason(error);
       } else if (
         error instanceof ModelEffectReconciliationRequiredError ||
         error instanceof ToolEffectReconciliationRequiredError ||
@@ -886,24 +871,8 @@ class LoopAgent implements Agent {
       throw new StepLimitReachedError(this.#maxSteps);
     } catch (error) {
       if (this.#turnDeadlineReached) {
-        // Ahead of both the reconciliation and the cancellation branch on
-        // purpose. Cancellation, because the deadline aborts the same
-        // controller Stop does and a Turn the clock ended must not be reported
-        // to the person as one they stopped. Reconciliation, because the
-        // reconciliation branch writes no `turn/end` on the promise that the
-        // run may still resume — and a run the deadline stopped never will.
-        // Deferring to it left `model/reconciliation-required` as the last
-        // event of an open Turn, and every later Turn on that Bot refused with
-        // `409` for the life of the Bot.
-        //
-        // The uncertainty is still recorded: whatever the model request wrote
-        // before the clock ran out stays in the journal. What changes is that
-        // the Turn is settled here — the open step's tool occurrences closed
-        // as `interrupted`, then `step/end` and `turn/end` — exactly as
-        // `kernel-do`'s `settledEventsV1` settles a Stop or a supersede.
         turnOutcome = "interrupted";
-        turnReason = turnEndReason(TURN_DEADLINE_REASON_V1);
-        this.#ctx.emit("agent/error", this, error);
+        turnReason = this.#deadlineTurnReason(error);
       } else if (
         error instanceof ModelEffectReconciliationRequiredError ||
         error instanceof ToolEffectReconciliationRequiredError ||
@@ -1419,6 +1388,29 @@ class LoopAgent implements Agent {
       () => Promise.resolve(proposed),
     );
     return decision.kind === "stop";
+  }
+
+  /**
+   * The reason a Turn the clock ended carries, and the one place that decides
+   * a deadline is not a cancellation and not a reconciliation.
+   *
+   * Its branch runs ahead of both. Ahead of cancellation, because the deadline
+   * aborts the same controller Stop does and a Turn the clock ended must not
+   * be reported to the person as one they stopped. Ahead of reconciliation,
+   * because that branch writes no `turn/end` on the promise the run may still
+   * resume — and a run the deadline stopped never will. Deferring to it left
+   * `model/reconciliation-required` as the last event of an open Turn, and
+   * every later Turn on that Bot refused with `409` for the life of the Bot.
+   *
+   * The uncertainty is still recorded: whatever the model request wrote before
+   * the clock ran out stays in the journal. What changes is that the Turn is
+   * settled — the open step's tool occurrences closed as `interrupted`, then
+   * `step/end` and `turn/end` — exactly as `kernel-do`'s `settledEventsV1`
+   * settles a Stop or a supersede.
+   */
+  #deadlineTurnReason(error: unknown): string | undefined {
+    this.#ctx.emit("agent/error", this, error);
+    return turnEndReason(TURN_DEADLINE_REASON_V1);
   }
 
   async #settleCancelledStep(turn: number, step: number): Promise<void> {

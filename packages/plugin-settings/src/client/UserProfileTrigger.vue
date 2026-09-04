@@ -11,6 +11,7 @@ const web = inject(frockBotWebDataKey);
 if (!providedAuth || !surfaces || !web)
   throw new Error("settings client services were not provided");
 const auth = providedAuth;
+const shell = web;
 const menuOpen = ref(false);
 const signOutError = ref<string>();
 const sessionUser = computed(() =>
@@ -54,6 +55,9 @@ async function signOut(): Promise<void> {
   signOutError.value = undefined;
   try {
     await auth.signOut();
+    // Held conversations belong to the User who was signed in. Nothing of
+    // theirs is carried into whoever signs in next.
+    shell.value.transcripts.forget();
     closeMenu();
   } catch (error) {
     signOutError.value =

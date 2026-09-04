@@ -74,5 +74,10 @@ export const CATALOG_DESCRIPTIONS: Readonly<Record<string, string>> = {
 };
 
 export function catalogDescriptionFor(packageId: string): string | undefined {
-  return CATALOG_DESCRIPTIONS[packageId];
+  // `Object.hasOwn`, not a bare index: a package id of `constructor` or
+  // `toString` would otherwise return something off `Object.prototype` and
+  // publish it as catalog copy.
+  return Object.hasOwn(CATALOG_DESCRIPTIONS, packageId)
+    ? CATALOG_DESCRIPTIONS[packageId]
+    : undefined;
 }
