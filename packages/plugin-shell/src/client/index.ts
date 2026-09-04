@@ -380,14 +380,15 @@ function assistantMessage(
     };
   }
   if (run.status === "superseded") {
-    // The same quiet treatment a stopped Turn gets. It keeps everything it
-    // already sent; the line only says why it ends where it does.
+    // Quieter than a stopped Turn: it keeps everything it already sent and
+    // carries no notice at all. The message that superseded it is sitting
+    // right underneath, in the person's own words, and it explains the ending
+    // better than a line of ours would (ADR 0024).
     return {
       id: `${run.runId}:assistant`,
       runId: run.runId,
       role: "assistant",
       text: visibleAssistantText(run),
-      notice: "Interrupted by your next message.",
       status: "aborted",
       tools: toolsFrom(run.events),
       sends: [],

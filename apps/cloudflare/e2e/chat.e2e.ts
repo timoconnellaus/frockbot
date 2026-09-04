@@ -36,6 +36,19 @@ import {
 // spec reads it from there rather than restating it.
 import { RUN_FAILURE_COPY_V1 } from "@frockbot/plugin-shell/run-failure-copy";
 
+/*
+ * The fake provider is one server shared by every spec in the shard, so a mode
+ * a spec switched on is switched off here rather than on its own last line —
+ * a spec that fails mid-Turn never reaches its last line. Leaving
+ * `unauthorized` on made every later spec's Turn fail with a 401 it never
+ * asked for; leaving `streaming` on made every later spec wait out the gap in
+ * the middle of every reply until it ran out of time. Both read as a
+ * regression in whatever ran next.
+ */
+test.afterEach(async ({ page, ollamaBaseUrl }) => {
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+});
+
 test("Turns stay ordered, render Markdown, and survive a reload", async ({
   page,
   userId,
@@ -162,13 +175,9 @@ test("a Turn that is running when the page reloads still delivers its reply", as
     "Reply from the local Ollama stub.",
     { timeout: 120_000 },
   );
-  await expect(
-    assistantMessages(page).last().locator(".bot-avatar-live"),
-  ).toHaveCount(0, { timeout: 120_000 });
-
-  // The fake provider is one server for the whole worker, so a spec that
-  // slowed it down puts it back before the next one runs.
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+  await expect(page.locator(".thread .bot-avatar-live")).toHaveCount(0, {
+    timeout: 120_000,
+  });
 });
 
 // The reply is drawn as it is written, not only when the Turn settles. The
@@ -204,7 +213,10 @@ test("a reply appears while the Bot is still writing it", async ({
         const last = assistantMessages(page).last();
         if ((await last.count()) === 0) return false;
         const text = (await last.textContent()) ?? "";
-        const live = await last.locator(".bot-avatar-live").count();
+        // The working row is the thread's own last child, not part of the
+        // running Turn's article, so the live avatar is looked for in the
+        // thread.
+        const live = await page.locator(".thread .bot-avatar-live").count();
         if (
           live > 0 &&
           text.includes("Reply from the") &&
@@ -223,11 +235,9 @@ test("a reply appears while the Bot is still writing it", async ({
     "Reply from the local Ollama stub.",
     { timeout: 120_000 },
   );
-  await expect(
-    assistantMessages(page).last().locator(".bot-avatar-live"),
-  ).toHaveCount(0, { timeout: 120_000 });
-
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+  await expect(page.locator(".thread .bot-avatar-live")).toHaveCount(0, {
+    timeout: 120_000,
+  });
 });
 
 // The thread's shape, not its plumbing: a reply the Bot delivered is drawn
@@ -281,9 +291,9 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   // The Turn's tool call is not in the transcript in words. The trail off the
   // avatar was the whole of what the conversation said about it, and a settled
   // Turn keeps none.
-  await expect(reply.getByRole("status", { name: "Working" })).toHaveCount(0, {
-    timeout: 120_000,
-  });
+  await expect(
+    page.locator(".thread").getByRole("status", { name: "Working" }),
+  ).toHaveCount(0, { timeout: 120_000 });
   await expect(reply.locator(".tool-chip")).toHaveCount(0);
   await expect(reply).not.toContainText("Send to user");
 
@@ -391,9 +401,9 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
     "Reply from the local Ollama stub.",
     { timeout: 120_000 },
   );
-  await expect(
-    assistantMessages(page).last().locator(".bot-working"),
-  ).toHaveCount(0, { timeout: 120_000 });
+  await expect(page.locator(".bot-working")).toHaveCount(0, {
+    timeout: 120_000,
+  });
 
   // The Turn ended and the row went; the bubble did not move.
   const settledLeft = await page.evaluate(() => {
@@ -404,8 +414,79 @@ test("the working avatar sits below the bubbles and never shifts them", async ({
     return bubble ? bubble.getBoundingClientRect().left : Number.NaN;
   });
   expect(settledLeft).toBeCloseTo(midTurn.bubbleLeft, 0);
+});
 
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+// Tim's report: sending while the Bot is working put the new message *under*
+// the working sheep, because the sheep belonged to the running Turn's article
+// and the new message was appended after it. The reader watched their own words
+// arrive below the animation that was supposedly about to answer them — and the
+// Turn they had just replaced was labelled "Interrupted by your next message.",
+// which said nothing their own message did not already say.
+test("a message sent mid-Turn lands above the working sheep, unlabelled", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Stepper",
+  });
+
+  // The gap in the middle of the streamed reply is the window to send into.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
+
+  const composer = composerInput(page);
+  await composer.fill("first");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(composer).toHaveValue("", { timeout: 120_000 });
+  // Wait until the Turn is visibly running before superseding it.
+  await expect(page.locator(".bot-working")).toHaveCount(1, {
+    timeout: 60_000,
+  });
+
+  await composer.fill("second");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(composer).toHaveValue("", { timeout: 120_000 });
+
+  // The order the reader sees: their new message, then the sheep, with nothing
+  // of the thread after it.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const thread = document.querySelector(".thread");
+          const row = thread?.querySelector(".bot-working");
+          if (!thread || !row) return null;
+          const children = [...thread.children];
+          const userIndex = children.findLastIndex(
+            (child) =>
+              child.classList.contains("message-user") &&
+              (child.textContent ?? "").includes("second"),
+          );
+          if (userIndex < 0) return null;
+          return {
+            userBeforeRow: userIndex < children.indexOf(row),
+            rowIsLast: children.at(-1) === row,
+          };
+        }),
+      { timeout: 60_000 },
+    )
+    .toEqual({ userBeforeRow: true, rowIsLast: true });
+
+  // The superseded Turn is not labelled: the message above explains itself.
+  await expect(page.locator(".thread")).not.toContainText(
+    "Interrupted by your next message.",
+  );
+
+  await expect(assistantMessages(page).last()).toContainText(
+    "Reply from the local Ollama stub.",
+    { timeout: 120_000 },
+  );
+  await expect(page.locator(".thread")).not.toContainText(
+    "Interrupted by your next message.",
+  );
 });
 
 // Tim's report, as the thread: a Bot that says three things in one Turn leaves
@@ -479,7 +560,11 @@ test("a working Bot shows a comet trail beside its avatar, and no tool names", a
       async () => {
         const last = assistantMessages(page).last();
         if ((await last.count()) === 0) return false;
-        const working = last.getByRole("status", { name: "Working" });
+        // The row is at the end of the thread rather than inside the running
+        // Turn's article, so it is found there.
+        const working = page
+          .locator(".thread")
+          .getByRole("status", { name: "Working" });
         if (
           (await working
             .locator('.ui-activity-trail[data-state="running"]')
@@ -500,11 +585,9 @@ test("a working Bot shows a comet trail beside its avatar, and no tool names", a
   // The Turn settled, so the working row and its trail went. The words "tool"
   // and "tool calls" were never in the thread at all.
   await expect(
-    assistantMessages(page).last().getByRole("status", { name: "Working" }),
+    page.locator(".thread").getByRole("status", { name: "Working" }),
   ).toHaveCount(0, { timeout: 120_000 });
   await expect(assistantMessages(page).last()).not.toContainText(/tool call/i);
-
-  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
 });
 
 test("a provider that stops accepting the key ends the Turn with a reason", async ({
