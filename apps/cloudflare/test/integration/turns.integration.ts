@@ -16,6 +16,7 @@ import {
   OLLAMA_REVOKED_API_KEY,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -64,17 +65,13 @@ describe("a Turn through the gateway, the loaded artifact and the Bot", () => {
     expect(response.status).toBe(200);
     expect(JSON.stringify(body)).toContain("Ollama reply");
 
-    const stored = await runInDurableObject(
-      botStub(userId, botId),
-      (_instance, state) =>
-        state.storage.get<{
-          events: Array<{
-            type: string;
-            classification?: string;
-            delayMs?: number;
-          }>;
-        }>("run:turn-command-503"),
-    );
+    const stored = await readStoredRunWithEventsV1<{
+      events: Array<{
+        type: string;
+        classification?: string;
+        delayMs?: number;
+      }>;
+    }>(userId, botId, "turn-command-503");
     expect(
       stored?.events.filter((event) => event.type === "model/request"),
     ).toHaveLength(2);
@@ -149,13 +146,9 @@ describe("a Turn through the gateway, the loaded artifact and the Bot", () => {
     expect(run).toBeDefined();
     expect(run?.status).toBe("failed");
 
-    const stored = await runInDurableObject(
-      botStub(userId, botId),
-      (_instance, state) =>
-        state.storage.get<{ events: Array<{ type: string }> }>(
-          "run:turn-command-401",
-        ),
-    );
+    const stored = await readStoredRunWithEventsV1<{
+      events: Array<{ type: string }>;
+    }>(userId, botId, "turn-command-401");
     expect(
       stored?.events.filter((event) => event.type === "model/request"),
     ).toHaveLength(1);
