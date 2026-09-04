@@ -18,7 +18,10 @@ import { UiIcon, UiIconButton, UiSkeleton } from "@frockbot/client-ui";
 import { computed, inject, onBeforeUnmount, ref, watch } from "vue";
 import { frockBotWebDataKey } from "../shared.js";
 import { appletsBridgeStateV2 } from "./applets-state.js";
-import { mostRecentlyChangedFileV1 } from "./applets-client.js";
+import {
+  appletSourceFingerprintV1,
+  mostRecentlyChangedFileV1,
+} from "./applets-client.js";
 import { packageIframePagesForSlotV1 } from "./package-iframe-entries.js";
 import PackageIframeHost from "./PackageIframeHost.vue";
 
@@ -70,20 +73,30 @@ watch(appletId, () => {
   userSelectedTab.value = undefined;
   followedTab.value = "code";
 });
-// A generation becoming active is the moment the Applet is worth looking at.
+// A generation becoming active is the moment the Applet is worth looking at —
+// and so is opening a page on an Applet that already has one. This runs
+// immediately because a second window, or a reload, mounts the canvas with the
+// viewer credential already in hand: waiting for a *change* left those pages
+// on the code view of an Applet that has been live for minutes.
 watch(
   () => viewer.value?.generationId,
   (generationId) => {
     if (generationId) followedTab.value = "app";
   },
+  { immediate: true },
 );
-// A Turn writing source is the moment the code is.
+// A Turn writing source is the moment the code is. The fingerprint is what
+// says a file changed: the canvas re-reads the source on every poll and gets a
+// fresh view object each time, so a watcher on the view itself fired on Turns
+// that wrote nothing — an Applet's own tool being called, say — and threw the
+// User off the live Applet mid-use. The first source to arrive is a load, not
+// a write, so it never moves the tab either.
 watch(
-  () => source.value?.files.map((file) => file.changedAt ?? file.generationId),
-  () => {
+  () => appletSourceFingerprintV1(source.value),
+  (fingerprint, previous) => {
+    if (!previous || fingerprint === previous) return;
     if (isRunning.value) followedTab.value = "code";
   },
-  { deep: true },
 );
 
 /** The file the code view is on, following the most recently changed one. */

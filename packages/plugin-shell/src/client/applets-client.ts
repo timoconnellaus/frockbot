@@ -137,3 +137,22 @@ export function mostRecentlyChangedFileV1(
   });
   return ordered[0]?.path;
 }
+
+/**
+ * A stable identity for the source the canvas is showing.
+ *
+ * The canvas follows the Turn: a Turn that writes source lands the User on the
+ * code. "Wrote source" has to be a fact about the files, though, not about the
+ * store having been re-read — `refreshAppletCanvas` assigns a fresh view object
+ * on every poll, so a watcher on the array itself fired on Turns that touched
+ * no file at all and yanked the User off the live Applet.
+ */
+export function appletSourceFingerprintV1(
+  source: AppletSourceViewV1 | undefined,
+): string {
+  if (!source) return "";
+  return source.files
+    .map((file) => `${file.path}@${file.generationId}@${file.changedAt ?? ""}`)
+    .toSorted()
+    .join("\n");
+}
