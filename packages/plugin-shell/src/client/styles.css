@@ -348,24 +348,39 @@
  * notices and sends stack inside it, so a one-word reply is a bubble the width
  * of its word rather than a sliver of a shared row.
  *
- * The avatar is beside that column only while the Bot is working. Every reply
- * in this transcript is from the same Bot — there are no group conversations —
- * so a sheep on every settled line said nothing and cost the column its left
- * edge. The one on the running Turn does say something, which is why it stays.
+ * The avatar is not in that column. While the Bot is working it sits on its
+ * own row underneath, so the trail streaming off its right has the width of
+ * the transcript to run through rather than the gutter beside a bubble. Every
+ * reply here is from the same Bot — there are no group conversations — so a
+ * sheep on every settled line said nothing and cost the column its left edge.
  */
 .message-assistant {
-  flex-direction: row;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
 }
 
 .message-column {
   display: flex;
   min-width: 0;
-  flex: 1 1 auto;
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
+}
+
+/*
+ * The working row. Its height is the trail's canvas: tall enough for the
+ * wobble to be visible, short enough that it reads as one line of the thread.
+ */
+.bot-working {
+  display: flex;
+  height: 44px;
+  align-items: center;
+  gap: 0;
+}
+
+.bot-working-indicator {
+  height: 100%;
 }
 
 .bot-avatar {
@@ -375,7 +390,6 @@
   height: var(--frock-avatar-sm);
   flex: 0 0 auto;
   place-items: center;
-  margin-top: 2px;
 }
 
 .bot-avatar-fallback {
@@ -410,16 +424,17 @@
 }
 
 /*
- * The ring's way off screen. The Turn has settled, the reply is the answer
- * now, and the stroke fades rather than vanishing between two frames.
+ * The working row's way off screen. The Turn has settled, the reply is the
+ * answer now, and the row fades rather than vanishing between two frames —
+ * which is also long enough for the particles still in flight to drain.
  */
-.activity-ring-enter-active,
-.activity-ring-leave-active {
+.bot-working-enter-active,
+.bot-working-leave-active {
   transition: opacity 420ms ease-out;
 }
 
-.activity-ring-enter-from,
-.activity-ring-leave-to {
+.bot-working-enter-from,
+.bot-working-leave-to {
   opacity: 0;
 }
 

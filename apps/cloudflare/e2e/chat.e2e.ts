@@ -256,7 +256,7 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   expect(fits.box).toBeGreaterThanOrEqual(fits.text);
   expect(fits.text).toBeGreaterThan(10);
 
-  // The Turn's tool call is not in the transcript in words. The ring on the
+  // The Turn's tool call is not in the transcript in words. The trail off the
   // avatar was the whole of what the conversation said about it, and a settled
   // Turn keeps none.
   await expect(reply.getByRole("status", { name: "Working" })).toHaveCount(0, {
@@ -269,6 +269,7 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   // Bot, so a sheep beside each one named nobody; the column starts at the
   // transcript's own left edge instead, with no gutter left behind.
   await expect(reply.locator(".bot-avatar")).toHaveCount(0);
+  await expect(reply.locator(".ui-activity-trail")).toHaveCount(0);
   const edges = await reply.evaluate((element) => {
     const column = element.querySelector(".message-column");
     return {
@@ -280,10 +281,10 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
 });
 
 // The owner's ask, from the other side: a Turn that spends its time making
-// tool calls has to look like it is working without naming one. The ring on
-// the Bot's avatar is that — present and labelled "Working" while the Turn
-// runs, gone once it settles, and never a word about a tool.
-test("a working Bot shows an activity ring on its avatar, and no tool names", async ({
+// tool calls has to look like it is working without naming one. The comet
+// trail off the Bot's avatar is that — a working row labelled "Working" while
+// the Turn runs, gone once it settles, and never a word about a tool.
+test("a working Bot shows a comet trail beside its avatar, and no tool names", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -302,19 +303,24 @@ test("a working Bot shows an activity ring on its avatar, and no tool names", as
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(composer).toHaveValue("", { timeout: 120_000 });
 
-  // Latched the way the streaming assertion above is: the ring is on screen at
-  // some point while the Turn runs, never necessarily when a poll happens to
-  // look.
-  let sawRing = false;
+  // Latched the way the streaming assertion above is: the trail is on screen
+  // at some point while the Turn runs, never necessarily when a poll happens
+  // to look.
+  let sawTrail = false;
   await expect
     .poll(
       async () => {
         const last = assistantMessages(page).last();
         if ((await last.count()) === 0) return false;
-        if ((await last.getByRole("status", { name: "Working" }).count()) > 0) {
-          sawRing = true;
+        const working = last.getByRole("status", { name: "Working" });
+        if (
+          (await working
+            .locator('.ui-activity-trail[data-state="running"]')
+            .count()) > 0
+        ) {
+          sawTrail = true;
         }
-        return sawRing;
+        return sawTrail;
       },
       { timeout: 60_000 },
     )
@@ -324,8 +330,8 @@ test("a working Bot shows an activity ring on its avatar, and no tool names", as
     "Reply from the local Ollama stub.",
     { timeout: 120_000 },
   );
-  // The Turn settled, so the ring completed and went. The words "tool" and
-  // "tool calls" were never in the thread at all.
+  // The Turn settled, so the working row and its trail went. The words "tool"
+  // and "tool calls" were never in the thread at all.
   await expect(
     assistantMessages(page).last().getByRole("status", { name: "Working" }),
   ).toHaveCount(0, { timeout: 120_000 });
