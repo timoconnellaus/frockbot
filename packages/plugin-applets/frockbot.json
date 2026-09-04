@@ -14,8 +14,8 @@
         {
           "id": "list",
           "artifact": {
-            "contentHash": "db52548255ebe482df18a1be2a22034fbaf40b97464d95729b053b1ca94aaf98",
-            "size": 7253,
+            "contentHash": "472271bef650af285dd3918850e117f9cd38e6a4839f1129c0708554f2c07e25",
+            "size": 8046,
             "mediaType": "text/html",
             "bundlerVersion": "frockbot-inline-html@1"
           },
