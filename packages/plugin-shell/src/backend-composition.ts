@@ -185,10 +185,16 @@ export interface ShellIsolateMountOptions {
  * (`docs/research/spike-applet-facets.md` §8). Absent when the Bot Durable
  * Object has no Applet binding: an Applet member's tools are then simply not
  * registered, exactly as an isolate member fails without a loader.
+ *
+ * `generationId` is the Applet generation this Turn's Composition pinned, and
+ * it is not decoration: the Applet Durable Object runs that generation or
+ * refuses the call (ADR 0038). Without it a publish landing mid-Turn would
+ * execute new code behind the schema and provenance the model was shown.
  */
 export interface ShellAppletMountOptions {
   invokeTool(request: {
     appletId: string;
+    generationId: string;
     tool: string;
     input: unknown;
   }): Promise<{ status: "ok" | "error"; content: string }>;
@@ -385,6 +391,9 @@ export function createShellCompositionHost(
               execute: async (input) => {
                 const outcome = await routing.invokeTool({
                   appletId: applet.appletId,
+                  // The pin the description above advertises, carried into the
+                  // call so the instance executes it or refuses.
+                  generationId: applet.generationId,
                   tool: tool.name,
                   input: input ?? null,
                 });
