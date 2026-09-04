@@ -336,6 +336,11 @@ test("the shell is usable on a phone", async ({
 });
 
 test("the sign-in page clears the native system bars", async ({ page }) => {
+  // This is a layout test for the public shell. Keep it independent of the
+  // e2e harness's Better Auth upstream, which is deliberately not configured.
+  await page.route("**/api/auth/get-session", (route) =>
+    route.fulfill({ json: null }),
+  );
   await emulateNativeSafeArea(page);
   await page.goto("/");
   await expect(page.locator(".auth-screen")).toBeVisible();
