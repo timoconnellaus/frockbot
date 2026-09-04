@@ -144,9 +144,13 @@ describe("debug route", () => {
     const response = await route(request, new URL(request.url));
 
     expect(response?.status).toBe(400);
-    expect(await response?.json()).toMatchObject({
+    const body = (await response?.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
       error: "debug query limit must be a whole number from 1 to 20",
     });
+    // No stack: the 500 path carries one for the operator, but a caller's own
+    // mistake must not hand back the build's file layout and line numbers.
+    expect(body.stack).toBeUndefined();
     expect(target.snapshots).toEqual([]);
   });
 

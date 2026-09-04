@@ -35,6 +35,11 @@ import {
   type RoutineFireV1,
   type RoutineScheduleStateV1,
 } from "./firing.js";
+import {
+  decodeRoutineInboxEntryV1,
+  routineFailureSentenceV1,
+  type RoutineInboxEntryV1,
+} from "./inbox.js";
 import { routineTerminalRecordsV1 } from "./inbox-store.js";
 import {
   decodeRoutineRecordV1,
@@ -53,6 +58,7 @@ import {
   ROUTINE_DEFERRAL_MS,
   ROUTINE_FIRE_LEASE_MS,
   ROUTINE_FIRE_PREFIX,
+  ROUTINE_INBOX_PREFIX,
   ROUTINE_FAILURE_BACKOFF_MS,
   ROUTINE_FAILURE_PAUSE_AFTER,
   ROUTINE_FIRE_TIMEOUT_MS,
@@ -437,7 +443,14 @@ export class RoutineScheduler {
   async nextRuns(): Promise<Map<string, string>> {
     const next = new Map<string, string>();
     for (const { record, state } of await this.#clocks(this.#storage)) {
-      next.set(record.routineId, new Date(state.dueAt).toISOString());
+      // The deadline, not the raw due time: a Routine held back by a deferral
+      // or a failure backoff is next owed a firing when the hold ends. Reading
+      // `dueAt` alone showed a "Next run" that had already gone past and never
+      // moved, for as long as the backoff lasted.
+      next.set(
+        record.routineId,
+        new Date(routineDeadlineV1(state)).toISOString(),
+      );
     }
     return next;
   }
@@ -798,14 +811,32 @@ export class RoutineScheduler {
   ): Promise<void> {
     const name = await this.#routineName(transaction, fire.routineId);
     const verb = outcome.status === "cancelled" ? "was stopped" : "did not run";
+    // The sentence, not the kernel string: the raw summary is on the run-log
+    // row this same transaction writes, which is where an operator looks.
+    const text = `"${name}" ${verb}: ${routineFailureSentenceV1(outcome.summary)}`;
+    // The same Routine failing the same way every minute is one thing that is
+    // wrong, not sixty. It folds into the entry already at the head of the
+    // inbox, which keeps its place in the order and gains a count.
+    const repeated = await this.#collapsibleFailure(
+      transaction,
+      fire.routineId,
+      text,
+    );
+    if (repeated) {
+      await transaction.put(repeated.key, {
+        ...repeated.entry,
+        runId: fire.fireId,
+        createdAt: now,
+        repeatCount: (repeated.entry.repeatCount ?? 1) + 1,
+      } satisfies RoutineInboxEntryV1);
+      return;
+    }
     const records = await routineTerminalRecordsV1({
       runId: fire.fireId,
       routineId: fire.routineId,
       routineName: name,
-      responseText:
-        outcome.summary === undefined || outcome.summary.trim().length === 0
-          ? `"${name}" ${verb}.`
-          : `"${name}" ${verb}: ${outcome.summary}`,
+      responseText: text,
+      failure: true,
       now,
       read: (key) => transaction.get(key),
     });
@@ -813,6 +844,41 @@ export class RoutineScheduler {
     for (const [key, value] of Object.entries(records.records)) {
       await transaction.put(key, value);
     }
+  }
+
+  /**
+   * The newest inbox entry, when it is an unread repeat of this same failure.
+   *
+   * Only the newest: an entry the User has already read, or one with anything
+   * in front of it, is part of a history rather than the live complaint, and
+   * rewriting it would move a row the User has already looked past.
+   */
+  async #collapsibleFailure(
+    transaction: RoutineStorageWritesV1,
+    routineId: string,
+    text: string,
+  ): Promise<{ key: string; entry: RoutineInboxEntryV1 } | undefined> {
+    const newest = await transaction.list<unknown>({
+      prefix: ROUTINE_INBOX_PREFIX,
+      limit: 1,
+    });
+    for (const [key, stored] of newest) {
+      try {
+        const entry = decodeRoutineInboxEntryV1(stored);
+        if (
+          !entry.acknowledged &&
+          entry.routineId === routineId &&
+          entry.wakeId === undefined &&
+          entry.text === text
+        ) {
+          return { key, entry };
+        }
+      } catch {
+        // An entry that cannot be read is not one to fold into.
+      }
+      return undefined;
+    }
+    return undefined;
   }
 
   async #settleFiring(

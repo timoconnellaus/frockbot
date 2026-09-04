@@ -759,6 +759,119 @@ describe("a failed firing", () => {
   });
 });
 
+describe("what a failing Routine tells the person", () => {
+  // The inbox entry, the run-log summary and the notification all carried
+  // `tool occurrence "tool:1:1:1" was not settled before step end`.
+  test("writes a sentence, and keeps the kernel string on the run log", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+    time.set("2026-01-01T00:01:00.000Z");
+    const raw =
+      'Bot turn ended with outcome model-error: tool occurrence "tool:1:1:1" was not settled before step end';
+    await drain(scheduler, { status: "failed", summary: raw });
+
+    const entries = await new RoutineInboxStore(storage, {
+      now: time.now,
+    }).list();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.text).toBe(
+      '"Morning brief" did not run: Something inside FrockBot went wrong; the run log has the details.',
+    );
+    expect(entries[0]?.text).not.toContain("tool occurrence");
+    // The operator's copy is untouched.
+    const runs = await storage.list<unknown>({ prefix: ROUTINE_RUN_PREFIX });
+    expect(
+      [...runs.values()].map((row) => decodeRoutineRunEntryV1(row).summary),
+    ).toEqual([raw]);
+  });
+
+  test("a provider's own words reach the person unchanged", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+    time.set("2026-01-01T00:01:00.000Z");
+    await drain(scheduler, {
+      status: "failed",
+      summary: "the model provider is rate limiting this account",
+    });
+
+    const entries = await new RoutineInboxStore(storage, {
+      now: time.now,
+    }).list();
+    expect(entries[0]?.text).toBe(
+      '"Morning brief" did not run: the model provider is rate limiting this account',
+    );
+  });
+
+  // Sixty rows of the same sentence is not sixty things being wrong.
+  test("folds repeats of one failure into a single entry with a count", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+    const failure = { status: "failed" as const, summary: "flaked" };
+    for (const minute of ["00:01", "02:00", "04:00"]) {
+      time.set(`2026-01-01T${minute}:00.000Z`);
+      await drain(scheduler, failure);
+    }
+
+    const entries = await new RoutineInboxStore(storage, {
+      now: time.now,
+    }).list();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.repeatCount).toBe(3);
+    expect(entries[0]?.createdAt).toBe("2026-01-01T04:00:00.000Z");
+    // Every firing still has its own run-log row; only the inbox collapses.
+    expect(
+      (await storage.list<unknown>({ prefix: ROUTINE_RUN_PREFIX })).size,
+    ).toBeGreaterThanOrEqual(3);
+  });
+
+  test("a different failure gets its own entry", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+    time.set("2026-01-01T00:01:00.000Z");
+    await drain(scheduler, { status: "failed", summary: "flaked" });
+    time.set("2026-01-01T02:00:00.000Z");
+    await drain(scheduler, { status: "failed", summary: "the disk is full" });
+
+    const entries = await new RoutineInboxStore(storage, {
+      now: time.now,
+    }).list();
+    expect(entries).toHaveLength(2);
+    expect(entries.every((entry) => entry.repeatCount === undefined)).toBe(
+      true,
+    );
+  });
+
+  // The panel showed a "Next run" five minutes in the past that never moved.
+  test("reports a backed-off Routine's next run in the future", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T00:00:00.000Z",
+      schedule: "@every 1m",
+    });
+    await store.execute(create, USER);
+    time.set("2026-01-01T00:01:00.000Z");
+    await drain(scheduler, { status: "failed", summary: "flaked" });
+
+    const next = (await scheduler.nextRuns()).get("brief");
+    expect(next).toBeDefined();
+    expect(Date.parse(next!)).toBeGreaterThan(time.now().getTime());
+    expect(next).toBe(
+      new Date(routineDeadlineV1(await state(storage))).toISOString(),
+    );
+  });
+});
+
 describe("an undecodable Routine record", () => {
   test("degrades that one Routine, never the whole object", async () => {
     const { storage, time, scheduler, store, create } = harness({

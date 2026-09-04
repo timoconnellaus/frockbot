@@ -406,9 +406,17 @@ export function projectBotUnreadViewV1(
   state: UnreadStateV1,
   cursors: readonly string[],
   lastMessage?: SidebarMessagePreviewV1,
+  /**
+   * Unacknowledged Routine failures. An automation Turn deliberately does not
+   * advance the activity cursor, so a Routine failing every minute badged
+   * nothing at all — the one Bot the User most needed to look at was the one
+   * the sidebar stayed quiet about. A failure is the Bot addressing its User,
+   * so it counts here even though the firing that produced it does not.
+   */
+  automationFailures = 0,
 ): BotUnreadViewV1 {
   const ceiling = state.lastActivityCursor;
-  let counted = 0;
+  let counted = Math.max(0, automationFailures);
   if (ceiling !== undefined) {
     for (const cursor of cursors) {
       if (cursor > ceiling) continue;

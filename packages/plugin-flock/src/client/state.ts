@@ -20,6 +20,14 @@ export interface FlockWebData {
   /** Per-Bot unread, as the Bot Durable Objects derive it. Never computed here. */
   unread: Record<string, BotUnreadViewV1>;
   loading: boolean;
+  /**
+   * Whether a directory read has ever completed.
+   *
+   * "No Bots yet." is a fact about the User's account, and it can only be
+   * stated once the account has been read. Before that — the first paint, and
+   * the reload after a Bot is created — the list is unknown, not empty.
+   */
+  loaded: boolean;
   error?: string;
   overlay?: "create" | "edit" | "archive";
   lifecycles: Record<string, BotLifecycleStatusV1>;
