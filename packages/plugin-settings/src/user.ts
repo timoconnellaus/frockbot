@@ -731,33 +731,6 @@ export class UserSettingsBackendContribution {
     return undefined;
   }
 
-  /**
-   * The mirror of `packageDependencyFailure`, read the other way round.
-   *
-   * Enabling B before A is refused, so disabling A while B is enabled must be
-   * refused too: otherwise the account is left in exactly the configuration
-   * the enable path will not create, and the next thing that reads it — the
-   * model picker, a Turn's binding — has a Package running on a dependency
-   * that is switched off. Refusing rather than cascading keeps the User's
-   * intent explicit: they are told what else has to go first.
-   */
-  private packageDependentFailure(
-    packageId: string,
-    settings: UserSettingsViewV1,
-  ): string | undefined {
-    for (const candidate of settings.packages) {
-      if (candidate.packageId === packageId) continue;
-      if (candidate.state !== "installed") continue;
-      const dependencies = this.packageDependencies.get(
-        `${candidate.packageId} ${candidate.version}`,
-      );
-      if (dependencies && packageId in dependencies) {
-        return `Package "${packageId}" is required by Package "${candidate.packageId}", which is enabled; disable "${candidate.packageId}" first`;
-      }
-    }
-    return undefined;
-  }
-
   async readConfiguration(input: unknown): Promise<UserSettingsViewV1> {
     const request = decodeUserConfigurationReadRpcV1(input);
     // Settings owns the stored-record migration and platform-row repair. Run
@@ -999,18 +972,7 @@ export class UserSettingsBackendContribution {
       return receipt;
     }
     let dependencyFailure: string | undefined;
-    if (
-      command.type === "user/uninstall-package" ||
-      (command.type === "user/set-package-enabled" && !command.enabled)
-    ) {
-      dependencyFailure = this.packageDependentFailure(
-        command.packageId,
-        current,
-      );
-    } else if (
-      command.type === "user/install-package" &&
-      command.enabled !== false
-    ) {
+    if (command.type === "user/install-package" && command.enabled !== false) {
       dependencyFailure = this.packageDependencyFailure(
         command.packageId,
         command.version,
