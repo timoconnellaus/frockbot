@@ -13,7 +13,11 @@ export type PackageProvenanceV1 =
       version: string;
       catalogId: string;
       catalogGeneration: string;
-      contentHash: string;
+      /**
+       * Absent for a first-party Catalog entry: it names reviewed compiled-in
+       * code, publishes no bundle, and so has no artifact hash to pin.
+       */
+      contentHash?: string;
     }
   | {
       kind: "user";
@@ -297,14 +301,16 @@ function decodePackageProvenanceV1(
   } else if (kind === "catalog") {
     exactKeys(
       value,
-      [...common, "catalogId", "catalogGeneration", "contentHash"],
-      [],
+      [...common, "catalogId", "catalogGeneration"],
+      ["contentHash"],
       label,
     );
     identity();
     boundedString(value.catalogId, `${label}.catalogId`, 64);
     boundedString(value.catalogGeneration, `${label}.catalogGeneration`, 64);
-    hashString(value.contentHash, `${label}.contentHash`);
+    if (value.contentHash !== undefined) {
+      hashString(value.contentHash, `${label}.contentHash`);
+    }
   } else if (kind === "user") {
     exactKeys(value, [...common, "userId", "authoredAt"], [], label);
     identity();
@@ -368,9 +374,12 @@ function decodeCompositionMemberV1(
     value.artifact === undefined
       ? undefined
       : decodeArtifactRefV1(value.artifact, `${label}.artifact`);
+  // A bundle-backed Catalog member must name exactly the artifact it pins; a
+  // first-party entry pins no bundle and mounts in the kernel isolate, so it
+  // carries neither hash nor artifact — the two must still agree.
   if (
     provenance.kind === "catalog" &&
-    (!artifact || artifact.contentHash !== provenance.contentHash)
+    artifact?.contentHash !== provenance.contentHash
   ) {
     throw new Error(
       `${label}.catalog provenance must match its Bot-isolate artifact`,

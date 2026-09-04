@@ -163,9 +163,8 @@ describe("seed catalog generation", () => {
   });
 
   test("every shipped Package carries a written line, not the fallback", async () => {
-    const { compileFoundationApplication } = await import(
-      "../applications/foundation/src/runtime.ts"
-    );
+    const { compileFoundationApplication } =
+      await import("../applications/foundation/src/runtime.ts");
     const plan = await compileFoundationApplication();
     const built = await buildCatalogGeneration(plan.packages);
 

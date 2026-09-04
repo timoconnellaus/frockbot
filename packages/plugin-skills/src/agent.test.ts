@@ -149,10 +149,7 @@ describe("the skill_load tool", () => {
     await catalog.refresh(4, session);
     const tool = createSkillLoadTool(catalog);
 
-    const loaded = await tool.execute(
-      { ref: "skills/kept/SKILL.md" },
-      CONTEXT,
-    );
+    const loaded = await tool.execute({ ref: "skills/kept/SKILL.md" }, CONTEXT);
     expect(loaded.isError).toBe(false);
     expect(loaded.content).toContain("Recipe body.");
     await dispose();

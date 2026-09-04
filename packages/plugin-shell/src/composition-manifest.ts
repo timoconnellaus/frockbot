@@ -1,8 +1,8 @@
 import {
-  type CompositionMemberV1,
   type FrockBotManifest,
   decodeFrockBotManifest,
 } from "@frockbot/kernel-composition";
+import type { CompositionMemberV1 } from "@frockbot/kernel-composition/generation";
 
 /**
  * Where a Composition member's manifest can be found. `stored` is

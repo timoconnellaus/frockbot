@@ -73,8 +73,7 @@ export class DurableCompositionFailureLog implements CompositionFailureLog {
       const streak =
         ((await transaction.get<number>(COMPOSITION_FAILURE_STREAK_KEY)) ?? 0) +
         1;
-      const quarantined =
-        attempt >= this.threshold || streak >= this.threshold;
+      const quarantined = attempt >= this.threshold || streak >= this.threshold;
       const writes: Record<string, unknown> = {
         [compositionFailureKey(generationId, attempt)]: recorded,
         [compositionFailureCountKey(generationId)]: attempt,

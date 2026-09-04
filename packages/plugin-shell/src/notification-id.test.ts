@@ -27,7 +27,12 @@ describe("notificationIdV1", () => {
 
   test("every minted id shape acknowledges", () => {
     const minted = [
-      notificationIdV1("package-connection-unavailable", crypto.randomUUID(), "aud-usd", "gmail"),
+      notificationIdV1(
+        "package-connection-unavailable",
+        crypto.randomUUID(),
+        "aud-usd",
+        "gmail",
+      ),
       notificationIdV1("package", "aud-usd", "rate:moved"),
       notificationIdV1("routine-failed", "2026-09-03T23:49:00.416Z:fire"),
       notificationIdV1("task-settled", crypto.randomUUID()),
@@ -37,7 +42,11 @@ describe("notificationIdV1", () => {
   });
 
   test("the same parts mint the same id, so a retry is one intent", () => {
-    const parts = ["composition-failure", "2026-09-03T23:49:00.416Z:abc", 2] as const;
+    const parts = [
+      "composition-failure",
+      "2026-09-03T23:49:00.416Z:abc",
+      2,
+    ] as const;
     expect(notificationIdV1(...parts)).toBe(notificationIdV1(...parts));
   });
 

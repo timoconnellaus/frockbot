@@ -31,7 +31,8 @@ export function notificationIdV1(
   const sanitized = raw
     .replace(/[^a-zA-Z0-9._-]/g, "-")
     .replace(/^[^a-zA-Z0-9]+/, "");
-  const seeded = sanitized.length === 0 ? `notification-${digest(raw)}` : sanitized;
+  const seeded =
+    sanitized.length === 0 ? `notification-${digest(raw)}` : sanitized;
   const bounded =
     seeded.length <= MAX_NOTIFICATION_ID_LENGTH
       ? seeded
@@ -39,7 +40,9 @@ export function notificationIdV1(
   if (!isPublicIdentifier(bounded)) {
     // Unreachable by construction; a mint that cannot be acknowledged is a
     // bug, never something to ship to a client that will 400 on it forever.
-    throw new Error(`minted notification id "${bounded}" is not acknowledgeable`);
+    throw new Error(
+      `minted notification id "${bounded}" is not acknowledgeable`,
+    );
   }
   return bounded;
 }

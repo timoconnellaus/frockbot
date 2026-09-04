@@ -44,8 +44,7 @@ export const CATALOG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   mcp: "Connect outside MCP servers, so the tools they offer show up for the Bot to use.",
   memory:
     "Remember things across conversations, so you do not have to repeat yourself.",
-  "mobile-clipboard":
-    "Let the Bot read and write the clipboard on your phone.",
+  "mobile-clipboard": "Let the Bot read and write the clipboard on your phone.",
   "mobile-notifications":
     "Get a push notification on your phone when the Bot needs you or finishes a job.",
   "package-catalog":

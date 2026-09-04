@@ -42,7 +42,10 @@ class MemoryStorage {
   delete(key: string | string[]): Promise<boolean | number> {
     if (Array.isArray(key)) {
       return Promise.resolve(
-        key.reduce((count, entry) => count + (this.values.delete(entry) ? 1 : 0), 0),
+        key.reduce(
+          (count, entry) => count + (this.values.delete(entry) ? 1 : 0),
+          0,
+        ),
       );
     }
     return Promise.resolve(this.values.delete(key));

@@ -71,10 +71,11 @@ describe("Package Catalog tool schemas", () => {
   test("expose the five exact input DTOs", () => {
     expect(PACKAGE_SEARCH_INPUT_SCHEMA_V1.required).toEqual(["query"]);
     expect(PACKAGE_INSPECT_INPUT_SCHEMA_V1.required).toEqual(["catalogId"]);
-    expect(PACKAGE_INSTALL_INPUT_SCHEMA_V1.required).toEqual([
-      "catalogId",
-      "contentHash",
-    ]);
+    // `contentHash` is optional: a first-party Catalog entry names reviewed
+    // compiled-in code and publishes no bundle, so it has no hash to send.
+    // Requiring one made `package_install` by chat refuse every seeded entry
+    // while the Plugins page installed the same one fine.
+    expect(PACKAGE_INSTALL_INPUT_SCHEMA_V1.required).toEqual(["catalogId"]);
     expect(PACKAGE_UPDATE_INPUT_SCHEMA_V1).toBe(
       PACKAGE_INSTALL_INPUT_SCHEMA_V1,
     );

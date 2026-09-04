@@ -273,7 +273,7 @@ const SKILL_LOAD_INPUT_SCHEMA = {
     path: {
       type: "string",
       description:
-        "The Skill's ref exactly as listed in <agent_skills> — bot/daily-standup, managed/add-connector, or plugin/<packageId>/<slug>. The path listed beside it is also accepted. This field is named \"path\" whichever of the two you send.",
+        'The Skill\'s ref exactly as listed in <agent_skills> — bot/daily-standup, managed/add-connector, or plugin/<packageId>/<slug>. The path listed beside it is also accepted. This field is named "path" whichever of the two you send.',
     },
   },
   required: ["path"],
@@ -454,7 +454,7 @@ export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
     // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
     admission: { subagentRoles: ["executor"] },
     description:
-      "Read one of your Skills in full. Pass the ref or the path listed in <agent_skills> as \"path\". Only Skills listed there can be loaded.",
+      'Read one of your Skills in full. Pass the ref or the path listed in <agent_skills> as "path". Only Skills listed there can be loaded.',
     inputSchema: SKILL_LOAD_INPUT_SCHEMA as unknown as Record<string, unknown>,
     idempotent: true,
     // Deliberately permissive: a wrong shape reaches `execute`, which says

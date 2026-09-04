@@ -6,10 +6,8 @@
 // reader already returned the raw document.
 import { describe, expect, test } from "bun:test";
 import { authoredManifestV1 } from "@frockbot/plugin-authoring/shared";
-import {
-  type CompositionMemberV1,
-  decodeFrockBotManifest,
-} from "@frockbot/kernel-composition";
+import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
+import type { CompositionMemberV1 } from "@frockbot/kernel-composition/generation";
 import { botIsolatePackageDescriptorV1 } from "@frockbot/kernel-composition/isolate";
 import { canonicalJson, sha256 } from "@frockbot/kernel-composition/compiler";
 
@@ -46,15 +44,26 @@ async function storedMember(): Promise<{
   const manifestHash = await sha256(canonicalJson(manifest));
   const member: CompositionMemberV1 = {
     packageId: "aud-usd",
+    specifier: "bot:aud-usd",
     version: "0.0.1",
     manifestHash,
-    origin: "bot-authored",
+    provenance: {
+      kind: "bot",
+      packageId: "aud-usd",
+      version: "0.0.1",
+      botId: "toolsmith",
+      sessionId: "user-1:toolsmith",
+      turnId: "turn-1",
+      runId: "run-1",
+      authoredAt: "2026-09-03T23:49:00.416Z",
+    },
     artifact: {
       contentHash: "b".repeat(64),
       size: 128,
-      mediaType: "text/javascript",
+      mediaType: "application/javascript",
+      bundlerVersion: "worker-bundler@0.2.3",
     },
-  } as CompositionMemberV1;
+  };
   const sources: CompositionManifestSourcesV1 = {
     stored: (hash) =>
       Promise.resolve(hash === manifestHash ? { manifest } : undefined),
