@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   decodeVoiceQuotaReceiptV1,
   recordVoiceUsageV1,
+  recordVoiceUsageSyncV1,
   reserveVoiceCaptureV1,
   VOICE_MINUTES_PER_DAY_V1,
   VOICE_SECONDS_PER_DAY_V1,
@@ -10,6 +11,7 @@ import {
   voiceSessionKeyV1,
   type VoiceQuotaStorage,
   type VoiceQuotaTransaction,
+  type VoiceQuotaSyncStorage,
 } from "./voice-quota.js";
 
 /**
@@ -82,6 +84,28 @@ describe("the durable per-User voice budget", () => {
         seconds: 45,
       }),
     ).toMatchObject({ usedSeconds: 45, recordedSeconds: 15 });
+  });
+
+  test("the synchronous receipt has the same cumulative idempotency", () => {
+    const values = new Map<string, unknown>();
+    const storage: VoiceQuotaSyncStorage = {
+      get: <T>(key: string) => values.get(key) as T | undefined,
+      put: <T>(key: string, value: T) => void values.set(key, value),
+    };
+    expect(
+      recordVoiceUsageSyncV1(storage, {
+        day: DAY,
+        sessionId: "sync-one",
+        seconds: 30,
+      }),
+    ).toMatchObject({ usedSeconds: 30, recordedSeconds: 30 });
+    expect(
+      recordVoiceUsageSyncV1(storage, {
+        day: DAY,
+        sessionId: "sync-one",
+        seconds: 30,
+      }),
+    ).toMatchObject({ usedSeconds: 30, recordedSeconds: 0 });
   });
 
   test("adds up across sessions and refuses once the day is spent", async () => {

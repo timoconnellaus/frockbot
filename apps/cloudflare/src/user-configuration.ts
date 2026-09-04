@@ -106,7 +106,7 @@ import type {
   McpAuthorizationStartRequestV1,
 } from "@frockbot/plugin-mcp/backend";
 import {
-  recordVoiceUsageV1,
+  recordVoiceUsageSyncV1,
   reserveVoiceCaptureV1,
   VOICE_QUOTA_DAY,
   type VoiceQuotaReceiptV1,
@@ -824,21 +824,24 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       seconds: rpcInteger({ minimum: 0, maximum: 24 * 60 * 60 }),
     });
     await this.assertUserIdentity(request.userId as string);
-    const receipt = await recordVoiceUsageV1(this.ctx.storage, {
-      day: request.day as string,
-      sessionId: request.sessionId as string,
-      seconds: request.seconds as number,
-    });
-    if (receipt.recordedSeconds > 0) {
-      (await this.billingContribution()).recordVoice({
-        day: receipt.day,
-        sessionId: receipt.sessionId,
-        sessionSeconds: receipt.sessionSeconds,
-        recordedSeconds: receipt.recordedSeconds,
-        at: new Date().toISOString(),
+    const billing = await this.billingContribution();
+    return this.ctx.storage.transactionSync(() => {
+      const receipt = recordVoiceUsageSyncV1(this.ctx.storage.kv, {
+        day: request.day as string,
+        sessionId: request.sessionId as string,
+        seconds: request.seconds as number,
       });
-    }
-    return receipt;
+      if (receipt.recordedSeconds > 0) {
+        billing.recordVoiceInCurrentTransaction({
+          day: receipt.day,
+          sessionId: receipt.sessionId,
+          sessionSeconds: receipt.sessionSeconds,
+          recordedSeconds: receipt.recordedSeconds,
+          at: new Date().toISOString(),
+        });
+      }
+      return receipt;
+    });
   }
 
   /** The durable per-User authoring quota configuration; defaults when unset. */

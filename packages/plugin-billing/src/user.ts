@@ -15,6 +15,14 @@ export interface BillingUserBackendHostV1 {
   now?: () => number;
 }
 
+interface VoiceEntryInputV1 {
+  day: string;
+  sessionId: string;
+  sessionSeconds: number;
+  recordedSeconds: number;
+  at: string;
+}
+
 export class BillingUserBackendContribution {
   readonly packageId = "billing";
   private readonly store: UsageStoreV1;
@@ -39,13 +47,7 @@ export class BillingUserBackendContribution {
     return { recorded: this.store.record(entries), quarantined };
   }
 
-  recordVoice(input: {
-    day: string;
-    sessionId: string;
-    sessionSeconds: number;
-    recordedSeconds: number;
-    at: string;
-  }): { recorded: number } {
+  private voiceEntry(input: VoiceEntryInputV1): UsageEntryV1 {
     if (
       !/^\d{4}-\d{2}-\d{2}$/.test(input.day) ||
       !input.sessionId ||
@@ -59,26 +61,36 @@ export class BillingUserBackendContribution {
       throw new Error("voice usage is invalid");
     }
     return {
-      recorded: this.store.record([
-        {
-          schemaVersion: 1,
-          entryId: `voice:${input.day}:${input.sessionId}:${input.sessionSeconds}`,
-          kind: "voice",
-          at: input.at,
-          provider: "openai",
-          model: "gpt-live-transcribe",
-          inputTokens: 0,
-          outputTokens: 0,
-          cachedInputTokens: 0,
-          reasoningTokens: 0,
-          voiceSeconds: input.recordedSeconds,
-          latencyMs: 0,
-          estimated: false,
-          unknownPrice: false,
-          priceTableVersion: MODEL_PRICE_TABLE_VERSION_V1,
-          costMicros: voiceCostMicrosV1(input.recordedSeconds),
-        },
-      ]),
+      schemaVersion: 1,
+      entryId: `voice:${input.day}:${input.sessionId}:${input.sessionSeconds}`,
+      kind: "voice",
+      at: input.at,
+      provider: "openai",
+      model: "gpt-live-transcribe",
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+      voiceSeconds: input.recordedSeconds,
+      latencyMs: 0,
+      estimated: false,
+      unknownPrice: false,
+      priceTableVersion: MODEL_PRICE_TABLE_VERSION_V1,
+      costMicros: voiceCostMicrosV1(input.recordedSeconds),
+    };
+  }
+
+  recordVoice(input: VoiceEntryInputV1): {
+    recorded: number;
+  } {
+    return { recorded: this.store.record([this.voiceEntry(input)]) };
+  }
+
+  recordVoiceInCurrentTransaction(input: VoiceEntryInputV1): {
+    recorded: number;
+  } {
+    return {
+      recorded: this.store.recordInCurrentTransaction([this.voiceEntry(input)]),
     };
   }
 
