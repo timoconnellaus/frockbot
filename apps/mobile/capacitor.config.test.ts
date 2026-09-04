@@ -38,6 +38,38 @@ describe("createCapacitorConfig", () => {
     });
   });
 
+  test("passes the Google Web OAuth client ID to the native auth plugin", () => {
+    const config = createCapacitorConfig({
+      FROCKBOT_HOSTED_APP_URL: "https://bot.frockbot.com",
+      FROCKBOT_GOOGLE_WEB_CLIENT_ID: "123-example.apps.googleusercontent.com",
+    });
+
+    expect(config.plugins).toEqual({
+      SystemBars: { insetsHandling: "css" },
+      FrockBotGoogleAuth: {
+        serverClientId: "123-example.apps.googleusercontent.com",
+      },
+    });
+  });
+
+  test("requires the Google Web OAuth client ID for a hosted build", () => {
+    expect(() =>
+      createCapacitorConfig({
+        FROCKBOT_HOSTED_APP_URL: "https://bot.frockbot.com",
+      }),
+    ).toThrow("FROCKBOT_GOOGLE_WEB_CLIENT_ID is required");
+  });
+
+  test("rejects a non-Web Google OAuth client ID", () => {
+    expect(() =>
+      createCapacitorConfig({
+        FROCKBOT_GOOGLE_WEB_CLIENT_ID: "android-client-id",
+      }),
+    ).toThrow(
+      "FROCKBOT_GOOGLE_WEB_CLIENT_ID must be a Google Web OAuth client ID",
+    );
+  });
+
   test("rejects a live-reload URL with credentials or a path", () => {
     expect(() =>
       createCapacitorConfig({
