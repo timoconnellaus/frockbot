@@ -20,6 +20,7 @@ import {
   type VoiceToolNameV1,
 } from "../shared.js";
 import { createVoicePlaybackV1, type VoicePlaybackV1 } from "./playback.js";
+import { deliverPendingVoiceNotificationsV1 } from "./pending-notifications.js";
 import VoiceSurface from "./VoiceSurface.vue";
 import VoiceToggle from "./VoiceToggle.vue";
 import { voiceClientStateKey, type VoiceClientStateV1 } from "./state.js";
@@ -32,7 +33,9 @@ const TOOL_NAMES: readonly VoiceToolNameV1[] = [
   "bot_activity",
   "memory_search",
   "pending_answers",
+  "ask_bot",
 ];
+const VOICE_PENDING_POLL_INTERVAL_MS_V1 = 15_000;
 
 function deviceIdV1(): string {
   if (typeof window === "undefined") return crypto.randomUUID();
@@ -85,7 +88,7 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
     const currentAttempt = attempt;
     refreshInFlight = request("/api/voice")
       .then(decodeVoiceAssistantViewV1)
-      .then((view) => {
+      .then(async (view) => {
         // The monthly ceiling is stable even if the User turns Voice on while
         // this read is in flight. Live remaining time is owned by the socket.
         state.value.quotaLimitSeconds = view.quota.limitSeconds;
@@ -107,6 +110,8 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
         if (view.ledger.state.enabled) {
           state.value.message =
             "Voice is ready to resume. Turn it on to reconnect this device.";
+        } else {
+          await deliverPendingVoiceNotificationsV1(view.ledger.pendingAnswers);
         }
       })
       .catch(() => {
@@ -290,6 +295,10 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
     },
   });
 
+  const pendingPoll = setInterval(() => {
+    if (state.value.status === "offline") void refresh();
+  }, VOICE_PENDING_POLL_INTERVAL_MS_V1);
+
   return [
     ctx.provide(voiceClientStateKey, state),
     surfaces.register({
@@ -304,6 +313,7 @@ export const voiceClientPlugin: ClientPlugin = (ctx) => {
       component: VoiceToggle,
     }),
     () => {
+      clearInterval(pendingPoll);
       attempt += 1;
       session?.close();
       session = undefined;

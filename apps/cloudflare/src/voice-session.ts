@@ -49,6 +49,7 @@ import {
 } from "./voice-upstream.js";
 import {
   parseVoiceAssistantUpstreamFrameV1,
+  voiceAssistantAnswerV1,
   voiceAssistantAudioInputV1,
   voiceAssistantKickoffV1,
   voiceAssistantSetupV1,
@@ -58,6 +59,16 @@ import {
   type VoiceAssistantUpstreamTargetV1,
 } from "./voice-assistant-upstream.js";
 import { VOICE_IDLE_TIMEOUT_MS_V1 } from "@frockbot/plugin-voice";
+import {
+  decodeVoicePendingAnswerV1,
+  type VoicePendingAnswerV1,
+} from "@frockbot/plugin-voice/shared";
+import {
+  decodeRpcEnvelopeV1,
+  rpcDecoded,
+  rpcIdentifier,
+  rpcString,
+} from "./durable-rpc.js";
 
 export const VOICE_DICTATION_INTERNAL_PATH = "/internal/voice-dictation/v1";
 export const VOICE_ASSISTANT_INTERNAL_PATH = "/internal/voice-assistant/v1";
@@ -117,6 +128,8 @@ interface LiveAssistant {
   kickoffPending: boolean;
   inputTranscript: string;
   outputTranscript: string;
+  kickoffAnswers: VoicePendingAnswerV1[];
+  briefingAnswerIds: string[];
   idleGuard?: ReturnType<typeof setTimeout>;
   quotaGuard?: ReturnType<typeof setTimeout>;
 }
@@ -126,6 +139,7 @@ interface VoiceAssistantStartReceiptV1 {
   quota: VoiceAssistantQuotaReceiptV1;
   state?: { resumptionHandle?: string };
   replacedSessionId?: string;
+  pendingAnswers?: VoicePendingAnswerV1[];
 }
 
 function serverFrame(frame: VoiceDictationServerFrameV1): string {
@@ -374,9 +388,15 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
       ),
       settled: false,
       reconnecting: false,
-      kickoffPending: !start.state?.resumptionHandle,
+      kickoffPending:
+        !start.state?.resumptionHandle ||
+        (start.pendingAnswers?.length ?? 0) > 0,
       inputTranscript: "",
       outputTranscript: "",
+      kickoffAnswers: (start.pendingAnswers ?? []).map(
+        decodeVoicePendingAnswerV1,
+      ),
+      briefingAnswerIds: [],
     };
     this.#assistant = assistant;
     client.serializeAttachment({
@@ -495,6 +515,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
           activeSessionId?: string;
           resumptionHandle?: string;
         };
+        pendingAnswers?: VoicePendingAnswerV1[];
       };
       quota?: { remainingSeconds?: number };
     };
@@ -515,9 +536,13 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
       remainingSeconds: Math.max(0, view.quota?.remainingSeconds ?? 0),
       settled: false,
       reconnecting: false,
-      kickoffPending: false,
+      kickoffPending: (view.ledger.pendingAnswers?.length ?? 0) > 0,
       inputTranscript: "",
       outputTranscript: "",
+      kickoffAnswers: (view.ledger.pendingAnswers ?? []).map(
+        decodeVoicePendingAnswerV1,
+      ),
+      briefingAnswerIds: [],
     };
     this.#assistant = assistant;
     this.#attachAssistantUpstream(assistant, upstream);
@@ -581,7 +606,13 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     if (frame.setupComplete) {
       if (assistant.kickoffPending) {
         assistant.kickoffPending = false;
-        upstream.send(JSON.stringify(voiceAssistantKickoffV1()));
+        assistant.briefingAnswerIds.push(
+          ...assistant.kickoffAnswers.map((answer) => answer.answerId),
+        );
+        upstream.send(
+          JSON.stringify(voiceAssistantKickoffV1(assistant.kickoffAnswers)),
+        );
+        assistant.kickoffAnswers = [];
       }
       this.#sendAssistant(assistant, {
         schemaVersion: 1,
@@ -687,6 +718,23 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
         type: "state",
         state: "listening",
       });
+      if (assistant.briefingAnswerIds.length > 0) {
+        const askIds = [...new Set(assistant.briefingAnswerIds)];
+        try {
+          await this.#user(assistant.userId).markVoiceAnswersBriefed({
+            schemaVersion: 1,
+            userId: assistant.userId,
+            sessionId: assistant.sessionId,
+            askIds,
+            at: new Date().toISOString(),
+          });
+          assistant.briefingAnswerIds = assistant.briefingAnswerIds.filter(
+            (askId) => !askIds.includes(askId),
+          );
+        } catch {
+          // The speech happened; a later provider turn retries the durable ack.
+        }
+      }
     }
     if (frame.goAwayMs !== undefined) {
       await this.#reconnectAssistant(assistant);
@@ -752,6 +800,44 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
       );
     } finally {
       assistant.reconnecting = false;
+    }
+  }
+
+  /** User-authority projection of a durable answer into the live room. */
+  async deliverVoiceAnswer(input: unknown): Promise<{
+    schemaVersion: 1;
+    status: "delivered" | "offline";
+  }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      sessionId: rpcString(128),
+      answer: rpcDecoded(decodeVoicePendingAnswerV1),
+    });
+    const assistant = this.#assistant;
+    if (
+      !assistant ||
+      assistant.settled ||
+      assistant.userId !== request.userId ||
+      assistant.sessionId !== request.sessionId
+    ) {
+      return { schemaVersion: 1, status: "offline" };
+    }
+    const answer = request.answer as VoicePendingAnswerV1;
+    if (!assistant.briefingAnswerIds.includes(answer.answerId)) {
+      assistant.briefingAnswerIds.push(answer.answerId);
+    }
+    try {
+      assistant.upstream.send(JSON.stringify(voiceAssistantAnswerV1(answer)));
+      this.#resetAssistantIdle(
+        assistant,
+        voiceAssistantUpstreamTargetV1(this.env),
+      );
+      return { schemaVersion: 1, status: "delivered" };
+    } catch {
+      assistant.briefingAnswerIds = assistant.briefingAnswerIds.filter(
+        (answerId) => answerId !== answer.answerId,
+      );
+      return { schemaVersion: 1, status: "offline" };
     }
   }
 
@@ -1193,6 +1279,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
       saveVoiceResumptionHandle(input: unknown): Promise<void>;
       appendVoiceTranscript(input: unknown): Promise<void>;
       executeVoiceTool(input: unknown): Promise<unknown>;
+      markVoiceAnswersBriefed(input: unknown): Promise<number>;
     };
   }
 }

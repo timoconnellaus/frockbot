@@ -1,5 +1,6 @@
 import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 import type { Plugin } from "cordis";
+import { askBotFromVoiceV1, type VoiceAskHostV1 } from "./ask.js";
 import { VoiceLedgerV1, type VoiceLedgerStorageV1 } from "./ledger.js";
 import { executeVoiceToolV1, type VoiceToolHostV1 } from "./tools.js";
 import type {
@@ -9,8 +10,10 @@ import type {
   VoiceTranscriptEntryV1,
 } from "./shared.js";
 
-export interface VoiceUserBackendHostV1 extends VoiceToolHostV1 {
+export interface VoiceUserBackendHostV1
+  extends Omit<VoiceToolHostV1, "askBot">, VoiceAskHostV1 {
   storage: VoiceLedgerStorageV1;
+  userId(): string;
 }
 
 export class VoiceUserBackendContributionV1 {
@@ -53,10 +56,25 @@ export class VoiceUserBackendContributionV1 {
     args?: unknown;
     at: string;
   }) {
-    const executed = await executeVoiceToolV1(this.host, {
-      name: input.name,
-      args: input.args,
-    });
+    const executed = await executeVoiceToolV1(
+      {
+        ...this.host,
+        askBot: (ask) =>
+          askBotFromVoiceV1(this.ledger, this.host, {
+            userId: this.host.userId(),
+            ...ask,
+          }),
+      },
+      {
+        name: input.name,
+        args: input.args,
+        context: {
+          sessionId: input.sessionId,
+          callId: input.callId,
+          at: input.at,
+        },
+      },
+    );
     await this.ledger.appendToolCall(input.sessionId, {
       schemaVersion: 1,
       id: input.callId,
@@ -69,6 +87,36 @@ export class VoiceUserBackendContributionV1 {
 
   recordPendingAnswer(answer: VoicePendingAnswerV1) {
     return this.ledger.recordPendingAnswer(answer);
+  }
+
+  recordAnswerDelivery(delivery: import("./shared.js").VoiceAnswerDeliveryV1) {
+    return delivery.outcome === "answered"
+      ? this.ledger.recordAnswered({
+          schemaVersion: 1,
+          type: "voice/answered",
+          askId: delivery.askId,
+          botId: delivery.botId,
+          runId: delivery.runId,
+          answer: delivery.answer,
+          answeredAt: delivery.at,
+        })
+      : this.ledger.recordFailed({
+          schemaVersion: 1,
+          type: "voice/failed",
+          askId: delivery.askId,
+          botId: delivery.botId,
+          runId: delivery.runId,
+          reason: delivery.reason,
+          failedAt: delivery.at,
+        });
+  }
+
+  markBriefed(input: {
+    askIds: readonly string[];
+    sessionId: string;
+    at: string;
+  }) {
+    return this.ledger.markBriefed(input);
   }
 
   view() {

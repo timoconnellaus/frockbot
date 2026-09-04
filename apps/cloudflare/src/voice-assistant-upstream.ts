@@ -3,6 +3,7 @@ import {
   VOICE_GEMINI_MODEL_V1,
   VOICE_KICKOFF_TEXT_V1,
   voiceSystemInstructionV1,
+  type VoicePendingAnswerV1,
 } from "@frockbot/plugin-voice";
 import type { VoiceSessionEnvV1 } from "./voice-upstream.js";
 
@@ -80,8 +81,33 @@ export function voiceAssistantSetupV1(
   };
 }
 
-export function voiceAssistantKickoffV1(): Record<string, unknown> {
-  return { realtimeInput: { text: VOICE_KICKOFF_TEXT_V1 } };
+function answerBriefingTextV1(
+  answers: readonly VoicePendingAnswerV1[],
+): string {
+  if (answers.length === 0) return VOICE_KICKOFF_TEXT_V1;
+  return [
+    "Speak these waiting Bot answers now, naming each Bot. Do not call a tool and do not omit any answer:",
+    ...answers.map(
+      (answer, index) =>
+        `${index + 1}. ${answer.botName} answered ${JSON.stringify(answer.question)}: ${answer.answer}`,
+    ),
+  ].join("\n");
+}
+
+export function voiceAssistantKickoffV1(
+  answers: readonly VoicePendingAnswerV1[] = [],
+): Record<string, unknown> {
+  return { realtimeInput: { text: answerBriefingTextV1(answers) } };
+}
+
+export function voiceAssistantAnswerV1(
+  answer: VoicePendingAnswerV1,
+): Record<string, unknown> {
+  return {
+    realtimeInput: {
+      text: `Speak this Bot answer now, naming the Bot: ${answer.botName} answered ${JSON.stringify(answer.question)}: ${answer.answer}`,
+    },
+  };
 }
 
 export function voiceAssistantAudioInputV1(

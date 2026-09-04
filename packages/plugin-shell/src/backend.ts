@@ -60,6 +60,7 @@ import {
   type BotDurableAuthorityOptions,
   type BotTurnExecutionInput,
   type OwnedBotTurnCommand,
+  type StoredRunOriginV1,
 } from "@frockbot/kernel-do";
 import type {
   FoundationAgentPackage,
@@ -681,6 +682,15 @@ export interface ShellBotBackendHost {
     turn: number;
     events: readonly SessionEvent[];
   }): Promise<void>;
+  /** A Package-neutral hook for an agent Turn's durable terminal projection. */
+  recordSettledAgentOutcome?(input: {
+    userId: string;
+    botId: string;
+    runId: string;
+    turn: number;
+    origin?: StoredRunOriginV1;
+    events: readonly SessionEvent[];
+  }): Promise<void>;
 }
 
 /** The narrow storage seam the Bot's announcement log is written through. */
@@ -784,6 +794,7 @@ export class ShellBotBackendContribution {
   private readonly hostDeferScheduledWork?: ShellBotBackendHost["deferScheduledWork"];
   private readonly hostSettleScheduledWork?: ShellBotBackendHost["settleScheduledWork"];
   private readonly recordSettledUsage?: ShellBotBackendHost["recordSettledUsage"];
+  private readonly recordSettledAgentOutcome?: ShellBotBackendHost["recordSettledAgentOutcome"];
 
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
@@ -800,6 +811,7 @@ export class ShellBotBackendContribution {
     this.hostDeferScheduledWork = host.deferScheduledWork;
     this.hostSettleScheduledWork = host.settleScheduledWork;
     this.recordSettledUsage = host.recordSettledUsage;
+    this.recordSettledAgentOutcome = host.recordSettledAgentOutcome;
     const routines = createBotRoutines(
       host.state.storage,
       createBotRoutineHookMinter(
@@ -1759,14 +1771,34 @@ export class ShellBotBackendContribution {
               input.command.sessionId,
               effect,
             ),
-          ...(this.recordSettledUsage
+          ...(this.recordSettledUsage || this.recordSettledAgentOutcome
             ? {
-                onTurnStopping: (settled) =>
-                  this.recordSettledUsage!({
-                    botId: input.identity.botId,
-                    runId: input.command.runId,
-                    ...settled,
-                  }),
+                onTurnStopping: async (settled) => {
+                  await Promise.allSettled([
+                    ...(this.recordSettledUsage
+                      ? [
+                          this.recordSettledUsage({
+                            botId: input.identity.botId,
+                            runId: input.command.runId,
+                            ...settled,
+                          }),
+                        ]
+                      : []),
+                    ...(this.recordSettledAgentOutcome
+                      ? [
+                          this.recordSettledAgentOutcome({
+                            userId: input.identity.userId,
+                            botId: input.identity.botId,
+                            runId: input.command.runId,
+                            ...(input.command.origin
+                              ? { origin: input.command.origin }
+                              : {}),
+                            ...settled,
+                          }),
+                        ]
+                      : []),
+                  ]);
+                },
               }
             : {}),
           ...(isolate ? { isolate } : {}),

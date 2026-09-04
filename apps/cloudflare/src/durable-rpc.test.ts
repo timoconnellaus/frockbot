@@ -173,6 +173,21 @@ describe("Durable Object RPC boundaries", () => {
       },
     } as const;
     expect(decodeBotAgentRunRpcV1(request)).toEqual(request);
+    expect(
+      decodeBotAgentRunRpcV1({
+        ...request,
+        command: {
+          ...request.command,
+          source: { kind: "voice", messageId: "voice-ask-1" },
+        },
+      }),
+    ).toEqual({
+      ...request,
+      command: {
+        ...request.command,
+        source: { kind: "voice", messageId: "voice-ask-1" },
+      },
+    });
     expect(() =>
       decodeBotAgentRunRpcV1({
         ...request,

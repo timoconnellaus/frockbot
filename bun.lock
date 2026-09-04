@@ -1250,6 +1250,7 @@
         "@frockbot/client-core": "workspace:*",
         "@frockbot/client-ui": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
+        "@frockbot/plugin-flock": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
         "@frockbot/protocol": "workspace:*",
         "cordis": "4.0.0-rc.8",
