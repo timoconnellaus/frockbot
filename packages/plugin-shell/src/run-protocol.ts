@@ -1012,10 +1012,37 @@ export function createClientRunListV1(
 const MAX_ANNOUNCEMENTS = 64;
 const MAX_ANNOUNCEMENT_NAME_BYTES = 400;
 
-/** Projects the Bot's durable announcement events onto the wire. */
+/**
+ * Where each Turn ended, by Turn number.
+ *
+ * A compaction is written at the end of the Turn that crossed the threshold,
+ * which is the *newest* Turn — so its own timestamp would place its marker at
+ * the bottom of the thread, far from the range it describes. The boundary it
+ * actually names is the end of `throughTurn`, and that is what the marker is
+ * dated with.
+ */
+function turnEndTimestampsV1(
+  session: readonly SessionEvent[],
+): Map<number, string> {
+  const ends = new Map<number, string>();
+  for (const event of session) {
+    if (event.type === "turn/end") ends.set(event.turn, event.timestamp);
+  }
+  return ends;
+}
+
+/**
+ * Projects the Bot's durable announcement events onto the wire.
+ *
+ * `session` is the conversation's own log, used only to date a compaction
+ * marker at the boundary it covers. Omitting it dates the marker by when the
+ * compaction was written, which is where it used to sit.
+ */
 export function projectClientAnnouncementsV1(
   events: readonly SessionEvent[],
+  session: readonly SessionEvent[] = events,
 ): ClientAnnouncementV1[] {
+  const turnEnds = turnEndTimestampsV1(session);
   return events.flatMap((event): ClientAnnouncementV1[] => {
     if (event.type === "bot/renamed") {
       return [
@@ -1040,7 +1067,13 @@ export function projectClientAnnouncementsV1(
           // a rename by this Bot's announcement log, and the two counters would
           // otherwise collide on an id the client upserts by.
           announcementId: `compaction-${event.seq}`,
-          at: truncate(event.timestamp, MAX_TIMESTAMP_LENGTH),
+          // Dated where the covered range ends, not when the summariser ran,
+          // so the marker sits between the last compacted Turn and the first
+          // verbatim one and stays there as newer Turns arrive.
+          at: truncate(
+            turnEnds.get(event.throughTurn) ?? event.timestamp,
+            MAX_TIMESTAMP_LENGTH,
+          ),
           throughTurn: event.throughTurn,
         },
       ];
