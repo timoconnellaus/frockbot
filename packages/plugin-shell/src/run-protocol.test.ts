@@ -1614,3 +1614,41 @@ describe("dispatched subagents in the run projection", () => {
     );
   });
 });
+
+describe("Computer sync degradation in the run projection", () => {
+  const degraded: SessionEvent = {
+    type: "computer/sync",
+    seq: 4,
+    timestamp,
+    turn: 1,
+    reason: "open",
+    status: "degraded",
+    detail: "Excluded 2 reproducible directories from Workspace sync.",
+    pulled: 0,
+    pushed: 1,
+    restored: 0,
+    removed: 0,
+    adopted: 0,
+    conflicts: 0,
+    failures: 0,
+    ignored: 2,
+    omitted: 0,
+  };
+
+  test("projects one plain-language event and round-trips it", () => {
+    const projected = projectClientRunV1(
+      storedRun([degraded, { ...degraded, seq: 5, reason: "turn-end" }]),
+    );
+    expect(projected.events).toEqual([
+      {
+        type: "computer/sync",
+        status: "degraded",
+        message: "Excluded 2 reproducible directories from Workspace sync.",
+      },
+    ]);
+    const page = createClientRunListV1([projected], { truncated: false });
+    expect(
+      decodeClientRunPageV1(structuredClone(page)).runs[0]?.events,
+    ).toEqual(projected.events);
+  });
+});

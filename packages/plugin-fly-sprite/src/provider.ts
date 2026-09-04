@@ -300,15 +300,35 @@ function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
     pick: (root: WorkspaceSyncReportV1["roots"][number]) => number,
   ) => report.roots.reduce((sum, root) => sum + pick(root), 0);
   const failed = report.failures[0];
+  const ignored = total((root) => root.ignored);
+  const omitted = total((root) => root.omitted);
+  const detail: string[] = [];
+  if (ignored > 0) {
+    detail.push(
+      `Excluded ${ignored} reproducible ${ignored === 1 ? "directory" : "directories"} from Workspace sync.`,
+    );
+  }
+  if (omitted > 0) {
+    detail.push(
+      `Omitted ${omitted} manifest ${omitted === 1 ? "entry" : "entries"} at the sync safety limit.`,
+    );
+  }
+  if (failed) {
+    detail.push(
+      `${report.failures.length} sync ${report.failures.length === 1 ? "operation" : "operations"} failed: ${failed.status}: ${failed.reason}.`,
+    );
+  }
   const summary: ComputerSyncSummaryV1 = {
     // Every root failing is `unavailable` — the usual shape of a paused
-    // Sprite. A partial failure is still an `ok` run that says what it missed.
+    // Sprite. Any partial failure or bounded exclusion is truthfully degraded.
     status:
       report.failures.length > 0 &&
       report.roots.every((root) => root.failures.length > 0)
         ? "unavailable"
-        : "ok",
-    detail: failed ? `${failed.status}: ${failed.reason}`.slice(0, 512) : "",
+        : report.failures.length > 0 || ignored > 0 || omitted > 0
+          ? "degraded"
+          : "ok",
+    detail: detail.join(" ").slice(0, 512),
     pulled: total((root) => root.pulled.length),
     pushed: total((root) => root.pushed.length),
     restored: total((root) => root.restored.length),
@@ -316,6 +336,8 @@ function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
       (root) => root.removedOnComputer.length + root.removedInStore.length,
     ),
     adopted: total((root) => root.adopted.length),
+    ignored,
+    omitted,
     conflicts: report.conflicts.length,
     failures: report.failures.length,
   };

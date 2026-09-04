@@ -1245,6 +1245,34 @@ describe("the durable-root sync on the Computer handle", () => {
     }
   });
 
+  test("reports a bounded dependency exclusion as degraded while source still syncs", async () => {
+    const { sprite, open } = providerHarness([APPLET_SOURCE_PACKAGE_ROOT]);
+    const handle = await open();
+    sprite.shellWrite(
+      MOUNTS.appletSource,
+      "todo/src/index.ts",
+      "export const todo = true;",
+    );
+    sprite.shellWrite(
+      MOUNTS.appletSource,
+      "todo/node_modules/dependency/package.json",
+      '{"name":"dependency"}',
+    );
+
+    const summary = await handle.sync!.reconcile("turn-end");
+
+    expect(summary).toMatchObject({
+      status: "degraded",
+      pushed: 1,
+      ignored: 1,
+      omitted: 0,
+      failures: 0,
+    });
+    expect(summary.detail).toBe(
+      "Excluded 1 reproducible directory from Workspace sync.",
+    );
+  });
+
   // The sync-now seam of ADR 0022 decision 7, provider side: an Applet publish
   // needs the bytes `applet build` left on the Computer to be in the store
   // before it reads them, and it needs that for one root, not the Workspace.

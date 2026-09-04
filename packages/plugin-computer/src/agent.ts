@@ -349,6 +349,21 @@ async function recordComputerSyncV1(
 ): Promise<void> {
   const session = sessions.get(sessionId);
   if (!session || session.disposed) return;
+  // One visible/debug degradation per Turn. A watcher can trigger more than
+  // one reconciliation and turn-end always runs, but repeating the same
+  // incomplete state adds noise rather than evidence. Successful syncs remain
+  // individually recorded because their reason and movement are useful.
+  if (
+    summary.status !== "ok" &&
+    session.events.some(
+      (event) =>
+        event.type === "computer/sync" &&
+        event.turn === Math.max(1, turn) &&
+        event.status !== "ok",
+    )
+  ) {
+    return;
+  }
   session.append({
     type: "computer/sync",
     turn: Math.max(1, turn),

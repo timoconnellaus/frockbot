@@ -663,7 +663,7 @@ export type ComputerSyncReasonV1 = "open" | "signal" | "turn-end" | "publish";
  * answers `unavailable` and a Turn continues.
  */
 export interface ComputerSyncSummaryV1 {
-  status: "ok" | "unavailable" | "refused" | "skipped";
+  status: "ok" | "degraded" | "unavailable" | "refused" | "skipped";
   /** Human-readable reason, empty when the run had nothing to say. */
   detail: string;
   pulled: number;
@@ -671,6 +671,10 @@ export interface ComputerSyncSummaryV1 {
   restored: number;
   removed: number;
   adopted: number;
+  /** Reproducible directories and durable entries excluded by policy. */
+  ignored: number;
+  /** Manifest entries left out after the scan reached its hard bound. */
+  omitted: number;
   conflicts: number;
   failures: number;
 }
@@ -687,6 +691,8 @@ export function computerSyncSummaryV1(
     restored: 0,
     removed: 0,
     adopted: 0,
+    ignored: 0,
+    omitted: 0,
     conflicts: 0,
     failures: 0,
   };

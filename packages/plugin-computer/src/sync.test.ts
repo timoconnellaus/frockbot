@@ -248,11 +248,31 @@ describe("the Computer Package as the sync's caller", () => {
     ).toBe(true);
     expect(
       syncEvents(events).map((event) => [event.reason, event.status]),
-    ).toEqual([
-      ["open", "unavailable"],
-      ["turn-end", "unavailable"],
-    ]);
+    ).toEqual([["open", "unavailable"]]);
     expect(syncEvents(events)[0]?.detail).toContain("paused");
+  });
+
+  test("records an incomplete sync only once in one Turn", async () => {
+    const { provider, signal } = fixture(() => ({
+      ...computerSyncSummaryV1(
+        "degraded",
+        "Excluded 1 reproducible directory from Workspace sync.",
+      ),
+      ignored: 1,
+    }));
+    const model = modelRunning(["first", "second"], (step) => {
+      if (step === 2) signal.value = "signal-2";
+    });
+
+    const events = await runTurn(provider, model);
+
+    expect(syncEvents(events)).toHaveLength(1);
+    expect(syncEvents(events)[0]).toMatchObject({
+      reason: "open",
+      status: "degraded",
+      ignored: 1,
+      omitted: 0,
+    });
   });
 });
 
