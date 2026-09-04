@@ -185,8 +185,16 @@ export interface FlySpriteComputerOptions {
 }
 
 export interface BrowserAction {
-  action: "snapshot" | "navigate" | "click" | "fill" | "press" | "wait";
+  action:
+    | "snapshot"
+    | "navigate"
+    | "close-origins"
+    | "click"
+    | "fill"
+    | "press"
+    | "wait";
   url?: string;
+  origins?: readonly string[];
   role?: string;
   name?: string;
   label?: string;

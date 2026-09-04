@@ -153,6 +153,48 @@ export interface ComputerAgentPluginConfig {
 export const HUMAN_CONTROL_PROMPT_LINE =
   "Your User is currently controlling the Computer; do not use it this Turn.";
 
+/** Bounded copy for the two transport failures an overloaded Sprite emits. */
+export const COMPUTER_OVERLOADED_TOOL_MESSAGE_V1 =
+  "The Computer is overloaded; a browser tab using too much memory was closed. Try again.";
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isOverloadedTransportFailure(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase();
+  return (
+    message.includes("websocket keepalive timeout") ||
+    message.includes("computer effect was cancelled")
+  );
+}
+
+/** A local HTTP origin an Applet preview can own; public sites never qualify. */
+export function localPreviewOriginV1(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    const local = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+    return local && (url.protocol === "http:" || url.protocol === "https:")
+      ? url.origin
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function localPreviewOriginsV1(value: string): string[] {
+  const found = new Set<string>();
+  for (const match of value.matchAll(/https?:\/\/[^\s"'<>]+/g)) {
+    const origin = localPreviewOriginV1(match[0].replace(/[),.;!?]+$/g, ""));
+    if (origin) found.add(origin);
+  }
+  return [...found];
+}
+
+function runsAppletPreviewV1(command: string): boolean {
+  return /(?:^|[\s;&|])(?:[^\s;&|]*\/)?applet\s+dev(?:\s|$)/.test(command);
+}
+
 /** The wake-free, Turn-scoped projection shared by prompt render and its log. */
 class ComputerControlPromptProjection {
   #line = "";
@@ -345,6 +387,9 @@ function decodeBrowser(input: unknown): ComputerBrowserAction | undefined {
 }
 
 function failure(error: unknown): { content: string; isError: true } {
+  if (isOverloadedTransportFailure(error)) {
+    return { content: COMPUTER_OVERLOADED_TOOL_MESSAGE_V1, isError: true };
+  }
   if (error instanceof ComputerError) {
     if (error.code === "human-control-active") {
       // The holder is named, so a second Bot of the same User — and the User
@@ -367,7 +412,7 @@ function failure(error: unknown): { content: string; isError: true } {
     return { content: error.message, isError: true };
   }
   return {
-    content: error instanceof Error ? error.message : String(error),
+    content: errorMessage(error),
     isError: true,
   };
 }
@@ -621,6 +666,8 @@ export function createComputerAgentPlugin(
     // Agent loop knows it; a tool context does not, so it is caught where the
     // loop already announces it.
     let currentTurn = 1;
+    /** Local preview origins this Bot navigated to during the current Turn. */
+    const previewOrigins = new Set<string>();
     // One cadence per mounted plugin, which is one per Turn: a Turn's first
     // Computer action always gets its capture, and the rest are debounced.
     const progressCadence = createComputerCaptureCadenceV1(
@@ -1039,6 +1086,23 @@ export function createComputerAgentPlugin(
               // A mirror that could not be written never withholds an outcome
               // that was read.
             }
+            if (
+              action === "stop" &&
+              runsAppletPreviewV1(held.command) &&
+              computer.browser
+            ) {
+              const origins = localPreviewOriginsV1(observed.logTail);
+              if (origins.length > 0) {
+                await computer.browser.perform(
+                  { type: "close-origins", origins },
+                  {
+                    signal: context.signal,
+                    effectId: `${context.effectId}:close-preview-tabs`,
+                  },
+                );
+                for (const origin of origins) previewOrigins.delete(origin);
+              }
+            }
             if (action === "logs") {
               return {
                 content: observed.logTail || "(no output yet)",
@@ -1355,7 +1419,7 @@ export function createComputerAgentPlugin(
         subagentRoles: ["executor", "computerUse"],
       },
       description:
-        "Run the Computer's self-check and read the report: disk, the shared scratch, the desktop gateway, your display, the browser profile and what the browser announces itself as, the durable-root sync and its conflicts, the reference docs, the browser launcher, the clock, and DNS. Read-only; it changes nothing and repairs nothing.",
+        "Run the Computer's self-check and read the report: disk, the shared scratch, the desktop gateway, your display, the browser profile, renderer-watchdog actions, top memory consumers, the durable-root sync and its conflicts, the reference docs, the browser launcher, the clock, and DNS. Read-only; it changes nothing and repairs nothing.",
       inputSchema: {
         type: "object",
         properties: {},
@@ -1575,6 +1639,10 @@ export function createComputerAgentPlugin(
                 signal: context.signal,
                 effectId: context.effectId,
               });
+              if (action.type === "navigate") {
+                const origin = localPreviewOriginV1(action.url);
+                if (origin) previewOrigins.add(origin);
+              }
               await fileProgressCapture(computer, context.botId, context);
               return {
                 content: result.accessibilitySnapshot,
@@ -1605,6 +1673,7 @@ export function createComputerAgentPlugin(
       ctx.on("agent/pre-step", async (agent, _inputs, turn, _step, next) => {
         if (turn !== currentTurn) {
           projectionWrites.clear();
+          previewOrigins.clear();
           // Every Turn's first Computer action is worth a capture, however
           // soon after the previous Turn's last one it happens.
           progressCadence.reset();
@@ -1630,6 +1699,16 @@ export function createComputerAgentPlugin(
           return;
         }
         try {
+          if (computer.browser && previewOrigins.size > 0) {
+            const origins = [...previewOrigins];
+            await computer.browser.perform(
+              { type: "close-origins", origins },
+              {
+                effectId: `computer:${writer?.runId ?? agent.session.id}:${turn}:close-preview-tabs`,
+              },
+            );
+            previewOrigins.clear();
+          }
           if (writer && computer.workspace) {
             const root: WorkspaceRootV1 = {
               kind: "package-declared",
@@ -1681,7 +1760,7 @@ export function createComputerAgentPlugin(
             "Use computer_exec to inspect the filesystem before claiming that a path or file exists.",
             "Use computer_screenshot to see your own desktop; each capture is filed in your durable screenshots root.",
             "For a job that outlasts this Turn, use computer_exec with background:true and check it later with computer_process_check. Do not poll it in a loop.",
-            "Use computer_doctor when the Computer misbehaves; it reports disk, desktop, sync, and network in one read-only call.",
+            "Use computer_doctor when the Computer misbehaves; it reports disk, desktop, renderer-watchdog actions, top memory consumers, sync, and network in one read-only call.",
             ...(controlPrompt?.current() ? [controlPrompt.current()] : []),
             "Never invent a directory listing.",
           ].join("\n"),

@@ -96,6 +96,7 @@ import {
   updateLaunchScript,
   WATCHDOG_LOG,
   WATCHDOG_RENDERER_RSS_LIMIT_KIB,
+  WATCHDOG_SCRIPT,
   WORKSPACES_ROOT,
 } from "./runtime.ts";
 
@@ -878,6 +879,7 @@ describe("installed shell scripts", () => {
       ENSURE_AGENT_SCRIPT,
       CONTROL_SCRIPT,
       BOUNDED_LOG_SCRIPT,
+      WATCHDOG_SCRIPT,
       CHROME_LAUNCHER,
       DOCTOR_SCRIPT,
       `${RUNTIME_ROOT}/start-gateway.sh`,

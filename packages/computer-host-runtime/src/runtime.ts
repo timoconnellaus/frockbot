@@ -1118,6 +1118,35 @@ if (action.action === "focus") {
   await done({ focused: Boolean(focusPage), ...(anchor ? { targetId: anchor.targetId } : {}) });
 }
 
+// Lifecycle cleanup from the Computer Package. Origins come from a preview
+// process's own bounded log and the action is already scoped to this Bot, but
+// enforce the window boundary again here: a shared browser profile never
+// makes another Bot's tab ours to close. If the recorded anchor was one of the
+// closed pages, adopt a surviving tab in the same window; only create a blank
+// replacement when the window has no page left.
+if (action.action === "close-origins") {
+  const origins = new Set(action.origins);
+  const candidates = anchor ? await pagesInWindow(anchor.windowId) : [];
+  let closed = 0;
+  for (const candidate of candidates) {
+    let origin = "";
+    try {
+      origin = new URL(candidate.url()).origin;
+    } catch {}
+    if (!origins.has(origin)) continue;
+    await candidate.close();
+    closed += 1;
+  }
+  const remaining = anchor ? await pagesInWindow(anchor.windowId) : [];
+  if (remaining.length > 0) {
+    const targetId = await targetIdOf(remaining.at(-1));
+    writeFileSync(targetPath(botKey), \`\${targetId}\\n\`, { mode: 0o600 });
+  } else if (anchor) {
+    await ensureWindow(botKey);
+  }
+  await done({ closed, origins: [...origins], snapshot: "" });
+}
+
 const own = anchor ? await pagesInWindow(anchor.windowId) : [];
 const page =
   own.at(-1) ??

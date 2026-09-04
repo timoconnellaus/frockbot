@@ -22,10 +22,20 @@ function report(generation: number): string {
     generation,
     capturedAt: "2026-09-01T00:00:00Z",
     checks: [
+      {
+        name: "watchdog",
+        status: "pass",
+        detail: "recent actions: none",
+      },
+      {
+        name: "memory-top",
+        status: "pass",
+        detail: "123 2048 chromium",
+      },
       { name: "disk-root", status: "pass", detail: "12% full" },
       { name: "dns", status: "fail", detail: "no resolver" },
     ],
-    summary: "2 checks, 1 passed, 1 failed",
+    summary: "4 checks, 3 passed, 1 failed",
   })}\n`;
 }
 
@@ -52,8 +62,10 @@ describe("doctorForAgent", () => {
 
     const decoded = await bot.doctor(signal());
 
-    expect(decoded.summary).toBe("2 checks, 1 passed, 1 failed");
+    expect(decoded.summary).toBe("4 checks, 3 passed, 1 failed");
     expect(decoded.checks.map((check) => check.status)).toEqual([
+      "pass",
+      "pass",
       "pass",
       "fail",
     ]);

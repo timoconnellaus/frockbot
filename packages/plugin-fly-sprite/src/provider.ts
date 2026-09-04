@@ -109,6 +109,8 @@ function browserAction(action: ComputerBrowserAction): BrowserAction {
       return { action: "snapshot" };
     case "navigate":
       return { action: "navigate", url: action.url };
+    case "close-origins":
+      return { action: "close-origins", origins: action.origins };
     case "click":
       return {
         action: "click",
