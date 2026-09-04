@@ -63,7 +63,6 @@ import {
   ROUTINE_FAILURE_PAUSE_AFTER,
   ROUTINE_FIRE_TIMEOUT_MS,
   ROUTINE_LIMIT_PER_BOT,
-  ROUTINE_MISSED_GRACE_MS,
   ROUTINE_PREFIX,
   ROUTINE_QUEUE_LIMIT,
   ROUTINE_QUEUE_PREFIX,
@@ -71,6 +70,7 @@ import {
   routineKeyV1,
   routineQueueKeyV1,
   routineQueuePrefixV1,
+  routineRunPrefixV1,
   routineScheduleKeyV1,
 } from "./storage-keys.js";
 
@@ -603,7 +603,9 @@ export class RoutineScheduler {
     record: RoutineRecordV1,
     state: RoutineScheduleStateV1,
     now: Date,
-  ): Promise<ClaimedFiringV1> {
+    // `undefined` when the schedule has no occurrence left: the Routine turns
+    // itself off and there is nothing to fire.
+  ): Promise<ClaimedFiringV1 | undefined> {
     const normalized = normalizeRoutineScheduleV1(
       record.schedule!,
       record.timezone,
@@ -642,13 +644,38 @@ export class RoutineScheduler {
     // re-owe this occurrence.
     const from = missedCount > 1 ? now : new Date(state.dueAt);
     const next = nextRoutineRunV1(normalized, from, anchor);
+    if (next === undefined) {
+      // The schedule has no occurrence left — `0 0 30 2 *` is February the
+      // 30th, and a Routine written before this was refused at write time
+      // still holds one. Falling back to "five minutes from now" turned that
+      // into a real model Turn every five minutes for ever. It is turned off
+      // instead, with a run-log entry that says why, and the firing this claim
+      // was about is abandoned rather than run.
+      await transaction.put(routineKeyV1(record.routineId), {
+        ...record,
+        enabled: false,
+        updatedAt: now.toISOString(),
+      } satisfies RoutineRecordV1);
+      await transaction.delete(routineScheduleKeyV1(record.routineId));
+      await appendRoutineRunEntryV1(transaction, {
+        schemaVersion: 1,
+        entryId: `${routineFireIdV1(record.routineId, String(state.dueAt))}-unreachable`,
+        routineId: record.routineId,
+        runId: routineFireIdV1(record.routineId, String(state.dueAt)),
+        fireId: routineFireIdV1(record.routineId, String(state.dueAt)),
+        trigger: "cron",
+        status: "skipped",
+        startedAt: now.toISOString(),
+        finishedAt: now.toISOString(),
+        summary: `The schedule "${record.schedule}" never comes around again in ${record.timezone}, so this Routine has been turned off. Give it a schedule that does and turn it back on.`,
+      } satisfies RoutineRunEntryV1);
+      return undefined;
+    }
     await transaction.put(routineScheduleKeyV1(record.routineId), {
       schemaVersion: 1,
       routineId: record.routineId,
       anchor: record.updatedAt,
-      dueAt: (
-        next ?? new Date(now.getTime() + ROUTINE_MISSED_GRACE_MS)
-      ).getTime(),
+      dueAt: next.getTime(),
       ...(state.consecutiveFailures === undefined
         ? {}
         : { consecutiveFailures: state.consecutiveFailures }),
@@ -889,6 +916,23 @@ export class RoutineScheduler {
     const finishedAt = at.toISOString();
     await this.#storage.transaction(async (transaction) => {
       await transaction.delete(routineFireKeyV1(fire.routineId));
+      // The Routine may have been deleted while this firing was in flight.
+      // Delete sweeps the record, the clock, the lock and the whole run log,
+      // and the settlement then used to re-append a run entry under the swept
+      // key and write an inbox entry naming a Routine that no longer exists —
+      // an orphan the user cannot open, delete, or explain. Nothing outlives
+      // the record it belongs to.
+      if (
+        (await transaction.get<unknown>(routineKeyV1(fire.routineId))) ===
+        undefined
+      ) {
+        const orphans = await transaction.list<unknown>({
+          prefix: routineRunPrefixV1(fire.routineId),
+        });
+        for (const key of orphans.keys()) await transaction.delete(key);
+        await transaction.delete(routineScheduleKeyV1(fire.routineId));
+        return;
+      }
       await this.#recordOutcomeOnClock(transaction, fire, outcome, at);
       if (outcome.status !== "ok") {
         await this.#recordFailureInbox(transaction, fire, outcome, finishedAt);

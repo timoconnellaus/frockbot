@@ -7,11 +7,16 @@ import {
   routineHandoffTextV1,
   subagentAttributionV1,
 } from "./inbox.js";
-import { RoutineInboxStore, routineTerminalRecordsV1 } from "./inbox-store.js";
+import {
+  retainedPendingInputsV1,
+  RoutineInboxStore,
+  routineTerminalRecordsV1,
+} from "./inbox-store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
 import {
   ROUTINE_INBOX_LIMIT,
   ROUTINE_INBOX_PREFIX,
+  ROUTINE_PENDING_INPUT_LIMIT,
   ROUTINE_WAKE_PREFIX,
 } from "./storage-keys.js";
 
@@ -433,5 +438,101 @@ describe("a Turn the User's next message replaced", () => {
     expect(
       pendingBotInputPreambleV1([{ ...superseded, unfinishedWork: false }]),
     ).not.toContain("Subagents");
+  });
+});
+
+describe("the pending-input cap", () => {
+  /**
+   * The four input kinds are not interchangeable. A dropped `wake` still has
+   * an inbox entry the user can read; an `approval`, a `machine-result` or a
+   * `superseded-turn` writes no entry anywhere, so dropping one loses a
+   * decision the user made or a result a machine produced, silently.
+   */
+  test("keeps every non-wake input and spends the budget on the wakes", async () => {
+    const store = storage();
+    const inbox = new RoutineInboxStore(store);
+    for (let index = 0; index < ROUTINE_PENDING_INPUT_LIMIT + 4; index += 1) {
+      await settle(store, { runId: `rf-${index}`, handoff: `wake ${index}` });
+    }
+    await inbox.enqueue({
+      schemaVersion: 1,
+      kind: "approval",
+      approvalId: "ap-1",
+      decision: "approved",
+      createdAt: NOW,
+    });
+    await inbox.enqueue({
+      schemaVersion: 1,
+      kind: "superseded-turn",
+      runId: "run-9",
+      unfinishedWork: true,
+      createdAt: NOW,
+    });
+
+    const drained = await inbox.drainInto("chat-run-1");
+    expect(drained).toHaveLength(ROUTINE_PENDING_INPUT_LIMIT);
+    // The approval decision and the superseded Turn survive; a flat
+    // `slice(-16)` used to drop whichever of them sat behind enough wakes.
+    expect(drained.filter((input) => input.kind === "approval")).toHaveLength(
+      1,
+    );
+    expect(
+      drained.filter((input) => input.kind === "superseded-turn"),
+    ).toHaveLength(1);
+    expect(drained.filter((input) => input.kind === "wake")).toHaveLength(
+      ROUTINE_PENDING_INPUT_LIMIT - 2,
+    );
+  });
+
+  test("keeps every durable input even when they alone exceed the bound", () => {
+    const approvals = Array.from(
+      { length: ROUTINE_PENDING_INPUT_LIMIT + 3 },
+      (_unused, index) =>
+        ({
+          schemaVersion: 1,
+          kind: "approval",
+          approvalId: `ap-${index}`,
+          decision: "approved",
+          createdAt: NOW,
+        }) as const,
+    );
+    // Over the bound is a problem worth having; losing an approval decision
+    // with nothing anywhere recording it is not.
+    expect(retainedPendingInputsV1(approvals)).toHaveLength(approvals.length);
+  });
+});
+
+describe("inbox retention", () => {
+  test("gives up read entries before unread ones", async () => {
+    const store = storage();
+    const inbox = new RoutineInboxStore(store);
+    for (let index = 0; index < ROUTINE_INBOX_LIMIT; index += 1) {
+      await settle(store, {
+        runId: `rf-${String(index).padStart(4, "0")}`,
+        responseText: `run ${index}`,
+      });
+    }
+    // The reader has caught up on everything so far.
+    await inbox.acknowledge([]);
+    // Five more land while they are away.
+    for (let index = 0; index < 5; index += 1) {
+      await settle(store, {
+        runId: `rf-new-${index}`,
+        responseText: `fresh ${index}`,
+      });
+    }
+
+    const entries = await inbox.list();
+    expect(entries).toHaveLength(ROUTINE_INBOX_LIMIT);
+    // Trimming purely by age used to drop whatever was oldest regardless of
+    // whether it had ever been read. Nothing unread is gone here.
+    const unread = entries.filter((entry) => !entry.acknowledged);
+    expect(unread.map((entry) => entry.text)).toEqual([
+      "fresh 4",
+      "fresh 3",
+      "fresh 2",
+      "fresh 1",
+      "fresh 0",
+    ]);
   });
 });

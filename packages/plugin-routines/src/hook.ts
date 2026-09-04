@@ -70,9 +70,18 @@ export interface RoutineDeliveryReceiptV1 {
 export class RoutineHookError extends Error {
   override readonly name = "RoutineHookError";
   readonly status: number;
-  constructor(status: number, message: string) {
+  /**
+   * What an anonymous caller is told. It is deliberately separate from
+   * `message`: the delivery route answers the open internet, and a refusal
+   * used to hand back the raw reason — including the name of the deployment's
+   * signing-secret variable and whether it was missing or merely short. The
+   * detail stays in `message` for the log; this is the wire body.
+   */
+  readonly publicMessage: string;
+  constructor(status: number, message: string, publicMessage?: string) {
     super(message);
     this.status = status;
+    this.publicMessage = publicMessage ?? message;
   }
 }
 
@@ -124,8 +133,10 @@ export function constantTimeEqualsV1(left: string, right: string): boolean {
 async function signingKey(secret: string): Promise<CryptoKey> {
   if (typeof secret !== "string" || secret.length < 16) {
     throw new RoutineHookError(
-      500,
+      503,
       "ROUTINE_HOOK_SECRET is missing or too short for webhook delivery",
+      // The caller learns the door is shut, not how it is built.
+      "webhook delivery is not configured",
     );
   }
   return crypto.subtle.importKey(
@@ -282,30 +293,39 @@ export function decodeRoutineHookKeyV1(value: unknown): RoutineHookKeyV1 {
 }
 
 /**
- * The delivery id one request is remembered by: the caller's `Idempotency-Key`
- * when it sent one, and otherwise the content itself. Either way the same
- * delivery twice is one firing.
+ * The delivery id one request is remembered by.
+ *
+ * Idempotency is the caller's claim to make, and only the caller can make it:
+ * an `Idempotency-Key` says "this is the same delivery I already sent", and
+ * two deliveries under one key are one firing. Without a key the id is unique
+ * per request, so two deliveries are two firings.
+ *
+ * It used to hash the body when no key was sent. That reads as a safety net
+ * and is really a silent decision about someone else's data: a provider
+ * POSTing `{"ping":true}` twice — two real events, identical payloads — got
+ * one firing and a `duplicate` receipt for the second, with nothing anywhere
+ * saying an event had been dropped. Coalescing without being asked to is worse
+ * than firing twice, because the caller can see a double firing and cannot see
+ * a swallowed one.
  */
 export async function routineDeliveryIdV1(
   routineId: string,
   body: string,
   idempotencyKey?: string | null,
 ): Promise<string> {
-  if (idempotencyKey) {
-    const trimmed = idempotencyKey.trim().slice(0, 256);
-    if (trimmed.length > 0) {
-      return hex(
-        await crypto.subtle.digest(
-          "SHA-256",
-          TEXT.encode(`key ${routineId} ${trimmed}`),
-        ),
-      );
-    }
+  const trimmed = idempotencyKey?.trim().slice(0, 256) ?? "";
+  if (trimmed.length > 0) {
+    return hex(
+      await crypto.subtle.digest(
+        "SHA-256",
+        TEXT.encode(`key ${routineId} ${trimmed}`),
+      ),
+    );
   }
   return hex(
     await crypto.subtle.digest(
       "SHA-256",
-      TEXT.encode(`body ${routineId} ${body}`),
+      TEXT.encode(`delivery ${routineId} ${crypto.randomUUID()}`),
     ),
   );
 }

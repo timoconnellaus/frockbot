@@ -526,6 +526,7 @@ describe("the webhook door against a real Bot Durable Object", () => {
     identity: { userId: string; botId: string },
     token: string,
     body: string,
+    idempotencyKey?: string,
   ) {
     const claims = await verifyRoutineHookTokenV1(
       env.ROUTINE_HOOK_SECRET,
@@ -547,7 +548,7 @@ describe("the webhook door against a real Bot Durable Object", () => {
         routineId: claims.r,
         keyVersion: claims.v,
         digest: await routineHookDigestV1(token),
-        deliveryId: await routineDeliveryIdV1(claims.r, body),
+        deliveryId: await routineDeliveryIdV1(claims.r, body, idempotencyKey),
         body,
         contentType: "application/json",
       },
@@ -591,12 +592,16 @@ describe("the webhook door against a real Bot Durable Object", () => {
     expect(await fireRecords(identity)).toEqual([]);
   });
 
-  test("a good key makes one firing, and the same delivery twice still makes one", async () => {
+  test("a good key makes one firing, and a replay the caller named still makes one", async () => {
     const { identity, token } = await webhookBot("goodkey");
 
-    const first = await deliver(identity, token, '{"event":"push"}');
+    // A replay is a delivery the caller itself said was the same one, by
+    // sending the same `Idempotency-Key` twice. Two identical bodies with no
+    // key are two events, and coalescing them used to swallow the second with
+    // nothing anywhere recording that it had happened.
+    const first = await deliver(identity, token, '{"event":"push"}', "evt-1");
     expect(first.status).toBe("accepted");
-    const replay = await deliver(identity, token, '{"event":"push"}');
+    const replay = await deliver(identity, token, '{"event":"push"}', "evt-1");
     expect(replay).toEqual({ status: "duplicate", fireId: first.fireId });
     expect(await fireRecords(identity)).toHaveLength(1);
 
@@ -614,5 +619,19 @@ describe("the webhook door against a real Bot Durable Object", () => {
       },
     });
     expect(runs[0]!.runId).toBe(first.fireId);
+  });
+
+  test("two deliveries with identical bodies and no key are two firings", async () => {
+    const { identity, token } = await webhookBot("distinct");
+
+    // A provider that POSTs `{"event":"push"}` twice sent two events. Nothing
+    // has claimed they are the same delivery, so nothing here may decide that
+    // for it: a swallowed event is invisible, while a double firing is not.
+    const first = await deliver(identity, token, '{"event":"push"}');
+    const second = await deliver(identity, token, '{"event":"push"}');
+    expect(first.status).toBe("accepted");
+    expect(second.status).toBe("accepted");
+    expect(second.fireId).not.toBe(first.fireId);
+    expect(await fireRecords(identity)).toHaveLength(2);
   });
 });

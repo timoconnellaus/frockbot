@@ -54,11 +54,19 @@ describe("RoutineStore.execute", () => {
     expect(listed.routines).toHaveLength(1);
   });
 
-  test("records a Bot writer as the Bot, and the view names no Session", async () => {
+  test("records a Bot writer as the Bot, naming the Turn that wrote it", async () => {
     const routines = store();
     const receipt = await routines.execute(create(), BOT);
     if (receipt.status !== "applied") throw new Error("unreachable");
-    expect(receipt.routine.createdBy).toEqual({ kind: "bot", botId: "scout" });
+    // Provenance that cannot answer "which Turn?" is not provenance: the view
+    // used to carry the Bot id alone, so a Routine a Bot wrote could not be
+    // traced back to the Turn that wrote it.
+    expect(receipt.routine.createdBy).toEqual({
+      kind: "bot",
+      botId: "scout",
+      sessionId: "tim:scout",
+      turnId: "turn-7",
+    });
     const stored = await routines.read("brief");
     expect(stored?.createdBy).toEqual(BOT);
   });
@@ -257,5 +265,45 @@ describe("RoutineStore run log", () => {
     const log = await routines.listRuns("scout", "brief");
     expect(log.entries).toHaveLength(1);
     expect(log.entries[0]).toMatchObject({ status: "failed" });
+  });
+});
+
+describe("a schedule that never comes around", () => {
+  /**
+   * `0 0 30 2 *` is February the 30th: croner parses it happily and then never
+   * names a next run. It used to be stored, and the scheduler's clock then fell
+   * back to "five minutes from now" on every claim, so the Routine burned a
+   * whole model Turn every five minutes for ever. A schedule with no future
+   * occurrence is not a schedule.
+   */
+  test("is refused at write time, and nothing is stored", async () => {
+    const routines = store();
+    await expect(
+      routines.execute(create({ schedule: "0 0 30 2 *" }), USER),
+    ).rejects.toThrow(/never comes around again/u);
+    await expect(
+      routines.execute(
+        create({ commandId: "cmd-2", schedule: "0 0 31 4 *" }),
+        USER,
+      ),
+    ).rejects.toThrow(/never comes around again/u);
+    expect((await routines.list("scout")).routines).toHaveLength(0);
+  });
+
+  test("names the expression and the zone, so the field can be corrected", async () => {
+    const routines = store();
+    const refusal = await routines
+      .execute(create({ schedule: "0 0 30 2 *" }), USER)
+      .catch((error: unknown) => error);
+    expect((refusal as Error).message).toContain("0 0 30 2 *");
+    expect((refusal as Error).message).toContain("Australia/Sydney");
+  });
+
+  test("an ordinary rare schedule is still accepted", async () => {
+    const routines = store();
+    // February the 29th happens; it is simply not every year.
+    await expect(
+      routines.execute(create({ schedule: "0 0 29 2 *" }), USER),
+    ).resolves.toMatchObject({ status: "applied" });
   });
 });
