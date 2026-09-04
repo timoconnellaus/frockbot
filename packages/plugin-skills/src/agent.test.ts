@@ -131,6 +131,48 @@ describe("the skill_load tool", () => {
     expect(refused.content).not.toContain("Forbidden body.");
     await dispose();
   });
+
+  test("accepts the ref field the prompt used to ask for", async () => {
+    // The prompt said "call skill_load with a ref"; the schema named the field
+    // `path`. `{"ref": ...}` failed `validate` and came back as the loop's
+    // generic `Invalid input for tool: skill_load`, naming nothing.
+    const workspace = await FakeWorkspace.seeded([
+      {
+        root: OWN_ROOT,
+        path: "skills/kept/SKILL.md",
+        text: skillMarkdown("kept", "Use this when keeping.", "Recipe body."),
+        writer: BOT_WRITER,
+      },
+    ]);
+    const { session, dispose } = await openSession();
+    const catalog = new SkillCatalog(OWNER, workspace);
+    await catalog.refresh(4, session);
+    const tool = createSkillLoadTool(catalog);
+
+    const loaded = await tool.execute(
+      { ref: "skills/kept/SKILL.md" },
+      CONTEXT,
+    );
+    expect(loaded.isError).toBe(false);
+    expect(loaded.content).toContain("Recipe body.");
+    await dispose();
+  });
+
+  test("says what a wrong input should have been, instead of refusing blankly", async () => {
+    const { session, dispose } = await openSession();
+    const catalog = new SkillCatalog(OWNER, new FakeWorkspace());
+    await catalog.refresh(4, session);
+    const tool = createSkillLoadTool(catalog);
+
+    // A shape the model can produce reaches `execute` and is explained there;
+    // `validate` no longer swallows it into a nameless refusal.
+    expect(tool.validate?.({ ref: "managed/applets" })).toBe(true);
+    const refused = await tool.execute({ skill: "managed/applets" }, CONTEXT);
+    expect(refused.isError).toBe(true);
+    expect(refused.content).toContain('"path"');
+    expect(refused.content).toContain('{"path":"managed/add-connector"}');
+    await dispose();
+  });
 });
 
 describe("the skill_write tool", () => {

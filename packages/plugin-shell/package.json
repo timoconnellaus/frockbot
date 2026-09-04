@@ -30,6 +30,7 @@
     "./frockbot.json": "./frockbot.json",
     "./host": "./src/host.ts",
     "./manifest": "./src/manifest.ts",
+    "./notification-id": "./src/notification-id.ts",
     "./package.json": "./package.json",
     "./run-cursor": "./src/run-cursor.ts",
     "./run-protocol": "./src/run-protocol.ts",

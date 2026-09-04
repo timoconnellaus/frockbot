@@ -273,7 +273,7 @@ const SKILL_LOAD_INPUT_SCHEMA = {
     path: {
       type: "string",
       description:
-        "The Skill's ref exactly as listed in <agent_skills> — bot/daily-standup, managed/add-connector, or plugin/<packageId>/<slug>. The path listed beside it is also accepted.",
+        "The Skill's ref exactly as listed in <agent_skills> — bot/daily-standup, managed/add-connector, or plugin/<packageId>/<slug>. The path listed beside it is also accepted. This field is named \"path\" whichever of the two you send.",
     },
   },
   required: ["path"],
@@ -424,6 +424,28 @@ function decodeSkillWriteInputV1(input: unknown): SkillWriteInputV1 {
   return decoded;
 }
 
+/**
+ * What `skill_load` was actually asked for, from either field name.
+ *
+ * The prompt said "call `skill_load` with a ref" while the schema named the
+ * field `path`, so the model reached for `ref` and got the loop's generic
+ * `Invalid input for tool: skill_load` — no field named, no shape offered. The
+ * prompt now names `path`, and `ref` is accepted as an alias so the older
+ * phrasing (and the model's own instinct) still lands.
+ */
+export function skillLoadNameV1(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const record = input as { path?: unknown; ref?: unknown };
+  const named = typeof record.path === "string" ? record.path : record.ref;
+  if (typeof named !== "string") return undefined;
+  const trimmed = named.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
+/** Why a `skill_load` input could not be used, and what to send instead. */
+export const SKILL_LOAD_INPUT_REFUSAL =
+  'skill_load input is invalid: "path" must be a non-empty string naming a Skill from <agent_skills> — its ref (bot/daily-standup, managed/add-connector, plugin/<packageId>/<slug>) or the path listed beside it. Expected {"path":"managed/add-connector"}.';
+
 export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
   return {
     name: "skill_load",
@@ -432,15 +454,22 @@ export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
     // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
     admission: { subagentRoles: ["executor"] },
     description:
-      "Read one of your Skills in full. Pass the path listed in <agent_skills>. Only Skills listed there can be loaded.",
+      "Read one of your Skills in full. Pass the ref or the path listed in <agent_skills> as \"path\". Only Skills listed there can be loaded.",
     inputSchema: SKILL_LOAD_INPUT_SCHEMA as unknown as Record<string, unknown>,
     idempotent: true,
-    validate: (input: unknown) =>
-      !!input &&
-      typeof input === "object" &&
-      typeof (input as { path?: unknown }).path === "string",
+    // Deliberately permissive: a wrong shape reaches `execute`, which says
+    // what was wrong. A bare `false` here becomes the generic
+    // `Invalid input for tool: skill_load`, which cost a step every time the
+    // model reached for the field name the prompt used.
+    validate: (input: unknown) => !!input && typeof input === "object",
     execute: (input: unknown) => {
-      const named = String((input as { path: string }).path).trim();
+      const named = skillLoadNameV1(input);
+      if (named === undefined) {
+        return Promise.resolve({
+          content: SKILL_LOAD_INPUT_REFUSAL,
+          isError: true,
+        });
+      }
       const loaded = catalog.current().skills;
       // A ref first, then the path. Both are printed in `<agent_skills>`, and
       // a ref is the only form that names a managed or plugin Skill, since

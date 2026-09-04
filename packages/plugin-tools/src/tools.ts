@@ -552,6 +552,30 @@ export class ToolRegistry extends Service implements ToolExecution {
     return { kind: "denied", call, result: { content, isError: true } };
   }
 
+  /**
+   * Why a name is not callable — and, when it *is* callable through the
+   * envelope, how.
+   *
+   * A dynamic tool is listed to the model by bare name in
+   * `<dynamic_tool_namespaces>`, so the model reaches for it by that name and
+   * used to get `Unknown tool: applet_list` and nothing else: a dead end for a
+   * tool that was right there, costing a step every time. The refusal now
+   * hands back the exact envelope for the namespace the name is actually in.
+   */
+  private unknownToolRefusal(name: string): string {
+    const namespaces = [...this.dynamicDefinitions]
+      .filter(([, definitions]) => definitions.has(name))
+      .map(([namespace]) => namespace)
+      .sort();
+    const first = namespaces[0];
+    if (first === undefined) return `Unknown tool: ${name}`;
+    const where =
+      namespaces.length === 1
+        ? `namespace "${first}"`
+        : `namespaces ${listOrNone(namespaces)} — pick one`;
+    return `Unknown tool: ${name}. It is a dynamic tool in ${where}; call it through ${CALL_DYNAMIC_TOOL_NAME} as {"namespace":"${first}","toolName":"${name}","arguments":{ … the tool's own input … }}. Call ${GET_DYNAMIC_TOOLS_NAME}({"namespace":"${first}","toolName":"${name}"}) first if you do not have its schema.`;
+  }
+
   private async prepareRegistered(
     call: ToolCall,
     registered: RegisteredTool | undefined,
@@ -566,7 +590,10 @@ export class ToolRegistry extends Service implements ToolExecution {
           return {
             kind: "denied",
             call,
-            result: { content: `Unknown tool: ${call.name}`, isError: true },
+            result: {
+              content: this.unknownToolRefusal(call.name),
+              isError: true,
+            },
           };
         }
         // Defence in depth: the catalog was already trimmed, so a call that
