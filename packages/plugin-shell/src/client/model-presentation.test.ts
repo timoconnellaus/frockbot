@@ -35,6 +35,20 @@ describe("model runtime presentation", () => {
     );
   });
 
+  test("names the stand-in model when the chosen one is unavailable", () => {
+    // The Bot is answering, so the line is not a failure — it names the model
+    // actually in use and says the User's own choice is not it.
+    expect(
+      modelRuntimeLabel({
+        source: "platform",
+        modelDisplayName: "Auto",
+        providerModelId: "@flock/auto",
+        packageDisplayName: "Flock AI",
+        fallback: true,
+      }),
+    ).toBe("Auto · Flock AI · your chosen model is unavailable");
+  });
+
   test("shows unavailable and backend failure states", () => {
     expect(modelRuntimeLabel({ source: "none" })).toBe(
       "No model available — set one up in Models",

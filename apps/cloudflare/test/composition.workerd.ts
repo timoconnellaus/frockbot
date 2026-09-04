@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
+import { notificationIdV1 } from "@frockbot/plugin-shell/notification-id";
 
 function probe(name: string) {
   return env.COMPOSITIONS.getByName(name);
@@ -145,7 +146,7 @@ describe("Composition fails closed in Workerd", () => {
     const failures = await stub.compositionFailures(broken);
     expect(failures).toMatchObject([{ attempt: 1, phase: "mount" }]);
     expect(await stub.visibleFailures()).toMatchObject([
-      { notificationId: `composition-failure:${broken}:1` },
+      { notificationId: notificationIdV1("composition-failure", broken, 1) },
     ]);
 
     await evictDurableObject(stub);

@@ -590,3 +590,45 @@ describe("progressive tool disclosure", () => {
     );
   });
 });
+
+describe("a dynamic tool called by its bare name", () => {
+  test("is answered with the envelope, not a dead-end Unknown tool", async () => {
+    // `applet_list` is listed to the model by bare name in
+    // `<dynamic_tool_namespaces>`, so the model reaches for it that way. The
+    // refusal used to be `Unknown tool: applet_list` and nothing else — a dead
+    // end for a tool that was right there.
+    const root = await rootWithTools();
+    root.tools.register(dynamicTool("applets", "applet_list"));
+
+    const result = await invoke(root, "applet_list", {});
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("applet_list");
+    expect(result.content).toContain(CALL_DYNAMIC_TOOL_NAME);
+    expect(result.content).toContain(
+      '{"namespace":"applets","toolName":"applet_list"',
+    );
+    expect(result.content).toContain(GET_DYNAMIC_TOOLS_NAME);
+  });
+
+  test("names every namespace the bare name is in", async () => {
+    const root = await rootWithTools();
+    root.tools.register(dynamicTool("mail-one", "search"));
+    root.tools.register(dynamicTool("mail-two", "search"));
+
+    const result = await invoke(root, "search", {});
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("mail-one");
+    expect(result.content).toContain("mail-two");
+  });
+
+  test("a name in no namespace still says only that it is unknown", async () => {
+    const root = await rootWithTools();
+    root.tools.register(dynamicTool("applets", "applet_list"));
+
+    const result = await invoke(root, "not_a_tool", {});
+
+    expect(result.content).toBe("Unknown tool: not_a_tool");
+  });
+});

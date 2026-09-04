@@ -128,6 +128,40 @@ describe("the audit table", () => {
     expect(third.nextCursor).toBeUndefined();
   });
 
+  test("rows written between two pages do not repeat or hide a row", () => {
+    const table = store();
+    table.insert([
+      entry({ occurrenceId: "tool:1:1:0", at: "2026-08-31T00:00:01.000Z" }),
+      entry({ occurrenceId: "tool:1:1:1", at: "2026-08-31T00:00:02.000Z" }),
+      entry({ occurrenceId: "tool:1:1:2", at: "2026-08-31T00:00:03.000Z" }),
+    ]);
+
+    const first = table.query({ limit: 2 });
+    expect(first.entries.map((row) => row.occurrenceId)).toEqual([
+      "tool:1:1:2",
+      "tool:1:1:1",
+    ]);
+
+    // The Bot keeps working while the reader reads. Under an offset cursor
+    // these two new rows shifted the window down by two, so "Load more"
+    // returned `tool:1:1:2` and `tool:1:1:1` a second time — duplicate rows on
+    // screen and duplicate Vue keys — and `tool:1:1:0` was never reachable.
+    table.insert([
+      entry({ occurrenceId: "tool:1:1:3", at: "2026-08-31T00:00:04.000Z" }),
+      entry({ occurrenceId: "tool:1:1:4", at: "2026-08-31T00:00:05.000Z" }),
+    ]);
+
+    const second = table.query({ limit: 2, before: first.nextCursor! });
+    expect(second.entries.map((row) => row.occurrenceId)).toEqual([
+      "tool:1:1:0",
+    ]);
+    expect(second.nextCursor).toBeUndefined();
+    const shown = [...first.entries, ...second.entries].map(
+      (row) => row.occurrenceId,
+    );
+    expect(new Set(shown).size).toBe(shown.length);
+  });
+
   test("a rebuild empties the table and reproduces the identical set", async () => {
     const table = store({ maxRows: 2 });
     const entries = [

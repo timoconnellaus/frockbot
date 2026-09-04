@@ -1249,6 +1249,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       packageDisplayName: catalogPackage?.displayName,
       connectionDisplayName: connection?.displayName,
       failure: effective.binding?.failure,
+      fallback: Boolean(effective.fallback),
     });
   }
 

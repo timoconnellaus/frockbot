@@ -132,7 +132,12 @@ describe("a webhook delivery through the gateway's public route", () => {
   it("accepts a good key, replays to the same firing, and runs once", async () => {
     const { userId, botId, token } = await webhookRoutine("hook-ok");
 
-    const accepted = await deliverHook(botId, token, '{"event":"push"}');
+    // A replay is the delivery the caller itself named as one, by sending the
+    // same `Idempotency-Key` twice. Nothing else can make that claim on its
+    // behalf: two identical bodies with no key are two events, and the door
+    // used to coalesce them and answer the second `duplicate`.
+    const key = { "idempotency-key": "evt-1" };
+    const accepted = await deliverHook(botId, token, '{"event":"push"}', key);
     expect(accepted.status).toBe(202);
     const receipt = (await expectJson(accepted)) as {
       status: string;
@@ -140,7 +145,7 @@ describe("a webhook delivery through the gateway's public route", () => {
     };
     expect(receipt.status).toBe("accepted");
 
-    const replayed = await deliverHook(botId, token, '{"event":"push"}');
+    const replayed = await deliverHook(botId, token, '{"event":"push"}', key);
     expect(replayed.status).toBe(202);
     expect(await expectJson(replayed)).toMatchObject({
       status: "duplicate",
@@ -161,13 +166,45 @@ describe("a webhook delivery through the gateway's public route", () => {
       { timeout: 5_000, interval: 50 },
     );
 
-    // A third delivery, after the firing has settled, is still the same one.
-    const late = await deliverHook(botId, token, '{"event":"push"}');
+    // A third delivery under the same key, after the firing has settled, is
+    // still the same one: the receipt outlives the run it made.
+    const late = await deliverHook(botId, token, '{"event":"push"}', key);
     expect(await expectJson(late)).toMatchObject({
       status: "duplicate",
       fireId: receipt.fireId,
     });
     expect(await automationRuns(userId, botId)).toHaveLength(1);
+  });
+
+  it("treats two unkeyed deliveries of one body as two events", async () => {
+    const { userId, botId, token } = await webhookRoutine("hook-distinct");
+
+    // A provider POSTing `{"event":"push"}` twice sent two events. Without an
+    // `Idempotency-Key` nothing has claimed they are the same delivery, and
+    // the door used to answer the second `duplicate` and never fire it — an
+    // event swallowed with no trace anywhere, which is strictly worse than a
+    // double firing the caller can see.
+    const first = (await expectJson(
+      await deliverHook(botId, token, '{"event":"push"}'),
+    )) as { status: string; fireId: string };
+    const second = (await expectJson(
+      await deliverHook(botId, token, '{"event":"push"}'),
+    )) as { status: string; fireId: string };
+    expect(first.status).toBe("accepted");
+    expect(second.status).toBe("accepted");
+    expect(second.fireId).not.toBe(first.fireId);
+
+    await vi.waitFor(
+      async () => {
+        await runDurableObjectAlarm(botStub(userId, botId));
+        const runs = await automationRuns(userId, botId);
+        expect(runs).toHaveLength(2);
+        expect(runs.map((run) => run.runId).sort()).toEqual(
+          [first.fireId, second.fireId].sort(),
+        );
+      },
+      { timeout: 10_000, interval: 50 },
+    );
   });
 
   it("answers a paused Routine with 409 rather than swallowing the delivery", async () => {

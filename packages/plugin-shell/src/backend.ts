@@ -415,6 +415,12 @@ import {
   type ClientRunV1,
   type ClientTurnV1,
 } from "./run-protocol.js";
+import { notificationIdV1 } from "./notification-id.js";
+import {
+  type CompositionManifestSourcesV1,
+  compositionMemberManifestDocumentV1,
+  compositionMemberManifestV1,
+} from "./composition-manifest.js";
 import {
   BOT_DEBUG_DEFAULT_RUN_LIMIT_V1,
   BOT_DEBUG_EVENT_BYTES_V1,
@@ -1233,15 +1239,44 @@ export class ShellBotBackendContribution {
     return { schemaVersion: 1, skills: entries };
   }
 
-  /** The one durable manifest lookup used by mounts, commands, and UI views. */
-  private async readCompositionMemberManifest(
+  /**
+   * The one durable manifest lookup used by mounts, commands, and UI views —
+   * as the **stored document**, byte-for-byte what `manifestHash` was taken
+   * over at authoring time.
+   *
+   * Decoding rebuilds the object (`decodeV5` always writes a `configuration`
+   * key, for one), so a decoded manifest does not canonicalize back to the
+   * recorded hash. Every mount re-verifies that hash
+   * (`botIsolatePackageDescriptorV1`), so the raw document is the only thing
+   * that can be handed to it; callers that want the typed shape decode it
+   * themselves through `readCompositionMemberManifest`.
+   */
+  private compositionManifestSources(): CompositionManifestSourcesV1 {
+    return {
+      stored: (manifestHash) =>
+        this.ctx.storage.get<AuthoredManifestRecordV1>(
+          authorshipManifestKey(manifestHash),
+        ),
+      application: (member) => this.readApplicationMemberManifest(member),
+    };
+  }
+
+  private readCompositionMemberManifestDocument(
+    member: CompositionMemberV1,
+  ): Promise<unknown | undefined> {
+    return compositionMemberManifestDocumentV1(
+      member,
+      this.compositionManifestSources(),
+    );
+  }
+
+  private readCompositionMemberManifest(
     member: CompositionMemberV1,
   ): Promise<FrockBotManifest | undefined> {
-    const stored = await this.ctx.storage.get<AuthoredManifestRecordV1>(
-      authorshipManifestKey(member.manifestHash),
+    return compositionMemberManifestV1(
+      member,
+      this.compositionManifestSources(),
     );
-    if (stored) return decodeFrockBotManifest(stored.manifest);
-    return await this.readApplicationMemberManifest(member);
   }
 
   /**
@@ -1268,6 +1303,19 @@ export class ShellBotBackendContribution {
     const hash = await sha256(canonicalJson(declared.manifest));
     if (hash !== member.manifestHash) return undefined;
     return declared.manifest;
+  }
+
+  /** The stored manifest document a mount hashes, or a modelled failure. */
+  private async requireCompositionMemberManifestDocument(
+    member: CompositionMemberV1,
+  ): Promise<unknown> {
+    const document = await this.readCompositionMemberManifestDocument(member);
+    if (document === undefined) {
+      throw new Error(
+        `package "${member.packageId}" manifest "${member.manifestHash}" is unavailable`,
+      );
+    }
+    return document;
   }
 
   private async requireCompositionMemberManifest(
@@ -1832,7 +1880,11 @@ export class ShellBotBackendContribution {
     fallback: CompositionGenerationV1,
   ): Promise<void> {
     await this.authority.recordNotification({
-      notificationId: `composition-failure:${failure.generationId}:${failure.attempt}`,
+      notificationId: notificationIdV1(
+        "composition-failure",
+        failure.generationId,
+        failure.attempt,
+      ),
       runId,
       createdAt: failure.at,
       title: `${settings.profile.name} kept its last working Packages`,
@@ -1883,7 +1935,8 @@ export class ShellBotBackendContribution {
         artifacts,
         this.bundledPackageArtifacts,
       ),
-      manifestFor: (member) => this.requireCompositionMemberManifest(member),
+      manifestFor: (member) =>
+        this.requireCompositionMemberManifestDocument(member),
       capabilitiesFor: (member) =>
         mintCapabilities({
           props: {
@@ -2692,7 +2745,12 @@ export class ShellBotBackendContribution {
     );
     if (!connection?.generation) {
       await this.authority.recordNotification({
-        notificationId: `package-connection-unavailable:${input.runId}:${input.packageId}:${input.request}`,
+        notificationId: notificationIdV1(
+          "package-connection-unavailable",
+          input.runId,
+          input.packageId,
+          input.request,
+        ),
         runId: input.runId,
         createdAt: new Date().toISOString(),
         title: "Connection unavailable",
@@ -2720,7 +2778,11 @@ export class ShellBotBackendContribution {
     }
     const request = decodeIsolateNotificationRequestV1(input.request);
     await this.authority.recordNotification({
-      notificationId: `package:${input.packageId}:${request.notificationId}`,
+      notificationId: notificationIdV1(
+        "package",
+        input.packageId,
+        request.notificationId,
+      ),
       runId: input.runId,
       createdAt: new Date().toISOString(),
       title: request.title,
@@ -3107,7 +3169,7 @@ export class ShellBotBackendContribution {
     await this.authority.recordNotification({
       // The same id shape the completion path uses, so one firing is one
       // intent however many times the alarm retries it.
-      notificationId: `routine-failed:${fire.fireId}`,
+      notificationId: notificationIdV1("routine-failed", fire.fireId),
       runId: fire.fireId,
       createdAt: new Date().toISOString(),
       title: `${settings.profile.name} could not run a Routine`,
@@ -3660,7 +3722,7 @@ export class ShellBotBackendContribution {
     }
     if (!settings.notifications.enabled) return;
     await this.authority.recordNotification({
-      notificationId: `task-settled:${task.taskId}`,
+      notificationId: notificationIdV1("task-settled", task.taskId),
       runId: task.taskId,
       createdAt: at,
       title: `${settings.profile.name} finished a subagent task`,
@@ -5464,7 +5526,7 @@ export class ShellBotBackendContribution {
       // `automation_completion_inbox` row".
       if (handoff === undefined) return undefined;
       return {
-        notificationId: `routine-wake:${result.runId}`,
+        notificationId: notificationIdV1("routine-wake", result.runId),
         runId: result.runId,
         createdAt: new Date().toISOString(),
         title: `${settings.profile.name} finished a Routine`,

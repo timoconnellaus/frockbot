@@ -11,6 +11,11 @@ export function modelRuntimeLabel(input: {
   packageDisplayName?: string;
   connectionDisplayName?: string;
   failure?: string;
+  /**
+   * The chosen model could not bind — its provider Package is off, or its
+   * Connection is gone — and the platform default is answering in its place.
+   */
+  fallback?: boolean;
 }): string {
   if (input.failure) return input.failure;
   if (input.source === "none" || !input.providerModelId) {
@@ -22,5 +27,6 @@ export function modelRuntimeLabel(input: {
   const runtime = provider ? `${model} · ${provider}` : model;
   if (input.source === "bot") return `${runtime} · this Bot only`;
   if (input.source === "account") return `${runtime} · Account model`;
+  if (input.fallback) return `${runtime} · your chosen model is unavailable`;
   return runtime;
 }

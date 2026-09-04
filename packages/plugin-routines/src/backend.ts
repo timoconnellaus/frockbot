@@ -164,10 +164,11 @@ function errorResponse(error: unknown): Response {
       error instanceof Error ? error.message : "Routine request is invalid",
     );
   }
-  return jsonError(
-    500,
-    error instanceof Error ? error.message : "Routine request failed",
-  );
+  // A decode refusal above is the User's own request coming back at them and
+  // says what to fix. Anything reaching here is ours: it names internals the
+  // caller cannot act on, so it goes to the log and the caller gets the fact.
+  console.error("Routine request failed", error);
+  return jsonError(500, "Routine request failed");
 }
 
 /**
@@ -242,13 +243,17 @@ async function deliverHook(
       error.name === "RoutineHookError"
     ) {
       const hookError = error as RoutineHookError;
-      return jsonError(hookError.status, hookError.message);
+      // The wire body, not the reason. A refusal on this route answers the
+      // open internet, and the raw message names deployment internals — which
+      // environment variable is unset, which decoder rejected what.
+      return jsonError(
+        hookError.status,
+        hookError.publicMessage ?? "webhook delivery failed",
+      );
     }
     if (isMissingBot(error)) return jsonError(404, "Routine not found");
-    return jsonError(
-      500,
-      error instanceof Error ? error.message : "webhook delivery failed",
-    );
+    console.error("routine webhook delivery failed", error);
+    return jsonError(500, "webhook delivery failed");
   }
 }
 
