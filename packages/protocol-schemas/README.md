@@ -2,7 +2,7 @@
 
 `schema/client-wire.schema.json` is the **one language-neutral source** for the native client contract. It is a JSON Schema 2020-12 bundle: select a named `$defs` entry, rather than validating against the permissive bundle root. `x-frockbot-compatibility` is a policy annotation, from which both languages' constants are generated. No DTO, schema, header or catalog assertion grants authority.
 
-This is phase 1. It defines wire contracts and verifies existing examples; it does not implement the Flutter application, PKCE exchange, A2UI renderer/action router, unified settings read model, or fallback bootstrap. Existing production decoders remain in place. Generated Dart classes encapsulate validated JSON and round-trip it; ergonomic typed presentation getters belong to the consuming native slice.
+This is phase 1. It defines wire contracts and verifies existing examples; it does not implement the Flutter application, PKCE exchange, A2UI renderer/action router, unified settings read model, or fallback bootstrap. Existing production decoders remain in place. Generated Dart classes validate and round-trip JSON, expose typed object fields and scalar values, and detach mutable input/collections. JSON unions retain their discriminator in toJson(); presentation models belong to the consuming native slice.
 
 ## Generation and checks
 

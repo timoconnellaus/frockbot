@@ -142,7 +142,7 @@ Land the review's failed-activation/data-preservation and concurrent-publication
 
 ## Slice 1 — Amend the constitution and define contracts
 
-This PR: accepted amendment and one ADR; reviewed base inventory; JSON Schema source; generated TypeScript/Dart types and validators; shared positive/negative fixtures; compatibility constants and server refusal; platform and delivery gates. Keep existing decoders unless replacement equivalence is proven. Generated Dart DTOs are validated JSON wrappers, not a Flutter application.
+This PR: accepted amendment and one ADR; reviewed base inventory; JSON Schema source; generated TypeScript/Dart types and validators; shared positive/negative fixtures; compatibility constants and server refusal; platform and delivery gates. Keep existing decoders unless replacement equivalence is proven. Generated Dart DTOs expose validated typed object fields and scalar values, preserve JSON union discriminators, and round-trip the wire data; they are not a Flutter application.
 
 **Exit:** authority, trust, version and migration rules are explicit; regeneration is deterministic; every named schema has valid/invalid examples; mapped production decoders agree with fixtures; unsupported negotiation is refused before application loading. No production A2UI manifest activation or native UI is claimed.
 

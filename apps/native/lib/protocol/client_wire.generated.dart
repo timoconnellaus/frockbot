@@ -81,478 +81,727 @@ Object? decodeProtocol(String name, Object? value) {
   return jsonDecode(jsonEncode(value));
 }
 
-/// A decoded Identifier; typed native presentation models are added with their slice.
+/// Validated Identifier; JSON unions retain their discriminator in toJson().
 class Identifier {
   final Object? _json;
   Identifier.fromJson(Object? value) : _json = decodeProtocol('Identifier', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  String get value => (toJson() as String);
 }
 
-/// A decoded BotId; typed native presentation models are added with their slice.
+/// Validated BotId; JSON unions retain their discriminator in toJson().
 class BotId {
   final Object? _json;
   BotId.fromJson(Object? value) : _json = decodeProtocol('BotId', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  String get value => (toJson() as String);
 }
 
-/// A decoded Digest; typed native presentation models are added with their slice.
+/// Validated Digest; JSON unions retain their discriminator in toJson().
 class Digest {
   final Object? _json;
   Digest.fromJson(Object? value) : _json = decodeProtocol('Digest', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  String get value => (toJson() as String);
 }
 
-/// A decoded Instant; typed native presentation models are added with their slice.
+/// Validated Instant; JSON unions retain their discriminator in toJson().
 class Instant {
   final Object? _json;
   Instant.fromJson(Object? value) : _json = decodeProtocol('Instant', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  String get value => (toJson() as String);
 }
 
-/// A decoded HttpsUrl; typed native presentation models are added with their slice.
+/// Validated HttpsUrl; JSON unions retain their discriminator in toJson().
 class HttpsUrl {
   final Object? _json;
   HttpsUrl.fromJson(Object? value) : _json = decodeProtocol('HttpsUrl', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  String get value => (toJson() as String);
 }
 
-/// A decoded Json; typed native presentation models are added with their slice.
+/// Validated Json; JSON unions retain their discriminator in toJson().
 class Json {
   final Object? _json;
   Json.fromJson(Object? value) : _json = decodeProtocol('Json', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Object? get value => toJson();
 }
 
-/// A decoded CatalogRef; typed native presentation models are added with their slice.
+/// Validated CatalogRef; JSON unions retain their discriminator in toJson().
 class CatalogRef {
   final Object? _json;
   CatalogRef.fromJson(Object? value) : _json = decodeProtocol('CatalogRef', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Identifier get id => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['id'])));
+  Digest get digest => Digest.fromJson(jsonDecode(jsonEncode((_json as Map)['digest'])));
 }
 
-/// A decoded ClientHello; typed native presentation models are added with their slice.
+/// Validated ClientHello; JSON unions retain their discriminator in toJson().
 class ClientHello {
   final Object? _json;
   ClientHello.fromJson(Object? value) : _json = decodeProtocol('ClientHello', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  int get protocolVersion => (jsonDecode(jsonEncode((_json as Map)['protocolVersion'])) as num).toInt();
+  String get nativeVersion => (jsonDecode(jsonEncode((_json as Map)['nativeVersion'])) as String);
+  List<CatalogRef> get catalogs => List<CatalogRef>.unmodifiable((jsonDecode(jsonEncode((_json as Map)['catalogs'])) as List).map((item) => CatalogRef.fromJson(item)));
 }
 
-/// A decoded CompatibilityView; typed native presentation models are added with their slice.
+/// Validated CompatibilityView; JSON unions retain their discriminator in toJson().
 class CompatibilityView {
   final Object? _json;
   CompatibilityView.fromJson(Object? value) : _json = decodeProtocol('CompatibilityView', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  int get protocolMin => (jsonDecode(jsonEncode((_json as Map)['protocolMin'])) as num).toInt();
+  int get protocolMax => (jsonDecode(jsonEncode((_json as Map)['protocolMax'])) as num).toInt();
+  String get minimumNativeVersion => (jsonDecode(jsonEncode((_json as Map)['minimumNativeVersion'])) as String);
+  List<CatalogRef> get catalogs => List<CatalogRef>.unmodifiable((jsonDecode(jsonEncode((_json as Map)['catalogs'])) as List).map((item) => CatalogRef.fromJson(item)));
 }
 
-/// A decoded UpdateRequired; typed native presentation models are added with their slice.
+/// Validated UpdateRequired; JSON unions retain their discriminator in toJson().
 class UpdateRequired {
   final Object? _json;
   UpdateRequired.fromJson(Object? value) : _json = decodeProtocol('UpdateRequired', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get status => (jsonDecode(jsonEncode((_json as Map)['status'])) as String);
+  String get message => (jsonDecode(jsonEncode((_json as Map)['message'])) as String);
 }
 
-/// A decoded AuthIdentity; typed native presentation models are added with their slice.
+/// Validated AuthIdentity; JSON unions retain their discriminator in toJson().
 class AuthIdentity {
   final Object? _json;
   AuthIdentity.fromJson(Object? value) : _json = decodeProtocol('AuthIdentity', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  Identifier get userId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['userId'])));
+  bool get isAdmin => (jsonDecode(jsonEncode((_json as Map)['isAdmin'])) as bool);
 }
 
-/// A decoded AuthStartCommand; typed native presentation models are added with their slice.
+/// Validated AuthStartCommand; JSON unions retain their discriminator in toJson().
 class AuthStartCommand {
   final Object? _json;
   AuthStartCommand.fromJson(Object? value) : _json = decodeProtocol('AuthStartCommand', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  Identifier get commandId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['commandId'])));
+  String get codeChallenge => (jsonDecode(jsonEncode((_json as Map)['codeChallenge'])) as String);
+  String get codeChallengeMethod => (jsonDecode(jsonEncode((_json as Map)['codeChallengeMethod'])) as String);
+  String get state => (jsonDecode(jsonEncode((_json as Map)['state'])) as String);
+  HttpsUrl get returnUri => HttpsUrl.fromJson(jsonDecode(jsonEncode((_json as Map)['returnUri'])));
 }
 
-/// A decoded AuthStartView; typed native presentation models are added with their slice.
+/// Validated AuthStartView; JSON unions retain their discriminator in toJson().
 class AuthStartView {
   final Object? _json;
   AuthStartView.fromJson(Object? value) : _json = decodeProtocol('AuthStartView', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  HttpsUrl get authorizationUrl => HttpsUrl.fromJson(jsonDecode(jsonEncode((_json as Map)['authorizationUrl'])));
+  Instant get expiresAt => Instant.fromJson(jsonDecode(jsonEncode((_json as Map)['expiresAt'])));
 }
 
-/// A decoded AuthExchangeCommand; typed native presentation models are added with their slice.
+/// Validated AuthExchangeCommand; JSON unions retain their discriminator in toJson().
 class AuthExchangeCommand {
   final Object? _json;
   AuthExchangeCommand.fromJson(Object? value) : _json = decodeProtocol('AuthExchangeCommand', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  Identifier get commandId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['commandId'])));
+  String get code => (jsonDecode(jsonEncode((_json as Map)['code'])) as String);
+  String get codeVerifier => (jsonDecode(jsonEncode((_json as Map)['codeVerifier'])) as String);
+  String get state => (jsonDecode(jsonEncode((_json as Map)['state'])) as String);
+  HttpsUrl get returnUri => HttpsUrl.fromJson(jsonDecode(jsonEncode((_json as Map)['returnUri'])));
 }
 
-/// A decoded AuthSessionView; typed native presentation models are added with their slice.
+/// Validated AuthSessionView; JSON unions retain their discriminator in toJson().
 class AuthSessionView {
   final Object? _json;
   AuthSessionView.fromJson(Object? value) : _json = decodeProtocol('AuthSessionView', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  Identifier get sessionId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['sessionId'])));
+  Identifier get userId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['userId'])));
+  Instant get expiresAt => Instant.fromJson(jsonDecode(jsonEncode((_json as Map)['expiresAt'])));
+  String get sessionToken => (jsonDecode(jsonEncode((_json as Map)['sessionToken'])) as String);
 }
 
-/// A decoded SessionRevokeCommand; typed native presentation models are added with their slice.
+/// Validated SessionRevokeCommand; JSON unions retain their discriminator in toJson().
 class SessionRevokeCommand {
   final Object? _json;
   SessionRevokeCommand.fromJson(Object? value) : _json = decodeProtocol('SessionRevokeCommand', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  Identifier get commandId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['commandId'])));
+  String get action => (jsonDecode(jsonEncode((_json as Map)['action'])) as String);
+  Identifier get sessionId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['sessionId'])));
 }
 
-/// A decoded SheepRecipe; typed native presentation models are added with their slice.
+/// Validated SheepRecipe; JSON unions retain their discriminator in toJson().
 class SheepRecipe {
   final Object? _json;
   SheepRecipe.fromJson(Object? value) : _json = decodeProtocol('SheepRecipe', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get background => (jsonDecode(jsonEncode((_json as Map)['background'])) as String);
+  String get upper => (jsonDecode(jsonEncode((_json as Map)['upper'])) as String);
+  String get middle => (jsonDecode(jsonEncode((_json as Map)['middle'])) as String);
+  String get lower => (jsonDecode(jsonEncode((_json as Map)['lower'])) as String);
 }
 
-/// A decoded BotRegistration; typed native presentation models are added with their slice.
+/// Validated BotRegistration; JSON unions retain their discriminator in toJson().
 class BotRegistration {
   final Object? _json;
   BotRegistration.fromJson(Object? value) : _json = decodeProtocol('BotRegistration', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  BotId get botId => BotId.fromJson(jsonDecode(jsonEncode((_json as Map)['botId'])));
+  Instant get registeredAt => Instant.fromJson(jsonDecode(jsonEncode((_json as Map)['registeredAt'])));
+  String get initialName => (jsonDecode(jsonEncode((_json as Map)['initialName'])) as String);
+  String? get initialDescription => (_json as Map).containsKey('initialDescription') ? (jsonDecode(jsonEncode(_json['initialDescription'])) as String) : null;
+  SheepRecipe get sheep => SheepRecipe.fromJson(jsonDecode(jsonEncode((_json as Map)['sheep'])));
+  BotWriter? get createdBy => (_json as Map).containsKey('createdBy') ? BotWriter.fromJson(jsonDecode(jsonEncode(_json['createdBy']))) : null;
 }
 
-/// A decoded BotDirectory; typed native presentation models are added with their slice.
+/// Validated BotDirectory; JSON unions retain their discriminator in toJson().
 class BotDirectory {
   final Object? _json;
   BotDirectory.fromJson(Object? value) : _json = decodeProtocol('BotDirectory', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  int get revision => (jsonDecode(jsonEncode((_json as Map)['revision'])) as num).toInt();
+  List<BotRegistration> get bots => List<BotRegistration>.unmodifiable((jsonDecode(jsonEncode((_json as Map)['bots'])) as List).map((item) => BotRegistration.fromJson(item)));
 }
 
-/// A decoded BotLifecycle; typed native presentation models are added with their slice.
+/// Validated BotLifecycle; JSON unions retain their discriminator in toJson().
 class BotLifecycle {
   final Object? _json;
   BotLifecycle.fromJson(Object? value) : _json = decodeProtocol('BotLifecycle', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  BotId get botId => BotId.fromJson(jsonDecode(jsonEncode((_json as Map)['botId'])));
+  String get status => (jsonDecode(jsonEncode((_json as Map)['status'])) as String);
+  int get revision => (jsonDecode(jsonEncode((_json as Map)['revision'])) as num).toInt();
 }
 
-/// A decoded BotLifecycleCommand; typed native presentation models are added with their slice.
+/// Validated BotLifecycleCommand; JSON unions retain their discriminator in toJson().
 class BotLifecycleCommand {
   final Object? _json;
   BotLifecycleCommand.fromJson(Object? value) : _json = decodeProtocol('BotLifecycleCommand', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get type => (jsonDecode(jsonEncode((_json as Map)['type'])) as String);
+  Identifier get commandId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['commandId'])));
+  BotId get botId => BotId.fromJson(jsonDecode(jsonEncode((_json as Map)['botId'])));
 }
 
-/// A decoded BotCreateCommand; typed native presentation models are added with their slice.
+/// Validated BotCreateCommand; JSON unions retain their discriminator in toJson().
 class BotCreateCommand {
   final Object? _json;
   BotCreateCommand.fromJson(Object? value) : _json = decodeProtocol('BotCreateCommand', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get type => (jsonDecode(jsonEncode((_json as Map)['type'])) as String);
+  Identifier get commandId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['commandId'])));
+  int get expectedRevision => (jsonDecode(jsonEncode((_json as Map)['expectedRevision'])) as num).toInt();
+  BotId get botId => BotId.fromJson(jsonDecode(jsonEncode((_json as Map)['botId'])));
+  String get name => (jsonDecode(jsonEncode((_json as Map)['name'])) as String);
+  String? get description => (_json as Map).containsKey('description') ? (jsonDecode(jsonEncode(_json['description'])) as String) : null;
+  SheepRecipe? get sheep => (_json as Map).containsKey('sheep') ? SheepRecipe.fromJson(jsonDecode(jsonEncode(_json['sheep']))) : null;
 }
 
-/// A decoded BotLifecycleReceipt; typed native presentation models are added with their slice.
+/// Validated BotLifecycleReceipt; JSON unions retain their discriminator in toJson().
 class BotLifecycleReceipt {
   final Object? _json;
   BotLifecycleReceipt.fromJson(Object? value) : _json = decodeProtocol('BotLifecycleReceipt', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  Identifier get commandId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['commandId'])));
+  BotId get botId => BotId.fromJson(jsonDecode(jsonEncode((_json as Map)['botId'])));
+  String get status => (jsonDecode(jsonEncode((_json as Map)['status'])) as String);
+  BotLifecycle get lifecycle => BotLifecycle.fromJson(jsonDecode(jsonEncode((_json as Map)['lifecycle'])));
+  String? get failure => (_json as Map).containsKey('failure') ? (jsonDecode(jsonEncode(_json['failure'])) as String) : null;
 }
 
-/// A decoded SkillRef; typed native presentation models are added with their slice.
+/// Validated SkillRef; JSON unions retain their discriminator in toJson().
 class SkillRef {
   final Object? _json;
   SkillRef.fromJson(Object? value) : _json = decodeProtocol('SkillRef', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Object? get value => toJson();
 }
 
-/// A decoded TurnCommand; typed native presentation models are added with their slice.
+/// Validated TurnCommand; JSON unions retain their discriminator in toJson().
 class TurnCommand {
   final Object? _json;
   TurnCommand.fromJson(Object? value) : _json = decodeProtocol('TurnCommand', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  Identifier get commandId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['commandId'])));
+  String get text => (jsonDecode(jsonEncode((_json as Map)['text'])) as String);
+  List<SkillRef>? get skills => (_json as Map).containsKey('skills') ? List<SkillRef>.unmodifiable((jsonDecode(jsonEncode(_json['skills'])) as List).map((item) => SkillRef.fromJson(item))) : null;
+  Map<String, Object?>? get supersedes => (_json as Map).containsKey('supersedes') ? Map<String, Object?>.unmodifiable(jsonDecode(jsonEncode(_json['supersedes'])) as Map) : null;
 }
 
-/// A decoded StopCommand; typed native presentation models are added with their slice.
+/// Validated StopCommand; JSON unions retain their discriminator in toJson().
 class StopCommand {
   final Object? _json;
   StopCommand.fromJson(Object? value) : _json = decodeProtocol('StopCommand', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get action => (jsonDecode(jsonEncode((_json as Map)['action'])) as String);
+  Identifier get commandId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['commandId'])));
+  Identifier get runId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['runId'])));
 }
 
-/// A decoded RunFenceCommand; typed native presentation models are added with their slice.
+/// Validated RunFenceCommand; JSON unions retain their discriminator in toJson().
 class RunFenceCommand {
   final Object? _json;
   RunFenceCommand.fromJson(Object? value) : _json = decodeProtocol('RunFenceCommand', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get action => (jsonDecode(jsonEncode((_json as Map)['action'])) as String);
 }
 
-/// A decoded ReconcileCommand; typed native presentation models are added with their slice.
+/// Validated ReconcileCommand; JSON unions retain their discriminator in toJson().
 class ReconcileCommand {
   final Object? _json;
   ReconcileCommand.fromJson(Object? value) : _json = decodeProtocol('ReconcileCommand', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get action => (jsonDecode(jsonEncode((_json as Map)['action'])) as String);
 }
 
-/// A decoded DurableReceipt; typed native presentation models are added with their slice.
+/// Validated DurableReceipt; JSON unions retain their discriminator in toJson().
 class DurableReceipt {
   final Object? _json;
   DurableReceipt.fromJson(Object? value) : _json = decodeProtocol('DurableReceipt', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  Identifier get commandId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['commandId'])));
+  Map<String, Object?> get owner => Map<String, Object?>.unmodifiable(jsonDecode(jsonEncode((_json as Map)['owner'])) as Map);
+  String get status => (jsonDecode(jsonEncode((_json as Map)['status'])) as String);
+  Instant get recordedAt => Instant.fromJson(jsonDecode(jsonEncode((_json as Map)['recordedAt'])));
+  Identifier? get runId => (_json as Map).containsKey('runId') ? Identifier.fromJson(jsonDecode(jsonEncode(_json['runId']))) : null;
+  String? get reason => (_json as Map).containsKey('reason') ? (jsonDecode(jsonEncode(_json['reason'])) as String) : null;
 }
 
-/// A decoded TurnRefusal; typed native presentation models are added with their slice.
+/// Validated TurnRefusal; JSON unions retain their discriminator in toJson().
 class TurnRefusal {
   final Object? _json;
   TurnRefusal.fromJson(Object? value) : _json = decodeProtocol('TurnRefusal', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get status => (jsonDecode(jsonEncode((_json as Map)['status'])) as String);
+  String get reason => (jsonDecode(jsonEncode((_json as Map)['reason'])) as String);
+  String get error => (jsonDecode(jsonEncode((_json as Map)['error'])) as String);
 }
 
-/// A decoded RunCursor; typed native presentation models are added with their slice.
+/// Validated RunCursor; JSON unions retain their discriminator in toJson().
 class RunCursor {
   final Object? _json;
   RunCursor.fromJson(Object? value) : _json = decodeProtocol('RunCursor', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  String get value => (toJson() as String);
 }
 
-/// A decoded Page; typed native presentation models are added with their slice.
+/// Validated Page; JSON unions retain their discriminator in toJson().
 class Page {
   final Object? _json;
   Page.fromJson(Object? value) : _json = decodeProtocol('Page', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Object? get value => toJson();
 }
 
-/// A decoded Conversation; typed native presentation models are added with their slice.
+/// Validated Conversation; JSON unions retain their discriminator in toJson().
 class Conversation {
   final Object? _json;
   Conversation.fromJson(Object? value) : _json = decodeProtocol('Conversation', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get conversationId => (jsonDecode(jsonEncode((_json as Map)['conversationId'])) as String);
+  int get ordinal => (jsonDecode(jsonEncode((_json as Map)['ordinal'])) as num).toInt();
+  Instant get startedAt => Instant.fromJson(jsonDecode(jsonEncode((_json as Map)['startedAt'])));
+  Instant? get endedAt => (_json as Map).containsKey('endedAt') ? Instant.fromJson(jsonDecode(jsonEncode(_json['endedAt']))) : null;
 }
 
-/// A decoded ConversationList; typed native presentation models are added with their slice.
+/// Validated ConversationList; JSON unions retain their discriminator in toJson().
 class ConversationList {
   final Object? _json;
   ConversationList.fromJson(Object? value) : _json = decodeProtocol('ConversationList', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  List<Conversation> get conversations => List<Conversation>.unmodifiable((jsonDecode(jsonEncode((_json as Map)['conversations'])) as List).map((item) => Conversation.fromJson(item)));
 }
 
-/// A decoded ConversationStartCommand; typed native presentation models are added with their slice.
+/// Validated ConversationStartCommand; JSON unions retain their discriminator in toJson().
 class ConversationStartCommand {
   final Object? _json;
   ConversationStartCommand.fromJson(Object? value) : _json = decodeProtocol('ConversationStartCommand', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  Identifier get commandId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['commandId'])));
 }
 
-/// A decoded ConversationQuery; typed native presentation models are added with their slice.
+/// Validated ConversationQuery; JSON unions retain their discriminator in toJson().
 class ConversationQuery {
   final Object? _json;
   ConversationQuery.fromJson(Object? value) : _json = decodeProtocol('ConversationQuery', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  RunCursor? get before => (_json as Map).containsKey('before') ? RunCursor.fromJson(jsonDecode(jsonEncode(_json['before']))) : null;
+  String? get conversationId => (_json as Map).containsKey('conversationId') ? (jsonDecode(jsonEncode(_json['conversationId'])) as String) : null;
 }
 
-/// A decoded SendPayload; typed native presentation models are added with their slice.
+/// Validated SendPayload; JSON unions retain their discriminator in toJson().
 class SendPayload {
   final Object? _json;
   SendPayload.fromJson(Object? value) : _json = decodeProtocol('SendPayload', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Object? get value => toJson();
 }
 
-/// A decoded RunEvent; typed native presentation models are added with their slice.
+/// Validated RunEvent; JSON unions retain their discriminator in toJson().
 class RunEvent {
   final Object? _json;
   RunEvent.fromJson(Object? value) : _json = decodeProtocol('RunEvent', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Object? get value => toJson();
 }
 
-/// A decoded RunOutcome; typed native presentation models are added with their slice.
+/// Validated RunOutcome; JSON unions retain their discriminator in toJson().
 class RunOutcome {
   final Object? _json;
   RunOutcome.fromJson(Object? value) : _json = decodeProtocol('RunOutcome', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Object? get value => toJson();
 }
 
-/// A decoded Run; typed native presentation models are added with their slice.
+/// Validated Run; JSON unions retain their discriminator in toJson().
 class Run {
   final Object? _json;
   Run.fromJson(Object? value) : _json = decodeProtocol('Run', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Object? get value => toJson();
 }
 
-/// A decoded Announcement; typed native presentation models are added with their slice.
+/// Validated Announcement; JSON unions retain their discriminator in toJson().
 class Announcement {
   final Object? _json;
   Announcement.fromJson(Object? value) : _json = decodeProtocol('Announcement', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Object? get value => toJson();
 }
 
-/// A decoded ConversationProjection; typed native presentation models are added with their slice.
+/// Validated ConversationProjection; JSON unions retain their discriminator in toJson().
 class ConversationProjection {
   final Object? _json;
   ConversationProjection.fromJson(Object? value) : _json = decodeProtocol('ConversationProjection', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  List<Run> get runs => List<Run>.unmodifiable((jsonDecode(jsonEncode((_json as Map)['runs'])) as List).map((item) => Run.fromJson(item)));
+  Page get page => Page.fromJson(jsonDecode(jsonEncode((_json as Map)['page'])));
+  List<Announcement>? get announcements => (_json as Map).containsKey('announcements') ? List<Announcement>.unmodifiable((jsonDecode(jsonEncode(_json['announcements'])) as List).map((item) => Announcement.fromJson(item))) : null;
 }
 
-/// A decoded StopReceipt; typed native presentation models are added with their slice.
+/// Validated StopReceipt; JSON unions retain their discriminator in toJson().
 class StopReceipt {
   final Object? _json;
   StopReceipt.fromJson(Object? value) : _json = decodeProtocol('StopReceipt', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get status => (jsonDecode(jsonEncode((_json as Map)['status'])) as String);
+  Identifier get commandId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['commandId'])));
+  Identifier get runId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['runId'])));
+  Run get run => Run.fromJson(jsonDecode(jsonEncode((_json as Map)['run'])));
 }
 
-/// A decoded ObserverCursor; typed native presentation models are added with their slice.
+/// Validated ObserverCursor; JSON unions retain their discriminator in toJson().
 class ObserverCursor {
   final Object? _json;
   ObserverCursor.fromJson(Object? value) : _json = decodeProtocol('ObserverCursor', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  String get value => (toJson() as String);
 }
 
-/// A decoded StateFrame; typed native presentation models are added with their slice.
+/// Validated StateFrame; JSON unions retain their discriminator in toJson().
 class StateFrame {
   final Object? _json;
   StateFrame.fromJson(Object? value) : _json = decodeProtocol('StateFrame', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Object? get value => toJson();
 }
 
-/// A decoded ObserverState; typed native presentation models are added with their slice.
+/// Validated ObserverState; JSON unions retain their discriminator in toJson().
 class ObserverState {
   final Object? _json;
   ObserverState.fromJson(Object? value) : _json = decodeProtocol('ObserverState', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  BotId get botId => BotId.fromJson(jsonDecode(jsonEncode((_json as Map)['botId'])));
+  ObserverCursor get cursor => ObserverCursor.fromJson(jsonDecode(jsonEncode((_json as Map)['cursor'])));
+  String get status => (jsonDecode(jsonEncode((_json as Map)['status'])) as String);
 }
 
-/// A decoded Notification; typed native presentation models are added with their slice.
+/// Validated Notification; JSON unions retain their discriminator in toJson().
 class Notification {
   final Object? _json;
   Notification.fromJson(Object? value) : _json = decodeProtocol('Notification', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  String get notificationId => (jsonDecode(jsonEncode((_json as Map)['notificationId'])) as String);
+  Identifier get runId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['runId'])));
+  Instant get createdAt => Instant.fromJson(jsonDecode(jsonEncode((_json as Map)['createdAt'])));
+  String get title => (jsonDecode(jsonEncode((_json as Map)['title'])) as String);
+  String get body => (jsonDecode(jsonEncode((_json as Map)['body'])) as String);
+  String? get urgency => (_json as Map).containsKey('urgency') ? (jsonDecode(jsonEncode(_json['urgency'])) as String) : null;
 }
 
-/// A decoded NotificationList; typed native presentation models are added with their slice.
+/// Validated NotificationList; JSON unions retain their discriminator in toJson().
 class NotificationList {
   final Object? _json;
   NotificationList.fromJson(Object? value) : _json = decodeProtocol('NotificationList', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  List<Notification> get notifications => List<Notification>.unmodifiable((jsonDecode(jsonEncode((_json as Map)['notifications'])) as List).map((item) => Notification.fromJson(item)));
 }
 
-/// A decoded NotificationAck; typed native presentation models are added with their slice.
+/// Validated NotificationAck; JSON unions retain their discriminator in toJson().
 class NotificationAck {
   final Object? _json;
   NotificationAck.fromJson(Object? value) : _json = decodeProtocol('NotificationAck', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get action => (jsonDecode(jsonEncode((_json as Map)['action'])) as String);
+  String get notificationId => (jsonDecode(jsonEncode((_json as Map)['notificationId'])) as String);
 }
 
-/// A decoded Acknowledgement; typed native presentation models are added with their slice.
+/// Validated Acknowledgement; JSON unions retain their discriminator in toJson().
 class Acknowledgement {
   final Object? _json;
   Acknowledgement.fromJson(Object? value) : _json = decodeProtocol('Acknowledgement', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get status => (jsonDecode(jsonEncode((_json as Map)['status'])) as String);
 }
 
-/// A decoded UnreadView; typed native presentation models are added with their slice.
+/// Validated UnreadView; JSON unions retain their discriminator in toJson().
 class UnreadView {
   final Object? _json;
   UnreadView.fromJson(Object? value) : _json = decodeProtocol('UnreadView', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  BotId get botId => BotId.fromJson(jsonDecode(jsonEncode((_json as Map)['botId'])));
+  int get count => (jsonDecode(jsonEncode((_json as Map)['count'])) as num).toInt();
+  bool get capped => (jsonDecode(jsonEncode((_json as Map)['capped'])) as bool);
+  bool get unread => (jsonDecode(jsonEncode((_json as Map)['unread'])) as bool);
+  bool get manuallyUnread => (jsonDecode(jsonEncode((_json as Map)['manuallyUnread'])) as bool);
+  RunCursor? get lastActivityCursor => (_json as Map).containsKey('lastActivityCursor') ? RunCursor.fromJson(jsonDecode(jsonEncode(_json['lastActivityCursor']))) : null;
+  Instant? get lastActivityAt => (_json as Map).containsKey('lastActivityAt') ? Instant.fromJson(jsonDecode(jsonEncode(_json['lastActivityAt']))) : null;
+  Instant? get lastViewedAt => (_json as Map).containsKey('lastViewedAt') ? Instant.fromJson(jsonDecode(jsonEncode(_json['lastViewedAt']))) : null;
+  Map<String, Object?>? get lastMessage => (_json as Map).containsKey('lastMessage') ? Map<String, Object?>.unmodifiable(jsonDecode(jsonEncode(_json['lastMessage'])) as Map) : null;
+  bool? get working => (_json as Map).containsKey('working') ? (jsonDecode(jsonEncode(_json['working'])) as bool) : null;
 }
 
-/// A decoded MarkReadCommand; typed native presentation models are added with their slice.
+/// Validated MarkReadCommand; JSON unions retain their discriminator in toJson().
 class MarkReadCommand {
   final Object? _json;
   MarkReadCommand.fromJson(Object? value) : _json = decodeProtocol('MarkReadCommand', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Object? get value => toJson();
 }
 
-/// A decoded SettingField; typed native presentation models are added with their slice.
+/// Validated SettingField; JSON unions retain their discriminator in toJson().
 class SettingField {
   final Object? _json;
   SettingField.fromJson(Object? value) : _json = decodeProtocol('SettingField', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Identifier get id => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['id'])));
+  String get label => (jsonDecode(jsonEncode((_json as Map)['label'])) as String);
+  String get kind => (jsonDecode(jsonEncode((_json as Map)['kind'])) as String);
+  Json get value => Json.fromJson(jsonDecode(jsonEncode((_json as Map)['value'])));
+  List<String>? get options => (_json as Map).containsKey('options') ? List<String>.unmodifiable((jsonDecode(jsonEncode(_json['options'])) as List).map((item) => (item as String))) : null;
+  bool get editable => (jsonDecode(jsonEncode((_json as Map)['editable'])) as bool);
 }
 
-/// A decoded SettingsFrame; typed native presentation models are added with their slice.
+/// Validated SettingsFrame; JSON unions retain their discriminator in toJson().
 class SettingsFrame {
   final Object? _json;
   SettingsFrame.fromJson(Object? value) : _json = decodeProtocol('SettingsFrame', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get home => (jsonDecode(jsonEncode((_json as Map)['home'])) as String);
+  int get revision => (jsonDecode(jsonEncode((_json as Map)['revision'])) as num).toInt();
+  Identifier get ownerId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['ownerId'])));
+  String get title => (jsonDecode(jsonEncode((_json as Map)['title'])) as String);
+  List<Map<String, Object?>> get sections => List<Map<String, Object?>>.unmodifiable((jsonDecode(jsonEncode((_json as Map)['sections'])) as List).map((item) => Map<String, Object?>.unmodifiable(item as Map)));
 }
 
-/// A decoded AppletViewerToken; typed native presentation models are added with their slice.
+/// Validated AppletViewerToken; JSON unions retain their discriminator in toJson().
 class AppletViewerToken {
   final Object? _json;
   AppletViewerToken.fromJson(Object? value) : _json = decodeProtocol('AppletViewerToken', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  String get token => (jsonDecode(jsonEncode((_json as Map)['token'])) as String);
+  Instant get expiresAt => Instant.fromJson(jsonDecode(jsonEncode((_json as Map)['expiresAt'])));
+  String get socketUrl => (jsonDecode(jsonEncode((_json as Map)['socketUrl'])) as String);
 }
 
-/// A decoded ImmutableArtifact; typed native presentation models are added with their slice.
+/// Validated ImmutableArtifact; JSON unions retain their discriminator in toJson().
 class ImmutableArtifact {
   final Object? _json;
   ImmutableArtifact.fromJson(Object? value) : _json = decodeProtocol('ImmutableArtifact', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Digest get contentHash => Digest.fromJson(jsonDecode(jsonEncode((_json as Map)['contentHash'])));
+  int get size => (jsonDecode(jsonEncode((_json as Map)['size'])) as num).toInt();
+  String get mediaType => (jsonDecode(jsonEncode((_json as Map)['mediaType'])) as String);
 }
 
-/// A decoded WebArtifact; typed native presentation models are added with their slice.
+/// Validated WebArtifact; JSON unions retain their discriminator in toJson().
 class WebArtifact {
   final Object? _json;
   WebArtifact.fromJson(Object? value) : _json = decodeProtocol('WebArtifact', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Digest get contentHash => Digest.fromJson(jsonDecode(jsonEncode((_json as Map)['contentHash'])));
+  int get size => (jsonDecode(jsonEncode((_json as Map)['size'])) as num).toInt();
+  String get mediaType => (jsonDecode(jsonEncode((_json as Map)['mediaType'])) as String);
+  String get bundlerVersion => (jsonDecode(jsonEncode((_json as Map)['bundlerVersion'])) as String);
 }
 
-/// A decoded FallbackBootstrap; typed native presentation models are added with their slice.
+/// Validated FallbackBootstrap; JSON unions retain their discriminator in toJson().
 class FallbackBootstrap {
   final Object? _json;
   FallbackBootstrap.fromJson(Object? value) : _json = decodeProtocol('FallbackBootstrap', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get appletId => (jsonDecode(jsonEncode((_json as Map)['appletId'])) as String);
+  Identifier get userId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['userId'])));
+  Identifier get generationId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['generationId'])));
+  Identifier get navigationEpoch => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['navigationEpoch'])));
+  HttpsUrl get bootstrapUrl => HttpsUrl.fromJson(jsonDecode(jsonEncode((_json as Map)['bootstrapUrl'])));
+  HttpsUrl get artifactOrigin => HttpsUrl.fromJson(jsonDecode(jsonEncode((_json as Map)['artifactOrigin'])));
+  WebArtifact get artifact => WebArtifact.fromJson(jsonDecode(jsonEncode((_json as Map)['artifact'])));
+  AppletViewerToken get viewer => AppletViewerToken.fromJson(jsonDecode(jsonEncode((_json as Map)['viewer'])));
 }
 
-/// A decoded ActionValueSchema; typed native presentation models are added with their slice.
+/// Validated ActionValueSchema; JSON unions retain their discriminator in toJson().
 class ActionValueSchema {
   final Object? _json;
   ActionValueSchema.fromJson(Object? value) : _json = decodeProtocol('ActionValueSchema', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Object? get value => toJson();
 }
 
-/// A decoded ActionSchema; typed native presentation models are added with their slice.
+/// Validated ActionSchema; JSON unions retain their discriminator in toJson().
 class ActionSchema {
   final Object? _json;
   ActionSchema.fromJson(Object? value) : _json = decodeProtocol('ActionSchema', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  String get type => (jsonDecode(jsonEncode((_json as Map)['type'])) as String);
+  Map<String, Object?> get properties => Map<String, Object?>.unmodifiable(jsonDecode(jsonEncode((_json as Map)['properties'])) as Map);
+  List<Identifier> get required => List<Identifier>.unmodifiable((jsonDecode(jsonEncode((_json as Map)['required'])) as List).map((item) => Identifier.fromJson(item)));
+  bool get additionalProperties => (jsonDecode(jsonEncode((_json as Map)['additionalProperties'])) as bool);
 }
 
-/// A decoded A2uiContribution; typed native presentation models are added with their slice.
+/// Validated A2uiContribution; JSON unions retain their discriminator in toJson().
 class A2uiContribution {
   final Object? _json;
   A2uiContribution.fromJson(Object? value) : _json = decodeProtocol('A2uiContribution', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  String get kind => (jsonDecode(jsonEncode((_json as Map)['kind'])) as String);
+  String get slot => (jsonDecode(jsonEncode((_json as Map)['slot'])) as String);
+  ImmutableArtifact get artifact => ImmutableArtifact.fromJson(jsonDecode(jsonEncode((_json as Map)['artifact'])));
+  String get protocolVersion => (jsonDecode(jsonEncode((_json as Map)['protocolVersion'])) as String);
+  CatalogRef get catalog => CatalogRef.fromJson(jsonDecode(jsonEncode((_json as Map)['catalog'])));
+  List<Map<String, Object?>> get actions => List<Map<String, Object?>>.unmodifiable((jsonDecode(jsonEncode((_json as Map)['actions'])) as List).map((item) => Map<String, Object?>.unmodifiable(item as Map)));
+  WebArtifact? get webFallback => (_json as Map).containsKey('webFallback') ? WebArtifact.fromJson(jsonDecode(jsonEncode(_json['webFallback']))) : null;
 }
 
-/// A decoded A2uiSurface; typed native presentation models are added with their slice.
+/// Validated A2uiSurface; JSON unions retain their discriminator in toJson().
 class A2uiSurface {
   final Object? _json;
   A2uiSurface.fromJson(Object? value) : _json = decodeProtocol('A2uiSurface', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  Identifier get surfaceId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['surfaceId'])));
+  Identifier get userId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['userId'])));
+  BotId get botId => BotId.fromJson(jsonDecode(jsonEncode((_json as Map)['botId'])));
+  Identifier get packageId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['packageId'])));
+  Identifier get generationId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['generationId'])));
+  int get revision => (jsonDecode(jsonEncode((_json as Map)['revision'])) as num).toInt();
+  ObserverCursor get cursor => ObserverCursor.fromJson(jsonDecode(jsonEncode((_json as Map)['cursor'])));
+  A2uiContribution get contribution => A2uiContribution.fromJson(jsonDecode(jsonEncode((_json as Map)['contribution'])));
+  ImmutableArtifact get snapshot => ImmutableArtifact.fromJson(jsonDecode(jsonEncode((_json as Map)['snapshot'])));
 }
 
-/// A decoded A2uiActionCommand; typed native presentation models are added with their slice.
+/// Validated A2uiActionCommand; JSON unions retain their discriminator in toJson().
 class A2uiActionCommand {
   final Object? _json;
   A2uiActionCommand.fromJson(Object? value) : _json = decodeProtocol('A2uiActionCommand', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  Identifier get commandId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['commandId'])));
+  Identifier get surfaceId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['surfaceId'])));
+  Identifier get packageId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['packageId'])));
+  Identifier get generationId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['generationId'])));
+  int get revision => (jsonDecode(jsonEncode((_json as Map)['revision'])) as num).toInt();
+  Identifier get actionId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['actionId'])));
+  Map<String, Object?> get input => Map<String, Object?>.unmodifiable(jsonDecode(jsonEncode((_json as Map)['input'])) as Map);
 }
 
-/// A decoded SurfaceUnavailable; typed native presentation models are added with their slice.
+/// Validated SurfaceUnavailable; JSON unions retain their discriminator in toJson().
 class SurfaceUnavailable {
   final Object? _json;
   SurfaceUnavailable.fromJson(Object? value) : _json = decodeProtocol('SurfaceUnavailable', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  Identifier get surfaceId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['surfaceId'])));
+  String get reason => (jsonDecode(jsonEncode((_json as Map)['reason'])) as String);
+  String get message => (jsonDecode(jsonEncode((_json as Map)['message'])) as String);
 }
 
-/// A decoded UnreadDirectory; typed native presentation models are added with their slice.
+/// Validated UnreadDirectory; JSON unions retain their discriminator in toJson().
 class UnreadDirectory {
   final Object? _json;
   UnreadDirectory.fromJson(Object? value) : _json = decodeProtocol('UnreadDirectory', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  List<UnreadView> get unread => List<UnreadView>.unmodifiable((jsonDecode(jsonEncode((_json as Map)['unread'])) as List).map((item) => UnreadView.fromJson(item)));
 }
 
-/// A decoded RunLookup; typed native presentation models are added with their slice.
+/// Validated RunLookup; JSON unions retain their discriminator in toJson().
 class RunLookup {
   final Object? _json;
   RunLookup.fromJson(Object? value) : _json = decodeProtocol('RunLookup', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  Object? get value => toJson();
 }
 
-/// A decoded BotIdentity; typed native presentation models are added with their slice.
+/// Validated BotIdentity; JSON unions retain their discriminator in toJson().
 class BotIdentity {
   final Object? _json;
   BotIdentity.fromJson(Object? value) : _json = decodeProtocol('BotIdentity', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  int get schemaVersion => (jsonDecode(jsonEncode((_json as Map)['schemaVersion'])) as num).toInt();
+  BotId get botId => BotId.fromJson(jsonDecode(jsonEncode((_json as Map)['botId'])));
+  String get name => (jsonDecode(jsonEncode((_json as Map)['name'])) as String);
+  String get namedBy => (jsonDecode(jsonEncode((_json as Map)['namedBy'])) as String);
+  bool get hiddenFromSidebar => (jsonDecode(jsonEncode((_json as Map)['hiddenFromSidebar'])) as bool);
+  String? get label => (_json as Map).containsKey('label') ? (jsonDecode(jsonEncode(_json['label'])) as String) : null;
+  String? get title => (_json as Map).containsKey('title') ? (jsonDecode(jsonEncode(_json['title'])) as String) : null;
+  Instant? get pinnedAt => (_json as Map).containsKey('pinnedAt') ? Instant.fromJson(jsonDecode(jsonEncode(_json['pinnedAt']))) : null;
 }
 
-/// A decoded BotWriter; typed native presentation models are added with their slice.
+/// Validated BotWriter; JSON unions retain their discriminator in toJson().
 class BotWriter {
   final Object? _json;
   BotWriter.fromJson(Object? value) : _json = decodeProtocol('BotWriter', value);
   Object? toJson() => jsonDecode(jsonEncode(_json));
+  String get kind => (jsonDecode(jsonEncode((_json as Map)['kind'])) as String);
+  BotId get botId => BotId.fromJson(jsonDecode(jsonEncode((_json as Map)['botId'])));
+  String get sessionId => (jsonDecode(jsonEncode((_json as Map)['sessionId'])) as String);
+  Identifier get turnId => Identifier.fromJson(jsonDecode(jsonEncode((_json as Map)['turnId'])));
 }
