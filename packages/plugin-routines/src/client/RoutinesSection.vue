@@ -12,6 +12,10 @@ import {
   UiField,
   UiIcon,
 } from "@frockbot/client-ui";
+import {
+  presentClientFailureV1,
+  serverRefusalMessageV1,
+} from "@frockbot/client-core";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { computed, inject, reactive, ref, watch } from "vue";
@@ -173,10 +177,15 @@ async function submit(): Promise<void> {
     // The form stays open and holds the reason itself, beside the field that
     // caused it. The section header keeps its copy for the reader who scrolls
     // back up, but the form no longer refuses in silence.
+    //
+    // A refused save is the deployment explaining a rule it holds — which
+    // field is wrong and why — so its own sentence is what belongs here. A
+    // fault carries no such sentence, and the classified failure's short one
+    // is what a person can act on instead of a stack's worth of plumbing.
     saveError.value =
-      error instanceof Error
-        ? error.message
-        : (routines.value.error ?? "Could not save the Routine");
+      serverRefusalMessageV1(error) ??
+      routines.value.error ??
+      presentClientFailureV1(error, "save the Routine");
   }
 }
 
