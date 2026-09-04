@@ -104,8 +104,8 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
   let shell: Ref<FrockBotWebData> | undefined;
   /** Stops the watcher that keeps an edited Bot's sidebar row in step. */
   let stopNameWatch: (() => void) | undefined;
-  /** Stops the watcher that clears the open Bot's badge as its reply arrives. */
-  let stopMessageWatch: (() => void) | undefined;
+  /** Stops the watcher that refreshes the row on the transcript's own beat. */
+  let stopTranscriptWatch: (() => void) | undefined;
   /** Stops the visibility/focus listeners that re-decide what is being read. */
   let stopFocusListeners: (() => void) | undefined;
   let authenticatedUserId: string | undefined;
@@ -113,6 +113,41 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
   let selectionGeneration = 0;
   /** Intents already shown by this page, so a poll cannot show one twice. */
   const deliveredNotifications = new Set<string>();
+  /** The refresh currently in flight, so overlapping beats collapse into one. */
+  let unreadRefresh: Promise<void> | undefined;
+  /** A beat that arrived while one was in flight, replayed once it finishes. */
+  let unreadRefreshQueued = false;
+
+  /**
+   * One unread read at a time, with at most one more behind it.
+   *
+   * A Turn produces several beats — its line appears, it streams, it settles —
+   * and each is a reason to re-read the row. Firing a request per beat would
+   * make the sidebar noisier than the transcript it is following, and
+   * out-of-order replies could put an older row back. Collapsing to one
+   * in-flight read plus one pending replay keeps the last beat authoritative.
+   * A failure is a refresh that did not happen: the poll tries again.
+   */
+  function refreshUnreadCoalesced(): Promise<void> {
+    if (unreadRefresh) {
+      unreadRefreshQueued = true;
+      return unreadRefresh;
+    }
+    unreadRefresh = (async () => {
+      try {
+        await state.value.refreshUnread();
+      } catch {
+        // A refresh is never authority; the poll retries and nothing is lost.
+      } finally {
+        unreadRefresh = undefined;
+      }
+      if (unreadRefreshQueued) {
+        unreadRefreshQueued = false;
+        await refreshUnreadCoalesced();
+      }
+    })();
+    return unreadRefresh;
+  }
 
   async function requireAuthenticatedUserId(): Promise<string> {
     if (!ctx.transport.readAuthenticatedUserId)
@@ -170,40 +205,52 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           };
         },
       );
-      // The badge follows the transcript, not the fifteen-second poll.
-      //
-      // A reply that lands in the open, focused chat used to raise a badge on
-      // its own row and hold it until the next tick — the User watching the
-      // answer arrive was told they had not read it. The Shell already learns
-      // about a settled Turn immediately, through the run channel of ADR 0026;
-      // this watches the transcript it projects and re-reads the fan-out in
-      // the same beat, which both suppresses the row and sends the receipt.
-      stopMessageWatch?.();
-      stopMessageWatch = watch(
-        () =>
-          // Optional on purpose: this watches the Shell through the interface
-          // it publishes, and a Shell that has not projected a transcript yet
-          // must not be a thrown error inside a watcher nobody can catch.
-          [value.value.activeBotId, value.value.messages?.length ?? 0] as const,
+      // The row and the transcript are two renderings of the same Turn, so
+      // they have to move together. The poll below is a floor — a Bot nobody
+      // is looking at still gets its badge within a tick — but the open Bot's
+      // own conversation already knows the instant a line lands or a Turn
+      // settles, and a row that reads "No messages yet" over a reply the User
+      // is looking at is the poll's latency made visible. The signal is
+      // per-line, never per-token: the newest line's identity and status, the
+      // number of lines, and whether a Turn is in flight.
+      stopTranscriptWatch?.();
+      stopTranscriptWatch = watch(
         () => {
-          if (!state.value.directory.bots.length) return;
-          void state.value.refreshUnread().catch(() => undefined);
+          const web = value.value;
+          // A host that has not projected a transcript yet — the first paint,
+          // and every test double — contributes no beat rather than throwing.
+          const messages = web.messages ?? [];
+          const last = messages[messages.length - 1];
+          return [
+            web.activeBotId ?? "",
+            web.activeRunId ?? "",
+            messages.length,
+            last?.id ?? "",
+            last?.status ?? "",
+          ].join(":");
+        },
+        () => {
+          void refreshUnreadCoalesced();
         },
       );
-      // Coming back to the window is the other moment the answer changes: the
-      // Bot replied while the tab was hidden — badge and notification, both
-      // correct — and now the User is looking at that very chat, so the badge
-      // has to go without waiting for a poll.
+      // Coming back to the window is the other moment the answer changes.
+      // Nothing about the transcript moved — the Bot replied while the tab was
+      // hidden, and both the badge and the notification were right to appear —
+      // but the User is now looking at that very chat, so the badge has to go
+      // without waiting for a poll. The same beat covers looking away: the row
+      // the rule was suppressing becomes an honest badge again.
       if (typeof document !== "undefined" && !stopFocusListeners) {
         const refresh = (): void => {
           if (!state.value.directory.bots.length) return;
-          void state.value.refreshUnread().catch(() => undefined);
+          void refreshUnreadCoalesced();
         };
         document.addEventListener("visibilitychange", refresh);
         window.addEventListener("focus", refresh);
+        window.addEventListener("blur", refresh);
         stopFocusListeners = () => {
           document.removeEventListener("visibilitychange", refresh);
           window.removeEventListener("focus", refresh);
+          window.removeEventListener("blur", refresh);
         };
       }
     },
@@ -492,6 +539,9 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
         }
         state.value.overlay = undefined;
         state.value.lifecyclePending = undefined;
+        // An archived Bot's transcript is no longer something to open
+        // instantly: the next time it is read it is read from the Bot.
+        shell?.value.transcripts.forget(botId);
         await state.value.load();
       } catch (error) {
         state.value.error =
@@ -518,6 +568,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
           state.value.error = "Still restoring — this will finish shortly.";
           return;
         }
+        shell?.value.transcripts.forget(botId);
         await state.value.load();
       } catch (error) {
         state.value.error =
@@ -744,7 +795,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
     if (!state.value.directory.bots.length) return;
     void (async () => {
       try {
-        await state.value.refreshUnread();
+        await refreshUnreadCoalesced();
         await deliverBackgroundNotifications();
       } catch {
         // A poll is a refresh, not authority: the next tick tries again and
@@ -756,7 +807,7 @@ export const flockClientPlugin: ClientPlugin = (ctx) => {
   return [
     () => clearInterval(poll),
     () => stopNameWatch?.(),
-    () => stopMessageWatch?.(),
+    () => stopTranscriptWatch?.(),
     () => stopFocusListeners?.(),
     ctx.provide(flockWebDataKey, state),
     ctx.slot({

@@ -153,6 +153,49 @@ describe("per-Bot unread in Workerd", () => {
     });
   });
 
+  // The row and the transcript are two renderings of the same Turn, so the
+  // very first settlement has to be enough: a Bot that has answered once owes
+  // its sidebar row that answer and the instant it landed, with no second Turn
+  // and no reload in between.
+  test("one settled Turn is enough for the row to carry its reply and time", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `unread-first-user-${suffix}`,
+      botId: `unread-first-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const name = `${identity.userId}:${identity.botId}`;
+
+    const before = await unreadRpc(name).readUnread(identity);
+    // "No messages yet" is the row for a Bot with no settled line at all.
+    expect(before.lastMessage).toBeUndefined();
+
+    const acceptedAt = "2026-08-31T00:00:00.000Z";
+    const sent = Date.now();
+    await bot(name).run({
+      ...identity,
+      command: {
+        runId: "run-1",
+        sessionId: name,
+        acceptedAt,
+        text: "hello",
+      },
+    });
+
+    const settled = await unreadRpc(name).readUnread(identity);
+    expect(settled.lastMessage).toMatchObject({
+      text: "Ollama reply",
+      role: "assistant",
+    });
+    // The time is when the Turn settled — this run, not the admission stamp of
+    // some earlier one, and not a placeholder the row would render as an epoch.
+    const at = Date.parse(settled.lastMessage?.at ?? "");
+    expect(Number.isFinite(at)).toBe(true);
+    expect(at).toBeGreaterThanOrEqual(sent);
+    expect(settled.lastMessage?.at).not.toBe(acceptedAt);
+  });
+
   // The preview record is written at settlement, so a Bot whose Turns settled
   // before that projection existed has a transcript and no record — and its
   // sidebar row read "No messages yet" over a full conversation. The read

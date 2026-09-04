@@ -712,7 +712,7 @@ export class ComputerHost {
   private readonly updates = new Map<string, ActiveUpdate>();
   /**
    * Sprites whose superseded per-slot desktop services this container has
-   * already retired (ADR 0030). The migration is idempotent, so this is a cost
+   * already retired (ADR 0031). The migration is idempotent, so this is a cost
    * saving rather than a correctness one: one `listServices` per Sprite per
    * container instead of one per open.
    */
@@ -1002,7 +1002,7 @@ export class ComputerHost {
         `if [ -n "$SLOT" ] && (exec 3<>/dev/tcp/127.0.0.1/$((${VNC_PORT_BASE} + SLOT))) 2>/dev/null; then`,
         `  echo ${DESKTOP_LIVE_MARKER}`,
         `fi`,
-        // One browser on the Computer, so one port to probe (ADR 0030). Its
+        // One browser on the Computer, so one port to probe (ADR 0031). Its
         // liveness is a different fact from the tenant's viewer being up:
         // either can be missing on its own, and declaring a running service
         // again would restart it.
@@ -1068,13 +1068,13 @@ export class ComputerHost {
 
   /**
    * Brings up the Computer's shared screen, its one browser, and this tenant's
-   * window and viewer, and answers with the display they are on (ADR 0030).
+   * window and viewer, and answers with the display they are on (ADR 0031).
    *
    * The gateway is not the desktop. `start-gateway.sh` serves noVNC and routes
    * a viewer token to a loopback VNC port, but the process that *owns* that
    * port is per tenant, so it can only be started once a tenant has a slot.
    *
-   * What is per tenant, and what is not, is the whole of ADR 0030. There is one
+   * What is per tenant, and what is not, is the whole of ADR 0031. There is one
    * Xvfb and one Chromium for the Computer, because the browser profile is the
    * User's and Chromium's singleton lock is per profile: the previous layout
    * gave every slot its own Xvfb and its own browser launch, and every launch
@@ -1156,7 +1156,7 @@ export class ComputerHost {
   }
 
   /**
-   * Stops and forgets the superseded per-slot desktop services (ADR 0030).
+   * Stops and forgets the superseded per-slot desktop services (ADR 0031).
    *
    * An existing Computer carries one `frockbot-desktop-<botKey>` per tenant
    * that ever opened a screen. Each is an Xvfb, a window manager, an `x11vnc`,
@@ -1424,7 +1424,7 @@ export class ComputerHost {
    *
    * That is not a hypothetical. A Computer went on serving noVNC's stock page
    * out of `/usr/share/novnc` for days after the runtime had been rewritten to
-   * serve FrockBot's own viewer from `${VIEWER_ROOT}` — the viewer 404 ADR 0030
+   * serve FrockBot's own viewer from `${VIEWER_ROOT}` — the viewer 404 ADR 0031
    * records — because every reconciliation re-declared a definition the
    * platform correctly recognised as unchanged. Picking up a rewritten launcher
    * takes a restart, so this asks for one.
@@ -2258,7 +2258,7 @@ export class ComputerHost {
       );
     }
     // A human has just taken this Computer over. Every Bot's window is on one
-    // screen now (ADR 0030), so the screen they are handed shows whichever
+    // screen now (ADR 0031), so the screen they are handed shows whichever
     // window Chromium last focused unless this raises theirs. Best effort: a
     // window that would not come to the front is a takeover of the wrong
     // rectangle, and is not worth refusing a lease the Sprite already granted.
