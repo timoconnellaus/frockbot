@@ -124,3 +124,40 @@ export function isConversationSessionIdV1(
   if (!sessionId.startsWith(`${base}#`)) return false;
   return /^[1-9][0-9]{0,6}$/.test(sessionId.slice(base.length + 1));
 }
+
+/**
+ * What a person is told when a new conversation is refused.
+ *
+ * The Turn that is running owns the event log the next Turn derives its
+ * request from, so a click may not pull it out from under it. That is a "not
+ * now", not a fault, and the sentence says what to do about it.
+ */
+export const CONVERSATION_BUSY_MESSAGE_V1 =
+  "This Bot is still working on a Turn. Wait for it to finish, then start a new conversation.";
+
+/**
+ * A refusal, told apart from a genuine failure.
+ *
+ * It exists so the Durable Object boundary can turn this one case into a value
+ * — a 409 the composer already understands — instead of letting it escape as
+ * an uncaught exception. An exception that crosses a DO's entry frame is
+ * logged by workerd as `Uncaught Error`, and the isolate that logs it has been
+ * seen to go down with a broken pipe immediately afterwards; in production the
+ * same sequence is a 500 where a 409 belonged.
+ */
+export class ConversationBusyError extends Error {
+  override readonly name = "ConversationBusyError";
+  constructor(message = CONVERSATION_BUSY_MESSAGE_V1) {
+    super(message);
+  }
+}
+
+/** Whether this is the "still working on a Turn" refusal, across bundles. */
+export function isConversationBusyV1(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    (error as { name?: unknown }).name === "ConversationBusyError"
+  );
+}

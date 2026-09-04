@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  appletSourceFingerprintV1,
   mostRecentlyChangedFileV1,
   readAppletList,
   readAppletSource,
@@ -118,6 +119,67 @@ describe("Applet routes", () => {
         ],
       }),
     ).toBe("ui.tsx");
+  });
+
+  test("the source fingerprint is the same for a re-read of the same files", () => {
+    // The canvas moves the User to the code when a Turn *writes* source. It
+    // re-reads the source on every poll and gets a fresh view object each
+    // time, so the identity that decides has to be the files themselves —
+    // otherwise a Turn that only called an Applet's own tool throws the User
+    // off the live Applet.
+    const file = {
+      path: "server.ts",
+      text: "export default class {}",
+      generationId: "w-1",
+      changedAt: "2026-09-03T00:01:00.000Z",
+    };
+    const view = {
+      appletId: "u1abc.todo",
+      truncated: false,
+      files: [file, { ...file, path: "ui.tsx", generationId: "w-2" }],
+    };
+    expect(appletSourceFingerprintV1(view)).toBe(
+      appletSourceFingerprintV1(structuredClone(view)),
+    );
+    // Order is not a change either: two reads may sort the store differently.
+    expect(
+      appletSourceFingerprintV1({ ...view, files: view.files.toReversed() }),
+    ).toBe(appletSourceFingerprintV1(view));
+    expect(appletSourceFingerprintV1(undefined)).toBe("");
+  });
+
+  test("the source fingerprint changes when a Turn writes a file", () => {
+    const view = {
+      appletId: "u1abc.todo",
+      truncated: false,
+      files: [
+        {
+          path: "server.ts",
+          text: "",
+          generationId: "w-1",
+          changedAt: "2026-09-03T00:01:00.000Z",
+        },
+      ],
+    };
+    expect(
+      appletSourceFingerprintV1({
+        ...view,
+        files: [
+          {
+            ...view.files[0]!,
+            generationId: "w-2",
+            changedAt: "2026-09-03T00:02:00.000Z",
+          },
+        ],
+      }),
+    ).not.toBe(appletSourceFingerprintV1(view));
+    // A new file is a write too.
+    expect(
+      appletSourceFingerprintV1({
+        ...view,
+        files: [...view.files, { ...view.files[0]!, path: "ui.tsx" }],
+      }),
+    ).not.toBe(appletSourceFingerprintV1(view));
   });
 });
 

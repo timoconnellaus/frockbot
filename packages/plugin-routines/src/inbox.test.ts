@@ -8,12 +8,14 @@ import {
   subagentAttributionV1,
 } from "./inbox.js";
 import {
+  readableRoutineInboxEntryV1,
   retainedPendingInputsV1,
   RoutineInboxStore,
   routineTerminalRecordsV1,
 } from "./inbox-store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
 import {
+  routineInboxKeyV1,
   ROUTINE_INBOX_LIMIT,
   ROUTINE_INBOX_PREFIX,
   ROUTINE_PENDING_INPUT_LIMIT,
@@ -108,6 +110,62 @@ describe("the completion inbox", () => {
     expect((await inbox.list()).every((entry) => entry.acknowledged)).toBe(
       true,
     );
+  });
+
+  /*
+   * `GET /api/bots/:id/routines/inbox` answered 500 once in verification. The
+   * read decoded every stored row strictly, and the decoder rejects an unknown
+   * field as firmly as a corrupt one — so one row written by a later version, or
+   * one half-written row, hid every readable completion beside it behind an
+   * error. A row nobody can read is skipped instead.
+   */
+  test("a malformed entry is skipped rather than failing the whole read", async () => {
+    const store = storage();
+    await settle(store, { runId: "rf-good", responseText: "readable" });
+    // Three shapes of bad row: a field this version has never heard of, a
+    // required field missing, and a value that is not an object at all.
+    await store.put(routineInboxKeyV1(90), {
+      schemaVersion: 1,
+      entryId: "ri-rf-future",
+      runId: "rf-future",
+      routineId: "morning-brief",
+      text: "from a later version",
+      attribution: "Automation: Morning brief",
+      createdAt: NOW,
+      acknowledged: false,
+      severity: "urgent",
+    });
+    await store.put(routineInboxKeyV1(91), {
+      schemaVersion: 1,
+      entryId: "ri-rf-partial",
+      runId: "rf-partial",
+    });
+    await store.put(routineInboxKeyV1(92), "not an entry at all");
+
+    const inbox = new RoutineInboxStore(store);
+    const entries = await inbox.list();
+    expect(entries.map((entry) => entry.runId)).toEqual(["rf-good"]);
+    // Acknowledging is tolerant on the same terms: the readable entry is
+    // marked, and the unreadable rows neither break the command nor count.
+    expect(await inbox.acknowledge([])).toBe(1);
+    expect((await inbox.list())[0]!.acknowledged).toBe(true);
+  });
+
+  test("the tolerant decode keeps a readable entry and drops an unreadable one", () => {
+    expect(readableRoutineInboxEntryV1({ schemaVersion: 2 })).toBeUndefined();
+    expect(readableRoutineInboxEntryV1(undefined)).toBeUndefined();
+    expect(
+      readableRoutineInboxEntryV1({
+        schemaVersion: 1,
+        entryId: "ri-1",
+        runId: "rf-1",
+        routineId: "morning-brief",
+        text: "readable",
+        attribution: "Automation: Morning brief",
+        createdAt: NOW,
+        acknowledged: false,
+      })?.entryId,
+    ).toBe("ri-1");
   });
 });
 

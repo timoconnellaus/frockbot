@@ -1,0 +1,21 @@
+# A source file carrying a stray control byte reads as binary to git, and a
+# binary file has no three-way merge: two branches that both edit it do not
+# conflict cleanly — one side is kept whole and the other's edits are dropped,
+# with nothing in the merge output to say so. That is the shape of trap
+# `packages/plugin-flock/src/client/index.ts` was, holding a literal NUL as a
+# watch-key separator until it was written as an escape instead.
+#
+# `diff` below forces a textual diff whatever bytes a file holds, so such a
+# file can never again review as "Bin 24493 -> 25169 bytes" with its real
+# change unreadable. It cannot save the merge — git's own binary detection
+# decides that and no attribute overrides it — so the guard that matters is
+# `packages/architecture-checks/src/source-nul-bytes.test.ts`, which keeps the
+# byte out of the tree in the first place.
+*.ts text diff
+*.tsx text diff
+*.vue text diff
+*.css text diff
+*.md text diff
+*.json text diff
+*.jsonc text diff
+*.html text diff

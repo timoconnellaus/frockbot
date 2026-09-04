@@ -24,12 +24,14 @@ export interface FlockWebData {
    * Whether a directory read has ever completed.
    *
    * "No Bots yet." is a fact about the User's account, and it can only be
-   * stated once the account has been read. Before that — the first paint, and
-   * the reload after a Bot is created — the list is unknown, not empty.
+   * stated once the account has been read. Before that — the first paint, the
+   * reload after a Bot is created, and every read that failed — the list is
+   * unknown, not empty, and offering to create a first Bot to someone who
+   * already has several is the worst thing this column can say.
    */
   loaded: boolean;
   error?: string;
-  overlay?: "create" | "edit" | "archive";
+  overlay?: "create" | "edit" | "archive" | "delete";
   lifecycles: Record<string, BotLifecycleStatusV1>;
   showArchived: boolean;
   lifecyclePending?: string;
@@ -50,6 +52,9 @@ export interface FlockWebData {
   toggleHidden(): void;
   openArchive(botId: string): void;
   archive(): Promise<void>;
+  /** Confirmation first: deleting a Bot destroys its chat history. */
+  openDelete(botId: string): void;
+  deleteBot(): Promise<void>;
   restore(botId: string): Promise<void>;
   closeOverlay(): void;
   reroll(): void;

@@ -70,6 +70,11 @@
   color: var(--frock-text);
 }
 
+.flock-lifecycle--danger,
+.flock-lifecycle--danger:hover {
+  color: var(--frock-danger-text);
+}
+
 /*
  * Pinned Bots. A wrapping row of large round tiles above the labelled groups,
  * each one a whole Bot rather than a line of text about it.
@@ -357,6 +362,24 @@
   color: var(--frock-danger-text);
 }
 
+/* The way to try the read again, beside the sentence that says it failed. */
+.flock-retry {
+  display: inline-block;
+  margin-top: 6px;
+  border: 1px solid var(--frock-border);
+  border-radius: var(--frock-radius-control);
+  background: transparent;
+  color: var(--frock-text);
+  padding: 2px 8px;
+  font: inherit;
+  font-size: var(--frock-text-xs);
+  cursor: pointer;
+}
+
+.flock-retry:hover {
+  background: var(--frock-fill-hover);
+}
+
 /* Header identity */
 
 .flock-identity-button {
@@ -604,6 +627,17 @@
 
 .flock-actions .primary:active {
   background: var(--frock-action-primary-pressed);
+}
+
+/* The one irreversible action in this dialog set, and it says so. */
+.flock-actions .danger {
+  border-color: var(--frock-danger-strong);
+  background: var(--frock-danger-strong);
+  color: var(--frock-on-accent);
+}
+
+.flock-actions .danger:hover {
+  background: var(--frock-danger-text);
 }
 
 @media (max-width: 600px) {

@@ -235,6 +235,26 @@ export function retainedPendingInputsV1(
   );
 }
 
+/**
+ * One stored inbox entry, or nothing when it cannot be read.
+ *
+ * The inbox is the only place a firing ever speaks, and it is read on a plain
+ * `GET`. Every other Routine record is decoded strictly, because a Routine that
+ * cannot be decoded must not be fired; an inbox entry is inert text already
+ * written, so the strictness buys nothing and costs the whole list. Exported so
+ * the tolerance is testable without a store.
+ */
+export function readableRoutineInboxEntryV1(
+  value: unknown,
+): RoutineInboxEntryV1 | undefined {
+  try {
+    return decodeRoutineInboxEntryV1(value);
+  } catch (error) {
+    if (error instanceof RoutineDecodeError) return undefined;
+    throw error;
+  }
+}
+
 export class RoutineInboxStore {
   readonly #storage: RoutineStorageV1;
   readonly #now: () => Date;
@@ -248,8 +268,15 @@ export class RoutineInboxStore {
   }
 
   /**
-   * Every inbox entry, newest first, trimmed to the retention bound first so a
-   * read is also the place the bound is enforced.
+   * Every inbox entry that still decodes, newest first, trimmed to the
+   * retention bound first so a read is also the place the bound is enforced.
+   *
+   * One unreadable row must not take the whole inbox with it. The decoder is
+   * exact — an entry a later version wrote with a field this one has never
+   * heard of is rejected as firmly as a corrupt one — so a single legacy row
+   * used to turn `GET …/routines/inbox` into a 500 and hide every completion
+   * beside it. A row nobody can read says nothing to anyone: it is skipped, and
+   * `#trimInbox` reclaims its space ahead of anything readable.
    */
   async list(): Promise<RoutineInboxEntryV1[]> {
     await this.#trimInbox();
@@ -257,9 +284,12 @@ export class RoutineInboxStore {
       prefix: ROUTINE_INBOX_PREFIX,
       limit: ROUTINE_INBOX_LIMIT,
     });
-    return [...stored.values()].map((value) =>
-      decodeRoutineInboxEntryV1(value),
-    );
+    const entries: RoutineInboxEntryV1[] = [];
+    for (const value of stored.values()) {
+      const entry = readableRoutineInboxEntryV1(value);
+      if (entry) entries.push(entry);
+    }
+    return entries;
   }
 
   /**
@@ -277,7 +307,12 @@ export class RoutineInboxStore {
       });
       let changed = 0;
       for (const [key, value] of stored.entries()) {
-        const entry = decodeRoutineInboxEntryV1(value);
+        // The same tolerance the read has: an entry that cannot be decoded
+        // cannot be shown either, so there is nothing here to mark read, and
+        // failing the whole command over it would leave the readable entries
+        // unacknowledged for good.
+        const entry = readableRoutineInboxEntryV1(value);
+        if (!entry) continue;
         if (entry.acknowledged) continue;
         if (wanted.size > 0 && !wanted.has(entry.entryId)) continue;
         await transaction.put(key, {
@@ -424,14 +459,9 @@ export class RoutineInboxStore {
     const acknowledged: string[] = [];
     const unread: string[] = [];
     for (const [key, value] of entries) {
-      let read = false;
-      try {
-        read = decodeRoutineInboxEntryV1(value).acknowledged;
-      } catch {
-        // An entry nothing can decode says nothing to anyone; it is the first
-        // thing worth reclaiming space from.
-        read = true;
-      }
+      // An entry nothing can decode says nothing to anyone; it is the first
+      // thing worth reclaiming space from.
+      const read = readableRoutineInboxEntryV1(value)?.acknowledged ?? true;
       (read ? acknowledged : unread).push(key);
     }
     for (const key of [...acknowledged, ...unread]) {

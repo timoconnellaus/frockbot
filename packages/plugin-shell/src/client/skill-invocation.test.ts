@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ClientSkillCatalogEntryV1 } from "../skill-protocol.js";
 import {
+  keptSkillHighlightV1,
   nextSkillHighlightV1,
   rankSkillCandidatesV1,
   SkillAttachmentStore,
@@ -139,5 +140,38 @@ describe("keyboard navigation", () => {
     expect(nextSkillHighlightV1(2, 3, 1)).toBe(0);
     expect(nextSkillHighlightV1(0, 3, -1)).toBe(2);
     expect(nextSkillHighlightV1(0, 0, 1)).toBe(0);
+  });
+
+  test("a refilter keeps the highlight on the Skill it was on", () => {
+    const ranked = rankSkillCandidatesV1(catalog, "standup");
+    // The composer refreshes the popover on every keyup, the arrow key's own
+    // keyup included. Row two has to survive that refresh, or the highlight
+    // snaps back to the first row and the arrow keys look dead.
+    const highlighted = ranked[1]!.entry.ref;
+    expect(keptSkillHighlightV1(highlighted, ranked)).toBe(1);
+  });
+
+  test("a narrower query keeps the highlight when the Skill is still offered", () => {
+    const before = rankSkillCandidatesV1(catalog, "s");
+    const highlighted = before.find(
+      (candidate) => candidate.entry.ref === "bot/standup-notes",
+    )!.entry.ref;
+    const after = rankSkillCandidatesV1(catalog, "standup-n");
+    expect(after.map((candidate) => candidate.entry.ref)).toContain(
+      highlighted,
+    );
+    expect(keptSkillHighlightV1(highlighted, after)).toBe(
+      after.findIndex((candidate) => candidate.entry.ref === highlighted),
+    );
+  });
+
+  test("falls back to the first row once the highlighted Skill is gone", () => {
+    const ranked = rankSkillCandidatesV1(catalog, "standup");
+    expect(keptSkillHighlightV1("bot/weekly-report", ranked)).toBe(0);
+    expect(keptSkillHighlightV1(undefined, ranked)).toBe(0);
+  });
+
+  test("an empty list has no highlight to keep", () => {
+    expect(keptSkillHighlightV1("bot/daily-standup", [])).toBe(0);
   });
 });

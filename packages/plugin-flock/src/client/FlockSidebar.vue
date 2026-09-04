@@ -109,17 +109,39 @@ onMounted(() => void flock.value.load());
 
 <template>
   <div class="flock-list-actions">
-    <button type="button" class="flock-manage" @click="flock.toggleArchived">
-      {{ flock.showArchived ? "Hide archived" : "Manage" }}
+    <button
+      type="button"
+      class="flock-manage"
+      :aria-pressed="flock.showArchived"
+      @click="flock.toggleArchived"
+    >
+      {{ flock.showArchived ? "Done" : "Manage" }}
     </button>
   </div>
+  <!--
+    An unreadable list is not an empty one, and it is not a loading one either.
+    Offering to add a first Bot to a User whose Bots simply did not load is the
+    worst thing this column can say; leaving the skeleton up forever is the
+    second worst, because it says the read is still coming when it has already
+    failed. So the failure takes the slot first, and offers the read again.
+  -->
+  <p
+    v-if="flock.error && !flock.directory.bots.length"
+    class="flock-error"
+    role="alert"
+  >
+    {{ flock.error }}
+    <button type="button" class="flock-retry" @click="flock.load()">
+      Retry
+    </button>
+  </p>
   <!--
     The skeleton is for a list nobody has yet, not for every request: the first
     paint happens before `load()` is even called, and a reload after creating a
     Bot must keep the list already on screen rather than blanking it. "No Bots
     yet." is a fact about the account, so it waits for an answer.
   -->
-  <div v-if="!flock.loaded" class="flock-skeleton" aria-busy="true">
+  <div v-else-if="!flock.loaded" class="flock-skeleton" aria-busy="true">
     <span class="flock-skeleton-label">Loading your flock…</span>
     <div v-for="row in 3" :key="row" class="flock-skeleton-row">
       <UiSkeleton shape="circle" />
@@ -257,6 +279,14 @@ onMounted(() => void flock.value.load());
             >
               Archive
             </button>
+            <button
+              v-if="flock.showArchived"
+              type="button"
+              class="flock-lifecycle flock-lifecycle--danger"
+              @click="flock.openDelete(bot.botId)"
+            >
+              Delete
+            </button>
           </div>
         </TransitionGroup>
       </section>
@@ -326,5 +356,13 @@ onMounted(() => void flock.value.load());
       </TransitionGroup>
     </div>
   </template>
-  <p v-if="flock.error" class="flock-error" role="alert">{{ flock.error }}</p>
+  <!-- The same failure over a list that still has rows: a banner, not a
+       replacement, because what is on screen is still the last thing known. -->
+  <p
+    v-if="flock.error && flock.directory.bots.length"
+    class="flock-error"
+    role="alert"
+  >
+    {{ flock.error }}
+  </p>
 </template>

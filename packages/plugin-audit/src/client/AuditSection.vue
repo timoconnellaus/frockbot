@@ -212,10 +212,22 @@ function when(entry: AuditEntryV1): string {
   gap: 12px;
 }
 
+/*
+ * The section head wraps rather than squeezing its own description. With the
+ * action fixed at its intrinsic width, the sentence was folded into a ~180px
+ * ribbon while a quarter of the panel sat empty beside it; below that basis
+ * the action takes its own line instead.
+ */
 .audit__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.audit__header > :deep(.ui-button),
+.audit__header > button {
+  margin-left: auto;
 }
 
 .audit__icon {
@@ -233,7 +245,7 @@ function when(entry: AuditEntryV1): string {
 .audit__intro {
   display: flex;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1 1 14rem;
   flex-direction: column;
 }
 

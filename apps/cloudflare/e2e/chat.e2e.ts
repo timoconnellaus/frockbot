@@ -260,16 +260,22 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   await expect(bubbles.first()).toHaveText("pong");
 
   // The bubble is wider than the word it holds, so the text is on one line.
-  const fits = await bubbles.first().evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    const text = range.getBoundingClientRect();
-    return { box: element.getBoundingClientRect().width, text: text.width };
-  });
+  // Measured once the text has actually been laid out: a range measured in the
+  // frame the bubble mounts reports a width of zero and fails on nothing.
+  const measure = async (): Promise<{ box: number; text: number }> =>
+    bubbles.first().evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const text = range.getBoundingClientRect();
+      return { box: element.getBoundingClientRect().width, text: text.width };
+    });
+  await expect
+    .poll(async () => (await measure()).text, { timeout: 10_000 })
+    .toBeGreaterThan(10);
+  const fits = await measure();
   expect(fits.box).toBeGreaterThanOrEqual(fits.text);
-  expect(fits.text).toBeGreaterThan(10);
 
-  // The Turn's tool call is not in the transcript in words. The ring on the
+  // The Turn's tool call is not in the transcript in words. The trail off the
   // avatar was the whole of what the conversation said about it, and a settled
   // Turn keeps none.
   await expect(reply.getByRole("status", { name: "Working" })).toHaveCount(0, {
@@ -282,6 +288,7 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   // Bot, so a sheep beside each one named nobody; the column starts at the
   // transcript's own left edge instead, with no gutter left behind.
   await expect(reply.locator(".bot-avatar")).toHaveCount(0);
+  await expect(reply.locator(".ui-activity-trail")).toHaveCount(0);
   const edges = await reply.evaluate((element) => {
     const column = element.querySelector(".message-column");
     return {
@@ -292,11 +299,117 @@ test("a delivered reply is one bubble, wide enough for its own text", async ({
   expect(edges.column).toBeCloseTo(edges.row, 0);
 });
 
+// The settled case above, from the other end of a Turn. The avatar used to sit
+// in a gutter to the left of the running Turn's bubbles and then vanish when
+// the Turn ended, which took the bubble sideways with it. The working row is
+// under the bubbles now, so a bubble is at the transcript's left edge while
+// the Bot is still writing, the sheep is below it rather than beside it, and
+// the end of the Turn moves nothing horizontally.
+test("the working avatar sits below the bubbles and never shifts them", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Stacker",
+  });
+  await page.setViewportSize({ width: 1351, height: 831 });
+
+  // The provider writes half the answer, waits, then writes the rest, which is
+  // the window where a bubble and the working row are both on screen.
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "streaming");
+
+  const composer = composerInput(page);
+  await composer.fill("say it slowly");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(composer).toHaveValue("", { timeout: 120_000 });
+
+  // Latched rather than asserted at an instant: the geometry is read the first
+  // time a bubble and the working row are both drawn, whenever that happens.
+  let running: {
+    bubbleLeft: number;
+    threadLeft: number;
+    gap: number;
+    trails: number;
+  } | null = null;
+  await expect
+    .poll(
+      async () => {
+        running = await page.evaluate(() => {
+          const thread = document.querySelector(".thread");
+          const row = document.querySelector(".bot-working");
+          const bubbles = document.querySelectorAll(
+            ".message-assistant .message-bubble",
+          );
+          const bubble = bubbles[bubbles.length - 1];
+          if (!thread || !row || !bubble) return null;
+          const bubbleBox = bubble.getBoundingClientRect();
+          if (bubbleBox.width === 0) return null;
+          return {
+            bubbleLeft: bubbleBox.left,
+            threadLeft: thread.getBoundingClientRect().left,
+            // How far the row's top is below the bubble's bottom. Negative
+            // would mean the two overlap, which is the old side-by-side row.
+            gap: row.getBoundingClientRect().top - bubbleBox.bottom,
+            // The indicator is beside the avatar, on the row — not beside the
+            // bubble, where it would be another thing pushing the text along.
+            trails: row.querySelectorAll(".ui-activity-trail").length,
+          };
+        });
+        return running !== null;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+  const midTurn = running as unknown as {
+    bubbleLeft: number;
+    threadLeft: number;
+    gap: number;
+    trails: number;
+  };
+
+  // The transcript pads its own edge, so "at the left edge" is the padding —
+  // what matters is that the bubble is not indented past it by an avatar
+  // gutter, and that it lands where a settled bubble lands.
+  const padding = await page.evaluate(() => {
+    const thread = document.querySelector(".thread");
+    if (!thread) return 0;
+    return Number.parseFloat(getComputedStyle(thread).paddingLeft);
+  });
+  expect(midTurn.bubbleLeft).toBeCloseTo(midTurn.threadLeft + padding, 0);
+  // Below, not beside.
+  expect(midTurn.gap).toBeGreaterThanOrEqual(0);
+  expect(midTurn.trails).toBe(1);
+
+  await expect(assistantMessages(page).last()).toContainText(
+    "Reply from the local Ollama stub.",
+    { timeout: 120_000 },
+  );
+  await expect(
+    assistantMessages(page).last().locator(".bot-working"),
+  ).toHaveCount(0, { timeout: 120_000 });
+
+  // The Turn ended and the row went; the bubble did not move.
+  const settledLeft = await page.evaluate(() => {
+    const bubbles = document.querySelectorAll(
+      ".message-assistant .message-bubble",
+    );
+    const bubble = bubbles[bubbles.length - 1];
+    return bubble ? bubble.getBoundingClientRect().left : Number.NaN;
+  });
+  expect(settledLeft).toBeCloseTo(midTurn.bubbleLeft, 0);
+
+  await setFakeOllamaChatMode(page, ollamaBaseUrl, "ok");
+});
+
 // The owner's ask, from the other side: a Turn that spends its time making
-// tool calls has to look like it is working without naming one. The ring on
-// the Bot's avatar is that — present and labelled "Working" while the Turn
-// runs, gone once it settles, and never a word about a tool.
-test("a working Bot shows an activity ring on its avatar, and no tool names", async ({
+// tool calls has to look like it is working without naming one. The comet
+// trail off the Bot's avatar is that — a working row labelled "Working" while
+// the Turn runs, gone once it settles, and never a word about a tool.
+test("a working Bot shows a comet trail beside its avatar, and no tool names", async ({
   page,
   userId,
   ollamaBaseUrl,
@@ -315,19 +428,24 @@ test("a working Bot shows an activity ring on its avatar, and no tool names", as
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(composer).toHaveValue("", { timeout: 120_000 });
 
-  // Latched the way the streaming assertion above is: the ring is on screen at
-  // some point while the Turn runs, never necessarily when a poll happens to
-  // look.
-  let sawRing = false;
+  // Latched the way the streaming assertion above is: the trail is on screen
+  // at some point while the Turn runs, never necessarily when a poll happens
+  // to look.
+  let sawTrail = false;
   await expect
     .poll(
       async () => {
         const last = assistantMessages(page).last();
         if ((await last.count()) === 0) return false;
-        if ((await last.getByRole("status", { name: "Working" }).count()) > 0) {
-          sawRing = true;
+        const working = last.getByRole("status", { name: "Working" });
+        if (
+          (await working
+            .locator('.ui-activity-trail[data-state="running"]')
+            .count()) > 0
+        ) {
+          sawTrail = true;
         }
-        return sawRing;
+        return sawTrail;
       },
       { timeout: 60_000 },
     )
@@ -337,8 +455,8 @@ test("a working Bot shows an activity ring on its avatar, and no tool names", as
     "Reply from the local Ollama stub.",
     { timeout: 120_000 },
   );
-  // The Turn settled, so the ring completed and went. The words "tool" and
-  // "tool calls" were never in the thread at all.
+  // The Turn settled, so the working row and its trail went. The words "tool"
+  // and "tool calls" were never in the thread at all.
   await expect(
     assistantMessages(page).last().getByRole("status", { name: "Working" }),
   ).toHaveCount(0, { timeout: 120_000 });
@@ -373,9 +491,22 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
 
   await sendMessage(page, "will not work");
 
-  await expect(page.locator(".message-assistant").last()).toContainText(
+  /*
+   * A failed Turn is a notice, not the Bot speaking.
+   *
+   * The thread used to render the durable failure verbatim in an assistant
+   * bubble — `Bot turn ended with outcome model-error`, a provider status
+   * code, and on one occasion a run UUID and the words "no durable provider
+   * outcome" — styled exactly like something the Bot had said. The reason is
+   * still on the run for `/api/debug` and the console; what the User is shown
+   * is one line, in the product's own words.
+   */
+  await expect(page.locator(".message-notice").last()).toHaveText(
     "This Bot couldn't finish its reply. Try again.",
   );
+  await expect(page.locator(".thread")).not.toContainText("model-error");
+  await expect(page.locator(".thread")).not.toContainText("outcome");
+  await expect(page.locator(".thread")).not.toContainText("401");
 
   // The fake endpoint is shared by every spec in the run, so the refusal this
   // test switched on is switched off again: leaving it on made every later

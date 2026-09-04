@@ -22,7 +22,8 @@
         { "slot": "frockbot.overlays", "order": 10 },
         { "slot": "frockbot.bot-identity", "order": 10 },
         { "slot": "frockbot.bot-avatar", "order": 10 },
-        { "slot": "frockbot.bot-avatar-editor", "order": 10 }
+        { "slot": "frockbot.bot-avatar-editor", "order": 10 },
+        { "slot": "frockbot.bot-settings-primary-sections", "order": 900 }
       ],
       "outlets": []
     }

@@ -49,6 +49,7 @@ describe("Flock Bot contribution", () => {
           return Promise.resolve();
         },
         archiveEligible: () => Promise.resolve(true),
+        tearDown: () => Promise.resolve(),
       });
     expect(await create().read(registration, "user-1")).toMatchObject({
       botId: "alpha",
@@ -95,6 +96,7 @@ describe("Flock Bot contribution", () => {
         storage,
         materializeSettings: () => Promise.resolve(),
         archiveEligible: () => Promise.resolve(eligible),
+        tearDown: () => Promise.resolve(),
       });
     const contribution = create();
     await contribution.read(registration, "user-1");
@@ -153,12 +155,95 @@ describe("Flock Bot contribution", () => {
     });
   });
 
+  test("deletes every key, cancels the alarm, and refuses to come back", async () => {
+    const storage = new MemoryStorage();
+    // Whatever else the Bot owned: a run, a Routine schedule, its transcript.
+    // The teardown is the host's, so the test plays the host and asserts that
+    // the Contribution asked for one and left nothing but the tombstone.
+    let alarms = 1;
+    const torn: Array<{ userId: string; botId: string }> = [];
+    const create = () =>
+      createFlockBotBackendContribution({
+        storage,
+        materializeSettings: () => Promise.resolve(),
+        archiveEligible: () => Promise.resolve(false),
+        tearDown: (identity) => {
+          torn.push(identity);
+          alarms = 0;
+          storage.values.clear();
+          return Promise.resolve();
+        },
+      });
+    const contribution = create();
+    await contribution.read(registration, "user-1");
+    await storage.put("run:run-1", { schemaVersion: 1 });
+    await storage.put("conversation", { schemaVersion: 1 });
+    await storage.put("routine-schedule:daily", { schemaVersion: 1 });
+    const command = {
+      schemaVersion: 1 as const,
+      type: "bot/delete" as const,
+      commandId: "delete-1",
+      botId: "alpha",
+    };
+    const applied = await contribution.executeLifecycle(
+      registration,
+      "user-1",
+      command,
+    );
+    expect(applied).toMatchObject({
+      status: "applied",
+      lifecycle: { botId: "alpha", status: "deleted" },
+    });
+    // Deletion is not gated on `archiveEligible`: a Bot mid-run is still
+    // deleted when its owner says so.
+    expect(torn).toEqual([{ userId: "user-1", botId: "alpha" }]);
+    expect(alarms).toBe(0);
+    // Nothing survives but the tombstone and the receipt that proves it.
+    expect([...storage.values.keys()].sort()).toEqual([
+      "flock:lifecycle-receipt:delete-1",
+      "flock:lifecycle:v1",
+    ]);
+    // Replaying the command, and replaying it against a fresh instance, both
+    // settle from the tombstone without tearing anything down again.
+    expect(
+      await contribution.executeLifecycle(registration, "user-1", command),
+    ).toEqual(applied);
+    const reconstructed = create();
+    expect(
+      await reconstructed.executeLifecycle(registration, "user-1", {
+        ...command,
+        commandId: "delete-2",
+      }),
+    ).toMatchObject({ status: "applied", lifecycle: { status: "deleted" } });
+    expect(torn).toHaveLength(1);
+    expect(
+      await reconstructed.readLifecycle(registration, "user-1"),
+    ).toMatchObject({ botId: "alpha", status: "deleted" });
+    // Neither restore nor archive resurrects it, and no Turn or sheep command
+    // may run against it.
+    expect(
+      await reconstructed.executeLifecycle(registration, "user-1", {
+        schemaVersion: 1,
+        type: "bot/restore",
+        commandId: "restore-1",
+        botId: "alpha",
+      }),
+    ).toMatchObject({ status: "rejected", failure: 'Bot "alpha" is deleted' });
+    await expect(reconstructed.read(registration, "user-1")).rejects.toThrow(
+      "deleted",
+    );
+    await expect(reconstructed.assertActive(storage, "alpha")).rejects.toThrow(
+      "deleted",
+    );
+  });
+
   test("rejects malformed durable sheep identity and receipt records", async () => {
     const storage = new MemoryStorage();
     const contribution = createFlockBotBackendContribution({
       storage,
       materializeSettings: () => Promise.resolve(),
       archiveEligible: () => Promise.resolve(true),
+      tearDown: () => Promise.resolve(),
     });
     await storage.put("flock:sheep:v1", {
       schemaVersion: 1,
