@@ -19,6 +19,7 @@ import {
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
+import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
 
 const ACTION = "Delete the staging database";
 
@@ -61,6 +62,7 @@ interface ApprovalRpc {
 
 interface StoredRunProbe {
   runId: string;
+  sessionId: string;
   status: string;
   events: Array<{ type: string; text?: string }>;
 }
@@ -77,11 +79,7 @@ async function storedRuns(identity: {
 }): Promise<StoredRunProbe[]> {
   return runInDurableObject(
     bot(identity.userId, identity.botId),
-    async (_instance, state) => [
-      ...(
-        await state.storage.list<StoredRunProbe>({ prefix: "run:" })
-      ).values(),
-    ],
+    (_instance, state) => hydratedStoredRunsV1<StoredRunProbe>(state.storage),
   );
 }
 

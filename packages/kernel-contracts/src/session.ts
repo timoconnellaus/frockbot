@@ -216,8 +216,8 @@ export class Session {
    * Resolved attachment bytes, keyed by content hash, held only while this
    * Session is resident.
    *
-   * The session event log is one Durable Object value and a screenshot in it
-   * would be a durable record that grows past what the object can hold, so an
+   * A screenshot in the session log would multiply durable storage and prompt
+   * size even though the Bot authority pages and chunks large events, so an
    * attachment records a Workspace path and a content hash and nothing else.
    * A tool that produced the bytes offers them here, and the request derived
    * while they are still held carries them to a model that can see images. On

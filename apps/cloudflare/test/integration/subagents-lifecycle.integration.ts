@@ -19,6 +19,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   toolCallTriggerPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
@@ -125,13 +126,9 @@ describe("the subagent lifecycle through the gateway", () => {
         text: "what happened?",
       }),
     )) as { runId: string };
-    const stored = await runInDurableObject(
-      botStateStubV1(userId, botId),
-      async (_instance, state) =>
-        await state.storage.get<{
-          events: Array<{ type: string; text?: string }>;
-        }>(`run:${next.runId}`),
-    );
+    const stored = await readStoredRunWithEventsV1<{
+      events: Array<{ type: string; text?: string }>;
+    }>(userId, botId, next.runId);
     // The drained hand-off is a preamble on the Turn's *input*, ahead of the
     // person's own words — which stay verbatim and last.
     const input = stored!.events

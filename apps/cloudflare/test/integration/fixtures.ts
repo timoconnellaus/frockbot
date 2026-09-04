@@ -11,11 +11,19 @@ import {
   runInDurableObject,
   SELF,
 } from "cloudflare:test";
+import type { SessionEvent } from "@frockbot/kernel-contracts";
 import { beforeAll, expect, vi } from "vitest";
 import {
   OLLAMA_BAD_API_KEY,
   OLLAMA_GOOD_API_KEY,
 } from "../harness/miniflare.ts";
+import { hydrateStoredRunEventsV1 } from "../session-log-probe.ts";
+
+export {
+  hydrateStoredRunEventsV1,
+  hydratedStoredRunsV1,
+  rewindStoredRunEventsV1,
+} from "../session-log-probe.ts";
 
 export { OLLAMA_BAD_API_KEY, OLLAMA_GOOD_API_KEY };
 export { OLLAMA_REVOKED_API_KEY } from "../harness/miniflare.ts";
@@ -24,7 +32,10 @@ export { OLLAMA_REVOKED_API_KEY } from "../harness/miniflare.ts";
  * call it should make in one response. The stub owns the wire shape; a test
  * only has to name the tools and their input.
  */
-export { toolCallTriggerPrompt } from "../harness/miniflare.ts";
+export {
+  repeatedToolCallPrompt,
+  toolCallTriggerPrompt,
+} from "../harness/miniflare.ts";
 
 /**
  * The `dueAt` a one-minute cron Routine holds when its occurrence has arrived,
@@ -58,6 +69,61 @@ export async function dueAtWithFiringHeadroomV1(
 /** The Bot Durable Object stub one User's Bot is held in. */
 export function botStateStubV1(userId: string, botId: string) {
   return env.BOT_STATES.get(env.BOT_STATES.idFromName(`${userId}:${botId}`));
+}
+
+type ExactStoredRunV1<Run> = Omit<Run, "events"> & { events: SessionEvent[] };
+
+/** Exact run journal for an integration assertion, hydrated from its range. */
+export async function readStoredRunWithEventsV1<Run extends object>(
+  userId: string,
+  botId: string,
+  runId: string,
+): Promise<ExactStoredRunV1<Run> | undefined> {
+  return runInDurableObject(
+    botStateStubV1(userId, botId),
+    async (_instance, state) => {
+      const stored = await state.storage.get<
+        Run & {
+          sessionId: string;
+          events?: unknown[];
+          eventRange?: { startSeq: number; endSeq: number };
+        }
+      >(`run:${runId}`);
+      if (!stored) return undefined;
+      return (await hydrateStoredRunEventsV1(
+        state.storage,
+        stored,
+      )) as ExactStoredRunV1<Run>;
+    },
+  );
+}
+
+/** Exact journals for integration assertions that inspect the raw run index. */
+export async function listStoredRunsWithEventsV1<Run extends object>(
+  userId: string,
+  botId: string,
+): Promise<Array<ExactStoredRunV1<Run>>> {
+  return runInDurableObject(
+    botStateStubV1(userId, botId),
+    async (_instance, state) => {
+      const stored = await state.storage.list<
+        Run & {
+          sessionId: string;
+          events?: unknown[];
+          eventRange?: { startSeq: number; endSeq: number };
+        }
+      >({ prefix: "run:" });
+      return Promise.all(
+        [...stored.values()].map(
+          async (run) =>
+            (await hydrateStoredRunEventsV1(
+              state.storage,
+              run,
+            )) as ExactStoredRunV1<Run>,
+        ),
+      );
+    },
+  );
 }
 
 /** The shape every caller needs of a durable run to recognise a firing. */
@@ -110,9 +176,19 @@ export async function settledRoutineFiringV1<
       const probe = await runInDurableObject(
         stub,
         async (_instance, state) => ({
-          runs: [
-            ...(await state.storage.list<Run>({ prefix: "run:" })).values(),
-          ],
+          runs: await Promise.all(
+            [
+              ...(
+                await state.storage.list<
+                  Run & {
+                    sessionId: string;
+                    events?: unknown[];
+                    eventRange?: { startSeq: number; endSeq: number };
+                  }
+                >({ prefix: "run:" })
+              ).values(),
+            ].map((run) => hydrateStoredRunEventsV1(state.storage, run)),
+          ),
           unsettled:
             (await state.storage.get<unknown>(`routine-fire:${routineId}`)) !==
             undefined,
@@ -124,7 +200,7 @@ export async function settledRoutineFiringV1<
       expect(fired).toHaveLength(1);
       expect(fired[0]!.status).toBe("completed");
       expect(probe.unsettled).toBe(false);
-      settled = fired[0];
+      settled = fired[0] as Run;
     },
     { timeout, interval: 50 },
   );

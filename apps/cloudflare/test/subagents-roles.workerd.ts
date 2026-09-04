@@ -30,6 +30,7 @@ import {
   encodeComputerHostRequestV1,
 } from "@frockbot/computer-host-protocol";
 import { FAKE_COMPUTER_HOST_TOKEN } from "./computer-host-fake.ts";
+import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
 
 interface Identity {
   userId: string;
@@ -59,6 +60,7 @@ function rpc(identity: Identity): RolesRpc {
 
 interface StoredRunProbe {
   runId: string;
+  sessionId: string;
   status: string;
   events: Array<{
     type: string;
@@ -73,9 +75,9 @@ interface StoredRunProbe {
 async function storedRuns(
   stub: ReturnType<typeof bot>,
 ): Promise<StoredRunProbe[]> {
-  return runInDurableObject(stub, async (_instance, state) => [
-    ...(await state.storage.list<StoredRunProbe>({ prefix: "run:" })).values(),
-  ]);
+  return runInDurableObject(stub, (_instance, state) =>
+    hydratedStoredRunsV1<StoredRunProbe>(state.storage),
+  );
 }
 
 async function turn(

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type SessionEvent } from "@frockbot/kernel-contracts";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
+import { SessionEventLog } from "@frockbot/kernel-do";
 import {
   botTurnCommandFingerprintV1,
   type BotTurnCompletion,
@@ -81,17 +82,31 @@ class MemoryRunStorage implements RunTerminalStorage {
     return Promise.resolve(this.values.get(key) as T | undefined);
   }
 
-  put(entries: Record<string, unknown>): Promise<void> {
-    this.putBatches.push(structuredClone(entries));
-    if (this.putFailure) return Promise.reject(this.putFailure);
-    for (const [key, value] of Object.entries(entries)) {
+  put(key: string | Record<string, unknown>, value?: unknown): Promise<void> {
+    if (typeof key === "string") {
       this.values.set(key, structuredClone(value));
+      return Promise.resolve();
+    }
+    this.putBatches.push(structuredClone(key));
+    if (this.putFailure) return Promise.reject(this.putFailure);
+    for (const [entry, item] of Object.entries(key)) {
+      this.values.set(entry, structuredClone(item));
     }
     return Promise.resolve();
   }
 
   delete(key: string): Promise<boolean> {
     return Promise.resolve(this.values.delete(key));
+  }
+
+  list<T>(options: { prefix: string }): Promise<Map<string, T>> {
+    return Promise.resolve(
+      new Map(
+        [...this.values.entries()].filter(([key]) =>
+          key.startsWith(options.prefix),
+        ) as Array<[string, T]>,
+      ),
+    );
   }
 }
 
@@ -284,6 +299,8 @@ describe("Bot run terminal persistence", () => {
       failure: "provider-bound retrieval unavailable",
     });
     expect(storage.values.get(keys.activeRun)).toBe("run-1");
-    expect(storage.values.get(keys.latestEvents)).toEqual([request]);
+    expect(await new SessionEventLog(storage).read("user:primary")).toEqual([
+      request,
+    ]);
   });
 });

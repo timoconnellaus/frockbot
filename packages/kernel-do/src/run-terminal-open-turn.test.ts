@@ -14,6 +14,7 @@ import {
   validateToolOccurrenceJournal,
 } from "@frockbot/kernel-contracts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
+import { SessionEventLog } from "./session-event-log.ts";
 import { createStoredRunCodecV1, type StoredRunV1 } from "./run-records.ts";
 import {
   cancelStoredRun,
@@ -117,7 +118,7 @@ async function settled(
 
   return {
     storage,
-    latest: storage.values.get(KEYS.latestEvents) as SessionEvent[],
+    latest: await new SessionEventLog(storage).read(SESSION_ID),
   };
 }
 
@@ -141,9 +142,13 @@ describe("settling a Turn interrupted mid-answer", () => {
     expect(() => admitNextTurn(latest)).not.toThrow();
     expect(latest.at(-1)).toMatchObject({ type: "turn/end", turn: 1 });
     // The settled record carries the same closed account, not a different one.
-    const record = storage.values.get(KEYS.run) as StoredRunV1<null>;
+    const record = storage.values.get(KEYS.run) as Omit<
+      StoredRunV1<null>,
+      "events"
+    >;
     expect(record.status).toBe("superseded");
-    expect(record.events.at(-1)).toMatchObject({ type: "turn/end", turn: 1 });
+    expect(Object.hasOwn(record, "events")).toBe(false);
+    expect(record.eventRange).toEqual({ startSeq: 0, endSeq: latest.length });
   });
 
   test("a stopped run leaves a log the next Turn can start on", async () => {
@@ -196,7 +201,7 @@ describe("settling a Turn interrupted mid-answer", () => {
 
     await cancelStoredRun(codec, storage, KEYS, "run-1", [], events);
 
-    const latest = storage.values.get(KEYS.latestEvents) as SessionEvent[];
+    const latest = await new SessionEventLog(storage).read(SESSION_ID);
     expect(latest.filter((event) => event.type === "turn/end")).toHaveLength(1);
     expect(() => admitNextTurn(latest)).not.toThrow();
   });

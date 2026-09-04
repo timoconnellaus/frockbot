@@ -15,6 +15,7 @@ import {
   type OwnedBotTurnCommand,
 } from "./authority.ts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
+import { SessionEventLog } from "./session-event-log.ts";
 import {
   BotTurnReconciliationRequiredError,
   BotTurnRecoveryRequiredError,
@@ -92,8 +93,13 @@ interface Deferred<T> {
  * requests never reach a Durable Object in the same microtask, and the tests
  * that send two messages are describing two requests.
  */
-function admitted(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+async function admitted(): Promise<void> {
+  // Admission now also hashes any legacy event payloads it migrates. Let the
+  // Web Crypto promises and the Durable Object transaction both drain before
+  // inspecting the durable queue.
+  for (let turn = 0; turn < 8; turn += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 }
 
 function deferred<T>(): Deferred<T> {
@@ -357,7 +363,9 @@ describe("a user message supersedes the running Turn", () => {
     probe.handle("run-2").finish();
     const result = await second;
 
-    const superseded = storedRun(storage, "run-1");
+    const superseded = await probe.authority.readRun("run-1");
+    expect(superseded).toBeDefined();
+    if (superseded === undefined) throw new Error("run-1 was not stored");
     expect(superseded.status).toBe("superseded");
     expect(superseded.supersededBy).toBe("run-2");
     expect(turnEndOf(superseded)).toMatchObject({
@@ -681,10 +689,7 @@ describe("a durable log left inside a Turn", () => {
     probe.handle("run-1").finish();
     await run;
 
-    const events = storage.values.get("latest-events") as Array<{
-      type: string;
-      turn?: number;
-    }>;
+    const events = await new SessionEventLog(storage).read("user-1:primary");
     // The orphaned Turn is closed, so the new one starts.
     expect(events[2]).toMatchObject({
       type: "turn/end",
@@ -738,7 +743,7 @@ describe("a durable log left inside a Turn", () => {
     probe.handle("run-1").finish();
     await run;
 
-    const events = storage.values.get("latest-events") as SessionEvent[];
+    const events = await new SessionEventLog(storage).read("user-1:primary");
     // Turn 1 is closed where it was abandoned, not after the Turns that
     // followed it, and the log is resequenced around the insertion.
     expect(

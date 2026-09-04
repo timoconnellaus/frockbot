@@ -13,7 +13,7 @@
 //      it, and `machine_command_check` reads the rows back;
 //   5. `machine_messages_send` produces an approval card carrying the exact
 //      text, and nothing reaches the Mac until somebody answers it.
-import { runInDurableObject, SELF } from "cloudflare:test";
+import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { machineRoutePathV1 } from "@frockbot/machine-protocol";
 import type { MachineCommandV1 } from "@frockbot/machine-protocol";
@@ -21,12 +21,12 @@ import { MachineAgentDriverV1 } from "@frockbot/plugin-user-machine/testing";
 import { toolCallTriggerPrompt } from "../harness/miniflare.ts";
 import {
   asUser,
-  botStateStubV1,
   expectOkJson,
   freshUserId,
   ORIGIN,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -57,10 +57,7 @@ async function offeredTools(
   botId: string,
   runId: string,
 ): Promise<string[]> {
-  const run = await runInDurableObject(
-    botStateStubV1(userId, botId),
-    async (_instance, state) => state.storage.get<TurnView>(`run:${runId}`),
-  );
+  const run = await readStoredRunWithEventsV1<TurnView>(userId, botId, runId);
   expect(run).toBeDefined();
   return run!.events
     .filter((event) => event.type === "model/request")

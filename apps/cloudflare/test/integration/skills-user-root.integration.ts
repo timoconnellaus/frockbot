@@ -15,7 +15,6 @@
 //     `source="user"` and `by="Bot A"`.
 //  3. Bot B can invoke it from the composer, and Bot A's own root is untouched
 //     — nothing was copied anywhere.
-import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
 import {
@@ -23,6 +22,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
+  readStoredRunWithEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -32,13 +32,7 @@ const SKILL_SLUG = "daily-standup";
 const SKILL_NAME = "Daily standup";
 const SKILL_BODY = "SHARED-STANDUP-BODY: ask each Bot for its blockers.";
 
-interface StoredRun {
-  events?: unknown[];
-}
-
-function botStub(userId: string, botId: string) {
-  return env.BOT_STATES.get(env.BOT_STATES.idFromName(`${userId}:${botId}`));
-}
+interface StoredRun {}
 
 /** The session events the Bot Durable Object durably recorded for one run. */
 async function runEvents(
@@ -46,16 +40,8 @@ async function runEvents(
   botId: string,
   runId: string,
 ): Promise<Array<Record<string, unknown>>> {
-  return runInDurableObject(
-    botStub(userId, botId),
-    async (_instance, state) => {
-      const events = (await state.storage.get<StoredRun>(`run:${runId}`))
-        ?.events;
-      return Array.isArray(events)
-        ? (events as Array<Record<string, unknown>>)
-        : [];
-    },
-  );
+  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
+  return (run?.events ?? []) as unknown as Array<Record<string, unknown>>;
 }
 
 function systemPromptOfStep(
