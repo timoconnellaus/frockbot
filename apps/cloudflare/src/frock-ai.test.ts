@@ -242,7 +242,7 @@ describe("Frock AI gateway deadline", () => {
         cancelled = reason;
       },
     });
-    const host = createFlockAiGatewayHostV1(unusedBinding(), {
+    const host = createFrockAiGatewayHostV1(unusedBinding(), {
       accountId: ACCOUNT_ID,
       token: TOKEN,
       timeoutMs: 20,
@@ -271,7 +271,7 @@ describe("Frock AI gateway deadline", () => {
       },
     });
     const stop = new AbortController();
-    const host = createFlockAiGatewayHostV1(unusedBinding(), {
+    const host = createFrockAiGatewayHostV1(unusedBinding(), {
       accountId: ACCOUNT_ID,
       token: TOKEN,
       timeoutMs: 20,
