@@ -24,6 +24,7 @@ export const defaultHttpTimeoutMs = 5_000;
 export const defaultHttpMaxResponseBytes = 1024 * 1024;
 
 const allowedRequestFields = new Set(["method", "headers", "body"]);
+const redirectStatuses = new Set([301, 302, 303, 307, 308]);
 const httpToken = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 export const httpString = (
@@ -198,7 +199,7 @@ export async function executeHttpGrantFetch(
     return await Promise.race([
       (async () => {
         const response = await execution.send(outgoing, name);
-        if (response.status >= 300 && response.status < 400) {
+        if (redirectStatuses.has(response.status)) {
           throw new Error(
             `${prefix}: redirect from granted "${name}" service was refused`,
           );

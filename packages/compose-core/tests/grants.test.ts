@@ -245,6 +245,27 @@ ${source}
     ]);
   });
 
+  it("returns a 304 to the caller instead of refusing it as a redirect", async () => {
+    const client = boundaryClient(
+      ((input: Request) =>
+        Promise.resolve(
+          new Response(null, {
+            status: 304,
+            headers: { etag: input.headers.get("if-none-match") ?? "" },
+          }),
+        )) as unknown as typeof fetch,
+      `export const rates = () => http.fetch('currency', '/rates', { headers: { 'if-none-match': '"abc"' } })`,
+    );
+    await client.settled();
+
+    await expect(client.callSource("caller", "rates")).resolves.toEqual({
+      status: 304,
+      ok: false,
+      headers: { etag: '"abc"' },
+      body: "",
+    });
+  });
+
   it("rejects RequestInit fields outside the wire whitelist", async () => {
     let called = false;
     const client = boundaryClient(
