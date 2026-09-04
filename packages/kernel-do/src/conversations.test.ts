@@ -9,7 +9,9 @@ import {
   type BotDurableAuthorityHooks,
 } from "./authority.ts";
 import {
+  ConversationBusyError,
   conversationSessionIdV1,
+  isConversationBusyV1,
   isConversationSessionIdV1,
 } from "./conversations.ts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
@@ -152,8 +154,15 @@ describe("starting a new conversation", () => {
     const probe = createAuthority(storage);
     storage.values.set("active-run", "run-9");
 
-    await expect(probe.authority.startConversation(IDENTITY)).rejects.toThrow(
-      /still working on a Turn/,
-    );
+    // Typed, not a bare Error: the Durable Object boundary keys on the name to
+    // turn this one case into a 409 value rather than letting it escape the
+    // object's entry frame as an uncaught exception.
+    const refusal = await probe.authority
+      .startConversation(IDENTITY)
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    expect(isConversationBusyV1(refusal)).toBe(true);
+    expect(refusal).toBeInstanceOf(ConversationBusyError);
+    expect((refusal as Error).message).toMatch(/still working on a Turn/);
   });
 });

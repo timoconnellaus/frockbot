@@ -55,21 +55,93 @@ export function isRequestTooLargeV1(error: unknown): boolean {
 }
 
 /**
- * Answer, having disturbed the request's body.
+ * Requests whose body has been handed to a subrequest.
  *
- * Cancelling rather than reading is deliberate: the bytes are not wanted, only
- * the stream's disturbance is, and cancelling an oversized body never
- * allocates it. A body already consumed — or already handed to a subrequest —
- * reports `bodyUsed` and is left alone, and a cancel that throws anyway must
- * never become the answer the client sees.
+ * `new Request(request, init)` and `fetch(request)` pipe the incoming body
+ * onward without ever setting `bodyUsed` on the request we were handed, so
+ * `bodyUsed` cannot tell a forwarded body from an unread one. It has to be
+ * recorded where the handoff happens.
+ *
+ * A `WeakSet` because the entry is worth exactly as long as the request is.
+ */
+const forwardedBodies = new WeakSet<Request>();
+
+/**
+ * Record that this request's body now belongs to a subrequest.
+ *
+ * Call it at every handoff, before awaiting the subrequest. Once the
+ * subrequest has answered, the pipe is closed from the far end and touching
+ * the near end — a cancel included — raises "Can't read from request stream
+ * after response has been sent". That error surfaces on the isolate rather
+ * than on the promise, so no `try`/`catch` around the cancel can contain it:
+ * it took workerd down mid-suite, every run, on the one POST whose body no
+ * route reads.
+ */
+export function forwardingBodyV1<T>(request: Request, forwarded: T): T {
+  forwardedBodies.add(request);
+  return forwarded;
+}
+
+/** Whether this request's body was handed on rather than read here. */
+export function bodyWasForwardedV1(request: Request): boolean {
+  return forwardedBodies.has(request);
+}
+
+/**
+ * How many bytes a drain will read before it gives up and cancels.
+ *
+ * Generous: every route that admits a body of its own is bounded far below
+ * this, so reaching it means a client is sending something no route wanted.
+ * Past it the connection is worth less than the time spent reading it.
+ */
+const DRAIN_BUDGET_BYTES_V1 = 8 * 1024 * 1024;
+
+/**
+ * Read the body out and throw it away, a chunk at a time.
+ *
+ * Cancelling is not enough, and this is the whole lesson of the incident.
+ * `cancel()` tears the stream down from the reading end; the writing end — the
+ * gateway pumping the browser's bytes into the loaded application's isolate —
+ * is still holding bytes it has not delivered when the response goes out, and
+ * that is what workerd reports as "Can't read from request stream after
+ * response has been sent". Reading to `done` is what actually retires the
+ * pipe. Verified against the dev stack: with a cancel the error is on every
+ * `POST /conversations`; with a read there is none.
+ *
+ * A reader loop rather than `arrayBuffer()`, so the bytes are dropped as they
+ * arrive and a large body is never held whole.
+ */
+async function consumeBodyV1(body: ReadableStream<Uint8Array>): Promise<void> {
+  const reader = body.getReader();
+  let seen = 0;
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) return;
+    seen += chunk.value?.byteLength ?? 0;
+    if (seen > DRAIN_BUDGET_BYTES_V1) {
+      await reader.cancel();
+      return;
+    }
+  }
+}
+
+/**
+ * Answer, having consumed the request's body.
+ *
+ * A body already read is left alone by `bodyUsed`; a body handed to a
+ * subrequest is left alone by `forwardingBodyV1`, because that subrequest's
+ * own wrapper is the one that owes it a read and the stream is no longer this
+ * isolate's to touch. Anything else is drained here, and a drain that throws
+ * anyway must never become the answer the client sees.
  */
 export async function drainedAnswerV1(
   request: Request,
   response: Response,
 ): Promise<Response> {
-  if (request.body && !request.bodyUsed) {
+  const body = request.body;
+  if (body && !request.bodyUsed && !bodyWasForwardedV1(request)) {
     try {
-      await request.body.cancel();
+      await consumeBodyV1(body);
     } catch {
       // The stream was already gone. The answer stands either way.
     }
