@@ -17,6 +17,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
 
@@ -32,7 +33,7 @@ public final class FrockBotMobilePlugin extends Plugin {
 
     @PluginMethod
     public void invoke(PluginCall call) {
-        if (!exact(call.getData(), Set.of("schemaVersion", "commandId", "input")) || call.getInt("schemaVersion", 0) != 1) {
+        if (!exact(keys(call.getData()), Set.of("schemaVersion", "commandId", "input")) || call.getInt("schemaVersion", 0) != 1) {
             call.reject("mobile broker request is invalid");
             return;
         }
@@ -50,13 +51,16 @@ public final class FrockBotMobilePlugin extends Plugin {
         }
     }
 
-    private static boolean exact(JSObject actual, Set<String> expected) {
-        if (actual.length() != expected.size()) return false;
-        Iterator<String> keys = actual.keys();
-        while (keys.hasNext()) {
-            if (!expected.contains(keys.next())) return false;
-        }
-        return true;
+    // Capacitor 8's JSObject is a JSONObject: it exposes keys() as an iterator, not keySet().
+    private static Set<String> keys(JSObject object) {
+        Set<String> names = new HashSet<>();
+        Iterator<String> iterator = object.keys();
+        while (iterator.hasNext()) names.add(iterator.next());
+        return names;
+    }
+
+    private static boolean exact(Set<String> actual, Set<String> expected) {
+        return actual.equals(expected);
     }
 
     private ClipboardManager clipboard() {
@@ -84,7 +88,7 @@ public final class FrockBotMobilePlugin extends Plugin {
     }
 
     private void writeClipboard(PluginCall call, JSObject input) {
-        if (!exact(input, Set.of("text"))) {
+        if (!exact(keys(input), Set.of("text"))) {
             call.reject("clipboard input has unknown fields");
             return;
         }
@@ -100,7 +104,7 @@ public final class FrockBotMobilePlugin extends Plugin {
     }
 
     private void showNotification(PluginCall call, JSObject input) {
-        if (!exact(input, Set.of("title", "body", "urgency")) && !exact(input, Set.of("title", "urgency"))) {
+        if (!exact(keys(input), Set.of("title", "body", "urgency")) && !exact(keys(input), Set.of("title", "urgency"))) {
             call.reject("notification input has unknown fields");
             return;
         }

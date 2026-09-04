@@ -18,11 +18,11 @@ describe("which upstream dictation opens", () => {
       FROCK_AI_ACCOUNT_ID: "account",
     });
     expect(target.path).toBe("openai");
-    expect(target.path !== "unconfigured" && target.url).toContain(
-      "wss://api.openai.com/v1/realtime",
+    expect(target.path !== "unconfigured" && target.url).toBe(
+      `wss://api.openai.com/v1/realtime?model=${VOICE_TRANSCRIPTION_MODEL_V1}`,
     );
-    expect(target.path !== "unconfigured" && target.url).toContain(
-      "intent=transcription",
+    expect(target.path !== "unconfigured" && target.headers).not.toHaveProperty(
+      "openai-beta",
     );
     expect(
       target.path !== "unconfigured" && target.headers["authorization"],
@@ -37,7 +37,10 @@ describe("which upstream dictation opens", () => {
     });
     expect(target.path).toBe("gateway");
     expect(target.path !== "unconfigured" && target.url).toBe(
-      `wss://gateway.ai.cloudflare.com/v1/account/flock/openai?intent=transcription&model=${VOICE_TRANSCRIPTION_MODEL_V1}`,
+      `wss://gateway.ai.cloudflare.com/v1/account/flock/openai?model=${VOICE_TRANSCRIPTION_MODEL_V1}`,
+    );
+    expect(target.path !== "unconfigured" && target.headers).not.toHaveProperty(
+      "openai-beta",
     );
     expect(
       target.path !== "unconfigured" && target.headers["cf-aig-authorization"],
@@ -74,10 +77,21 @@ describe("which upstream dictation opens", () => {
 describe("what the upstream is told", () => {
   test("opens a transcription session on the streaming model", () => {
     const update = voiceUpstreamSessionUpdateV1();
-    expect(update.type).toBe("transcription_session.update");
-    expect(update.session).toMatchObject({
-      input_audio_format: "pcm16",
-      input_audio_transcription: { model: "gpt-live-transcribe" },
+    expect(update).toEqual({
+      type: "session.update",
+      session: {
+        type: "transcription",
+        audio: {
+          input: {
+            format: { type: "audio/pcm", rate: 24_000 },
+            transcription: { model: "gpt-live-transcribe" },
+            turn_detection: {
+              type: "server_vad",
+              silence_duration_ms: 500,
+            },
+          },
+        },
+      },
     });
   });
 });
@@ -113,14 +127,17 @@ describe("translating the upstream's frames", () => {
     expect(translated?.completed).toBe(true);
   });
 
-  test("an upstream error reaches the person as a sentence", () => {
+  test("an upstream error keeps provider detail out of the user-visible sentence", () => {
     const translated = translateVoiceUpstreamFrameV1(
       JSON.stringify({ type: "error", error: { message: "model not found" } }),
     );
-    expect(translated?.frame.type).toBe("error");
-    expect(
-      translated?.frame.type === "error" && translated.frame.message,
-    ).toContain("model not found");
+    expect(translated?.frame).toEqual({
+      schemaVersion: 1,
+      type: "error",
+      message:
+        "Dictation stopped: the speech service refused the connection. Try again.",
+    });
+    expect(translated?.upstreamError).toBe("model not found");
   });
 
   test("everything else — and anything unparseable — is dropped", () => {

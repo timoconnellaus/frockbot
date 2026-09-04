@@ -49,7 +49,7 @@ describe("Flock Bot contribution", () => {
           return Promise.resolve();
         },
         archiveEligible: () => Promise.resolve(true),
-        tearDown: () => Promise.resolve(),
+        tearDown: () => Promise.resolve("complete"),
       });
     expect(await create().read(registration, "user-1")).toMatchObject({
       botId: "alpha",
@@ -96,7 +96,7 @@ describe("Flock Bot contribution", () => {
         storage,
         materializeSettings: () => Promise.resolve(),
         archiveEligible: () => Promise.resolve(eligible),
-        tearDown: () => Promise.resolve(),
+        tearDown: () => Promise.resolve("complete"),
       });
     const contribution = create();
     await contribution.read(registration, "user-1");
@@ -171,7 +171,7 @@ describe("Flock Bot contribution", () => {
           torn.push(identity);
           alarms = 0;
           storage.values.clear();
-          return Promise.resolve();
+          return Promise.resolve("complete" as const);
         },
       });
     const contribution = create();
@@ -237,13 +237,47 @@ describe("Flock Bot contribution", () => {
     );
   });
 
+  test("keeps deletion pending until the host has purged derived state", async () => {
+    const storage = new MemoryStorage();
+    const outcomes: Array<"pending" | "complete"> = ["pending", "complete"];
+    const contribution = createFlockBotBackendContribution({
+      storage,
+      materializeSettings: () => Promise.resolve(),
+      archiveEligible: () => Promise.resolve(true),
+      tearDown: () => Promise.resolve(outcomes.shift() ?? "complete"),
+    });
+    await contribution.read(registration, "user-1");
+    const command = {
+      schemaVersion: 1 as const,
+      type: "bot/delete" as const,
+      commandId: "delete-paged",
+      botId: "alpha",
+    };
+
+    expect(
+      await contribution.executeLifecycle(registration, "user-1", command),
+    ).toMatchObject({
+      status: "pending",
+      lifecycle: { status: "active" },
+    });
+    expect(
+      await contribution.readLifecycle(registration, "user-1"),
+    ).toMatchObject({ status: "active" });
+    expect(
+      await contribution.executeLifecycle(registration, "user-1", command),
+    ).toMatchObject({
+      status: "applied",
+      lifecycle: { status: "deleted" },
+    });
+  });
+
   test("rejects malformed durable sheep identity and receipt records", async () => {
     const storage = new MemoryStorage();
     const contribution = createFlockBotBackendContribution({
       storage,
       materializeSettings: () => Promise.resolve(),
       archiveEligible: () => Promise.resolve(true),
-      tearDown: () => Promise.resolve(),
+      tearDown: () => Promise.resolve("complete"),
     });
     await storage.put("flock:sheep:v1", {
       schemaVersion: 1,

@@ -35,6 +35,17 @@ that arrive after it. Send commits the audio, waits for the finished transcript
 and then calls the ordinary `sendMessage`, so a dictated message supersedes,
 counts, and is refused exactly like a typed one. Enter sends; Escape bins.
 
+Production v0.3.14 (PR #220) exposed a protocol mistake on 2026-09-04:
+pressing the dictation button stopped with "The Realtime Beta API is no longer
+supported. Please use /v1/realtime for the GA API." Slice A had sent the beta
+`openai-beta: realtime=v1` header, the beta `intent=transcription` query, and a
+`transcription_session.update` event. The repair uses the GA `/v1/realtime`
+WebSocket with only `?model=gpt-live-transcribe`, no beta header, and
+`session.update` with `session.type: "transcription"`. The current OpenAI GA
+guide recommends `gpt-live-transcribe` for low-latency streaming transcription,
+so that model remains the deliberate choice. Its PCM input is now the required
+24 kHz `audio/pcm`, including at the browser resampler.
+
 What landed:
 
 | Piece                                        | Where                                                                                                                             |
@@ -75,16 +86,17 @@ OpenAI key, then the AI Gateway.
    flag replaces the Worker's whole secret set, so an optional name that is not
    carried would be deleted on the next deploy (ADR 0025). Locally it goes in
    `apps/cloudflare/.dev.vars` (see `.dev.vars.example`). With it set, the
-   Durable Object opens `wss://api.openai.com/v1/realtime?intent=transcription`
-   with `Authorization: Bearer …`.
+   Durable Object opens
+   `wss://api.openai.com/v1/realtime?model=gpt-live-transcribe` with
+   `Authorization: Bearer …` and no beta header.
 2. **AI Gateway BYOK (the fallback, and still optional).** No `OPENAI_API_KEY`;
    instead the OpenAI provider key is stored **BYOK on the `flock` AI Gateway
    in the Cloudflare dashboard**, and the Worker holds `FROCK_AI_GATEWAY_TOKEN`
    (already deployed) plus the `FROCK_AI_ACCOUNT_ID` var. The Durable Object
    then opens
-   `wss://gateway.ai.cloudflare.com/v1/<account>/flock/openai?intent=transcription`
-   with `cf-aig-authorization: Bearer …`. Nothing new has to be placed for this
-   path beyond the BYOK provider key on the gateway.
+   `wss://gateway.ai.cloudflare.com/v1/<account>/flock/openai?model=gpt-live-transcribe`
+   with `cf-aig-authorization: Bearer …` and no beta header. Nothing new has to
+   be placed for this path beyond the BYOK provider key on the gateway.
 
 `GEMINI_API_KEY` is also a GitHub repository secret as of 2026-09-04 and is
 carried in both optional lists already. Nothing reads it yet; slice B will read
@@ -98,13 +110,15 @@ nothing and needs no credential. Production sets no such var.
 
 - **Assumption 1 of "Verify before slice A" is still open.** Nobody has proved
   that AI Gateway's OpenAI realtime path accepts a _transcription-only_ session
-  (`gpt-live-transcribe`); the docs still show only `gpt-4o-realtime` models.
-  That is exactly why the upstream is selectable, and why the direct key takes
-  precedence: with `OPENAI_API_KEY` set, the gateway branch does not run in
-  production. Which path runs is decided by where Tim puts the key, and the
-  gateway branch will not be exercised until a deployment has no direct key.
-- Neither upstream has been reached from a deployed Worker: everything proved so
-  far is against the fake. The first real capture is the proof.
+  with the GA payload and `gpt-live-transcribe`; Cloudflare's realtime example
+  still shows the retired beta header and an old preview model. That is exactly
+  why the upstream is selectable, and why the direct key takes precedence: with
+  `OPENAI_API_KEY` set, the gateway branch does not run in production. Which
+  path runs is decided by where Tim puts the key, and the gateway branch will
+  not be exercised until a deployment has no direct key.
+- Neither upstream has been reached from a deployed Worker after the GA repair:
+  everything proved locally is against the fake. The first real capture after
+  deployment is the proof.
 - The AudioWorklet resample path has been exercised in headless Chromium only.
   Safari (which ignores a requested `sampleRate`) and the Capacitor and Electron
   shells are untested; the native shells still need their microphone permission
@@ -116,7 +130,7 @@ nothing and needs no credential. Production sets no such var.
 
 These gate D1 and D3. Each is a short spike, not a design question.
 
-- [ ] AI Gateway's OpenAI realtime path accepts a **transcription-only** session (`session.update` with `type: "transcription"`, model `gpt-live-transcribe`). The docs show only `gpt-4o-realtime` models. If it does not, dictation falls back to the `VoiceSession` DO opening `wss://api.openai.com/v1/realtime` directly with an `OPENAI_API_KEY` Worker secret — which must then be added to the release workflow's `--secrets-file` list, because that flag replaces the Worker's whole secret set (ADR 0025).
+- [ ] AI Gateway's OpenAI realtime path accepts a **transcription-only** session (`session.update` with `type: "transcription"`, model `gpt-live-transcribe`). Cloudflare's realtime example still shows the retired beta protocol and an old preview model. If the GA session does not pass through, dictation falls back to the `VoiceSession` DO opening `wss://api.openai.com/v1/realtime` directly with an `OPENAI_API_KEY` Worker secret — which must then be added to the release workflow's `--secrets-file` list, because that flag replaces the Worker's whole secret set (ADR 0025).
 - [ ] AI Gateway's Google AI Studio realtime path carries `gemini-3.1-flash-live-preview` with a BYOK key (the documented pattern passes `?api_key=`). Fallback is the same shape: DO → `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=…`, as zerobsai did.
 - [ ] Choose the per-User voice-minutes quota default (undecided; 60 minutes per day is a reasonable start).
 
@@ -127,7 +141,7 @@ These gate D1 and D3. Each is a short spike, not a design question.
 - Use `realtimeInput.text` after the first turn, never `clientContent` (3.1 accepts `clientContent` only for seeding history). Set `binaryType = "arraybuffer"` on the workerd upstream socket or frames are silently dropped. `speechConfig.languageCode` does not steer accent on native-audio models; the system instruction does.
 - **Record intent before effect.** `ask_bot` writes the ledger entry in the User DO before dispatching the agent-lane Turn, with an idempotency key; a retried tool call never asks twice.
 - The voice transcript (text and tool calls, **never audio**) is durable and readable on a Voice surface; that surface also carries the "answers waiting" badge.
-- Native shells: Capacitor needs `NSMicrophoneUsageDescription` / `RECORD_AUDIO`; Electron's sandboxed window needs a media permission handler. These are progressive enhancements — the web path works today (the app Worker sets no restrictive `permissions-policy`; only the marketing site does). iOS Safari ignores `AudioContext({ sampleRate: 16000 })`; resample in the worklet.
+- Native shells: Capacitor needs `NSMicrophoneUsageDescription` / `RECORD_AUDIO`; Electron's sandboxed window needs a media permission handler. These are progressive enhancements — the web path works today (the app Worker sets no restrictive `permissions-policy`; only the marketing site does). iOS Safari ignores a requested `AudioContext` sample rate; resample to the GA API's 24 kHz PCM rate in the worklet.
 - Feature styles must use `--frock-*` tokens (`scripts/check-ui-styles.ts`); the wave animation is level-driven from an `AnalyserNode`.
 - e2e fakes providers, never the app: a fake Gemini Live / OpenAI transcription WebSocket service is required. zerobsai's `gemini-live.ts` fake is the start.
 - Cloudflare AI Gateway realtime WebSockets support OpenAI and Google AI Studio, with BYOK keys stored on the gateway and `cf-aig-authorization` auth; browser clients would authenticate via `sec-websocket-protocol`, which is why the DO (not the browser) holds the upstream leg.

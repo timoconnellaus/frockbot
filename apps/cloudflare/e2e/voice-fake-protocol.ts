@@ -16,5 +16,9 @@
  */
 export const E2E_DICTATED_TEXT_V1 = "Testing dictation from a fake microphone.";
 
-/** Audio frames per streamed word: roughly a tenth of a second at 16 kHz. */
+/** Audio frames per streamed word: roughly a tenth of a second at 24 kHz. */
 export const E2E_DICTATION_FRAMES_PER_WORD_V1 = 3;
+
+/** What production returned when a beta Realtime handshake reached GA. */
+export const E2E_REALTIME_BETA_REMOVED_ERROR_V1 =
+  "The Realtime Beta API is no longer supported. Please use /v1/realtime for the GA API.";

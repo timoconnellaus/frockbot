@@ -13,6 +13,10 @@ import {
   createFrockAiFakeWorker,
   FROCK_AI_FAKE_SERVICE,
 } from "./test/frock-ai-fake.ts";
+import {
+  createVectorizeFakeWorker,
+  VECTORIZE_FAKE_SERVICE,
+} from "./test/vectorize-fake.ts";
 
 // One instance for the whole project. It runs in Node, so the suites reach its
 // state over the same binding, under `/__fake/*`.
@@ -37,8 +41,13 @@ export default defineConfig({
         serviceBindings: {
           COMPUTER_HOST: (request: Request) => computerHost.fetch(request),
           AI: FROCK_AI_FAKE_SERVICE,
+          MEMORY_INDEX: VECTORIZE_FAKE_SERVICE,
+          MEMORY_INDEX_PROBE: VECTORIZE_FAKE_SERVICE,
         },
-        workers: [createFrockAiFakeWorker("2026-08-27")],
+        workers: [
+          createFrockAiFakeWorker("2026-08-27"),
+          createVectorizeFakeWorker("2026-08-27"),
+        ],
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
         durableObjects: {
           AUTHORING: "AuthoringProbe",

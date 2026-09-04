@@ -2,6 +2,7 @@ import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import {
   E2E_DICTATED_TEXT_V1,
   E2E_DICTATION_FRAMES_PER_WORD_V1,
+  E2E_REALTIME_BETA_REMOVED_ERROR_V1,
 } from "./voice-fake-protocol.ts";
 
 const encoder = new TextEncoder();
@@ -79,10 +80,54 @@ function fakeRealtimeTranscription(): Response {
       return;
     }
     if (message.type === "transcription_session.update") {
-      server.send(JSON.stringify({ type: "transcription_session.updated" }));
+      server.send(
+        JSON.stringify({
+          type: "error",
+          error: { message: E2E_REALTIME_BETA_REMOVED_ERROR_V1 },
+        }),
+      );
+      return;
+    }
+    if (message.type === "session.update") {
+      const session = (message as { session?: unknown }).session;
+      const input =
+        session &&
+        typeof session === "object" &&
+        (session as { type?: unknown }).type === "transcription"
+          ? (session as { audio?: { input?: unknown } }).audio?.input
+          : undefined;
+      const valid =
+        input !== null &&
+        typeof input === "object" &&
+        (input as { format?: { type?: unknown; rate?: unknown } }).format
+          ?.type === "audio/pcm" &&
+        (input as { format?: { rate?: unknown } }).format?.rate === 24_000 &&
+        (input as { transcription?: { model?: unknown } }).transcription
+          ?.model === "gpt-live-transcribe" &&
+        (input as { turn_detection?: { type?: unknown } }).turn_detection
+          ?.type === "server_vad";
+      if (!valid) {
+        server.send(
+          JSON.stringify({
+            type: "error",
+            error: { message: "Invalid GA transcription session." },
+          }),
+        );
+        return;
+      }
+      server.send(JSON.stringify({ type: "session.updated", session }));
       return;
     }
     if (message.type === "input_audio_buffer.append") {
+      if (typeof (message as { audio?: unknown }).audio !== "string") {
+        server.send(
+          JSON.stringify({
+            type: "error",
+            error: { message: "Invalid GA audio append." },
+          }),
+        );
+        return;
+      }
       frames += 1;
       const due = Math.min(
         DICTATION_WORDS.length,
@@ -120,6 +165,11 @@ export default {
       url.pathname === "/v1/realtime" &&
       request.headers.get("upgrade")?.toLowerCase() === "websocket"
     ) {
+      if (request.headers.has("openai-beta")) {
+        return new Response(E2E_REALTIME_BETA_REMOVED_ERROR_V1, {
+          status: 400,
+        });
+      }
       return fakeRealtimeTranscription();
     }
     return new Response("Frock AI fake speaks RPC only", { status: 404 });
