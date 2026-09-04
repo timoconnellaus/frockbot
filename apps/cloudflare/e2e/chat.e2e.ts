@@ -15,7 +15,9 @@ import {
   expect,
   assistantMessages,
   composerInput,
+  createBot,
   provisionThroughUi,
+  revealSidebar,
   sendMessage,
   setFakeOllamaChatMode,
 } from "./fixtures.ts";
@@ -493,4 +495,159 @@ test("a Bot the client cannot reach settles with a reason and a Retry", async ({
   await expect(page.getByRole("button", { name: /Stop/ })).toHaveCount(0);
   await expect(composer).toHaveValue(prompt);
   await expect(page.getByRole("button", { name: "Retry" })).toBeEnabled();
+});
+
+test("a conversation opens at its end, and switching back to it does not reload it", async ({
+  page,
+  userId,
+  ollamaBaseUrl,
+}) => {
+  await provisionThroughUi(page, {
+    userId,
+    apiKey: E2E_OLLAMA_GOOD_API_KEY,
+    apiBaseUrl: ollamaBaseUrl,
+    botName: "Long",
+  });
+
+  // Long enough that the thread has to scroll: an opening that is already at
+  // the end proves nothing on a transcript that fits.
+  const prompts = Array.from(
+    { length: 6 },
+    (_, index) => `Turn number ${index + 1}`,
+  );
+  for (const prompt of prompts) await sendMessage(page, prompt);
+
+  const thread = page.locator("section.thread");
+  await expect
+    .poll(() =>
+      thread.evaluate((element) => element.scrollHeight > element.clientHeight),
+    )
+    .toBe(true);
+
+  await createBot(page, "Other");
+  await expect(composerInput(page)).toHaveValue("");
+
+  /*
+   * Everything this test asks about is true or false at one instant — the
+   * moment the thread stops carrying `thread-settling`, which is when it goes
+   * from laid-out-but-unpainted to on screen. So it is all sampled there, in
+   * the page, rather than read back afterwards from Node where a background
+   * revalidation could have landed in between and changed the answer.
+   *
+   * What is sampled: where the thread is scrolled, how much of the transcript
+   * is in it, and how many `GET /turns` reads have *answered* this client. A
+   * transcript drawn from the cache is whole and at its end with that count
+   * still at zero — it cannot have come from a read that has not returned. The
+   * count is of answers rather than of requests on purpose: the design says a
+   * restored transcript may be revalidated behind the paint, so a read in
+   * flight at this instant is the feature and not the bug.
+   *
+   * The class is read from each mutation record's `oldValue` rather than from
+   * the element, so a slow runner that batches the add and the remove into one
+   * callback is still seen as the transition it was.
+   */
+  await page.evaluate(() => {
+    const element = document.querySelector("section.thread");
+    if (!element) throw new Error("the thread is missing");
+    const marker = "thread-settling";
+    const samples: {
+      atEnd: boolean;
+      distance: number;
+      messages: number;
+      turnReads: number;
+    }[] = [];
+    const scope = window as unknown as {
+      threadOpenings: typeof samples;
+      threadTurnReads: number;
+    };
+    scope.threadOpenings = samples;
+    scope.threadTurnReads = 0;
+
+    const fetchImpl = window.fetch.bind(window);
+    const counting = (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      const method = (
+        init?.method ?? (input instanceof Request ? input.method : "GET")
+      ).toUpperCase();
+      const answer = fetchImpl(input, init);
+      if (
+        method === "GET" &&
+        new URL(url, location.href).pathname.endsWith("/turns")
+      )
+        return answer.then((response) => {
+          scope.threadTurnReads += 1;
+          return response;
+        });
+      return answer;
+    };
+    // The counter stands in for `fetch` itself, so anything hung off the real
+    // one — `preconnect` — is carried across rather than dropped.
+    window.fetch = Object.assign(counting, window.fetch) as typeof window.fetch;
+
+    new MutationObserver((records) => {
+      const left = records.some(
+        (record) =>
+          record.attributeName === "class" &&
+          (record.oldValue ?? "").includes(marker),
+      );
+      if (!left || element.classList.contains(marker)) return;
+      const distance =
+        element.scrollHeight - element.scrollTop - element.clientHeight;
+      samples.push({
+        atEnd: distance <= 1,
+        distance,
+        messages: element.querySelectorAll("article.message-user").length,
+        turnReads: scope.threadTurnReads,
+      });
+    }).observe(element, {
+      attributes: true,
+      attributeFilter: ["class"],
+      attributeOldValue: true,
+    });
+  });
+
+  await revealSidebar(page);
+  await page
+    .locator(".flock-bot-row", { has: page.getByText("Long", { exact: true }) })
+    .click();
+
+  await expect(thread.getByText(prompts[0] ?? "")).toBeVisible();
+  await expect(thread.getByText(prompts.at(-1) ?? "")).toBeVisible();
+
+  const openings = await page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          threadOpenings: {
+            atEnd: boolean;
+            distance: number;
+            messages: number;
+            turnReads: number;
+          }[];
+        }
+      ).threadOpenings,
+  );
+  const opening = openings[0];
+  expect(opening).toBeDefined();
+  if (!opening) throw new Error("the thread never opened");
+  // The conversation is on screen at its end in the first frame that shows it:
+  // no top-of-thread frame, and no scroll for the reader to watch.
+  expect(opening.atEnd).toBe(true);
+  // Whole, and drawn from the client's own memory: every Turn is on screen
+  // while no read of them has answered. That is the reload the User asked not
+  // to have — the thread was never empty and never waited on the network.
+  expect(opening.messages).toBe(prompts.length);
+  expect(opening.turnReads).toBe(0);
+
+  // It stays at the end once visible, rather than settling there afterwards.
+  const distance = await thread.evaluate(
+    (element) =>
+      element.scrollHeight - element.scrollTop - element.clientHeight,
+  );
+  expect(distance).toBeLessThanOrEqual(1);
 });
