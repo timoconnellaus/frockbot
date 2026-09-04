@@ -8,6 +8,7 @@ import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
 import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import type { BotStateEnv } from "./bot-state.js";
+import { hydrateStoredRunEventsV1 } from "../test/session-log-probe.js";
 
 // `mock.module` is process-global and the first registration in a suite run
 // fixes the module's shape, so this stub has to satisfy every consumer the run
@@ -308,9 +309,11 @@ describe("BotState Ollama execution", () => {
       ),
     );
     for (const runId of ["ollama-do-run-1", "ollama-do-run-2"]) {
-      const run = await storage.get<StoredRun>(`run:${runId}`);
+      const stored = await storage.get<StoredRun>(`run:${runId}`);
+      expect(stored).toBeDefined();
+      const run = await hydrateStoredRunEventsV1(storage, stored!);
       expect(
-        run?.events.find((event) => event.type === "model/request"),
+        run.events.find((event) => event.type === "model/request"),
       ).toMatchObject({
         request: {
           provider: "ollama-cloud",
