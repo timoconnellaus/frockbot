@@ -1342,10 +1342,16 @@ export class ComputerHost {
         // be a restart, because the service definition has not changed and
         // re-declaring an unchanged definition changes nothing.
         if (inspection.state.update.status === "started") {
-          await this.declareWatchdog(sprite, true);
+          const watchdogRefreshed = await this.declareWatchdog(sprite, true);
+          if (!watchdogRefreshed) return record;
           if (inspection.humanControlFresh) return record;
           await this.declareGateway(sprite, true);
-          await this.restartServiceSoft(sprite, BROWSER_SERVICE, "browser");
+          const browserRefreshed = await this.restartServiceSoft(
+            sprite,
+            BROWSER_SERVICE,
+            "browser",
+          );
+          if (!browserRefreshed) return record;
         }
         await this.writeHostState(sprite, {
           version: 1,
@@ -1386,7 +1392,7 @@ export class ComputerHost {
     record: ComputerRecord,
     progress: ComputerHostProvisioningV1,
     onProgress?: (progress: ComputerHostProvisioningV1) => void,
-    deferGateway = false,
+    deferServiceRestarts = false,
   ): Promise<ComputerRecord> {
     const digest = runtimeDocumentDigestV1();
     // Durable intent precedes the launcher. Recovery sees `started`, compares
@@ -1412,7 +1418,8 @@ export class ComputerHost {
     // immediately resumes the same read-only scan. Do this even while the
     // other service restarts are deferred, so the guard exists as soon as its
     // script does.
-    await this.declareWatchdog(sprite, true);
+    const watchdogRefreshed = await this.declareWatchdog(sprite, true);
+    if (!watchdogRefreshed) return { ...record, provisioning: updated };
     // A human is driving this desktop. `UPDATE_PHASES` disturbed nothing —
     // they are idempotent file installs, and a running websockify serves the
     // viewer page it just rewrote from the same `--web` directory on the next
@@ -1421,14 +1428,19 @@ export class ComputerHost {
     // the digest now matches, and the reconciliation above re-declares it on
     // the first open after the lease goes stale. Deferring the whole update
     // instead is what left a Computer serving no viewer page at all.
-    if (deferGateway) return { ...record, provisioning: updated };
+    if (deferServiceRestarts) return { ...record, provisioning: updated };
     // A running websockify keeps the `--web` directory from its original
     // process, so the newly installed viewer page is only served once that
     // process is replaced (P3).
     await this.declareGateway(sprite, true);
     // The launcher's path is stable, so only a service restart makes an
     // already-running Chromium pick up the newly installed renderer bounds.
-    await this.restartServiceSoft(sprite, BROWSER_SERVICE, "browser");
+    const browserRefreshed = await this.restartServiceSoft(
+      sprite,
+      BROWSER_SERVICE,
+      "browser",
+    );
+    if (!browserRefreshed) return { ...record, provisioning: updated };
     await this.writeHostState(sprite, {
       version: 1,
       generation: record.generation,
@@ -1521,30 +1533,38 @@ export class ComputerHost {
   private async declareWatchdog(
     sprite: SpriteHandle,
     restart: boolean,
-  ): Promise<void> {
+  ): Promise<boolean> {
     await this.declareService(sprite, WATCHDOG_SERVICE, {
       cmd: WATCHDOG_SCRIPT,
     });
-    if (restart) {
-      await this.restartServiceSoft(sprite, WATCHDOG_SERVICE, "watchdog");
-    }
+    return restart
+      ? this.restartServiceSoft(sprite, WATCHDOG_SERVICE, "watchdog")
+      : true;
   }
 
-  /** A failed service refresh is observable through box-doctor, not an open refusal. */
+  /**
+   * A failed service refresh is observable through box-doctor, not an open
+   * refusal. The boolean keeps the durable update intent pending for retry.
+   * An absent service is already reconciled: its next declaration starts the
+   * current launcher, so there is no old process left to replace.
+   */
   private async restartServiceSoft(
     sprite: SpriteHandle,
     name: string,
     label: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await withTimeout(
         settleService(await sprite.restartService(name, "30s"), label),
         `${label} restart`,
         COMPUTER_HOST_PHASE_TIMEOUTS.service,
       );
-    } catch {
+      return true;
+    } catch (error) {
+      if (isNotFound(error)) return true;
       // The service declaration remains supervised. Its doctor check carries
       // the actionable failure without taking exec and file access down too.
+      return false;
     }
   }
 

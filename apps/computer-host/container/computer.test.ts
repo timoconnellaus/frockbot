@@ -917,6 +917,47 @@ describe("open", () => {
     expect(sprite.services.get(DESKTOP_SERVICE)).toBe("running");
   });
 
+  test("a browser refresh that fails stays pending and retries on the next open", async () => {
+    const { host, sprite } = provisioned();
+    sprite.services.set(BROWSER_SERVICE, "running");
+    writeFile(sprite, PROVISION_DIGEST, "stale\n");
+    sprite.scripts = [
+      report("running", updatingRuntime, "update"),
+      report("stopped", updateReady, "update"),
+    ];
+    let browserFailures = 1;
+    sprite.onServiceOperation = (operation, name) => {
+      if (
+        operation === "restart" &&
+        name === BROWSER_SERVICE &&
+        browserFailures-- > 0
+      ) {
+        throw new FakeApiError(500, "the browser would not restart");
+      }
+    };
+
+    const first = await host.handle(request({ kind: "open" }));
+
+    expect(first.status).toBe(200);
+    expect(
+      JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
+    ).toMatchObject({
+      update: { status: "started", digest: runtimeDocumentDigestV1() },
+    });
+
+    const second = await host.handle(
+      request({ kind: "open" }, { effectId: "open-after-restart-failure" }),
+    );
+
+    expect(second.status).toBe(200);
+    expect(
+      sprite.serviceRestarts.filter((name) => name === BROWSER_SERVICE),
+    ).toEqual([BROWSER_SERVICE]);
+    expect(
+      JSON.parse(sprite.files.get(COMPUTER_HOST_STATE_PATH)!.bytes.toString()),
+    ).toEqual({ version: 1, generation: 4 });
+  });
+
   test("provisioning a Computer starts the gateway rather than restarting it", async () => {
     // Nothing is running yet, so the declaration is the start. A restart here
     // would be a second process launch on a Computer that has had none.
