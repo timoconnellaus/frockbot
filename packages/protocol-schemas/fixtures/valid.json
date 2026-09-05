@@ -865,9 +865,7 @@
       "displayName": "Counter",
       "status": "published",
       "currentGenerationId": "generation-1",
-      "tools": [
-        "increment"
-      ],
+      "tools": ["increment"],
       "createdAt": "2026-09-05T00:00:00.000Z"
     }
   },
@@ -882,9 +880,7 @@
           "displayName": "Counter",
           "status": "published",
           "currentGenerationId": "generation-1",
-          "tools": [
-            "increment"
-          ],
+          "tools": ["increment"],
           "createdAt": "2026-09-05T00:00:00.000Z"
         }
       ]
@@ -1029,9 +1025,7 @@
       "displayName": "Counter",
       "status": "published",
       "currentGenerationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
-      "tools": [
-        "increment"
-      ],
+      "tools": ["increment"],
       "createdAt": "2026-09-05T00:00:00.000Z"
     }
   },
@@ -1086,6 +1080,23 @@
           "urgency": "critical"
         }
       ]
+    }
+  },
+  {
+    "name": "MarkReadReceipt valid",
+    "schema": "MarkReadReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "read-1",
+      "status": "applied",
+      "unread": {
+        "schemaVersion": 1,
+        "botId": "alpha",
+        "count": 0,
+        "capped": false,
+        "unread": false,
+        "manuallyUnread": false
+      }
     }
   }
 ]

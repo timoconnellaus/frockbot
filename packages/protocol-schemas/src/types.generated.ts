@@ -656,6 +656,12 @@ export type NotificationDirectory = {
     botId: BotId;
   }>;
 };
+export type MarkReadReceipt = {
+  schemaVersion: 1;
+  commandId: Identifier;
+  status: "applied";
+  unread: UnreadView;
+};
 export interface ProtocolTypes {
   Identifier: Identifier;
   BotId: BotId;
@@ -736,4 +742,5 @@ export interface ProtocolTypes {
   SettingsOptionsQuery: SettingsOptionsQuery;
   SettingsOptionsPage: SettingsOptionsPage;
   NotificationDirectory: NotificationDirectory;
+  MarkReadReceipt: MarkReadReceipt;
 }

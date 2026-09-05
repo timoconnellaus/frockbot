@@ -35,6 +35,8 @@ import { CLIENT_VERSION_DEGRADED_MESSAGE_V1 } from "@frockbot/plugin-shell/run-f
 import {
   decodeBotUnreadCommandV1,
   decodeBotUnreadDirectoryViewV1,
+  decodeBotNotificationDirectoryViewV1,
+  decodeBotUnreadReceiptV1,
 } from "@frockbot/plugin-shell/unread";
 import {
   decodeDirectoryViewV1,
@@ -87,6 +89,8 @@ const existing: Record<string, (value: unknown) => unknown> = {
   BotCreateCommand: decodeCreateBotCommandV1,
   MarkReadCommand: decodeBotUnreadCommandV1,
   UnreadDirectory: decodeBotUnreadDirectoryViewV1,
+  NotificationDirectory: decodeBotNotificationDirectoryViewV1,
+  MarkReadReceipt: decodeBotUnreadReceiptV1,
 };
 
 for (const [accepted, fixtures] of [

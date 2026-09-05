@@ -130,5 +130,6 @@ declare const validators: {
   isNotificationDirectory(
     value: unknown,
   ): value is ProtocolTypes["NotificationDirectory"];
+  isMarkReadReceipt(value: unknown): value is ProtocolTypes["MarkReadReceipt"];
 };
 export default validators;

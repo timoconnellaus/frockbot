@@ -691,9 +691,7 @@
       "schemaVersion": 1,
       "commandId": "command-1",
       "text": "1.1.0",
-      "grant": [
-        "*"
-      ]
+      "grant": ["*"]
     }
   },
   {
@@ -1081,9 +1079,7 @@
       "displayName": "Counter",
       "status": "unknown",
       "currentGenerationId": "generation-1",
-      "tools": [
-        "increment"
-      ],
+      "tools": ["increment"],
       "createdAt": "2026-09-05T00:00:00.000Z"
     }
   },
@@ -1426,6 +1422,23 @@
           "credential": "not-a-secret"
         }
       ]
+    }
+  },
+  {
+    "name": "MarkReadReceipt rejects unknown status",
+    "schema": "MarkReadReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "read-1",
+      "status": "guessed",
+      "unread": {
+        "schemaVersion": 1,
+        "botId": "alpha",
+        "count": 0,
+        "capped": false,
+        "unread": false,
+        "manuallyUnread": false
+      }
     }
   }
 ]
