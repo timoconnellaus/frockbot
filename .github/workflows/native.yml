@@ -1,0 +1,57 @@
+name: Native qualification
+
+on:
+  pull_request:
+    paths:
+      - "apps/native/**"
+      - "packages/protocol-schemas/**"
+      - "scripts/*protocol*"
+      - "scripts/*native*"
+      - ".github/workflows/native.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flutter:
+    name: Flutter qualification (advisory)
+    runs-on: ubuntu-latest
+    # Separate advisory job; it is not a required branch-protection check.
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify committed qualification pins
+        run: python3 scripts/check-native-pins.py
+      - name: Locate the exact qualified SDK
+        id: sdk
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v flutter >/dev/null 2>&1; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Flutter is absent; advisory native checks were not run. Local qualification is still required."
+            exit 0
+          fi
+          flutter --version --machine > "$RUNNER_TEMP/flutter-version.json"
+          if ! python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); sys.exit(v["frameworkRevision"] != "4cf24164269a5ebf0c16a028a00727d0e77bbb05")' "$RUNNER_TEMP/flutter-version.json"; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Runner Flutter differs from the pinned SDK; no upgrade or substitute was attempted."
+            exit 0
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+      - name: Resolve pinned packages
+        if: steps.sdk.outputs.available == 'true'
+        working-directory: apps/native
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze Dart
+        if: steps.sdk.outputs.available == 'true'
+        working-directory: apps/native
+        run: flutter analyze --no-pub
+      - name: Test shared fixtures and native state machines
+        if: steps.sdk.outputs.available == 'true'
+        working-directory: apps/native
+        run: flutter test --no-pub

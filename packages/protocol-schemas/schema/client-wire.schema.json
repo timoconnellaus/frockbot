@@ -2939,6 +2939,86 @@
       },
       "required": ["kind", "botId", "sessionId", "turnId"],
       "additionalProperties": false
+    },
+    "TurnResponse": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "runId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 64000
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunEvent"
+          },
+          "maxItems": 512
+        },
+        "notification": {
+          "$ref": "#/$defs/Notification"
+        }
+      },
+      "required": ["schemaVersion", "runId", "text", "events"],
+      "additionalProperties": false
+    },
+    "AppletSummary": {
+      "type": "object",
+      "properties": {
+        "appletId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 129,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\\.[a-z0-9-]{1,64}$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "status": {
+          "enum": ["draft", "published", "deleted"]
+        },
+        "currentGenerationId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tools": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Instant"
+        }
+      },
+      "required": ["appletId", "displayName", "status", "tools", "createdAt"],
+      "additionalProperties": false
+    },
+    "AppletDirectory": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "applets": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/AppletSummary"
+          }
+        }
+      },
+      "required": ["schemaVersion", "applets"],
+      "additionalProperties": false
     }
   },
   "x-frockbot-compatibility": {

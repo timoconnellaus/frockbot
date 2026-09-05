@@ -123,6 +123,9 @@ function decodeHostInit(data: unknown): AppletHostInitV1 | undefined {
       socketUrl: value.socketUrl,
       token: value.token,
       generationId: value.generationId,
+      ...(value.tokenTransport === "subprotocol-v1"
+        ? { tokenTransport: "subprotocol-v1" as const }
+        : {}),
     },
   };
 }
@@ -178,6 +181,14 @@ export function createApplet<TServer extends { tables: TablesShape }>(
       lastInit = init.applet;
       transport.connect(init.applet);
     });
+    window.parent.postMessage(
+      {
+        schemaVersion: 1,
+        type: "applet/ready",
+        tokenTransport: "subprotocol-v1",
+      },
+      "*",
+    );
     // Leave with a close frame rather than a dropped connection: the server
     // then sees a 1000, not a 1006 it has to discover on its next write. A
     // page restored from the back/forward cache reconnects with the same

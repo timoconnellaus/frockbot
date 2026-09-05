@@ -5,6 +5,7 @@ coverage/
 .pi/
 .herdr/
 .bun/
+.native-build/
 .husky/_/
 bun.lock
 **/gradlew
@@ -18,3 +19,13 @@ packages/applet-sdk/template/
 
 # Standalone Ajv bundle: reproducibility is checked by generate-typescript-protocol.
 packages/protocol-schemas/src/validators.generated.js
+
+# Pinned upstream platform adapter; preserve original source formatting.
+apps/native/vendor/
+apps/native/build/
+apps/native/.dart_tool/
+apps/native/macos/Flutter/ephemeral/
+apps/native/android/.gradle/
+apps/native/spec/a2ui-0.9.1/*.json
+apps/native/android/local.properties
+apps/native/android/.kotlin/

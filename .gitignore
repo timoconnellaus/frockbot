@@ -20,3 +20,5 @@ wrangler-logs/
 # Agent worktrees
 .claude/worktrees/
 .dogfood/
+.native-build/
+.lavish/
