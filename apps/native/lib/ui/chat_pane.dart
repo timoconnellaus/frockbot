@@ -61,15 +61,14 @@ class _ChatPaneState extends State<ChatPane> {
   }
 
   Future<void> send() async {
-    if (editor.value.composing.isValid && !editor.value.composing.isCollapsed) {
-      return;
-    }
-    if (!widget.controller.canSend || editor.text.trim().isEmpty) return;
+    final text = editor.text;
+    if (!widget.controller.canSend || text.trim().isEmpty) return;
     unawaited(HapticFeedback.lightImpact());
-    await widget.controller.send(editor.text);
-    if (!mounted) return;
-    if (widget.controller.draft.isEmpty) editor.clear();
-    focus.requestFocus();
+    // Composing text (Android keyboards hold the last word open) sends as
+    // typed. The box empties now; a failed send puts the text back.
+    editor.clear();
+    await widget.controller.send(text);
+    if (mounted) focus.requestFocus();
   }
 
   Future<void> refreshHistory({bool older = false}) async {
