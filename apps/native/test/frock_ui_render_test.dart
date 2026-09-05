@@ -93,4 +93,48 @@ void main() {
     out.writeAsBytesSync(bytes!.buffer.asUint8List());
     debugDisableShadows = true;
   });
+
+  // The secondary screens in the page frame, captured the same way.
+  for (final (name, screen, proof) in [
+    ('inbox', const FrockInboxScreen(), 'Bob finished the Q3 memo'),
+    ('settings', const FrockSettingsScreen(), 'Save profile'),
+  ]) {
+    testWidgets('$name renders at phone size in the page frame', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390 * 3, 780 * 3);
+      tester.view.devicePixelRatio = 3;
+      tester.view.padding = const FakeViewPadding(top: 47 * 3, bottom: 34 * 3);
+      addTearDown(tester.view.reset);
+      debugDisableShadows = false;
+      final key = GlobalKey();
+      await tester.runAsync(loadFonts);
+      await tester.pumpWidget(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: FrockTokens.themeData(FrockTokens.dark),
+          home: RepaintBoundary(key: key, child: screen),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text(proof), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      if (Platform.environment['FROCK_EVIDENCE'] != '1') {
+        debugDisableShadows = true;
+        return;
+      }
+      final boundary =
+          key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      final image = await tester.runAsync(
+        () => boundary.toImage(pixelRatio: 3),
+      );
+      final bytes = await tester.runAsync(
+        () => image!.toByteData(format: ui.ImageByteFormat.png),
+      );
+      File('../../docs/design/evidence/flutter-$name.png')
+          .writeAsBytesSync(bytes!.buffer.asUint8List());
+      debugDisableShadows = true;
+    });
+  }
 }

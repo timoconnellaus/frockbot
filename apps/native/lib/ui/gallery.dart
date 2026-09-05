@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'frock_page.dart';
 import 'frock_tokens.dart';
 import 'frock_widgets.dart';
 
@@ -170,3 +171,213 @@ class FrockChatScreen extends StatelessWidget {
 }
 
 void _noop() {}
+
+/// The Inbox: a secondary screen in the page frame. Same content as the
+/// system page's "Page frame, lead, notice" component, at phone size.
+class FrockInboxScreen extends StatelessWidget {
+  const FrockInboxScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    return FrockPage(
+      title: 'Inbox',
+      padded: false,
+      leading: const FrockIconButton(
+        Icons.arrow_back_rounded,
+        semanticLabel: 'Back',
+      ),
+      trailing: const FrockIconButton(
+        Icons.refresh_rounded,
+        semanticLabel: 'Refresh inbox',
+      ),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          FrockTokens.edge,
+          8,
+          FrockTokens.edge,
+          FrockTokens.edge,
+        ),
+        children: [
+          const FrockLead(
+            'Open a conversation to follow up, or dismiss an update when you’re done.',
+          ),
+          const FrockEyebrow('Updates'),
+          const SizedBox(height: FrockTokens.eyebrowToGroup),
+          FrockGroup(
+            children: [
+              FrockNotice(
+                title: 'Bob finished the Q3 memo',
+                body: 'Draft is in your Docs. Two numbers need your eye before it goes to Sarah.',
+                stamp: '14:02',
+                actions: [
+                  const FrockPill(
+                    'Open Bot',
+                    icon: Icons.chat_bubble_outline_rounded,
+                    size: PillSize.sm,
+                  ),
+                  FrockPill(
+                    'Dismiss',
+                    kind: PillKind.ghost,
+                    size: PillSize.sm,
+                    color: t.ink2,
+                  ),
+                ],
+              ),
+              FrockNotice(
+                title: 'Research couldn’t reach Notion',
+                body: 'The connection was revoked. Reconnect it in Connectors and the Routine will retry.',
+                stamp: 'Thu',
+                actions: [
+                  const FrockPill(
+                    'Open Bot',
+                    icon: Icons.chat_bubble_outline_rounded,
+                    size: PillSize.sm,
+                  ),
+                  FrockPill(
+                    'Dismiss',
+                    kind: PillKind.ghost,
+                    size: PillSize.sm,
+                    color: t.ink2,
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: FrockTokens.groupGap),
+          const FrockEyebrow('Unread'),
+          const SizedBox(height: FrockTokens.eyebrowToGroup),
+          FrockGroup(
+            children: [
+              FrockRow(
+                leading: const FrockIconTile(Icons.mark_chat_unread_outlined),
+                title: 'Bob',
+                caption: 'Sent the memo to Sarah. Want a summary?',
+                trailing: FrockPill(
+                  'Read',
+                  kind: PillKind.ghost,
+                  size: PillSize.sm,
+                  color: t.accent,
+                ),
+                chevron: true,
+              ),
+              FrockRow(
+                leading: const FrockIconTile(Icons.mark_chat_unread_outlined),
+                title: 'Research',
+                caption: 'Three papers matched. Two look strong.',
+                trailing: FrockPill(
+                  'Read',
+                  kind: PillKind.ghost,
+                  size: PillSize.sm,
+                  color: t.accent,
+                ),
+                chevron: true,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Settings home: rows to the sub-screens, then a section as an eyebrow over
+/// a group with a primary pill to save.
+class FrockSettingsScreen extends StatelessWidget {
+  const FrockSettingsScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    return FrockPage(
+      title: 'Settings',
+      padded: false,
+      leading: const FrockIconButton(
+        Icons.arrow_back_rounded,
+        semanticLabel: 'Back',
+      ),
+      trailing: const FrockIconButton(
+        Icons.refresh_rounded,
+        semanticLabel: 'Refresh settings',
+      ),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          FrockTokens.edge,
+          8,
+          FrockTokens.edge,
+          FrockTokens.edge,
+        ),
+        children: [
+          const FrockGroup(
+            children: [
+              FrockRow(
+                leading: FrockIconTile(Icons.auto_awesome_rounded),
+                title: 'Models',
+                caption: 'Your default model and provider accounts',
+                chevron: true,
+              ),
+              FrockRow(
+                leading: FrockIconTile(Icons.hub_outlined),
+                title: 'Connectors',
+                caption: 'Accounts and services for every Bot',
+                chevron: true,
+              ),
+            ],
+          ),
+          const SizedBox(height: FrockTokens.groupGap),
+          const FrockEyebrow('Profile'),
+          const SizedBox(height: FrockTokens.eyebrowToGroup),
+          FrockGroup(
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: TextField(
+                  decoration: InputDecoration(labelText: 'Name'),
+                  controller: null,
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: TextField(
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    helperText: 'Where your Bots reach you',
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(0, 10, 0, 10),
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  children: [
+                    FrockPill(
+                      'Save profile',
+                      kind: PillKind.primary,
+                      size: PillSize.sm,
+                      onTap: () {},
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: FrockTokens.groupGap),
+          const FrockEyebrow('Frock AI'),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('Account connected', style: t.caption),
+          ),
+          const SizedBox(height: FrockTokens.eyebrowToGroup),
+          const FrockGroup(
+            children: [
+              FrockRow(
+                leading: FrockIconTile(Icons.auto_awesome_rounded),
+                title: 'Frock AI · Auto',
+                caption: 'Default model for every Bot',
+                chevron: true,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}

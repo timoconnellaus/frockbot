@@ -13,12 +13,16 @@ class FrockPage extends StatelessWidget {
     required this.title,
     required this.child,
     this.trailing,
+    this.leading,
     this.maxWidth = 680,
     this.padded = true,
   });
   final String title;
   final Widget child;
   final Widget? trailing;
+
+  /// Replaces the way back (the gallery renders one without a Navigator).
+  final Widget? leading;
   final double maxWidth;
 
   /// Content gets the page edge unless it manages its own (a WebView, a list
@@ -37,14 +41,16 @@ class FrockPage extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
               child: FrockBar(
-                leading: navigator.canPop()
-                    ? FrockIconButton(
-                        Icons.arrow_back_rounded,
-                        key: const ValueKey('back'),
-                        semanticLabel: 'Back',
-                        onTap: navigator.pop,
-                      )
-                    : null,
+                leading:
+                    leading ??
+                    (navigator.canPop()
+                        ? FrockIconButton(
+                            Icons.arrow_back_rounded,
+                            key: const ValueKey('back'),
+                            semanticLabel: 'Back',
+                            onTap: navigator.pop,
+                          )
+                        : null),
                 title: Text(
                   title,
                   style: t.barTitle,
