@@ -93,7 +93,7 @@ describe("ComposioClient", () => {
     }
     expect(failure).toBeInstanceOf(Error);
     expect(failure instanceof Error ? failure.message : "").toBe(
-      "Composio request failed (401)",
+      "The service could not complete this request (401)",
     );
   });
 
