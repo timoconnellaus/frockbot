@@ -11,6 +11,7 @@ import {
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import {
   SessionEventLog,
+  sessionEventLogIndexKeyV1,
   UNRECONCILABLE_RUN_FAILURE_V1,
 } from "@frockbot/kernel-do";
 import { createShellBotBackendContribution } from "./backend.js";
@@ -1614,6 +1615,60 @@ describe("Bot recovery", () => {
     expect(
       storage.listRequests.some((request) => request.prefix === "run:"),
     ).toBe(false);
+  });
+
+  test("reads the conversation Session once per transcript page request", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+    await contribution.materializeSettings(
+      { userId: "user-1", botId: "primary" },
+      { name: "Housework" },
+    );
+    const sessionId = "user-1:primary";
+    await new SessionEventLog(storage).rewrite(sessionId, [
+      {
+        type: "turn/start",
+        seq: 0,
+        timestamp: "2026-09-01T00:00:00.000Z",
+        turn: 1,
+      },
+      {
+        type: "turn/end",
+        seq: 1,
+        timestamp: "2026-09-01T00:00:01.000Z",
+        turn: 1,
+        outcome: "completed",
+      },
+      {
+        type: "conversation/compacted",
+        seq: 2,
+        timestamp: "2026-09-01T00:00:02.000Z",
+        effectId: "compaction-1",
+        fromTurn: 1,
+        throughTurn: 1,
+        summary: "## Summary\nThe first Turn.",
+        identifiers: [],
+        provider: "provider-1",
+        model: "model-1",
+      },
+    ]);
+    storage.gets.length = 0;
+
+    const page = await contribution.listRuns({ schemaVersion: 1 });
+
+    expect(page.announcements).toMatchObject([
+      { type: "conversation/compacted", throughTurn: 1 },
+    ]);
+    // Every full Session-log pass starts at its index. One index read means
+    // marker collection and marker placement shared the same event pass.
+    expect(
+      storage.gets.filter(
+        (key) => key === sessionEventLogIndexKeyV1(sessionId),
+      ),
+    ).toHaveLength(1);
   });
 
   /**
