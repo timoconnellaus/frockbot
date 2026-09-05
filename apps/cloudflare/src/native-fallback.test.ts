@@ -20,6 +20,20 @@ describe("anonymous native Applet bootstrap", () => {
     expect(html).not.toContain("javascriptChannel");
     expect(html).not.toContain("Bearer");
     expect(html).not.toContain("?token=");
+    // The whole kit palette travels, not just three names; anything missing
+    // falls back to the kit's light defaults and looks off-brand on the phone.
+    for (const name of [
+      "surface-raised",
+      "surface-subtle",
+      "text-muted",
+      "border",
+      "accent-surface",
+      "accent-text",
+      "radius-card",
+    ]) {
+      expect(html).toContain(`"${name}":`);
+    }
+    expect(html).toContain("background:#1b1a20");
   });
   test("refuses attacker origins, artifact paths, duplicate queries and non-GET", () => {
     for (const input of [
