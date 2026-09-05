@@ -20,8 +20,8 @@ export interface VoiceSessionEnvV1 {
    * The direct OpenAI path. Present, it is the one that runs: the AI Gateway's
    * realtime path has not yet been exercised with a transcription-only
    * session. Deployed as a Worker secret, so the release workflow's
-   * `--secrets-file` list must carry the name or a deploy would delete it (ADR
-   * 0025).
+   * `--secrets-file` list must carry the name or no release ever updates it
+   * (ADR 0025).
    */
   OPENAI_API_KEY?: string;
   /** `cf-aig-authorization` bearer for the `flock` AI Gateway. */
