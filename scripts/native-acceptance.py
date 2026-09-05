@@ -183,9 +183,46 @@ def flow(bot_name, applet_name):
     print("Navigation completed. Facet persistence and durable receipt correlation are separate required proofs.")
 
 
+def parse_metrics(raw):
+    # Android splits long Flutter print calls into unprefixed continuation
+    # lines. Retain complete bounded records, never a truncated first line.
+    records, pending, dropped = [], "", 0
+    allowed = {"schemaVersion", "frames", "appInputToFrameMs", "firstPaintMs", "firstEditableFrameMs"}
+    for line in raw.splitlines():
+        if "FROCKBOT_METRICS " in line:
+            dropped += bool(pending)
+            pending = line.split("FROCKBOT_METRICS ", 1)[1]
+        elif pending:
+            pending += line
+        else:
+            continue
+        if len(pending) > 32768:
+            dropped += 1
+            pending = ""
+            continue
+        try:
+            value = json.loads(pending)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and value.get("schemaVersion") == 1 and set(value) <= allowed:
+            records.append(value)
+        else:
+            dropped += 1
+        pending = ""
+    return {"records": records, "incompleteRecords": dropped + bool(pending)}
+
+
+def capture_metrics():
+    pid = adb("shell", "pidof", PACKAGE).stdout.strip()
+    if not pid.isdigit():
+        raise RuntimeError("The native app process is unavailable")
+    raw = adb("logcat", "-d", "--pid=" + pid, "-s", "flutter:I", "-v", "raw").stdout
+    return {"pid": int(pid), **parse_metrics(raw)}
+
+
 def measure():
     wait_device()
-    cold, warm = [], []
+    cold, warm, flutter = [], [], []
     for index in range(30):
         adb("shell", "am", "force-stop", PACKAGE)
         cold.append(adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity").stdout)
@@ -193,7 +230,11 @@ def measure():
         adb("shell", "input", "keyevent", "KEYCODE_HOME")
         warm.append(adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity").stdout)
         time.sleep(1)
+        # Once per process, before the next cold launch kills it. Reading only
+        # the final PID silently loses the first 29 launch observations.
+        flutter.append({"launch": index + 1, **capture_metrics()})
         write("launches.json", {"activityCold": cold, "activityWarm": warm, "firstEditableFrame": None})
+        write("flutter-launch-metrics.json", flutter)
     write("base-memory.txt", adb("shell", "dumpsys", "meminfo", PACKAGE).stdout)
     for _ in range(20):
         adb("shell", "input", "keyevent", "KEYCODE_HOME")
@@ -202,9 +243,7 @@ def measure():
         time.sleep(1)
     write("after-resume-memory.txt", adb("shell", "dumpsys", "meminfo", PACKAGE).stdout)
     write("gfxinfo.txt", adb("shell", "dumpsys", "gfxinfo", PACKAGE, "framestats").stdout)
-    pid = adb("shell", "pidof", PACKAGE).stdout.strip()
-    raw = adb("logcat", "-d", "--pid=" + pid, "-s", "flutter:I").stdout
-    write("flutter-metrics.txt", "\n".join(line for line in raw.splitlines() if "FROCKBOT_METRICS " in line))
+    write("flutter-resume-metrics.json", capture_metrics())
     write("measurement-status.json", {"threeFiveMinuteRuns": False, "flutterReleaseFrameTrace": False,
                                       "inputToPaintTrace": False, "firstEditableFrame30Launches": False,
                                       "applet20OpenCloseCycles": False, "exitCriteriaMet": False})
