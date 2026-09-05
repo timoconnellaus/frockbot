@@ -2,17 +2,12 @@ import type { ClientPluginContext } from "@frockbot/client-core";
 import type {
   BotSettingsViewV1,
   ModelBindingV1,
-  UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type { FrockBotWebData } from "@frockbot/plugin-shell/shared";
 import type { InjectionKey, Ref } from "vue";
-import {
-  ACCOUNT_MODEL_SETTING_ID_V1,
-  BOT_MODEL_SETTING_ID_V1,
-} from "../model-settings.js";
+import { BOT_MODEL_SETTING_ID_V1 } from "../model-settings.js";
 
 export interface CustomModelsClientState {
-  setAccountModel(model: ModelBindingV1 | undefined): Promise<void>;
   setBotModel(model: ModelBindingV1 | undefined): Promise<void>;
 }
 
@@ -55,23 +50,6 @@ export function createCustomModelsClientState(
   web: Ref<CustomModelsWebData>,
 ): CustomModelsClientState {
   return {
-    async setAccountModel(model) {
-      const current: UserSettingsViewV1 | undefined = web.value.userSettings;
-      if (!current || !transport.executeConfiguration) {
-        throw new Error("Model settings are unavailable");
-      }
-      const receipt = await transport.executeConfiguration({
-        schemaVersion: 1,
-        type: "user/set-package-settings",
-        commandId: crypto.randomUUID(),
-        expectedRevision: current.revision,
-        packageId: "custom-models",
-        ...settingChange(ACCOUNT_MODEL_SETTING_ID_V1, model),
-      });
-      await web.value.loadUserSettings();
-      await rejectRefusal(receipt);
-    },
-
     async setBotModel(model) {
       const current: BotSettingsViewV1 | undefined = web.value.botSettings;
       const botId = web.value.activeBotId;

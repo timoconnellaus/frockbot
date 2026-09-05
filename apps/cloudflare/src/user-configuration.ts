@@ -1,3 +1,4 @@
+import { decodeProtocol } from "@frockbot/protocol-schemas";
 import { saveNativeQualificationForm } from "./native-form.js";
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -16,6 +17,7 @@ import {
 } from "@frockbot/connection-core";
 import {
   decodeBotSettingsViewV1,
+  type UserSettingsViewV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
 } from "@frockbot/configuration-core";
@@ -665,10 +667,68 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return pinned === userId;
   }
 
-  async readConfiguration(input: unknown) {
+  async readConfiguration(input: unknown): Promise<UserSettingsViewV1> {
     const request = decodeUserConfigurationReadRpcV1(input);
     await this.assertUserIdentity(request.userId);
-    return (await this.settingsContribution()).readConfiguration(request);
+    const settings = await (
+      await this.settingsContribution()
+    ).readConfiguration(request);
+    if (request.view === 2) return settings;
+    return (await this.settingsContribution()).previousSettingsView(settings);
+  }
+
+  async readSettingsFrame(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        home: rpcEnum(["application", "models"]),
+      },
+      { identityName: rpcString(100), identityEmail: rpcString(320) },
+    );
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.settingsContribution()).readSettingsFrame(
+      request.userId as string,
+      request.home as "application" | "models",
+      {
+        ...(request.identityName
+          ? { name: request.identityName as string }
+          : {}),
+        ...(request.identityEmail
+          ? { email: request.identityEmail as string }
+          : {}),
+      },
+    );
+  }
+
+  async readSettingsOptions(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      query: rpcDecoded((value) =>
+        decodeProtocol("SettingsOptionsQuery", value),
+      ),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.settingsContribution()).readSettingsOptions(
+      request.userId as string,
+      request.query,
+    );
+  }
+
+  async changeSettings(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      home: rpcEnum(["application", "models"]),
+      command: rpcDecoded((value) =>
+        decodeProtocol("SettingsChangeCommand", value),
+      ),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.settingsContribution()).changeSettings(
+      request.userId as string,
+      request.home as "application" | "models",
+      request.command,
+    );
   }
 
   async executeConfiguration(input: unknown) {

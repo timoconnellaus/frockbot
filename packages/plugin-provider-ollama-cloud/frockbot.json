@@ -3,17 +3,25 @@
   "id": "provider-ollama-cloud",
   "displayName": "Ollama Cloud",
   "version": "0.0.1",
-  "compatibility": { "frockbot": ">=0.0.1" },
+  "compatibility": {
+    "frockbot": ">=0.0.1"
+  },
   "dependencies": {
-    "custom-models": ">=0.0.1",
     "credentials": ">=0.0.1",
     "settings": ">=0.0.1",
     "web": ">=0.0.1"
   },
   "defaultEnablement": "disabled",
   "contributions": {
-    "backend": [{ "entry": "./user", "host": "user" }],
-    "runtime": { "entry": "./runtime" }
+    "backend": [
+      {
+        "entry": "./user",
+        "host": "user"
+      }
+    ],
+    "runtime": {
+      "entry": "./runtime"
+    }
   },
   "permissions": [
     "connections:manage",
@@ -41,7 +49,10 @@
         "id": "ollama-cloud-account",
         "displayName": "Ollama Cloud account",
         "allowMultiple": true,
-        "authorization": { "kind": "api-key", "driverId": "ollama-cloud" },
+        "authorization": {
+          "kind": "api-key",
+          "driverId": "ollama-cloud"
+        },
         "capabilities": ["ollama-cloud-models", "ollama-cloud-web-search"],
         "settings": [
           {

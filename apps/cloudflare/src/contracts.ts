@@ -1,3 +1,7 @@
+import type {
+  SettingsFrame,
+  SettingsChangeCommand,
+} from "@frockbot/protocol-schemas";
 import {
   type BotIsolateEntrypoint,
   type BotIsolateEnv,
@@ -501,6 +505,8 @@ export interface AuthSession {
 }
 
 export interface GatewayAuth {
+  /** Profile hints for the already authenticated User; no credential fields. */
+  profile?(userId: string): Promise<{ name?: string; email?: string } | null>;
   handler(request: Request): Promise<Response>;
   getSession(headers: Headers): Promise<AuthSession | null>;
 }
@@ -555,6 +561,20 @@ export interface UserConfigurationBinding {
   readConfiguration(
     request: UserConfigurationReadRpcV1,
   ): Promise<UserSettingsViewV1>;
+  readSettingsFrame(
+    request: UserConfigurationReadRpcV1 & { home: "application" | "models" },
+  ): Promise<SettingsFrame>;
+  readSettingsOptions(
+    request: UserConfigurationReadRpcV1 & {
+      query: import("@frockbot/protocol-schemas").SettingsOptionsQuery;
+    },
+  ): Promise<import("@frockbot/protocol-schemas").SettingsOptionsPage>;
+  changeSettings(
+    request: UserConfigurationReadRpcV1 & {
+      home: "application" | "models";
+      command: SettingsChangeCommand;
+    },
+  ): Promise<OperationReceiptV1>;
   executeConfiguration(
     request: UserConfigurationExecuteRpcV1,
   ): Promise<OperationReceiptV1>;

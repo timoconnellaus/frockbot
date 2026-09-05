@@ -63,7 +63,6 @@ function user(state: "disabled" | "installed"): UserSettingsViewV1 {
         packageId: "custom-models",
         version: "0.0.1",
         state,
-        values: { "account-model": accountModel },
       },
     ],
     connections: [
@@ -89,6 +88,7 @@ function user(state: "disabled" | "installed"): UserSettingsViewV1 {
       },
     ],
     platformModel,
+    accountModel,
   };
 }
 
@@ -118,7 +118,7 @@ describe("Custom models resolution", () => {
         user: disabledUser,
         packages,
       }),
-    ).toMatchObject({ source: "platform", model: platformModel });
+    ).toMatchObject({ source: "account", model: accountModel });
     expect(disabledUser.packages[1]?.values).toEqual(storedAccountValues);
     expect(configuredBot.packageValues).toEqual(storedBotValues);
 
@@ -139,7 +139,7 @@ describe("Custom models resolution", () => {
     ).toMatchObject({ source: "account", model: accountModel });
 
     const withoutAccount = user("installed");
-    delete withoutAccount.packages[1]?.values;
+    delete withoutAccount.accountModel;
     expect(
       resolveEffectiveBotModelV1({
         bot: { packageValues: {} },

@@ -16,7 +16,7 @@ const MODEL_BINDING_SCHEMA = {
 } satisfies PackageSettingSchema;
 
 describe("Custom models manifest", () => {
-  test("is default-disabled and declares exact User and Bot model-role settings", () => {
+  test("is default-disabled and declares only the Bot model override setting", () => {
     const manifest = decodeFrockBotManifest(rawManifest);
 
     expect(manifest).toMatchObject({
@@ -26,13 +26,6 @@ describe("Custom models manifest", () => {
       defaultEnablement: "disabled",
     });
     expect(manifest.configuration?.settings).toEqual([
-      {
-        id: "account-model",
-        schemaVersion: 1,
-        scopes: ["user"],
-        role: "model",
-        schema: MODEL_BINDING_SCHEMA,
-      },
       {
         id: "model",
         schemaVersion: 1,
@@ -51,7 +44,7 @@ describe("Custom models manifest", () => {
     });
   });
 
-  test("is the declared Ollama Cloud dependency", () => {
-    expect(ollamaManifest.dependencies["custom-models"]).toBe(">=0.0.1");
+  test("is not required to choose Ollama Cloud", () => {
+    expect(ollamaManifest.dependencies).not.toHaveProperty("custom-models");
   });
 });

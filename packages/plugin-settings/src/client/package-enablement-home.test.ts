@@ -23,8 +23,11 @@ test("only Plugins turns a Package on or off", async () => {
   expect(callers).toEqual(["PluginsSurface.vue"]);
 });
 
-test("Models sends the decision to Plugins instead of making it", async () => {
+test("Models keeps generic enablement out of the permanent model-choice surface", async () => {
   const source = await Bun.file(new URL("ModelsSurface.vue", directory)).text();
-  expect(source).toContain(`surfaces.open("plugins")`);
+  // Account choice is now required base behavior. Choosing a provider is the
+  // constitutional opt-in, admitted as a typed model-selection command by the
+  // User owner; there is no generic Package enable/disable control here.
+  expect(source).toContain('<SettingsFrameView home="models"');
   expect(source).not.toContain("setPackageEnabled");
 });

@@ -6554,7 +6554,8 @@ export class ShellBotBackendContribution {
     return {
       composioRequest: (userId, botId, command) =>
         rpc.composioRequest({ schemaVersion: 1, userId, botId, command }),
-      readConfiguration: (input) => rpc.readConfiguration(input),
+      readConfiguration: (input) =>
+        rpc.readConfiguration({ ...input, view: 2 }),
       executeConfiguration: async (command) =>
         decodeOperationReceiptV1(
           await rpc.executeConfiguration({

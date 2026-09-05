@@ -4,6 +4,11 @@ import {
   clientSurfaceRegistryKey,
   type ClientPlugin,
 } from "@frockbot/client-core";
+import { authSessionClientKey } from "@frockbot/plugin-auth/shared";
+import {
+  createSettingsFrameClient,
+  settingsFrameClientKey,
+} from "./settings-frames.js";
 import BotPanel from "./BotPanel.vue";
 import BotSettingsSurface from "./BotSettingsSurface.vue";
 import BotSettingsTrigger from "./BotSettingsTrigger.vue";
@@ -17,7 +22,21 @@ import { defineClientContribution } from "@frockbot/kernel-contracts/contributio
 
 export const settingsClientPlugin: ClientPlugin = (ctx) => {
   const surfaces = ctx.inject(clientSurfaceRegistryKey);
+  const auth = ctx.inject(authSessionClientKey);
+  const frames = createSettingsFrameClient(
+    ctx.transport,
+    () =>
+      auth.projection.value.status === "authenticated"
+        ? auth.projection.value.user.id
+        : undefined,
+    {
+      getItem: (key) => localStorage.getItem(key),
+      setItem: (key, value) => localStorage.setItem(key, value),
+      removeItem: (key) => localStorage.removeItem(key),
+    },
+  );
   return [
+    ctx.provide(settingsFrameClientKey, frames),
     surfaces.register({
       id: "bot-settings",
       title: "Settings",

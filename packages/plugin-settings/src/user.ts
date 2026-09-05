@@ -1,8 +1,19 @@
+import { decodeProtocol } from "@frockbot/protocol-schemas";
+import {
+  applicationSettingsFrame,
+  applicationSettingsCommand,
+  modelsSettingsFrame,
+  modelsSettingsCommand,
+  modelSettingsOptions,
+} from "./settings-frame.js";
 import {
   configurationCommandFingerprintV1,
+  packageConfigurationHomeV1,
   ConfigurationConflictError,
   ConfigurationDecodeError,
   decodePackageSettingIdsV1,
+  decodeModelBindingV1,
+  modelBindingFailureV1,
   decodePackageSettingsPatchV1,
   MAX_PACKAGE_SETTINGS_V1,
   decodeOperationReceiptV1,
@@ -13,6 +24,7 @@ import {
   MAX_USER_CONNECTIONS_V1,
   USER_PROFILE_PLACEHOLDER_NAME_V1,
   type ConnectionView,
+  type ExecutionPackageDefinition,
   type JsonValue,
   type PackageSettingValueV1,
   type OperationReceiptV1,
@@ -29,11 +41,17 @@ import {
   type CatalogPinV1,
 } from "@frockbot/catalog-core";
 import type { ConnectionCommandV1 } from "@frockbot/connection-core";
-import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
+import type {
+  PackageSettingDefinition,
+  ConnectionTypeDefinition,
+} from "@frockbot/kernel-composition";
 import type { Plugin } from "cordis";
 import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 const STATE_KEY = "user-configuration";
+const ACCOUNT_MODEL_KEY = "user-account-model:v1";
+const ACCOUNT_MODEL_CHECKPOINT_KEY =
+  "user-account-model:migration-checkpoint:v1";
 const DEFAULT_PACKAGES_BOOTSTRAP_KEY = "user-default-packages-bootstrap:v1";
 const DEFAULT_PACKAGES_BOOTSTRAP_VERSION = 3;
 /**
@@ -126,6 +144,9 @@ export interface UserPackageCatalogHost {
 export interface AvailableUserPackage {
   packageId: string;
   version: string;
+  displayName?: string;
+  capabilities?: readonly ExecutionPackageDefinition["capabilities"][number][];
+  connectionTypes?: readonly ConnectionTypeDefinition[];
   /**
    * True when the immutable application manifest declares a Connection Type
    * or Capability for this Package. These are the Packages a new User owns
@@ -258,6 +279,10 @@ function mergePackageSettingValues(
 function applyUserCommand(
   current: UserSettingsViewV1,
   command: UserConfigurationCommandV1,
+  chooseProvider: (
+    current: UserSettingsViewV1,
+    packageId: string,
+  ) => UserSettingsViewV1,
   settingDefinitions: (
     packageId: string,
     version: string,
@@ -267,6 +292,16 @@ function applyUserCommand(
   switch (command.type) {
     case "user/update-profile":
       return { ...current, revision, profile: command.profile };
+    case "user/choose-model-provider":
+      return chooseProvider(current, command.packageId);
+    case "user/set-account-model": {
+      const { accountModel: _previous, ...base } = current;
+      return {
+        ...base,
+        revision,
+        ...(command.model === null ? {} : { accountModel: command.model }),
+      };
+    }
     case "user/set-platform-model":
       return {
         ...current,
@@ -639,7 +674,10 @@ export class UserSettingsBackendContribution {
                 "repair",
               );
         let settingsChanged = stored !== undefined && rawMigrated !== stored;
-        let migrated = decodeUserSettingsViewV1(rawMigrated);
+        let migrated = await this.withAccountModel(
+          decodeUserSettingsViewV1(rawMigrated),
+          transaction,
+        );
         if (markerVersion === 1) {
           const seeded = this.applyEnablementRolloutDefaults(
             this.addMissingPackages(migrated, this.enablementRolloutPackages),
@@ -667,7 +705,9 @@ export class UserSettingsBackendContribution {
           ? { ...migrated, revision: migrated.revision + 1 }
           : migrated;
         await transaction.put({
-          ...(settingsChanged ? { [STATE_KEY]: next } : {}),
+          ...(settingsChanged
+            ? await this.configurationRecords(next, transaction)
+            : {}),
           [DEFAULT_PACKAGES_BOOTSTRAP_KEY]: {
             schemaVersion: DEFAULT_PACKAGES_BOOTSTRAP_VERSION,
           },
@@ -680,13 +720,16 @@ export class UserSettingsBackendContribution {
           : decodeUserSettingsViewV1(
               migrateStoredUserSettingsV1(stored, this.storedSettingsPackages),
             );
-      const seeded = this.addMissingPackages(current, this.defaultPackages);
+      const seeded = this.addMissingPackages(
+        await this.withAccountModel(current, transaction),
+        this.defaultPackages,
+      );
       const next = {
         ...seeded,
         revision: seeded.revision + 1,
       } satisfies UserSettingsViewV1;
       await transaction.put({
-        [STATE_KEY]: next,
+        ...(await this.configurationRecords(next, transaction)),
         [DEFAULT_PACKAGES_BOOTSTRAP_KEY]: {
           schemaVersion: DEFAULT_PACKAGES_BOOTSTRAP_VERSION,
         },
@@ -905,6 +948,118 @@ export class UserSettingsBackendContribution {
     return entry;
   }
 
+  private chooseModelProvider(
+    current: UserSettingsViewV1,
+    packageId: string,
+  ): UserSettingsViewV1 {
+    const provider = this.host.availablePackages.find(
+      (pkg) => pkg.packageId === packageId,
+    );
+    if (
+      !provider?.capabilities?.some((capability) => capability.kind === "model")
+    )
+      throw new ConfigurationDecodeError("Model provider is unavailable");
+    let packages = [...current.packages];
+    const visiting = new Set<string>();
+    const enable = (id: string) => {
+      const existing = packages.find((pkg) => pkg.packageId === id);
+      if (existing?.state === "installed") return;
+      if (existing?.state === "failed")
+        throw new ConfigurationDecodeError(
+          "This provider needs recovery before it can be chosen",
+        );
+      if (visiting.has(id))
+        throw new ConfigurationDecodeError(
+          "Provider dependencies could not be resolved",
+        );
+      const available = this.host.availablePackages.find(
+        (pkg) =>
+          pkg.packageId === id &&
+          (!existing || pkg.version === existing.version),
+      );
+      if (!available)
+        throw new ConfigurationDecodeError(
+          "A provider dependency is unavailable",
+        );
+      visiting.add(id);
+      for (const dependency of Object.keys(available.dependencies ?? {}).sort())
+        enable(dependency);
+      visiting.delete(id);
+      packages = [
+        ...packages.filter((pkg) => pkg.packageId !== id),
+        existing
+          ? { ...existing, state: "installed" }
+          : { packageId: id, version: available.version, state: "installed" },
+      ];
+    };
+    enable(packageId);
+    return { ...current, revision: current.revision + 1, packages };
+  }
+
+  /** Previous readers have one fallback slot; preserve the current effective
+   * account fallback without restoring the removed Package setting/control. */
+  previousSettingsView(settings: UserSettingsViewV1): UserSettingsViewV1 {
+    const { accountModel, ...previous } = settings;
+    const packages = this.host.availablePackages.map((pkg) => ({
+      ...pkg,
+      settings: [...(pkg.settings ?? [])],
+      capabilities: [...(pkg.capabilities ?? [])],
+      connectionTypes: [...(pkg.connectionTypes ?? [])],
+    }));
+    return accountModel &&
+      !modelBindingFailureV1({ model: accountModel, user: settings, packages })
+      ? { ...previous, platformModel: accountModel }
+      : previous;
+  }
+
+  async readSettingsFrame(
+    userId: string,
+    home: "application" | "models",
+    identity?: { name?: string; email?: string },
+  ) {
+    const frame =
+      home === "models" ? modelsSettingsFrame : applicationSettingsFrame;
+    return frame(
+      userId,
+      await this.readConfiguration({ schemaVersion: 1, userId }),
+      this.host.availablePackages,
+      identity,
+    );
+  }
+
+  async readSettingsOptions(userId: string, input: unknown) {
+    return modelSettingsOptions(
+      userId,
+      await this.readConfiguration({ schemaVersion: 1, userId }),
+      this.host.availablePackages,
+      input,
+    );
+  }
+
+  async changeSettings(
+    userId: string,
+    home: "application" | "models",
+    input: unknown,
+  ) {
+    const requested = decodeProtocol("SettingsChangeCommand", input);
+    if (requested.ownerId !== userId)
+      throw new ConfigurationDecodeError("Settings owner mismatch");
+    const command =
+      home === "models"
+        ? modelsSettingsCommand(requested)
+        : applicationSettingsCommand(requested);
+    return this.host.storage.transaction((storage) =>
+      this.applyConfigurationCommand(
+        userId,
+        command,
+        storage,
+        configurationCommandFingerprintV1(command),
+        undefined,
+        home,
+      ),
+    );
+  }
+
   async executeConfiguration(input: unknown): Promise<OperationReceiptV1> {
     const request = decodeUserConfigurationExecuteRpcV1(input);
     const { command } = request;
@@ -968,6 +1123,7 @@ export class UserSettingsBackendContribution {
     storage: UserSettingsTransaction,
     commandFingerprint: string,
     catalogInstall?: CatalogEntryV1,
+    home?: "application" | "models",
   ): Promise<OperationReceiptV1> {
     await this.assertIdentity(userId, storage);
     const receiptKey = `${RECEIPT_PREFIX}${command.commandId}`;
@@ -993,11 +1149,7 @@ export class UserSettingsBackendContribution {
         throw new Error("Package is not available in this application");
       }
     }
-    const storedSettings = await storage.get<unknown>(STATE_KEY);
-    const current =
-      storedSettings === undefined
-        ? initialState()
-        : decodeUserSettingsViewV1(migrateStoredUserSettingsV1(storedSettings));
+    const current = await this.readSnapshot(storage);
     if (command.type === "user/set-package-enabled" && command.enabled) {
       const installed = current.packages.find(
         (pkg) => pkg.packageId === command.packageId,
@@ -1029,6 +1181,33 @@ export class UserSettingsBackendContribution {
       await storage.put(receiptKey, { commandFingerprint, receipt });
       return receipt;
     }
+    if (home !== undefined && command.type === "user/set-package-settings") {
+      const installed = current.packages.find(
+        (pkg) => pkg.packageId === command.packageId,
+      );
+      const item = this.host.availablePackages.find(
+        (pkg) =>
+          pkg.packageId === command.packageId &&
+          pkg.version === installed?.version,
+      );
+      if (
+        installed?.state !== "installed" ||
+        !item ||
+        packageConfigurationHomeV1(item) !==
+          (home === "application" ? "user-settings" : "models")
+      ) {
+        const receipt: OperationReceiptV1 = {
+          schemaVersion: 1,
+          commandId: command.commandId,
+          revision: current.revision,
+          status: "rejected",
+          failure:
+            "These settings are no longer available here. Refresh Settings to continue.",
+        };
+        await storage.put(receiptKey, { commandFingerprint, receipt });
+        return receipt;
+      }
+    }
     let dependencyFailure: string | undefined;
     if (command.type === "user/install-package" && command.enabled !== false) {
       dependencyFailure = this.packageDependencyFailure(
@@ -1059,9 +1238,30 @@ export class UserSettingsBackendContribution {
       await storage.put(receiptKey, { commandFingerprint, receipt });
       return receipt;
     }
-    const applied = applyUserCommand(current, command, (packageId, version) =>
-      this.settingDefinitions(packageId, version),
-    );
+    let applied: UserSettingsViewV1;
+    try {
+      applied = applyUserCommand(
+        current,
+        command,
+        (current, id) => this.chooseModelProvider(current, id),
+        (packageId, version) => this.settingDefinitions(packageId, version),
+      );
+    } catch (error) {
+      if (
+        command.type !== "user/choose-model-provider" ||
+        !(error instanceof ConfigurationDecodeError)
+      )
+        throw error;
+      const receipt: OperationReceiptV1 = {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        revision: current.revision,
+        status: "rejected",
+        failure: error.message,
+      };
+      await storage.put(receiptKey, { commandFingerprint, receipt });
+      return receipt;
+    }
     // One command, one revision: the cascade is part of the disable the User
     // asked for, not a second write they have to reconcile against.
     const next =
@@ -1076,19 +1276,74 @@ export class UserSettingsBackendContribution {
       status: "applied",
     };
     await storage.put({
-      [STATE_KEY]: next,
+      ...(await this.configurationRecords(next, storage)),
       [receiptKey]: { commandFingerprint, receipt },
     });
     return receipt;
+  }
+
+  /** Account choice has its own versioned User record; the previous settings DTO stays readable. */
+  private async withAccountModel(
+    value: UserSettingsViewV1,
+    storage: UserSettingsTransaction,
+  ): Promise<UserSettingsViewV1> {
+    const stored = await storage.get<unknown>(ACCOUNT_MODEL_KEY);
+    if (stored === undefined) return value; // A previous shape may supply the one-time migration value.
+    if (
+      !stored ||
+      typeof stored !== "object" ||
+      Array.isArray(stored) ||
+      Object.keys(stored).sort().join() !== "model,schemaVersion" ||
+      !("schemaVersion" in stored) ||
+      stored.schemaVersion !== 1 ||
+      !("model" in stored)
+    )
+      throw new ConfigurationDecodeError("Stored account model is invalid");
+    const { accountModel: _migrated, ...base } = value;
+    return {
+      ...base,
+      ...(stored.model === null
+        ? {}
+        : { accountModel: decodeModelBindingV1(stored.model) }),
+    };
+  }
+
+  private async configurationRecords(
+    value: UserSettingsViewV1,
+    storage: UserSettingsTransaction,
+  ): Promise<Record<string, unknown>> {
+    const { accountModel, ...settings } = value;
+    const previous = await storage.get<unknown>(ACCOUNT_MODEL_KEY);
+    // All callers are inside the User owner's transaction. Preserve one recovery
+    // checkpoint before the migration; code revert never rewinds this data.
+    const checkpoint =
+      previous === undefined
+        ? await storage.get<unknown>(STATE_KEY)
+        : undefined;
+    return {
+      [STATE_KEY]: settings,
+      [ACCOUNT_MODEL_KEY]: { schemaVersion: 1, model: accountModel ?? null },
+      ...(checkpoint === undefined
+        ? {}
+        : {
+            [ACCOUNT_MODEL_CHECKPOINT_KEY]: {
+              schemaVersion: 1,
+              settings: checkpoint,
+            },
+          }),
+    };
   }
 
   async readSnapshot(
     storage: UserSettingsTransaction = this.host.storage,
   ): Promise<UserSettingsViewV1> {
     const stored = await storage.get<unknown>(STATE_KEY);
-    return stored === undefined
-      ? initialState()
-      : decodeUserSettingsViewV1(migrateStoredUserSettingsV1(stored));
+    return this.withAccountModel(
+      stored === undefined
+        ? initialState()
+        : decodeUserSettingsViewV1(migrateStoredUserSettingsV1(stored)),
+      storage,
+    );
   }
 
   async read(
@@ -1121,7 +1376,7 @@ export class UserSettingsBackendContribution {
         revision: current.revision + 1,
         connections: [...retained, structuredClone(connection)],
       } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
+      await transaction.put(await this.configurationRecords(next, transaction));
       return structuredClone(connection);
     };
     if (storage) return create(storage);
@@ -1157,7 +1412,7 @@ export class UserSettingsBackendContribution {
             : candidate,
         ),
       } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
+      await transaction.put(await this.configurationRecords(next, transaction));
       return structuredClone(nextConnection);
     };
     if (storage) return replace(storage);

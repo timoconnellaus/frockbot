@@ -357,6 +357,7 @@
         "@frockbot/connection-core": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
         "@frockbot/protocol": "workspace:*",
+        "@frockbot/protocol-schemas": "workspace:*",
         "vue": "3.5.41",
       },
       "devDependencies": {
@@ -1185,6 +1186,7 @@
         "@frockbot/kernel-contracts": "workspace:*",
         "@frockbot/plugin-auth": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",
+        "@frockbot/protocol-schemas": "workspace:*",
         "cordis": "4.0.0-rc.8",
         "vue": "3.5.41",
       },

@@ -2360,6 +2360,42 @@
         },
         "editable": {
           "type": "boolean"
+        },
+        "hint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "minimum": {
+          "type": "number"
+        },
+        "maximum": {
+          "type": "number"
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32000
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "choices": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/SettingChoice"
+          }
+        },
+        "choiceSource": {
+          "const": "account-models"
+        },
+        "isSet": {
+          "type": "boolean"
+        },
+        "canReset": {
+          "type": "boolean"
         }
       },
       "required": ["id", "label", "kind", "value", "editable"],
@@ -2393,7 +2429,10 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/$defs/Identifier"
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,255}$"
               },
               "packageId": {
                 "$ref": "#/$defs/Identifier"
@@ -2418,6 +2457,28 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 8000
+              },
+              "actions": {
+                "type": "array",
+                "maxItems": 4,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "enum": ["choose-provider", "manage-provider"]
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "packageId": {
+                      "$ref": "#/$defs/Identifier"
+                    }
+                  },
+                  "required": ["kind", "label", "packageId"],
+                  "additionalProperties": false
+                }
               }
             },
             "required": ["id", "label", "fields"],
@@ -3020,11 +3081,206 @@
       "required": ["schemaVersion", "applets"],
       "additionalProperties": false
     },
+    "SettingsChangeCommand": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "commandId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sectionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,255}$"
+        },
+        "values": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "$ref": "#/$defs/Json"
+          }
+        },
+        "unset": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        },
+        "ownerId": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "commandId",
+        "expectedRevision",
+        "sectionId",
+        "values",
+        "ownerId"
+      ],
+      "additionalProperties": false
+    },
+    "SettingsReceipt": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "commandId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "status": {
+              "enum": ["pending", "applied"]
+            }
+          },
+          "required": ["schemaVersion", "commandId", "revision", "status"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "commandId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "status": {
+              "const": "rejected"
+            },
+            "failure": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "commandId",
+            "revision",
+            "status",
+            "failure"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "SettingsHandoffCommand": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "home": {
+          "enum": ["models", "connections"]
+        }
+      },
+      "required": ["schemaVersion", "home"],
+      "additionalProperties": false
+    },
     "GenerationId": {
       "type": "string",
       "minLength": 1,
       "maxLength": 256,
       "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}$"
+    },
+    "SettingChoice": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "value": {
+          "$ref": "#/$defs/Json"
+        }
+      },
+      "required": ["label", "value"],
+      "additionalProperties": false
+    },
+    "SettingsOptionsQuery": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "source": {
+          "const": "account-models"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "query": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "required": ["schemaVersion", "source", "revision", "query"],
+      "additionalProperties": false
+    },
+    "SettingsOptionsPage": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "source": {
+          "const": "account-models"
+        },
+        "ownerId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/SettingChoice"
+          }
+        },
+        "nextCursor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "required": ["schemaVersion", "source", "ownerId", "revision", "items"],
+      "additionalProperties": false
     }
   },
   "x-frockbot-compatibility": {

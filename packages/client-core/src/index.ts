@@ -1,3 +1,8 @@
+import type {
+  SettingsFrame,
+  SettingsChangeCommand,
+  SettingsReceipt,
+} from "@frockbot/protocol-schemas";
 import type { SkillRefV1 } from "@frockbot/kernel-contracts";
 import type { BotStateTopicV1 } from "@frockbot/protocol";
 import {
@@ -225,6 +230,14 @@ export interface VoiceAssistantSessionV1 {
 }
 
 export interface AgentTransport {
+  readSettingsOptions?(
+    query: import("@frockbot/protocol-schemas").SettingsOptionsQuery,
+  ): Promise<import("@frockbot/protocol-schemas").SettingsOptionsPage>;
+  readSettingsFrame?(home: "application" | "models"): Promise<SettingsFrame>;
+  changeSettings?(
+    home: "application" | "models",
+    command: SettingsChangeCommand,
+  ): Promise<SettingsReceipt>;
   /** False when this platform cannot complete external Connection authorization. */
   readonly connectionsAvailable?: boolean;
   /**

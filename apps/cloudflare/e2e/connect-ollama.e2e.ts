@@ -43,18 +43,27 @@ test("a good key reaches ready and lists the endpoint's models", async ({
   // The catalog the Connection resolved is the one the configured endpoint
   // serves, and it is what the model choosers offer — on the same surface the
   // account was connected on, because Models owns both.
-  const models = page.getByLabel(/^Account model/);
-  await expect(models).toBeVisible();
+  await page
+    .locator(".settings-frame")
+    .getByRole("button", { name: "Refresh", exact: true })
+    .click();
+  const section = page.locator("form.frame-section", {
+    has: page.getByRole("heading", { name: "Default model", exact: true }),
+  });
+  await section.getByRole("button", { name: /Auto/u }).click();
+  const picker = page.getByRole("dialog", { name: "Choose a model" });
   await expect(
-    models.getByRole("option", {
-      name: `${E2E_MODEL_LABEL} — ${E2E_CONNECTION_LABEL}`,
+    picker.getByRole("button", {
+      name: `${E2E_MODEL_LABEL} · ${E2E_CONNECTION_LABEL}`,
+      exact: true,
     }),
-  ).toBeAttached();
+  ).toBeVisible();
   await expect(
-    models.getByRole("option", {
-      name: `glm-5.3-flash — ${E2E_CONNECTION_LABEL}`,
+    picker.getByRole("button", {
+      name: `glm-5.3-flash · ${E2E_CONNECTION_LABEL}`,
+      exact: true,
     }),
-  ).toBeAttached();
+  ).toBeVisible();
 });
 
 test("a key the endpoint refuses for inference never reaches ready", async ({

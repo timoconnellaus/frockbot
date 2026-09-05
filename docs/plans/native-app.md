@@ -166,6 +166,29 @@ Complete trusted Models, Connections, settings, audit/undo/recovery, extension m
 
 **Tests:** paired renderer scenarios against one backend, exact single settings home and disabled-override tests, corrupt-extension recovery/undo, old supported client and minimum-version refusal, revoked session and native storage inspection, voice/media interruptions, unread deduplication, deep links, file/clipboard permissions and lowest-device performance fixture. Review dependencies/imports to prove Dart carries no Agent loop or provider secrets.
 
+### C1 — Settings and Models (2026-09-05)
+
+The User owner supplies shared, bounded settings frames, searchable model pages
+and revisioned, owner-bound commands to Vue and Flutter. Account model choice is
+permanent; the optional Custom models Package holds only Bot overrides. Choosing
+a provider installs its manifest dependency closure, and credentials remain on
+the same-User backend Models surface. Disabled Package fields disappear while
+captured overrides survive. Profile prefill comes from authenticated identity
+without changing stored profile data on read.
+
+Paired gateway scenarios cover both credentials over one User owner, save,
+duplicate replay after owner eviction, stale revisions and cross-account
+refusal. Native tests cover retained uncertain saves, large text in both themes,
+search races and explicit default intent. The previous released settings DTO and
+model resolver exercise the bounded compatibility projection. See the
+[settings seam plan](native-settings.md) and [acceptance ledger](native-acceptance-2026-09-05-slice3.md).
+
+The Pixel was unlocked again after the orchestrator restart; captures of these
+new screens await C1 deployment so the device can use its production session. Local
+macOS release captures use a test account through the production Worker harness;
+they do not qualify production macOS sign-in or the remaining device budgets.
+Connections, unread/deep links and Bot recovery remain subsequent milestones.
+
 ## Slice 4 — Qualify A2UI and Compose independently
 
 Promote the qualified A2UI manifest/catalog/action contract with immutable snapshots, declared slots, live subset checks and host unavailable states. In a separate backend slice, pin one reviewed vendored `@frockbot/compose-*` commit behind a FrockBot adapter and run one real extension. Native rendering must remain releasable without a wholesale Cordis-to-Compose rewrite.

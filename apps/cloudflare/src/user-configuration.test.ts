@@ -178,6 +178,7 @@ describe("UserConfiguration Connection routing", () => {
     ).resolves.toBe(false);
     await configuration.readConfiguration({
       schemaVersion: 1,
+      view: 2,
       userId: "new-user",
     });
     await expect(
@@ -200,6 +201,7 @@ describe("UserConfiguration Connection routing", () => {
 
     const first = await configuration.readConfiguration({
       schemaVersion: 1,
+      view: 2,
       userId: "user-1",
     });
     expect(first).toMatchObject({
@@ -255,6 +257,7 @@ describe("UserConfiguration Connection routing", () => {
 
     let user = await configuration.readConfiguration({
       schemaVersion: 1,
+      view: 2,
       userId,
     });
     expect(user.packages).not.toContainEqual(
@@ -293,6 +296,7 @@ describe("UserConfiguration Connection routing", () => {
       expect(receipt.status).toBe("applied");
       user = (await configuration.readConfiguration({
         schemaVersion: 1,
+        view: 2,
         userId,
       })) as UserSettingsViewV1;
     };
@@ -315,15 +319,12 @@ describe("UserConfiguration Connection routing", () => {
     });
     await execute({
       schemaVersion: 1,
-      type: "user/set-package-settings",
+      type: "user/set-account-model",
       commandId: "choose-ollama",
       expectedRevision: user.revision,
-      packageId: "custom-models",
-      values: {
-        "account-model": {
-          connectionId: LEGACY_OLLAMA_CONNECTION_ID,
-          providerModelId: LEGACY_OLLAMA_MODEL_ID,
-        },
+      model: {
+        connectionId: LEGACY_OLLAMA_CONNECTION_ID,
+        providerModelId: LEGACY_OLLAMA_MODEL_ID,
       },
     });
     expect(resolveEffectiveBotModelV1({ bot, user, packages })).toMatchObject({
@@ -358,30 +359,26 @@ describe("UserConfiguration Connection routing", () => {
 
     await execute({
       schemaVersion: 1,
-      type: "user/set-package-settings",
+      type: "user/set-account-model",
       commandId: "follow-platform-again",
       expectedRevision: user.revision,
-      packageId: "custom-models",
-      unset: ["account-model"],
+      model: null,
     });
     expect(resolveEffectiveBotModelV1({ bot, user, packages })).toMatchObject({
       source: "platform",
       binding: { state: "ready", packageId: "provider-flock-ai" },
     });
 
-    // Disabling the choice Package makes its retained value inert. Reapply it
-    // first so this assertion distinguishes Package enablement from clearing.
+    // Disabling Bot overrides retains the account choice; this provider is
+    // still disabled, so its visible platform fallback remains in effect.
     await execute({
       schemaVersion: 1,
-      type: "user/set-package-settings",
+      type: "user/set-account-model",
       commandId: "retain-ollama-choice",
       expectedRevision: user.revision,
-      packageId: "custom-models",
-      values: {
-        "account-model": {
-          connectionId: LEGACY_OLLAMA_CONNECTION_ID,
-          providerModelId: LEGACY_OLLAMA_MODEL_ID,
-        },
+      model: {
+        connectionId: LEGACY_OLLAMA_CONNECTION_ID,
+        providerModelId: LEGACY_OLLAMA_MODEL_ID,
       },
     });
     await execute({
@@ -396,13 +393,9 @@ describe("UserConfiguration Connection routing", () => {
       source: "platform",
       binding: { state: "ready", packageId: "provider-flock-ai" },
     });
-    expect(
-      user.packages.find((pkg) => pkg.packageId === "custom-models")?.values,
-    ).toEqual({
-      "account-model": {
-        connectionId: LEGACY_OLLAMA_CONNECTION_ID,
-        providerModelId: LEGACY_OLLAMA_MODEL_ID,
-      },
+    expect(user.accountModel).toEqual({
+      connectionId: LEGACY_OLLAMA_CONNECTION_ID,
+      providerModelId: LEGACY_OLLAMA_MODEL_ID,
     });
   });
 
@@ -427,6 +420,7 @@ describe("UserConfiguration Connection routing", () => {
     const packages = await executionPackages();
     let user = await configuration.readConfiguration({
       schemaVersion: 1,
+      view: 2,
       userId,
     });
     const platformPackageIds = plan.packages
@@ -496,6 +490,7 @@ describe("UserConfiguration Connection routing", () => {
       expect(receipt).toMatchObject({ status: "applied" });
       user = await configuration.readConfiguration({
         schemaVersion: 1,
+        view: 2,
         userId,
       });
       return receipt;
@@ -518,15 +513,12 @@ describe("UserConfiguration Connection routing", () => {
     });
     await execute({
       schemaVersion: 1,
-      type: "user/set-package-settings",
+      type: "user/set-account-model",
       commandId: "choose-production-ollama-model",
       expectedRevision: user.revision,
-      packageId: "custom-models",
-      values: {
-        "account-model": {
-          connectionId: PRODUCTION_OLLAMA_CONNECTION_ID,
-          providerModelId: PRODUCTION_OLLAMA_MODEL_ID,
-        },
+      model: {
+        connectionId: PRODUCTION_OLLAMA_CONNECTION_ID,
+        providerModelId: PRODUCTION_OLLAMA_MODEL_ID,
       },
     });
     expect(
@@ -546,11 +538,10 @@ describe("UserConfiguration Connection routing", () => {
 
     await execute({
       schemaVersion: 1,
-      type: "user/set-package-settings",
+      type: "user/set-account-model",
       commandId: "clear-production-ollama-model",
       expectedRevision: user.revision,
-      packageId: "custom-models",
-      unset: ["account-model"],
+      model: null,
     });
     effective = resolveEffectiveBotModelV1({
       bot: { packageValues: {} },

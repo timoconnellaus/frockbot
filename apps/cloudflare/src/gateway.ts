@@ -1,3 +1,4 @@
+import { decodeProtocol } from "@frockbot/protocol-schemas";
 import { nativeFallbackResponse } from "./native-fallback.js";
 import { accountIsAdmitted } from "./account-admission.js";
 import { isNativeAuthPath, readNativeJsonBody } from "./native-auth.js";
@@ -968,6 +969,108 @@ export function createGateway(dependencies: GatewayDependencies) {
       if (response) return response;
     }
 
+    if (url.pathname === "/api/settings/models/options") {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      let query;
+      try {
+        query = decodeProtocol(
+          "SettingsOptionsQuery",
+          await readNativeJsonBody(request),
+        );
+      } catch {
+        return jsonError(400, "Invalid model search");
+      }
+      try {
+        return Response.json(
+          decodeProtocol(
+            "SettingsOptionsPage",
+            await dependencies
+              .userConfigurationFor(userId)
+              .readSettingsOptions({ schemaVersion: 1, userId, query }),
+          ),
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.name === "ConfigurationConflictError"
+        )
+          return jsonError(409, "Models changed. Refresh and try again.");
+        return jsonError(503, "Models are temporarily unavailable.");
+      }
+    }
+
+    if (
+      ["/api/settings/application", "/api/settings/models"].includes(
+        url.pathname,
+      )
+    ) {
+      const home = url.pathname.endsWith("/models") ? "models" : "application";
+      try {
+        const owner = dependencies.userConfigurationFor(userId);
+        if (request.method === "GET") {
+          // Identity supplies only an unsaved profile suggestion. The User's
+          // saved profile wins and only a save command persists edited fields.
+          const identity =
+            home !== "application"
+              ? null
+              : development.userId
+                ? { name: "Local developer" }
+                : await dependencies.auth.profile?.(userId).catch(() => null);
+          return Response.json(
+            decodeProtocol(
+              "SettingsFrame",
+              await owner.readSettingsFrame({
+                schemaVersion: 1,
+                userId,
+                home,
+                ...(identity?.name?.trim()
+                  ? { identityName: identity.name.trim().slice(0, 100) }
+                  : {}),
+                ...(identity?.email?.trim()
+                  ? { identityEmail: identity.email.trim().slice(0, 320) }
+                  : {}),
+              }),
+            ),
+            { headers: { "cache-control": "no-store" } },
+          );
+        }
+        if (request.method !== "POST")
+          return jsonError(405, "method not allowed");
+        let command;
+        try {
+          command = decodeProtocol(
+            "SettingsChangeCommand",
+            await readNativeJsonBody(request, 512_000),
+          );
+        } catch {
+          return jsonError(400, "Invalid settings command");
+        }
+        if (command.ownerId !== userId)
+          return jsonError(403, "Settings belong to another account.");
+        return Response.json(
+          decodeOperationReceiptV1(
+            await owner.changeSettings({
+              schemaVersion: 1,
+              userId,
+              home,
+              command,
+            }),
+          ),
+        );
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.name === "ConfigurationConflictError"
+        )
+          return jsonError(409, "Settings changed. Refresh and try again.");
+        if (error instanceof Error && error.name === "ConfigurationDecodeError")
+          return jsonError(400, "Check these settings and try again.");
+        return jsonError(503, "Settings are temporarily unavailable.");
+      }
+    }
+
     const botSettingsMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/settings$/,
     );
@@ -979,11 +1082,21 @@ export function createGateway(dependencies: GatewayDependencies) {
           : undefined;
         if (request.method === "GET") {
           if (!botSettingsMatch) {
+            if (
+              url.searchParams.has("view") &&
+              url.searchParams.get("view") !== "2"
+            )
+              return jsonError(426, "Refresh FrockBot to update Settings.");
             return Response.json(
-              decodeUserSettingsViewV1(
+              settingsProjection(
                 await dependencies
                   .userConfigurationFor(userId)
-                  .readConfiguration({ schemaVersion: 1, userId }),
+                  .readConfiguration({
+                    schemaVersion: 1,
+                    userId,
+                    view: url.searchParams.get("view") === "2" ? 2 : 1,
+                  }),
+                url.searchParams.get("view"),
               ),
             );
           }
@@ -1025,6 +1138,14 @@ export function createGateway(dependencies: GatewayDependencies) {
         }
         if (isUserSettings && "botId" in command) {
           return jsonError(400, "User settings require a User command");
+        }
+        if (
+          command.type === "user/set-package-settings" &&
+          command.packageId === "custom-models" &&
+          (Object.hasOwn(command.values ?? {}, "account-model") ||
+            command.unset?.includes("account-model"))
+        ) {
+          return jsonError(426, "Refresh FrockBot to update Models.");
         }
         if (command.type === "user/set-platform-model") {
           return jsonError(
@@ -1215,4 +1336,12 @@ export function createGateway(dependencies: GatewayDependencies) {
       );
     }
   };
+}
+
+/** The previous browser wire shape remains readable while Models moves to frames. */
+function settingsProjection(input: unknown, contract: string | null) {
+  const decoded = decodeUserSettingsViewV1(input);
+  if (contract === "2") return decoded;
+  const { accountModel: _accountModel, ...view } = decoded;
+  return view;
 }

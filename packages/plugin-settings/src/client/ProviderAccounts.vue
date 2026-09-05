@@ -7,7 +7,6 @@ import {
   type PluginCatalogItem,
 } from "@frockbot/plugin-shell/shared";
 import { computed, inject, ref } from "vue";
-import ProviderPackageSettings from "./ProviderPackageSettings.vue";
 
 const providedSurfaces = inject(clientSurfaceRegistryKey);
 const providedWeb = inject(frockBotWebDataKey);
@@ -451,8 +450,6 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
           </UiButton>
         </div>
       </form>
-
-      <ProviderPackageSettings :item="item" />
     </article>
 
     <div v-if="providers.length === 0" class="provider-empty">
