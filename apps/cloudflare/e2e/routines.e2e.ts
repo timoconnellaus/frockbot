@@ -224,6 +224,7 @@ for (const scenario of [
     await form
       .getByRole("combobox", { name: /^When/ })
       .selectOption({ label: scenario.event });
+    await form.getByText("Event options", { exact: true }).click();
     if (scenario.slug === "googlecalendar") {
       await expect(form.getByLabel("Calendar Id", { exact: true })).toHaveValue(
         "primary",
@@ -250,7 +251,9 @@ for (const scenario of [
     await card.getByRole("button", { name: "Resume", exact: true }).click();
     await expect(card.getByRole("status")).toHaveText("Listening");
     await card.getByRole("button", { name: "Edit", exact: true }).click();
+    await form.getByText("Event options", { exact: true }).click();
     await expect(form.getByLabel(scenario.field)).toHaveValue(scenario.value);
+    await form.getByText("Event options", { exact: true }).click();
     await form
       .getByRole("combobox", { name: "Account", exact: true })
       .scrollIntoViewIfNeeded();

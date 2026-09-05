@@ -639,60 +639,68 @@ async function toggleLog(routineId: string): Promise<void> {
               </option>
             </select>
           </UiField>
-          <UiField
-            v-for="field in eventFields"
-            :key="field.key"
-            :label="field.label"
-            :hint="field.hint"
+          <details
+            v-if="eventFields.length"
+            :key="form.triggerType"
+            class="routine-form__options"
+            :open="eventFields.some((field) => field.required)"
           >
-            <select
-              v-if="field.options.length"
-              v-model="form.config[field.key]"
-              :required="field.required"
+            <summary>Event options</summary>
+            <UiField
+              v-for="field in eventFields"
+              :key="field.key"
+              :label="field.label"
+              :hint="field.hint"
             >
-              <option v-if="!field.required" value="">Any</option>
-              <option
-                v-for="option in field.options"
-                :key="option"
-                :value="option"
+              <select
+                v-if="field.options.length"
+                v-model="form.config[field.key]"
+                :required="field.required"
               >
-                {{ option }}
-              </option>
-            </select>
-            <input
-              v-else-if="field.type === 'boolean'"
-              v-model="form.config[field.key]"
-              type="checkbox"
-            />
-            <input
-              v-else-if="field.type === 'number' || field.type === 'integer'"
-              v-model.number="form.config[field.key]"
-              type="number"
-              :step="field.type === 'integer' ? 1 : 'any'"
-              :required="field.required"
-            />
-            <textarea
-              v-else-if="field.type === 'array' || field.type === 'object'"
-              :value="
-                typeof form.config[field.key] === 'string'
-                  ? String(form.config[field.key])
-                  : JSON.stringify(form.config[field.key], null, 2)
-              "
-              @input="
-                form.config[field.key] = (
-                  $event.target as HTMLTextAreaElement
-                ).value
-              "
-              :required="field.required"
-              rows="3"
-            />
-            <input
-              v-else
-              v-model="form.config[field.key]"
-              :required="field.required"
-              maxlength="8000"
-            />
-          </UiField>
+                <option v-if="!field.required" value="">Any</option>
+                <option
+                  v-for="option in field.options"
+                  :key="option"
+                  :value="option"
+                >
+                  {{ option }}
+                </option>
+              </select>
+              <input
+                v-else-if="field.type === 'boolean'"
+                v-model="form.config[field.key]"
+                type="checkbox"
+              />
+              <input
+                v-else-if="field.type === 'number' || field.type === 'integer'"
+                v-model.number="form.config[field.key]"
+                type="number"
+                :step="field.type === 'integer' ? 1 : 'any'"
+                :required="field.required"
+              />
+              <textarea
+                v-else-if="field.type === 'array' || field.type === 'object'"
+                :value="
+                  typeof form.config[field.key] === 'string'
+                    ? String(form.config[field.key])
+                    : JSON.stringify(form.config[field.key], null, 2)
+                "
+                @input="
+                  form.config[field.key] = (
+                    $event.target as HTMLTextAreaElement
+                  ).value
+                "
+                :required="field.required"
+                rows="3"
+              />
+              <input
+                v-else
+                v-model="form.config[field.key]"
+                :required="field.required"
+                maxlength="8000"
+              />
+            </UiField>
+          </details>
         </template>
       </template>
       <UiField
@@ -998,5 +1006,24 @@ async function toggleLog(routineId: string): Promise<void> {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.routine-form__options {
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+}
+
+.routine-form__options summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.routine-form__options :deep(.ui-field) {
+  margin-top: 12px;
+}
+
+.routine-form__options input[type="checkbox"] {
+  width: auto;
+  align-self: flex-start;
 }
 </style>
