@@ -25,11 +25,13 @@ import {
   storedRunRecordV2,
   storedRunSubagentRoleV1,
   storedRunTurnTypeV1,
+  unreadableStoredRunV1,
   type BotNotificationIntent,
   type BotTurnCommand,
   type BotTurnCompletion,
   type StoredRunCodecV1,
   type StoredRunV1,
+  type UnreadableStoredRunV1,
 } from "./run-records.js";
 import {
   completeStoredRun,
@@ -238,6 +240,14 @@ function runWasDiscardedV1(
 ): boolean {
   return Boolean(run?.stopRequestedAt || run?.supersededAt);
 }
+
+/**
+ * One run as the display-only read boundary sees it: either the decoded
+ * record, or the bounded identity of a record that could not be decoded.
+ */
+export type DisplayRunReadV1<Snapshot> =
+  | { readonly readable: true; readonly run: StoredRunV1<Snapshot> }
+  | { readonly readable: false; readonly run: UnreadableStoredRunV1 };
 
 export interface BotDurableAuthorityOptions<Snapshot> {
   state: DurableObjectState;
@@ -1248,6 +1258,61 @@ export class BotDurableAuthority<Snapshot> {
     return this.readRunFrom(this.ctx.storage, runId, "display");
   }
 
+  /**
+   * The record alone, for display, never throwing on a record it cannot read.
+   *
+   * The transcript is the one reader that must survive a bad row. Execution
+   * and recovery stay strict — they act on the record, and acting on a record
+   * nobody can decode is how a Turn gets settled twice — but a read that only
+   * draws the conversation owes the person the other forty Turns. An
+   * undecodable record comes back as {@link UnreadableStoredRunV1}: the run id
+   * from the lookup key plus whatever scraped strings are safe, which is
+   * enough to render exactly one degraded row.
+   */
+  async readRunHeaderForDisplay(
+    runId: string,
+  ): Promise<DisplayRunReadV1<Snapshot> | undefined> {
+    const raw = await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`);
+    if (raw === undefined) return undefined;
+    try {
+      return { readable: true, run: this.codec.require(raw) };
+    } catch {
+      return { readable: false, run: unreadableStoredRunV1(runId, raw) };
+    }
+  }
+
+  /**
+   * The journal behind a display header, degrading rather than throwing.
+   *
+   * Takes the header the caller already read rather than the run id: a
+   * transcript page reads one record per candidate and hydrates only the ones
+   * it keeps, and re-reading the record here would put that read back.
+   */
+  async hydrateRunForDisplay(
+    header: DisplayRunReadV1<Snapshot>,
+  ): Promise<DisplayRunReadV1<Snapshot>> {
+    if (!header.readable) return header;
+    try {
+      return {
+        readable: true,
+        run: await this.hydrateRun(this.ctx.storage, header.run, "display"),
+      };
+    } catch {
+      return {
+        readable: false,
+        run: unreadableStoredRunV1(header.run.runId, header.run),
+      };
+    }
+  }
+
+  /** {@link readRunHeaderForDisplay} with its journal hydrated. */
+  async readStoredRunForDisplayOrDegraded(
+    runId: string,
+  ): Promise<DisplayRunReadV1<Snapshot> | undefined> {
+    const header = await this.readRunHeaderForDisplay(runId);
+    return header ? this.hydrateRunForDisplay(header) : undefined;
+  }
+
   private async readRunFrom(
     storage: SessionEventLogStorage,
     runId: string,
@@ -1256,7 +1321,16 @@ export class BotDurableAuthority<Snapshot> {
     const run = this.codec.optional(
       await storage.get<unknown>(`${RUN_PREFIX}${runId}`),
     );
-    if (!run?.eventRange) return run;
+    if (!run) return undefined;
+    return this.hydrateRun(storage, run, fidelity);
+  }
+
+  private async hydrateRun(
+    storage: SessionEventLogStorage,
+    run: StoredRunV1<Snapshot>,
+    fidelity: "exact" | "display",
+  ): Promise<StoredRunV1<Snapshot>> {
+    if (!run.eventRange) return run;
     const log = new SessionEventLog(storage);
     const events =
       fidelity === "display"

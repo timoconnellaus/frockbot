@@ -9,7 +9,6 @@ import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import {
   asUser,
-  expectJson,
   expectOkJson,
   freshUserId,
   OLLAMA_FLAKY_API_KEY,
@@ -25,6 +24,7 @@ useApplicationArtifact();
 interface RunView {
   runId: string;
   status?: string;
+  input?: string;
   outcome?: { type: string; message?: string };
 }
 
@@ -170,10 +170,11 @@ describe("a Turn through the gateway, the loaded artifact and the Bot", () => {
 });
 
 describe("a stored run the current codec refuses", () => {
-  it("is a JSON failure with its reason, never workerd's HTML error page", async () => {
+  it("degrades to one row and keeps the rest of the transcript", async () => {
     const userId = freshUserId("codec");
     const botId = "codec-bot";
     await provisionThroughGateway({ userId, botId });
+    await runTurn(userId, botId, "hello", "turn-command-codec");
 
     // Planted through the Bot Durable Object's own storage: no command can
     // produce a record the codec refuses, and the incident was a record
@@ -190,12 +191,66 @@ describe("a stored run the current codec refuses", () => {
 
     const response = await asUser(userId, `/api/bots/${botId}/turns`);
 
-    expect(response.status).toBe(500);
+    // The route used to answer 500 here — JSON with a reason rather than
+    // workerd's HTML error page, which was incident 1, but still a transcript
+    // the person could never open again. One unreadable row is now one row.
+    expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/json");
-    const body = (await expectJson(response)) as { error: string };
-    expect(body.error).toContain("stored run");
-    // The incident's actual symptom: an HTML body decoded as JSON.
-    expect(JSON.stringify(body).startsWith("<")).toBe(false);
-    expect(body.error.startsWith("<")).toBe(false);
+    const list = (await expectOkJson(response)) as { runs: RunView[] };
+    expect(list.runs.map((run) => run.runId)).toContain("turn-command-codec");
+    const degraded = list.runs.find((run) => run.runId === "planted");
+    expect(degraded?.status).toBe("failed");
+    expect(degraded?.outcome?.message).toContain("could not be read");
+    expect(JSON.stringify(list).startsWith("<")).toBe(false);
+  });
+
+  it("degrades a record whose recovery state is inconsistent", async () => {
+    // The exact shape a resolve bug can leave behind: `reconciliation-required`
+    // on a record still phased `executing`. The strict storage codec throws on
+    // it, which used to blank the whole transcript — the per-run degradation
+    // never ran, because nothing reached it.
+    const userId = freshUserId("recovery-state");
+    const botId = "recovery-state-bot";
+    await provisionThroughGateway({ userId, botId });
+    await runTurn(userId, botId, "hello", "turn-command-good");
+
+    const planted = await runInDurableObject(
+      botStub(userId, botId),
+      async (_instance, state) => {
+        const stored = (await state.storage.get(
+          "run:turn-command-good",
+        )) as Record<string, unknown>;
+        const { responseText: _responseText, ...rest } = stored;
+        await state.storage.put({
+          "run:turn-command-broken": {
+            ...rest,
+            runId: "turn-command-broken",
+            acceptedAt: "2026-01-02T00:00:00.000Z",
+            input: "what did I ask?",
+            status: "reconciliation-required",
+            phase: "executing",
+          },
+          "run-index:2026-01-02T00:00:00.000Z:turn-command-broken":
+            "turn-command-broken",
+        });
+        return stored;
+      },
+    );
+    expect(planted).toBeDefined();
+
+    const list = (await expectOkJson(
+      await asUser(userId, `/api/bots/${botId}/turns`),
+    )) as { runs: RunView[] };
+
+    // A valid page: the readable Turn is still there, and the corrupt one is
+    // a single row that says so rather than a 500 over everything.
+    const good = list.runs.find((run) => run.runId === "turn-command-good");
+    expect(good?.status).toBe("completed");
+    const broken = list.runs.find((run) => run.runId === "turn-command-broken");
+    expect(broken?.status).toBe("failed");
+    expect(broken?.outcome?.message).toContain("could not be read");
+    // The person's own words survive the degradation: the row is scraped from
+    // the raw record, not invented from the index key alone.
+    expect(broken?.input).toBe("what did I ask?");
   });
 });

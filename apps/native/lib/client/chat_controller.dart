@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import 'page_cache.dart';
 import 'transport.dart';
 
 enum ConnectionState { connecting, connected, disconnected, paused }
@@ -21,6 +22,7 @@ class ChatController extends ChangeNotifier {
     String Function()? nextId,
   }) : nextId = nextId ?? randomId;
   String get key => 'chat/$userId/$botId';
+  String get pageKey => pageCacheKey(userId, botId);
   String draft = '';
   String? pendingId;
   String? pendingText;
@@ -67,19 +69,52 @@ class ChatController extends ChangeNotifier {
       'stopTarget': stopTarget,
     }),
   );
+  void _restoreSaved(String? saved) {
+    if (saved == null) return;
+    final value = jsonDecode(saved) as Map<String, dynamic>;
+    if (value['version'] != 1 || value['draft'] is! String) {
+      throw const FormatException('Invalid draft');
+    }
+    draft = value['draft'] as String;
+    pendingId = value['pendingId'] as String?;
+    pendingText = value['pendingText'] as String?;
+    stopId = value['stopId'] as String?;
+    stopTarget = value['stopTarget'] as String?;
+  }
+
+  /// The transcript last seen for this Bot, so its pane opens on the messages
+  /// the User remembers instead of an empty pane. The network page that follows
+  /// replaces it, including the cursor it restored.
+  void _restoreCachedPage(SnapshotStore? snapshot) {
+    if (snapshot == null || conversationId != null) return;
+    final cached = decodePageCache(snapshot.peek(pageKey));
+    if (cached == null) return;
+    for (final run in cached.runs) {
+      _put(run);
+    }
+    before = cached.before;
+    _cachedCursor = before != null;
+  }
+
+  bool _initialized = false;
+  bool _cachedCursor = false;
   Future<void> initialize() async {
+    if (_initialized) return;
+    _initialized = true;
+    final snapshot = store is SnapshotStore ? store as SnapshotStore : null;
     try {
-      final saved = await store.read(key);
-      if (saved != null) {
-        final value = jsonDecode(saved) as Map<String, dynamic>;
-        if (value['version'] != 1 || value['draft'] is! String) {
-          throw const FormatException('Invalid draft');
-        }
-        draft = value['draft'] as String;
-        pendingId = value['pendingId'] as String?;
-        pendingText = value['pendingText'] as String?;
-        stopId = value['stopId'] as String?;
-        stopTarget = value['stopTarget'] as String?;
+      _restoreCachedPage(snapshot);
+    } catch (_) {
+      // A cache that cannot be read only costs this switch its first frame.
+    }
+    try {
+      if (snapshot != null && snapshot.resident) {
+        // Draft and pending state decide whether this Bot can accept a message,
+        // so they are known before the composer is offered — from memory when
+        // the store already holds them, and only then without awaiting.
+        _restoreSaved(snapshot.peek(key));
+      } else {
+        _restoreSaved(await store.read(key));
       }
       ready = true;
       changed();
@@ -134,10 +169,14 @@ class ChatController extends ChangeNotifier {
       for (final run in page['runs'] as List) {
         _put(Map<String, dynamic>.from(run as Map));
       }
-      if (older || before == null) {
+      if (older || before == null || _cachedCursor) {
         before = (page['page'] as Map)['nextCursor'] as String?;
+        _cachedCursor = false;
       }
       error = null;
+      if (conversationId == null) {
+        unawaited(writePageCache(store, userId, botId, runs, before));
+      }
     } finally {
       loading = false;
       changed();
