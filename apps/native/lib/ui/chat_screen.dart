@@ -23,6 +23,7 @@ class ChatScreen extends StatelessWidget {
     required this.onSignOut,
     required this.onApplets,
     required this.onSettings,
+    this.onManageBots,
     required this.body,
     this.extraActions = const [],
     this.onInbox,
@@ -39,6 +40,9 @@ class ChatScreen extends StatelessWidget {
   final VoidCallback onSignOut;
   final VoidCallback onApplets;
   final VoidCallback onSettings;
+
+  /// Opens Bot recovery/management from the flock drawer.
+  final VoidCallback? onManageBots;
   final Widget body;
   final List<Widget> extraActions;
 
@@ -65,6 +69,7 @@ class ChatScreen extends StatelessWidget {
       onRefresh: onRefresh,
       onSettings: onSettings,
       onSignOut: onSignOut,
+      onManageBots: onManageBots,
       onInbox: onInbox,
       inboxCount: inboxCount,
       unreadOf: unreadOf,

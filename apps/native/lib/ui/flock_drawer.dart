@@ -25,6 +25,7 @@ class FlockDrawer extends StatelessWidget {
     required this.onRefresh,
     required this.onSettings,
     required this.onSignOut,
+    this.onManageBots,
     this.stateOf,
     this.onInbox,
     this.inboxCount = 0,
@@ -36,6 +37,9 @@ class FlockDrawer extends StatelessWidget {
   final VoidCallback onRefresh;
   final VoidCallback onSettings;
   final VoidCallback onSignOut;
+
+  /// Opens Bot recovery/management; absent when the account has no owner view.
+  final VoidCallback? onManageBots;
 
   /// What the ring around each sheep says. Unknown Bots get no ring.
   final BotState Function(String botId)? stateOf;
@@ -141,6 +145,14 @@ class FlockDrawer extends StatelessWidget {
                   title: 'Refresh',
                   onTap: onRefresh,
                 ),
+                if (onManageBots != null)
+                  FrockRow(
+                    key: const ValueKey('manage-bots'),
+                    leading: const FrockIconTile(Icons.manage_accounts_rounded),
+                    title: 'Manage Bots',
+                    chevron: true,
+                    onTap: onManageBots,
+                  ),
                 FrockRow(
                   leading: const FrockIconTile(Icons.tune_rounded),
                   title: 'Settings',

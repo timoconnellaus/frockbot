@@ -379,8 +379,37 @@ export function shellGuiCommandV1(command: string): string | undefined {
   const pattern = new RegExp(
     String.raw`(?:^|[;&|(\n]|\$\()\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;|&]*\s+)*(?:sudo\s+|env\s+)?(?:[^\s;|&'"]*/)?(${names})(?=$|[\s;|&)'"])`,
   );
-  const match = pattern.exec(command);
+  const match = pattern.exec(shellCommandPositionsV1(command));
   return match?.[1];
+}
+
+/**
+ * The shell string with its data removed, so only command positions remain.
+ *
+ * A here-document body and a quoted string are data the shell hands to a
+ * program, never a command the shell runs; a TypeScript file written with
+ * `cat > ui.tsx <<'EOF'` starts every line with `import`, and a Bot writing
+ * one was refused as if it had reached for ImageMagick's `import`. Heredoc
+ * bodies and single-quoted strings go entirely; a double-quoted string keeps
+ * only its `$(…)` substitutions, which the shell does run.
+ */
+export function shellCommandPositionsV1(command: string): string {
+  // Heredocs: from the operator to the line that is exactly the terminator.
+  // The first line stays (the command that owns the heredoc); the body goes.
+  const heredoc =
+    /<<-?\s*(?:'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)"|([A-Za-z_][A-Za-z0-9_]*))[^\n]*\n([\s\S]*?)\n[ \t]*\1\2\3[ \t]*(?=\n|$)/g;
+  let out = command.replace(heredoc, (_all, a, b, c, _body) => {
+    const word = (a ?? b ?? c) as string;
+    return `<<${word}\n${word}`;
+  });
+  // Single quotes: literal data.
+  out = out.replace(/'[^']*'/g, "''");
+  // Double quotes: data, except a command substitution inside them.
+  out = out.replace(/"((?:\\.|[^"\\])*)"/g, (_all, inner: string) => {
+    const substitutions = inner.match(/\$\([^)]*\)/g) ?? [];
+    return `"${substitutions.join(" ")}"`;
+  });
+  return out;
 }
 
 /** The one browser profile every Bot of one User shares (ADR 0012). */

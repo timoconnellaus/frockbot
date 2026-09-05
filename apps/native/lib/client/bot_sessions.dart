@@ -122,6 +122,15 @@ class BotSessions {
     }
   }
 
+  /// Detach a Bot whose authoritative lifecycle made it unavailable.
+  /// Keep pending commands: disconnecting never cancels admitted work.
+  void forget(String userId, String botId) {
+    _live.remove(_key(userId, botId))?.dispose();
+    unawaited(
+      store.delete(pageCacheKey(userId, botId)).catchError((Object _) {}),
+    );
+  }
+
   void clear() {
     for (final session in _live.values.toList()) {
       session.dispose();

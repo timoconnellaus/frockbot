@@ -18,8 +18,22 @@
 // A spec in flight still fails; the ones after it do not.
 import type { ChildProcess } from "node:child_process";
 
-/** How many unexpected exits are tolerated before the harness gives up. */
+/** How many unexpected exits are tolerated inside `RESTART_WINDOW_MS`. */
 export const MAX_RESTARTS = 5;
+
+/**
+ * The window the restart budget is counted over.
+ *
+ * A lifetime budget answers the wrong question. `wrangler dev` exits roughly
+ * once every few minutes on a CI runner (its proxy treats one dropped
+ * forwarded request as fatal — cloudflare/workers-sdk#15317), so a lifetime
+ * count of five is really a ceiling on how long a shard may run: the long
+ * shard spent it, and every spec after that met a server that was never
+ * coming back. What the cap is for is telling a server that cannot come back
+ * from one that keeps being knocked over, and that is a question about a
+ * window, not about a whole run.
+ */
+export const RESTART_WINDOW_MS = 5 * 60_000;
 
 /** Lines of the dead child's output printed when it exits unexpectedly. */
 export const CRASH_TAIL_LINES = 60;
@@ -77,9 +91,13 @@ export interface SuperviseOptions {
   /** Copy a chunk of the child's output somewhere durable. */
   forwardOutput: (child: ChildProcess, tail: OutputTail) => void;
   maxRestarts?: number;
+  /** How long a restart counts against the budget. */
+  windowMs?: number;
   delayMs?: (attempt: number) => number;
   sleep?: (ms: number) => Promise<void>;
   report?: (message: string) => void;
+  /** The clock the window is measured on. */
+  now?: () => number;
 }
 
 export interface SupervisedProcess {
@@ -103,6 +121,8 @@ export interface SupervisedProcess {
  */
 export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
   const maxRestarts = options.maxRestarts ?? MAX_RESTARTS;
+  const windowMs = options.windowMs ?? RESTART_WINDOW_MS;
+  const now = options.now ?? (() => Date.now());
   const delayMs = options.delayMs ?? restartDelayMs;
   const sleep =
     options.sleep ??
@@ -113,6 +133,7 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
   let current: ChildProcess | undefined;
   let tail = new OutputTail();
   let restarts = 0;
+  let recent: number[] = [];
   let stopping = false;
 
   const attach = (child: ChildProcess): void => {
@@ -134,16 +155,20 @@ export function superviseProcess(options: SuperviseOptions): SupervisedProcess {
   const restart = async (): Promise<void> => {
     while (!stopping) {
       restarts += 1;
-      if (restarts > maxRestarts) {
+      const at = now();
+      recent = [...recent, at].filter((when) => at - when < windowMs);
+      if (recent.length > maxRestarts) {
         report(
-          `${options.label} has crashed ${restarts} times; giving up. ` +
+          `${options.label} has crashed ${recent.length} times in the last ` +
+            `${Math.round(windowMs / 1000)}s (${restarts} in this run); giving up. ` +
             `The rest of this shard will fail to connect.`,
         );
         return;
       }
-      const wait = delayMs(restarts);
+      const wait = delayMs(recent.length);
       report(
-        `Restarting ${options.label} (attempt ${restarts}/${maxRestarts}) in ${wait}ms.`,
+        `Restarting ${options.label} (attempt ${recent.length}/${maxRestarts} ` +
+          `in this window, ${restarts} in this run) in ${wait}ms.`,
       );
       await sleep(wait);
       if (stopping) return;

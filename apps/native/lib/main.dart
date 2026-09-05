@@ -9,6 +9,7 @@ import 'client/auth.dart';
 import 'settings/page.dart';
 import 'activity/controller.dart';
 import 'activity/page.dart';
+import 'recovery/page.dart';
 import 'auth/sign_in_page.dart';
 import 'ui/chat_pane.dart';
 import 'ui/chat_screen.dart';
@@ -16,6 +17,10 @@ import 'ui/flock_drawer.dart' show lookOf;
 import 'ui/frock_tokens.dart';
 import 'ui/frock_widgets.dart';
 import 'ui/gallery.dart';
+import 'voice/audio.dart';
+import 'voice/controller.dart';
+import 'voice/page.dart';
+import 'voice/session.dart';
 import 'acceptance_metrics.dart';
 import 'client/bot_sessions.dart';
 import 'client/chat_controller.dart';
@@ -151,15 +156,33 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
       final directory = wire.BotDirectory.fromJson(
         await api.request('/api/bots'),
       );
+      final lifecycle = wire.BotLifecycleDirectory.fromJson(
+        await api.request('/api/bots/lifecycles'),
+      );
+      final unavailable = lifecycle.lifecycles
+          .where((state) => state.status != 'active')
+          .map((state) => state.botId.value)
+          .toSet();
+      final activeBots = directory.bots
+          .where((bot) => !unavailable.contains(bot.botId.value))
+          .toList();
+      for (final prior in bots) {
+        if (!activeBots.any((bot) => bot.botId.value == prior.botId.value)) {
+          sessions.forget(identity.userId.value, prior.botId.value);
+        }
+      }
       await store.write(
         'directory/${identity.userId.value}',
-        jsonEncode(directory.toJson()),
+        jsonEncode({
+          ...directory.toJson() as Map,
+          'bots': [for (final bot in activeBots) bot.toJson()],
+        }),
       );
       final saved = await store.read('selection.${identity.userId.value}');
       if (mounted) {
         setState(() {
           userId = identity.userId.value;
-          bots = directory.bots;
+          bots = activeBots;
           selected = bots.where((b) => b.botId.value == saved).firstOrNull;
           error = null;
         });
@@ -167,7 +190,7 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
         if (pendingBot != null) unawaited(followBotLink());
         unawaited(
           sessions.prefetch(identity.userId.value, [
-            for (final bot in directory.bots) bot.botId.value,
+            for (final bot in activeBots) bot.botId.value,
           ], after: selected?.botId.value),
         );
       }
@@ -240,10 +263,21 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
       await api.request('/api/bots'),
     );
     if (!mounted || userId != owner) return;
-    final bot = directory.bots.where((b) => b.botId.value == botId).firstOrNull;
+    final lifecycle = wire.BotLifecycleDirectory.fromJson(
+      await api.request('/api/bots/lifecycles'),
+    );
+    if (!mounted || userId != owner) return;
+    final unavailable = lifecycle.lifecycles
+        .where((state) => state.status != 'active')
+        .map((state) => state.botId.value)
+        .toSet();
+    final active = directory.bots
+        .where((bot) => !unavailable.contains(bot.botId.value))
+        .toList();
+    final bot = active.where((b) => b.botId.value == botId).firstOrNull;
     if (bot == null) throw const FormatException('Unavailable Bot');
     navigatorKey.currentState?.popUntil((route) => route.isFirst);
-    setState(() => bots = directory.bots);
+    setState(() => bots = active);
     select(bot);
   }
 
@@ -303,6 +337,23 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
         /* A selection that could not be remembered still switched. */
       }),
     );
+  }
+
+  /// Voice is the whole screen: a route, not a sheet over the conversation.
+  Future<void> openVoice(BuildContext context) async {
+    final look = selected == null ? null : lookOf(selected!.sheep);
+    final navigator = Navigator.of(context);
+    final controller = VoiceController(
+      backend: BackendVoice(api),
+      audio: DeviceVoiceAudio(),
+      deviceId: await voiceDeviceId(store),
+    );
+    await navigator.push(
+      MaterialPageRoute<void>(
+        builder: (_) => VoicePage(controller: controller, botLook: look),
+      ),
+    );
+    controller.dispose();
   }
 
   BotState selectedState = BotState.none;
@@ -369,6 +420,19 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
               builder: (_) => AppletDirectoryPage(api: api, userId: userId!),
             ),
           ),
+          onManageBots: () {
+            scaffoldKey.currentState?.closeDrawer();
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => BotRecoveryPage(
+                  api: api,
+                  store: store,
+                  userId: userId!,
+                  changed: restore,
+                ),
+              ),
+            );
+          },
           onSettings: () {
             scaffoldKey.currentState?.closeDrawer();
             Navigator.of(context).push(
@@ -441,6 +505,7 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
                   botName: selected!.initialName,
                   botLook: lookOf(selected!.sheep),
                   onActivity: selectedActivity,
+                  onVoice: () => unawaited(openVoice(context)),
                 ),
         );
       },
@@ -466,6 +531,9 @@ class ConversationView extends StatefulWidget {
 
   /// Reports what the ring around this Bot's sheep should say.
   final ValueChanged<BotState>? onActivity;
+
+  /// Opens the whole-screen Voice route from the composer's mic.
+  final VoidCallback? onVoice;
   const ConversationView({
     super.key,
     required this.sessions,
@@ -474,6 +542,7 @@ class ConversationView extends StatefulWidget {
     this.botName = 'your Bot',
     this.botLook = SheepLook.plain,
     this.onActivity,
+    this.onVoice,
   });
   @override
   State<ConversationView> createState() => _ConversationViewState();
@@ -605,6 +674,7 @@ class _ConversationViewState extends State<ConversationView>
             onReconnect: session.channel.connect,
             botName: widget.botName,
             botLook: widget.botLook,
+            onVoice: widget.onVoice,
           ),
         ),
       ],
