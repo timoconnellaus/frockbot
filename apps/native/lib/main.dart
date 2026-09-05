@@ -21,6 +21,8 @@ import 'ui/frock_widgets.dart';
 import 'ui/gallery.dart';
 import 'voice/audio.dart';
 import 'voice/controller.dart';
+import 'voice/dictation.dart';
+import 'voice/dictation_controller.dart';
 import 'voice/page.dart';
 import 'voice/session.dart';
 import 'acceptance_metrics.dart';
@@ -369,6 +371,14 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
     );
   }
 
+  /// Dictation for the composer's mic, made once and kept: it owns the
+  /// microphone, and a new one per rebuild would fight the old one for it.
+  DictationController? _dictation;
+  DictationController get dictation => _dictation ??= DictationController(
+    backend: BackendDictation(api),
+    audio: DeviceVoiceAudio(),
+  );
+
   /// Voice is the whole screen: a route, not a sheet over the conversation.
   Future<void> openVoice(BuildContext context) async {
     final look = selected == null ? null : lookOf(selected!.sheep);
@@ -507,6 +517,9 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
                 },
           inboxCount: activity?.notices.length ?? 0,
           unreadOf: (id) => activity?.unread[id],
+          // Gemini Live is app-wide, so it lives in the bar and stays there
+          // with no Bot chosen. The composer's mic dictates.
+          onVoice: () => unawaited(openVoice(context)),
           extraActions: [
             if (selected != null && activity != null)
               FrockIconButton(
@@ -557,7 +570,7 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
                   botName: selected!.initialName,
                   botLook: lookOf(selected!.sheep),
                   onActivity: selectedActivity,
-                  onVoice: () => unawaited(openVoice(context)),
+                  dictation: dictation,
                 ),
         );
       },
@@ -566,6 +579,7 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     unawaited(links?.cancel());
+    _dictation?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     clearActivity();
     sessions.clear();
@@ -584,8 +598,8 @@ class ConversationView extends StatefulWidget {
   /// Reports what the ring around this Bot's sheep should say.
   final ValueChanged<BotState>? onActivity;
 
-  /// Opens the whole-screen Voice route from the composer's mic.
-  final VoidCallback? onVoice;
+  /// Dictation for the composer's mic; Voice itself is in the top bar.
+  final DictationController? dictation;
   const ConversationView({
     super.key,
     required this.sessions,
@@ -594,7 +608,7 @@ class ConversationView extends StatefulWidget {
     this.botName = 'your Bot',
     this.botLook = SheepLook.plain,
     this.onActivity,
-    this.onVoice,
+    this.dictation,
   });
   @override
   State<ConversationView> createState() => _ConversationViewState();
@@ -726,7 +740,7 @@ class _ConversationViewState extends State<ConversationView>
             onReconnect: session.channel.connect,
             botName: widget.botName,
             botLook: widget.botLook,
-            onVoice: widget.onVoice,
+            dictation: widget.dictation,
           ),
         ),
       ],

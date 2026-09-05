@@ -279,7 +279,7 @@ class _Control extends StatelessWidget {
         Icons.close_rounded,
         PillKind.tonal,
         () => unawaited(Navigator.of(context).maybePop()),
-        'Open Voice again from the mic in the composer.',
+        'Open Voice again from the top of the screen.',
       ),
       VoicePhase.connecting => (
         'Pause',

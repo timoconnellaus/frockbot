@@ -65,6 +65,7 @@ class FakeBackend implements VoiceBackend {
 
 class FakeAudio implements VoiceAudio {
   bool listening = false;
+  int rate = voiceInputSampleRate;
   int interrupts = 0;
   bool disposed = false;
   final played = <Uint8List>[];
@@ -72,9 +73,14 @@ class FakeAudio implements VoiceAudio {
   void Function(Uint8List)? onFrame;
 
   @override
-  Future<void> listen(void Function(Uint8List pcm16) frame) async {
+  Future<void> listen(
+    void Function(Uint8List pcm16) frame, {
+    int sampleRate = voiceInputSampleRate,
+    bool playback = true,
+  }) async {
     if (refusal != null) throw refusal!;
     listening = true;
+    rate = sampleRate;
     onFrame = frame;
   }
 
