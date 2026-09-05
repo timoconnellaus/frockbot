@@ -89,7 +89,11 @@ test("Gmail connects through the public callback into a reconstructed User DO an
     client: "browser",
   });
   expect(
-    (await read()).connections.filter((row) => row.state === "ready"),
+    (await read()).connections.filter(
+      (row) =>
+        row.connectionId === "gmail-workerd-connection" &&
+        row.state === "ready",
+    ),
   ).toHaveLength(1);
   const revoke = await rpc.composioRequest({
     schemaVersion: 1,

@@ -69,18 +69,37 @@ const connectors = computed(() => {
   }).flatMap((item): PluginCatalogItem[] => {
     const dynamic = item.connectionTypes.filter((type) => type.catalogPath);
     if (dynamic.length)
-      return dynamic.flatMap((type) =>
-        (
-          web.value.connectorCatalog?.[`${item.packageId}/${type.id}`] ?? []
-        ).map((entry) => ({
+      return dynamic.flatMap((type) => {
+        const entries = [
+          ...(web.value.connectorCatalog?.[`${item.packageId}/${type.id}`] ??
+            []),
+        ];
+        for (const connection of web.value.userSettings?.connections ?? []) {
+          const id = connection.safeMetadata.connectorId;
+          if (
+            connection.packageId !== item.packageId ||
+            connection.state === "revoked" ||
+            typeof id !== "string" ||
+            entries.some((entry) => entry.id === id)
+          )
+            continue;
+          entries.push({
+            id,
+            name: String(
+              connection.safeMetadata.connectorName ?? connection.displayName,
+            ),
+            description: "Your connected account",
+          });
+        }
+        return entries.map((entry) => ({
           ...item,
           displayName: entry.name,
           connectorId: entry.id,
           connectorDescription: entry.description,
           connectorIcon: entry.icon,
           connectionTypes: [type],
-        })),
-      );
+        }));
+      });
     if (item.packageId === MCP_PACKAGE_ID)
       return [
         ...mcpServers.value.map((server) => ({
@@ -233,7 +252,7 @@ function connectionCount(item: PluginCatalogItem): number {
       connection.packageId === item.packageId &&
       connection.state !== "revoked" &&
       (!item.connectorId ||
-        connection.safeMetadata.toolkitSlug === item.connectorId) &&
+        connection.safeMetadata.connectorId === item.connectorId) &&
       (!item.connectionId || connection.connectionId === item.connectionId),
   ).length;
 }
@@ -340,6 +359,9 @@ async function addMcpServer(): Promise<void> {
 }
 
 /** Start whichever authorization the card's Connection Type declares. */
+const labelingConnector = ref<string>();
+const accountAlias = ref("");
+
 function beginConnect(item: PluginCatalogItem): void {
   if (item.packageId === MCP_PACKAGE_ID) {
     beginMcpConnection();
@@ -352,6 +374,11 @@ function beginConnect(item: PluginCatalogItem): void {
     apiKeyConnectionTypeId.value = connectionType.id;
     apiKeyLabel.value = item.displayName;
     apiKey.value = "";
+    return;
+  }
+  if (item.connectorId) {
+    labelingConnector.value = item.connectorId;
+    accountAlias.value = "";
     return;
   }
   void connect(item.packageId, connectionType.id, item.connectorId);
@@ -384,12 +411,14 @@ async function connect(
   packageId: string,
   connectionTypeId: string,
   connectorId?: string,
+  alias?: string,
 ): Promise<void> {
   try {
     const redirectUrl = await web.value.startConnection(
       packageId,
       connectionTypeId,
       connectorId,
+      alias,
     );
     if (redirectUrl) {
       await web.value.openConnectionAuthorization(redirectUrl);
@@ -426,6 +455,14 @@ async function connect(
         <UiButton @click="dismissConnectionReturn">Dismiss</UiButton>
       </p>
 
+      <p
+        v-if="Object.keys(web.connectorCatalogErrors ?? {}).length"
+        role="status"
+        class="field-hint"
+      >
+        Some connectors could not be refreshed.
+        <UiButton @click="web.loadPluginCatalog()">Try again</UiButton>
+      </p>
       <label class="connector-search"
         ><span>Find a connector</span
         ><input
@@ -487,6 +524,36 @@ async function connect(
             </UiButton>
           </div>
 
+          <form
+            v-if="item.connectorId && labelingConnector === item.connectorId"
+            class="api-key-form"
+            @submit.prevent="
+              connect(
+                item.packageId,
+                item.connectionTypes[0]!.id,
+                item.connectorId,
+                accountAlias.trim(),
+              )
+            "
+          >
+            <label
+              ><span>Account label</span
+              ><input
+                v-model="accountAlias"
+                placeholder="Work email or personal account"
+                maxlength="120"
+                required
+            /></label>
+            <p class="field-hint">
+              Choose a name so you can recognize this account later.
+            </p>
+            <div class="api-key-actions">
+              <UiButton @click="labelingConnector = undefined">Cancel</UiButton
+              ><UiButton type="submit" variant="primary"
+                >Continue to sign in</UiButton
+              >
+            </div>
+          </form>
           <PackageAccounts :item="item" />
 
           <div

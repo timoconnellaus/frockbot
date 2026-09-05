@@ -134,6 +134,10 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
  */
 export const NON_SECRET_WORKER_SETTINGS_V1: readonly ProductionSecretV1[] = [
   {
+    name: "COMPOSIO_TEST_URL",
+    why: "Provider HTTP stand-in used only with development authentication; never deployed.",
+  },
+  {
     name: "NATIVE_SLICE_2_AUTH",
     why: "Qualification gate; not enabled by the production configuration.",
   },

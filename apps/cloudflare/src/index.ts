@@ -299,6 +299,7 @@ interface Env {
    */
   FROCKBOT_AUTHORIZATION_STATE_SECRET?: string;
   COMPOSIO_API_KEY?: string;
+  COMPOSIO_TEST_URL?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   FROCKBOT_ADMIN_EMAILS?: string;
   ALLOWED_CLIENT_ORIGINS?: string;

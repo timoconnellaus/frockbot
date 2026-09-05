@@ -76,6 +76,10 @@ export function createComposioFake() {
     if (match) {
       const account = accounts.get(decodeURIComponent(match[1]!));
       if (!account) return Response.json({ error: "Missing" }, { status: 404 });
+      if (request.method === "DELETE") {
+        accounts.delete(account.id);
+        return Response.json({});
+      }
       if (match[2]) account.status = "REVOKED";
       return Response.json(account);
     }

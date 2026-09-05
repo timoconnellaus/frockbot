@@ -302,6 +302,13 @@ export class ComposioClient {
     );
   }
 
+  deleteConnectedAccount(connectedAccountId: string): Promise<unknown> {
+    return this.request(
+      `/connected_accounts/${encodeURIComponent(connectedAccountId)}`,
+      { method: "DELETE" },
+    );
+  }
+
   executeTool(input: ExecuteComposioToolInput): Promise<unknown> {
     return this.request(
       `/tools/execute/${encodeURIComponent(input.toolSlug)}`,

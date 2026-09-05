@@ -41,6 +41,7 @@ export async function reconcileComposioProviderConnection(
   if (request.operation === "link") {
     const account = (await client.listConnectedAccounts(request.userId)).find(
       (candidate) =>
+        candidate.userId === request.userId &&
         candidate.alias === request.providerAlias &&
         candidate.toolkitSlug === request.toolkitSlug,
     );

@@ -2240,16 +2240,24 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           string,
           ReturnType<typeof decodeConnectorCatalogV1>
         > = {};
+        const connectorCatalogErrors: Record<string, string> = {};
         await Promise.all(
           pluginCatalog.flatMap((item) =>
             item.connectionTypes
               .filter((type) => type.catalogPath)
               .map(async (type) => {
                 if (!ctx.transport.hostedRequest || !type.catalogPath) return;
-                connectorCatalog[`${item.packageId}/${type.id}`] =
-                  decodeConnectorCatalogV1(
+                const key = `${item.packageId}/${type.id}`;
+                try {
+                  connectorCatalog[key] = decodeConnectorCatalogV1(
                     await ctx.transport.hostedRequest(type.catalogPath),
                   );
+                } catch {
+                  connectorCatalog[key] =
+                    web.value.connectorCatalog?.[key] ?? [];
+                  connectorCatalogErrors[key] =
+                    "Some connectors could not be refreshed. Try again shortly.";
+                }
               }),
           ),
         );
@@ -2268,10 +2276,14 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
                 (type) =>
                   !type.catalogPath ||
                   (connectorCatalog[`${item.packageId}/${type.id}`]?.length ??
-                    0) > 0,
+                    0) > 0 ||
+                  Boolean(
+                    connectorCatalogErrors[`${item.packageId}/${type.id}`],
+                  ),
               ),
           );
           web.value.connectorCatalog = connectorCatalog;
+          web.value.connectorCatalogErrors = connectorCatalogErrors;
           updateSettingsLoadError("catalog");
           committed = true;
         }
@@ -2551,6 +2563,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       packageId: string,
       connectionTypeId: string,
       connectorId?: string,
+      alias?: string,
     ): Promise<string | undefined> {
       if (!ctx.transport.startConnection) {
         throw new Error("Connections are unavailable");
@@ -2564,6 +2577,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         packageId,
         connectionTypeId,
         ...(connectorId ? [connectorId] : []),
+        alias ?? "",
       ]);
       const operation = await reserveConnectionOperation(
         connectionOperations,
@@ -2583,6 +2597,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           packageId,
           connectionTypeId,
           ...(connectorId ? { connectorId } : {}),
+          ...(alias ? { alias } : {}),
           nativeReturnNonce: operation.nativeReturnNonce,
         });
       } catch (error) {

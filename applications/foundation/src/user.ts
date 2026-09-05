@@ -218,7 +218,8 @@ export async function createFoundationUserBackendContributions(
         | "CREDENTIAL_KEYRING"
         | "MACHINE_TOKEN_SECRET"
         | "COMPOSIO_API_KEY"
-        | "BETTER_AUTH_URL",
+        | "BETTER_AUTH_URL"
+        | "COMPOSIO_TEST_URL",
     ): string | undefined;
     /**
      * The publication seam: the User Durable Object's own object storage and
@@ -368,6 +369,7 @@ export async function createFoundationUserBackendContributions(
         storage: host.storage,
         settings,
         apiKey: host.readSecret("COMPOSIO_API_KEY"),
+        apiBaseUrl: host.readSecret("COMPOSIO_TEST_URL"),
         callbackBaseUrl:
           host.readSecret("BETTER_AUTH_URL") ?? "http://localhost:8787",
       };

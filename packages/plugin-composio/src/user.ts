@@ -15,7 +15,10 @@ import {
   ComposioRequestError,
   type ToolkitSummary,
 } from "./composio-client.js";
-import { ComposioConnectionCoordinator } from "./connections.js";
+import {
+  ComposioConnectionCoordinator,
+  retireProviderAccount,
+} from "./connections.js";
 import {
   ComposioUserBackendContribution,
   type ComposioStorage,
@@ -26,6 +29,7 @@ export interface ComposioUserHost {
   storage: ComposioStorage;
   settings: UserSettingsBackendContribution;
   apiKey?: string;
+  apiBaseUrl?: string;
   client?: ComposioClient;
   callbackBaseUrl: string;
 }
@@ -35,6 +39,8 @@ type CachedCatalog = {
   expiresAt: number;
   items: ToolkitSummary[];
 };
+const AUTH_PENDING_KEY = "composio:auth-config-pending:v1";
+const AUTH_RETRY_MS = 60_000;
 const CATALOG_KEY = "composio:catalog:v1";
 
 /** All provider calls and durable authorization records live in the User DO. */
@@ -46,7 +52,7 @@ export class ComposioUserService {
     this.client =
       host.client ??
       (host.apiKey?.trim()
-        ? new ComposioClient({ apiKey: host.apiKey })
+        ? new ComposioClient({ apiKey: host.apiKey, baseUrl: host.apiBaseUrl })
         : undefined);
     this.records = new ComposioUserBackendContribution({
       state: { storage: host.storage },
@@ -54,8 +60,14 @@ export class ComposioUserService {
       availablePackages: [{ packageId: "composio", version: "0.0.1" }],
       reconcileProviderConnection: (request) =>
         reconcileComposioProviderConnection(this.requireClient(), request),
-      revokeConnectedAccount: (id) =>
-        this.requireClient().revokeConnectedAccount(id),
+      revokeConnectedAccount: (id, userId, connectionId) =>
+        retireProviderAccount(
+          this.requireClient(),
+          this.records,
+          userId,
+          connectionId,
+          id,
+        ),
     });
   }
   private requireClient(): ComposioClient {
@@ -94,16 +106,33 @@ export class ComposioUserService {
       };
       await this.host.storage.put(CATALOG_KEY, cache);
     }
+    const retained = (
+      await this.host.settings.readSnapshot()
+    ).connections.filter(
+      (row) => row.packageId === this.packageId && row.state !== "revoked",
+    );
+    const items = cache.items.map((item) => ({
+      id: item.slug,
+      name: item.name,
+      description: item.description,
+      ...(item.logo ? { icon: item.logo } : {}),
+    }));
+    for (const connection of retained) {
+      const slug = connection.safeMetadata.toolkitSlug;
+      if (typeof slug === "string" && !items.some((item) => item.id === slug))
+        items.push({
+          id: slug,
+          name: String(
+            connection.safeMetadata.toolkitName ?? connection.displayName,
+          ),
+          description: "This connection needs attention",
+        });
+    }
     return {
       schemaVersion: 1,
       items: decodeConnectorCatalogV1({
         schemaVersion: 1,
-        items: cache.items.map((item) => ({
-          id: item.slug,
-          name: item.name,
-          description: item.description,
-          ...(item.logo ? { icon: item.logo } : {}),
-        })),
+        items,
       }),
     };
   }
@@ -133,7 +162,23 @@ export class ComposioUserService {
     // The provider has no documented idempotency key. An interrupted creation
     // is reconciled from its catalog, never blindly repeated.
     const claimed = await this.host.storage.transaction(async (tx) => {
-      if (await tx.get(key)) return false;
+      const previous = await tx.get<{ status: string }>(key);
+      if (
+        previous &&
+        previous.status !== "ready" &&
+        previous.status !== "failed"
+      )
+        return false;
+      const pending = (await tx.get<string[]>(AUTH_PENDING_KEY)) ?? [];
+      if (!pending.includes(slug)) {
+        if (pending.length >= 1000)
+          throw new Error("Too many connectors awaiting setup");
+        await tx.put(AUTH_PENDING_KEY, [...pending, slug]);
+      }
+      const alarm = await tx.getAlarm?.();
+      await tx.setAlarm(
+        Math.min(alarm ?? Infinity, Date.now() + AUTH_RETRY_MS),
+      );
       await tx.put(key, {
         schemaVersion: 1,
         status: "creating",
@@ -143,12 +188,34 @@ export class ComposioUserService {
     });
     if (!claimed)
       throw new Error(
-        "This connector is still being prepared. Try again shortly.",
+        "This connector needs administrator setup before it can connect.",
       );
-    const created = await client.createManagedAuthConfig(
-      slug,
-      `FrockBot ${toolkit.name}`,
-    );
+    let created;
+    try {
+      created = await client.createManagedAuthConfig(
+        slug,
+        `FrockBot ${toolkit.name}`,
+      );
+    } catch (error) {
+      const definitive =
+        error instanceof ComposioRequestError &&
+        error.status >= 400 &&
+        error.status < 500 &&
+        error.status !== 408 &&
+        error.status !== 409;
+      await this.host.storage.put(key, {
+        schemaVersion: 1,
+        status: definitive ? "failed" : "uncertain",
+        failure: definitive
+          ? "Setup was rejected; another connection attempt may retry."
+          : "Setup outcome is unknown; the administrator can finish setup and the next read will reconcile it.",
+      });
+      throw new Error(
+        definitive
+          ? "This connector could not be prepared. Try connecting again."
+          : "This connector needs administrator setup before it can connect.",
+      );
+    }
     await this.host.storage.put(key, {
       schemaVersion: 1,
       status: "ready",
@@ -162,11 +229,31 @@ export class ComposioUserService {
   }
   async request(userId: string, input: unknown): Promise<unknown> {
     await this.host.settings.read(userId);
+    await this.migrate(userId);
     if (!input || typeof input !== "object" || Array.isArray(input))
       throw new Error("Connection command is invalid");
     const value = input as Record<string, unknown>;
     if (value.schemaVersion !== 1)
       throw new Error("Connection command version is unsupported");
+    const fields: Record<string, string[]> = {
+      catalog: [],
+      start: ["command", "start"],
+      revoke: ["connectionId"],
+      fail: ["connectionId", "authorizationStateId"],
+      complete: ["connectionId", "authorizationStateId", "connectedAccountId"],
+    };
+    if (
+      typeof value.operation !== "string" ||
+      !Object.hasOwn(fields, value.operation)
+    )
+      throw new Error("Connection command is unsupported");
+    const allowed = new Set([
+      "schemaVersion",
+      "operation",
+      ...fields[value.operation]!,
+    ]);
+    if (Object.keys(value).some((key) => !allowed.has(key)))
+      throw new Error("Connection command has invalid fields");
     if (value.operation === "catalog") {
       await this.reconcile(userId);
       return this.catalog(userId);
@@ -229,43 +316,106 @@ export class ComposioUserService {
     }
     throw new Error("Connection command is unsupported");
   }
-  async reconcile(userId: string): Promise<void> {
-    if (!this.client) return;
-    const snapshot = await this.host.settings.readSnapshot();
-    for (const connection of snapshot.connections.filter(
-      (row) => row.packageId === this.packageId && row.state === "ready",
-    )) {
-      const id = connection.safeMetadata.connectedAccountId;
-      let active = false;
-      try {
-        if (this.client && typeof id === "string") {
-          const account = await this.client.getConnectedAccount(id);
-          active =
-            account.userId === userId &&
-            account.id === id &&
-            account.toolkitSlug === connection.safeMetadata.toolkitSlug &&
-            account.status === "ACTIVE" &&
-            !account.disabled;
-        }
-      } catch (error) {
-        // A provider outage fails closed for this read, but does not claim the
-        // grant expired. The next read retries and can restore availability.
-        if (!(error instanceof ComposioRequestError && error.status === 404))
-          throw new Error(
-            "Could not check your connected apps. Try again shortly.",
-          );
-      }
-      if (!active)
+  private async migrate(userId: string): Promise<void> {
+    await this.host.storage.transaction(async (tx) => {
+      const snapshot = await this.host.settings.readSnapshot(tx);
+      for (const connection of snapshot.connections) {
+        if (
+          connection.packageId !== this.packageId ||
+          connection.safeMetadata.recordVersion === 1
+        )
+          continue;
         await this.host.settings.replaceConnection(
           userId,
           connection.connectionId,
           connection.generation,
           {
             ...connection,
-            state: "failed",
-            failure: `${connection.safeMetadata.toolkitName ?? "This connection"} needs reconnecting`,
+            connectionTypeId: "app",
+            generation: crypto.randomUUID(),
+            safeMetadata: {
+              ...connection.safeMetadata,
+              recordVersion: 1,
+              toolkitSlug:
+                connection.safeMetadata.toolkitSlug ??
+                connection.connectionTypeId,
+              toolkitName:
+                connection.safeMetadata.toolkitName ?? connection.displayName,
+            },
           },
+          tx,
         );
+      }
+    });
+  }
+  async reconcile(userId: string): Promise<void> {
+    await this.migrate(userId);
+    if (
+      !this.client ||
+      !(await this.host.settings.isPackageInstalled(userId, this.packageId))
+    )
+      return;
+    const snapshot = await this.host.settings.readSnapshot();
+    for (const connection of snapshot.connections.filter(
+      (row) =>
+        row.packageId === this.packageId &&
+        (row.state === "ready" ||
+          (row.state === "reconciliation-required" &&
+            row.safeMetadata.availabilityCheck === true)),
+    )) {
+      let next = connection;
+      try {
+        const id = connection.safeMetadata.connectedAccountId;
+        const account =
+          typeof id === "string"
+            ? await this.client.getConnectedAccount(id)
+            : undefined;
+        const active =
+          account &&
+          account.userId === userId &&
+          account.id === id &&
+          account.toolkitSlug === connection.safeMetadata.toolkitSlug &&
+          account.status === "ACTIVE" &&
+          !account.disabled;
+        if (active && connection.state === "ready") continue;
+        const { availabilityCheck: _check, ...safeMetadata } =
+          connection.safeMetadata;
+        next = {
+          ...connection,
+          state: active ? "ready" : "failed",
+          safeMetadata,
+          failure: active
+            ? undefined
+            : `${safeMetadata.toolkitName ?? "This connection"} needs reconnecting`,
+        };
+      } catch (error) {
+        next = {
+          ...connection,
+          state:
+            error instanceof ComposioRequestError && error.status === 404
+              ? "failed"
+              : "reconciliation-required",
+          safeMetadata: { ...connection.safeMetadata, availabilityCheck: true },
+          failure: "Could not check this connection. Try again shortly.",
+        };
+      }
+      // Read again inside the DO transaction: provider I/O may overlap a
+      // Disconnect. A stale observation must never change that decision.
+      await this.host.storage.transaction(async (tx) => {
+        const current = await this.host.settings.readSnapshot(tx);
+        const live = current.connections.find(
+          (row) => row.connectionId === connection.connectionId,
+        );
+        if (!live || JSON.stringify(live) !== JSON.stringify(connection))
+          return;
+        await this.host.settings.replaceConnection(
+          userId,
+          connection.connectionId,
+          connection.generation,
+          { ...next, generation: crypto.randomUUID() },
+          tx,
+        );
+      });
     }
   }
   projectConnection(connection: ConnectionView): ConnectionView {
@@ -273,8 +423,12 @@ export class ComposioUserService {
     return {
       ...connection,
       safeMetadata: {
-        ...(typeof toolkitSlug === "string" ? { toolkitSlug } : {}),
-        ...(typeof toolkitName === "string" ? { toolkitName } : {}),
+        ...(typeof toolkitSlug === "string"
+          ? { connectorId: toolkitSlug }
+          : {}),
+        ...(typeof toolkitName === "string"
+          ? { connectorName: toolkitName }
+          : {}),
       },
       ...(connection.failure
         ? {
@@ -288,6 +442,57 @@ export class ComposioUserService {
   }
   async alarm() {
     await this.records.alarm();
+    const pending =
+      (await this.host.storage.get<string[]>(AUTH_PENDING_KEY)) ?? [];
+    if (!pending.length || !this.client) return;
+    try {
+      const configs = await this.client.listAuthConfigs();
+      await this.host.storage.transaction(async (tx) => {
+        const live = (await tx.get<string[]>(AUTH_PENDING_KEY)) ?? [];
+        const remaining: string[] = [];
+        for (const slug of pending) {
+          const key = `composio:auth-config:${slug}`;
+          const record = await tx.get<{ status: string; startedAt?: number }>(
+            key,
+          );
+          if (record?.status !== "creating" && record?.status !== "uncertain")
+            continue;
+          if (
+            record.startedAt &&
+            record.startedAt + AUTH_RETRY_MS > Date.now()
+          ) {
+            remaining.push(slug);
+            continue;
+          }
+          const config = configs.find((item) => item.toolkitSlug === slug);
+          await tx.put(
+            key,
+            config
+              ? { schemaVersion: 1, status: "ready", id: config.id }
+              : {
+                  schemaVersion: 1,
+                  status: "uncertain",
+                  failure: "Administrator setup is needed before connecting.",
+                },
+          );
+        }
+        // Unknown creates are terminal and visible on the next connect attempt.
+        // A later catalog lookup can resolve them; never repeat their POST.
+        await tx.put(AUTH_PENDING_KEY, [
+          ...live.filter((slug) => !pending.includes(slug)),
+          ...remaining,
+        ]);
+        if (remaining.length) await tx.setAlarm(Date.now() + AUTH_RETRY_MS);
+      });
+    } catch {
+      const alarm = await this.host.storage.getAlarm?.();
+      await this.host.storage.setAlarm(
+        Math.min(
+          alarm && alarm > Date.now() ? alarm : Infinity,
+          Date.now() + AUTH_RETRY_MS,
+        ),
+      );
+    }
   }
   async lookupConnectionCommand(userId: string, commandId: string) {
     await this.host.settings.read(userId);
@@ -321,11 +526,19 @@ export class ComposioUserService {
     if (command.type === "connection/disconnect")
       await this.coordinator().revoke(userId, command.connectionId);
     else if (command.type === "connection/update-label")
-      next = { ...connection, displayName: command.label };
+      next = {
+        ...connection,
+        generation: crypto.randomUUID(),
+        displayName: command.label,
+      };
     else if (command.type === "connection/set-enabled") {
       if (command.enabled && connection.state !== "disabled")
         throw new Error("Reconnect this account first");
-      next = { ...connection, state: command.enabled ? "ready" : "disabled" };
+      next = {
+        ...connection,
+        generation: crypto.randomUUID(),
+        state: command.enabled ? "ready" : "disabled",
+      };
     } else throw new Error("Connection command is unsupported");
     if (next !== connection)
       await this.host.settings.replaceConnection(

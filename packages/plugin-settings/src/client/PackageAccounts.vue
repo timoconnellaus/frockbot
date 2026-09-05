@@ -36,7 +36,7 @@ const connections = computed<ConnectionView[]>(() =>
     (connection) =>
       connection.packageId === props.item.packageId &&
       (!props.item.connectorId ||
-        connection.safeMetadata.toolkitSlug === props.item.connectorId) &&
+        connection.safeMetadata.connectorId === props.item.connectorId) &&
       (!props.item.connectionId ||
         connection.connectionId === props.item.connectionId) &&
       connection.state !== "revoked",
@@ -66,6 +66,7 @@ async function reconnectAccount(connection: ConnectionView): Promise<void> {
       connection.packageId,
       connection.connectionTypeId,
       props.item.connectorId,
+      connection.displayName,
     );
     if (url) await web.value.openConnectionAuthorization(url);
   } catch {

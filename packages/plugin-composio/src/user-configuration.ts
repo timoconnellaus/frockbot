@@ -72,7 +72,11 @@ export interface ComposioUserBackendHost {
   reconcileProviderConnection(
     request: ComposioProviderReconciliationRequest,
   ): Promise<ComposioProviderReconciliationResult>;
-  revokeConnectedAccount(connectedAccountId: string): Promise<unknown>;
+  revokeConnectedAccount(
+    connectedAccountId: string,
+    userId: string,
+    connectionId: string,
+  ): Promise<unknown>;
 }
 
 export interface StartConnectionInput {
@@ -234,7 +238,9 @@ export class ComposioUserBackendContribution {
   ): Promise<UserSettingsViewV1["connections"][number] | undefined> {
     const settings = await this.read(userId);
     return settings.connections.find(
-      (connection) => connection.connectionId === connectionId,
+      (connection) =>
+        connection.packageId === "composio" &&
+        connection.connectionId === connectionId,
     );
   }
 
@@ -242,6 +248,8 @@ export class ComposioUserBackendContribution {
     userId: string,
     input: StartConnectionInput,
   ): Promise<boolean> {
+    if (input.packageId !== "composio")
+      throw new Error("Connection owner is invalid");
     await this.assertIdentity(userId);
     return this.ctx.storage.transaction(async (transaction) => {
       const current = await this.settings.readSnapshot(transaction);
@@ -295,7 +303,7 @@ export class ComposioUserBackendContribution {
           },
         ],
       } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
+      await this.writeState(transaction, current, next);
       await this.scheduleAlarm(
         transaction,
         nextConnectionAlarm(next) ?? effectDeadlineAt,
@@ -398,7 +406,8 @@ export class ComposioUserBackendContribution {
     return this.ctx.storage.transaction(async (transaction) => {
       const current = await this.settings.readSnapshot(transaction);
       const connection = current.connections.find(
-        (item) => item.connectionId === connectionId,
+        (item) =>
+          item.packageId === "composio" && item.connectionId === connectionId,
       );
       if (!connection) {
         throw new Error(`Connection "${connectionId}" was not admitted`);
@@ -448,7 +457,7 @@ export class ComposioUserBackendContribution {
           item.connectionId === connectionId ? claimed : item,
         ),
       } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
+      await this.writeState(transaction, current, next);
       await this.scheduleAlarm(
         transaction,
         nextConnectionAlarm(next) ?? effectDeadlineAt,
@@ -472,7 +481,8 @@ export class ComposioUserBackendContribution {
       return this.ctx.storage.transaction(async (transaction) => {
         const current = await this.settings.readSnapshot(transaction);
         const connection = current.connections.find(
-          (item) => item.connectionId === connectionId,
+          (item) =>
+            item.packageId === "composio" && item.connectionId === connectionId,
         );
         if (
           !connection ||
@@ -530,7 +540,7 @@ export class ComposioUserBackendContribution {
             item.connectionId === connectionId ? nextConnection : item,
           ),
         } satisfies UserSettingsViewV1;
-        await transaction.put(STATE_KEY, next);
+        await this.writeState(transaction, current, next);
         const alarmAt = nextConnectionAlarm(next);
         if (alarmAt !== undefined)
           await this.scheduleAlarm(transaction, alarmAt);
@@ -621,7 +631,8 @@ export class ComposioUserBackendContribution {
     return this.ctx.storage.transaction(async (transaction) => {
       const current = await this.settings.readSnapshot(transaction);
       let connection = current.connections.find(
-        (item) => item.connectionId === connectionId,
+        (item) =>
+          item.packageId === "composio" && item.connectionId === connectionId,
       );
       if (!connection) {
         throw new Error(`Connection "${connectionId}" was not admitted`);
@@ -688,7 +699,7 @@ export class ComposioUserBackendContribution {
             item.connectionId === connectionId ? pending : item,
           ),
         } satisfies UserSettingsViewV1;
-        await transaction.put(STATE_KEY, next);
+        await this.writeState(transaction, current, next);
         await this.scheduleAlarm(
           transaction,
           Math.max(
@@ -717,12 +728,32 @@ export class ComposioUserBackendContribution {
           item.connectionId === connectionId ? claimed : item,
         ),
       } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
+      await this.writeState(transaction, current, next);
       await this.scheduleAlarm(
         transaction,
         nextConnectionAlarm(next) ?? effectDeadlineAt,
       );
       return { phase: "provider" as const, connection: claimed };
+    });
+  }
+
+  async claimProviderAccountDeletion(
+    userId: string,
+    connectionId: string,
+  ): Promise<boolean> {
+    return this.transitionConnection(userId, connectionId, (connection) => {
+      if (
+        connection.state !== "revoking" ||
+        connection.safeMetadata.providerAccountDeletionRequested === true
+      )
+        return undefined;
+      return {
+        ...connection,
+        safeMetadata: {
+          ...connection.safeMetadata,
+          providerAccountDeletionRequested: true,
+        },
+      };
     });
   }
 
@@ -786,6 +817,7 @@ export class ComposioUserBackendContribution {
         operation: "link" | "revoke";
       }> = [];
       const connections = current.connections.map((connection) => {
+        if (connection.packageId !== "composio") return connection;
         let next = connection;
         if (connectionAuthorizationExpired(next, now)) {
           const providerAlias = next.safeMetadata.providerAlias;
@@ -876,7 +908,7 @@ export class ComposioUserBackendContribution {
         revision: changed ? current.revision + 1 : current.revision,
         connections,
       } satisfies UserSettingsViewV1;
-      if (changed) await transaction.put(STATE_KEY, next);
+      if (changed) await this.writeState(transaction, current, next);
       const alarmAt = nextConnectionAlarm(next);
       if (alarmAt === undefined) {
         // The shared User alarm may also serve another Contribution.
@@ -950,7 +982,11 @@ export class ComposioUserBackendContribution {
             if (result.status !== "revoked") {
               if (claim.phase !== "provider") continue;
               try {
-                await this.revokeConnectedAccount(account.id);
+                await this.revokeConnectedAccount(
+                  account.id,
+                  userId,
+                  connection.connectionId,
+                );
               } catch (error) {
                 await this.requireConnectionReconciliation(
                   userId,
@@ -1005,7 +1041,11 @@ export class ComposioUserBackendContribution {
                 const connectedAccountId = safeMetadata.connectedAccountId;
                 if (typeof connectedAccountId !== "string") continue;
                 try {
-                  await this.revokeConnectedAccount(connectedAccountId);
+                  await this.revokeConnectedAccount(
+                    connectedAccountId,
+                    userId,
+                    connection.connectionId,
+                  );
                 } finally {
                   await this.requireConnectionReconciliation(
                     userId,
@@ -1068,7 +1108,8 @@ export class ComposioUserBackendContribution {
     return this.ctx.storage.transaction(async (transaction) => {
       const current = await this.settings.readSnapshot(transaction);
       const connection = current.connections.find(
-        (item) => item.connectionId === connectionId,
+        (item) =>
+          item.packageId === "composio" && item.connectionId === connectionId,
       );
       if (!connection) {
         throw new Error(`Connection "${connectionId}" was not admitted`);
@@ -1082,7 +1123,7 @@ export class ComposioUserBackendContribution {
           item.connectionId === connectionId ? nextConnection : item,
         ),
       } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
+      await this.writeState(transaction, current, next);
       const alarmAt = nextConnectionAlarm(next);
       if (alarmAt === undefined) {
         // The shared User alarm may also serve another Contribution.
@@ -1091,6 +1132,34 @@ export class ComposioUserBackendContribution {
         await this.scheduleAlarm(transaction, Math.max(Date.now(), alarmAt));
       }
       return true;
+    });
+  }
+
+  private async writeState(
+    transaction: UserSettingsTransaction,
+    current: UserSettingsViewV1,
+    next: UserSettingsViewV1,
+  ): Promise<void> {
+    const previous = new Map(
+      current.connections.map((connection) => [
+        connection.connectionId,
+        connection,
+      ]),
+    );
+    await transaction.put(STATE_KEY, {
+      ...next,
+      connections: next.connections.map((connection) => {
+        if (
+          connection.packageId !== "composio" ||
+          connection === previous.get(connection.connectionId)
+        )
+          return connection;
+        return {
+          ...connection,
+          generation: crypto.randomUUID(),
+          safeMetadata: { ...connection.safeMetadata, recordVersion: 1 },
+        };
+      }),
     });
   }
 

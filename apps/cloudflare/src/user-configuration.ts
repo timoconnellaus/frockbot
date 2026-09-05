@@ -172,6 +172,8 @@ const USER_IDENTITY_KEY = "user:identity";
 
 interface UserConfigurationEnv {
   COMPOSIO_API_KEY?: string;
+  COMPOSIO_TEST_URL?: string;
+  ALLOW_DEVELOPMENT_AUTH?: string;
   BETTER_AUTH_URL?: string;
   CREDENTIAL_KEYRING?: string;
   /**
@@ -258,11 +260,15 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
           readSecret: (name) =>
             name === "MACHINE_TOKEN_SECRET"
               ? this.env.MACHINE_TOKEN_SECRET
-              : name === "COMPOSIO_API_KEY"
-                ? this.env.COMPOSIO_API_KEY
-                : name === "BETTER_AUTH_URL"
-                  ? this.env.BETTER_AUTH_URL
-                  : this.env.CREDENTIAL_KEYRING,
+              : name === "COMPOSIO_TEST_URL"
+                ? this.env.ALLOW_DEVELOPMENT_AUTH === "true"
+                  ? this.env.COMPOSIO_TEST_URL
+                  : undefined
+                : name === "COMPOSIO_API_KEY"
+                  ? this.env.COMPOSIO_API_KEY
+                  : name === "BETTER_AUTH_URL"
+                    ? this.env.BETTER_AUTH_URL
+                    : this.env.CREDENTIAL_KEYRING,
           packagePublisher: createPackagePublicationHost(
             this.env,
             this.ctx.storage,

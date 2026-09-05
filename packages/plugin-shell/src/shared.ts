@@ -323,6 +323,7 @@ export interface FrockBotWebData {
   botSettings?: BotSettingsViewV1;
   userSettings?: UserSettingsViewV1;
   pluginCatalog: PluginCatalogItem[];
+  connectorCatalogErrors?: Record<string, string>;
   connectorCatalog?: Record<
     string,
     import("@frockbot/connection-core").ConnectorCatalogEntryV1[]
@@ -525,6 +526,7 @@ export interface FrockBotWebData {
     packageId: string,
     connectionTypeId: string,
     connectorId?: string,
+    alias?: string,
   ): Promise<string | undefined>;
   openConnectionAuthorization(url: string): Promise<void>;
   revokeConnection(packageId: string, connectionId: string): Promise<void>;

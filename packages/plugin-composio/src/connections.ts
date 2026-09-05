@@ -11,6 +11,7 @@ import type {
   RevokeConnectionResult,
   StartConnectionResult,
 } from "./backend-contracts.js";
+import { ComposioRequestError } from "./composio-client.js";
 import {
   linkReconciliationDisposition,
   reconcileComposioProviderConnection,
@@ -75,6 +76,10 @@ export interface ComposioConnectionStore {
     phase: "provider" | "finalize" | "pending" | "done";
     connection: ConnectionView;
   }>;
+  claimProviderAccountDeletion(
+    userId: string,
+    connectionId: string,
+  ): Promise<boolean>;
   recordRevocationProviderCompleted(
     userId: string,
     connectionId: string,
@@ -83,6 +88,28 @@ export interface ComposioConnectionStore {
     userId: string,
     connectionId: string,
   ): Promise<boolean>;
+}
+
+/** A definite unsupported revoke can fall back to removal, under a separate durable intent. */
+export async function retireProviderAccount(
+  client: ComposioClient,
+  store: ComposioConnectionStore,
+  userId: string,
+  connectionId: string,
+  accountId: string,
+): Promise<void> {
+  try {
+    await client.revokeConnectedAccount(accountId);
+  } catch (error) {
+    if (
+      !(error instanceof ComposioRequestError) ||
+      (error.status !== 400 && error.status !== 409)
+    )
+      throw error;
+    if (!(await store.claimProviderAccountDeletion(userId, connectionId)))
+      throw new Error("Account removal requires reconciliation");
+    await client.deleteConnectedAccount(accountId);
+  }
 }
 
 export interface ComposioConnectionTypeConfig {
@@ -202,7 +229,13 @@ export class ComposioConnectionCoordinator {
       }
       let providerError: unknown;
       try {
-        await this.config.client.revokeConnectedAccount(connectedAccountId);
+        await retireProviderAccount(
+          this.config.client,
+          this.config.store,
+          userId,
+          connectionId,
+          connectedAccountId,
+        );
       } catch (error) {
         providerError = error;
       }
@@ -696,7 +729,13 @@ export class ComposioConnectionCoordinator {
     }
     if (shouldInvokeProvider) {
       try {
-        await this.config.client.revokeConnectedAccount(connectedAccountId);
+        await retireProviderAccount(
+          this.config.client,
+          this.config.store,
+          userId,
+          connectionId,
+          connectedAccountId,
+        );
         await this.config.store.recordRevocationProviderCompleted(
           userId,
           connectionId,
@@ -706,7 +745,7 @@ export class ComposioConnectionCoordinator {
           userId,
           connectionId,
           "revoke",
-          "Revocation outcome requires reconciliation",
+          "Account removal requires reconciliation",
         );
         throw error;
       }

@@ -423,6 +423,7 @@ describe("Connection provider reconciliation alarms", () => {
             id: "account-1",
             status: "ACTIVE",
             toolkitSlug: "gmail",
+            user_id: "user-1",
             alias: "link-command",
           },
         });
@@ -520,6 +521,7 @@ describe("Connection provider reconciliation alarms", () => {
             id: "account-1",
             status: "ACTIVE",
             toolkitSlug: "gmail",
+            user_id: "user-1",
             alias: "link-command",
           },
         });
@@ -586,6 +588,7 @@ describe("Connection provider reconciliation alarms", () => {
           {
             id: "account-1",
             status: "ACTIVE",
+            user_id: "user-1",
             alias: "link-command",
             toolkit: { slug: "gmail" },
           },
@@ -681,6 +684,7 @@ describe("Connection provider reconciliation alarms", () => {
           {
             id: "account-1",
             status: "ACTIVE",
+            user_id: "user-1",
             alias: "link-command",
             toolkit: { slug: "gmail" },
           },
@@ -731,6 +735,7 @@ describe("Connection provider reconciliation alarms", () => {
               {
                 id: "account-1",
                 status: "ACTIVE",
+                user_id: "user-1",
                 alias: "link-command",
                 toolkit: { slug: "gmail" },
               },
@@ -918,6 +923,7 @@ describe("Connection provider reconciliation alarms", () => {
             id: "account-1",
             status: "REVOKED",
             toolkitSlug: "gmail",
+            user_id: "user-1",
             alias: "link-command",
           },
         });
@@ -967,6 +973,7 @@ describe("Connection provider reconciliation alarms", () => {
                 {
                   id: "account-1",
                   status: "INITIALIZING",
+                  user_id: "user-1",
                   alias: "link-command",
                   toolkit: { slug: "gmail" },
                 },
@@ -1116,6 +1123,7 @@ describe("Connection provider reconciliation alarms", () => {
             id: "account-1",
             status: "ACTIVE",
             toolkitSlug: "gmail",
+            user_id: "user-1",
             alias: "link-command",
           },
         });
@@ -1162,6 +1170,7 @@ describe("Connection provider reconciliation alarms", () => {
           id: "account-1",
           status: "ACTIVE",
           toolkitSlug: "gmail",
+          user_id: "user-1",
           alias: "link-command",
         },
       },
@@ -1174,6 +1183,7 @@ describe("Connection provider reconciliation alarms", () => {
           id: "account-1",
           status: "FAILED",
           toolkitSlug: "gmail",
+          user_id: "user-1",
           alias: "link-command",
         },
       },
@@ -1263,6 +1273,7 @@ describe("Connection provider reconciliation alarms", () => {
             id: "account-1",
             status: "ACTIVE",
             toolkitSlug: "gmail",
+            user_id: "user-1",
             alias: "link-command",
           },
         });
@@ -1335,6 +1346,7 @@ describe("Connection provider reconciliation alarms", () => {
                 id: "account-1",
                 status: "INITIALIZING",
                 toolkitSlug: "gmail",
+                user_id: "user-1",
                 alias: "link-command",
               },
             });
@@ -1345,6 +1357,7 @@ describe("Connection provider reconciliation alarms", () => {
               id: "account-1",
               status: "REVOKED",
               toolkitSlug: "gmail",
+              user_id: "user-1",
               alias: "link-command",
             },
           });
@@ -1575,6 +1588,7 @@ describe("Connection provider reconciliation alarms", () => {
             id: "account-1",
             status: "ACTIVE",
             toolkitSlug: "gmail",
+            user_id: "user-1",
             alias: "link-command",
           },
         });
@@ -1627,6 +1641,7 @@ describe("Connection provider reconciliation alarms", () => {
               id: "account-1",
               status: "INITIALIZING",
               toolkitSlug: "gmail",
+              user_id: "user-1",
               alias: "link-command",
             },
           }),
@@ -1685,6 +1700,7 @@ describe("Connection provider reconciliation alarms", () => {
                     id: "account-1",
                     status: "REVOKED",
                     toolkitSlug: "gmail",
+                    user_id: "user-1",
                     alias: "link-command",
                   },
                 },
