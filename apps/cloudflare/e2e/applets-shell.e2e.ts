@@ -248,15 +248,15 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
     botName: "Builder",
   });
 
-  // The entry is declared at order 5 and Connectors registers at 10, so the
-  // entry draws above it.
+  // The entry is a sidebar action, so it draws above the User's own row at the
+  // foot of the column.
   const entry = page.getByRole("button", { name: "Applets", exact: true });
-  const connectors = page.getByRole("button", { name: "Connectors" });
+  const profile = page.locator("button.profile-trigger");
   await expect(entry).toBeVisible();
   const entryBox = await entry.boundingBox();
-  const connectorsBox = await connectors.boundingBox();
+  const profileBox = await profile.boundingBox();
   expect(entryBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(
-    connectorsBox?.y ?? 0,
+    profileBox?.y ?? 0,
   );
 
   // The canvas is already up, because this Session has a focused Applet: its
@@ -279,6 +279,28 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   await entry.click();
   const surface = page.getByRole("region", { name: "Applets" });
   await expect(surface.getByText("Built by this Bot")).toBeVisible();
+  /*
+   * The two ways out a User reaches for before finding the ✕.
+   *
+   * Clicking the dimmed workspace closes the surface — the dimming has always
+   * looked like a promise that it would — and Escape closes it from wherever
+   * the focus has landed, which after a click on the page behind is the
+   * document body rather than anything inside the panel.
+   */
+  const scrim = page.locator("[data-surface-scrim]");
+  // The panel is pinned to the left edge and paints over the scrim there, so
+  // the dimmed part a User can actually click is what is left of the window.
+  const scrimBox = await scrim.boundingBox();
+  await scrim.click({
+    position: { x: (scrimBox?.width ?? 0) - 24, y: 120 },
+  });
+  await expect(surface).toBeHidden();
+  await entry.click();
+  await expect(surface).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(surface).toBeHidden();
+  await entry.click();
+  await expect(surface).toBeVisible();
   const listFrame = surface.locator("iframe").contentFrame();
   await expect(listFrame.getByText("applets:Todo")).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -288,7 +310,11 @@ test("a Package entry opens its surface and a focused Applet fills the canvas", 
   // the ready state slides the live Applet in over the code view.
   stubs.publish();
   await listFrame.getByRole("button", { name: "Open Todo" }).click();
-  await surface.page().keyboard.press("Escape");
+  // The focus is inside the Package's own frame, which is where its key events
+  // stay, so the way out here is the panel's own Close button rather than the
+  // Escape the shell listens for.
+  await page.getByRole("button", { name: "Close panel" }).click();
+  await expect(surface).toBeHidden();
   // The header names the live generation in words. The exact id is not on the
   // page at all — it is an internal identifier, and the Applet the frame loads
   // is what proves the right generation went live.

@@ -34,7 +34,7 @@
     "upper": [
       {
         "id": "upper-neutral",
-        "label": "Neutral crown",
+        "label": "No headwear",
         "parent": null,
         "kind": "root"
       },
@@ -180,7 +180,7 @@
     "middle": [
       {
         "id": "middle-neutral",
-        "label": "Neutral face",
+        "label": "No glasses",
         "parent": null,
         "kind": "root"
       },
@@ -266,7 +266,7 @@
     "lower": [
       {
         "id": "lower-neutral",
-        "label": "Neutral lower face",
+        "label": "No neckwear",
         "parent": null,
         "kind": "root"
       },

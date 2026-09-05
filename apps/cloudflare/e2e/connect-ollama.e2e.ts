@@ -37,7 +37,7 @@ test("a good key reaches ready and lists the endpoint's models", async ({
   });
 
   const card = ollamaCard(page);
-  await expect(card.getByText("ready · models fresh")).toBeVisible();
+  await expect(card.getByText("Ready · model list up to date")).toBeVisible();
   await expect(card.getByText(E2E_CONNECTION_LABEL)).toBeVisible();
 
   // The catalog the Connection resolved is the one the configured endpoint
@@ -77,6 +77,6 @@ test("a key the endpoint refuses for inference never reaches ready", async ({
   await expect(failure).toContainText(
     "Ollama Cloud rejected the key for inference",
   );
-  await expect(card.getByText("ready ·")).toHaveCount(0);
-  await expect(card.getByText("failed", { exact: true })).toBeVisible();
+  await expect(card.getByText("Ready ·")).toHaveCount(0);
+  await expect(card.getByText("Not working", { exact: true })).toBeVisible();
 });

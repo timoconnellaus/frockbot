@@ -153,7 +153,17 @@ describe("user application security headers", () => {
     expect(policy.get("font-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("img-src")).toEqual(["'self'", "data:"]);
     expect(policy.get("style-src")).toEqual(["'self'"]);
-    expect(policy.get("connect-src")).toEqual(["'self'", "wss://app.example"]);
+    // The zone injects the Cloudflare Insights beacon above this Worker, so a
+    // policy that refused it logged a console error on every page load.
+    expect(policy.get("script-src")).toEqual([
+      "'self'",
+      "https://static.cloudflareinsights.com",
+    ]);
+    expect(policy.get("connect-src")).toEqual([
+      "'self'",
+      "https://cloudflareinsights.com",
+      "wss://app.example",
+    ]);
     // Package pages use the anonymous UI origin; the expanded Computer viewer
     // frames the Sprite's own noVNC page.
     expect(policy.get("frame-src")).toEqual([
@@ -173,6 +183,7 @@ describe("user application security headers", () => {
     );
     expect(policy.get("connect-src")).toEqual([
       "'self'",
+      "https://cloudflareinsights.com",
       "ws://localhost:8787",
     ]);
   });

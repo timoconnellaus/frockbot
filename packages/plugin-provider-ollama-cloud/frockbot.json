@@ -29,8 +29,8 @@
         "scopes": ["user"],
         "schema": {
           "type": "integer",
-          "title": "Web search results",
-          "description": "The most results web_search returns, whatever the model asks for. Absent means the tool's own default of 5.",
+          "title": "Maximum web search results",
+          "description": "How many results a Bot's web search returns at most, however many it asks for. Leave this empty to use the default of 5.",
           "minimum": 1,
           "maximum": 10
         }

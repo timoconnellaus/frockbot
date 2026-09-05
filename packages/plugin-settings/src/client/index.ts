@@ -7,7 +7,6 @@ import {
 import BotPanel from "./BotPanel.vue";
 import BotSettingsSurface from "./BotSettingsSurface.vue";
 import BotSettingsTrigger from "./BotSettingsTrigger.vue";
-import ConnectorsTrigger from "./ConnectorsTrigger.vue";
 import ConnectionsSurface from "./ConnectionsSurface.vue";
 import ModelsSurface from "./ModelsSurface.vue";
 import PluginsSurface from "./PluginsSurface.vue";
@@ -53,11 +52,13 @@ export const settingsClientPlugin: ClientPlugin = (ctx) => {
       title: "Settings",
       component: UserSettingsSurface,
     }),
-    ctx.slot({
-      slot: "frockbot.sidebar-actions",
-      order: 10,
-      component: ConnectorsTrigger,
-    }),
+    /*
+     * Models, Plugins and Connectors are one group of account surfaces and
+     * they have one way in: the User menu. Connectors used to sit in the
+     * sidebar footer as well, so the same panel had two entries with the same
+     * name while its two siblings had one each — a User who found it in one
+     * place had no way to tell the other was the same thing.
+     */
     ctx.slot({
       slot: "frockbot.user-profile",
       order: 10,

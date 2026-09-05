@@ -147,6 +147,11 @@ function packageUiArtifactOrigin(requestUrl: URL): string {
   return `${requestUrl.protocol}//${host}${requestUrl.port ? `:${requestUrl.port}` : ""}`;
 }
 
+/** Where the zone's injected Cloudflare Insights beacon is served from. */
+const INSIGHTS_SCRIPT_ORIGIN = "https://static.cloudflareinsights.com";
+/** Where that beacon posts its measurements — a different host from the script. */
+const INSIGHTS_REPORT_ORIGIN = "https://cloudflareinsights.com";
+
 function withSecurityHeaders(
   response: Response,
   artifactOrigin: string,
@@ -162,7 +167,16 @@ function withSecurityHeaders(
     // projections and neither becomes an authority in the hosted client. An
     // Applet's own UI is another page on the same artifact origin, nested by
     // the Applets canvas page, so the origin already named here covers it.
-    `default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self' ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${artifactOrigin} https://*.sprites.app; frame-ancestors 'none'; base-uri 'none'`,
+    //
+    // Cloudflare Insights is injected into every response by the zone itself,
+    // above this Worker, so the page loads it whether or not the policy allows
+    // it — and under `script-src 'self'` it was refused on every page load and
+    // logged a red console error for every User. Naming the beacon's origin is
+    // the honest fix: it is the deployment's own analytics, its script is
+    // fetched from one Cloudflare host and it reports to another. Removing it
+    // instead would mean turning the feature off in the zone, which the code
+    // cannot state or keep true.
+    `default-src 'self'; script-src 'self' ${INSIGHTS_SCRIPT_ORIGIN}; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src 'self' ${INSIGHTS_REPORT_ORIGIN} ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${artifactOrigin} https://*.sprites.app; frame-ancestors 'none'; base-uri 'none'`,
   );
   return secured;
 }

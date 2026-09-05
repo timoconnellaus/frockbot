@@ -28,10 +28,25 @@ watch(
   { flush: "post" },
 );
 
-function onKeydown(event: KeyboardEvent): void {
-  if (event.key !== "Escape") return;
+/*
+ * Escape closes the panel wherever the focus is.
+ *
+ * A handler bound to the panel element only hears the key while the focus is
+ * inside it, and the focus leaves the moment the User clicks the conversation
+ * behind the panel or the browser hands it to the document body. The window is
+ * where "close this" has to be heard, so the key is a real way out rather than
+ * one that works only immediately after the panel opens.
+ */
+function onWindowKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Escape" || event.defaultPrevented) return;
+  if (!props.open) return;
   event.preventDefault();
   emit("close");
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("keydown", onWindowKeydown);
+  onBeforeUnmount(() => window.removeEventListener("keydown", onWindowKeydown));
 }
 
 onBeforeUnmount(() => restoreFocus?.focus());
@@ -47,17 +62,34 @@ onBeforeUnmount(() => restoreFocus?.focus());
     the two was the live one. Dimming what the panel is over says it, and gives
     the pointer the dismissal every other overlay in the product has.
 
-    It dims and nothing else: these surfaces are not modal. The workspace
-    behind one stays live — the composer takes a message while Plugins is
-    open, a Package page runs beside its own surface — so a layer that ate the
-    pointer would change what the app is, not just how it looks. Escape and
-    the panel's own Close button are the ways out, and they are enough.
+    The scrim is a control, not decoration. A dimmed layer that swallows a
+    click without doing anything is the thing every User tries first and the
+    thing this panel used to ignore; clicking it now closes the panel, which is
+    what the dimming has been promising all along. The workspace under it is
+    `inert` while the panel is open, so the pointer, the Tab key and the
+    accessibility tree all agree about which of the two layers is live. That
+    inert background is what makes the panel modal in practice; the panel
+    itself stays a region rather than claiming `aria-modal`, which would hide
+    everything else from assistive technology including the surfaces these
+    panels legitimately open over.
+
+    It is a pointer shortcut and not a second exit in the accessibility tree:
+    the header's Close button is that exit, and two controls with one name
+    would only make the panel harder to read aloud.
 
     It is a `v-if` rather than a transition for the same reason a fade would be
     wrong: an element that outlives its panel is one nobody can see and
     everybody's clicks land on.
   -->
-  <div v-if="open" class="ui-sidebar-overlay__scrim" aria-hidden="true"></div>
+  <button
+    v-if="open"
+    type="button"
+    class="ui-sidebar-overlay__scrim"
+    data-surface-scrim
+    tabindex="-1"
+    aria-hidden="true"
+    @click="emit('close')"
+  ></button>
   <Transition name="ui-surface">
     <aside
       v-if="open"
@@ -65,7 +97,6 @@ onBeforeUnmount(() => restoreFocus?.focus());
       class="ui-sidebar-overlay"
       role="region"
       aria-labelledby="ui-sidebar-overlay-title"
-      @keydown="onKeydown"
     >
       <header class="ui-sidebar-overlay__header">
         <h2 id="ui-sidebar-overlay-title">{{ title }}</h2>
@@ -88,9 +119,10 @@ onBeforeUnmount(() => restoreFocus?.focus());
   position: absolute;
   z-index: var(--frock-layer-surface);
   inset: 0;
+  padding: 0;
+  border: 0;
   background: var(--frock-overlay-tint);
-  /* Decoration, not a control: the workspace underneath stays usable. */
-  pointer-events: none;
+  cursor: default;
 }
 
 .ui-sidebar-overlay {

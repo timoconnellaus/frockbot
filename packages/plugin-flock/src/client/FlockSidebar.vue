@@ -109,6 +109,11 @@ onMounted(() => void flock.value.load());
 
 <template>
   <div class="flock-list-actions">
+    <!--
+      One control, one look. "Manage" as a text link and "Done" as a filled
+      pill read as two different buttons doing two different things, when they
+      are the same toggle in its two states; the pressed state carries the mode.
+    -->
     <button
       type="button"
       class="flock-manage"
@@ -217,6 +222,7 @@ onMounted(() => void flock.value.load());
               active: active === bot.botId,
               archived: flock.lifecycles[bot.botId] === 'archived',
               unread: isUnread(bot.botId),
+              managing: flock.showArchived,
             }"
           >
             <button
@@ -261,32 +267,39 @@ onMounted(() => void flock.value.load());
                 />
               </span>
             </button>
-            <button
-              v-if="
-                flock.showArchived && flock.lifecycles[bot.botId] === 'archived'
-              "
-              type="button"
-              class="flock-lifecycle"
-              @click="flock.restore(bot.botId)"
-            >
-              Restore
-            </button>
-            <button
-              v-else-if="flock.showArchived"
-              type="button"
-              class="flock-lifecycle"
-              @click="flock.openArchive(bot.botId)"
-            >
-              Archive
-            </button>
-            <button
-              v-if="flock.showArchived"
-              type="button"
-              class="flock-lifecycle flock-lifecycle--danger"
-              @click="flock.openDelete(bot.botId)"
-            >
-              Delete
-            </button>
+            <!--
+              Manage mode's actions.
+
+              They are one aligned group on their own line rather than two bare
+              words wrapped around the row: the row keeps its full width for
+              the name and preview, every row is the same height whichever
+              actions it offers, and Delete looks like what it does.
+            -->
+            <div v-if="flock.showArchived" class="flock-row-actions">
+              <button
+                v-if="flock.lifecycles[bot.botId] === 'archived'"
+                type="button"
+                class="flock-lifecycle"
+                @click="flock.restore(bot.botId)"
+              >
+                Restore
+              </button>
+              <button
+                v-else
+                type="button"
+                class="flock-lifecycle"
+                @click="flock.openArchive(bot.botId)"
+              >
+                Archive
+              </button>
+              <button
+                type="button"
+                class="flock-lifecycle flock-lifecycle--danger"
+                @click="flock.openDelete(bot.botId)"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         </TransitionGroup>
       </section>
