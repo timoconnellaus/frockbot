@@ -120,6 +120,14 @@ class ChatController extends ChangeNotifier {
       changed();
       await refresh();
       if (pendingId != null) await checkDelivery();
+      // A draft identical to the last message sent is the message itself,
+      // left over from before the box emptied on send. Not a draft.
+      final last = runs.lastOrNull;
+      if (draft.isNotEmpty && last != null && last['input'] == draft) {
+        draft = '';
+        await _persist();
+        changed();
+      }
       // A stored Stop is observed, never dispatched merely because the app opened.
     } catch (_) {
       error = 'Couldn’t restore this conversation. Please reconnect.';
@@ -198,13 +206,16 @@ class ChatController extends ChangeNotifier {
     final id = nextId();
     pendingId = id;
     pendingText = text;
-    draft = text;
+    // The box empties the moment the send is accepted; `pendingText` is the
+    // durable copy, and it returns to the box only if the send fails.
+    draft = '';
     changed();
     try {
       await _persist(); // No transport call can precede this durable local write.
     } catch (_) {
       pendingId = null;
       pendingText = null;
+      draft = text;
       sending = false;
       error = 'Couldn’t save your message. Please try again.';
       changed();
@@ -217,6 +228,7 @@ class ChatController extends ChangeNotifier {
       if (failure.refused) {
         pendingId = null;
         pendingText = null;
+        draft = text;
         await _persist();
         error = failure.message;
       } else {
@@ -244,9 +256,9 @@ class ChatController extends ChangeNotifier {
       if (run != null) {
         _put(run);
         error = null;
-        if (draft == pendingText) draft = '';
       } else {
         error = 'Your message didn’t go through. You can send it again.';
+        if (draft.isEmpty) draft = pendingText ?? '';
       }
       final savedText = pendingText;
       pendingId = null;

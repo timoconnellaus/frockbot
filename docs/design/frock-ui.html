@@ -1,0 +1,673 @@
+<meta charset="utf-8">
+<title>Frock UI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Archivo+Black&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* A deliberately single-theme page: this direction is dark-first and every colour is painted. */
+  :root {
+    --ground: #151419;
+    --window: #1b1a20;
+    --sheet: #221f27;
+    --tile: #2b282f;
+    --tile-2: #35313a;
+    --line: rgb(244 242 246 / 8%);
+    --line-2: rgb(244 242 246 / 16%);
+    --ink: rgb(244 242 246 / 92%);
+    --ink-2: rgb(244 242 246 / 60%);
+    --ink-3: rgb(244 242 246 / 42%);
+    --accent: #ec386b;
+    --accent-ink: #f3a3ba;
+    --accent-tint: rgb(236 56 107 / 14%);
+    --accent-glow: rgb(236 56 107 / 34%);
+    --good: #7cc9a6; --good-tint: rgb(124 201 166 / 14%);
+    --warn: #dfc07f; --warn-tint: rgb(223 192 127 / 14%);
+    --danger: #ef9aa5; --danger-tint: rgb(239 154 165 / 14%);
+    --sans: "Manrope", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+    --display: "Archivo Black", "Manrope", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--ground); }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 400 14px/20px var(--sans); -webkit-font-smoothing: antialiased; }
+  ::selection { background: rgb(236 56 107 / 26%); }
+
+  /* ---------- page ---------- */
+  .wrap { max-width: 1320px; margin: 0 auto; padding: 48px 32px 96px; }
+  header.top { max-width: 70ch; margin-bottom: 40px; }
+  .eyebrow { font: 600 11px/16px var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); }
+  header.top h1 { font: 400 40px/44px var(--display); letter-spacing: -.02em; margin: 10px 0 14px; text-wrap: balance; }
+  header.top p { margin: 0 0 8px; color: var(--ink-2); font-size: 15px; line-height: 23px; }
+  header.top p b { color: var(--ink); font-weight: 600; }
+  .ideas { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 28px 0 48px; }
+  .idea { padding: 14px 16px; border-radius: 14px; background: var(--window); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .idea b { display: block; font-weight: 600; margin-bottom: 4px; }
+  .idea span { color: var(--ink-2); font-size: 13px; line-height: 19px; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(390px, 1fr)); gap: 40px 28px; justify-items: center; }
+  figure { margin: 0; width: 390px; }
+  figcaption { margin-top: 14px; }
+  figcaption b { display: block; font-weight: 600; font-size: 14px; }
+  figcaption b i { font-style: normal; color: var(--ink-3); font-weight: 500; margin-right: 8px; font-family: var(--mono); font-size: 12px; }
+  figcaption span { display: block; color: var(--ink-2); font-size: 13px; line-height: 19px; margin-top: 3px; }
+
+  /* ---------- phone ---------- */
+  .phone { width: 390px; height: 800px; border-radius: 40px; background: var(--window); border: 1px solid var(--line-2); position: relative; overflow: hidden; box-shadow: 0 30px 80px rgb(0 0 0 / 55%), inset 0 1px 0 rgb(255 255 255 / 6%); display: flex; flex-direction: column; }
+  .status { height: 48px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px 0 32px; font: 600 13px var(--sans); flex: none; }
+  .status .r { display: inline-flex; gap: 5px; align-items: center; }
+  .status .r i { width: 15px; height: 9px; border-radius: 3px; border: 1px solid var(--ink-2); position: relative; display: inline-block; }
+  .status .r i::after { content: ""; position: absolute; inset: 2px; right: 4px; background: var(--ink); border-radius: 1px; }
+  .screen { flex: 1; min-height: 0; padding: 0 20px; display: flex; flex-direction: column; position: relative; }
+  .homebar { height: 22px; flex: none; display: grid; place-items: center; }
+  .homebar i { width: 120px; height: 4px; border-radius: 2px; background: var(--ink-3); display: block; }
+
+  /* ---------- primitives ---------- */
+  .bar { height: 44px; display: flex; align-items: center; gap: 8px; margin: 0 -4px; }
+  .bar .t { flex: 1; text-align: center; font: 600 16px/22px var(--sans); letter-spacing: -.01em; }
+  .bar .t.l { text-align: left; }
+  .ib { width: 36px; height: 36px; border-radius: 18px; display: grid; place-items: center; background: transparent; color: var(--ink); border: 0; }
+  .ib svg, .ico svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  .ib.f { background: var(--tile); }
+  .pill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 0 16px; border-radius: 18px; font: 600 14px var(--sans); background: var(--tile); color: var(--ink); border: 0; white-space: nowrap; }
+  .pill.p { background: var(--accent); color: #fff; box-shadow: 0 8px 24px var(--accent-glow); }
+  .pill.g { background: transparent; color: var(--ink-2); }
+  .pill.sm { height: 30px; padding: 0 12px; font-size: 13px; }
+  .pill.lg { height: 46px; padding: 0 22px; font-size: 15px; border-radius: 23px; }
+  .pill svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  /* A Bot is its own sheep: the Flock's layers, stacked in the web's order (see
+     packages/plugin-flock/src/shared.ts sheepLayerIds and the app's sheep_layers.dart). */
+  .sheep { background-color: var(--tile); background-size: 100% 100%; background-repeat: no-repeat; background-position: center; border-radius: 27%; flex: none; }
+  .sheep { background-image: url("../../packages/plugin-flock/assets/canonical.webp"), url("../../packages/plugin-flock/assets/background-hot-pink.webp"); }
+  .sheep.look-a { background-image: url("../../packages/plugin-flock/assets/emerald-necktie.webp"), url("../../packages/plugin-flock/assets/ranger-fedora-feather.webp"), url("../../packages/plugin-flock/assets/forest-ranger-fedora.webp"), url("../../packages/plugin-flock/assets/canonical.webp"), url("../../packages/plugin-flock/assets/background-lime-green.webp"); }
+  .sheep.look-b { background-image: url("../../packages/plugin-flock/assets/white-snow-goggles.webp"), url("../../packages/plugin-flock/assets/blue-sailor-cap.webp"), url("../../packages/plugin-flock/assets/canonical.webp"), url("../../packages/plugin-flock/assets/background-hot-pink.webp"); }
+  .sheep.look-c { background-image: url("../../packages/plugin-flock/assets/tortoiseshell-readers.webp"), url("../../packages/plugin-flock/assets/matte-black-top-hat.webp"), url("../../packages/plugin-flock/assets/canonical.webp"), url("../../packages/plugin-flock/assets/background-canary-yellow.webp"); }
+  .sheep.look-d { background-image: url("../../packages/plugin-flock/assets/leather-bell.webp"), url("../../packages/plugin-flock/assets/lilac-flower-crown.webp"), url("../../packages/plugin-flock/assets/canonical.webp"), url("../../packages/plugin-flock/assets/background-electric-blue.webp"); }
+  .sheep.look-e { background-image: url("../../packages/plugin-flock/assets/red-polka-bowtie.webp"), url("../../packages/plugin-flock/assets/chef-toque.webp"), url("../../packages/plugin-flock/assets/canonical.webp"), url("../../packages/plugin-flock/assets/background-vivid-purple.webp"); }
+  .ring { position: relative; }
+  .ring::before { content: ""; position: absolute; inset: -3px; border-radius: 32%; border: 2px solid var(--accent); opacity: .9; }
+  .ring.good::before { border-color: var(--good); }
+  .ring.idle::before { border-color: var(--line-2); }
+  .glow { position: absolute; width: 260px; height: 260px; border-radius: 50%; background: radial-gradient(circle, var(--accent-glow) 0%, transparent 62%); pointer-events: none; }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums slashed-zero; }
+  .h-display { font: 400 28px/32px var(--display); letter-spacing: -.02em; }
+  .h-name { font: 400 20px/24px var(--display); letter-spacing: -.015em; }
+  .sec { font: 600 11px/16px var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin: 18px 0 8px; }
+  .muted { color: var(--ink-2); }
+  .faint { color: var(--ink-3); }
+  .sm { font-size: 12px; line-height: 16px; }
+  .group { background: var(--sheet); border-radius: 18px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); padding: 4px 14px; }
+  .row { display: flex; align-items: center; gap: 12px; min-height: 50px; padding: 6px 0; position: relative; }
+  .row + .row::before { content: ""; position: absolute; left: 44px; right: 0; top: 0; height: 1px; background: var(--line); }
+  .row .ico { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--tile); color: var(--ink-2); flex: none; }
+  .row .ico.a { background: var(--accent-tint); color: var(--accent-ink); }
+  .row .ico.g { background: var(--good-tint); color: var(--good); }
+  .row .ico.w { background: var(--warn-tint); color: var(--warn); }
+  .row .main { flex: 1; min-width: 0; }
+  .row .main b { display: block; font-weight: 600; font-size: 14px; line-height: 18px; letter-spacing: -.005em; }
+  .row .main span { display: block; font-size: 12px; line-height: 16px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .tr { color: var(--ink-3); font: 500 12px var(--mono); display: inline-flex; align-items: center; gap: 6px; }
+  .row .tr svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.75; }
+  .chev { width: 14px; height: 14px; stroke: var(--ink-3); fill: none; stroke-width: 1.75; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; }
+  .sw { width: 42px; height: 26px; border-radius: 13px; background: var(--tile-2); position: relative; flex: none; }
+  .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 40%); }
+  .sw.on { background: var(--accent); } .sw.on::after { left: 19px; }
+  .composer { display: flex; align-items: center; gap: 4px; height: 44px; padding: 4px 4px 4px 16px; border-radius: 22px; background: var(--sheet); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%), 0 10px 30px rgb(0 0 0 / 35%); }
+  .composer > span:not(.ib) { flex: 1; color: var(--ink-3); font-size: 15px; } .composer .ib { flex: none; }
+  .composer .ib { width: 34px; height: 34px; }
+  .composer .ib.p { background: var(--accent); color: #fff; }
+  .receipt { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--sheet); margin-top: 6px; }
+  .receipt .ico { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--tile); color: var(--ink-2); flex: none; }
+  .receipt .ico svg { width: 14px; height: 14px; }
+  .receipt b { font-weight: 600; font-size: 13px; line-height: 17px; flex: 1; min-width: 0; letter-spacing: -.005em; }
+  .receipt b span { color: var(--ink-2); font-weight: 500; }
+  .receipt .t { font: 500 11px var(--mono); color: var(--ink-3); }
+  .stats { display: flex; gap: 8px; }
+  .stat { flex: 1; background: var(--sheet); border-radius: 14px; padding: 12px 12px 10px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .stat b { display: block; font: 400 22px/26px var(--display); letter-spacing: -.02em; }
+  .stat span { display: block; font-size: 11px; line-height: 14px; color: var(--ink-3); margin-top: 2px; letter-spacing: .04em; text-transform: uppercase; font-weight: 600; }
+  .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 3px; border-radius: 12px; background: var(--sheet); }
+  .seg span { text-align: center; padding: 7px 0; font: 600 13px var(--sans); color: var(--ink-2); border-radius: 9px; }
+  .seg span.on { background: var(--tile-2); color: var(--ink); }
+  .msg { max-width: 78%; padding: 8px 13px; border-radius: 18px; font-size: 15px; line-height: 22px; letter-spacing: -.004em; }
+  .msg.u { align-self: flex-end; background: var(--tile); border-bottom-right-radius: 6px; }
+  .msg.b { align-self: stretch; max-width: 100%; padding: 0; }
+  .caret { display: inline-block; width: 8px; height: 16px; background: var(--accent); border-radius: 2px; vertical-align: -3px; margin-left: 2px; opacity: .8; }
+  .sheetcard { background: var(--sheet); border-radius: 24px 24px 0 0; padding: 12px 20px 24px; box-shadow: 0 -20px 60px rgb(0 0 0 / 50%), inset 0 1px 0 rgb(255 255 255 / 6%); margin: auto -20px 0; }
+  .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--ink-3); margin: 0 auto 14px; }
+  .preview { background: var(--window); border-radius: 14px; padding: 12px 14px; border: 1px solid var(--line); }
+  .preview .k { font: 600 11px/16px var(--sans); color: var(--ink-3); letter-spacing: .06em; text-transform: uppercase; }
+  .preview .v { font-size: 14px; line-height: 20px; margin-bottom: 8px; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .btile { position: relative; overflow: hidden; background: var(--sheet); border-radius: 22px; padding: 16px 14px 14px; min-height: 168px; display: flex; flex-direction: column; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .btile .sheep { width: 56px; height: 56px; margin-bottom: auto; }
+  .btile .n { font: 400 18px/22px var(--display); letter-spacing: -.015em; margin-top: 12px; }
+  .btile .s { font-size: 12px; line-height: 16px; color: var(--ink-2); margin-top: 3px; display: flex; align-items: center; gap: 6px; }
+  .btile .glow { width: 200px; height: 200px; left: -40px; top: -60px; }
+  .btile.new { border: 1px dashed var(--line-2); background: transparent; align-items: center; justify-content: center; color: var(--ink-2); box-shadow: none; }
+  .ctile { background: var(--sheet); border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 92px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .ctile .logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font: 700 13px var(--sans); }
+  .ctile b { font-weight: 600; font-size: 14px; }
+  .ctile .st { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+  .term { background: #0f0e12; border-radius: 16px; padding: 12px 14px; font: 400 12px/18px var(--mono); color: rgb(244 242 246 / 78%); border: 1px solid var(--line); overflow: hidden; }
+  .term .p { color: var(--accent-ink); }
+  .term .ok { color: var(--good); }
+  .term .dim { color: var(--ink-3); }
+  .flow { display: flex; flex-direction: column; gap: 0; }
+  .step { display: flex; gap: 12px; align-items: flex-start; position: relative; padding: 6px 0; }
+  .step .n { width: 32px; height: 32px; border-radius: 9px; background: var(--tile); display: grid; place-items: center; color: var(--ink-2); flex: none; font: 600 12px var(--mono); }
+  .step .n.a { background: var(--accent-tint); color: var(--accent-ink); }
+  .step + .step::before { content: ""; position: absolute; left: 15px; top: -10px; height: 16px; width: 2px; background: var(--line-2); border-radius: 1px; }
+  .step b { display: block; font-weight: 600; font-size: 14px; line-height: 18px; }
+  .step span { display: block; font-size: 12px; line-height: 16px; color: var(--ink-2); }
+  .bars { display: flex; align-items: flex-end; gap: 4px; height: 36px; }
+  .bars i { flex: 1; background: var(--good); border-radius: 2px 2px 0 0; opacity: .8; display: block; }
+  .bars i.f { background: var(--danger); }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font: 600 12px/16px var(--sans); color: var(--ink-2); }
+  .field .in { height: 44px; border-radius: 14px; background: var(--sheet); border: 1px solid var(--line-2); display: flex; align-items: center; padding: 0 14px; font-size: 16px; box-shadow: 0 0 0 3px var(--accent-tint); }
+  .todo { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+  .todo .cb { width: 22px; height: 22px; border-radius: 7px; border: 1.5px solid var(--line-2); flex: none; display: grid; place-items: center; }
+  .todo .cb.on { background: var(--accent); border-color: var(--accent); }
+  .todo .cb svg { width: 12px; height: 12px; stroke: #fff; fill: none; stroke-width: 2.5; }
+  .todo .cb.on + span { color: var(--ink-3); text-decoration: line-through; }
+  .todo span { flex: 1; font-size: 15px; }
+  .fab { position: absolute; right: 20px; bottom: 30px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 14px; background: var(--tile); font: 600 12px var(--sans); color: var(--ink); white-space: nowrap; }
+  .chip.a { background: var(--accent-tint); color: var(--accent-ink); }
+  .chip.g { background: var(--good-tint); color: var(--good); }
+  .chips { display: flex; gap: 8px; overflow: hidden; }
+  .dock { display: flex; justify-content: space-around; align-items: center; height: 56px; margin: 6px -20px 0; border-top: 1px solid var(--line); padding: 0 12px; }
+  .dock div { display: flex; flex-direction: column; align-items: center; gap: 3px; font: 600 10px var(--sans); color: var(--ink-3); letter-spacing: .04em; }
+  .dock div.on { color: var(--ink); }
+  .dock svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  .dock div.on svg { stroke: var(--accent); }
+  /* ---------- system section ---------- */
+  .sys { margin: 8px 0 56px; }
+  .sys h2 { font: 400 26px/30px var(--display); letter-spacing: -.02em; margin: 0 0 6px; }
+  .sys > p { margin: 0 0 22px; color: var(--ink-2); max-width: 70ch; }
+  .sec-h { font: 600 11px/16px var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); margin: 34px 0 10px; }
+  .spec { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
+  .stage { background: var(--window); border: 1px solid var(--line); border-radius: 18px; padding: 20px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .stage h4 { margin: 0 0 12px; font: 600 11px/16px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+  .stage + .stage { margin-top: 16px; }
+  .notes { color: var(--ink-2); font-size: 13px; line-height: 19px; display: flex; flex-direction: column; gap: 10px; }
+  .notes p { margin: 0; } .notes b { color: var(--ink); font-weight: 600; }
+  .tok { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .tok th { text-align: left; font: 600 11px/16px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 0 8px 6px 0; border-bottom: 1px solid var(--line-2); }
+  .tok td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--ink-2); }
+  .tok td:first-child { font-family: var(--mono); color: var(--ink); font-size: 11.5px; }
+  .sw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
+  .swatch { border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--sheet); }
+  .swatch i { display: block; height: 44px; }
+  .swatch b { display: block; font: 600 12px/16px var(--sans); padding: 6px 9px 0; }
+  .swatch span { display: block; font: 500 10.5px/14px var(--mono); color: var(--ink-3); padding: 0 9px 7px; }
+  .trow { display: grid; grid-template-columns: 130px minmax(0,1fr); gap: 16px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .trow:last-child { border-bottom: 0; }
+  .trow .k { font: 600 11px/14px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+  .trow .k small { display: block; font: 500 10.5px var(--mono); letter-spacing: 0; text-transform: none; margin-top: 2px; }
+  .comp { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px 24px; }
+  .comp > div { display: flex; flex-direction: column; gap: 10px; }
+  .comp h5 { margin: 0; font: 600 12px/16px var(--sans); color: var(--ink-2); }
+  .rowline { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .desk { font-size: 13px; }
+  @media (max-width: 900px) { .spec { grid-template-columns: 1fr; } }
+
+  @media (prefers-reduced-motion: no-preference) { .pulse { animation: pulse 1.6s ease-in-out infinite; } }
+  @keyframes pulse { 0%,100% { opacity: .5 } 50% { opacity: 1 } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">Frock UI · the system · v1 draft</div>
+    <h1>The app is your Bots' office. Chat is one room in it.</h1>
+    <p>Today the app is a chat list with settings behind it. That is how every AI product looks, and it hides the thing FrockBot actually does: Bots that work while you are away, with real accounts, real Applets and a real Computer.</p>
+    <p>So the home is a <b>briefing</b>, not a thread list. Every action a Bot takes is a <b>receipt</b> you can read in a second. Bots are <b>characters</b> with a state you can see across the room. And the pink stops being paint and becomes <b>light</b>: it glows behind whichever Bot is working, and it marks the one thing that needs you.</p>
+  </header>
+
+  <div class="ideas">
+    <div class="idea"><b>Briefing over inbox</b><span>Open the app and read what happened, what needs you, and what is running. You never hunt through chats to find out.</span></div>
+    <div class="idea"><b>Receipts, not logs</b><span>Each tool call becomes a one-line receipt: icon tile, plain sentence, mono time. In chat, on the Bot's Work tab, and in the briefing.</span></div>
+    <div class="idea"><b>Bots as characters</b><span>Sheep avatars with a state ring: pink working, green ready, grey idle. Names set in the display face like a wordmark.</span></div>
+    <div class="idea"><b>Accent as light</b><span>Radial glow behind a working Bot, a glow under the one primary pill. Everything else is tone on tone.</span></div>
+    <div class="idea"><b>One universal input</b><span>"Ask any Bot" lives on the briefing. Routing to the right Bot is the product's job, not yours.</span></div>
+    <div class="idea"><b>Mono where it counts</b><span>Times, counts, ids and the Computer's output in JetBrains Mono. It signals precision without a terminal aesthetic.</span></div>
+  </div>
+
+
+  <div class="sys">
+    <h2>The system</h2>
+    <p>Everything the screens below are built from. Names are shared with Flutter; the phone values are the ones shown, the desktop shell uses the compact column.</p>
+
+    <div class="sec-h">Colour · tone before line</div>
+    <div class="spec">
+      <div>
+        <div class="stage"><h4>Four depths, three inks, one light</h4>
+          <div class="sw-grid">
+            <div class="swatch"><i style="background:var(--ground)"></i><b>ground</b><span>#151419</span></div>
+            <div class="swatch"><i style="background:var(--window)"></i><b>window</b><span>#1b1a20</span></div>
+            <div class="swatch"><i style="background:var(--sheet)"></i><b>sheet</b><span>#221f27</span></div>
+            <div class="swatch"><i style="background:var(--tile)"></i><b>tile</b><span>#2b282f</span></div>
+            <div class="swatch"><i style="background:var(--tile-2)"></i><b>tile.2</b><span>#35313a</span></div>
+            <div class="swatch"><i style="background:rgb(244 242 246 / 92%)"></i><b>ink</b><span>92%</span></div>
+            <div class="swatch"><i style="background:rgb(244 242 246 / 60%)"></i><b>ink.2</b><span>60%</span></div>
+            <div class="swatch"><i style="background:rgb(244 242 246 / 42%)"></i><b>ink.3</b><span>42%</span></div>
+            <div class="swatch"><i style="background:var(--accent)"></i><b>accent</b><span>#ec386b</span></div>
+            <div class="swatch"><i style="background:var(--accent-ink)"></i><b>accent.ink</b><span>#f3a3ba</span></div>
+            <div class="swatch"><i style="background:var(--accent-tint)"></i><b>accent.tint</b><span>14%</span></div>
+            <div class="swatch"><i style="background:radial-gradient(circle at 50% 50%, var(--accent-glow), transparent 70%)"></i><b>accent.glow</b><span>34% radial</span></div>
+            <div class="swatch"><i style="background:var(--good)"></i><b>good</b><span>#7cc9a6</span></div>
+            <div class="swatch"><i style="background:var(--warn)"></i><b>warn</b><span>#dfc07f</span></div>
+            <div class="swatch"><i style="background:var(--danger)"></i><b>danger</b><span>#ef9aa5</span></div>
+            <div class="swatch"><i style="background:var(--line-2)"></i><b>line / line.2</b><span>8% / 16%</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="notes">
+        <p><b>Depth is tone.</b> ground → window → sheet → tile → tile.2. Each step is 3 to 4% lighter and a raised surface carries a 1px top highlight at 5% white. No drop shadows except under things that float.</p>
+        <p><b>Ink is alpha.</b> Three tiers of the same colour, so text sits correctly on every depth without a per-surface grey.</p>
+        <p><b>Accent is light.</b> Solid for the one action per screen and the state ring. Tint for tiles, selection and chips. Ink for tinted words. Glow behind a working Bot and under the one pink pill.</p>
+        <p><b>Status is desaturated.</b> Good, warn and danger have their chroma pulled down so they read without glowing; each has a 14% tint for tiles.</p>
+        <p><b>Light theme</b> exists for Applets and previews: cream ground, the same names, the same tints. It is a second palette, not an inversion.</p>
+      </div>
+    </div>
+
+    <div class="sec-h">Type · three faces, ten roles</div>
+    <div class="spec">
+      <div class="stage">
+        <div class="trow"><div class="k">Display<small>Archivo Black · 28/32 · −.02em</small></div><div class="h-display">Good afternoon, Tim.</div></div>
+        <div class="trow"><div class="k">Name<small>Archivo Black · 20/24</small></div><div class="h-name">Bob</div></div>
+        <div class="trow"><div class="k">Number<small>Archivo Black · 22/26</small></div><div style="font:400 22px/26px var(--display);letter-spacing:-.02em">3 <span style="font:400 18px var(--display)">$0.04</span> <span style="font:400 18px var(--display)">14%</span></div></div>
+        <div class="trow"><div class="k">Bar title<small>Manrope 600 · 16/22 · −.01em</small></div><div style="font:600 16px/22px var(--sans);letter-spacing:-.01em">Bob's Computer</div></div>
+        <div class="trow"><div class="k">Message<small>Manrope 400 · 15/22 · −.004em</small></div><div style="font:400 15px/22px var(--sans);letter-spacing:-.004em;max-width:52ch">Found it. She is asking for Q3 by region. APAC is up 18%, EMEA flat, Americas down 4%.</div></div>
+        <div class="trow"><div class="k">Row<small>Manrope 600 · 14/18</small></div><div style="font:600 14px/18px var(--sans)">Research finished the draft</div></div>
+        <div class="trow"><div class="k">Body<small>Manrope 400 · 14/20</small></div><div style="font:400 14px/20px var(--sans);max-width:52ch">Connections belong to you, not to a Bot. Any Bot you allow can use them.</div></div>
+        <div class="trow"><div class="k">Caption<small>Manrope 500 · 12/16 · ink.2</small></div><div style="font:500 12px/16px var(--sans);color:var(--ink-2)">Q3 pricing memo · 1,240 words</div></div>
+        <div class="trow"><div class="k">Eyebrow<small>Manrope 600 · 11/16 · .1em caps</small></div><div class="eyebrow" style="color:var(--ink-3)">While you were away</div></div>
+        <div class="trow"><div class="k">Mono<small>JetBrains Mono 500 · 11–12 · tabular</small></div><div class="mono" style="font-size:12px;color:var(--ink-3)">14:02 · 2m 14s · bob-daff7ee3 · 212 passed</div></div>
+      </div>
+      <div class="notes">
+        <p><b>Archivo Black is the voice.</b> Greetings, Bot names, the big numbers on a stat. Never in a control, never below 18px.</p>
+        <p><b>Manrope does the work</b> at 400 and 600 only. Nothing under 20px is heavier than 600.</p>
+        <p><b>Mono is for time, count and id.</b> Receipts' right column, timestamps, terminal output. Always tabular, slashed zero.</p>
+        <p><b>Desktop compact:</b> message 14/20, row 13/18, body 13/18, caption 12/16, bar title 15/20. Display and Name unchanged.</p>
+        <p><b>Line heights are on the 4px grid</b>, tracking tightens as size grows.</p>
+      </div>
+    </div>
+
+    <div class="sec-h">Space, shape, motion</div>
+    <div class="spec">
+      <div class="stage">
+        <table class="tok">
+          <thead><tr><th>Token</th><th>Phone</th><th>Desktop</th><th>Used for</th></tr></thead>
+          <tbody>
+            <tr><td>space.edge</td><td>18–20</td><td>20–24</td><td>Screen edge</td></tr>
+            <tr><td>space.row</td><td>10</td><td>8</td><td>Between fields; rows in a group have no gap</td></tr>
+            <tr><td>space.group</td><td>18</td><td>16</td><td>Between groups; eyebrow sits 8 above its group</td></tr>
+            <tr><td>row.height</td><td>50</td><td>40</td><td>Group rows; 44px tap area regardless</td></tr>
+            <tr><td>control.sm / md / lg</td><td>30 / 36 / 46</td><td>28 / 32 / 36</td><td>Pills, icon buttons, composer (44)</td></tr>
+            <tr><td>tile</td><td>32</td><td>28</td><td>Icon tile in a row; receipt tile 24</td></tr>
+            <tr><td>avatar.sm / md / lg / hero</td><td>24 / 32 / 56 / 84</td><td>22 / 28 / 48 / 72</td><td>Sheep; radius 27% of size; ring at −3px, 2px</td></tr>
+            <tr><td>radius.pill</td><td>999</td><td>999</td><td>Buttons, chips, composer</td></tr>
+            <tr><td>radius.group</td><td>18</td><td>14</td><td>Groups, cards, stats</td></tr>
+            <tr><td>radius.tile</td><td>22</td><td>18</td><td>Bot tiles, canvases</td></tr>
+            <tr><td>radius.sheet</td><td>24</td><td>20</td><td>Bottom sheets, dialogs</td></tr>
+            <tr><td>radius.receipt</td><td>12</td><td>10</td><td>Receipts, previews</td></tr>
+            <tr><td>motion.fast / enter</td><td colspan="2">140ms / 260ms · cubic-bezier(.2,0,0,1)</td><td>State changes / things entering</td></tr>
+            <tr><td>glow</td><td colspan="2">260px radial, accent 34% → transparent 62%</td><td>Behind a working Bot, above the fold only</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="notes">
+        <p><b>Rows never have gaps.</b> A group is one sheet; rows inside are separated by a hairline that starts at the text edge.</p>
+        <p><b>Pills everywhere on the phone.</b> Desktop keeps 10px radius on controls so it sits beside other desktop apps.</p>
+        <p><b>One glow per screen</b>, always behind the thing that is working or the thing that needs you.</p>
+        <p><b>Motion:</b> one curve, two durations, no bounce, no ripple. Pressed darkens one step. Sheets follow the finger.</p>
+      </div>
+    </div>
+
+    <div class="sec-h">Components</div>
+    <div class="stage">
+      <div class="comp">
+        <div><h5>Bot avatar + state ring</h5><div class="rowline"><div class="sheep ring look-a" style="width:56px;height:56px"></div><div class="sheep ring good look-b" style="width:56px;height:56px"></div><div class="sheep ring idle look-c" style="width:56px;height:56px"></div><div class="sheep look-d" style="width:32px;height:32px"></div><div class="sheep look-e" style="width:24px;height:24px"></div></div><div class="notes"><p>Pink working · green ready · grey idle · no ring when state is irrelevant.</p></div></div>
+        <div><h5>Pills</h5><div class="rowline"><span class="pill p">Approve and send</span><span class="pill">Decline</span><span class="pill g">Edit</span><span class="pill sm p">Review</span><span class="pill sm">Run now</span></div><div class="rowline"><span class="ib f"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span><span class="ib"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span><span class="pill" style="color:var(--danger)">Stop</span></div><div class="notes"><p>One pink pill per screen, with a glow. Destructive is calm: ink in danger on a tile, never a red fill.</p></div></div>
+        <div><h5>Group and rows</h5><div class="group"><div class="row"><div class="ico a"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><div class="main"><b>Inbox digest ran</b><span>14 emails · 2 need a reply</span></div><span class="tr">2h</span></div><div class="row"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><div class="main"><b>Research finished the draft</b><span>Q3 pricing memo · 1,240 words</span></div><svg class="chev" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></div><div class="row"><div class="main"><b>Notify me on failure</b></div><span class="sw on"></span></div></div></div>
+        <div><h5>Receipt</h5><div class="receipt" style="margin:0"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Searched Gmail · <span>“Thursday numbers”</span></b><span class="t">3 hits</span></div><div class="receipt"><div class="ico" style="background:var(--good-tint);color:var(--good)"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><b>Drafted reply · <span>214 words</span></b><span class="t">ready</span></div><div class="receipt" style="border:1px solid rgb(236 56 107 / 30%)"><div class="ico" style="background:var(--accent-tint);color:var(--accent-ink)"><svg viewBox="0 0 24 24"><path d="M12 8v5M12 16h.01"/><circle cx="12" cy="12" r="9"/></svg></div><b>Waiting to send an email</b><span class="pill sm p">Review</span></div><div class="notes"><p>Tile, verb-first sentence, mono right column. Same object in chat, on a Bot's Work tab, in the briefing, in the Computer.</p></div></div>
+        <div><h5>Needs-you group</h5><div class="group" style="border:1px solid rgb(236 56 107 / 35%);box-shadow:0 0 0 4px var(--accent-tint), inset 0 1px 0 rgb(255 255 255 / 5%)"><div class="row"><div class="sheep ring look-a" style="width:32px;height:32px"></div><div class="main"><b>Bob wants to send an email</b><span>To Sarah · draft ready</span></div><span class="pill sm p">Review</span></div></div><div class="notes"><p>The only bordered group. Accent border at 35% plus a 4px tint halo.</p></div></div>
+        <div><h5>Stats</h5><div class="stats"><div class="stat"><b>3</b><span>Routines</span></div><div class="stat"><b>1</b><span>Applet</span></div><div class="stat"><b style="font-family:var(--display)">$0.04</b><span>Today</span></div></div><div class="notes"><p>Number in the display face, label as an eyebrow. Three across, never more.</p></div></div>
+        <div><h5>Composer</h5><div class="composer" style="margin:0"><span>Ask any Bot</span><span class="ib"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span class="ib p"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div><div class="notes"><p>44px pill, 15px text, 34px buttons inside. Floats over the dock with a soft shadow.</p></div></div>
+        <div><h5>Chips and segments</h5><div class="chips"><span class="chip a">All 4</span><span class="chip">Working 1</span><span class="chip g"><span class="dot"></span>Live</span><span class="chip">Idle 2</span></div><div class="seg"><span>Chat</span><span class="on">Work</span><span>Setup</span></div></div>
+        <div><h5>Bot tile</h5><div class="tiles"><div class="btile" style="min-height:150px"><div class="glow"></div><div class="sheep ring look-b" style="width:56px;height:56px"></div><div class="n">Bob</div><div class="s"><span class="dot" style="color:var(--accent)"></span>Running tests</div></div><div class="btile" style="min-height:150px"><div class="sheep ring idle look-c" style="width:56px;height:56px"></div><div class="n">Ops</div><div class="s"><span class="dot" style="color:var(--ink-3)"></span>Idle · 3 days</div></div></div></div>
+        <div><h5>Steps, bars, well</h5><div class="flow"><div class="step"><div class="n a">✉</div><div><b>An email arrives in Gmail</b><span>any label</span></div></div><div class="step"><div class="n">1</div><div><b>Write a digest</b><span>Group by sender</span></div></div></div><div class="bars" style="height:28px"><i style="height:60%"></i><i style="height:80%"></i><i class="f" style="height:30%"></i><i style="height:75%"></i><i style="height:90%"></i><i style="height:70%"></i></div><div class="term" style="padding:8px 12px"><div><span class="p">$</span> bun test</div><div><span class="ok">✓</span> add.test.ts <span class="dim">(12)</span></div></div></div>
+        <div><h5>Field and sheet</h5><div class="field"><label>Name your Bot</label><div class="in">Bob<span class="caret"></span></div></div><div class="preview"><div class="k">To</div><div class="v" style="margin:0">Sarah Chen</div></div><div class="notes"><p>Label above, 44px field, focus is a 3px tint halo. Sheets have a grab handle, 24px top radius, and rise from the dock.</p></div></div>
+        <div><h5>Page frame, lead, notice</h5><div class="bar" style="margin:0 0 6px"><span class="ib"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></span><span class="t" style="flex:1;text-align:center;font:600 16px/22px var(--sans);letter-spacing:-.01em">Inbox</span><span class="ib"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg></span></div><p style="margin:0 0 10px;font:400 14px/20px var(--sans);color:var(--ink-2)">Open a conversation to follow up, or dismiss an update when you’re done.</p><div class="eyebrow" style="color:var(--ink-3);margin-bottom:8px">Updates</div><div class="group" style="margin:0"><div style="padding:14px 16px"><div style="display:flex;gap:12px;align-items:flex-start"><b style="flex:1;font:600 14px/18px var(--sans)">Bob finished the Q3 memo</b><span class="mono" style="font-size:12px;color:var(--ink-3)">14:02</span></div><div style="font:400 14px/20px var(--sans);margin-top:6px">Draft is in your Docs. Two numbers need your eye before it goes to Sarah.</div><div class="rowline" style="margin-top:12px"><span class="pill sm">Open Bot</span><span class="pill sm g">Dismiss</span></div></div></div><div class="notes"><p><b>Every secondary screen is this frame:</b> a way back on the left, the name in the middle, at most one action on the right, content bounded to 680px. A lead is one paragraph in ink.2 that explains the page once. A notice is a row that grew: title, when, body, and pills for what you can do. In Flutter: <code>FrockPage</code>, <code>FrockLead</code>, <code>FrockNotice</code>.</p></div></div>
+        <div><h5>Dock</h5><div class="dock" style="margin:0;border-top:1px solid var(--line)"><div class="on"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9H4z"/></svg>TODAY</div><div><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M3 19a5 5 0 0 1 10 0M11 19a5 5 0 0 1 10 0"/></svg>BOTS</div><div><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>APPLETS</div><div><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>YOU</div></div><div class="notes"><p>Four destinations. Today is home. The active glyph takes the accent, the label stays ink.</p></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec-h" style="margin-top:8px">The screens</div>
+  <div class="gallery">
+
+    <!-- 01 Today -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="glow" style="left:-80px;top:40px"></div>
+          <div class="bar"><span class="t l"><span class="eyebrow">Saturday · 5 Sep</span></span><span class="ib f"><div class="sheep look-d" style="width:22px;height:22px"></div></span></div>
+          <div class="h-display" style="margin:6px 0 14px">Good afternoon,<br>Tim.</div>
+          <div class="sec" style="margin-top:6px">Needs you</div>
+          <div class="group" style="border:1px solid rgb(236 56 107 / 35%);box-shadow:0 0 0 4px var(--accent-tint), inset 0 1px 0 rgb(255 255 255 / 5%)">
+            <div class="row"><div class="sheep ring look-e" style="width:32px;height:32px"></div><div class="main"><b>Bob wants to send an email</b><span>To Sarah · “Re: Thursday's numbers” · draft ready</span></div><span class="pill sm p">Review</span></div>
+          </div>
+          <div class="sec">While you were away</div>
+          <div class="group">
+            <div class="row"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><div class="main"><b>Research finished the draft</b><span>Q3 pricing memo · 1,240 words</span></div><span class="tr">1h</span></div>
+            <div class="row"><div class="ico a"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><div class="main"><b>Inbox digest ran</b><span>14 emails · 2 need a reply</span></div><span class="tr">2h</span></div>
+            <div class="row"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg></div><div class="main"><b>Weekly Todos updated</b><span>Added Call mum</span></div><span class="tr">4h</span></div>
+          </div>
+          <div class="sec">Running now</div>
+          <div class="row" style="min-height:40px"><div class="sheep ring look-a" style="width:28px;height:28px"></div><div class="main"><b>Bob · running tests</b><span class="mono">bun test · 2m 14s</span></div><span class="dot pulse" style="color:var(--accent)"></span></div>
+          <div style="margin-top:auto"></div>
+          <div class="composer"><span>Ask any Bot</span><span class="ib"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span class="ib p"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+          <div class="dock">
+            <div class="on"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9H4z"/></svg>TODAY</div>
+            <div><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M3 19a5 5 0 0 1 10 0M11 19a5 5 0 0 1 10 0"/></svg>BOTS</div>
+            <div><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>APPLETS</div>
+            <div><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>YOU</div>
+          </div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>01</i>Today <i style="margin-left:8px">retired 2026-09-05: no Today screen; what it held moves into chat and the drawer</i></b><span>The briefing. What needs you glows. What happened reads as receipts. What is running has a pulse. One input asks any Bot.</span></figcaption>
+    </figure>
+
+    <!-- 02 Bots -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="t l h-name" style="font-size:22px">Bots</span><span class="ib f"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span></div>
+          <div class="chips" style="margin:6px 0 14px"><span class="chip a">All 4</span><span class="chip">Working 1</span><span class="chip">Needs you 1</span><span class="chip">Idle 2</span></div>
+          <div class="tiles">
+            <div class="btile"><div class="glow"></div><div class="sheep ring look-b" style="width:56px;height:56px"></div><div class="n">Bob</div><div class="s"><span class="dot" style="color:var(--accent)"></span>Running tests</div></div>
+            <div class="btile"><div class="sheep ring good look-c" style="width:56px;height:56px"></div><div class="n">Research</div><div class="s"><span class="dot" style="color:var(--good)"></span>Draft ready</div></div>
+            <div class="btile"><div class="sheep ring idle look-d" style="width:56px;height:56px"></div><div class="n">Inbox</div><div class="s"><span class="dot" style="color:var(--ink-3)"></span>Next run 6 pm</div></div>
+            <div class="btile"><div class="sheep ring idle look-e" style="width:56px;height:56px"></div><div class="n">Ops</div><div class="s"><span class="dot" style="color:var(--ink-3)"></span>Idle · 3 days</div></div>
+            <div class="btile new"><svg viewBox="0 0 24 24" style="width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.75"><path d="M12 5v14M5 12h14"/></svg><div class="sm" style="margin-top:6px;font-weight:600">New Bot</div></div>
+          </div>
+          <div class="sec" style="margin-top:22px">Shared</div>
+          <div class="group"><div class="row"><div class="sheep look-a" style="width:32px;height:32px"></div><div class="main"><b>Family</b><span>with Sarah · groceries, calendar</span></div><svg class="chev" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></div></div>
+          <div style="margin-top:auto"></div>
+          <div class="dock">
+            <div><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9H4z"/></svg>TODAY</div>
+            <div class="on"><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M3 19a5 5 0 0 1 10 0M11 19a5 5 0 0 1 10 0"/></svg>BOTS</div>
+            <div><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>APPLETS</div>
+            <div><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>YOU</div>
+          </div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>02</i>The flock</b><span>Bots as characters. A state ring and a glow tell you who is busy from across the room. Names in the display face, like a wordmark.</span></figcaption>
+    </figure>
+
+    <!-- 03 Bot home -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="glow" style="left:65px;top:-40px"></div>
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t"></span><span class="ib"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:4px 0 16px;position:relative">
+            <div class="sheep ring look-b" style="width:84px;height:84px"></div>
+            <div class="h-display" style="font-size:30px">Bob</div>
+            <div class="muted sm" style="display:flex;gap:6px;align-items:center"><span class="dot pulse" style="color:var(--accent)"></span>Running tests on your Computer · <span class="mono">2m 14s</span></div>
+          </div>
+          <div class="stats">
+            <div class="stat"><b>3</b><span>Routines</span></div>
+            <div class="stat"><b>1</b><span>Applet</span></div>
+            <div class="stat"><b class="mono" style="font-family:var(--display)">$0.04</b><span>Today</span></div>
+          </div>
+          <div class="seg" style="margin:14px 0 4px"><span>Chat</span><span class="on">Work</span><span>Setup</span></div>
+          <div class="sec">Today</div>
+          <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 17l6-6-6-6M12 19h8"/></svg></div><b>Ran <span>bun test</span> · 212 passed</b><span class="t">14:02</span></div>
+          <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM9 9h6v6H9z"/></svg></div><b>Published <span>Weekly Todos</span> · gen 7</b><span class="t">13:40</span></div>
+          <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Read <span>12 emails</span> from Gmail</b><span class="t">13:38</span></div>
+          <div class="receipt" style="border:1px solid rgb(236 56 107 / 30%)"><div class="ico" style="background:var(--accent-tint);color:var(--accent-ink)"><svg viewBox="0 0 24 24"><path d="M12 8v5M12 16h.01"/><circle cx="12" cy="12" r="9"/></svg></div><b>Waiting to send an email</b><span class="pill sm p">Review</span></div>
+          <div class="sec">Yesterday</div>
+          <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></div><b>Inbox digest · <span>3 runs, all good</span></b><span class="t">18:00</span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>03</i>A Bot's home</b><span>Not a chat. Who it is, what it is doing, three numbers, and its Work as receipts. Chat is one tab of three.</span></figcaption>
+    </figure>
+
+    <!-- 04 Chat -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t" style="display:inline-flex;align-items:center;justify-content:center;gap:8px"><div class="sheep ring look-c" style="width:24px;height:24px"></div>Bob</span><span class="ib"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg></span></div>
+          <div style="display:flex;flex-direction:column;gap:12px;flex:1;padding-top:8px">
+            <div class="faint sm mono" style="text-align:center">Today 13:36</div>
+            <div class="msg u">Find Sarah's email about Thursday's numbers and draft a reply with the totals from the sheet.</div>
+            <div class="msg b">
+              <div>Found it. She is asking for Q3 by region. I searched Thursday’s thread, read the regions sheet and drafted a reply.</div>
+              <div style="margin-top:10px">APAC is up 18%, EMEA flat, Americas down 4%. The draft leads with APAC and flags the Americas dip as timing. Want me to send it<span class="caret"></span></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:2px"><span class="pill sm p">Send it</span><span class="pill sm">Show draft</span><span class="pill sm g">Edit</span></div>
+          </div>
+          <div class="composer" style="margin-top:12px"><span>Message Bob</span><span class="ib"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span class="ib p"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>04</i>Chat</b><span>The Bot's reply is prose in its own words, then the choice as pills. No tool calls in the thread, no spinner, no “thinking”; what the Bot did lives on its Work tab.</span></figcaption>
+    </figure>
+
+    <!-- 05 Approval -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen" style="background:linear-gradient(rgb(0 0 0 / 0%), rgb(0 0 0 / 45%))">
+          <div class="bar" style="opacity:.35"><span class="t l"><span class="eyebrow">Saturday · 5 Sep</span></span></div>
+          <div class="h-display" style="opacity:.35;margin:6px 0 14px">Good afternoon,<br>Tim.</div>
+          <div class="sheetcard">
+            <div class="grab"></div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><div class="sheep ring look-d" style="width:40px;height:40px"></div><div><div style="font-weight:600;font-size:16px;line-height:20px">Bob wants to send an email</div><div class="muted sm">Approval needed · expires in 20 min</div></div></div>
+            <div class="preview">
+              <div class="k">To</div><div class="v">Sarah Chen</div>
+              <div class="k">Subject</div><div class="v">Re: Thursday's numbers</div>
+              <div class="k">Message</div><div class="v muted" style="margin:0">Hi Sarah, here are the Q3 totals by region. APAC is up 18% on the quarter, EMEA is flat, and the Americas are down 4%, which looks like timing on two deals that closed…</div>
+            </div>
+            <div class="sm faint" style="margin:12px 2px 14px">Bob will remember this choice for replies to Sarah.</div>
+            <div style="display:flex;gap:8px"><span class="pill lg" style="flex:1">Decline</span><span class="pill lg p" style="flex:2">Approve and send</span></div>
+          </div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>05</i>Approval</b><span>The one screen where the accent is spent in full. A sheet over the briefing, the exact effect previewed, two pills, and what the Bot will learn.</span></figcaption>
+    </figure>
+
+    <!-- 06 Applet -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t"></span><span class="ib"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span></div>
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;margin:4px 0 16px">
+            <div><div class="h-display">Weekly Todos</div><div class="muted sm" style="margin-top:6px;display:flex;align-items:center;gap:8px"><div class="sheep look-e" style="width:18px;height:18px"></div>by Bob · <span class="chip g" style="height:22px;padding:0 8px"><span class="dot"></span>Live</span></div></div>
+            <div class="stat" style="flex:none;padding:8px 12px 6px;text-align:center"><b>2</b><span>open</span></div>
+          </div>
+          <div class="sec">This week</div>
+          <div class="group" style="padding:4px 14px">
+            <div class="todo"><span class="cb"></span><span>Buy milk</span><span class="tr mono faint sm">Tue</span></div>
+            <div class="todo" style="border-top:1px solid var(--line)"><span class="cb"></span><span>Call mum</span><span class="tr mono faint sm">6 pm</span></div>
+            <div class="todo" style="border-top:1px solid var(--line)"><span class="cb on"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></span><span>Send Q3 memo</span></div>
+            <div class="todo" style="border-top:1px solid var(--line)"><span class="cb on"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></span><span>Book dentist</span></div>
+          </div>
+          <div class="sec">Bob added</div>
+          <div class="receipt" style="margin-top:0"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div><b>Call mum <span>· from your chat</span></b><span class="t">4h</span></div>
+          <div class="fab"><span class="pill lg p"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add</span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>06</i>An Applet</b><span>Built by a Bot, but it looks native because it uses the same kit: display title, a group, receipts for what the Bot changed, one pink pill.</span></figcaption>
+    </figure>
+
+    <!-- 07 Routine -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t"></span><span class="sw on"></span></div>
+          <div class="eyebrow" style="margin-top:4px">Routine · Inbox</div>
+          <div class="h-display" style="margin:6px 0 4px">Inbox digest</div>
+          <div class="muted sm">Runs when an email arrives, at most once an hour.</div>
+          <div class="sec" style="margin-top:20px">When</div>
+          <div class="flow">
+            <div class="step"><div class="n a"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.75"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><div><b>An email arrives in Gmail</b><span>tim@… · any label · via Composio</span></div></div>
+          </div>
+          <div class="sec">Then</div>
+          <div class="flow">
+            <div class="step"><div class="n">1</div><div><b>Read new mail since last run</b><span>Skip newsletters and receipts</span></div></div>
+            <div class="step"><div class="n">2</div><div><b>Write a digest</b><span>Group by sender, flag anything that needs a reply</span></div></div>
+            <div class="step"><div class="n">3</div><div><b>Send it to you</b><span>Notify only if something needs a reply</span></div></div>
+          </div>
+          <div class="sec" style="display:flex;justify-content:space-between;align-items:baseline">Last 14 runs <span class="mono" style="letter-spacing:0;text-transform:none;color:var(--good)">13 ok · 1 failed</span></div>
+          <div class="bars"><i style="height:60%"></i><i style="height:70%"></i><i style="height:55%"></i><i style="height:80%"></i><i style="height:65%"></i><i class="f" style="height:30%"></i><i style="height:75%"></i><i style="height:60%"></i><i style="height:90%"></i><i style="height:70%"></i><i style="height:65%"></i><i style="height:80%"></i><i style="height:72%"></i><i style="height:68%"></i></div>
+          <div class="sm faint" style="margin-top:6px;display:flex;justify-content:space-between"><span class="mono">4 Sep</span><span class="mono">avg 6.2 s · $0.002</span><span class="mono">today</span></div>
+          <div style="margin-top:auto;display:flex;gap:8px"><span class="pill" style="flex:1">Run now</span><span class="pill g" style="flex:1">Ask Bob to change it</span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>07</i>A Routine</b><span>When, then, and how it has been going. The Bot wrote the steps in plain sentences; you edit by asking, or run it now.</span></figcaption>
+    </figure>
+
+    <!-- 08 Connect -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t l h-name" style="font-size:22px">Connect</span></div>
+          <div class="composer" style="height:40px;box-shadow:none;margin:6px 0 16px"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:var(--ink-3);fill:none;stroke-width:1.75;margin-right:8px"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search 300+ services</span></div>
+          <div class="sec" style="margin-top:0">Connected</div>
+          <div class="tiles">
+            <div class="ctile"><div class="logo" style="background:#fff;color:#d44638">M</div><div><b>Gmail</b><div class="st" style="color:var(--good)"><span class="dot"></span>tim@…</div></div></div>
+            <div class="ctile"><div class="logo" style="background:#fff;color:#1a73e8">31</div><div><b>Calendar</b><div class="st" style="color:var(--good)"><span class="dot"></span>2 calendars</div></div></div>
+          </div>
+          <div class="sec">Popular</div>
+          <div class="tiles">
+            <div class="ctile"><div class="logo" style="background:#4a154b;color:#fff">S</div><div><b>Slack</b><div class="st">Messages, channels</div></div></div>
+            <div class="ctile"><div class="logo" style="background:#fff;color:#000">N</div><div><b>Notion</b><div class="st">Pages, databases</div></div></div>
+            <div class="ctile"><div class="logo" style="background:#24292f;color:#fff">G</div><div><b>GitHub</b><div class="st">Issues, PRs</div></div></div>
+            <div class="ctile"><div class="logo" style="background:#5e6ad2;color:#fff">L</div><div><b>Linear</b><div class="st">Issues, cycles</div></div></div>
+          </div>
+          <div class="sm faint" style="margin-top:14px;line-height:17px">Connections belong to you, not to a Bot. Any Bot you allow can use them, and every use shows up as a receipt.</div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>08</i>Connect a service</b><span>Services as tiles you already recognise, connected ones first. No “Composio”, no “connector” vocabulary, one sentence on trust.</span></figcaption>
+    </figure>
+
+    <!-- 09 Computer -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t" style="display:inline-flex;align-items:center;justify-content:center;gap:8px"><div class="sheep ring look-a" style="width:24px;height:24px"></div>Bob's Computer</span><span class="ib"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/></svg></span></div>
+          <div style="display:flex;align-items:center;gap:8px;margin:6px 0 12px"><span class="dot pulse" style="color:var(--accent)"></span><span style="font-weight:600">Running tests</span><span class="mono faint sm" style="margin-left:auto">2m 14s</span></div>
+          <div class="term">
+            <div><span class="p">$</span> bun test</div>
+            <div class="dim">bun test v1.3.2 (frockbot-applets)</div>
+            <div><span class="ok">✓</span> weekly-todos/add.test.ts <span class="dim">(12)</span></div>
+            <div><span class="ok">✓</span> weekly-todos/list.test.ts <span class="dim">(9)</span></div>
+            <div><span class="ok">✓</span> weekly-todos/publish.test.ts <span class="dim">(4)</span></div>
+            <div><span class="dim">›</span> weekly-todos/sync.test.ts <span class="pulse">…</span></div>
+            <div class="dim" style="margin-top:6px">25 pass · 0 fail · 187 expect() calls</div>
+          </div>
+          <div class="stats" style="margin-top:12px">
+            <div class="stat"><b class="mono" style="font-family:var(--display);font-size:18px">14%</b><span>CPU</span></div>
+            <div class="stat"><b class="mono" style="font-family:var(--display);font-size:18px">412<small style="font-size:11px;letter-spacing:0"> MB</small></b><span>Memory</span></div>
+            <div class="stat"><b class="mono" style="font-family:var(--display);font-size:18px">$0.01</b><span>This session</span></div>
+          </div>
+          <div class="sec">Recent</div>
+          <div class="receipt" style="margin-top:0"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 17l6-6-6-6M12 19h8"/></svg></div><b>bun run build <span>· 1.8 s</span></b><span class="t">14:00</span></div>
+          <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 10h16"/></svg></div><b>Wrote 3 files in <span>weekly-todos/</span></b><span class="t">13:58</span></div>
+          <div style="margin-top:auto;display:flex;gap:8px"><span class="pill" style="flex:1">Open terminal</span><span class="pill" style="flex:1;color:var(--danger)">Stop</span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>09</i>The Computer</b><span>You can watch a Bot work. Mono output in a deep well, three live numbers, receipts for what it did, and a Stop that is calm, not red.</span></figcaption>
+    </figure>
+
+    <!-- 10 First run -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="glow" style="left:65px;top:60px;width:260px;height:260px"></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;position:relative;text-align:center">
+            <div class="sheep ring look-b" style="width:112px;height:112px;margin-bottom:8px"></div>
+            <div class="eyebrow">Your first Bot</div>
+            <div class="h-display" style="font-size:32px;line-height:36px">Meet<br><span style="color:var(--accent-ink)">Bob</span></div>
+            <div class="muted" style="max-width:26ch;font-size:15px;line-height:22px">Bob will read what you connect, build what you ask for, and show you every step.</div>
+          </div>
+          <div class="field" style="margin-bottom:12px"><label>Name your Bot</label><div class="in">Bob<span class="caret"></span></div></div>
+          <span class="pill lg p" style="width:100%">Continue</span>
+          <div class="sm faint" style="text-align:center;margin:12px 0 4px">You can rename Bob any time.</div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>10</i>First run</b><span>One sheep, one name, one pill. The name you type becomes the wordmark above it, so the Bot feels like a character before it has said a word.</span></figcaption>
+    </figure>
+
+    <!-- 11 Voice, live -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></span><span class="t"><span class="eyebrow">Voice · with your Bots</span></span><span class="ib" style="visibility:hidden"></span></div>
+          <div class="glow" style="left:65px;top:120px;width:260px;height:260px"></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;position:relative;text-align:center">
+            <div class="sheep ring look-b" style="width:112px;height:112px;margin-bottom:6px"></div>
+            <div class="chips" style="justify-content:center"><span class="chip g"><span class="dot"></span>Listening</span></div>
+            <div style="font:400 15px/22px var(--sans);letter-spacing:-.004em;max-width:30ch;color:var(--ink-2)">“…so ask Bob whether Sarah’s numbers are in yet, and if they are, send her the draft.”</div>
+            <div style="font:400 15px/22px var(--sans);letter-spacing:-.004em;max-width:30ch">On it. Bob says the sheet landed at 9:12. Want me to send the draft now, or read it first?</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:8px">
+            <span class="pill lg" style="width:100%;display:inline-flex;align-items:center;justify-content:center;gap:8px"><svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75"><path d="M8 5v14M16 5v14"/></svg>Pause</span>
+            <span class="sm faint" style="text-align:center">Pausing stops listening. Your Bots keep working and their messages wait for you.</span>
+          </div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>11</i>Voice, live</b><span>The whole screen, not a sheet over chat. One sheep with the glow behind it, the last thing you said and the last thing it said as two lines, and one control: Pause.</span></figcaption>
+    </figure>
+
+    <!-- 12 Voice, paused with messages waiting -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></span><span class="t"><span class="eyebrow">Voice · paused</span></span><span class="ib" style="visibility:hidden"></span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;position:relative;text-align:center">
+            <div class="sheep ring idle look-b" style="width:112px;height:112px;margin-bottom:6px;opacity:.7"></div>
+            <div class="chips" style="justify-content:center"><span class="chip">Paused · not listening</span></div>
+            <div style="font:400 15px/22px var(--sans);letter-spacing:-.004em;max-width:30ch;color:var(--ink-2)">Nothing is being heard. Your Bots don’t know you stepped away; what they send waits here.</div>
+          </div>
+          <div class="eyebrow" style="color:var(--ink-3);margin-bottom:8px">Waiting for you</div>
+          <div class="group" style="margin:0 0 12px">
+            <div class="row"><div class="sheep look-a" style="width:32px;height:32px"></div><div class="main"><b>Bob</b><span>Sarah replied. She wants the APAC number split by country.</span></div><span class="chip a">1</span></div>
+            <div class="row"><div class="sheep look-c" style="width:32px;height:32px"></div><div class="main"><b>Research</b><span>Two of the three papers look strong. Summary is ready.</span></div><span class="chip a">1</span></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:8px">
+            <span class="pill lg p" style="width:100%;display:inline-flex;align-items:center;justify-content:center;gap:8px"><svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;stroke:none"><path d="M7 5l12 7-12 7z"/></svg>Resume · 2 waiting</span>
+            <span class="sm faint" style="text-align:center">Resuming hands these to the voice agent to work through with you.</span>
+          </div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>12</i>Voice, paused</b><span>Pause stops the session outright. Bots don’t know; what they send while you are away queues as rows, and the count rides on Resume so you know there is a reason to come back. The four states: live, paused and quiet, paused with messages waiting, resuming.</span></figcaption>
+    </figure>
+
+  </div>
+</div>

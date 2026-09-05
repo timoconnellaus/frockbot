@@ -7,6 +7,9 @@ import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/states.dart';
 import '../theme/frock_theme.dart';
+import '../ui/frock_page.dart';
+import '../ui/frock_tokens.dart';
+import '../ui/frock_widgets.dart';
 
 /// User-owned Connection status; grants stay on the backend Connectors surface.
 class ConnectionsPage extends StatefulWidget {
@@ -116,19 +119,16 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Connectors'),
-      actions: [
-        IconButton(
-          tooltip: 'Refresh connections',
-          onPressed: loading ? null : load,
-          icon: const Icon(Icons.refresh_rounded),
-        ),
-      ],
-    ),
-    body: SafeArea(
-      top: false,
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    return FrockPage(
+      title: 'Connectors',
+      padded: false,
+      trailing: FrockIconButton(
+        Icons.refresh_rounded,
+        semanticLabel: 'Refresh connections',
+        onTap: loading ? null : load,
+      ),
       child: frame == null
           ? loading
                 ? const FrockLoading(label: 'Loading connections')
@@ -140,111 +140,118 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                     onAction: load,
                   )
           : RefreshIndicator(
+              color: t.accent,
+              backgroundColor: t.tile,
               onRefresh: load,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+                padding: const EdgeInsets.fromLTRB(
+                  FrockTokens.edge,
+                  8,
+                  FrockTokens.edge,
+                  FrockTokens.edge,
+                ),
                 children: [
-                  Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 680),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const SizedBox(height: 8),
-                          Icon(
-                            Icons.hub_outlined,
-                            size: 40,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          const SizedBox(height: 20),
-                          Text(
-                            'Your accounts, together',
-                            style: Theme.of(context).textTheme.headlineMedium,
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Connect an account or service once and every Bot you own can use it.',
-                            style: Theme.of(context).textTheme.bodyLarge,
-                          ),
-                          const SizedBox(height: 20),
-                          FilledButton.icon(
-                            onPressed: opening ? null : manage,
-                            icon: const Icon(Icons.open_in_browser_rounded),
-                            label: Text(
-                              opening
-                                  ? 'Opening browser…'
-                                  : 'Manage connections',
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            'Add accounts, reconnect or remove access in your browser.',
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                          ),
-                          if (message != null)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              child: Semantics(
-                                liveRegion: true,
-                                child: Text(message!),
-                              ),
-                            ),
-                          const SizedBox(height: 28),
-                          Text(
-                            'Connected accounts',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 12),
-                          if (frame!.accounts.isEmpty)
-                            Card(
-                              child: Padding(
-                                padding: const EdgeInsets.all(20),
-                                child: Text(
-                                  'No accounts connected yet. Choose Manage connections to find a service.',
-                                  style: Theme.of(context).textTheme.bodyLarge,
-                                ),
-                              ),
-                            ),
-                          for (final account in frame!.accounts)
-                            _ConnectionCard(
-                              key: ValueKey(account['id']),
-                              account: account,
-                            ),
-                        ],
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text('Your accounts, together', style: t.nameStyle),
+                  ),
+                  const FrockLead(
+                    'Connect an account or service once and every Bot you own can use it.',
+                  ),
+                  FrockGroup(
+                    children: [
+                      FrockRow(
+                        key: const ValueKey('manage-connections'),
+                        leading: const FrockIconTile(
+                          Icons.open_in_browser_rounded,
+                        ),
+                        title: opening
+                            ? 'Opening browser…'
+                            : 'Manage connections',
+                        caption: 'Add accounts, reconnect or remove access in your browser.',
+                        chevron: true,
+                        onTap: opening ? null : manage,
                       ),
+                    ],
+                  ),
+                  if (message != null) ...[
+                    const SizedBox(height: FrockTokens.groupGap),
+                    FrockGroup(
+                      needsYou: true,
+                      children: [
+                        Semantics(
+                          liveRegion: true,
+                          child: FrockNotice(
+                            title: 'Connections',
+                            body: message!,
+                          ),
+                        ),
+                      ],
                     ),
+                  ],
+                  const SizedBox(height: FrockTokens.groupGap),
+                  const FrockEyebrow('Connected accounts'),
+                  const SizedBox(height: FrockTokens.eyebrowToGroup),
+                  FrockGroup(
+                    children: [
+                      if (frame!.accounts.isEmpty)
+                        const FrockRow(
+                          leading: FrockIconTile(Icons.hub_outlined),
+                          title: 'No accounts connected yet',
+                          caption:
+                              'Choose Manage connections to find a service.',
+                        ),
+                      for (final account in frame!.accounts)
+                        _ConnectionRow(
+                          key: ValueKey(account['id']),
+                          account: account,
+                        ),
+                    ],
                   ),
                 ],
               ),
             ),
-    ),
-  );
+    );
+  }
 }
 
-class _ConnectionCard extends StatelessWidget {
+class _ConnectionRow extends StatelessWidget {
   final Map<String, Object?> account;
-  const _ConnectionCard({super.key, required this.account});
+  const _ConnectionRow({super.key, required this.account});
   @override
   Widget build(BuildContext context) {
-    final (icon, status) = switch (account['state']) {
-      'ready' => (Icons.check_circle_outline_rounded, 'Available to every Bot'),
-      'disabled' => (Icons.pause_circle_outline_rounded, 'Access paused'),
+    final (icon, tone, status) = switch (account['state']) {
+      'ready' => (
+        Icons.check_circle_outline_rounded,
+        TileTone.good,
+        'Available to every Bot',
+      ),
+      'disabled' => (
+        Icons.pause_circle_outline_rounded,
+        TileTone.neutral,
+        'Access paused',
+      ),
       'authorizing' => (
         Icons.open_in_browser_rounded,
+        TileTone.accent,
         'Finish connecting in your browser',
       ),
-      'revoking' => (Icons.remove_circle_outline_rounded, 'Removing access'),
+      'revoking' => (
+        Icons.remove_circle_outline_rounded,
+        TileTone.warn,
+        'Removing access',
+      ),
       'reconciliation-required' => (
         Icons.sync_problem_rounded,
+        TileTone.warn,
         'Connection needs to be checked',
       ),
-      _ => (Icons.error_outline_rounded, 'Connection needs attention'),
+      _ => (
+        Icons.error_outline_rounded,
+        TileTone.danger,
+        'Connection needs attention',
+      ),
     };
     return TweenAnimationBuilder<double>(
       duration: FrockTheme.motion(context),
@@ -256,42 +263,11 @@ class _ConnectionCard extends StatelessWidget {
           child: child,
         ),
       ),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 3, right: 14),
-                child: Icon(icon, color: Theme.of(context).colorScheme.primary),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      account['label']! as String,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      account['service']! as String,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      status,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+      child: FrockRow(
+        leading: FrockIconTile(icon, tone: tone),
+        title: account['label']! as String,
+        caption: status,
+        trailing: FrockChip(account['service']! as String),
       ),
     );
   }

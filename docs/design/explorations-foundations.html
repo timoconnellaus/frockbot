@@ -1,0 +1,914 @@
+<title>Frock UI Foundations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Archivo+Black&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* ------------------------------------------------------------------
+     Frock UI — foundation tokens. One vocabulary for HTML and Flutter.
+     Names are what Flutter mirrors (FrockTokens.text.md etc.); the pixel
+     values change with density, never the names.
+     ------------------------------------------------------------------ */
+  :root {
+    color-scheme: light;
+    /* light palette */
+    --frock-window: #f3f1ee;
+    --frock-surface: #faf9f7;
+    --frock-surface-raised: #ffffff;
+    --frock-surface-subtle: #eeebe6;
+    --frock-surface-sidebar: #ece9e4;
+    --frock-border: #e1ddd7;
+    --frock-border-strong: #b9b3ab;
+    --frock-text: #1f1e24;
+    --frock-text-muted: #635d6c;
+    --frock-text-subtle: #8a8494;
+    --frock-text-disabled: #aaa4b2;
+    --frock-accent: #d92d5f;
+    --frock-accent-hover: #c62656;
+    --frock-accent-pressed: #b0204b;
+    --frock-on-accent: #ffffff;
+    --frock-accent-soft: #fbe6ec;
+    --frock-accent-text: #b0204b;
+    --frock-good: #1f8f5f;
+    --frock-good-soft: #e2f4ea;
+    --frock-warn: #9a6a00;
+    --frock-warn-soft: #fbf0d3;
+    --frock-danger: #c8323f;
+    --frock-danger-soft: #fbe3e5;
+    --frock-fill-hover: rgb(31 30 36 / 5%);
+    --frock-fill-pressed: rgb(31 30 36 / 9%);
+    --frock-focus-ring: rgb(217 45 95 / 30%);
+    --frock-shadow-card: 0 1px 2px rgb(31 30 36 / 6%), 0 8px 22px rgb(31 30 36 / 8%);
+    --frock-shadow-floating: 0 18px 45px rgb(31 30 36 / 18%);
+    --frock-skeleton: rgb(31 30 36 / 7%);
+    --frock-skeleton-shine: rgb(255 255 255 / 60%);
+    --frock-highlight: rgb(255 255 255 / 70%);
+    --frock-selection: rgb(217 45 95 / 22%);
+    --frock-accent-tint: rgb(217 45 95 / 12%);
+    --frock-accent-ink: #b0204b;
+    --frock-scrollbar: rgb(31 30 36 / 18%);
+    --frock-divider-inset: 42px;
+
+    /* faces */
+    --frock-font-sans: "Manrope", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+    --frock-font-display: "Archivo Black", "Manrope", sans-serif;
+    --frock-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --frock-mono-scale: 0.92em;
+
+    /* compact density: pointer devices, the desktop web shell */
+    --frock-text-xs: 11px;
+    --frock-text-sm: 12px;
+    --frock-text-base: 13px;
+    --frock-text-md: 14px;
+    --frock-text-lg: 15px;
+    --frock-text-xl: 17px;
+    --frock-text-2xl: 20px;
+    --frock-text-display: 24px;
+    --frock-text-input: 13px;
+    --frock-text-message: 14px;
+    --frock-control-sm: 28px;
+    --frock-control-md: 32px;
+    --frock-control-lg: 36px;
+    --frock-icon-sm: 14px;
+    --frock-icon-md: 16px;
+    --frock-icon-lg: 18px;
+    --frock-hit: 32px;
+    --frock-pad-control: 12px;
+    --frock-gap-inline: 6px;
+
+    /* rhythm (density independent) */
+    --frock-space-1: 4px;
+    --frock-space-2: 8px;
+    --frock-space-3: 12px;
+    --frock-space-4: 16px;
+    --frock-space-5: 20px;
+    --frock-space-6: 24px;
+    --frock-space-8: 32px;
+    --frock-space-row: 8px;   /* between fields in a form */
+    --frock-space-edge: 20px; /* screen edge */
+    --frock-leading-tight: 1.2;
+    --frock-leading-snug: 1.35;
+    --frock-leading-normal: 1.5;
+    /* grid line heights: every role lands on the 4px grid */
+    --frock-lh-xs: 16px; --frock-lh-sm: 16px; --frock-lh-base: 20px; --frock-lh-message: 20px; --frock-lh-md: 20px; --frock-lh-lg: 20px; --frock-lh-xl: 24px; --frock-lh-2xl: 24px; --frock-lh-display: 28px;
+    /* optical tracking per role */
+    --frock-track-display: -0.02em; --frock-track-2xl: -0.015em; --frock-track-xl: -0.01em; --frock-track-lg: -0.006em; --frock-track-base: 0; --frock-track-sm: 0.004em; --frock-track-xs: 0.01em;
+    --frock-tracking-eyebrow: 0.08em;
+    --frock-tracking-display: -0.02em;
+    --frock-radius-control: 10px;
+    --frock-radius-card: 14px;
+    --frock-radius-panel: 20px;
+    --frock-radius-pill: 999px;
+    --frock-radius-tile: 10px;
+    --frock-radius-button: var(--frock-radius-control);
+    --frock-radius-group: 14px;
+    --frock-motion-fast: 140ms cubic-bezier(0.2, 0, 0, 1);
+    --frock-motion-enter: 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --_dark: 1; }
+  }
+  :root[data-theme="dark"] { --_dark: 1; }
+  /* dark palette (product default) */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --frock-window: #1d1c23; --frock-surface: #211f26; --frock-surface-raised: #2b2930;
+      --frock-surface-subtle: #26242b; --frock-surface-sidebar: #19181d;
+      --frock-border: rgb(244 242 246 / 9%); --frock-border-strong: rgb(244 242 246 / 22%);
+      --frock-text: rgb(244 242 246 / 92%); --frock-text-muted: rgb(244 242 246 / 62%); --frock-text-subtle: rgb(244 242 246 / 45%); --frock-text-disabled: rgb(244 242 246 / 30%);
+      --frock-accent: #ec386b; --frock-accent-hover: #d92d5f; --frock-accent-pressed: #c62656; --frock-on-accent: #fff;
+      --frock-accent-soft: #3a2230; --frock-accent-text: #f2a6bd;
+      --frock-good: #7cc9a6; --frock-good-soft: #1f2e27;
+      --frock-warn: #dfc07f; --frock-warn-soft: #332d1f;
+      --frock-danger: #ef9aa5; --frock-danger-soft: #362126;
+      --frock-highlight: rgb(255 255 255 / 6%); --frock-selection: rgb(236 56 107 / 26%); --frock-accent-tint: rgb(236 56 107 / 14%); --frock-accent-ink: #f2a6bd;
+      --frock-scrollbar: rgb(244 242 246 / 16%); --frock-skeleton-shine: rgb(255 255 255 / 10%);
+      --frock-fill-hover: rgb(244 242 246 / 7%); --frock-fill-pressed: rgb(244 242 246 / 12%);
+      --frock-focus-ring: rgb(236 56 107 / 32%);
+      --frock-shadow-card: 0 8px 22px rgb(0 0 0 / 24%); --frock-shadow-floating: 0 18px 45px rgb(0 0 0 / 44%);
+      --frock-skeleton: rgb(244 242 246 / 8%);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --frock-window: #1d1c23; --frock-surface: #211f26; --frock-surface-raised: #2b2930;
+    --frock-surface-subtle: #26242b; --frock-surface-sidebar: #19181d;
+    --frock-border: rgb(244 242 246 / 9%); --frock-border-strong: rgb(244 242 246 / 22%);
+    --frock-text: rgb(244 242 246 / 92%); --frock-text-muted: rgb(244 242 246 / 62%); --frock-text-subtle: rgb(244 242 246 / 45%); --frock-text-disabled: rgb(244 242 246 / 30%);
+    --frock-accent: #ec386b; --frock-accent-hover: #d92d5f; --frock-accent-pressed: #c62656; --frock-on-accent: #fff;
+    --frock-accent-soft: #3a2230; --frock-accent-text: #f2a6bd;
+    --frock-good: #7cc9a6; --frock-good-soft: #1f2e27;
+    --frock-warn: #dfc07f; --frock-warn-soft: #332d1f;
+    --frock-danger: #ef9aa5; --frock-danger-soft: #362126;
+    --frock-highlight: rgb(255 255 255 / 6%); --frock-selection: rgb(236 56 107 / 26%); --frock-accent-tint: rgb(236 56 107 / 14%); --frock-accent-ink: #f2a6bd;
+    --frock-scrollbar: rgb(244 242 246 / 16%); --frock-skeleton-shine: rgb(255 255 255 / 10%);
+    --frock-fill-hover: rgb(244 242 246 / 7%); --frock-fill-pressed: rgb(244 242 246 / 12%);
+    --frock-focus-ring: rgb(236 56 107 / 32%);
+    --frock-shadow-card: 0 8px 22px rgb(0 0 0 / 24%); --frock-shadow-floating: 0 18px 45px rgb(0 0 0 / 44%);
+    --frock-skeleton: rgb(244 242 246 / 8%);
+  }
+
+  /* touch density: phones and the Flutter app. Same names, larger values. */
+  [data-density="touch"] {
+    --frock-text-xs: 11px; --frock-text-sm: 12px; --frock-text-base: 14px; --frock-text-md: 15px;
+    --frock-text-lg: 16px; --frock-text-xl: 17px; --frock-text-2xl: 20px; --frock-text-display: 26px;
+    --frock-text-input: 16px; /* iOS zooms below 16; the composer scales its rendered text with transform-free padding instead */
+    --frock-text-message: 15px;
+    --frock-lh-base: 20px; --frock-lh-message: 22px; --frock-lh-md: 22px; --frock-lh-lg: 22px; --frock-lh-xl: 24px; --frock-lh-2xl: 26px; --frock-lh-display: 32px;
+    --frock-control-sm: 28px; --frock-control-md: 34px; --frock-control-lg: 40px;
+    --frock-icon-sm: 16px; --frock-icon-md: 18px; --frock-icon-lg: 20px;
+    --frock-hit: 44px; --frock-pad-control: 12px; --frock-gap-inline: 6px;
+    --frock-space-row: 10px; --frock-space-edge: 16px;
+    --frock-radius-button: 999px; --frock-radius-group: 16px; --frock-radius-tile: 11px;
+  }
+
+  /* ---------------- page chrome (the spec itself) ---------------- */
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--frock-window); color: var(--frock-text); font: 400 14px/1.5 var(--frock-font-sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  ::selection { background: var(--frock-selection); }
+  * { scrollbar-width: thin; scrollbar-color: var(--frock-scrollbar) transparent; }
+  html { overscroll-behavior: none; background: var(--frock-window); }
+  .page { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
+  .rail { position: sticky; top: 0; height: 100vh; padding: 28px 20px; border-right: 1px solid var(--frock-border); background: var(--frock-surface-sidebar); display: flex; flex-direction: column; gap: 22px; }
+  .rail h1 { font: 400 22px/1.1 var(--frock-font-display); letter-spacing: -0.02em; margin: 0; }
+  .rail .sub { color: var(--frock-text-muted); font-size: 12px; margin-top: 6px; }
+  .rail nav { display: flex; flex-direction: column; gap: 2px; }
+  .rail nav a { text-decoration: none; padding: 6px 10px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--frock-text-muted); }
+  .rail nav a:hover { background: var(--frock-fill-hover); color: var(--frock-text); }
+  .switches { display: flex; flex-direction: column; gap: 10px; margin-top: auto; }
+  .seg { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 3px; border-radius: 10px; background: var(--frock-surface-raised); border: 1px solid var(--frock-border); }
+  .seg button { border: 0; background: transparent; color: var(--frock-text-muted); font: 700 12px var(--frock-font-sans); padding: 6px 10px; border-radius: 7px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--frock-surface); color: var(--frock-text); box-shadow: var(--frock-shadow-card); }
+  .switch-label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--frock-text-subtle); font-weight: 700; }
+  main { padding: 36px 48px 80px; max-width: 1180px; }
+  main > header { margin-bottom: 36px; max-width: 68ch; }
+  main > header h2 { font: 400 34px/1.1 var(--frock-font-display); letter-spacing: -0.02em; margin: 0 0 12px; text-wrap: balance; }
+  main > header p { margin: 0 0 8px; color: var(--frock-text-muted); font-size: 15px; }
+  section { margin: 0 0 56px; scroll-margin-top: 24px; }
+  section > h3 { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--frock-accent-text); font-weight: 800; margin: 0 0 6px; }
+  section > h3 + p { margin: 0 0 18px; max-width: 68ch; color: var(--frock-text-muted); }
+  section > h3 + p strong { color: var(--frock-text); }
+  .spec { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+  .spec.wide { grid-template-columns: 1fr; }
+  .spec.stack { align-items: stretch; }
+  .stage { background: var(--frock-surface); border: 1px solid var(--frock-border); border-radius: 14px; padding: 24px; }
+  .stage.grid { display: grid; gap: 20px; }
+  .stage h4 { margin: 0 0 12px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--frock-text-subtle); font-weight: 700; }
+  .notes { font-size: 13px; color: var(--frock-text-muted); display: flex; flex-direction: column; gap: 10px; }
+  .notes p { margin: 0; }
+  .notes b { color: var(--frock-text); font-weight: 700; }
+  .tokens { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .tokens th { text-align: left; font-weight: 700; color: var(--frock-text-subtle); padding: 4px 8px 6px 0; border-bottom: 1px solid var(--frock-border); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .tokens td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--frock-border); vertical-align: top; }
+  .tokens code { font: 500 11.5px var(--frock-font-mono); color: var(--frock-text); }
+  .tokens td:last-child { color: var(--frock-text-muted); }
+  .phone { width: 390px; margin: 0 auto; border-radius: 28px; border: 1px solid var(--frock-border-strong); background: var(--frock-window); padding: 14px 16px 18px; box-shadow: var(--frock-shadow-floating); }
+  [data-density="compact"] .phone { display: none; }
+  [data-density="touch"] .desktop-only { display: none; }
+  .overflow { overflow-x: auto; }
+
+  /* ---------------- swatches ---------------- */
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 12px; }
+  .swatch { border-radius: 12px; overflow: hidden; border: 1px solid var(--frock-border); background: var(--frock-surface); }
+  .swatch .chip { height: 56px; }
+  .swatch .meta { padding: 8px 10px 10px; }
+  .swatch .meta b { display: block; font-size: 12px; }
+  .swatch .meta code { font: 500 11px var(--frock-font-mono); color: var(--frock-text-muted); }
+  .pair { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .pair .box { border-radius: 12px; padding: 14px 16px; border: 1px solid var(--frock-border); }
+  .pair .box b { display: block; font-size: 13px; margin-bottom: 4px; }
+  .pair .box span { font-size: 12px; }
+
+  /* ---------------- type specimens ---------------- */
+  .type-row { display: grid; grid-template-columns: 150px minmax(0,1fr); gap: 18px; align-items: baseline; padding: 12px 0; border-bottom: 1px solid var(--frock-border); }
+  .type-row:last-child { border-bottom: 0; }
+  .type-row .k { font-size: 11px; color: var(--frock-text-subtle); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  .type-row .k small { display: block; font: 500 11px var(--frock-font-mono); letter-spacing: 0; text-transform: none; color: var(--frock-text-muted); margin-top: 2px; }
+  .t-display { font: 400 var(--frock-text-display)/var(--frock-lh-display) var(--frock-font-display); letter-spacing: var(--frock-track-display); text-wrap: balance; }
+  .t-title { font: 700 var(--frock-text-2xl)/var(--frock-lh-2xl) var(--frock-font-sans); letter-spacing: var(--frock-track-2xl); text-wrap: balance; }
+  .t-heading { font: 600 var(--frock-text-xl)/var(--frock-lh-xl) var(--frock-font-sans); letter-spacing: var(--frock-track-xl); }
+  .t-row { font: 600 var(--frock-text-lg)/var(--frock-lh-lg) var(--frock-font-sans); letter-spacing: var(--frock-track-lg); }
+  .t-body-lg { font: 400 var(--frock-text-md)/var(--frock-lh-md) var(--frock-font-sans); }
+  .t-body { font: 400 var(--frock-text-base)/var(--frock-lh-base) var(--frock-font-sans); letter-spacing: var(--frock-track-base); }
+  .t-label { font: 600 var(--frock-text-sm)/var(--frock-lh-sm) var(--frock-font-sans); letter-spacing: var(--frock-track-sm); }
+  .t-caption { font: 500 var(--frock-text-sm)/var(--frock-lh-sm) var(--frock-font-sans); color: var(--frock-text-muted); font-variant-numeric: tabular-nums; letter-spacing: var(--frock-track-sm); }
+  .t-eyebrow { font: 600 var(--frock-text-xs)/var(--frock-lh-xs) var(--frock-font-sans); letter-spacing: var(--frock-tracking-eyebrow); text-transform: uppercase; color: var(--frock-text-subtle); }
+  .t-mono { font: 500 calc(var(--frock-text-base) * 0.92)/var(--frock-lh-base) var(--frock-font-mono); color: var(--frock-text); font-variant-numeric: tabular-nums slashed-zero; letter-spacing: 0; }
+  .measure { max-width: 62ch; }
+
+  /* ---------------- components ---------------- */
+  .fb-button { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--frock-gap-inline); min-height: var(--frock-control-md); padding: 0 var(--frock-pad-control); border: 1px solid transparent; border-radius: var(--frock-radius-button); background: var(--frock-surface-raised); color: var(--frock-text); font: 600 var(--frock-text-base)/1 var(--frock-font-sans); cursor: pointer; white-space: nowrap; transition: background-color var(--frock-motion-fast), border-color var(--frock-motion-fast), color var(--frock-motion-fast), transform var(--frock-motion-fast); }
+  .fb-button:hover:not(:disabled) { background: var(--frock-fill-hover); border-color: var(--frock-border); }
+  .fb-button:active:not(:disabled) { transform: scale(0.97); }
+  .fb-button:focus-visible { outline: 3px solid var(--frock-focus-ring); outline-offset: 2px; }
+  .fb-button:disabled { opacity: 0.4; cursor: default; }
+  .fb-button[data-variant="primary"] { background: var(--frock-accent); color: var(--frock-on-accent); }
+  .fb-button[data-variant="primary"]:hover:not(:disabled) { background: var(--frock-accent-hover); border-color: transparent; }
+  .fb-button[data-variant="primary"]:active:not(:disabled) { background: var(--frock-accent-pressed); }
+  .fb-button[data-variant="secondary"] { border-color: var(--frock-border); background: var(--frock-surface-raised); }
+  [data-density="touch"] .fb-button[data-variant="secondary"] { border-color: transparent; box-shadow: var(--frock-shadow-card); }
+  .fb-button[data-variant="secondary"]:hover:not(:disabled) { background: var(--frock-surface-subtle); border-color: var(--frock-border-strong); }
+  .fb-button[data-variant="ghost"] { background: transparent; }
+  .fb-button[data-variant="danger"] { background: var(--frock-danger-soft); color: var(--frock-danger); }
+  .fb-button[data-variant="danger"]:hover:not(:disabled) { border-color: var(--frock-danger); }
+  .fb-button[data-size="sm"] { min-height: var(--frock-control-sm); font-size: var(--frock-text-sm); padding: 0 calc(var(--frock-pad-control) - 2px); }
+  .fb-button[data-size="lg"] { min-height: var(--frock-control-lg); font-size: var(--frock-text-md); padding: 0 calc(var(--frock-pad-control) + 4px); }
+  .fb-button[data-block] { display: flex; width: 100%; }
+  .fb-icon-button { width: var(--frock-control-md); height: var(--frock-control-md); padding: 0; border-radius: var(--frock-radius-button); }
+  .fb-icon-button[data-shape="round"] { border-radius: var(--frock-radius-pill); }
+  .fb-button svg, .fb-icon-button svg { width: var(--frock-icon-md); height: var(--frock-icon-md); stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .fb-button[data-size="sm"] svg { width: var(--frock-icon-sm); height: var(--frock-icon-sm); }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+  .fb-field { display: flex; flex-direction: column; gap: 4px; }
+  .fb-label { font: 600 var(--frock-text-sm)/1.3 var(--frock-font-sans); color: var(--frock-text); display: flex; justify-content: space-between; gap: 8px; }
+  .fb-label .opt { font-weight: 500; color: var(--frock-text-subtle); }
+  .fb-control { min-height: var(--frock-control-md); padding: 0 var(--frock-pad-control); border: 1px solid var(--frock-border); border-radius: var(--frock-radius-control); background: var(--frock-surface); color: var(--frock-text); font: 400 var(--frock-text-input)/1.4 var(--frock-font-sans); width: 100%; transition: border-color var(--frock-motion-fast), box-shadow var(--frock-motion-fast); }
+  .fb-control::placeholder { color: var(--frock-text-subtle); }
+  .fb-control:hover { border-color: var(--frock-border-strong); }
+  .fb-control:focus { outline: none; border-color: var(--frock-accent); box-shadow: 0 0 0 3px var(--frock-focus-ring); }
+  .fb-control:disabled { opacity: 0.4; }
+  textarea.fb-control { padding: calc(var(--frock-pad-control) - 4px) var(--frock-pad-control); min-height: calc(var(--frock-control-md) * 2.4); resize: vertical; }
+  .fb-field[data-state="error"] .fb-control { border-color: var(--frock-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--frock-danger) 25%, transparent); }
+  .fb-help { font: 500 var(--frock-text-sm)/1.35 var(--frock-font-sans); color: var(--frock-text-muted); }
+  .fb-field[data-state="error"] .fb-help { color: var(--frock-danger); }
+  .fb-select { position: relative; }
+  .fb-select select { appearance: none; padding-right: calc(var(--frock-pad-control) + 20px); }
+  .fb-select svg { position: absolute; right: 10px; top: 50%; translate: 0 -50%; width: var(--frock-icon-md); height: var(--frock-icon-md); stroke: var(--frock-text-muted); fill: none; stroke-width: 2; pointer-events: none; }
+  .fb-adorn { position: relative; }
+  .fb-adorn > svg { position: absolute; left: 10px; top: 50%; translate: 0 -50%; width: var(--frock-icon-md); height: var(--frock-icon-md); stroke: var(--frock-text-subtle); fill: none; stroke-width: 2; pointer-events: none; }
+  .fb-adorn .fb-control { padding-left: calc(var(--frock-pad-control) + 22px); }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 20px; }
+
+  .fb-check { display: inline-flex; align-items: center; gap: 10px; min-height: var(--frock-control-md); font: 500 var(--frock-text-base)/1.3 var(--frock-font-sans); cursor: pointer; }
+  .fb-check input { appearance: none; margin: 0; width: 18px; height: 18px; border: 1.5px solid var(--frock-border-strong); border-radius: 5px; background: var(--frock-surface); display: grid; place-items: center; flex: none; transition: background-color var(--frock-motion-fast), border-color var(--frock-motion-fast); }
+  .fb-check input[type="radio"] { border-radius: 50%; }
+  .fb-check input:checked { background: var(--frock-accent); border-color: var(--frock-accent); }
+  .fb-check input[type="checkbox"]:checked::after { content: ""; width: 5px; height: 9px; border: solid var(--frock-on-accent); border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+  .fb-check input[type="radio"]:checked::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--frock-on-accent); }
+  .fb-check input:focus-visible { outline: 3px solid var(--frock-focus-ring); outline-offset: 2px; }
+  [data-density="touch"] .fb-check input { width: 22px; height: 22px; border-radius: 6px; }
+  .fb-switch { display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--frock-control-lg); font: 500 var(--frock-text-base)/1.3 var(--frock-font-sans); cursor: pointer; width: 100%; }
+  .fb-switch input { appearance: none; margin: 0; width: 36px; height: 22px; border-radius: 999px; background: var(--frock-border-strong); position: relative; flex: none; transition: background-color var(--frock-motion-fast); }
+  .fb-switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: translate var(--frock-motion-fast); box-shadow: 0 1px 2px rgb(0 0 0 / 30%); }
+  .fb-switch input:checked { background: var(--frock-accent); }
+  .fb-switch input:checked::after { translate: 14px 0; }
+  .fb-switch input:focus-visible { outline: 3px solid var(--frock-focus-ring); outline-offset: 2px; }
+  [data-density="touch"] .fb-switch input { width: 44px; height: 26px; }
+  [data-density="touch"] .fb-switch input::after { width: 20px; height: 20px; }
+  [data-density="touch"] .fb-switch input:checked::after { translate: 18px 0; }
+  .fb-chip { display: inline-flex; align-items: center; gap: 6px; min-height: var(--frock-control-sm); padding: 0 10px; font-variant-numeric: tabular-nums; border-radius: var(--frock-radius-pill); border: 1px solid var(--frock-border); background: var(--frock-surface-raised); font: 600 var(--frock-text-sm)/1 var(--frock-font-sans); color: var(--frock-text); }
+  .fb-chip[data-tone="accent"] { background: var(--frock-accent-tint); color: var(--frock-accent-ink); border-color: transparent; }
+  .fb-chip[data-tone="good"] { background: var(--frock-good-soft); color: var(--frock-good); border-color: transparent; }
+  .fb-chip[data-tone="warn"] { background: var(--frock-warn-soft); color: var(--frock-warn); border-color: transparent; }
+  .fb-chip[data-tone="danger"] { background: var(--frock-danger-soft); color: var(--frock-danger); border-color: transparent; }
+  .fb-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  [data-density="touch"] .fb-chip { border-color: transparent; }
+  .fb-badge { display: inline-flex; align-items: center; min-height: 18px; padding: 0 6px; border-radius: 6px; background: var(--frock-accent); color: var(--frock-on-accent); font: 700 var(--frock-text-xs)/1 var(--frock-font-sans); font-variant-numeric: tabular-nums; }
+  .stack { display: flex; flex-direction: column; gap: var(--frock-space-row); }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .divider { height: 1px; background: var(--frock-border); margin: 8px 0; }
+  .radii { display: flex; gap: 16px; flex-wrap: wrap; }
+  .radii div { width: 96px; height: 64px; background: var(--frock-surface-raised); border: 1px solid var(--frock-border); display: grid; place-items: end start; padding: 8px; font: 700 11px var(--frock-font-sans); color: var(--frock-text-muted); }
+  .spaces { display: flex; align-items: flex-end; gap: 12px; }
+  .spaces div { background: var(--frock-accent); border-radius: 3px; position: relative; }
+  .spaces div::after { content: attr(data-l); position: absolute; top: 100%; left: 0; margin-top: 4px; font: 700 11px var(--frock-font-sans); color: var(--frock-text-muted); }
+
+  /* list rows and chat, ChatGPT-tight */
+  .fb-list { display: flex; flex-direction: column; }
+  .fb-row { display: flex; align-items: center; gap: 12px; min-height: var(--frock-control-lg); padding: 6px 0; border-bottom: 1px solid var(--frock-border); font: 500 var(--frock-text-base)/1.3 var(--frock-font-sans); letter-spacing: -0.005em; }
+  .fb-row:last-child { border-bottom: 0; }
+  /* touch: a group is one tonal surface; rows are separated by tone and rhythm, not lines */
+  [data-density="touch"] .fb-list { background: var(--frock-surface-raised); border-radius: var(--frock-radius-group); padding: 4px 12px; box-shadow: inset 0 1px 0 var(--frock-highlight); }
+  [data-density="touch"] .fb-row { border-bottom: 0; min-height: 48px; padding: 5px 0; }
+  [data-density="touch"] .fb-row + .fb-row { border-top: 0; position: relative; }
+  [data-density="touch"] .fb-row + .fb-row::before { content: ""; position: absolute; left: var(--frock-divider-inset); right: 0; top: 0; height: 1px; background: color-mix(in srgb, var(--frock-border) 70%, transparent); }
+  [data-density="touch"] .fb-row + .fb-row:not(:has(.lead))::before { left: 0; }
+  .fb-row .lead { width: 30px; height: 30px; translate: 0 -0.5px; border-radius: 27%; background: var(--frock-surface-subtle); display: grid; place-items: center; flex: none; }
+  [data-density="touch"] .fb-row .lead { background: var(--frock-accent-tint); }
+  [data-density="touch"] .fb-row .lead svg { stroke: var(--frock-accent-text); }
+  .fb-row .lead[data-tone="good"] { background: var(--frock-good-soft); } .fb-row .lead[data-tone="good"] svg { stroke: var(--frock-good) !important; }
+  .fb-row .lead[data-tone="neutral"] { background: var(--frock-surface-subtle); } .fb-row .lead[data-tone="neutral"] svg { stroke: var(--frock-text-muted) !important; }
+  .fb-row .lead svg { width: var(--frock-icon-md); height: var(--frock-icon-md); stroke: var(--frock-text-muted); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .fb-row .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .fb-row .main .t-caption { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fb-row .trail { color: var(--frock-text-subtle); display: inline-flex; align-items: center; gap: 6px; font: 500 var(--frock-text-sm)/1 var(--frock-font-sans); }
+  .fb-row .trail svg { width: var(--frock-icon-sm); height: var(--frock-icon-sm); stroke: currentColor; fill: none; stroke-width: 1.75; translate: 0 -0.5px; }
+  .fb-group { margin-bottom: 16px; }
+  .fb-group > .t-eyebrow { padding: 0 0 6px; }
+  [data-density="touch"] .fb-group > .t-eyebrow { padding: 0 4px 6px; }
+  .summary { font: 400 var(--frock-text-md)/1.45 var(--frock-font-sans); color: var(--frock-text); letter-spacing: -0.005em; }
+  .summary em { font-style: normal; color: var(--frock-accent-ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stats { display: flex; gap: 14px; font: 600 var(--frock-text-xs)/1 var(--frock-font-sans); color: var(--frock-text-muted); margin-top: 8px; }
+  .stats span { display: inline-flex; align-items: center; gap: 5px; }
+  .stats svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 1.6; translate: 0 -0.5px; }
+  .appbar { display: flex; align-items: center; gap: 8px; min-height: 44px; margin: -4px 0 4px; }
+  .appbar .t-heading { flex: 1; text-align: center; font-size: var(--frock-text-lg); }
+  .msg { max-width: 78%; padding: 7px 12px; border-radius: 18px; font: 400 var(--frock-text-message)/var(--frock-lh-message) var(--frock-font-sans); letter-spacing: -0.004em; hanging-punctuation: first; }
+  .msg.user { align-self: flex-end; background: var(--frock-surface-raised); border-bottom-right-radius: 6px; }
+  .quick { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+  .quick .fb-chip { flex: none; }
+  .msg.bot { align-self: flex-start; padding-left: 0; padding-right: 0; max-width: 100%; }
+  .composer { display: flex; align-items: center; gap: 4px; border: 1px solid var(--frock-border); border-radius: 22px; padding: 4px 4px 4px 14px; background: var(--frock-surface-raised); min-height: 40px; box-shadow: inset 0 1px 0 var(--frock-highlight); caret-color: var(--frock-accent); }
+  .composer .in { flex: 1; font: 400 var(--frock-text-message)/1.4 var(--frock-font-sans); color: var(--frock-text-subtle); padding: 4px 0; }
+  .composer .fb-icon-button { width: 30px; height: 30px; }
+  .composer .fb-icon-button svg { width: 15px; height: 15px; }
+
+  /* before / after */
+  .compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+  #screens .compare { grid-template-columns: repeat(auto-fit, minmax(300px, 390px)); }
+  .compare figure { margin: 0; }
+  .compare figcaption { font-size: 12px; color: var(--frock-text-muted); margin-bottom: 10px; font-weight: 700; }
+  .m3 { border-radius: 14px; background: var(--frock-surface); border: 1px solid var(--frock-border); padding: 24px; }
+  .m3 .title { font-size: 20px; font-weight: 600; margin-bottom: 20px; }
+  .m3 .field { position: relative; border: 2px solid var(--frock-accent); border-radius: 12px; padding: 18px 16px; font-size: 16px; margin-bottom: 20px; }
+  .m3 .field span { position: absolute; top: -10px; left: 12px; background: var(--frock-surface); padding: 0 4px; font-size: 13px; color: var(--frock-accent); }
+  .m3 .btn { height: 52px; border-radius: 10px; background: var(--frock-accent); color: #fff; font-size: 16px; font-weight: 700; display: grid; place-items: center; }
+  .m3 .counter { text-align: right; font-size: 13px; color: var(--frock-text-muted); margin: -12px 0 16px; }
+
+  @media (max-width: 900px) {
+    .page { grid-template-columns: 1fr; }
+    .rail { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--frock-border); }
+    main { padding: 24px 18px 60px; }
+    .spec { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="page">
+  <aside class="rail">
+    <div>
+      <h1>Frock UI</h1>
+      <div class="sub">Foundations, pass 5. One design for the web shell, the Flutter app, Applets, A2UI and plugin fallbacks.</div>
+    </div>
+    <nav>
+      <a href="#principles">Principles</a>
+      <a href="#density">Density</a>
+      <a href="#colour">Colour</a>
+      <a href="#type">Typography</a>
+      <a href="#rhythm">Spacing &amp; shape</a>
+      <a href="#buttons">Buttons</a>
+      <a href="#fields">Fields</a>
+      <a href="#selection">Selection</a>
+      <a href="#chips">Chips &amp; badges</a>
+      <a href="#craft">Craft rules</a>
+      <a href="#screens">Phone screens</a>
+      <a href="#before">Phone, before and after</a>
+      <a href="#next">What is next</a>
+    </nav>
+    <div class="switches">
+      <div>
+        <div class="switch-label">Density</div>
+        <div class="seg" role="group" aria-label="Density">
+          <button type="button" data-density-pick="compact" aria-pressed="true">Desktop</button>
+          <button type="button" data-density-pick="touch" aria-pressed="false">Phone</button>
+        </div>
+      </div>
+      <div>
+        <div class="switch-label">Theme</div>
+        <div class="seg" role="group" aria-label="Theme">
+          <button type="button" data-theme-pick="dark" aria-pressed="false">Dark</button>
+          <button type="button" data-theme-pick="light" aria-pressed="false">Light</button>
+          <button type="button" data-theme-pick="" aria-pressed="true">System</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <main id="root" data-density="compact">
+    <header>
+      <h2>Small, quiet, and the same everywhere</h2>
+      <p>FrockBot sits beside Slack, Linear and the terminal. Its interface should read like those products: a 13px working size on a pointer device, 15px on a phone, controls no taller than they need to be, and one accent spent where it matters.</p>
+      <p>Every value on this page is a named token. Flutter gets the same names with the same numbers. If a component here and a widget there disagree, the token is the referee.</p>
+    </header>
+
+    <section id="principles">
+      <h3>Principles</h3>
+      <p>Five rules that decide most questions before they are asked.</p>
+      <div class="spec wide">
+        <div class="pair">
+          <div class="box"><b>Density is a token, not a redesign.</b><span>Two densities, compact and touch. Same names, different pixels. A screen never mixes them.</span></div>
+          <div class="box"><b>Labels sit above fields.</b><span>No floating labels, no outlined Material fields. Label, control, help line, in that order, always.</span></div>
+          <div class="box"><b>One accent, spent once per view.</b><span>The primary action is pink. Nothing else is. Status uses its own good/warn/danger hues.</span></div>
+          <div class="box"><b>Tone before lines.</b><span>Three steps of surface: window, group, tile. A phone list is one lighter group with tiles inside it, no hairlines. Desktop keeps 1px borders; shadows are for things that float.</span></div>
+          <div class="box"><b>Small text, quiet weight.</b><span>Messages at 15 on a phone, chrome at 14 or below, nothing under 20px heavier than 600. Big friendly text reads as a toy.</span></div>
+          <div class="box"><b>Dark is home, light is real.</b><span>Dark is the product default. Light is a full palette, not an inversion, because Applets and email previews need it.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="density">
+      <h3>Density</h3>
+      <p>Flip the switch in the rail. <strong>Compact</strong> is the desktop shell and any pointer device. <strong>Touch</strong> is the phone and the Flutter app. Control heights grow from 28/32/36 to 28/34/40, text steps up one pixel, the tap target is 44px even where the drawn control is smaller, and nothing else changes. The phone reference is ChatGPT and iMessage: messages at the body size, chrome you barely notice.</p>
+      <div class="spec">
+        <div class="overflow">
+          <table class="tokens">
+            <thead><tr><th>Token</th><th>Compact</th><th>Touch</th><th>Used for</th></tr></thead>
+            <tbody>
+              <tr><td><code>text.base</code></td><td>13</td><td>14</td><td>Body, buttons, rows</td></tr>
+              <tr><td><code>text.message</code></td><td>14</td><td>15</td><td>Chat messages and the composer</td></tr>
+              <tr><td><code>text.md</code></td><td>14</td><td>15</td><td>Reading text, greeting</td></tr>
+              <tr><td><code>text.lg</code></td><td>15</td><td>16</td><td>App bar title, primary rows</td></tr>
+              <tr><td><code>text.xl</code></td><td>17</td><td>17</td><td>Section headings</td></tr>
+              <tr><td><code>text.2xl</code></td><td>20</td><td>20</td><td>Page titles</td></tr>
+              <tr><td><code>text.display</code></td><td>24</td><td>26</td><td>Empty states, onboarding</td></tr>
+              <tr><td><code>text.sm</code> / <code>xs</code></td><td>12 / 11</td><td>12 / 11</td><td>Labels, captions / eyebrows</td></tr>
+              <tr><td><code>text.input</code></td><td>13</td><td>16</td><td>Native form fields; 16 stops iOS zooming</td></tr>
+              <tr><td><code>control.sm/md/lg</code></td><td>28 / 32 / 36</td><td>28 / 34 / 40</td><td>Button and field heights</td></tr>
+              <tr><td><code>icon.sm/md/lg</code></td><td>14 / 16 / 18</td><td>16 / 18 / 20</td><td>Glyphs inside controls</td></tr>
+              <tr><td><code>hit</code></td><td>32</td><td>44</td><td>Minimum tap target</td></tr>
+              <tr><td><code>pad.control</code></td><td>12</td><td>12</td><td>Horizontal padding in controls</td></tr>
+              <tr><td><code>space.row</code></td><td>8</td><td>10</td><td>Between fields; list rows use hairlines, not gaps</td></tr>
+              <tr><td><code>space.edge</code></td><td>20</td><td>16</td><td>Screen edge</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="notes">
+          <p><b>Why two and not a slider.</b> Every screen is either operated with a pointer or a thumb. Two fixed sets keep the Flutter port a table, not a formula.</p>
+          <p><b>Where the phone got bulky.</b> Material 3 gives a 52px filled button, a 56px app bar, 16px padding inside everything and a card around everything. Touch density keeps the tap target at 44px but draws a 36px control, puts hairlines between rows instead of gaps, and uses no cards inside a list.</p>
+          <p><b>Rhythm does not change.</b> The 4px spacing scale, radii and motion are shared by both densities.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="colour">
+      <h3>Colour</h3>
+      <p>The dark palette is the reviewed one the web shell already ships. Light is derived from the same violet-leaning greys so both feel like one product. Each swatch is a role, and components name roles only.</p>
+      <div class="spec wide stack">
+        <div class="stage">
+          <h4>Surfaces and text</h4>
+          <div class="swatches">
+            <div class="swatch"><div class="chip" style="background:var(--frock-window)"></div><div class="meta"><b>window</b><code>surface.window</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-surface)"></div><div class="meta"><b>surface</b><code>surface</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-surface-raised)"></div><div class="meta"><b>raised</b><code>surface.raised</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-surface-subtle)"></div><div class="meta"><b>subtle</b><code>surface.subtle</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-surface-sidebar)"></div><div class="meta"><b>sidebar</b><code>surface.sidebar</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-border)"></div><div class="meta"><b>border</b><code>border</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-border-strong)"></div><div class="meta"><b>border strong</b><code>border.strong</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-text)"></div><div class="meta"><b>text</b><code>text</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-text-muted)"></div><div class="meta"><b>muted</b><code>text.muted</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-text-subtle)"></div><div class="meta"><b>subtle</b><code>text.subtle</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-text-disabled)"></div><div class="meta"><b>disabled</b><code>text.disabled</code></div></div>
+          </div>
+        </div>
+        <div class="stage">
+          <h4>Accent and status</h4>
+          <div class="swatches">
+            <div class="swatch"><div class="chip" style="background:var(--frock-accent)"></div><div class="meta"><b>accent</b><code>accent</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-accent-hover)"></div><div class="meta"><b>hover</b><code>accent.hover</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-accent-pressed)"></div><div class="meta"><b>pressed</b><code>accent.pressed</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-accent-soft)"></div><div class="meta"><b>accent soft</b><code>accent.soft</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-accent-text)"></div><div class="meta"><b>accent text</b><code>accent.text</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-good)"></div><div class="meta"><b>good</b><code>good</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-good-soft)"></div><div class="meta"><b>good soft</b><code>good.soft</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-warn)"></div><div class="meta"><b>warn</b><code>warn</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-warn-soft)"></div><div class="meta"><b>warn soft</b><code>warn.soft</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-danger)"></div><div class="meta"><b>danger</b><code>danger</code></div></div>
+            <div class="swatch"><div class="chip" style="background:var(--frock-danger-soft)"></div><div class="meta"><b>danger soft</b><code>danger.soft</code></div></div>
+          </div>
+        </div>
+        <div class="stage">
+          <h4>Roles in use</h4>
+          <div class="pair">
+            <div class="box" style="background:var(--frock-surface-raised)"><b>Raised on surface</b><span class="t-caption">A card, a secondary button, a list row's hover.</span></div>
+            <div class="box" style="background:var(--frock-accent-soft);border-color:transparent;color:var(--frock-accent-text)"><b>Accent soft</b><span>The User's own message, a selected row, a pink chip.</span></div>
+            <div class="box" style="background:var(--frock-good-soft);border-color:transparent;color:var(--frock-good)"><b>Good</b><span>Connected. Published. Reply delivered.</span></div>
+            <div class="box" style="background:var(--frock-warn-soft);border-color:transparent;color:var(--frock-warn)"><b>Warn</b><span>Waiting on your approval. Nearly out of budget.</span></div>
+            <div class="box" style="background:var(--frock-danger-soft);border-color:transparent;color:var(--frock-danger)"><b>Danger</b><span>The reply failed. This deletes the Bot.</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="type">
+      <h3>Typography</h3>
+      <p>Manrope everywhere, weights 400 to 800. Archivo Black is the display face and appears only where the product speaks in its own voice: an empty state, onboarding, the app name. Never in a control, never in a list.</p>
+      <div class="spec">
+        <div class="stage">
+          <div class="type-row"><div class="k">Display<small>display · Archivo Black</small></div><div class="t-display">Nothing here yet.<br>Ask Bob to build something.</div></div>
+          <div class="type-row"><div class="k">Title<small>2xl · 700</small></div><div class="t-title">Weekly Todos</div></div>
+          <div class="type-row"><div class="k">Heading<small>xl · 600</small></div><div class="t-heading">Connected services</div></div>
+          <div class="type-row"><div class="k">Row<small>lg · 600</small></div><div class="t-row">Bob <span class="t-caption" style="font-weight:500">· replied 2 min ago</span></div></div>
+          <div class="type-row"><div class="k">Body large<small>md · 400</small></div><div class="t-body-lg measure">Reading text: a greeting, a summary, a paragraph in a dialog. Line height 1.5, measure around sixty characters.</div></div>
+          <div class="type-row"><div class="k">Message<small>message · 400</small></div><div class="measure" style="font: 400 var(--frock-text-message)/1.45 var(--frock-font-sans)">Chat text, the composer, and a Bot's reply. One pixel above body on a phone, never more. This is what most of the app is read at.</div></div>
+          <div class="type-row"><div class="k">Body<small>base · 400</small></div><div class="t-body measure">The working size. Settings copy, dialog text, the composer, buttons. On a desktop this is 13px, the same as Slack and Linear.</div></div>
+          <div class="type-row"><div class="k">Label<small>sm · 600</small></div><div class="t-label">Bot name</div></div>
+          <div class="type-row"><div class="k">Caption<small>sm · 500 · muted</small></div><div class="t-caption">Live since Sep 5, 1:04 pm · 24 of 120</div></div>
+          <div class="type-row"><div class="k">Eyebrow<small>xs · 600 · tracked</small></div><div class="t-eyebrow">Routines</div></div>
+          <div class="type-row"><div class="k">Mono<small>sm · 500</small></div><div class="t-mono">bob-daff7ee3 · 0.3.39 · 118 ms</div></div>
+        </div>
+        <div class="notes">
+          <p><b>Ten roles, no more.</b> A screen picks from these; it never sets a size. The style linter already rejects literal font sizes in plugin CSS, and the Flutter theme will expose the same ten as named text styles.</p>
+          <p><b>Weight carries hierarchy, gently.</b> Titles 700, headings and rows 600, body 400. Nothing below 20px is heavier than 600; Manrope at 700 goes chunky at small sizes. Size differences between neighbours stay small so the page reads calm.</p>
+          <p><b>Text has three tiers of contrast</b>, 92%, 62% and 45% of the text colour, not three greys. Pure white on the darkest ground reads loud.</p>
+          <p><b>Numbers are tabular.</b> Captions, counters and timestamps set <code>tabular-nums</code> so lists line up.</p>
+          <p><b>Balanced headings.</b> Display and title text wrap with <code>text-wrap: balance</code>; Flutter gets the same by keeping those strings short.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="rhythm">
+      <h3>Spacing &amp; shape</h3>
+      <p>A 4px scale. On desktop, controls are 10px radius, cards 14, panels 20. On a phone, buttons and chips become pills, groups 16, icon tiles 11, and fields stay at 10. Shadows appear on floating things and on secondary pills only.</p>
+      <div class="spec">
+        <div class="stage grid">
+          <div>
+            <h4>Space</h4>
+            <div class="spaces" style="height:48px">
+              <div data-l="1 · 4" style="width:4px;height:4px"></div>
+              <div data-l="2 · 8" style="width:8px;height:8px"></div>
+              <div data-l="3 · 12" style="width:12px;height:12px"></div>
+              <div data-l="4 · 16" style="width:16px;height:16px"></div>
+              <div data-l="5 · 20" style="width:20px;height:20px"></div>
+              <div data-l="6 · 24" style="width:24px;height:24px"></div>
+              <div data-l="8 · 32" style="width:32px;height:32px"></div>
+            </div>
+          </div>
+          <div>
+            <h4>Radius</h4>
+            <div class="radii">
+              <div style="border-radius:var(--frock-radius-control)">control · 10</div>
+              <div style="border-radius:var(--frock-radius-card)">card · 14</div>
+              <div style="border-radius:var(--frock-radius-panel)">panel · 20</div>
+              <div style="border-radius:var(--frock-radius-pill)">pill · touch buttons</div>
+              <div style="border-radius:var(--frock-radius-tile);width:64px">tile</div>
+            </div>
+          </div>
+          <div>
+            <h4>Elevation</h4>
+            <div class="row">
+              <div style="width:140px;height:64px;border-radius:14px;background:var(--frock-surface-raised);border:1px solid var(--frock-border);display:grid;place-items:center" class="t-label">Resting</div>
+              <div style="width:140px;height:64px;border-radius:14px;background:var(--frock-surface-raised);border:1px solid var(--frock-border);box-shadow:var(--frock-shadow-card);display:grid;place-items:center" class="t-label">Card</div>
+              <div style="width:140px;height:64px;border-radius:14px;background:var(--frock-surface-raised);border:1px solid var(--frock-border);box-shadow:var(--frock-shadow-floating);display:grid;place-items:center" class="t-label">Floating</div>
+            </div>
+          </div>
+        </div>
+        <div class="notes">
+          <p><b>Inside a control:</b> horizontal padding is <code>pad.control</code>, the gap between icon and text is <code>gap.inline</code>. Vertical padding is never set; the height token is.</p>
+          <p><b>Between controls:</b> 8 in a row, <code>space.row</code> between fields, 16 between groups, 24 between sections. Lists never use gaps: rows touch, separated by a hairline.</p>
+          <p><b>Screen edges:</b> <code>space.edge</code>, 16 on a phone, 20 on desktop panels.</p>
+          <p><b>Motion:</b> 140ms for state changes, 260ms for things entering. Reduced motion turns both off.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="buttons">
+      <h3>Buttons</h3>
+      <p>Four variants, three sizes. Primary is the one pink thing on a view. Secondary is bordered and raised. Ghost is for toolbars and rows. Danger is soft until hovered, so a destructive action is legible but not shouting.</p>
+      <div class="spec">
+        <div class="stage grid">
+          <div>
+            <h4>Variants · medium</h4>
+            <div class="btn-row">
+              <button class="fb-button" data-variant="primary">Send</button>
+              <button class="fb-button" data-variant="secondary">Cancel</button>
+              <button class="fb-button" data-variant="ghost">Show code</button>
+              <button class="fb-button" data-variant="danger">Delete Bot</button>
+              <button class="fb-button" data-variant="primary" disabled>Send</button>
+            </div>
+          </div>
+          <div>
+            <h4>Sizes</h4>
+            <div class="btn-row">
+              <button class="fb-button" data-variant="secondary" data-size="sm">Small</button>
+              <button class="fb-button" data-variant="secondary">Medium</button>
+              <button class="fb-button" data-variant="secondary" data-size="lg">Large</button>
+              <button class="fb-button" data-variant="primary" data-size="lg"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>Publish</button>
+            </div>
+          </div>
+          <div>
+            <h4>With icons · icon only</h4>
+            <div class="btn-row">
+              <button class="fb-button" data-variant="secondary"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New Bot</button>
+              <button class="fb-button" data-variant="ghost" data-size="sm"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM9 9h6v6H9z"/></svg>Code</button>
+              <button class="fb-button fb-icon-button" data-variant="secondary" aria-label="Copy link"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></button>
+              <button class="fb-button fb-icon-button" data-variant="ghost" aria-label="More"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+              <button class="fb-button fb-icon-button" data-variant="primary" data-shape="round" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+            </div>
+          </div>
+          <div class="phone">
+            <div class="stack">
+              <div class="t-eyebrow">Phone · touch density</div>
+              <button class="fb-button" data-variant="primary" data-block data-size="lg">Save</button>
+              <div class="btn-row">
+                <button class="fb-button" data-variant="secondary" style="flex:1">Cancel</button>
+                <button class="fb-button" data-variant="primary" style="flex:1">Continue</button>
+              </div>
+              <div class="btn-row">
+                <button class="fb-button" data-variant="ghost" data-size="sm">Show code</button>
+                <button class="fb-button fb-icon-button" data-variant="primary" data-shape="round" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="notes">
+          <p><b>Text is semibold, size base.</b> A button's label never exceeds the body text beside it. That single rule is most of the difference from the Material default.</p>
+          <p><b>Shape follows density.</b> Desktop buttons are 10px rounded rectangles. Phone buttons are pills, and a secondary pill carries a light shadow instead of a border.</p>
+          <p><b>Height is the token.</b> sm/md/lg map to <code>control.sm/md/lg</code>. On a phone a large button is 42px, not 52, and a medium one is 36.</p>
+          <p><b>Full width only on a phone</b>, and only for the one primary action at the bottom of a form or sheet.</p>
+          <p><b>Press feedback</b> is a 3% scale for 140ms and a darker fill. No ripple.</p>
+          <p><b>Disabled</b> keeps the shape and drops to disabled text on subtle surface. Never 50% opacity over content.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="fields">
+      <h3>Fields</h3>
+      <p>Label above, control, help below. The label is the small bold role; help is a caption. Focus is a 1px accent border plus a soft ring. Error swaps both for danger and puts the reason in the help line.</p>
+      <div class="spec">
+        <div class="stage grid">
+          <div class="form-grid desktop-only">
+            <label class="fb-field"><span class="fb-label">Bot name</span><input class="fb-control" value="Bob" /><span class="fb-help">Shown in the sidebar and in notifications.</span></label>
+            <label class="fb-field"><span class="fb-label">Handle <span class="opt">optional</span></span><input class="fb-control" placeholder="bob" /></label>
+            <label class="fb-field" data-state="error"><span class="fb-label">Webhook URL</span><input class="fb-control" value="htp://example" /><span class="fb-help">Enter a full URL starting with https://</span></label>
+            <label class="fb-field"><span class="fb-label">Model</span><span class="fb-select"><select class="fb-control"><option>Frock AI · Auto</option><option>Ollama · qwen3:8b</option></select><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span><span class="fb-help">Frock AI costs per token. Ollama is included.</span></label>
+            <label class="fb-field"><span class="fb-label">Search</span><span class="fb-adorn"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input class="fb-control" placeholder="Search Bots" /></span></label>
+            <label class="fb-field"><span class="fb-label">Disabled</span><input class="fb-control" value="Managed by your plan" disabled /></label>
+            <label class="fb-field" style="grid-column:1/-1"><span class="fb-label">Instructions</span><textarea class="fb-control" rows="3">You are Bob. Keep replies short. Ask before spending money.</textarea><span class="fb-help">Sent with every message. Markdown is fine.</span></label>
+          </div>
+          <div class="phone">
+            <div class="stack" style="gap:10px">
+              <div class="t-title">Form preview</div>
+              <div class="t-body-lg">Give this sample a name.</div>
+              <label class="fb-field"><span class="fb-label">Name<span class="opt">24 / 120</span></span><input class="fb-control" value="Native durable form test" /></label>
+              <label class="fb-field"><span class="fb-label">Model</span><span class="fb-select"><select class="fb-control"><option>Frock AI · Auto</option></select><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></label>
+              <label class="fb-field" data-state="error"><span class="fb-label">Webhook URL</span><input class="fb-control" value="htp://example" /><span class="fb-help">Enter a full URL starting with https://</span></label>
+              <button class="fb-button" data-variant="primary" data-block data-size="lg">Save</button>
+              <div class="t-caption" style="color:var(--frock-good)">Saved.</div>
+            </div>
+          </div>
+        </div>
+        <div class="notes">
+          <p><b>No floating labels.</b> They cost a top margin, clash with placeholders and cannot hold a counter. The counter lives in the label's right slot.</p>
+          <p><b>Entered text</b> is <code>text.input</code>: 13 on desktop, 16 on a phone so iOS does not zoom.</p>
+          <p><b>Height is <code>control.md</code></b>: 32 desktop, 36 phone. Textareas take the same padding and a 2.4× minimum.</p>
+          <p><b>Select</b> is the same control with a chevron. Native pickers on the phone, a menu on desktop, identical at rest.</p>
+          <p><b>Errors</b> go in the help line, in danger colour, in a sentence that says how to fix it.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="selection">
+      <h3>Selection</h3>
+      <p>Checkbox, radio and switch share the accent fill and the focus ring. A switch is a row: label left, control right, the whole row tappable.</p>
+      <div class="spec">
+        <div class="stage grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+          <div class="stack" style="gap:2px">
+            <h4>Checkbox</h4>
+            <label class="fb-check"><input type="checkbox" checked /> Buy milk</label>
+            <label class="fb-check"><input type="checkbox" /> Call mum</label>
+            <label class="fb-check"><input type="checkbox" checked /> Send weekly summary</label>
+          </div>
+          <div class="stack" style="gap:2px">
+            <h4>Radio</h4>
+            <label class="fb-check"><input type="radio" name="r" checked /> Every morning</label>
+            <label class="fb-check"><input type="radio" name="r" /> Weekdays</label>
+            <label class="fb-check"><input type="radio" name="r" /> When an email arrives</label>
+          </div>
+          <div class="stack" style="gap:2px">
+            <h4>Switch</h4>
+            <label class="fb-switch">Notify me on failure <input type="checkbox" checked /></label>
+            <div class="divider"></div>
+            <label class="fb-switch">Let Bob create Routines <input type="checkbox" /></label>
+            <div class="divider"></div>
+            <label class="fb-switch">Use my Computer <input type="checkbox" checked /></label>
+          </div>
+        </div>
+        <div class="notes">
+          <p><b>18px box on desktop, 22 on a phone.</b> The row is <code>control.md</code> tall with a 44px tap area, so a thumb finds it without the list looking padded.</p>
+          <p><b>Switch rows</b> are separated by a hairline, not cards. A settings list is one surface.</p>
+          <p><b>Radio groups</b> replace dropdowns whenever there are five or fewer options that fit on screen.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="chips">
+      <h3>Chips &amp; badges</h3>
+      <p>A chip is a small pill that names a state or a filter. A badge is a count. Status chips use the status hues; the accent chip marks the selected filter.</p>
+      <div class="spec">
+        <div class="stage grid">
+          <div class="row">
+            <span class="fb-chip">All Bots</span>
+            <span class="fb-chip" data-tone="accent">Mine</span>
+            <span class="fb-chip"><span class="dot" style="color:var(--frock-good)"></span>Ready</span>
+            <span class="fb-chip" data-tone="good"><span class="dot"></span>Live</span>
+            <span class="fb-chip" data-tone="warn"><span class="dot"></span>Needs approval</span>
+            <span class="fb-chip" data-tone="danger"><span class="dot"></span>Failed</span>
+            <span class="fb-chip">Gmail <svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2.5"><path d="M6 6l12 12M18 6 6 18"/></svg></span>
+          </div>
+          <div class="row">
+            <span class="t-row">Inbox</span><span class="fb-badge">3</span>
+            <span class="t-row" style="margin-left:16px">Routines</span><span class="fb-badge">12</span>
+          </div>
+        </div>
+        <div class="notes">
+          <p><b>Chip height is <code>control.sm</code></b> and its text is the label role. It never looks like a button: no shadow, no bold accent fill.</p>
+          <p><b>The dot</b> carries status when colour alone would not; it is the same glyph a list row uses.</p>
+          <p><b>Badges</b> are tabular, 18px tall, accent only. A muted count is plain caption text.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="craft">
+      <h3>Craft rules</h3>
+      <p>The small things premium products get right. Each is a token or a rule, applied everywhere, so the app never has to decide.</p>
+      <div class="spec">
+        <div class="stage grid">
+          <div>
+            <h4>Empty state · display voice, one sentence, one action</h4>
+            <div style="max-width:360px;display:flex;flex-direction:column;gap:8px;padding:8px 0 4px">
+              <div class="t-display">Nothing here yet.</div>
+              <div class="t-body" style="color:var(--frock-text-muted)">Ask Bob to build a Weekly Todos Applet, or connect Gmail and let a Routine watch your inbox.</div>
+              <div class="btn-row" style="margin-top:6px"><button class="fb-button" data-variant="primary">Ask Bob</button><button class="fb-button" data-variant="ghost">Connect a service</button></div>
+            </div>
+          </div>
+          <div>
+            <h4>Loading · one shimmer, tiles keep their shape</h4>
+            <div class="fb-list" style="max-width:360px">
+              <div class="fb-row"><div class="lead" style="background:var(--frock-skeleton)"></div><div class="main"><span style="display:block;height:12px;width:46%;border-radius:6px;background:var(--frock-skeleton)"></span><span style="display:block;height:10px;width:70%;border-radius:5px;background:var(--frock-skeleton);margin-top:4px"></span></div></div>
+              <div class="fb-row"><div class="lead" style="background:var(--frock-skeleton)"></div><div class="main"><span style="display:block;height:12px;width:38%;border-radius:6px;background:var(--frock-skeleton)"></span><span style="display:block;height:10px;width:58%;border-radius:5px;background:var(--frock-skeleton);margin-top:4px"></span></div></div>
+            </div>
+          </div>
+          <div>
+            <h4>Numbers, ids, punctuation</h4>
+            <div class="stack" style="gap:6px;max-width:420px">
+              <div class="t-body">Spent <b style="font-variant-numeric:tabular-nums">$0.04</b> today · <b style="font-variant-numeric:tabular-nums">$1.20</b> this month</div>
+              <div class="t-body">Bot <span class="t-mono">bob-daff7ee3</span> · release <span class="t-mono">0.3.41</span> · <span class="t-mono">118 ms</span></div>
+              <div class="t-body">“Quotes are curly,” ranges use an en dash (9–5), and a unit keeps its number: 6 pm, 2 s, 400 KB.</div>
+              <div class="t-body"><span style="opacity:.4">Disabled is the same control at 40%</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="notes">
+          <p><b>Type grid.</b> Every role has a pixel line height on the 4px grid, so stacked text in two columns lines up. Tracking tightens as size grows.</p>
+          <p><b>Light, not shadow.</b> A raised group carries a 1px top highlight at 6% white. Dark surfaces get lighter as they come forward, and the ground is a touch cooler than the surfaces on it.</p>
+          <p><b>Status is desaturated in the dark.</b> Good, warn and danger sit 15% lower in chroma so they read without glowing.</p>
+          <p><b>Accent at three strengths.</b> Solid for the one action, 14% tint for tiles and selection, and an ink tone for tinted words. Solid pink never colours text.</p>
+          <p><b>Icons match text weight.</b> 1.6px strokes beside 400 text, 1.75 in buttons, and glyphs nudged half a pixel so they sit on the baseline.</p>
+          <p><b>Dividers start at the text</b>, never under the tile. Tiles and avatars use a radius of 27% of their size so every size is one family.</p>
+          <p><b>Selection, caret, scrollbar</b> take the brand: accent at 24% for selection, accent caret, thin border-tint scrollbars, no overscroll flash.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="screens">
+      <h3>Phone screens</h3>
+      <p>Three screens at touch density, built only from the pieces above. Rows live in one tonal group with icon tiles, the app bar is 44px, actions are pills, and the composer is a pill. The home screen borrows one idea from the voice-app reference: a greeting whose key numbers are tinted in the accent.</p>
+      <div class="spec wide">
+        <div class="compare">
+          <figure>
+            <figcaption>Home · a greeting with tinted numbers, then groups</figcaption>
+            <div data-density="touch" style="max-width:390px;border-radius:14px;background:var(--frock-window);border:1px solid var(--frock-border);padding:10px 16px 12px">
+              <div class="appbar" style="justify-content:space-between"><span class="t-eyebrow" style="color:var(--frock-accent)">FrockBot</span><button class="fb-button fb-icon-button" data-variant="ghost" data-shape="round" aria-label="Account"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></button></div>
+              <div class="summary" style="margin:2px 0 0">Good afternoon, Tim. Since yesterday your Bots finished <em>3 Routines</em>, published <em>Weekly Todos</em> and spent <em>$0.04</em>.</div>
+              <div class="stats"><span><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/></svg>4 Bots</span><span><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>2 running</span><span style="color:var(--frock-good)"><svg viewBox="0 0 24 24"><path d="m4 14 5-5 4 4 7-7"/></svg>all healthy</span></div>
+              <div class="fb-group" style="margin-top:16px"><div class="t-eyebrow">Recent</div><div class="fb-list">
+                <div class="fb-row"><div class="lead"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></svg></div><div class="main">Bob<span class="t-caption">Added Call mum to Weekly Todos · 2 m</span></div><div class="trail"><svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></div></div>
+                <div class="fb-row"><div class="lead"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></svg></div><div class="main">Research<span class="t-caption">Draft ready for review · 1 h</span></div><span class="fb-badge">1</span></div>
+              </div></div>
+              <div class="fb-group" style="margin:0"><div class="t-eyebrow">Applets</div><div class="fb-list">
+                <div class="fb-row"><div class="lead" data-tone="good"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><div class="main">Weekly Todos<span class="t-caption">Live · 2 open</span></div><div class="trail"><svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></div></div>
+                <div class="fb-row"><div class="lead" data-tone="neutral"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div><div class="main" style="color:var(--frock-accent-text)">Ask a Bot to build one</div></div>
+              </div></div>
+            </div>
+          </figure>
+          <figure>
+            <figcaption>Settings · tonal groups with icon tiles</figcaption>
+            <div data-density="touch" style="max-width:390px;border-radius:14px;background:var(--frock-window);border:1px solid var(--frock-border);padding:10px 16px 12px">
+              <div class="appbar"><button class="fb-button fb-icon-button" data-variant="ghost" aria-label="Back"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button><span class="t-heading">Bob</span><button class="fb-button" data-variant="ghost" data-size="sm">Done</button></div>
+              <div class="fb-group"><div class="t-eyebrow">Model</div><div class="fb-list">
+                <div class="fb-row"><div class="lead"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></div><div class="main">Frock AI · Auto<span class="t-caption">Picks the cheapest model that can do the job</span></div><div class="trail"><svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></div></div>
+                <div class="fb-row"><div class="lead" data-tone="neutral"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg></div><div class="main">Instructions<span class="t-caption">You are Bob. Keep replies short.</span></div><div class="trail"><svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></div></div>
+              </div></div>
+              <div class="fb-group"><div class="t-eyebrow">Behaviour</div><div class="fb-list">
+                <label class="fb-row" style="cursor:pointer"><div class="main">Notify me on failure</div><span class="fb-switch" style="width:auto;min-height:0"><input type="checkbox" checked /></span></label>
+                <label class="fb-row" style="cursor:pointer"><div class="main">Let Bob create Routines</div><span class="fb-switch" style="width:auto;min-height:0"><input type="checkbox" /></span></label>
+                <label class="fb-row" style="cursor:pointer"><div class="main">Use my Computer<span class="t-caption">dev-sprite-tim · idle</span></div><span class="fb-switch" style="width:auto;min-height:0"><input type="checkbox" checked /></span></label>
+              </div></div>
+              <div class="fb-group" style="margin:0"><div class="t-eyebrow">Connected</div><div class="fb-list">
+                <div class="fb-row"><div class="lead" data-tone="good"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><div class="main">Gmail<span class="t-caption">tim@…</span></div><span class="fb-chip" data-tone="good"><span class="dot"></span>Live</span></div>
+                <div class="fb-row"><div class="lead" data-tone="neutral"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div><div class="main" style="color:var(--frock-accent-text)">Connect a service</div></div>
+              </div></div>
+            </div>
+          </figure>
+          <figure>
+            <figcaption>Chat · user in a soft bubble, Bot as plain text</figcaption>
+            <div data-density="touch" style="max-width:390px;border-radius:14px;background:var(--frock-window);border:1px solid var(--frock-border);padding:10px 16px 12px;display:flex;flex-direction:column;min-height:420px">
+              <div class="appbar"><button class="fb-button fb-icon-button" data-variant="ghost" aria-label="Menu"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><span class="t-heading">Bob</span><button class="fb-button fb-icon-button" data-variant="ghost" aria-label="Applets"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg></button></div>
+              <div style="display:flex;flex-direction:column;gap:10px;flex:1">
+                <div class="msg user">Please reply with exactly: Native device check complete.</div>
+                <div class="msg bot">Native device check complete.</div>
+                <div class="msg user">Now add “call mum” to my weekly todos, and remind me at 6 pm.</div>
+                <div class="msg bot">Added <b>Call mum</b> to Weekly Todos.<span class="t-caption" style="display:block;margin-top:3px">Opened Weekly Todos · 2 s</span></div>
+              </div>
+              <div class="quick" style="margin-bottom:8px"><span class="fb-chip" data-tone="accent">Summarise my inbox</span><span class="fb-chip">Weekly Todos</span><span class="fb-chip">Plan tomorrow</span></div>
+              <div class="composer"><span class="in">Message Bob</span><button class="fb-button fb-icon-button" data-variant="ghost" data-shape="round" aria-label="Voice"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><button class="fb-button fb-icon-button" data-variant="primary" data-shape="round" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div>
+            </div>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="before">
+      <h3>Phone, before and after</h3>
+      <p>The same form the Flutter app rendered this afternoon, rebuilt with the tokens above at touch density. Switch the rail to Phone to see the after at true size.</p>
+      <div class="compare">
+        <figure>
+          <figcaption>Before · Material 3 defaults</figcaption>
+          <div class="m3" style="max-width:390px">
+            <div class="title">Form preview</div>
+            <div style="font-size:16px;margin-bottom:16px">Give this sample a name.</div>
+            <div class="field"><span>Name</span>Native durable form test</div>
+            <div class="counter">24/120</div>
+            <div class="btn">Save</div>
+            <div style="font-size:16px;margin-top:16px">Saved.</div>
+          </div>
+        </figure>
+        <figure>
+          <figcaption>After · Frock UI, touch density</figcaption>
+          <div data-density="touch" style="max-width:390px;border-radius:14px;background:var(--frock-surface);border:1px solid var(--frock-border);padding:20px 16px">
+            <div class="stack" style="gap:10px">
+              <div class="t-title">Form preview</div>
+              <div class="t-body-lg" style="color:var(--frock-text-muted)">Give this sample a name.</div>
+              <label class="fb-field"><span class="fb-label">Name<span class="opt">24 / 120</span></span><input class="fb-control" value="Native durable form test" /></label>
+              <button class="fb-button" data-variant="primary" data-block data-size="lg">Save</button>
+              <div class="t-caption" style="color:var(--frock-good)">Saved.</div>
+            </div>
+          </div>
+        </figure>
+      </div>
+    </section>
+
+    <section id="next">
+      <h3>What is next</h3>
+      <p>Once these foundations are agreed, the same page grows in this order, and each step lands in the repo as the single source both platforms build from.</p>
+      <div class="spec wide">
+        <div class="pair">
+          <div class="box"><b>1. Surfaces</b><span>Cards, list rows, dividers, app bar, bottom sheet and dialog, empty states with the display face.</span></div>
+          <div class="box"><b>2. Chat</b><span>Message bubbles at body-large, the composer, the pending and stopped states, tool-call rows.</span></div>
+          <div class="box"><b>3. Tokens file</b><span><code>packages/plugin-ui-theme</code> becomes the source: one JSON of tokens, generated CSS for the shell and Applet kit, generated Dart for Flutter.</span></div>
+          <div class="box"><b>4. Flutter port</b><span>A <code>FrockTokens</code> theme extension and widgets that mirror each class here, then side-by-side screenshots from the Pixel and a browser at 390px to confirm they match.</span></div>
+          <div class="box"><b>5. Applet kit and A2UI</b><span>The kit stylesheet and A2UI component set consume the generated CSS, so an Applet looks native in both hosts.</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+  const root = document.getElementById("root");
+  const html = document.documentElement;
+  const KEY = "frock-ui-foundations";
+  let state = { density: "compact", theme: "" };
+  try { state = { ...state, ...JSON.parse(localStorage.getItem(KEY) || "{}") }; } catch {}
+  function apply() {
+    root.dataset.density = state.density;
+    if (state.theme) html.dataset.theme = state.theme; else delete html.dataset.theme;
+    document.querySelectorAll("[data-density-pick]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.densityPick === state.density)));
+    document.querySelectorAll("[data-theme-pick]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themePick === state.theme)));
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+  }
+  document.querySelectorAll("[data-density-pick]").forEach(b => b.addEventListener("click", () => { state.density = b.dataset.densityPick; apply(); }));
+  document.querySelectorAll("[data-theme-pick]").forEach(b => b.addEventListener("click", () => { state.theme = b.dataset.themePick; apply(); }));
+  apply();
+</script>

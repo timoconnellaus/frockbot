@@ -1,0 +1,443 @@
+<title>Ten Ways to Talk to Bob</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Archivo+Black&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap">
+<style>
+  :root {
+    --ground: #151419; --window: #1b1a20; --sheet: #221f27; --tile: #2b282f; --tile-2: #35313a;
+    --line: rgb(244 242 246 / 8%); --line-2: rgb(244 242 246 / 16%);
+    --ink: rgb(244 242 246 / 92%); --ink-2: rgb(244 242 246 / 60%); --ink-3: rgb(244 242 246 / 42%);
+    --accent: #ec386b; --accent-ink: #f3a3ba; --accent-tint: rgb(236 56 107 / 14%); --accent-glow: rgb(236 56 107 / 34%);
+    --good: #7cc9a6; --good-tint: rgb(124 201 166 / 14%);
+    --sans: "Manrope", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+    --display: "Archivo Black", "Manrope", sans-serif;
+    --serif: "Newsreader", Georgia, serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sheep: url("data:image/png;base64,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");
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--ground); }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 400 14px/20px var(--sans); -webkit-font-smoothing: antialiased; }
+  ::selection { background: rgb(236 56 107 / 26%); }
+  .wrap { max-width: 1360px; margin: 0 auto; padding: 48px 32px 96px; }
+  header.top { max-width: 68ch; margin-bottom: 36px; }
+  .eyebrow { font: 600 11px/16px var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); }
+  header.top h1 { font: 400 38px/42px var(--display); letter-spacing: -.02em; margin: 10px 0 12px; text-wrap: balance; }
+  header.top p { margin: 0 0 8px; color: var(--ink-2); font-size: 15px; line-height: 23px; }
+  header.top p b { color: var(--ink); font-weight: 600; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(390px, 1fr)); gap: 44px 28px; justify-items: center; }
+  figure { margin: 0; width: 390px; }
+  figcaption { margin-top: 14px; }
+  figcaption b { display: block; font-weight: 600; font-size: 15px; }
+  figcaption b i { font-style: normal; color: var(--ink-3); font-weight: 500; margin-right: 8px; font-family: var(--mono); font-size: 12px; }
+  figcaption span { display: block; color: var(--ink-2); font-size: 13px; line-height: 19px; margin-top: 3px; }
+  figcaption em { display: block; color: var(--ink-3); font-size: 12px; line-height: 17px; margin-top: 6px; font-style: normal; }
+
+  .phone { width: 390px; height: 780px; border-radius: 40px; background: var(--window); border: 1px solid var(--line-2); position: relative; overflow: hidden; box-shadow: 0 30px 80px rgb(0 0 0 / 55%), inset 0 1px 0 rgb(255 255 255 / 6%); display: flex; flex-direction: column; }
+  .status { height: 46px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px 0 32px; font: 600 13px var(--sans); flex: none; position: relative; z-index: 2; }
+  .status i { width: 15px; height: 9px; border-radius: 3px; border: 1px solid var(--ink-2); position: relative; display: inline-block; vertical-align: -1px; }
+  .status i::after { content: ""; position: absolute; inset: 2px; right: 4px; background: var(--ink); border-radius: 1px; }
+  .screen { flex: 1; min-height: 0; padding: 0 18px; display: flex; flex-direction: column; position: relative; }
+  .homebar { height: 22px; flex: none; display: grid; place-items: center; position: relative; z-index: 2; }
+  .homebar i { width: 120px; height: 4px; border-radius: 2px; background: var(--ink-3); display: block; }
+  .bar { height: 44px; display: flex; align-items: center; gap: 8px; margin: 0 -4px; position: relative; z-index: 1; }
+  .bar .t { flex: 1; text-align: center; font: 600 16px/22px var(--sans); letter-spacing: -.01em; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+  .ib { width: 36px; height: 36px; border-radius: 18px; display: grid; place-items: center; color: var(--ink); flex: none; }
+  svg.i { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  .sheep { background: var(--sheep) center/cover; border-radius: 27%; flex: none; }
+  .ring { position: relative; }
+  .ring::before { content: ""; position: absolute; inset: -3px; border-radius: 32%; border: 2px solid var(--accent); }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums slashed-zero; }
+  .thread { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding-top: 6px; }
+  .composer { display: flex; align-items: center; gap: 4px; height: 44px; padding: 4px 4px 4px 16px; border-radius: 22px; background: var(--sheet); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); margin-top: 12px; position: relative; z-index: 1; }
+  .composer > span:not(.ib) { flex: 1; color: var(--ink-3); font-size: 15px; } .composer .ib { flex: none; }
+  .composer .ib { width: 34px; height: 34px; }
+  .composer .ib.p { background: var(--accent); color: #fff; }
+  .pill { display: inline-flex; align-items: center; justify-content: center; height: 30px; padding: 0 12px; border-radius: 15px; font: 600 13px var(--sans); background: var(--tile); color: var(--ink); white-space: nowrap; }
+  .pill.p { background: var(--accent); color: #fff; }
+  .pill.g { background: transparent; color: var(--ink-2); }
+  .choices { display: flex; gap: 8px; margin-top: 4px; }
+  .receipt { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 12px; background: var(--sheet); margin-top: 6px; }
+  .receipt .ico { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--tile); color: var(--ink-2); flex: none; }
+  .receipt .ico svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 1.75; }
+  .receipt .ico.g { background: var(--good-tint); color: var(--good); }
+  .receipt b { font-weight: 600; font-size: 13px; line-height: 17px; flex: 1; min-width: 0; }
+  .receipt b span { color: var(--ink-2); font-weight: 500; }
+  .receipt .t { font: 500 11px var(--mono); color: var(--ink-3); }
+  .caret { display: inline-block; width: 7px; height: 15px; background: var(--accent); border-radius: 2px; vertical-align: -3px; margin-left: 2px; opacity: .85; }
+  .stamp { text-align: center; font: 500 11px var(--mono); color: var(--ink-3); }
+  .u, .b { font-size: 15px; line-height: 22px; letter-spacing: -.004em; }
+  .u { align-self: flex-end; max-width: 78%; padding: 8px 13px; border-radius: 18px 18px 6px 18px; background: var(--tile); }
+  .b { align-self: stretch; }
+  .glow { position: absolute; border-radius: 50%; background: radial-gradient(circle, var(--accent-glow) 0%, transparent 62%); pointer-events: none; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; }
+  @media (prefers-reduced-motion: no-preference) { .pulse { animation: pulse 1.6s ease-in-out infinite; } }
+  @keyframes pulse { 0%,100% { opacity: .5 } 50% { opacity: 1 } }
+
+  /* 01 Paper: no bubbles, speaker labels, editorial serif for the Bot */
+  .v1 .u { align-self: stretch; max-width: 100%; background: transparent; padding: 0; border-radius: 0; }
+  .v1 .who { font: 600 11px/16px var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px; display: flex; gap: 8px; align-items: center; }
+  .v1 .who.me { color: var(--accent-ink); }
+  .v1 .b { font: 400 17px/26px var(--serif); }
+  .v1 .u { font: 400 15px/22px var(--sans); color: var(--ink-2); }
+  .v1 .thread { gap: 18px; padding-top: 10px; }
+  .v1 .receipt { background: transparent; border-top: 1px solid var(--line); border-radius: 0; padding: 8px 0; margin: 0; }
+  .v1 .receipt + .receipt { border-top: 1px solid var(--line); }
+  .v1 .receipts { margin: 8px 0 4px; border-bottom: 1px solid var(--line); }
+  .v1 .composer { border-radius: 0; border: 0; border-top: 1px solid var(--line-2); background: transparent; padding-left: 0; margin: 0 -18px; padding: 8px 18px; height: auto; box-shadow: none; }
+  .v1 .pill { border-radius: 4px; }
+
+  /* 02 iMessage: bubbles both sides, pink for the user */
+  .v2 .u { background: var(--accent); color: #fff; }
+  .v2 .b { align-self: flex-start; max-width: 82%; background: var(--sheet); padding: 8px 13px; border-radius: 18px 18px 18px 6px; }
+  .v2 .b .receipt { background: var(--tile); }
+  .v2 .composer { background: var(--sheet); }
+
+  /* 03 Terminal */
+  .v3 .screen { font-family: var(--mono); }
+  .v3 .u, .v3 .b { font: 400 13px/19px var(--mono); }
+  .v3 .u { align-self: stretch; max-width: 100%; background: transparent; padding: 0; color: var(--ink); }
+  .v3 .u::before { content: "> "; color: var(--accent-ink); }
+  .v3 .b { color: var(--ink-2); }
+  .v3 .b .ln { color: var(--ink); }
+  .v3 .receipt { background: transparent; padding: 0; margin: 2px 0 0; gap: 8px; }
+  .v3 .receipt .ico { display: none; }
+  .v3 .receipt b { font: 400 12px/18px var(--mono); }
+  .v3 .receipt b::before { content: "  ✓ "; color: var(--good); }
+  .v3 .receipt .t { margin-left: auto; }
+  .v3 .composer { border-radius: 6px; background: #0f0e12; border-color: var(--line-2); padding-left: 12px; }
+  .v3 .composer span { font: 400 13px var(--mono); }
+  .v3 .composer span::before { content: "$ "; color: var(--accent-ink); }
+  .v3 .composer .ib.p { border-radius: 6px; }
+  .v3 .pill { border-radius: 6px; font-family: var(--mono); font-weight: 500; font-size: 12px; }
+  .v3 .bar .t { font-family: var(--mono); font-weight: 500; font-size: 13px; }
+  .v3 .thread { gap: 14px; }
+
+  /* 04 Cards: each turn a card with header */
+  .v4 .thread { gap: 10px; }
+  .v4 .card { background: var(--sheet); border-radius: 16px; padding: 10px 12px 12px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .v4 .card .hd { display: flex; align-items: center; gap: 8px; font: 600 12px/16px var(--sans); color: var(--ink-2); margin-bottom: 6px; }
+  .v4 .card .hd .t { margin-left: auto; font: 500 11px var(--mono); color: var(--ink-3); }
+  .v4 .card .av { width: 20px; height: 20px; border-radius: 6px; background: var(--tile-2); display: grid; place-items: center; font: 700 10px var(--sans); }
+  .v4 .u { align-self: stretch; max-width: 100%; background: transparent; padding: 0; border-radius: 0; font-size: 15px; }
+  .v4 .receipt { background: var(--tile); }
+  .v4 .composer { border-radius: 16px; }
+  .v4 .composer .ib.p { border-radius: 12px; }
+  .v4 .pill { border-radius: 10px; }
+
+  /* 05 Rail: vertical timeline with avatars */
+  .v5 .thread { padding-left: 34px; position: relative; gap: 16px; }
+  .v5 .thread::before { content: ""; position: absolute; left: 11px; top: 14px; bottom: 6px; width: 2px; background: var(--line); border-radius: 1px; }
+  .v5 .item { position: relative; }
+  .v5 .item .av { position: absolute; left: -34px; top: 0; width: 24px; height: 24px; border-radius: 8px; background: var(--tile-2); display: grid; place-items: center; font: 700 11px var(--sans); }
+  .v5 .item .av.s { background: var(--sheep) center/cover; }
+  .v5 .u { align-self: stretch; max-width: 100%; background: transparent; padding: 0; border-radius: 0; color: var(--ink-2); }
+  .v5 .meta { font: 500 11px var(--mono); color: var(--ink-3); margin-bottom: 3px; }
+  .v5 .receipt { background: transparent; border: 1px solid var(--line); }
+
+  /* 06 Glow: orb behind the Bot, glass surfaces */
+  .v6 .phone { background: radial-gradient(120% 60% at 50% -10%, #3a1f2c 0%, var(--window) 55%); }
+  .v6 .u { background: rgb(255 255 255 / 7%); backdrop-filter: blur(10px); border: 1px solid rgb(255 255 255 / 8%); }
+  .v6 .b { color: var(--ink); }
+  .v6 .receipt { background: rgb(255 255 255 / 5%); border: 1px solid rgb(255 255 255 / 7%); backdrop-filter: blur(8px); }
+  .v6 .composer { background: rgb(255 255 255 / 6%); border-color: rgb(255 255 255 / 10%); backdrop-filter: blur(12px); box-shadow: 0 12px 40px rgb(0 0 0 / 40%); }
+  .v6 .orb { position: absolute; left: 50%; top: 70px; translate: -50% 0; width: 180px; height: 180px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #ff7aa0 0%, #ec386b 30%, #5b1d33 70%, transparent 72%); filter: blur(14px); opacity: .55; }
+  .v6 .pill.p { box-shadow: 0 8px 28px var(--accent-glow); }
+
+  /* 07 Split: canvas on top, chat strip below */
+  .v7 .canvas { flex: 1; min-height: 0; background: var(--sheet); border-radius: 20px; padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .v7 .canvas .ttl { display: flex; align-items: center; justify-content: space-between; }
+  .v7 .canvas .ttl b { font: 400 18px/22px var(--display); letter-spacing: -.015em; }
+  .v7 .draft { background: var(--window); border-radius: 12px; padding: 10px 12px; font-size: 13px; line-height: 19px; color: var(--ink-2); border: 1px solid var(--line); flex: 1; overflow: hidden; }
+  .v7 .draft b { display: block; color: var(--ink); font-weight: 600; margin-bottom: 4px; }
+  .v7 .strip { margin-top: 10px; }
+  .v7 .u { max-width: 100%; align-self: stretch; background: transparent; padding: 0; border-radius: 0; color: var(--ink-3); font-size: 13px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .v7 .b { font-size: 14px; line-height: 20px; }
+  .v7 .receipt { background: var(--window); padding: 5px 8px; margin: 0; }
+  .v7 .rrow { display: flex; gap: 6px; }
+  .v7 .rrow .receipt { flex: 1; min-width: 0; }
+  .v7 .rrow .receipt b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* 08 Focus: one reply large, history faded */
+  .v8 .thread { justify-content: flex-end; gap: 14px; }
+  .v8 .hist { opacity: .32; font-size: 13px; line-height: 18px; }
+  .v8 .u { background: transparent; padding: 0; border-radius: 0; align-self: stretch; max-width: 100%; color: var(--accent-ink); font-size: 14px; }
+  .v8 .b { font: 400 22px/30px var(--sans); letter-spacing: -.015em; font-weight: 500; }
+  .v8 .receipt { background: transparent; padding: 0; margin-top: 4px; }
+  .v8 .receipt b { font-weight: 500; color: var(--ink-2); }
+  .v8 .composer { height: 52px; border-radius: 26px; }
+  .v8 .composer .ib { width: 42px; height: 42px; }
+  .v8 .composer .ib.p { background: var(--accent); }
+  .v8 .composer .ib.v { background: var(--tile); color: var(--accent-ink); }
+
+  /* 09 Sheets: question is the header, answer is the body, stacked */
+  .v9 .thread { gap: 10px; }
+  .v9 .qa { background: var(--sheet); border-radius: 18px; overflow: hidden; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .v9 .qa .q { padding: 10px 14px; background: var(--tile); font: 600 14px/20px var(--sans); }
+  .v9 .qa .a { padding: 10px 14px 12px; }
+  .v9 .qa.old { opacity: .6; }
+  .v9 .qa.old .a { display: none; }
+  .v9 .qa.old .q { background: var(--sheet); color: var(--ink-2); font-weight: 500; }
+  .v9 .u { display: none; }
+  .v9 .receipt { background: var(--window); }
+  .v9 .composer { border-radius: 18px; }
+
+  /* 10 Dense: Slack-flat, avatar left, 13px, no bubbles */
+  .v10 .thread { gap: 12px; }
+  .v10 .line { display: flex; gap: 10px; }
+  .v10 .line .av { width: 30px; height: 30px; border-radius: 9px; background: var(--tile-2); display: grid; place-items: center; font: 700 12px var(--sans); flex: none; }
+  .v10 .line .av.s { background: var(--sheep) center/cover; }
+  .v10 .line .body { flex: 1; min-width: 0; }
+  .v10 .line .nm { font: 600 13px/18px var(--sans); display: flex; gap: 8px; align-items: baseline; }
+  .v10 .line .nm span { font: 500 11px var(--mono); color: var(--ink-3); }
+  .v10 .u, .v10 .b { font-size: 14px; line-height: 20px; }
+  .v10 .u { background: transparent; padding: 0; border-radius: 0; align-self: stretch; max-width: 100%; }
+  .v10 .receipt { padding: 5px 8px; border-radius: 8px; }
+  .v10 .composer { border-radius: 10px; height: 40px; }
+  .v10 .composer .ib.p { border-radius: 8px; width: 30px; height: 30px; }
+  .v10 .pill { border-radius: 8px; height: 28px; font-size: 12px; }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">Ten directions · one screen · one palette</div>
+    <h1>Ten ways to talk to Bob</h1>
+    <p>The same conversation every time: you ask Bob to find Sarah's email and draft a reply, Bob shows its work and asks what to do. Same colours, same sheep. Only the idea changes.</p>
+    <p>Each one is a real direction the whole app could follow, not a skin. The caption says what it would mean for the rest of the product.</p>
+  </header>
+
+  <div class="gallery">
+
+    <!-- 01 Paper -->
+    <figure>
+      <div class="phone v1">
+        <div class="status"><span>9:41</span><span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg class="i" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t" style="font-family:var(--serif);font-weight:500;font-size:18px">Bob</span><span class="ib"><svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span></div>
+          <div class="thread">
+            <div><div class="who me">You <span class="mono" style="letter-spacing:0;text-transform:none">13:36</span></div><div class="u">Find Sarah's email about Thursday's numbers and draft a reply with the totals from the sheet.</div></div>
+            <div><div class="who">Bob</div><div class="b">Found it. She is asking for Q3 by region.
+              <div class="receipts">
+                <div class="receipt"><b>Searched Gmail · <span>“Thursday numbers”</span></b><span class="t">3 hits</span></div>
+                <div class="receipt"><b>Read <span>Q3 regions.xlsx</span></b><span class="t">4 sheets</span></div>
+                <div class="receipt"><b>Drafted reply · <span>214 words</span></b><span class="t">ready</span></div>
+              </div>
+              APAC is up 18%, EMEA flat, Americas down 4%. The draft leads with APAC and flags the Americas dip as timing. Want me to send it<span class="caret"></span></div></div>
+            <div class="choices"><span class="pill p">Send it</span><span class="pill">Show draft</span><span class="pill g">Edit</span></div>
+          </div>
+          <div class="composer"><span>Reply to Bob</span><span class="ib p"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>01</i>Paper</b><span>No bubbles. A transcript set like a page: small-caps speaker labels, the Bot in a serif, receipts as ruled lines. Reads like correspondence, not an app.</span><em>Whole app: document-like screens, ruled lists, serif for anything a Bot writes.</em></figcaption>
+    </figure>
+
+    <!-- 02 iMessage -->
+    <figure>
+      <div class="phone v2">
+        <div class="status"><span>9:41</span><span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg class="i" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t" style="flex-direction:column;gap:2px"><div class="sheep ring" style="width:30px;height:30px"></div><span style="font-size:12px;font-weight:600">Bob</span></span><span class="ib"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/></svg></span></div>
+          <div class="thread">
+            <div class="stamp">Today 13:36</div>
+            <div class="u">Find Sarah's email about Thursday's numbers and draft a reply with the totals from the sheet.</div>
+            <div class="b">Found it. She is asking for Q3 by region.
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Searched Gmail</b><span class="t">3 hits</span></div>
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 10h16M10 4v16"/></svg></div><b>Read Q3 regions.xlsx</b><span class="t">4 sheets</span></div>
+              <div class="receipt"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><b>Drafted reply</b><span class="t">214 w</span></div>
+            </div>
+            <div class="b">APAC is up 18%, EMEA flat, Americas down 4%. Want me to send it<span class="caret"></span></div>
+            <div class="choices"><span class="pill p">Send it</span><span class="pill">Show draft</span></div>
+          </div>
+          <div class="composer"><span>iMessage-style</span><span class="ib"><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span class="ib p"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>02</i>Messages</b><span>The familiar one. Pink bubbles for you, grey for Bob, avatar in the bar. Zero learning curve; Bob feels like a contact, receipts ride inside the bubble.</span><em>Whole app: a contacts list of Bots, everything else in sheets.</em></figcaption>
+    </figure>
+
+    <!-- 03 Terminal -->
+    <figure>
+      <div class="phone v3">
+        <div class="status"><span>9:41</span><span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg class="i" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t">bob <span style="color:var(--ink-3)">·</span> <span style="color:var(--good)">ready</span></span><span class="ib"><svg class="i" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6M12 19h8"/></svg></span></div>
+          <div class="thread">
+            <div class="u">Find Sarah's email about Thursday's numbers and draft a reply with the totals from the sheet.</div>
+            <div class="b"><span class="ln">Found it. She is asking for Q3 by region.</span>
+              <div class="receipt"><b>gmail.search "Thursday numbers"</b><span class="t">3</span></div>
+              <div class="receipt"><b>sheets.read Q3-regions.xlsx</b><span class="t">4 tabs</span></div>
+              <div class="receipt"><b>gmail.draft → Sarah Chen</b><span class="t">214w</span></div>
+              <div style="margin-top:8px"><span class="ln">APAC +18% · EMEA flat · Americas −4%.</span><br>Draft leads with APAC, flags Americas as timing.<br><span class="ln">Send it?</span> <span style="color:var(--ink-3)">[y/n/edit]</span><span class="caret"></span></div>
+            </div>
+            <div class="choices"><span class="pill p">y  send</span><span class="pill">show draft</span><span class="pill g">edit</span></div>
+          </div>
+          <div class="composer"><span>_</span><span class="ib p"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>03</i>Terminal</b><span>Mono everywhere, prompts, receipts as commands with a tick. Honest about what a Bot is. Dense and fast; for people who like seeing the machinery.</span><em>Whole app: a shell with panes. Routines are cron lines, Applets are directories.</em></figcaption>
+    </figure>
+
+    <!-- 04 Cards -->
+    <figure>
+      <div class="phone v4">
+        <div class="status"><span>9:41</span><span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg class="i" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t">Sarah's numbers</span><span class="ib"><svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span></div>
+          <div class="thread">
+            <div class="card"><div class="hd"><span class="av">T</span>Tim<span class="t">13:36</span></div><div class="u">Find Sarah's email about Thursday's numbers and draft a reply with the totals from the sheet.</div></div>
+            <div class="card"><div class="hd"><div class="sheep" style="width:20px;height:20px"></div>Bob<span class="t">13:37 · 8 s</span></div><div class="b">Found it. She is asking for Q3 by region.
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Searched Gmail · <span>“Thursday numbers”</span></b><span class="t">3 hits</span></div>
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 10h16M10 4v16"/></svg></div><b>Read <span>Q3 regions.xlsx</span></b><span class="t">4 sheets</span></div>
+              <div class="receipt"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><b>Drafted reply · <span>214 words</span></b><span class="t">ready</span></div>
+              <div style="margin-top:10px">APAC is up 18%, EMEA flat, Americas down 4%. Want me to send it<span class="caret"></span></div>
+              <div class="choices" style="margin-top:10px"><span class="pill p">Send it</span><span class="pill">Show draft</span><span class="pill g">Edit</span></div>
+            </div></div>
+          </div>
+          <div class="composer"><span>Add to this thread</span><span class="ib p"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>04</i>Cards</b><span>Every turn is a card with a header: who, when, how long. Threads get titles. Feels like Linear or a well-kept issue tracker; work is auditable.</span><em>Whole app: everything is a card in a list, every card has a header, filters everywhere.</em></figcaption>
+    </figure>
+
+    <!-- 05 Rail -->
+    <figure>
+      <div class="phone v5">
+        <div class="status"><span>9:41</span><span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg class="i" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t">Bob</span><span class="ib"><svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span></div>
+          <div class="thread">
+            <div class="item"><span class="av">T</span><div class="meta">13:36</div><div class="u">Find Sarah's email about Thursday's numbers and draft a reply with the totals from the sheet.</div></div>
+            <div class="item"><span class="av s"></span><div class="meta">13:36 · searched</div><div class="receipt" style="margin:0"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Gmail · <span>“Thursday numbers”</span></b><span class="t">3</span></div></div>
+            <div class="item"><span class="av s"></span><div class="meta">13:36 · read</div><div class="receipt" style="margin:0"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 10h16M10 4v16"/></svg></div><b>Q3 regions.xlsx</b><span class="t">4 sheets</span></div></div>
+            <div class="item"><span class="av s"></span><div class="meta">13:37 · drafted</div><div class="receipt" style="margin:0"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><b>Reply to Sarah · <span>214 words</span></b><span class="t">ready</span></div></div>
+            <div class="item"><span class="av s"></span><div class="meta">13:37</div><div class="b">APAC is up 18%, EMEA flat, Americas down 4%. The draft leads with APAC and flags the Americas dip as timing. Want me to send it<span class="caret"></span></div><div class="choices" style="margin-top:8px"><span class="pill p">Send it</span><span class="pill">Show draft</span></div></div>
+          </div>
+          <div class="composer"><span>Message Bob</span><span class="ib p"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>05</i>Rail</b><span>A timeline. Every event, yours or Bob's, hangs off one vertical rail with a timestamp, like a commit log. Actions and words have equal weight.</span><em>Whole app: one rail per Bot, one for the whole flock; Routines are rails too.</em></figcaption>
+    </figure>
+
+    <!-- 06 Glow -->
+    <figure>
+      <div class="phone v6">
+        <div class="status"><span>9:41</span><span><i></i></span></div>
+        <div class="screen">
+          <div class="orb"></div>
+          <div class="bar" style="z-index:1"><span class="ib"><svg class="i" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t"></span><span class="ib"><svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span></div>
+          <div style="position:relative;z-index:1;text-align:center;margin:56px 0 18px"><div style="font:400 24px/28px var(--display);letter-spacing:-.02em">Bob</div><div style="font-size:12px;color:var(--ink-2);margin-top:4px;display:inline-flex;gap:6px;align-items:center"><span class="dot pulse" style="color:var(--accent)"></span>drafting</div></div>
+          <div class="thread" style="position:relative;z-index:1;justify-content:flex-end">
+            <div class="u">Find Sarah's email about Thursday's numbers and draft a reply with the totals.</div>
+            <div class="b">Found it. She is asking for Q3 by region.
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Searched Gmail</b><span class="t">3 hits</span></div>
+              <div class="receipt"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><b>Drafted reply · <span>214 words</span></b><span class="t">ready</span></div>
+              <div style="margin-top:10px">APAC is up 18%, EMEA flat, Americas down 4%. Want me to send it<span class="caret"></span></div>
+            </div>
+            <div class="choices"><span class="pill p">Send it</span><span class="pill" style="background:rgb(255 255 255 / 8%)">Show draft</span></div>
+          </div>
+          <div class="composer"><span>Talk to Bob</span><span class="ib"><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span class="ib p"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>06</i>Glow</b><span>The Bot is a presence, not a list. A pink orb breathes while it works, surfaces are glass over it. Emotional, voice-friendly, the Dribbble direction done with restraint.</span><em>Whole app: one orb per Bot, colour shifts with state; settings stay flat and quiet.</em></figcaption>
+    </figure>
+
+    <!-- 07 Split -->
+    <figure>
+      <div class="phone v7">
+        <div class="status"><span>9:41</span><span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg class="i" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t"><div class="sheep ring" style="width:22px;height:22px"></div>Bob</span><span class="ib"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/></svg></span></div>
+          <div class="canvas">
+            <div class="ttl"><b>Reply to Sarah</b><span class="pill" style="height:26px;font-size:12px;background:var(--good-tint);color:var(--good)">Draft</span></div>
+            <div class="rrow">
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Gmail · 3 hits</b></div>
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 10h16M10 4v16"/></svg></div><b>Q3 regions.xlsx</b></div>
+            </div>
+            <div class="draft"><b>Re: Thursday's numbers</b>Hi Sarah, here are the Q3 totals by region. APAC is up 18% on the quarter, EMEA is flat, and the Americas are down 4%, which looks like timing on two deals that closed in the first week of October rather than…<br><br>Totals: APAC 4.2M · EMEA 3.1M · Americas 2.8M</div>
+            <div class="choices" style="margin-top:0"><span class="pill p" style="flex:1">Send</span><span class="pill" style="flex:1">Edit</span></div>
+          </div>
+          <div class="strip">
+            <div class="u">You: Find Sarah's email about Thursday's numbers and draft a reply…</div>
+            <div class="b" style="margin-top:4px">Drafted it. APAC up 18%, EMEA flat, Americas down 4%. Send it<span class="caret"></span></div>
+          </div>
+          <div class="composer" style="margin-top:8px"><span>Message Bob</span><span class="ib p"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>07</i>Canvas</b><span>The work is the screen; the chat is a strip under it. What Bob made (a draft, an Applet, a terminal) is always front and centre, the conversation steers it.</span><em>Whole app: every Bot screen is a canvas with a chat strip. Applets and the Computer already fit this.</em></figcaption>
+    </figure>
+
+    <!-- 08 Focus -->
+    <figure>
+      <div class="phone v8">
+        <div class="status"><span>9:41</span><span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg class="i" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t"></span><span class="ib"><div class="sheep ring" style="width:26px;height:26px"></div></span></div>
+          <div class="thread">
+            <div class="hist">Earlier · Bob summarised your inbox and added Call mum to Weekly Todos.</div>
+            <div class="u">Find Sarah's email about Thursday's numbers and draft a reply with the totals from the sheet.</div>
+            <div class="b">Found it. APAC is up 18%, EMEA flat, Americas down 4%. The draft leads with APAC and flags the dip as timing.
+              <div class="receipt"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><b>Searched Gmail, read the sheet, drafted 214 words</b></div>
+              <div style="margin-top:12px">Want me to send it<span class="caret"></span></div>
+            </div>
+            <div class="choices" style="margin-top:8px"><span class="pill p" style="height:36px;padding:0 16px">Send it</span><span class="pill" style="height:36px;padding:0 16px">Show draft</span></div>
+          </div>
+          <div class="composer"><span>Say something</span><span class="ib v"><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span class="ib p"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>08</i>Focus</b><span>One exchange at a time, set large. History fades above. Receipts collapse to one line. Built for voice and for reading at arm's length; the app gets out of the way.</span><em>Whole app: big type, few controls, everything else behind a swipe.</em></figcaption>
+    </figure>
+
+    <!-- 09 Sheets -->
+    <figure>
+      <div class="phone v9">
+        <div class="status"><span>9:41</span><span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg class="i" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t">Bob</span><span class="ib"><svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span></div>
+          <div class="thread">
+            <div class="qa old"><div class="q">Summarise my inbox</div></div>
+            <div class="qa old"><div class="q">Add “call mum” to Weekly Todos</div></div>
+            <div class="qa"><div class="q">Find Sarah's email about Thursday's numbers and draft a reply with the totals from the sheet.</div><div class="a"><div class="b">Found it. She is asking for Q3 by region.
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Searched Gmail</b><span class="t">3 hits</span></div>
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 10h16M10 4v16"/></svg></div><b>Read Q3 regions.xlsx</b><span class="t">4 sheets</span></div>
+              <div class="receipt"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><b>Drafted reply</b><span class="t">214 w</span></div>
+              <div style="margin-top:10px">APAC is up 18%, EMEA flat, Americas down 4%. Want me to send it<span class="caret"></span></div>
+              <div class="choices" style="margin-top:10px"><span class="pill p">Send it</span><span class="pill">Show draft</span><span class="pill g">Edit</span></div>
+            </div></div></div>
+          </div>
+          <div class="composer"><span>Ask Bob something new</span><span class="ib p"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>09</i>Sheets</b><span>Each ask is a sheet: your question is its title bar, Bob's answer is its body. Older asks collapse to their titles. A conversation becomes a stack of things you asked for.</span><em>Whole app: asks are objects you can reopen, pin, share, or turn into a Routine.</em></figcaption>
+    </figure>
+
+    <!-- 10 Dense -->
+    <figure>
+      <div class="phone v10">
+        <div class="status"><span>9:41</span><span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span><span class="t" style="justify-content:flex-start;font-size:15px"># bob <span style="color:var(--ink-3);font-weight:500;font-size:12px">· 4 members</span></span><span class="ib"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span></div>
+          <div class="thread">
+            <div class="line"><span class="av">T</span><div class="body"><div class="nm">Tim <span>13:36</span></div><div class="u">Find Sarah's email about Thursday's numbers and draft a reply with the totals from the sheet.</div></div></div>
+            <div class="line"><span class="av s"></span><div class="body"><div class="nm">Bob <span>13:36</span></div><div class="b">Found it. She is asking for Q3 by region.</div>
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Searched Gmail · <span>“Thursday numbers”</span></b><span class="t">3</span></div>
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 10h16M10 4v16"/></svg></div><b>Read <span>Q3 regions.xlsx</span></b><span class="t">4 sheets</span></div>
+              <div class="receipt"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><b>Drafted reply · <span>214 words</span></b><span class="t">ready</span></div>
+            </div></div>
+            <div class="line"><span class="av s"></span><div class="body"><div class="nm">Bob <span>13:37</span></div><div class="b">APAC is up 18%, EMEA flat, Americas down 4%. The draft leads with APAC and flags the Americas dip as timing. Want me to send it<span class="caret"></span></div><div class="choices" style="margin-top:8px"><span class="pill p">Send it</span><span class="pill">Show draft</span><span class="pill g">Edit</span></div></div></div>
+          </div>
+          <div class="composer"><span>Message #bob</span><span class="ib p"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>10</i>Dense</b><span>Slack's shape: avatar, name, time, text, no bubbles, 14px. Bots are channels, people can be in them too. The most information per screen of the ten.</span><em>Whole app: channels and threads; Bot groups (GrokBot channels) fall out of this for free.</em></figcaption>
+    </figure>
+
+  </div>
+</div>

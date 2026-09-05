@@ -33,6 +33,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/sheep.png
+    - assets/sheep/
   fonts:
     - family: Manrope
       fonts:
@@ -40,6 +41,10 @@ flutter:
     - family: Archivo Black
       fonts:
         - asset: assets/fonts/archivo-black-latin.ttf
+    - family: JetBrains Mono
+      fonts:
+        - asset: assets/fonts/jetbrains-mono-latin.ttf
+          weight: 500
 
 dependency_overrides:
   webview_flutter_wkwebview:
