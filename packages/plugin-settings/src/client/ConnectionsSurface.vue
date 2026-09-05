@@ -50,10 +50,12 @@ const connectionReturnMessage = computed(() => {
 
 /** The Package's display name when the catalog knows it, its id otherwise. */
 function connectorDisplayName(packageId: string): string {
-  return (
-    web.value.pluginCatalog.find((item) => item.packageId === packageId)
-      ?.displayName ?? packageId
+  const item = web.value.pluginCatalog.find(
+    (item) => item.packageId === packageId,
   );
+  return !item || item.connectionTypes.some((type) => type.catalogPath)
+    ? "Your account"
+    : item.displayName;
 }
 
 function dismissConnectionReturn(): void {

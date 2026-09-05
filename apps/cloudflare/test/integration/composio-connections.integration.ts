@@ -19,15 +19,19 @@ it("a direct Gmail connector completes a public callback, survives replay, and d
   expect(catalog.items).toContainEqual(
     expect.objectContaining({ id: "gmail", name: "Gmail" }),
   );
-  const started = (await expectOkJson(
-    await postAsUser(userId, "/api/plugins/composio/connections", {
+  const startResponse = await postAsUser(
+    userId,
+    "/api/plugins/composio/connections",
+    {
       schemaVersion: 1,
       type: "connection/start",
       commandId: "gmail-integration-one",
       connectionTypeId: "app",
       connectorId: "gmail",
-    }),
-  )) as { redirectUrl: string };
+    },
+  );
+  expect(startResponse.status).toBe(201);
+  const started = (await startResponse.json()) as { redirectUrl: string };
   const callback = new URL(started.redirectUrl);
   callback.searchParams.set("user_id", "forged");
   // No as_user query or session: the callback is dispatched before auth.

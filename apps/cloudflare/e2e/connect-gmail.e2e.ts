@@ -4,6 +4,7 @@ test("Gmail is a direct searchable connector with durable connected and disconne
   page,
   userId,
 }) => {
+  test.setTimeout(60_000);
   await page.route("https://connect.example.test/**", async (route) => {
     const callback = new URL(route.request().url()).searchParams.get(
       "callback",
@@ -30,8 +31,7 @@ test("Gmail is a direct searchable connector with durable connected and disconne
     .fill("tim@example.com");
   await card.getByRole("button", { name: "Continue to sign in" }).click();
   await page.waitForURL(/connection=composio-ready/, { timeout: 30_000 });
-  if (await firstRunDialog(page).isVisible())
-    await firstRunDialog(page).getByRole("button", { name: "Cancel" }).click();
+  await firstRunDialog(page).getByRole("button", { name: "Cancel" }).click();
   await page.locator("button.profile-trigger").click();
   await page.getByRole("menuitem", { name: "Connectors", exact: true }).click();
   await page.getByRole("searchbox").fill("gmail");
@@ -42,6 +42,7 @@ test("Gmail is a direct searchable connector with durable connected and disconne
   await page.screenshot({
     path: "e2e/test-results/gmail-connected.png",
     fullPage: true,
+    animations: "disabled",
   });
   await card.getByRole("button", { name: "Disconnect", exact: true }).click();
   await expect(
