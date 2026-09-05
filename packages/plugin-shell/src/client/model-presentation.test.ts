@@ -28,7 +28,7 @@ describe("model runtime presentation", () => {
       packageDisplayName: "Ollama Cloud",
     };
     expect(modelRuntimeLabel({ ...label, source: "account" })).toBe(
-      "Llama 3 · Ollama Cloud · Account model",
+      "Llama 3 · Ollama Cloud · your choice for every Bot",
     );
     expect(modelRuntimeLabel({ ...label, source: "bot" })).toBe(
       "Llama 3 · Ollama Cloud · this Bot only",

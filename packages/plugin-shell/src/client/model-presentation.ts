@@ -26,7 +26,11 @@ export function modelRuntimeLabel(input: {
   const provider = input.packageDisplayName ?? input.connectionDisplayName;
   const runtime = provider ? `${model} · ${provider}` : model;
   if (input.source === "bot") return `${runtime} · this Bot only`;
-  if (input.source === "account") return `${runtime} · Account model`;
+  // "Account model" is this codebase's word for the setting, not the User's
+  // for what it does. What the line has to say is which Bots the choice
+  // covers, which is exactly what the Bot-scoped line next to it says.
+  if (input.source === "account")
+    return `${runtime} · your choice for every Bot`;
   if (input.fallback) return `${runtime} · your chosen model is unavailable`;
   return runtime;
 }

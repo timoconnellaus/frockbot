@@ -60,6 +60,26 @@ function dismissConnectionReturn(): void {
   web.value.connectionReturn = undefined;
 }
 
+/**
+ * The line under a connector's name.
+ *
+ * It used to be the Connection Type's own name, which for most Packages is the
+ * Package's name again in the singular — "MCP servers" over "MCP server" says
+ * nothing a User did not already read on the line above. What a User wants
+ * from a card they are not opening is whether it is on, so that is what it
+ * says.
+ */
+function connectorStatus(item: PluginCatalogItem): string {
+  if (item.connectionTypes[0]?.authorizationKind === "none") {
+    return credentiallessConnection(item)?.state === "ready"
+      ? "On for every Bot you own"
+      : "Off";
+  }
+  const count = connectionCount(item.packageId);
+  if (count === 0) return "No account connected";
+  return count === 1 ? "1 account connected" : `${count} accounts connected`;
+}
+
 const connectors = computed(() =>
   configurablePackages({
     catalog: web.value.pluginCatalog,
@@ -415,9 +435,7 @@ async function connect(
             </span>
             <span class="connector-copy">
               <strong>{{ item.displayName }}</strong>
-              <small>
-                {{ item.connectionTypes[0]?.displayName }}
-              </small>
+              <small>{{ connectorStatus(item) }}</small>
             </span>
             <UiButton
               v-if="item.connectionTypes[0]?.authorizationKind === 'none'"

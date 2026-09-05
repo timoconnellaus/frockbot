@@ -52,16 +52,32 @@
   padding: 0 4px;
 }
 
+/*
+ * Manage mode's controls: the list's own toggle and the per-row actions.
+ *
+ * They share one shape — a small bordered pill — so "Manage", "Done",
+ * "Archive" and "Delete" read as the same class of control rather than as a
+ * link, a filled button and two bare words that happen to be clickable.
+ */
 .flock-manage,
 .flock-lifecycle {
-  border: 0;
-  border-radius: var(--frock-radius-control);
+  display: inline-flex;
+  height: var(--frock-control-sm);
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--frock-border);
+  border-radius: 999px;
   background: transparent;
   color: var(--frock-text-muted);
-  padding: 2px 6px;
   font: inherit;
   font-size: var(--frock-text-xs);
+  font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--frock-motion-fast),
+    color var(--frock-motion-fast),
+    border-color var(--frock-motion-fast);
 }
 
 .flock-manage:hover,
@@ -70,9 +86,39 @@
   color: var(--frock-text);
 }
 
-.flock-lifecycle--danger,
-.flock-lifecycle--danger:hover {
+/* The mode is on: the toggle says so rather than changing into a new control. */
+.flock-manage[aria-pressed="true"] {
+  border-color: var(--frock-border-strong);
+  background: var(--frock-fill-hover);
+  color: var(--frock-text);
+}
+
+/*
+ * Delete is irreversible and confirms before it acts, and it says both: it is
+ * the only control in the row drawn in the danger colour.
+ */
+.flock-lifecycle--danger {
+  border-color: var(--frock-danger-border);
   color: var(--frock-danger-text);
+}
+
+.flock-lifecycle--danger:hover {
+  border-color: var(--frock-danger-strong);
+  background: var(--frock-danger-surface);
+  color: var(--frock-danger-text);
+}
+
+/*
+ * The action group sits on its own line under the row rather than beside it:
+ * the name and preview keep the full column width in every mode, and a row
+ * with two actions is exactly as tall as one with one.
+ */
+.flock-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  grid-column: 1 / -1;
 }
 
 /*
@@ -191,6 +237,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+  row-gap: 8px;
   padding: 8px 10px;
   border: 0;
   border-radius: 12px;
@@ -235,6 +282,21 @@
 .flock-bot-row.active:hover {
   background: var(--frock-surface);
   box-shadow: var(--frock-shadow-card);
+}
+
+/*
+ * In manage mode every row is a card. One row carrying the card background
+ * because it happened to be the open Bot, while its neighbours floated on the
+ * column, read as a rendering fault rather than as selection.
+ */
+.flock-bot-row.managing {
+  border: 1px solid var(--frock-border);
+  background: var(--frock-surface-subtle);
+}
+
+.flock-bot-row.managing.active,
+.flock-bot-row.managing.active:hover {
+  border-color: var(--frock-border-strong);
 }
 
 .flock-bot-copy {
@@ -564,14 +626,24 @@
   display: block;
   width: 100%;
   margin-top: 4px;
-  padding: 0;
+  /*
+   * The chevron is the browser's and it sits at the right edge of the control,
+   * so the value needs room reserved for it. Without this the longest option
+   * in a group — "Plum cat-eye glasses" — ran straight into the arrow while
+   * the three shorter ones cleared it, and the four selects read as four
+   * different controls.
+   */
+  padding: 0 20px 0 0;
   border: 0;
+  overflow: hidden;
   background: transparent;
   color: var(--frock-text);
   font: inherit;
   font-size: var(--frock-text-base);
   font-weight: 600;
   letter-spacing: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   text-transform: none;
 }
 

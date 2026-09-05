@@ -1355,8 +1355,20 @@ function handleComposerKeydown(event: KeyboardEvent): void {
 
 <template>
   <div class="frockbot-root">
+    <!--
+      The workspace under an open surface.
+
+      A drawer that covers the app while the app behind it still answers the
+      Tab key is two live UIs at once: a screen reader reads straight past the
+      panel into the conversation, and the focus ring disappears behind the
+      scrim. `inert` says which layer the User is in, and takes the background
+      out of the accessibility tree for exactly as long as the panel is over
+      it. A panel-placed surface sits inside this shell rather than over it, so
+      it is not one of these.
+    -->
     <div
       class="app-shell"
+      :inert="Boolean(overlaySurface) || undefined"
       :class="{
         'panel-open': rightPanelOpen,
         'panel-surface': Boolean(panelSurface),

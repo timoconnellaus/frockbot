@@ -19,7 +19,9 @@ if (!shell) throw new Error("FrockBot client data was not provided");
   <section v-if="shell.activeBotId" class="flock-danger-zone">
     <div>
       <strong>Delete Bot</strong>
-      <small>This Bot and its chat history will be permanently deleted.</small>
+      <small
+        >This removes its conversation and Applets. It cannot be undone.</small
+      >
     </div>
     <button
       type="button"

@@ -51,6 +51,32 @@ const connecting = ref(false);
 /** Connection ids with a command in flight, so their row can say so. */
 const busyConnections = ref<string[]>([]);
 
+/**
+ * A Connection's state, in words rather than in the field name.
+ *
+ * The raw state used to be printed with a CSS `text-transform: capitalize`
+ * over it, which turned "ready" into "Ready" and, next to it, "· models fresh"
+ * into "· Models Fresh" — Title Case on a phrase that is not a title, and a
+ * word ("fresh") that says nothing about what it is fresh about. Both lines
+ * are written here, as they should read.
+ */
+function connectionStateLabel(state: ConnectionView["state"]): string {
+  if (state === "ready") return "Ready";
+  if (state === "disabled") return "Turned off";
+  if (state === "failed") return "Not working";
+  if (state === "revoking") return "Disconnecting…";
+  if (state === "reconciliation-required") return "Needs attention";
+  return "Connecting…";
+}
+
+/** Whether this account's model list is current, in the same plain register. */
+function modelCatalogLabel(state: string): string {
+  if (state === "fresh") return "model list up to date";
+  if (state === "stale") return "model list out of date";
+  if (state === "refreshing") return "refreshing its model list";
+  return `model list ${state}`;
+}
+
 function failureMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
@@ -273,9 +299,9 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
             aria-hidden="true"
           />
           <strong>{{ connection.displayName }}</strong>
-          <small>{{ connection.state }}</small>
+          <small>{{ connectionStateLabel(connection.state) }}</small>
           <small v-if="connection.modelCatalog">
-            · models {{ connection.modelCatalog.state }}
+            · {{ modelCatalogLabel(connection.modelCatalog.state) }}
           </small>
         </div>
         <div class="account-actions">
@@ -476,12 +502,6 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
   min-width: 0;
 }
 
-/* Written as it should read; no transform decides its capitalisation. */
-.provider-count,
-.connection-busy {
-  text-transform: none;
-}
-
 .connection-busy {
   margin: 4px 0 0;
   color: var(--frock-text-muted, inherit);
@@ -507,7 +527,6 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
   margin-top: 4px;
   color: var(--frock-text-muted);
   font-size: var(--frock-text-sm);
-  text-transform: capitalize;
 }
 
 .provider-account {
@@ -541,7 +560,21 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
   background: var(--frock-danger-text);
 }
 
-.account-actions,
+/*
+ * One edge for every row of buttons.
+ *
+ * Right-aligned and wrapping, a card with five actions put four on one line
+ * and pushed the fifth out on its own against the far edge, lined up with
+ * nothing; the card next to it, with two, sat in a third position again.
+ * Aligning them to the card's left edge — the same edge the account's name
+ * starts at — gives every row the same start whatever it holds.
+ */
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .api-key-actions {
   display: flex;
   flex-wrap: wrap;

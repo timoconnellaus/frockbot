@@ -62,9 +62,7 @@ test("an admin changes the durable signup policy", async ({ page }) => {
   }).toPass({ timeout: 60_000 });
 
   await page.reload();
-  await expect(
-    page.getByRole("button", { name: "Connectors", exact: true }),
-  ).toBeVisible();
+  await expect(page.locator("button.profile-trigger")).toBeVisible();
   await openAdmin(page);
   await expect(page.getByLabel("Accept new signups")).toBeChecked({
     checked: !initial,
