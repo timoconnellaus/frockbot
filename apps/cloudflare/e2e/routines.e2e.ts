@@ -235,7 +235,7 @@ for (const scenario of [
         form.getByLabel("Include All Day", { exact: true }),
       ).not.toBeChecked();
     }
-    await form.getByLabel(scenario.field, { exact: true }).fill(scenario.value);
+    await form.getByLabel(scenario.field).fill(scenario.value);
     await expect(form).not.toContainText("Composio");
     await expect(form).not.toContainText("delivery key");
     await form.getByRole("button", { name: "Save Routine" }).click();
@@ -250,9 +250,7 @@ for (const scenario of [
     await card.getByRole("button", { name: "Resume", exact: true }).click();
     await expect(card.getByRole("status")).toHaveText("Listening");
     await card.getByRole("button", { name: "Edit", exact: true }).click();
-    await expect(form.getByLabel(scenario.field, { exact: true })).toHaveValue(
-      scenario.value,
-    );
+    await expect(form.getByLabel(scenario.field)).toHaveValue(scenario.value);
     await form
       .getByRole("combobox", { name: "Account", exact: true })
       .scrollIntoViewIfNeeded();
