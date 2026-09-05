@@ -98,6 +98,7 @@ void main() {
   for (final (name, screen, proof) in [
     ('inbox', const FrockInboxScreen(), 'Bob finished the Q3 memo'),
     ('settings', const FrockSettingsScreen(), 'Save profile'),
+    ('voice', const FrockVoiceScreen(), 'Resume · 2 waiting'),
   ]) {
     testWidgets('$name renders at phone size in the page frame', (
       tester,

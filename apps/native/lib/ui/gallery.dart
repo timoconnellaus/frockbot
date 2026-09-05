@@ -362,3 +362,112 @@ class FrockSettingsScreen extends StatelessWidget {
     );
   }
 }
+
+/// Voice, paused with messages waiting: screen 12 on the system page. The
+/// whole screen, one sheep, what is waiting as rows, and Resume carrying the
+/// count. Pause stops the session outright; Bots don't know.
+class FrockVoiceScreen extends StatelessWidget {
+  const FrockVoiceScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    return Scaffold(
+      backgroundColor: t.window,
+      body: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            FrockTokens.edge,
+            0,
+            FrockTokens.edge,
+            bottom + 12,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              FrockBar(
+                leading: const FrockIconButton(
+                  Icons.close_rounded,
+                  semanticLabel: 'Leave voice',
+                ),
+                title: const FrockEyebrow('Voice · paused'),
+              ),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Opacity(
+                      opacity: 0.7,
+                      child: FrockSheep(
+                        look: SheepLook(
+                          background: 'hot-pink',
+                          upper: 'upper-neutral',
+                          middle: 'rose-heart-sunglasses',
+                          lower: 'lower-neutral',
+                        ),
+                        size: 112,
+                        state: BotState.idle,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const FrockChip('Paused · not listening'),
+                    const SizedBox(height: 12),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 300),
+                      child: Text(
+                        'Nothing is being heard. Your Bots don’t know you stepped away; what they send waits here.',
+                        textAlign: TextAlign.center,
+                        style: t.message.copyWith(color: t.ink2),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const FrockEyebrow('Waiting for you'),
+              FrockGroup(
+                children: [
+                  FrockRow(
+                    leading: const FrockSheep(
+                      look: SheepLook(
+                        background: 'hot-pink',
+                        upper: 'upper-neutral',
+                        middle: 'rose-heart-sunglasses',
+                        lower: 'lower-neutral',
+                      ),
+                      size: FrockTokens.avatarMd,
+                    ),
+                    title: 'Bob',
+                    caption: 'Sarah replied. She wants the APAC number split by country.',
+                    trailing: const FrockChip('1', tone: TileTone.accent),
+                  ),
+                  FrockRow(
+                    leading: const FrockSheep(size: FrockTokens.avatarMd),
+                    title: 'Research',
+                    caption: 'Two of the three papers look strong. Summary is ready.',
+                    trailing: const FrockChip('1', tone: TileTone.accent),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              FrockPill(
+                'Resume · 2 waiting',
+                kind: PillKind.primary,
+                size: PillSize.lg,
+                icon: Icons.play_arrow_rounded,
+                expand: true,
+                onTap: () {},
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Resuming hands these to the voice agent to work through with you.',
+                textAlign: TextAlign.center,
+                style: t.caption,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

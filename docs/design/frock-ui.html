@@ -235,7 +235,7 @@
 
   <div class="sys">
     <h2>The system</h2>
-    <p>Everything the ten screens below are built from. Names are shared with Flutter; the phone values are the ones shown, the desktop shell uses the compact column.</p>
+    <p>Everything the screens below are built from. Names are shared with Flutter; the phone values are the ones shown, the desktop shell uses the compact column.</p>
 
     <div class="sec-h">Colour · tone before line</div>
     <div class="spec">
@@ -344,7 +344,7 @@
     </div>
   </div>
 
-  <div class="sec-h" style="margin-top:8px">The ten screens</div>
+  <div class="sec-h" style="margin-top:8px">The screens</div>
   <div class="gallery">
 
     <!-- 01 Today -->
@@ -451,10 +451,7 @@
             <div class="faint sm mono" style="text-align:center">Today 13:36</div>
             <div class="msg u">Find Sarah's email about Thursday's numbers and draft a reply with the totals from the sheet.</div>
             <div class="msg b">
-              <div>Found it. She is asking for Q3 by region. Here is what I did:</div>
-              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Searched Gmail · <span>“Thursday numbers”</span></b><span class="t">3 hits</span></div>
-              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 10h16M10 4v16"/></svg></div><b>Read <span>Q3 regions.xlsx</span></b><span class="t">4 sheets</span></div>
-              <div class="receipt"><div class="ico" style="background:var(--good-tint);color:var(--good)"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><b>Drafted reply · <span>214 words</span></b><span class="t">ready</span></div>
+              <div>Found it. She is asking for Q3 by region. I searched Thursday’s thread, read the regions sheet and drafted a reply.</div>
               <div style="margin-top:10px">APAC is up 18%, EMEA flat, Americas down 4%. The draft leads with APAC and flags the Americas dip as timing. Want me to send it<span class="caret"></span></div>
             </div>
             <div style="display:flex;gap:8px;margin-top:2px"><span class="pill sm p">Send it</span><span class="pill sm">Show draft</span><span class="pill sm g">Edit</span></div>
@@ -463,7 +460,7 @@
         </div>
         <div class="homebar"><i></i></div>
       </div>
-      <figcaption><b><i>04</i>Chat with receipts</b><span>The Bot's reply is prose with its work shown inline as receipts, then the choice as pills. No tool-call JSON, no spinner, no “thinking”.</span></figcaption>
+      <figcaption><b><i>04</i>Chat</b><span>The Bot's reply is prose in its own words, then the choice as pills. No tool calls in the thread, no spinner, no “thinking”; what the Bot did lives on its Work tab.</span></figcaption>
     </figure>
 
     <!-- 05 Approval -->
@@ -621,6 +618,55 @@
         <div class="homebar"><i></i></div>
       </div>
       <figcaption><b><i>10</i>First run</b><span>One sheep, one name, one pill. The name you type becomes the wordmark above it, so the Bot feels like a character before it has said a word.</span></figcaption>
+    </figure>
+
+    <!-- 11 Voice, live -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></span><span class="t"><span class="eyebrow">Voice · with your Bots</span></span><span class="ib" style="visibility:hidden"></span></div>
+          <div class="glow" style="left:65px;top:120px;width:260px;height:260px"></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;position:relative;text-align:center">
+            <div class="sheep ring look-b" style="width:112px;height:112px;margin-bottom:6px"></div>
+            <div class="chips" style="justify-content:center"><span class="chip g"><span class="dot"></span>Listening</span></div>
+            <div style="font:400 15px/22px var(--sans);letter-spacing:-.004em;max-width:30ch;color:var(--ink-2)">“…so ask Bob whether Sarah’s numbers are in yet, and if they are, send her the draft.”</div>
+            <div style="font:400 15px/22px var(--sans);letter-spacing:-.004em;max-width:30ch">On it. Bob says the sheet landed at 9:12. Want me to send the draft now, or read it first?</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:8px">
+            <span class="pill lg" style="width:100%;display:inline-flex;align-items:center;justify-content:center;gap:8px"><svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75"><path d="M8 5v14M16 5v14"/></svg>Pause</span>
+            <span class="sm faint" style="text-align:center">Pausing stops listening. Your Bots keep working and their messages wait for you.</span>
+          </div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>11</i>Voice, live</b><span>The whole screen, not a sheet over chat. One sheep with the glow behind it, the last thing you said and the last thing it said as two lines, and one control: Pause.</span></figcaption>
+    </figure>
+
+    <!-- 12 Voice, paused with messages waiting -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></span><span class="t"><span class="eyebrow">Voice · paused</span></span><span class="ib" style="visibility:hidden"></span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;position:relative;text-align:center">
+            <div class="sheep ring idle look-b" style="width:112px;height:112px;margin-bottom:6px;opacity:.7"></div>
+            <div class="chips" style="justify-content:center"><span class="chip">Paused · not listening</span></div>
+            <div style="font:400 15px/22px var(--sans);letter-spacing:-.004em;max-width:30ch;color:var(--ink-2)">Nothing is being heard. Your Bots don’t know you stepped away; what they send waits here.</div>
+          </div>
+          <div class="eyebrow" style="color:var(--ink-3);margin-bottom:8px">Waiting for you</div>
+          <div class="group" style="margin:0 0 12px">
+            <div class="row"><div class="sheep look-a" style="width:32px;height:32px"></div><div class="main"><b>Bob</b><span>Sarah replied. She wants the APAC number split by country.</span></div><span class="chip a">1</span></div>
+            <div class="row"><div class="sheep look-c" style="width:32px;height:32px"></div><div class="main"><b>Research</b><span>Two of the three papers look strong. Summary is ready.</span></div><span class="chip a">1</span></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:8px">
+            <span class="pill lg p" style="width:100%;display:inline-flex;align-items:center;justify-content:center;gap:8px"><svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;stroke:none"><path d="M7 5l12 7-12 7z"/></svg>Resume · 2 waiting</span>
+            <span class="sm faint" style="text-align:center">Resuming hands these to the voice agent to work through with you.</span>
+          </div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>12</i>Voice, paused</b><span>Pause stops the session outright. Bots don’t know; what they send while you are away queues as rows, and the count rides on Resume so you know there is a reason to come back. The four states: live, paused and quiet, paused with messages waiting, resuming.</span></figcaption>
     </figure>
 
   </div>
