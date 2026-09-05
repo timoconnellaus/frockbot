@@ -99,6 +99,7 @@ void main() {
     ('inbox', const FrockInboxScreen(), 'Bob finished the Q3 memo'),
     ('settings', const FrockSettingsScreen(), 'Save profile'),
     ('voice', const FrockVoiceScreen(), 'Resume · 2 waiting'),
+    ('connect', const FrockConnectScreen(), 'Messages, channels'),
   ]) {
     testWidgets('$name renders at phone size in the page frame', (
       tester,

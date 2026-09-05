@@ -206,7 +206,7 @@ class FrockInboxScreen extends StatelessWidget {
               ),
               FrockNotice(
                 title: 'Research couldn’t reach Notion',
-                body: 'The connection was revoked. Reconnect it in Connectors and the Routine will retry.',
+                body: 'The connection was removed. Connect Notion again and the Routine will retry.',
                 stamp: 'Thu',
                 actions: [
                   const FrockPill(
@@ -297,7 +297,7 @@ class FrockSettingsScreen extends StatelessWidget {
               ),
               FrockRow(
                 leading: FrockIconTile(Icons.hub_outlined),
-                title: 'Connectors',
+                title: 'Connect',
                 caption: 'Accounts and services for every Bot',
                 chevron: true,
               ),
@@ -467,6 +467,91 @@ class FrockVoiceScreen extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Connect a service: screen 08 on docs/design/frock-ui.html. Services as
+/// tiles a person already recognises, the ones they have connected first, and
+/// one sentence on whose connections these are. Nothing here says "connector".
+class FrockConnectScreen extends StatelessWidget {
+  const FrockConnectScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    return FrockPage(
+      title: 'Connect',
+      padded: false,
+      leading: const FrockIconButton(
+        Icons.arrow_back_rounded,
+        semanticLabel: 'Back',
+      ),
+      trailing: const FrockIconButton(
+        Icons.refresh_rounded,
+        semanticLabel: 'Refresh services',
+      ),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          FrockTokens.edge,
+          6,
+          FrockTokens.edge,
+          FrockTokens.edge,
+        ),
+        children: [
+          Container(
+            constraints: const BoxConstraints(minHeight: 40),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: BoxDecoration(
+              color: t.tile,
+              borderRadius: BorderRadius.circular(FrockTokens.radiusPill),
+              border: Border.all(color: t.line),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.search_rounded, size: 16, color: t.ink3),
+                const SizedBox(width: 8),
+                Text('Search services', style: t.body.copyWith(color: t.ink3)),
+              ],
+            ),
+          ),
+          const SizedBox(height: FrockTokens.groupGap),
+          const FrockEyebrow('Connected'),
+          const SizedBox(height: FrockTokens.eyebrowToGroup),
+          const FrockTileGrid(
+            children: [
+              FrockServiceTile(
+                name: 'Gmail',
+                caption: 'Connected',
+                tone: TileTone.good,
+                dot: true,
+              ),
+              FrockServiceTile(
+                name: 'Calendar',
+                caption: 'Connected',
+                tone: TileTone.good,
+                dot: true,
+              ),
+            ],
+          ),
+          const SizedBox(height: FrockTokens.groupGap),
+          const FrockEyebrow('Popular'),
+          const SizedBox(height: FrockTokens.eyebrowToGroup),
+          const FrockTileGrid(
+            children: [
+              FrockServiceTile(name: 'Slack', caption: 'Messages, channels'),
+              FrockServiceTile(name: 'Notion', caption: 'Pages, databases'),
+              FrockServiceTile(name: 'GitHub', caption: 'Issues, PRs'),
+              FrockServiceTile(name: 'Linear', caption: 'Issues, cycles'),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Connections belong to you, not to a Bot. Any Bot you allow can '
+            'use them, and every use shows up as a receipt.',
+            style: t.caption.copyWith(height: 17 / 12),
+          ),
+        ],
       ),
     );
   }

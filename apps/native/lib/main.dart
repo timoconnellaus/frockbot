@@ -6,6 +6,7 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/scheduler.dart';
 
 import 'client/auth.dart';
+import 'connections/page.dart';
 import 'settings/page.dart';
 import 'activity/controller.dart';
 import 'activity/page.dart';
@@ -99,6 +100,14 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
       if (userId != null) await followBotLink();
       return;
     }
+    // Coming back from a service's own sign-in. Nothing to exchange: the
+    // server has already recorded the outcome, so the app only has to show
+    // Connect again and say how it went.
+    final outcome = connectionReturn(uri);
+    if (outcome != null) {
+      openConnections(outcome);
+      return;
+    }
     try {
       if (await auth.accept(uri)) {
         navigatorKey.currentState?.popUntil((route) => route.isFirst);
@@ -121,6 +130,26 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
         });
       }
     }
+  }
+
+  /// Connect, reopened on the outcome the browser handed back.
+  void openConnections(String outcome) {
+    final navigator = navigatorKey.currentState;
+    final user = userId;
+    if (navigator == null || user == null) return;
+    navigator.popUntil((route) => route.isFirst);
+    unawaited(
+      navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => ConnectionsPage(
+            api: api,
+            userId: user,
+            store: store,
+            outcome: outcome,
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> restore() async {

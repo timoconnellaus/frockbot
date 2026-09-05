@@ -850,3 +850,184 @@ class FrockBotMessage extends StatelessWidget {
     );
   }
 }
+
+/// A service you can connect: its logo, its name, one line underneath. Screen
+/// 08 on docs/design/frock-ui.html. The logo is the service's own mark when
+/// the catalog carries one and a letter on a colour drawn from the name when
+/// it does not, so a tile never renders empty while a picture is in flight.
+class FrockServiceTile extends StatelessWidget {
+  const FrockServiceTile({
+    super.key,
+    required this.name,
+    this.caption,
+    this.iconUrl,
+    this.tone = TileTone.neutral,
+    this.dot = false,
+    this.onTap,
+    this.onLongPress,
+  });
+  final String name;
+  final String? caption;
+
+  /// An https logo. Anything else, or a picture that fails, falls back to the
+  /// letter tile.
+  final String? iconUrl;
+
+  /// Colours the status dot and its caption; the tile itself stays neutral so
+  /// a wall of tiles reads as one surface.
+  final TileTone tone;
+  final bool dot;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+
+  /// A stable colour per service, so Slack is the same purple every launch.
+  static Color _seed(String name) {
+    var hash = 0;
+    for (final unit in name.toLowerCase().codeUnits) {
+      hash = (hash * 31 + unit) & 0x7fffffff;
+    }
+    return HSLColor.fromAHSL(1, (hash % 360).toDouble(), 0.42, 0.52).toColor();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    final captionColor = switch (tone) {
+      TileTone.neutral => t.ink3,
+      TileTone.accent => t.accentInk,
+      TileTone.good => t.good,
+      TileTone.warn => t.warn,
+      TileTone.danger => t.danger,
+    };
+    final url = iconUrl;
+    final letter = name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
+    final seed = _seed(name);
+    final fallback = Container(
+      width: 30,
+      height: 30,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: seed,
+        borderRadius: BorderRadius.circular(FrockTokens.radiusIconTile),
+      ),
+      child: Text(
+        letter,
+        style: t.row.copyWith(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          height: 1,
+          color: Colors.white,
+        ),
+      ),
+    );
+    Widget logo = fallback;
+    if (url != null && url.startsWith('https://')) {
+      logo = ClipRRect(
+        borderRadius: BorderRadius.circular(FrockTokens.radiusIconTile),
+        child: Image.network(
+          url,
+          width: 30,
+          height: 30,
+          fit: BoxFit.cover,
+          errorBuilder: (context, _, _) => fallback,
+          frameBuilder: (context, child, frame, wasSynchronous) =>
+              frame == null && !wasSynchronous ? fallback : child,
+        ),
+      );
+    }
+    return Semantics(
+      button: onTap != null,
+      label: caption == null ? name : '$name. $caption',
+      child: Material(
+        color: t.sheet,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 92),
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                logo,
+                const SizedBox(height: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      name,
+                      style: t.row,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (caption != null)
+                      Row(
+                        children: [
+                          if (dot) ...[
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                color: captionColor,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                          ],
+                          Expanded(
+                            child: Text(
+                              caption!,
+                              style: t.caption.copyWith(color: captionColor),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Two tiles to a row, in a list that scrolls: a grid without a viewport of
+/// its own, so the whole screen keeps one scroll.
+class FrockTileGrid extends StatelessWidget {
+  final List<Widget> children;
+  const FrockTileGrid({super.key, required this.children});
+  @override
+  Widget build(BuildContext context) {
+    final rows = <Widget>[];
+    for (var index = 0; index < children.length; index += 2) {
+      final second = index + 1 < children.length ? children[index + 1] : null;
+      rows.add(
+        Padding(
+          padding: EdgeInsets.only(top: index == 0 ? 0 : 10),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: children[index]),
+                const SizedBox(width: 10),
+                Expanded(child: second ?? const SizedBox.shrink()),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: rows,
+    );
+  }
+}
