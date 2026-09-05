@@ -1403,5 +1403,77 @@
         "name": "Tim"
       }
     }
+  },
+  {
+    "name": "ConnectionsFrame refuses credential metadata",
+    "schema": "ConnectionsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "ownerId": "tim",
+      "revision": 1,
+      "accounts": [
+        {
+          "id": "calendar-work",
+          "label": "Work calendar",
+          "service": "Calendar",
+          "state": "ready",
+          "token": "synthetic-test-secret"
+        }
+      ]
+    }
+  },
+  {
+    "name": "ConnectionsFrame rejects unknown lifecycle",
+    "schema": "ConnectionsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "ownerId": "tim",
+      "revision": 1,
+      "accounts": [
+        {
+          "id": "calendar-work",
+          "label": "Work calendar",
+          "service": "Calendar",
+          "state": "whatever"
+        }
+      ]
+    }
+  },
+  {
+    "name": "NotificationDirectory rejects credential metadata",
+    "schema": "NotificationDirectory",
+    "value": {
+      "schemaVersion": 1,
+      "notifications": [
+        {
+          "schemaVersion": 1,
+          "botId": "alpha",
+          "notificationId": "notice-1",
+          "runId": "run-1",
+          "createdAt": "2026-09-05T10:00:00.000Z",
+          "title": "Alpha replied",
+          "body": "Ready",
+          "urgency": "critical",
+          "credential": "not-a-secret"
+        }
+      ]
+    }
+  },
+  {
+    "name": "MarkReadReceipt rejects unknown status",
+    "schema": "MarkReadReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "read-1",
+      "status": "guessed",
+      "unread": {
+        "schemaVersion": 1,
+        "botId": "alpha",
+        "count": 0,
+        "capped": false,
+        "unread": false,
+        "manuallyUnread": false
+      }
+    }
   }
 ]

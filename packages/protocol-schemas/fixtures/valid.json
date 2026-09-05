@@ -1062,5 +1062,58 @@
       "items": [],
       "nextCursor": 50
     }
+  },
+  {
+    "name": "ConnectionsFrame valid",
+    "schema": "ConnectionsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "ownerId": "tim",
+      "revision": 1,
+      "accounts": [
+        {
+          "id": "calendar-work",
+          "label": "Work calendar",
+          "service": "Calendar",
+          "state": "ready"
+        }
+      ]
+    }
+  },
+  {
+    "name": "NotificationDirectory valid",
+    "schema": "NotificationDirectory",
+    "value": {
+      "schemaVersion": 1,
+      "notifications": [
+        {
+          "schemaVersion": 1,
+          "botId": "alpha",
+          "notificationId": "notice-1",
+          "runId": "run-1",
+          "createdAt": "2026-09-05T10:00:00.000Z",
+          "title": "Alpha replied",
+          "body": "Ready",
+          "urgency": "critical"
+        }
+      ]
+    }
+  },
+  {
+    "name": "MarkReadReceipt valid",
+    "schema": "MarkReadReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "read-1",
+      "status": "applied",
+      "unread": {
+        "schemaVersion": 1,
+        "botId": "alpha",
+        "count": 0,
+        "capped": false,
+        "unread": false,
+        "manuallyUnread": false
+      }
+    }
   }
 ]

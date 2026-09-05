@@ -16,6 +16,7 @@ import {
   sidebarMessagePreviewFromRunsV1,
   UNREAD_COUNT_CAP,
   type UnreadStateV1,
+  type BotPendingNotificationV1,
 } from "./unread.js";
 
 /** A cursor in the exact shape the Bot's admission index writes. */
@@ -454,4 +455,29 @@ describe("the fan-out views", () => {
       }),
     ).toThrow();
   });
+});
+
+test("notification fan-out preserves critical urgency without accepting arbitrary fields", () => {
+  const notice = {
+    schemaVersion: 1,
+    botId: "alpha",
+    notificationId: "approval-1",
+    runId: "run-1",
+    createdAt: "2026-09-05T10:00:00.000Z",
+    title: "Your decision is needed",
+    body: "Open the Bot",
+    urgency: "critical",
+  } satisfies BotPendingNotificationV1;
+  expect(
+    decodeBotNotificationDirectoryViewV1({
+      schemaVersion: 1,
+      notifications: [notice],
+    }).notifications[0],
+  ).toEqual(notice);
+  expect(() =>
+    decodeBotNotificationDirectoryViewV1({
+      schemaVersion: 1,
+      notifications: [{ ...notice, secret: "invalid" }],
+    }),
+  ).toThrow();
 });

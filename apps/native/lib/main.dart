@@ -7,6 +7,8 @@ import 'package:flutter/scheduler.dart';
 
 import 'client/auth.dart';
 import 'settings/page.dart';
+import 'activity/controller.dart';
+import 'activity/page.dart';
 import 'auth/sign_in_page.dart';
 import 'ui/chat_pane.dart';
 import 'ui/chat_screen.dart';
@@ -47,7 +49,7 @@ class FrockBotApp extends StatefulWidget {
   State<FrockBotApp> createState() => _FrockBotAppState();
 }
 
-class _FrockBotAppState extends State<FrockBotApp> {
+class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
   final navigatorKey = GlobalKey<NavigatorState>();
   final scaffoldKey = GlobalKey<ScaffoldState>();
   late final LocalStore store = widget.store ?? nativeStore();
@@ -55,6 +57,9 @@ class _FrockBotAppState extends State<FrockBotApp> {
   late final NativeSignIn auth = NativeSignIn(api, store);
   late final BotSessions sessions = BotSessions(api: api, store: store);
   StreamSubscription<Uri>? links;
+  ActivityController? activity;
+  Timer? activityTimer;
+  String? pendingBot;
   String? userId;
   String? error;
   bool busy = true;
@@ -64,6 +69,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final appLinks = AppLinks();
     links = appLinks.uriLinkStream.listen(
       (uri) {
@@ -81,10 +87,17 @@ class _FrockBotAppState extends State<FrockBotApp> {
   }
 
   Future<void> accept(Uri uri) async {
+    final target = botLink(uri);
+    if (target != null) {
+      pendingBot = target;
+      if (userId != null) await followBotLink();
+      return;
+    }
     try {
       if (await auth.accept(uri)) {
         navigatorKey.currentState?.popUntil((route) => route.isFirst);
         sessions.clear();
+        clearActivity();
         if (mounted) {
           setState(() {
             userId = null;
@@ -150,6 +163,8 @@ class _FrockBotAppState extends State<FrockBotApp> {
           selected = bots.where((b) => b.botId.value == saved).firstOrNull;
           error = null;
         });
+        bindActivity(identity.userId.value);
+        if (pendingBot != null) unawaited(followBotLink());
         unawaited(
           sessions.prefetch(identity.userId.value, [
             for (final bot in directory.bots) bot.botId.value,
@@ -169,6 +184,85 @@ class _FrockBotAppState extends State<FrockBotApp> {
         setState(() {
           busy = false;
         });
+      }
+    }
+  }
+
+  void activityChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void clearActivity() {
+    activityTimer?.cancel();
+    activityTimer = null;
+    activity?.removeListener(activityChanged);
+    activity?.dispose();
+    activity = null;
+  }
+
+  void bindActivity(String owner) {
+    if (activity?.userId == owner) {
+      activity!.botNames = {
+        for (final bot in bots) bot.botId.value: bot.initialName,
+      };
+      return;
+    }
+    clearActivity();
+    activity = ActivityController(api, store, owner)
+      ..addListener(activityChanged);
+    activity!.botNames = {
+      for (final bot in bots) bot.botId.value: bot.initialName,
+    };
+    unawaited(activity!.load());
+    activityTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => unawaited(activity?.load()),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    activityTimer?.cancel();
+    activityTimer = null;
+    if (state == AppLifecycleState.resumed) {
+      unawaited(activity?.load());
+      activityTimer = Timer.periodic(
+        const Duration(seconds: 10),
+        (_) => unawaited(activity?.load()),
+      );
+    }
+  }
+
+  Future<void> openBot(String botId) async {
+    final owner = userId;
+    if (owner == null) return;
+    final directory = wire.BotDirectory.fromJson(
+      await api.request('/api/bots'),
+    );
+    if (!mounted || userId != owner) return;
+    final bot = directory.bots.where((b) => b.botId.value == botId).firstOrNull;
+    if (bot == null) throw const FormatException('Unavailable Bot');
+    navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    setState(() => bots = directory.bots);
+    select(bot);
+  }
+
+  Future<void> followBotLink() async {
+    final botId = pendingBot;
+    pendingBot = null;
+    if (botId == null) return;
+    try {
+      await openBot(botId);
+    } catch (_) {
+      final context = scaffoldKey.currentContext;
+      if (context != null && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'That Bot isn’t available. Refresh your Bots and try again.',
+            ),
+          ),
+        );
       }
     }
   }
@@ -284,7 +378,39 @@ class _FrockBotAppState extends State<FrockBotApp> {
               ),
             );
           },
+          onInbox: activity == null
+              ? null
+              : () {
+                  scaffoldKey.currentState?.closeDrawer();
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          ActivityPage(controller: activity!, openBot: openBot),
+                    ),
+                  );
+                },
+          inboxCount: activity?.notices.length ?? 0,
+          unreadOf: (id) => activity?.unread[id],
           extraActions: [
+            if (selected != null && activity != null)
+              FrockIconButton(
+                activity!.unread[selected!.botId.value]?.unread == true
+                    ? Icons.mark_chat_read_outlined
+                    : Icons.mark_chat_unread_outlined,
+                key: const ValueKey('mark-read'),
+                semanticLabel:
+                    activity!.unread[selected!.botId.value]?.unread == true
+                    ? 'Mark as read'
+                    : 'Mark as unread',
+                onTap: activity!.saving || activity!.pending
+                    ? null
+                    : () => activity!.mark(
+                        selected!.botId.value,
+                        read:
+                            activity!.unread[selected!.botId.value]?.unread ==
+                            true,
+                      ),
+              ),
             if (const bool.fromEnvironment('NATIVE_ACCEPTANCE'))
               FrockIconButton(
                 Icons.dynamic_form_outlined,
@@ -323,6 +449,8 @@ class _FrockBotAppState extends State<FrockBotApp> {
   @override
   void dispose() {
     unawaited(links?.cancel());
+    WidgetsBinding.instance.removeObserver(this);
+    clearActivity();
     sessions.clear();
     api.close();
     super.dispose();

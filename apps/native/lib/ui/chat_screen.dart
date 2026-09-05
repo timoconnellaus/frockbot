@@ -25,6 +25,9 @@ class ChatScreen extends StatelessWidget {
     required this.onSettings,
     required this.body,
     this.extraActions = const [],
+    this.onInbox,
+    this.inboxCount = 0,
+    this.unreadOf,
     this.scaffoldKey,
   });
   final GlobalKey<ScaffoldState>? scaffoldKey;
@@ -38,6 +41,13 @@ class ChatScreen extends StatelessWidget {
   final VoidCallback onSettings;
   final Widget body;
   final List<Widget> extraActions;
+
+  /// Opens the Inbox; absent until the account's activity has loaded.
+  final VoidCallback? onInbox;
+  final int inboxCount;
+
+  /// What the account knows about unread activity per Bot.
+  final wire.UnreadView? Function(String botId)? unreadOf;
 
   static const wideBreakpoint = 800.0;
 
@@ -55,6 +65,9 @@ class ChatScreen extends StatelessWidget {
       onRefresh: onRefresh,
       onSettings: onSettings,
       onSignOut: onSignOut,
+      onInbox: onInbox,
+      inboxCount: inboxCount,
+      unreadOf: unreadOf,
     );
     final room = Padding(
       padding: EdgeInsets.fromLTRB(

@@ -127,5 +127,12 @@ declare const validators: {
   isSettingsOptionsPage(
     value: unknown,
   ): value is ProtocolTypes["SettingsOptionsPage"];
+  isConnectionsFrame(
+    value: unknown,
+  ): value is ProtocolTypes["ConnectionsFrame"];
+  isNotificationDirectory(
+    value: unknown,
+  ): value is ProtocolTypes["NotificationDirectory"];
+  isMarkReadReceipt(value: unknown): value is ProtocolTypes["MarkReadReceipt"];
 };
 export default validators;

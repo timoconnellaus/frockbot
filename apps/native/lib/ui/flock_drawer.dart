@@ -26,6 +26,9 @@ class FlockDrawer extends StatelessWidget {
     required this.onSettings,
     required this.onSignOut,
     this.stateOf,
+    this.onInbox,
+    this.inboxCount = 0,
+    this.unreadOf,
   });
   final List<wire.BotRegistration> bots;
   final String? selectedId;
@@ -36,6 +39,23 @@ class FlockDrawer extends StatelessWidget {
 
   /// What the ring around each sheep says. Unknown Bots get no ring.
   final BotState Function(String botId)? stateOf;
+
+  /// Opens the Inbox of notices from every Bot; absent until it has loaded.
+  final VoidCallback? onInbox;
+  final int inboxCount;
+
+  /// Unread activity per Bot: the last line as the caption, the count as a chip.
+  final wire.UnreadView? Function(String botId)? unreadOf;
+
+  static String? _lastLine(wire.UnreadView? view) {
+    final message = view?.lastMessage;
+    final text = message?['text'];
+    if (text is! String || text.trim().isEmpty) return null;
+    return text.trim();
+  }
+
+  static String _countLabel(wire.UnreadView view) =>
+      view.count == 0 ? 'New' : '${view.count}${view.capped ? '+' : ''}';
 
   @override
   Widget build(BuildContext context) {
@@ -78,13 +98,23 @@ class FlockDrawer extends StatelessWidget {
                                       BotState.none,
                                 ),
                                 title: bot.initialName,
-                                trailing: bot.botId.value == selectedId
-                                    ? Icon(
-                                        Icons.check_rounded,
-                                        size: FrockTokens.icon,
-                                        color: t.accent,
-                                      )
-                                    : null,
+                                caption: _lastLine(
+                                  unreadOf?.call(bot.botId.value),
+                                ),
+                                trailing: switch (unreadOf?.call(
+                                  bot.botId.value,
+                                )) {
+                                  final view? when view.unread => FrockChip(
+                                    _countLabel(view),
+                                    tone: TileTone.accent,
+                                  ),
+                                  _ when bot.botId.value == selectedId => Icon(
+                                    Icons.check_rounded,
+                                    size: FrockTokens.icon,
+                                    color: t.accent,
+                                  ),
+                                  _ => null,
+                                },
                                 onTap: () => onSelect(bot),
                               ),
                           ],
@@ -95,6 +125,17 @@ class FlockDrawer extends StatelessWidget {
             const SizedBox(height: FrockTokens.groupGap),
             FrockGroup(
               children: [
+                if (onInbox != null)
+                  FrockRow(
+                    key: const ValueKey('inbox'),
+                    leading: const FrockIconTile(Icons.inbox_rounded),
+                    title: 'Inbox',
+                    trailing: inboxCount == 0
+                        ? null
+                        : FrockChip('$inboxCount', tone: TileTone.accent),
+                    chevron: true,
+                    onTap: onInbox,
+                  ),
                 FrockRow(
                   leading: const FrockIconTile(Icons.refresh_rounded),
                   title: 'Refresh',

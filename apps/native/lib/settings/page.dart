@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../client/transport.dart';
+import '../connections/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/states.dart';
 import 'controller.dart';
@@ -149,6 +150,27 @@ class _SettingsPageState extends State<SettingsPage>
                                         store: widget.store,
                                         userId: widget.userId,
                                         home: 'models',
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            if (widget.home == 'application')
+                              Card(
+                                child: ListTile(
+                                  leading: const Icon(Icons.hub_outlined),
+                                  title: const Text('Connectors'),
+                                  subtitle: const Text(
+                                    'Accounts and services for every Bot',
+                                  ),
+                                  trailing: const Icon(
+                                    Icons.chevron_right_rounded,
+                                  ),
+                                  onTap: () => Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => ConnectionsPage(
+                                        api: widget.api,
+                                        userId: widget.userId,
                                       ),
                                     ),
                                   ),

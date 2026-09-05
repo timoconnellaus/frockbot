@@ -1001,6 +1001,20 @@ export function createGateway(dependencies: GatewayDependencies) {
       }
     }
 
+    if (url.pathname === "/api/settings/connections") {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      try {
+        const frame = await dependencies
+          .userConfigurationFor(userId)
+          .readConnectionsFrame({ schemaVersion: 1, userId });
+        return Response.json(decodeProtocol("ConnectionsFrame", frame), {
+          headers: { "cache-control": "no-store" },
+        });
+      } catch {
+        return jsonError(503, "Connections are temporarily unavailable.");
+      }
+    }
+
     if (
       ["/api/settings/application", "/api/settings/models"].includes(
         url.pathname,

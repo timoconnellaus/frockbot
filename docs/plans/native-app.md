@@ -189,6 +189,40 @@ macOS release captures use a test account through the production Worker harness;
 they do not qualify production macOS sign-in or the remaining device budgets.
 Connections, unread/deep links and Bot recovery remain subsequent milestones.
 
+### C2 — Connections (2026-09-05)
+
+Native Connectors is reached from Settings and projects the same User-owned
+Connection lifecycle as Vue, with one entry per account. It excludes model
+provider accounts (Models), revoked accounts and disabled Package surfaces.
+Only bounded labels, service names and states reach Dart; provider errors,
+metadata, tokens and credential records do not. Catalog search and grant,
+reconnect and revocation controls use the existing trusted backend Connectors
+surface in the system browser. Returning refreshes the native projection.
+
+The paired gateway scenario completes a browser grant, replays its callback,
+evicts the User owner and observes one ready Connection in native, then revokes
+it and checks both Users' views. Native tests cover offline recovery, handoff
+origin refusal, return refresh, single-home navigation, 200% text and reduced
+motion. See [the Connections seam plan](native-connections.md). The dated
+acceptance ledger records release captures and remaining physical gates.
+
+### C3 — Inbox, unread and Bot links (2026-09-05)
+
+Native now shows the same pending Bot notices and unread cursors as Vue. Refresh
+is read-only; explicit acknowledgements and mark-read/unread commands reach the
+same Bot owner. Lost read-status receipts retain their command across client
+restart. Notification and root `?bot=` links select only a Bot present in the
+signed-in User's live directory, and Android declares the verified root path.
+The fan-out now accepts the existing critical urgency field.
+
+Paired gateway scenarios cover failed-Turn notices, repeated acknowledgement,
+Bot owner eviction and cross-User refusal. Native tests cover deduplication,
+offline recovery, large text/reduced motion and strict link validation. See
+[the inbox seam plan](native-notifications.md). This lands inbox/unread state
+convergence; background OS push, notification channels and cross-device OS
+alert delivery claims remain unimplemented and unqualified. The native app
+emits no additional OS alert. Device and release evidence stays in the ledger.
+
 ## Slice 4 — Qualify A2UI and Compose independently
 
 Promote the qualified A2UI manifest/catalog/action contract with immutable snapshots, declared slots, live subset checks and host unavailable states. In a separate backend slice, pin one reviewed vendored `@frockbot/compose-*` commit behind a FrockBot adapter and run one real extension. Native rendering must remain releasable without a wholesale Cordis-to-Compose rewrite.
