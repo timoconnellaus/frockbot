@@ -506,9 +506,16 @@
   animation: frock-fade-in var(--frock-motion-fast) both;
 }
 
+/*
+ * The wardrobe dialog. Its height is its content's, not a number: fixed at
+ * 520px the art panel was the tallest thing in the grid, so the form column
+ * ended well above its own buttons, which were pinned to the bottom of a box
+ * neither column had filled. The columns now agree because the form is what
+ * decides the height.
+ */
 .flock-dialog {
   width: min(660px, 100%);
-  height: min(520px, calc(100vh - 48px));
+  max-height: calc(100vh - 48px);
   display: grid;
   grid-template-columns: 250px 1fr;
   overflow: hidden;
@@ -560,6 +567,10 @@
 
 .flock-form {
   position: relative;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow-y: auto;
   padding: 26px 30px;
 }
 
@@ -683,12 +694,12 @@
   line-height: var(--frock-leading-normal);
 }
 
+/* The answers sit under the last field, not at the bottom of a fixed frame. */
 .flock-actions {
-  position: absolute;
-  right: 30px;
-  bottom: 24px;
   display: flex;
+  justify-content: flex-end;
   gap: 8px;
+  margin-top: 24px;
 }
 
 .flock-actions button {
@@ -789,10 +800,8 @@
 
   .flock-actions {
     position: sticky;
-    right: auto;
     bottom: 0;
-    justify-content: flex-end;
-    margin-top: 18px;
+    margin-top: auto;
     padding: 10px 0;
     background: var(--frock-surface);
   }

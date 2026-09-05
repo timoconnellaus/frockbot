@@ -45,6 +45,7 @@ import {
   VOICE_CAPTURE_WORKLET_SOURCE_V1,
 } from "@frockbot/plugin-shell/client/voice-worklet";
 import { answeredEntryV1, entryFailureStatusV1 } from "./entry-boundary.js";
+import { INSIGHTS_REPORT_ORIGIN, INSIGHTS_SCRIPT_ORIGIN } from "./insights.js";
 import {
   drainedAnswerV1,
   isRequestTooLargeV1,
@@ -149,11 +150,6 @@ function packageUiArtifactOrigin(requestUrl: URL): string {
         : `ui.${appHost}`;
   return `${requestUrl.protocol}//${host}${requestUrl.port ? `:${requestUrl.port}` : ""}`;
 }
-
-/** Where the zone's injected Cloudflare Insights beacon is served from. */
-const INSIGHTS_SCRIPT_ORIGIN = "https://static.cloudflareinsights.com";
-/** Where that beacon posts its measurements — a different host from the script. */
-const INSIGHTS_REPORT_ORIGIN = "https://cloudflareinsights.com";
 
 function withSecurityHeaders(
   response: Response,

@@ -21,7 +21,8 @@ test("the default panel composes Computer and Routines and swaps to Settings", a
   const panel = page.getByRole("region", { name: "Bot panel" });
   await expect(panel).toBeVisible();
   await expect(panel.locator("section.computer-card")).toBeVisible();
-  await expect(panel.getByText("Observed's screen")).toBeVisible();
+  // The card is the whole statement: no caption repeats it underneath.
+  await expect(panel.getByText("Observed's screen")).toHaveCount(0);
   await expect(panel.getByText("Routines", { exact: true })).toBeVisible();
   await expect(panel.getByText("No Routines yet.")).toBeVisible();
   const routinesEditor = panel.getByRole("link", {
@@ -77,7 +78,7 @@ test("the default panel and Settings fit the mobile shell", async ({
 
   const panel = page.getByRole("region", { name: "Bot panel" });
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("Pocket's screen")).toBeVisible();
+  await expect(panel.getByText("Pocket's screen")).toHaveCount(0);
   await page.getByRole("button", { name: "Bot settings" }).click();
   await expect(page.getByRole("region", { name: "Settings" })).toBeVisible();
 

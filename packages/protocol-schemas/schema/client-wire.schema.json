@@ -2515,7 +2515,7 @@
           "$ref": "#/$defs/Identifier"
         },
         "generationId": {
-          "$ref": "#/$defs/Identifier"
+          "$ref": "#/$defs/GenerationId"
         },
         "navigationEpoch": {
           "$ref": "#/$defs/Identifier"
@@ -2722,7 +2722,7 @@
           "$ref": "#/$defs/Identifier"
         },
         "generationId": {
-          "$ref": "#/$defs/Identifier"
+          "$ref": "#/$defs/GenerationId"
         },
         "revision": {
           "type": "integer",
@@ -2769,7 +2769,7 @@
           "$ref": "#/$defs/Identifier"
         },
         "generationId": {
-          "$ref": "#/$defs/Identifier"
+          "$ref": "#/$defs/GenerationId"
         },
         "revision": {
           "type": "integer",
@@ -2985,7 +2985,7 @@
           "enum": ["draft", "published", "deleted"]
         },
         "currentGenerationId": {
-          "$ref": "#/$defs/Identifier"
+          "$ref": "#/$defs/GenerationId"
         },
         "tools": {
           "type": "array",
@@ -3019,6 +3019,12 @@
       },
       "required": ["schemaVersion", "applets"],
       "additionalProperties": false
+    },
+    "GenerationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}$"
     }
   },
   "x-frockbot-compatibility": {

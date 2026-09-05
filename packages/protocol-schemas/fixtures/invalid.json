@@ -1090,5 +1090,20 @@
       "schemaVersion": 2,
       "applets": []
     }
+  },
+  {
+    "name": "GenerationId rejects path separators",
+    "schema": "GenerationId",
+    "value": "../generation"
+  },
+  {
+    "name": "GenerationId bounded",
+    "schema": "GenerationId",
+    "value": "ggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+  },
+  {
+    "name": "GenerationId rejects control characters",
+    "schema": "GenerationId",
+    "value": "generation\nnext"
   }
 ]

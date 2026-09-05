@@ -80,6 +80,7 @@ export default defineConfig({
           // Object loads Bot-authored Packages in the other namespace.
           USER_APPLICATIONS: {},
           BOT_PACKAGES: {},
+          APPLETS: {},
         },
         serviceBindings: {
           COMPUTER_HOST: (request: Request) => computerHost.fetch(request),
@@ -95,6 +96,7 @@ export default defineConfig({
         durableObjects: {
           // Production classes, not probes.
           BOT_STATES: "BotState",
+          APPLET_STATES: { className: "AppletState", useSQLite: true },
           // `wrangler.jsonc` lists `UserConfiguration` in `new_sqlite_classes`,
           // so the transcript index has SQL storage in production; miniflare
           // needs that said explicitly.
@@ -118,6 +120,9 @@ export default defineConfig({
           FOUNDATION_ARTIFACT: foundationArtifact,
           DEFAULT_APPLICATION_HASH: "foundation-v1",
           ALLOW_DEVELOPMENT_AUTH: "true",
+          NATIVE_SLICE_2_AUTH: "android",
+          BETTER_AUTH_SECRET: "workerd-native-auth-secret-0123456789abcdef",
+          APPLET_VIEWER_SECRET: "workerd-native-applet-secret-0123456789abcdef",
           // The same placeholder `wrangler.jsonc` gives the `development` and
           // `e2e` environments: with an allowlist configured, only the
           // canonical `development` identity is a deployment admin, so the

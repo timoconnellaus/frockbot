@@ -28,6 +28,7 @@ import type {
   WorkerCode,
 } from "./contracts.js";
 import { createDebugRoute } from "./debug.js";
+import { INSIGHTS_REPORT_ORIGIN, INSIGHTS_SCRIPT_ORIGIN } from "./insights.js";
 import {
   drainedAnswerV1,
   forwardingBodyV1,
@@ -43,8 +44,26 @@ const PUBLIC_ASSET_PATHS = new Set([
   "/favicon.ico",
 ]);
 const PACKAGE_UI_PATH = /^\/packages\/([0-9a-f]{64})\.html$/;
-export const PACKAGE_UI_CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'";
+/*
+ * The artifact host is a host in the same zone, so the zone injected its
+ * Insights beacon into these pages too and the policy below refused it: every
+ * open of an Applet logged a CSP violation for a script the page had not
+ * asked for and could not remove.
+ *
+ * The response says `no-transform` (see `servePackageUiArtifact`), which is
+ * the honest fix here and not only an analytics preference: an artifact is
+ * addressed by the hash of its bytes, and a zone feature that rewrites its
+ * HTML is rewriting the thing the hash names. A zone that honours it injects
+ * nothing and this policy stays exactly as tight as it reads.
+ *
+ * The beacon's two origins are named anyway, because `no-transform` is a
+ * request to an edge feature rather than a guarantee this Worker can make. A
+ * page that is served the beacon in spite of it loads and reports it instead
+ * of filling a User's console; nothing else is opened, and `connect-src`
+ * already names one origin — the page's own gateway — so this adds a second
+ * named host to a list rather than a hole to a closed one.
+ */
+export const PACKAGE_UI_CSP = `default-src 'none'; script-src 'unsafe-inline' ${INSIGHTS_SCRIPT_ORIGIN}; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'`;
 
 /**
  * The gateway origin an artifact host belongs to: `ui.bot.example` serves the
@@ -93,7 +112,7 @@ export function packageUiCspV1(url: URL): string {
   const connect = origins
     .flatMap((candidate) => [candidate, candidate.replace(/^http/, "ws")])
     .join(" ");
-  return `${PACKAGE_UI_CSP}; connect-src ${connect}; frame-src ${url.origin}`;
+  return `${PACKAGE_UI_CSP}; connect-src ${connect} ${INSIGHTS_REPORT_ORIGIN}; frame-src ${url.origin}`;
 }
 export const SIGNUPS_CLOSED_MESSAGE =
   "FrockBot isn't taking new signups right now.";
@@ -139,7 +158,11 @@ export async function servePackageUiArtifact(
   const etag = `"${contentHash}"`;
   const headers = {
     "content-type": "text/html; charset=utf-8",
-    "cache-control": "public, max-age=31536000, immutable",
+    // `no-transform` asks the edge to leave the bytes alone. An artifact is
+    // addressed by their hash, so a zone feature that rewrites its HTML —
+    // the Insights beacon injection is the one that did — is rewriting the
+    // thing the hash names.
+    "cache-control": "public, max-age=31536000, immutable, no-transform",
     "content-security-policy": packageUiCspV1(url),
     "cross-origin-resource-policy": "cross-origin",
     "referrer-policy": "no-referrer",
@@ -853,10 +876,17 @@ export function createGateway(dependencies: GatewayDependencies) {
         !/^[A-Za-z0-9_-]{16,64}$/.test(epoch)
       )
         return jsonError(400, "Invalid Applet");
-      return Response.json(
-        await dependencies.nativeAppletBootstrap(userId, appletId, epoch),
-        { headers: { "cache-control": "no-store" } },
-      );
+      try {
+        return Response.json(
+          await dependencies.nativeAppletBootstrap(userId, appletId, epoch),
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch {
+        return jsonError(
+          503,
+          "This Applet is unavailable. Reopen it to try again.",
+        );
+      }
     }
     if (request.method === "GET" && url.pathname === "/api/identity") {
       return Response.json({ schemaVersion: 1, userId, isAdmin });

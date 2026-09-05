@@ -17,5 +17,27 @@
   "implementationSha256": {
     "lib/extensions/catalog.dart": "6f98033b2ec4dae896eaaa60608ed1f35ada21c12605f30145852926dc9a6009",
     "vendor/webview_flutter_wkwebview/darwin/webview_flutter_wkwebview/Sources/webview_flutter_wkwebview/WebViewConfigurationProxyAPIDelegate.swift": "9a7a56036f9cf335dd50f4e96dd4dc642a531370a1ad140afaa6ff065cc97fb3"
+  },
+  "acceptance": {
+    "date": "2026-09-05",
+    "ledger": "docs/plans/native-acceptance-2026-09-05-slice3.md",
+    "android": {
+      "versionCode": 11,
+      "signerPreserved": true,
+      "authenticatedFlow": "chat-stop-form-observed; published-todo-needs-current-sdk-generation",
+      "automaticVerifiedLink": "unqualified-domain-externally-approved",
+      "measurements": "docs/plans/native-evidence-2026-09-05-slice3/pixel-release8-measurements.json",
+      "realApplet": {
+        "status": "blocked-legacy-viewer-protocol",
+        "generationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
+        "nativeBootstrap": "passed-after-v0.3.39-deployment",
+        "mutationObserved": false
+      }
+    },
+    "macos": {
+      "releaseBuild": "passed",
+      "verifiedSignIn": "blocked-matching-provisioning-profile"
+    },
+    "fullBudgets": "unqualified"
   }
 }

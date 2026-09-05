@@ -59,6 +59,36 @@ describe("Package UI artifact route", () => {
     );
   });
 
+  test("leaves the zone no reason to break a Package page", async () => {
+    // The zone injects its Insights beacon into every HTML response it
+    // serves, this host included, and the frame's own policy refused it: a
+    // Package page that had done nothing logged a CSP violation on load.
+    const request = new Request(
+      `https://ui.bot.frockbot.com/packages/${hash}.html`,
+    );
+    const response = await servePackageUiArtifact(
+      request,
+      new URL(request.url),
+      artifacts,
+    );
+    // Bytes addressed by their hash are not the edge's to rewrite.
+    expect(response.headers.get("cache-control")).toContain("no-transform");
+    const csp = response.headers.get("content-security-policy") ?? "";
+    // Named anyway, because `no-transform` is a request to a zone feature and
+    // not a guarantee this Worker can make.
+    expect(csp).toContain(
+      "script-src 'unsafe-inline' https://static.cloudflareinsights.com",
+    );
+    expect(csp).toContain(
+      "connect-src https://bot.frockbot.com wss://bot.frockbot.com https://cloudflareinsights.com",
+    );
+    // Naming the beacon opens nothing else: the page still loads no image,
+    // font, frame or script from anywhere it was not already given.
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).not.toContain("*");
+    expect(csp).not.toContain("'unsafe-eval'");
+  });
+
   test("serves no application route on the artifact host", async () => {
     const request = new Request("https://ui.bot.frockbot.com/");
     expect(

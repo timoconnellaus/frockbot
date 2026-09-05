@@ -468,7 +468,7 @@ export type FallbackBootstrap = {
   schemaVersion: 1;
   appletId: string;
   userId: Identifier;
-  generationId: Identifier;
+  generationId: GenerationId;
   navigationEpoch: Identifier;
   bootstrapUrl: HttpsUrl;
   artifactOrigin: HttpsUrl;
@@ -509,7 +509,7 @@ export type A2uiSurface = {
   userId: Identifier;
   botId: BotId;
   packageId: Identifier;
-  generationId: Identifier;
+  generationId: GenerationId;
   revision: number;
   cursor: ObserverCursor;
   contribution: A2uiContribution;
@@ -520,7 +520,7 @@ export type A2uiActionCommand = {
   commandId: Identifier;
   surfaceId: Identifier;
   packageId: Identifier;
-  generationId: Identifier;
+  generationId: GenerationId;
   revision: number;
   actionId: Identifier;
   input: {
@@ -575,7 +575,7 @@ export type AppletSummary = {
   appletId: string;
   displayName: string;
   status: "draft" | "published" | "deleted";
-  currentGenerationId?: Identifier;
+  currentGenerationId?: GenerationId;
   tools: Array<string>;
   createdAt: Instant;
 };
@@ -583,6 +583,7 @@ export type AppletDirectory = {
   schemaVersion: 1;
   applets: Array<AppletSummary>;
 };
+export type GenerationId = string;
 export interface ProtocolTypes {
   Identifier: Identifier;
   BotId: BotId;
@@ -655,4 +656,5 @@ export interface ProtocolTypes {
   TurnResponse: TurnResponse;
   AppletSummary: AppletSummary;
   AppletDirectory: AppletDirectory;
+  GenerationId: GenerationId;
 }

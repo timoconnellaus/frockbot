@@ -21,12 +21,13 @@ test("a User edits and saves the prefilled profile name", async ({
   const name = settings.getByLabel("Name");
   await expect(name).toHaveValue("Local developer");
   await name.fill("Tim");
-  // Package settings sections carry their own Save; the profile is saved by
-  // the form's own actions row.
-  await settings
-    .locator("form.settings-form > .settings-actions")
-    .getByRole("button", { name: "Save settings" })
-    .click();
+  // Package settings sections carry their own Save. The profile's sits with
+  // the two fields it saves and names them, so there is exactly one button on
+  // this surface that means "save what I just typed here".
+  await expect(
+    settings.getByRole("button", { name: "Save profile" }),
+  ).toHaveCount(1);
+  await settings.getByRole("button", { name: "Save profile" }).click();
 
   await expect(settings).toBeHidden();
   await expect(profileTrigger).toHaveText("Tim");
