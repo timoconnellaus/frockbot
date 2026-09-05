@@ -6,6 +6,21 @@ export interface ToolkitSummary {
   logo?: string;
   managedOAuth: boolean;
 }
+export interface TriggerTypeSummary {
+  slug: string;
+  name: string;
+  description: string;
+  configSchema: Record<string, unknown>;
+  version: string;
+  needsSetup: boolean;
+}
+export interface TriggerInstanceSummary {
+  id: string;
+  accountId: string;
+  triggerType: string;
+  config: Record<string, unknown>;
+  disabled: boolean;
+}
 export interface AuthConfigSummary {
   id: string;
   toolkitSlug: string;
@@ -306,6 +321,109 @@ export class ComposioClient {
         inputSchema,
         version: requiredString(tool, "version"),
       };
+    });
+  }
+
+  async listTriggerTypes(toolkitSlug: string): Promise<TriggerTypeSummary[]> {
+    const query = new URLSearchParams({
+      toolkit_slugs: toolkitSlug,
+      toolkit_versions: "latest",
+      limit: "50",
+    });
+    const values = await this.pages(`/triggers_types?${query}`);
+    return values.map((raw) => {
+      const value = asRecord(raw),
+        slug = requiredString(value, "slug");
+      if (
+        asRecord(value.toolkit).slug !== toolkitSlug ||
+        !slug.startsWith(`${toolkitSlug.toUpperCase()}_`)
+      )
+        throw new Error("This event belongs to another connector");
+      const config = asRecord(value.config);
+      const configSchema =
+        config.type === "object"
+          ? config
+          : {
+              type: "object",
+              properties: Object.fromEntries(
+                Object.entries(config).map(([key, raw]) => {
+                  const { required: _, ...field } = asRecord(raw);
+                  if (field.type === "enum" && Array.isArray(field.options)) {
+                    field.type = "string";
+                    field.enum = field.options;
+                    delete field.options;
+                  }
+                  return [key, field];
+                }),
+              ),
+              required: Object.entries(config)
+                .filter(([, raw]) => asRecord(raw).required === true)
+                .map(([key]) => key),
+            };
+      return {
+        slug,
+        name: requiredString(value, "name"),
+        description:
+          typeof value.description === "string" ? value.description : "",
+        configSchema,
+        version: requiredString(value, "version"),
+        needsSetup: value.requires_webhook_endpoint_setup === true,
+      };
+    });
+  }
+  async listTriggerInstances(
+    accountId: string,
+  ): Promise<TriggerInstanceSummary[]> {
+    const query = new URLSearchParams({
+      connected_account_ids: accountId,
+      show_disabled: "true",
+      limit: "50",
+    });
+    const values = await this.pages(`/trigger_instances/active?${query}`);
+    return values.map((raw) => {
+      const value = asRecord(raw);
+      if (value.connected_account_id !== accountId)
+        throw new Error("This event belongs to another account");
+      return {
+        id: requiredString(value, "id"),
+        accountId,
+        triggerType: requiredString(value, "trigger_name"),
+        config: asRecord(value.trigger_config),
+        disabled: !!value.disabled_at,
+      };
+    });
+  }
+  async upsertTrigger(input: {
+    accountId: string;
+    triggerType: string;
+    toolkit: string;
+    version: string;
+    config: Record<string, unknown>;
+  }): Promise<string> {
+    const value = asRecord(
+      await this.request(
+        `/trigger_instances/${encodeURIComponent(input.triggerType)}/upsert`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            connected_account_id: input.accountId,
+            trigger_config: input.config,
+            toolkit_versions: { [input.toolkit]: input.version },
+          }),
+        },
+      ),
+    );
+    return requiredString(value, "trigger_id");
+  }
+  setTriggerEnabled(id: string, enabled: boolean): Promise<unknown> {
+    return this.request(`/trigger_instances/manage/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: enabled ? "enable" : "disable" }),
+    });
+  }
+  deleteTrigger(id: string): Promise<unknown> {
+    return this.request(`/trigger_instances/manage/${encodeURIComponent(id)}`, {
+      method: "DELETE",
     });
   }
 

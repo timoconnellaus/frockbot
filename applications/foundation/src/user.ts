@@ -1,3 +1,4 @@
+import type { ConnectionEventDeliveryV1 } from "@frockbot/connection-core";
 import type { ComposioUserService } from "@frockbot/plugin-composio/user";
 import type { ApplicationPlan } from "@frockbot/kernel-composition/compiler";
 import {
@@ -218,6 +219,7 @@ export async function createFoundationUserBackendContributions(
         | "CREDENTIAL_KEYRING"
         | "MACHINE_TOKEN_SECRET"
         | "COMPOSIO_API_KEY"
+        | "COMPOSIO_WEBHOOK_SECRET"
         | "BETTER_AUTH_URL"
         | "COMPOSIO_TEST_URL",
     ): string | undefined;
@@ -232,6 +234,11 @@ export async function createFoundationUserBackendContributions(
      * than mutating Bot state itself.
      */
     commandBotLifecycle: FlockUserBackendHost["commandBotLifecycle"];
+    deliverConnectionEvent?(
+      userId: string,
+      botId: string,
+      delivery: ConnectionEventDeliveryV1,
+    ): Promise<unknown>;
     readBotLifecycle: FlockUserBackendHost["readBotLifecycle"];
     /**
      * The remote Package Catalog. Absent when the deployment publishes none,
@@ -369,6 +376,8 @@ export async function createFoundationUserBackendContributions(
         storage: host.storage,
         settings,
         apiKey: host.readSecret("COMPOSIO_API_KEY"),
+        webhookSecret: host.readSecret("COMPOSIO_WEBHOOK_SECRET"),
+        deliverEvent: host.deliverConnectionEvent,
         apiBaseUrl: host.readSecret("COMPOSIO_TEST_URL"),
         callbackBaseUrl:
           host.readSecret("BETTER_AUTH_URL") ?? "http://localhost:8787",

@@ -1,3 +1,6 @@
+import { ComposioTriggerSubscriptions } from "./triggers.js";
+import { decodeStoredComposioTriggerEvent } from "./webhook.js";
+import type { ConnectionEventDeliveryV1 } from "@frockbot/connection-core";
 import { ConnectedAccountTools } from "./tools.js";
 import {
   decodeStartConnectionCommandV1,
@@ -7,6 +10,7 @@ import {
 import {
   decodeConnectionCommandV1,
   decodeConnectorCatalogV1,
+  decodeConnectionTriggerV1,
   type ConnectorCatalogEntryV1,
 } from "@frockbot/connection-core";
 import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
@@ -33,6 +37,12 @@ export interface ComposioUserHost {
   apiBaseUrl?: string;
   client?: ComposioClient;
   callbackBaseUrl: string;
+  webhookSecret?: string;
+  deliverEvent?(
+    userId: string,
+    botId: string,
+    delivery: ConnectionEventDeliveryV1,
+  ): Promise<unknown>;
 }
 
 type CachedCatalog = {
@@ -48,6 +58,7 @@ const CATALOG_KEY = "composio:catalog:v1";
 export class ComposioUserService {
   readonly packageId = "composio";
   readonly records: ComposioUserBackendContribution;
+  readonly triggerSubscriptions: ComposioTriggerSubscriptions;
   private readonly client?: ComposioClient;
   constructor(private readonly host: ComposioUserHost) {
     this.client =
@@ -55,6 +66,24 @@ export class ComposioUserService {
       (host.apiKey?.trim()
         ? new ComposioClient({ apiKey: host.apiKey, baseUrl: host.apiBaseUrl })
         : undefined);
+    this.triggerSubscriptions = new ComposioTriggerSubscriptions({
+      storage: host.storage,
+      client: this.client,
+      webhookConfigured: !!host.webhookSecret?.trim(),
+      deliver: host.deliverEvent,
+      connections: async () => {
+        const snapshot = await host.settings.readSnapshot();
+        const enabled = snapshot.packages.some(
+          (pkg) =>
+            pkg.packageId === this.packageId && pkg.state === "installed",
+        );
+        return snapshot.connections
+          .filter((row) => row.packageId === this.packageId)
+          .map((row) =>
+            enabled ? row : { ...row, state: "disabled" as const },
+          );
+      },
+    });
     this.records = new ComposioUserBackendContribution({
       state: { storage: host.storage },
       settings: host.settings,
@@ -228,7 +257,11 @@ export class ComposioUserService {
       toolkitSlug: slug,
     };
   }
-  async request(userId: string, input: unknown): Promise<unknown> {
+  async request(
+    userId: string,
+    input: unknown,
+    botId?: string,
+  ): Promise<unknown> {
     await this.host.settings.read(userId);
     await this.migrate(userId);
     if (!input || typeof input !== "object" || Array.isArray(input))
@@ -239,6 +272,11 @@ export class ComposioUserService {
     const fields: Record<string, string[]> = {
       catalog: [],
       "tool-availability": [],
+      "trigger-types": [],
+      "validate-trigger": ["trigger"],
+      "sync-subscription": ["subscription"],
+      "subscription-status": ["bindings"],
+      "deliver-event": ["event"],
       "list-tools": ["connectionId"],
       "execute-tool": [
         "connectionId",
@@ -265,6 +303,38 @@ export class ComposioUserService {
     ]);
     if (Object.keys(value).some((key) => !allowed.has(key)))
       throw new Error("Connection command has invalid fields");
+    if (value.operation === "trigger-types")
+      return this.triggerSubscriptions.catalog(userId);
+    if (
+      value.operation === "validate-trigger" ||
+      value.operation === "sync-subscription" ||
+      value.operation === "subscription-status"
+    ) {
+      if (!botId)
+        throw new Error("Bot identity is required for Routine subscriptions");
+      if (value.operation === "sync-subscription") {
+        await this.triggerSubscriptions.sync(userId, botId, value.subscription);
+        return { schemaVersion: 1, status: "recorded" };
+      }
+      if (value.operation === "subscription-status")
+        return {
+          schemaVersion: 1,
+          routines: await this.triggerSubscriptions.statuses(
+            userId,
+            botId,
+            value.bindings,
+          ),
+        };
+      const trigger = decodeConnectionTriggerV1(value.trigger);
+      return this.triggerSubscriptions.validate(userId, trigger);
+    }
+    if (value.operation === "deliver-event") {
+      await this.triggerSubscriptions.receive(
+        userId,
+        decodeStoredComposioTriggerEvent(value.event),
+      );
+      return { schemaVersion: 1, status: "accepted" };
+    }
     if (value.operation === "tool-availability")
       return {
         schemaVersion: 1,
@@ -347,8 +417,16 @@ export class ComposioUserService {
     }
     if (!isConnectionIdentifier(value.connectionId))
       throw new Error("Connection is invalid");
-    if (value.operation === "revoke")
-      return this.coordinator().revoke(userId, value.connectionId);
+    if (value.operation === "revoke") {
+      try {
+        return await this.coordinator().revoke(userId, value.connectionId);
+      } finally {
+        await this.triggerSubscriptions.removeConnection(
+          userId,
+          value.connectionId,
+        );
+      }
+    }
     if (!isConnectionIdentifier(value.authorizationStateId))
       throw new Error("Connection authorization is invalid");
     if (value.operation === "fail")
@@ -497,6 +575,8 @@ export class ComposioUserService {
   }
   async alarm() {
     await this.records.alarm();
+    const userId = await this.host.storage.get<string>("user-id");
+    if (userId) await this.triggerSubscriptions.alarm(userId);
     const pending =
       (await this.host.storage.get<string[]>(AUTH_PENDING_KEY)) ?? [];
     if (!pending.length || !this.client) return;
@@ -610,6 +690,12 @@ export class ComposioUserService {
         connection.generation,
         next,
       );
+    if (command.type === "connection/disconnect")
+      await this.triggerSubscriptions.removeConnection(
+        userId,
+        connection.connectionId,
+      );
+    else await this.triggerSubscriptions.reconcile(userId);
     const receipt = {
       schemaVersion: 1,
       commandId: command.commandId,

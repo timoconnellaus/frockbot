@@ -68,7 +68,7 @@ export interface TemplateRoutineCandidateV1 {
   name: string;
   prompt: string;
   schedule?: string;
-  trigger?: { kind: "webhook" };
+  trigger?: { kind: "webhook" | "connection" };
   timezone: string;
 }
 
@@ -310,12 +310,19 @@ function scrubSkills(
   return skills;
 }
 
-function scrubRoutines(source: TemplateSourceV1): TemplateRoutineV1[] {
+function scrubRoutines(
+  source: TemplateSourceV1,
+  omissions: Omissions,
+): TemplateRoutineV1[] {
   const slugs = new Set<string>();
   const routines: TemplateRoutineV1[] = [];
   for (const candidate of source.routines) {
     if (routines.length >= MAX_TEMPLATE_ROUTINES_V1) break;
     if (!candidate.prompt) continue;
+    if (candidate.trigger?.kind === "connection") {
+      omissions.add("connection");
+      continue;
+    }
     const webhook = candidate.trigger?.kind === "webhook";
     routines.push({
       slug: uniqueSlug(templateSlugV1(candidate.name, "routine"), slugs),
@@ -434,7 +441,7 @@ export function buildBotTemplateV1(
   omissions.add("memory");
 
   const skills = scrubSkills(source, omissions);
-  const routines = scrubRoutines(source);
+  const routines = scrubRoutines(source, omissions);
   const packages = scrubPackages(source, omissions);
   const mcpServers = scrubServers(source, omissions);
 

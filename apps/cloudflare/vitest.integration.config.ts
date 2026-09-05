@@ -114,6 +114,7 @@ export default defineConfig({
         },
         bindings: {
           COMPOSIO_API_KEY: "test-composio-backend-key",
+          COMPOSIO_WEBHOOK_SECRET: "test-provider-webhook-secret",
           BETTER_AUTH_URL: "https://bot.frockbot.com",
           TEST_MIGRATIONS: authMigrations,
           FOUNDATION_ARTIFACT: foundationArtifact,

@@ -1,3 +1,7 @@
+import {
+  decodeConnectionTriggerCatalogV1,
+  type ConnectionTriggerCatalogV1,
+} from "@frockbot/connection-core";
 // The Routines gateway Contribution: the authenticated HTTP surface.
 //
 // Three routes, all Bot-scoped and all beside `/api/bots/:id/settings`:
@@ -73,6 +77,10 @@ export interface RoutinesGatewayHost {
     },
   ): Promise<RoutineHookDeliveryReceiptV1>;
   listRoutines(userId: string, botId: string): Promise<RoutineListViewV1>;
+  listTriggers?(
+    userId: string,
+    botId: string,
+  ): Promise<ConnectionTriggerCatalogV1>;
   executeRoutineCommand(
     userId: string,
     botId: string,
@@ -117,6 +125,7 @@ export interface RoutinesBackendRouteContribution {
 }
 
 const ROUTINES = /^\/api\/bots\/([^/]+)\/routines$/;
+const ROUTINE_TRIGGERS = /^\/api\/bots\/([^/]+)\/routines\/triggers$/;
 const ROUTINE_INBOX = /^\/api\/bots\/([^/]+)\/routines\/inbox$/;
 const ROUTINE_RUNS = /^\/api\/bots\/([^/]+)\/routines\/([^/]+)\/runs$/;
 const ROUTINE_HOOK = /^\/api\/bots\/([^/]+)\/routines\/([^/]+)\/hook$/;
@@ -270,16 +279,31 @@ export function createRoutinesBackendContribution(
     packageId: "routines",
     async route(request, url, context) {
       if (!context.userId) return undefined;
+      const triggers = ROUTINE_TRIGGERS.exec(url.pathname);
       const list = ROUTINES.exec(url.pathname);
       const inbox = ROUTINE_INBOX.exec(url.pathname);
       const runs = ROUTINE_RUNS.exec(url.pathname);
       const run = ROUTINE_RUN.exec(url.pathname);
-      if (!list && !inbox && !runs && !run) return undefined;
+      if (!triggers && !list && !inbox && !runs && !run) return undefined;
       if ([...url.searchParams.keys()].length > 0) {
         return jsonError(400, "Routine routes take no query parameters");
       }
       try {
-        const botId = pathSegment((list ?? inbox ?? runs ?? run)![1]!);
+        const botId = pathSegment(
+          (triggers ?? list ?? inbox ?? runs ?? run)![1]!,
+        );
+        if (triggers) {
+          if (request.method !== "GET")
+            return jsonError(405, "method not allowed");
+          return Response.json(
+            decodeConnectionTriggerCatalogV1(
+              (await host.listTriggers?.(context.userId, botId)) ?? {
+                schemaVersion: 1,
+                items: [],
+              },
+            ),
+          );
+        }
         if (run) {
           if (request.method !== "GET") {
             return jsonError(405, "method not allowed");
