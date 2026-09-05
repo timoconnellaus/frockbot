@@ -1183,24 +1183,32 @@ export class ShellBotBackendContribution {
    * announcement log. A compaction (ADR 0030) is already a durable event on
    * the conversation's session log — appending a second copy of it here would
    * be two records of one fact — so it is read back from there instead.
+   * The transcript injects that log after reading it once, because marker
+   * collection and marker placement consume the same events (ADR 0038).
    */
-  async listAnnouncements(): Promise<SessionEvent[]> {
+  private async announcementsFromSession(
+    conversationEvents: readonly SessionEvent[],
+  ): Promise<SessionEvent[]> {
     const stored = await this.ctx.storage.list<unknown>({
       prefix: BOT_ANNOUNCEMENT_PREFIX,
     });
     const announcements = [...stored.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([, value]) => decodeSessionEvent(value));
-    const sessionId = await this.authority.readConversationSessionId();
-    const session = sessionId
-      ? await this.authority.readSessionEvents(sessionId)
-      : [];
-    for (const event of session) {
+    for (const event of conversationEvents) {
       if (event.type === "conversation/compacted") announcements.push(event);
     }
     return announcements
       .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
       .slice(-BOT_ANNOUNCEMENT_RETENTION);
+  }
+
+  async listAnnouncements(): Promise<SessionEvent[]> {
+    const sessionId = await this.authority.readConversationSessionId();
+    const session = sessionId
+      ? await this.authority.readSessionEvents(sessionId)
+      : [];
+    return this.announcementsFromSession(session);
   }
 
   /**
@@ -1213,7 +1221,7 @@ export class ShellBotBackendContribution {
       ? await this.authority.readSessionEvents(sessionId)
       : [];
     return projectClientAnnouncementsV1(
-      await this.listAnnouncements(),
+      await this.announcementsFromSession(session),
       session,
     );
   }
