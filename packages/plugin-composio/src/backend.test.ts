@@ -81,7 +81,11 @@ describe("configured Composio backend", () => {
       const url = new URL(
         "https://bot.frockbot.com/api/plugins/composio/callback",
       );
-      expect(contribution.publicRoute).toBeUndefined();
+      expect(
+        await contribution.publicRoute?.(new Request(url), url, {
+          client: "browser",
+        }),
+      ).toBeUndefined();
       expect(
         await contribution.route(new Request(url), url, { client: "browser" }),
       ).toBeUndefined();
@@ -486,6 +490,10 @@ describe("public Connect callback security", () => {
     if (!response) throw new Error("Expected catalog");
     const body: unknown = await response.json();
     expect(body).toEqual({ schemaVersion: 1, items: [] });
-    expect(contribution.publicRoute).toBeUndefined();
+    expect(
+      await contribution.publicRoute?.(new Request(url), url, {
+        client: "browser",
+      }),
+    ).toBeUndefined();
   });
 });

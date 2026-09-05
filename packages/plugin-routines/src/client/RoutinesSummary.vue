@@ -63,7 +63,9 @@ watch(
       <li v-for="routine in rows" :key="routine.routineId">
         <span>
           <strong>{{ routine.name }}</strong>
-          <small>{{ routine.schedule ?? "Webhook" }}</small>
+          <small>{{
+            routine.schedule ?? routine.eventName ?? "Webhook"
+          }}</small>
         </span>
         <small>{{ routine.enabled ? "On" : "Paused" }}</small>
       </li>

@@ -174,6 +174,7 @@ const USER_IDENTITY_KEY = "user:identity";
 
 interface UserConfigurationEnv {
   COMPOSIO_API_KEY?: string;
+  COMPOSIO_WEBHOOK_SECRET?: string;
   COMPOSIO_TEST_URL?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   BETTER_AUTH_URL?: string;
@@ -266,11 +267,31 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
                 ? this.env.ALLOW_DEVELOPMENT_AUTH === "true"
                   ? this.env.COMPOSIO_TEST_URL
                   : undefined
-                : name === "COMPOSIO_API_KEY"
-                  ? this.env.COMPOSIO_API_KEY
-                  : name === "BETTER_AUTH_URL"
-                    ? this.env.BETTER_AUTH_URL
-                    : this.env.CREDENTIAL_KEYRING,
+                : name === "COMPOSIO_WEBHOOK_SECRET"
+                  ? this.env.COMPOSIO_WEBHOOK_SECRET
+                  : name === "COMPOSIO_API_KEY"
+                    ? this.env.COMPOSIO_API_KEY
+                    : name === "BETTER_AUTH_URL"
+                      ? this.env.BETTER_AUTH_URL
+                      : this.env.CREDENTIAL_KEYRING,
+          deliverConnectionEvent: async (userId, botId, delivery) => {
+            await this.assertUserIdentity(userId);
+            await (await this.contributions()).flock.registration(botId);
+            // SAFETY: this namespace is bound to BotState; the DTO is decoded at its RPC seam.
+            const rpc = this.env.BOT_STATES.getByName(
+              `${userId}:${botId}`,
+            ) as unknown as {
+              deliverConnectionEvent(input: unknown): Promise<unknown>;
+            };
+            return rpcJsonSnapshotV1(
+              await rpc.deliverConnectionEvent({
+                schemaVersion: 1,
+                userId,
+                botId,
+                delivery,
+              }),
+            );
+          },
           packagePublisher: createPackagePublicationHost(
             this.env,
             this.ctx.storage,
@@ -809,7 +830,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     if (
       operation === "list-tools" ||
       operation === "execute-tool" ||
-      operation === "tool-availability"
+      operation === "tool-availability" ||
+      operation === "validate-trigger" ||
+      operation === "sync-subscription" ||
+      operation === "subscription-status"
     ) {
       if (typeof request.botId !== "string")
         throw new Error("Bot identity is required for tools");
@@ -817,7 +841,11 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     }
     const contribution = contributions.composio;
     if (!contribution) throw new Error("Connected apps are unavailable");
-    return contribution.request(userId, request.command);
+    return contribution.request(
+      userId,
+      request.command,
+      typeof request.botId === "string" ? request.botId : undefined,
+    );
   }
 
   async readMcpServers(input: unknown) {
@@ -1743,6 +1771,12 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     contributions.search.purge(botId);
     contributions.audit.purgeAuditForBot(botId);
     await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}`);
+    const userId = await this.provenIdentity();
+    if (userId)
+      await contributions.composio?.triggerSubscriptions.removeBot(
+        userId,
+        botId,
+      );
     await contributions.flock.forgetDeletedBot(botId);
   }
 
@@ -2152,7 +2186,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             : { schedule: routine.schedule }),
           ...(routine.trigger === undefined
             ? {}
-            : { trigger: { kind: "webhook" as const } }),
+            : { trigger: { kind: routine.trigger.kind } }),
           timezone: routine.timezone,
         })),
     };

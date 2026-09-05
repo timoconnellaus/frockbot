@@ -1136,6 +1136,7 @@
         "@frockbot/client-core": "workspace:*",
         "@frockbot/client-ui": "workspace:*",
         "@frockbot/configuration-core": "workspace:*",
+        "@frockbot/connection-core": "workspace:*",
         "@frockbot/kernel-agent-loop": "workspace:*",
         "@frockbot/kernel-contracts": "workspace:*",
         "@frockbot/plugin-shell": "workspace:*",

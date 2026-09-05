@@ -350,6 +350,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
+          COMPOSIO_WEBHOOK_SECRET: ${{ secrets.COMPOSIO_WEBHOOK_SECRET }}
           FROCKBOT_AUTHORIZATION_STATE_SECRET: ${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}
         shell: bash
         run: |
@@ -543,6 +544,7 @@ jobs:
           # `--secrets-file` replaces the whole set every time.
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
+          COMPOSIO_WEBHOOK_SECRET: ${{ secrets.COMPOSIO_WEBHOOK_SECRET }}
           FROCKBOT_AUTHORIZATION_STATE_SECRET: ${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}
         shell: bash
         run: |

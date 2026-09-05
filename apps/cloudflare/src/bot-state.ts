@@ -1,3 +1,7 @@
+import {
+  decodeConnectionEventDeliveryV1,
+  type ConnectionEventDeliveryV1,
+} from "@frockbot/connection-core";
 import { DurableObject } from "cloudflare:workers";
 import {
   BotStateChannel,
@@ -1928,6 +1932,34 @@ export class BotState extends DurableObject<BotStateEnv> {
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return shell.listRoutines(identity);
+  }
+
+  async listRoutineTriggers(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.listRoutineTriggers(identity);
+  }
+  async deliverConnectionEvent(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      delivery: rpcDecoded(decodeConnectionEventDeliveryV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return shell.deliverConnectionEvent(
+      request.delivery as ConnectionEventDeliveryV1,
+    );
   }
 
   /** One Routine command, applied durably with the User recorded as writer. */
