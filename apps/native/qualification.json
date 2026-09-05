@@ -22,11 +22,17 @@
     "date": "2026-09-05",
     "ledger": "docs/plans/native-acceptance-2026-09-05-slice3.md",
     "android": {
-      "versionCode": 9,
+      "versionCode": 11,
       "signerPreserved": true,
-      "authenticatedFlow": "chat-stop-form-observed; applet-awaiting-bootstrap-fix",
+      "authenticatedFlow": "chat-stop-form-observed; published-todo-needs-current-sdk-generation",
       "automaticVerifiedLink": "unqualified-domain-externally-approved",
-      "measurements": "docs/plans/native-evidence-2026-09-05-slice3/pixel-release8-measurements.json"
+      "measurements": "docs/plans/native-evidence-2026-09-05-slice3/pixel-release8-measurements.json",
+      "realApplet": {
+        "status": "blocked-legacy-viewer-protocol",
+        "generationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
+        "nativeBootstrap": "passed-after-v0.3.39-deployment",
+        "mutationObserved": false
+      }
     },
     "macos": {
       "releaseBuild": "passed",

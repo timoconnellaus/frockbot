@@ -10,7 +10,10 @@ import {
   type SessionEvent,
 } from "@frockbot/kernel-contracts";
 import type { CompositionGenerationV1 } from "@frockbot/kernel-composition/generation";
-import { DurableCompositionStore } from "./composition-store.js";
+import {
+  DurableCompositionStore,
+  decodeCompositionPinV1,
+} from "./composition-store.js";
 import { DurableCompositionFailureLog } from "./composition-failures.js";
 import {
   boundedRunFailureV1,
@@ -69,6 +72,7 @@ import {
 } from "./conversations.js";
 import {
   ACTIVE_RUN_KEY,
+  COMPOSITION_CURRENT_KEY,
   CONVERSATION_INDEX_KEY,
   CONVERSATION_KEY,
   MAX_LISTED_CONVERSATIONS,
@@ -410,6 +414,14 @@ export class BotDurableAuthority<Snapshot> {
    * Makes the durably queued run the active one, recomputing the history it
    * starts from: the Turn it waited behind appended events, and the queued
    * Turn's model request derives from everything that is durable now.
+   *
+   * The Composition pin is recomputed here for the same reason. A queued Turn
+   * is admitted but has not started, and "an in-flight Turn keeps its pinned
+   * implementation" is about a Turn that is running, not one that is waiting.
+   * The Turn ahead of it can author a Package or follow a deployment while it
+   * waits, and pinning what the pointer said at admission ran the queued Turn
+   * without the member that was just added — the tool the Bot had told the
+   * person it had built.
    */
   private async promoteQueuedRun(runId: string): Promise<
     | "not-queued"
@@ -459,9 +471,18 @@ export class BotDurableAuthority<Snapshot> {
       // repair applies before this Turn starts on it.
       const repaired = repairedSessionLogV1(run.sessionId, storedEvents);
       const latestEvents = repaired ?? storedEvents;
+      // The pointer is materialized at admission, so it is there; a Bot whose
+      // record somehow is not keeps the generation it was admitted under
+      // rather than failing a Turn it is owed.
+      const pointer = await transaction.get<unknown>(COMPOSITION_CURRENT_KEY);
+      const compositionGenerationId =
+        pointer === undefined
+          ? run.compositionGenerationId
+          : decodeCompositionPinV1(pointer).generationId;
       const promoted = this.codec.require({
         ...run,
         phase: "admitted",
+        compositionGenerationId,
         previousEventCount: latestEvents.length,
         ...storedRunEventFieldsV2(latestEvents.length, []),
       } satisfies StoredRunV1<Snapshot>);

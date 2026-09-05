@@ -13,20 +13,32 @@
  * consumes, from the same manifest, so the list that is checked and the list
  * that is deployed cannot drift apart.
  *
+ * `revoke <NAME>` deletes one secret from the deployed Worker. It exists
+ * because the deploy cannot: `--secrets-file` is additive, so dropping a name
+ * from the production environment stops releases updating that secret and
+ * leaves the value production is running on live and authorized. Revocation
+ * is a deliberate act by an operator, never a side effect of a release, and
+ * the release workflow never runs this command.
+ *
  *   bun scripts/check-production-secrets.ts check [--live]
  *   bun scripts/check-production-secrets.ts write-secrets-file <path>
+ *   bun scripts/check-production-secrets.ts revoke <NAME>
  */
 import { writeFileSync } from "node:fs";
 import {
+  REQUIRED_PRODUCTION_SECRETS_V1,
   deployedSecretNamesV1,
   productionSecretsReportV1,
 } from "../apps/cloudflare/src/production-secrets.js";
+
+const workerDirectory = new URL("../apps/cloudflare/", import.meta.url)
+  .pathname;
 
 /** The secret names the deployed Worker holds, or undefined if unreadable. */
 async function liveSecretNames(): Promise<string[] | undefined> {
   const listed = Bun.spawnSync({
     cmd: ["bunx", "wrangler", "secret", "list"],
-    cwd: new URL("../apps/cloudflare/", import.meta.url).pathname,
+    cwd: workerDirectory,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -56,6 +68,7 @@ async function check(live: boolean): Promise<number> {
     process.env,
     live ? await liveSecretNames() : undefined,
   );
+  for (const notice of report.notices) console.log(notice);
   for (const warning of report.warnings) {
     console.log(
       process.env.GITHUB_ACTIONS
@@ -96,6 +109,41 @@ function writeSecretsFile(path: string): number {
   return 0;
 }
 
+/**
+ * Delete one secret from the deployed Worker.
+ *
+ * The only way a value stops being live. A required name is refused: deleting
+ * it takes production down, and the operator who genuinely means to do that
+ * can reach for wrangler directly. Everything else — a retired optional key, a
+ * door left open by hand, a name nobody claims — is deleted here, named in the
+ * output so the act is on the record. The name is not the value; nothing
+ * secret is printed.
+ */
+function revoke(name: string): number {
+  if (REQUIRED_PRODUCTION_SECRETS_V1.some((secret) => secret.name === name)) {
+    console.error(
+      `${name} is required in production: ${REQUIRED_PRODUCTION_SECRETS_V1.find((secret) => secret.name === name)?.why} Refusing to revoke it.`,
+    );
+    return 1;
+  }
+  console.log(`Deleting ${name} from the deployed Worker…`);
+  const deleted = Bun.spawnSync({
+    cmd: ["bunx", "wrangler", "secret", "delete", name],
+    cwd: workerDirectory,
+    stdout: "inherit",
+    stderr: "inherit",
+    stdin: "inherit",
+  });
+  if (deleted.exitCode !== 0) {
+    console.error(`Could not delete ${name}; it is still live.`);
+    return deleted.exitCode === null ? 1 : deleted.exitCode;
+  }
+  console.log(
+    `${name} is deleted. Remove it from the production environment and from the manifest if it is named there, so no release puts it back.`,
+  );
+  return 0;
+}
+
 const [command, ...rest] = process.argv.slice(2);
 if (command === "check") {
   process.exit(await check(rest.includes("--live")));
@@ -106,9 +154,16 @@ if (command === "check") {
     process.exit(1);
   }
   process.exit(writeSecretsFile(path));
+} else if (command === "revoke") {
+  const name = rest[0];
+  if (!name) {
+    console.error("revoke needs the name of one secret");
+    process.exit(1);
+  }
+  process.exit(revoke(name));
 } else {
   console.error(
-    "usage: check-production-secrets.ts check [--live] | write-secrets-file <path>",
+    "usage: check-production-secrets.ts check [--live] | write-secrets-file <path> | revoke <NAME>",
   );
   process.exit(1);
 }

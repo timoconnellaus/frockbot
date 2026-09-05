@@ -5,14 +5,19 @@
  * With no model Package enabled the surface used to be one sentence in a box
  * at the top of a full-height drawer — no statement of what was running, and
  * no way to act on the advice it gave. The platform always has an answer to
- * "which model is this", so the surface leads with it, and the one thing a
- * User can do from here is a button rather than the name of another surface.
+ * "which model is this", so the surface leads with it, and the way on is a
+ * button rather than the name of another surface.
+ *
+ * What it does not do is make the decision itself. Turning a Package on is
+ * Plugins' to own and every control has exactly one home (AGENTS.md,
+ * "Settings surfaces"), so this surface says why there is nothing to choose
+ * from and opens the surface where that is settled.
  */
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { UiAnchor, UiButton } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
-import { computed, inject, onMounted, ref } from "vue";
+import { computed, inject, onMounted } from "vue";
 import {
   isModelProviderPackage,
   isPackageInstalled,
@@ -54,33 +59,33 @@ const chooserInstalled = computed(() =>
     : false,
 );
 
-const enabling = ref(false);
+/** What this surface can offer once it has said why it is empty. */
+const chooserName = computed(
+  () => chooser.value?.displayName ?? "Custom models",
+);
 
 /**
- * Turn the chooser on from here. Enablement's home is Plugins, and this is
- * that same command rather than a second one: a Package this surface is about
- * is worth one press where the User is already reading about it. A Package
- * that is not installed at all is an install decision, which belongs on
- * Plugins, so that case opens Plugins instead.
+ * Why the provider choices are not here, in the words of the Package that
+ * would bring them.
+ *
+ * A Package that is installed but off is a switch to flip; one that is not
+ * installed yet is an addition to make. Both decisions are Plugins', and this
+ * surface only says which one is waiting there.
  */
-async function enableChooser(): Promise<void> {
-  const item = chooser.value;
-  if (!item || !chooserInstalled.value) {
-    surfaces.open("plugins");
-    return;
-  }
-  enabling.value = true;
-  try {
-    await web.value.setPackageEnabled(item.packageId, true);
-    await web.value.loadUserSettings();
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error
-        ? error.message
-        : `Could not turn on ${item.displayName}`;
-  } finally {
-    enabling.value = false;
-  }
+const reason = computed(() =>
+  chooserInstalled.value
+    ? `${chooserName.value} is installed but turned off, so there are no providers or models to choose from here.`
+    : `${chooserName.value} is not installed, so there are no providers or models to choose from here.`,
+);
+
+/**
+ * Enablement's home is Plugins, and a control has exactly one home
+ * (AGENTS.md, "Settings surfaces"). This surface used to run the enable
+ * command itself, which made the same decision available in two places; it
+ * now explains what is missing and opens the surface that owns the decision.
+ */
+function openPlugins(): void {
+  surfaces.open("plugins");
 }
 
 onMounted(async () => {
@@ -115,17 +120,12 @@ onMounted(async () => {
         FrockBot picks the model for every Bot you own and keeps it working, so
         there is nothing to set up.
       </p>
+      <p>{{ reason }}</p>
       <p>
-        Turn on {{ chooser?.displayName ?? "Custom models" }} to connect your
-        own provider and choose the model yourself.
+        Turning {{ chooserName }} on is done in Plugins, where every plugin is
+        added and switched on or off.
       </p>
-      <UiButton variant="primary" :disabled="enabling" @click="enableChooser">
-        <template v-if="enabling">Turning on…</template>
-        <template v-else-if="chooserInstalled">
-          Turn on {{ chooser?.displayName ?? "Custom models" }}
-        </template>
-        <template v-else>Open Plugins</template>
-      </UiButton>
+      <UiButton variant="primary" @click="openPlugins"> Open Plugins </UiButton>
     </section>
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}

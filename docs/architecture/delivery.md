@@ -10,7 +10,17 @@ Opening a PR or pushing a version tag starts an obligation to watch it with `bun
 
 The release workflow uses the manifest twice. `bun scripts/check-production-secrets.ts check` runs in the deploy job's validation step, before anything is built, and fails naming the missing secret and what it costs. `check --live` runs immediately before `wrangler deploy`, adding a comparison against the deployed Worker's own secret list, and `write-secrets-file` then writes the JSON that `--secrets-file` consumes — so the list that is checked and the list that is deployed are the same list.
 
-Two facts make this necessary. `wrangler deploy --secrets-file` **replaces the Worker's whole secret set**, so a secret set by hand with `wrangler secret put`, and not named in the manifest and in the deploy step's `env:` block, is deleted by the next release. And a secret the code requires but production never had fails silently at the feature, not at the deploy: `APPLET_VIEWER_SECRET` was set in every test environment and in none of production, so every published Applet answered 503 from the day the Applet authority shipped until 2026-09-05.
+Two facts make this necessary. A secret the code requires but production never had fails silently at the feature, not at the deploy: `APPLET_VIEWER_SECRET` was set in every test environment and in none of production, so every published Applet answered 503 from the day the Applet authority shipped until 2026-09-05. And a release only ever adds to what production holds.
+
+### A release never revokes a secret
+
+`wrangler deploy --secrets-file` is **additive**: it writes the names the file carries and leaves every other secret the Worker holds exactly as it is ("omitted secrets will not be deleted", `wrangler deploy --help`, 4.93). Three consequences, all of them operational:
+
+- **Removing a name from the GitHub production environment does not revoke it.** Releases stop updating that secret; the value production is already running on stays live and stays authorized. An operator who deletes `COMPOSIO_API_KEY` intending to cut Composio off has changed nothing until they revoke it.
+- **Revocation is its own deliberate act**: `bun scripts/check-production-secrets.ts revoke <NAME>` deletes one secret from the deployed Worker with `wrangler secret delete`. The release workflow never runs it, and it refuses a required name. Remove the name from the production environment and from the manifest as well, or the next release puts it back.
+- **A secret set by hand survives every release**, so `check --live` reports it: `check --live` prints what the deploy actually does — what it adds, what it overwrites, and what it leaves untouched — and warns, without claiming a deletion, about each live secret this release does not carry.
+
+`check --live` fails the release when the deployed Worker holds a setting the manifest marks as one production must never have (`ALLOW_DEVELOPMENT_AUTH`, `WORKSPACE_SEED_TOKEN`, and the other harness doors). No deploy will close such a door, so the gate refuses to ship over the top of it until an operator revokes it.
 
 Adding a setting to the Worker's `Env` interface without classifying it in the manifest fails `apps/cloudflare/src/production-secrets.test.ts`, which also checks that the deploy step's `env:` block carries every deployed name and that the check runs before the deploy.
 

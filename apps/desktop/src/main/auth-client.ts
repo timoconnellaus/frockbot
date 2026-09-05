@@ -10,6 +10,7 @@ import {
   decodeDesktopApiRequest,
   decodeDesktopExternalAuthorizationRequest,
   decodeExternalAuthorizationUrl,
+  desktopApiResponseV1,
   type DesktopAuthEventV1,
   type DesktopAuthUserV1,
   type DesktopApiResponse,
@@ -253,12 +254,7 @@ export class ElectronDesktopAuthCapability extends DesktopAuthCapability {
         body: decodedRequest.body,
         redirect: "error",
       });
-      return {
-        schemaVersion: 1,
-        status: response.status,
-        contentType: response.headers.get("content-type"),
-        body: await response.text(),
-      } satisfies DesktopApiResponse;
+      return desktopApiResponseV1(response, await response.text());
     };
 
     const authorizationHandler = async (
