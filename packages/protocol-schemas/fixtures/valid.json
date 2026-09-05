@@ -896,7 +896,8 @@
       "sectionId": "profile",
       "values": {
         "name": "Tim"
-      }
+      },
+      "ownerId": "tim"
     }
   },
   {

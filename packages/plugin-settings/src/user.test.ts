@@ -1998,6 +1998,7 @@ describe("provider choice is one durable User decision", () => {
       commandId: "choose-provider",
       expectedRevision: 4,
       sectionId: "provider.provider",
+      ownerId: "tim",
       values: {},
     };
     const first = await owner().changeSettings("tim", "models", command);
@@ -2027,6 +2028,7 @@ describe("provider choice is one durable User decision", () => {
       commandId: "choose-broken",
       expectedRevision: 0,
       sectionId: "provider.provider",
+      ownerId: "tim",
       values: {},
     };
     const first = await owner().changeSettings("tim", "models", command);

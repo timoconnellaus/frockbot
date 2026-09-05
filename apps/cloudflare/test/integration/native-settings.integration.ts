@@ -31,6 +31,7 @@ test("browser and native Settings share one owner, revision, pending identity an
     commandId: "saved-profile",
     expectedRevision: initial.revision,
     sectionId: "profile",
+    ownerId: userId,
     values: { name: "Tim" },
   });
   const browser = await read(await asUser(userId, "/api/settings/application"));
@@ -42,8 +43,12 @@ test("browser and native Settings share one owner, revision, pending identity an
     commandId: "native-profile",
     expectedRevision: browser.revision,
     sectionId: "profile",
+    ownerId: userId,
     values: { name: "Tim", email: "tim@example.test" },
   };
+  // A retained save from a previous login cannot write under the next session.
+  expect((await native("/api/settings/application", { ...command, ownerId: "another-user" })).status).toBe(403);
+  expect(await read(await native("/api/settings/application"))).toEqual(browser);
   const receipt = decodeProtocol(
     "SettingsReceipt",
     await (await native("/api/settings/application", command)).json(),
@@ -76,6 +81,7 @@ test("browser and native Settings share one owner, revision, pending identity an
     commandId: "choose-ollama",
     expectedRevision: models.revision,
     sectionId: "provider.provider-ollama-cloud",
+    ownerId: userId,
     values: {},
   };
   expect(

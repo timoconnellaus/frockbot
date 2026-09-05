@@ -1047,6 +1047,7 @@ export function createGateway(dependencies: GatewayDependencies) {
         } catch {
           return jsonError(400, "Invalid settings command");
         }
+        if (command.ownerId !== userId) return jsonError(403, "Settings belong to another account.");
         return Response.json(
           decodeOperationReceiptV1(
             await owner.changeSettings({

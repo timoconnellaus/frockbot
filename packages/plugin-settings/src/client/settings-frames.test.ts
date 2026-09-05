@@ -1,3 +1,4 @@
+import { reactive } from "vue";
 import { expect, test } from "bun:test";
 import type {
   SettingsChangeCommand,
@@ -25,6 +26,7 @@ const command: SettingsChangeCommand = {
   commandId: "save-1",
   expectedRevision: 1,
   sectionId: "profile",
+  ownerId: "tim",
   values: { name: "Tim" },
 };
 const frame: SettingsFrame = {
@@ -107,4 +109,36 @@ test("wrong receipts remain pending, owner changes fence in-flight reads, unavai
       command,
     ),
   ).rejects.toThrow("Update FrockBot");
+});
+
+test("reactive model selections and retained commands cross the JSON seam", async () => {
+  const store = new Store();
+  const sent: SettingsChangeCommand[] = [];
+  const client = createSettingsFrameClient(
+    {
+      readSettingsFrame: async () => frame,
+      changeSettings: async (_, value) => {
+        sent.push(value);
+        return {
+          schemaVersion: 1,
+          commandId: value.commandId,
+          status: "applied",
+          revision: 2,
+        };
+      },
+    },
+    () => "tim",
+    store,
+  );
+  const model = reactive({ connectionId: "work", providerModelId: "model-1" });
+  const selected = reactive({
+    ...command,
+    sectionId: "model",
+    values: { "account-model": model },
+  });
+  expect(await client.save("models", selected)).toBe("applied");
+  expect(sent[0]!.values).toEqual({
+    "account-model": { connectionId: "work", providerModelId: "model-1" },
+  });
+  expect(await client.save("application", reactive(command))).toBe("applied");
 });

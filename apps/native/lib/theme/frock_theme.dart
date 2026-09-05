@@ -45,6 +45,15 @@ abstract final class FrockTheme {
     );
     return base.copyWith(
       scaffoldBackgroundColor: dark ? window : const Color(0xfffaf8fb),
+      cardTheme: CardThemeData(
+        color: dark ? raised : Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: scheme.outlineVariant),
+        ),
+      ),
       textTheme: type.copyWith(
         displaySmall: type.displaySmall?.copyWith(
           fontFamily: 'Archivo Black',

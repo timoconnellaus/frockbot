@@ -1,3 +1,4 @@
+import { decodeProtocol } from "@frockbot/protocol-schemas";
 import {
   applicationSettingsFrame,
   applicationSettingsCommand,
@@ -1040,10 +1041,13 @@ export class UserSettingsBackendContribution {
     home: "application" | "models",
     input: unknown,
   ) {
+    const requested = decodeProtocol("SettingsChangeCommand", input);
+    if (requested.ownerId !== userId)
+      throw new ConfigurationDecodeError("Settings owner mismatch");
     const command =
       home === "models"
-        ? modelsSettingsCommand(input)
-        : applicationSettingsCommand(input);
+        ? modelsSettingsCommand(requested)
+        : applicationSettingsCommand(requested);
     return this.host.storage.transaction((storage) =>
       this.applyConfigurationCommand(
         userId,
@@ -1177,10 +1181,7 @@ export class UserSettingsBackendContribution {
       await storage.put(receiptKey, { commandFingerprint, receipt });
       return receipt;
     }
-    if (
-      home === "application" &&
-      command.type === "user/set-package-settings"
-    ) {
+    if (home !== undefined && command.type === "user/set-package-settings") {
       const installed = current.packages.find(
         (pkg) => pkg.packageId === command.packageId,
       );
@@ -1192,7 +1193,8 @@ export class UserSettingsBackendContribution {
       if (
         installed?.state !== "installed" ||
         !item ||
-        packageConfigurationHomeV1(item) !== "user-settings"
+        packageConfigurationHomeV1(item) !==
+          (home === "application" ? "user-settings" : "models")
       ) {
         const receipt: OperationReceiptV1 = {
           schemaVersion: 1,

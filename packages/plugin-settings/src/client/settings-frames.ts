@@ -4,6 +4,7 @@ import {
 } from "@frockbot/client-core";
 import {
   decodeProtocol,
+  isProtocolValue,
   type SettingsChangeCommand,
   type SettingsFrame,
   type SettingsOptionsQuery,
@@ -85,11 +86,19 @@ export function createSettingsFrameClient(
     async save(home, input) {
       if (!transport.changeSettings)
         throw new Error("Update FrockBot to save Settings");
-      const command = decodeProtocol("SettingsChangeCommand", input);
+      // Vue can supply nested reactive proxies, which structuredClone refuses.
+      // Validate first, then materialize the exact JSON sent over the wire.
+      if (!isProtocolValue("SettingsChangeCommand", input))
+        throw new Error("Invalid settings command");
+      const command = decodeProtocol(
+        "SettingsChangeCommand",
+        JSON.parse(JSON.stringify(input)),
+      );
       const pending = this.pending(home);
       if (pending && JSON.stringify(pending) !== JSON.stringify(command))
         throw new Error("Check the pending save first");
       const id = owner();
+      if (command.ownerId !== id) throw new Error("Settings owner mismatch");
       const commandKey = key(home);
       store.setItem(commandKey, JSON.stringify(command));
       try {

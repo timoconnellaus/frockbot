@@ -72,6 +72,7 @@ function save(
     schemaVersion: 1,
     commandId: crypto.randomUUID(),
     expectedRevision: frame.value.revision,
+    ownerId: frame.value.ownerId,
     sectionId,
     values,
     ...(unset.length ? { unset } : {}),

@@ -84,6 +84,7 @@ class SettingsController extends ChangeNotifier {
       'commandId': randomId(),
       'expectedRevision': frame!.revision,
       'sectionId': sectionId,
+      'ownerId': userId,
       'values': values,
       if (unset.isNotEmpty) 'unset': unset,
     });
@@ -98,6 +99,9 @@ class SettingsController extends ChangeNotifier {
     final command = pending!;
     var applied = false;
     try {
+      if (command.ownerId.value != userId) {
+        throw const FormatException('Settings owner mismatch');
+      }
       // Persist before dispatch, and keep the same id through loss of the reply.
       await store.write(_key, jsonEncode(command.toJson()));
       final receipt =

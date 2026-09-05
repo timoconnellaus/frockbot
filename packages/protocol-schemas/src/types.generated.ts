@@ -606,6 +606,7 @@ export type SettingsChangeCommand = {
     [key: string]: Json;
   };
   unset?: Array<Identifier>;
+  ownerId: Identifier;
 };
 export type SettingsReceipt =
   | {

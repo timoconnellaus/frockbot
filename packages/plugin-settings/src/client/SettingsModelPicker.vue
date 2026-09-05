@@ -75,85 +75,91 @@ function choose(choice: SettingChoice) {
 onBeforeUnmount(close);
 </script>
 <template>
-  <UiButton type="button" :disabled="disabled" @click="open">{{
-    label
-  }}</UiButton>
-  <dialog ref="dialog" aria-labelledby="model-picker-title" @cancel="close">
-    <div class="picker-heading">
-      <h3 id="model-picker-title">Choose a model</h3>
-      <UiButton type="button" @click="close">Done</UiButton>
-    </div>
-    <label class="search-label" for="settings-model-search"
-      >Search models</label
-    >
-    <input
-      id="settings-model-search"
-      v-model="query"
-      type="search"
-      maxlength="100"
-      autofocus
-      @input="search"
-    />
-    <div class="picker-results" :aria-busy="busy">
-      <div
-        v-if="busy"
-        class="picker-loading"
-        role="status"
-        aria-label="Loading models"
-      >
-        <span v-for="i in 5" :key="i" />
+  <UiButton
+    type="button"
+    :disabled="disabled"
+    :aria-label="`Model: ${label}`"
+    @click="open"
+    >{{ label }}</UiButton
+  >
+  <Teleport to="body">
+    <dialog ref="dialog" aria-labelledby="model-picker-title" @cancel="close">
+      <div class="picker-heading">
+        <h3 id="model-picker-title">Choose a model</h3>
+        <UiButton type="button" @click="close">Done</UiButton>
       </div>
-      <div v-else-if="failed" role="alert" class="picker-empty">
-        <p>
-          Models couldn’t load. Check your connection and try again. If Settings
-          changed, return to Models and refresh.
+      <label class="search-label" for="settings-model-search"
+        >Search models</label
+      >
+      <input
+        id="settings-model-search"
+        v-model="query"
+        type="search"
+        maxlength="100"
+        autofocus
+        @input="search"
+      />
+      <div class="picker-results" :aria-busy="busy">
+        <div
+          v-if="busy"
+          class="picker-loading"
+          role="status"
+          aria-label="Loading models"
+        >
+          <span v-for="i in 5" :key="i" />
+        </div>
+        <div v-else-if="failed" role="alert" class="picker-empty">
+          <p>
+            Models couldn’t load. Check your connection and try again. If
+            Settings changed, return to Models and refresh.
+          </p>
+          <UiButton type="button" @click="load">Try again</UiButton>
+        </div>
+        <p v-else-if="!page?.items.length" class="picker-empty">
+          No matching models. Try another name, or connect a provider on Models.
         </p>
-        <UiButton type="button" @click="load">Try again</UiButton>
-      </div>
-      <p v-else-if="!page?.items.length" class="picker-empty">
-        No matching models. Try another name, or connect a provider on Models.
-      </p>
-      <ul v-else aria-label="Available models">
-        <li v-for="choice in page.items" :key="JSON.stringify(choice.value)">
-          <button
-            type="button"
-            :aria-pressed="
-              JSON.stringify(value) === JSON.stringify(choice.value)
-            "
-            @click="choose(choice)"
-          >
-            <span>{{ choice.label }}</span
-            ><span
-              v-if="JSON.stringify(value) === JSON.stringify(choice.value)"
-              aria-hidden="true"
-              >✓</span
+        <ul v-else aria-label="Available models">
+          <li v-for="choice in page.items" :key="JSON.stringify(choice.value)">
+            <button
+              type="button"
+              :aria-pressed="
+                JSON.stringify(value) === JSON.stringify(choice.value)
+              "
+              @click="choose(choice)"
             >
-          </button>
-        </li>
-      </ul>
-    </div>
-    <div class="picker-pages">
-      <UiButton
-        type="button"
-        :disabled="busy || !previous.length"
-        @click="
-          cursor = previous.pop();
-          load();
-        "
-        >Previous</UiButton
-      >
-      <UiButton
-        type="button"
-        :disabled="busy || failed || page?.nextCursor === undefined"
-        @click="
-          previous.push(cursor);
-          cursor = page?.nextCursor;
-          load();
-        "
-        >More models</UiButton
-      >
-    </div>
-  </dialog>
+              <span>{{ choice.label }}</span
+              ><span
+                v-if="JSON.stringify(value) === JSON.stringify(choice.value)"
+                aria-hidden="true"
+                >✓</span
+              >
+            </button>
+          </li>
+        </ul>
+      </div>
+      <div class="picker-pages">
+        <UiButton
+          type="button"
+          :disabled="busy || !previous.length"
+          @click="
+            cursor = previous.pop();
+            load();
+          "
+          >Previous</UiButton
+        >
+        <UiButton
+          type="button"
+          :disabled="busy || failed || page?.nextCursor === undefined"
+          @click="
+            previous.push(cursor);
+            cursor = page?.nextCursor;
+            load();
+          "
+          >More models</UiButton
+        >
+      </div>
+    </dialog>
+  </Teleport>
 </template>
 <style scoped>
 dialog {

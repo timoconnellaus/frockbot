@@ -37,6 +37,7 @@ class LocalSettingsApi extends NativeApi {
         path.contains('#')) {
       throw const FormatException('Invalid local route');
     }
+    stderr.writeln('Design settings request: $path');
     final request = await client.openUrl(
       body == null ? 'GET' : 'POST',
       origin.resolve(path),
@@ -46,6 +47,7 @@ class LocalSettingsApi extends NativeApi {
     request.headers.contentType = ContentType.json;
     if (body != null) request.write(jsonEncode(body));
     final response = await request.close().timeout(const Duration(seconds: 10));
+    stderr.writeln('Design settings response: ${response.statusCode}');
     if (response.statusCode >= 300) {
       await response.drain<void>();
       throw RequestFailure('Local worker refused request', response.statusCode);
@@ -59,10 +61,23 @@ class LocalSettingsApi extends NativeApi {
   }
 }
 
+class DesignStore implements LocalStore {
+  final delegate = ProtectedStore();
+  @override
+  Future<String?> read(String key) async {
+    try { return await delegate.read(key); }
+    catch (error) { stderr.writeln('Design storage read: ${error.runtimeType}'); rethrow; }
+  }
+  @override
+  Future<void> write(String key, String value) => delegate.write(key, value);
+  @override
+  Future<void> delete(String key) => delegate.delete(key);
+}
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  final store = ProtectedStore();
+  final store = DesignStore();
   final api = LocalSettingsApi(
     store,
     Uri.parse(const String.fromEnvironment('NATIVE_TEST_ORIGIN')),

@@ -2,8 +2,10 @@ import { expect, test } from "bun:test";
 import type { UserSettingsViewV1 } from "@frockbot/configuration-core";
 import {
   applicationSettingsFrame,
+  applicationSettingsCommand,
   modelSettingsOptions,
   modelsSettingsFrame,
+  modelsSettingsCommand,
 } from "./settings-frame.js";
 import type {
   AvailableUserPackage,
@@ -255,4 +257,56 @@ test("the platform binding has one Auto choice", () => {
     null,
     { connectionId: "work", providerModelId: "model-1" },
   ]);
+});
+
+test("provider knobs have one Models home and disappear while disabled", () => {
+  const user = settings(1);
+  const declared = {
+    ...provider,
+    settings: [
+      {
+        id: "limit",
+        schemaVersion: 1 as const,
+        scopes: ["user" as const],
+        schema: { type: "integer" as const, minimum: 1, maximum: 10 },
+      },
+    ],
+  };
+  user.packages[0]!.values = { limit: 4 };
+  expect(
+    modelsSettingsFrame("tim", user, [declared]).sections[1]!.fields,
+  ).toMatchObject([{ id: "limit", value: 4, canReset: true }]);
+  expect(
+    applicationSettingsFrame("tim", user, [declared]).sections,
+  ).toHaveLength(1);
+  user.packages[0]!.state = "disabled";
+  expect(
+    modelsSettingsFrame("tim", user, [declared]).sections[1]!.fields,
+  ).toEqual([]);
+  expect(user.packages[0]!.values).toEqual({ limit: 4 });
+  expect(
+    modelsSettingsCommand({
+      schemaVersion: 1,
+      commandId: "reset-limit",
+      ownerId: "tim",
+      expectedRevision: 8,
+      sectionId: "provider.provider",
+      values: {},
+      unset: ["limit"],
+    }),
+  ).toMatchObject({ type: "user/set-package-settings", unset: ["limit"] });
+});
+
+test("resetting an Application setting omits the empty patch at the owner seam", () => {
+  expect(
+    applicationSettingsCommand({
+      schemaVersion: 1,
+      ownerId: "tim",
+      commandId: "reset-application",
+      expectedRevision: 1,
+      sectionId: "package.example",
+      values: {},
+      unset: ["limit"],
+    }),
+  ).toMatchObject({ type: "user/set-package-settings", unset: ["limit"] });
 });

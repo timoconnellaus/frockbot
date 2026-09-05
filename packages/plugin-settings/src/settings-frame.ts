@@ -194,7 +194,7 @@ export function applicationSettingsCommand(
     ...meta,
     type: "user/set-package-settings",
     packageId: command.sectionId.slice(8),
-    values: command.values,
+    ...(Object.keys(command.values).length ? { values: command.values } : {}),
     ...(command.unset ? { unset: command.unset } : {}),
   });
 }
@@ -344,11 +344,32 @@ export function modelsSettingsFrame(
     const connections = settings.connections.filter(
       (connection) => connection.packageId === provider.packageId,
     );
+    let providerFields: SettingField[] = [];
+    let fieldFailure: string | undefined;
+    if (
+      installed?.state === "installed" &&
+      installed.version === provider.version
+    ) {
+      try {
+        providerFields = (provider.settings ?? [])
+          .filter(
+            (setting) =>
+              setting.scopes.includes("user") && setting.role !== "model",
+          )
+          .map((setting) => field(setting, installed.values?.[setting.id]));
+        if (providerFields.length > 32) throw new Error("Provider field limit");
+      } catch {
+        providerFields = [];
+        fieldFailure =
+          "These provider settings need a newer app. Account setup is still available.";
+      }
+    }
     sections.push({
       id: `provider.${provider.packageId}`,
       packageId: provider.packageId,
       label: provider.displayName ?? provider.packageId,
-      fields: [],
+      fields: providerFields,
+      ...(fieldFailure ? { failure: fieldFailure } : {}),
       credentialStatus: connections.some(
         (connection) => connection.state === "ready",
       )
@@ -392,9 +413,8 @@ export function modelsSettingsCommand(
     commandId: command.commandId,
     expectedRevision: command.expectedRevision,
   };
-  if (command.unset?.length)
-    throw new ConfigurationDecodeError("Invalid model command");
   if (
+    !command.unset?.length &&
     command.sectionId === "model" &&
     Object.keys(command.values).join() === "account-model"
   )
@@ -403,14 +423,19 @@ export function modelsSettingsCommand(
       type: "user/set-account-model",
       model: command.values["account-model"],
     });
-  if (
-    command.sectionId.startsWith("provider.") &&
-    Object.keys(command.values).length === 0
-  )
-    return userCommand({
-      ...meta,
-      type: "user/choose-model-provider",
-      packageId: command.sectionId.slice(9),
-    });
+  if (command.sectionId.startsWith("provider.")) {
+    const packageId = command.sectionId.slice(9);
+    return Object.keys(command.values).length === 0 && !command.unset?.length
+      ? userCommand({ ...meta, type: "user/choose-model-provider", packageId })
+      : userCommand({
+          ...meta,
+          type: "user/set-package-settings",
+          packageId,
+          ...(Object.keys(command.values).length
+            ? { values: command.values }
+            : {}),
+          ...(command.unset ? { unset: command.unset } : {}),
+        });
+  }
   throw new ConfigurationDecodeError("Unknown model section");
 }

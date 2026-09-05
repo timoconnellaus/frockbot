@@ -3116,6 +3116,9 @@
           "items": {
             "$ref": "#/$defs/Identifier"
           }
+        },
+        "ownerId": {
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -3123,7 +3126,8 @@
         "commandId",
         "expectedRevision",
         "sectionId",
-        "values"
+        "values",
+        "ownerId"
       ],
       "additionalProperties": false
     },
