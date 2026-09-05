@@ -20,6 +20,8 @@ class BotStateChannel {
   int _attempt = 0;
   bool _paused = false;
   bool _disposed = false;
+  bool _dirty = false;
+  bool _flushing = false;
   String? _cursor;
   BotStateChannel({
     required this.api,
@@ -38,6 +40,7 @@ class BotStateChannel {
     _socket = null;
     await old?.close();
     status(ConnectionState.connecting);
+    _dirty = false;
     try {
       final saved = await store.read(key);
       _cursor = wire.isProtocolValue('ObserverCursor', saved) ? saved : null;
@@ -77,10 +80,13 @@ class BotStateChannel {
                         int.parse(cursor) != int.parse(_cursor!) + 1)) {
                   throw const FormatException('Discontinuous event');
                 }
-                await invalidate();
-                if (epoch != _epoch) return;
-                await store.write(key, cursor);
+                // The cursor moves at once so the next frame checks out. It is
+                // persisted only after one refresh has applied everything up
+                // to it: a replayed backlog costs one fetch, not one per event,
+                // so `state/ready` is processed well inside its deadline.
                 _cursor = cursor;
+                _dirty = true;
+                _flush();
               })
               .catchError((Object _) {
                 _failed(epoch);
@@ -92,6 +98,33 @@ class BotStateChannel {
     } catch (_) {
       _failed(epoch);
     }
+  }
+
+  /// One refresh covers every frame that arrived while the previous one ran.
+  /// A refresh that fails tears the socket down like any other frame error;
+  /// the reconnect replays from the last persisted cursor.
+  void _flush() {
+    if (_flushing) return;
+    _flushing = true;
+    unawaited(() async {
+      try {
+        while (_dirty && !_disposed) {
+          _dirty = false;
+          final epoch = _epoch;
+          final target = _cursor;
+          try {
+            await invalidate();
+            if (epoch != _epoch || target == null) continue;
+            await store.write(key, target);
+          } catch (_) {
+            _failed(epoch);
+            return;
+          }
+        }
+      } finally {
+        _flushing = false;
+      }
+    }());
   }
 
   void _failed(int epoch) {

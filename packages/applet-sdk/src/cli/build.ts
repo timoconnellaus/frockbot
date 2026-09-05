@@ -89,7 +89,9 @@ function page(title: string, script: string): string {
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${title.replaceAll("<", "&lt;")}</title>`,
-    "<style>html,body{margin:0;height:100%;background:var(--frockbot-surface,#ffffff)}</style>",
+    // The root gets a definite height so the kit's own root (min-height: 100%)
+    // fills the page; without it an Applet ends where its content ends.
+    "<style>html,body,#applet-root{margin:0;height:100%;background:var(--frockbot-surface,#ffffff)}</style>",
     "</head>",
     "<body>",
     '<div id="applet-root"></div>',
