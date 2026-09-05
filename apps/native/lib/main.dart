@@ -6,6 +6,8 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 
 import 'client/auth.dart';
+import 'auth/sign_in_page.dart';
+import 'theme/frock_theme.dart';
 import 'acceptance_metrics.dart';
 import 'client/chat_controller.dart';
 import 'client/state_channel.dart';
@@ -35,6 +37,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
   String? userId;
   String? error;
   bool busy = true;
+  bool awaitingBrowser = false;
   List<wire.BotRegistration> bots = [];
   wire.BotRegistration? selected;
   @override
@@ -149,6 +152,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
     });
     try {
       await auth.start();
+      if (mounted) setState(() => awaitingBrowser = true);
     } catch (failure) {
       if (mounted) {
         setState(() {
@@ -180,75 +184,20 @@ class _FrockBotAppState extends State<FrockBotApp> {
     title: 'FrockBot',
     navigatorKey: navigatorKey,
     debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: const Color(0xff1f1e24),
-      colorScheme:
-          ColorScheme.fromSeed(
-            seedColor: const Color(0xffec386b),
-            brightness: Brightness.dark,
-          ).copyWith(
-            primary: const Color(0xffec386b),
-            surface: const Color(0xff211f26),
-          ),
-      inputDecorationTheme: const InputDecorationTheme(
-        border: OutlineInputBorder(),
-      ),
-    ),
+    theme: FrockTheme.theme(Brightness.light),
+    darkTheme: FrockTheme.theme(Brightness.dark),
+    themeMode: ThemeMode.dark,
     home: Builder(
       builder: (context) {
         if (userId == null) {
-          return Scaffold(
-            appBar: AppBar(title: const Text('FrockBot')),
-            body: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 440),
-                child: Padding(
-                  padding: const EdgeInsets.all(28),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Icon(Icons.auto_awesome_rounded, size: 56),
-                      const SizedBox(height: 24),
-                      const Text(
-                        'Your Bots, with you.',
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      const Text('Sign in to pick up your conversations.'),
-                      const SizedBox(height: 28),
-                      FilledButton.icon(
-                        key: const ValueKey('sign-in'),
-                        onPressed: busy ? null : signIn,
-                        icon: const Icon(Icons.open_in_new),
-                        label: const Text('Continue with Google'),
-                      ),
-                      if (error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 16),
-                          child: Text(error!),
-                        ),
-                      const SizedBox(height: 16),
-                      TextButton(
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => FormPreview(api: api, store: store),
-                          ),
-                        ),
-                        child: const Text('Open form preview'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          return SignInPage(
+            busy: busy,
+            awaitingBrowser: awaitingBrowser,
+            error: error,
+            onSignIn: signIn,
           );
         }
+
         final directory = ListView(
           children: [
             const Padding(
@@ -261,9 +210,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
             for (final bot in bots)
               ListTile(
                 key: ValueKey('bot-${bot.botId.value}'),
-                leading: const CircleAvatar(
-                  child: Icon(Icons.smart_toy_outlined),
-                ),
+                leading: const SheepAvatar(),
                 title: Text(bot.initialName),
                 selected: bot.botId.value == selected?.botId.value,
                 onTap: () {
@@ -318,15 +265,16 @@ class _FrockBotAppState extends State<FrockBotApp> {
                   ),
                 ),
               ),
-              IconButton(
-                tooltip: 'Form preview',
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => FormPreview(api: api, store: store),
+              if (const bool.fromEnvironment('NATIVE_ACCEPTANCE'))
+                IconButton(
+                  tooltip: 'Form preview',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => FormPreview(api: api, store: store),
+                    ),
                   ),
+                  icon: const Icon(Icons.dynamic_form_outlined),
                 ),
-                icon: const Icon(Icons.dynamic_form_outlined),
-              ),
             ],
           ),
           drawer: wide ? null : Drawer(child: SafeArea(child: directory)),

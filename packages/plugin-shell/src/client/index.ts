@@ -60,7 +60,7 @@ import {
 import { MCP_OAUTH_CONNECTION_TYPE_ID } from "@frockbot/plugin-mcp/agent";
 import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
-import { knownFailureCopyV1 } from "../run-failure-copy.js";
+import { failureNoticeV1, knownFailureCopyV1 } from "../run-failure-copy.js";
 import {
   ClientTurnRefusedErrorV1,
   type ClientTurnRefusalReasonV1,
@@ -363,6 +363,27 @@ function sendMessages(run: ClientRun): WebChatMessage[] {
 }
 
 /**
+ * Why a failed Turn ended where it did, and the way out of it.
+ *
+ * Every one of these sentences used to end "Try again." with nothing to press,
+ * so the person's only way to try again was to retype what they had already
+ * sent. The invitation comes off the sentence and becomes the action beside
+ * it, which sends the same message as a new Turn. An ending that trying again
+ * cannot repair — the person stopped it, or the Bot declined — keeps its whole
+ * sentence and offers nothing.
+ */
+function failedNotice(
+  run: ClientRun,
+  notice: (primary?: string) => string | undefined,
+): { notice?: string; retry?: "resend-turn" } {
+  const failure = failureNoticeV1(knownFailureCopyV1(run.failure));
+  return {
+    ...(notice(failure.notice) ? { notice: notice(failure.notice) } : {}),
+    ...(failure.retry ? { retry: "resend-turn" as const } : {}),
+  };
+}
+
+/**
  * The Turn's own line: the model's words, why the Turn ended where it did,
  * the tools it ran and the subagents it dispatched. It closes the run, under
  * whatever the Turn had already sent.
@@ -464,7 +485,7 @@ function assistantMessage(
       // wire, so this keeps whatever that chose — the model-deadline copy says
       // something the outcome alone cannot — and falls back to the same line a
       // reply-less failure gets.
-      notice: notice(knownFailureCopyV1(run.failure)),
+      ...failedNotice(run, notice),
       status: "error",
       tools: toolsFrom(run.events),
       sends: [],
@@ -482,7 +503,7 @@ function assistantMessage(
     // Why the Turn ends there, under whatever it had already said — never as
     // the bubble's own text, which reads as the Bot saying it.
     ...(run.status === "failed"
-      ? { notice: notice(knownFailureCopyV1(run.failure)) }
+      ? failedNotice(run, notice)
       : syncNotice
         ? { notice: syncNotice }
         : {}),
@@ -2797,7 +2818,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.messages,
           result.runId,
           [...sendMessages(settled), assistantMessage(settled, undefined)],
-          optimisticAt,
+          // The Turn's own timestamp, not this tab's clock. By the time the
+          // POST answers, a poll has usually replaced the user line's
+          // optimistic stamp with the run's durable `admittedAt` — which is a
+          // round trip and a clock skew later than the moment the send began.
+          // Stamping the reply with the earlier moment sorted it above the
+          // message it answered, and above every message sent after it.
+          turnStampV1(web.value.messages, result.runId) ?? optimisticAt,
         );
         try {
           await deliverNotifications(botId, generation);
@@ -3363,6 +3390,22 @@ function replaceTurnMessages(
   const stamp = at ?? existingAt;
   if (stamp) for (const message of replacements) message.at = stamp;
   messages.splice(start, 0, ...replacements);
+}
+
+/**
+ * When a Turn happened, as the thread reckons it: the timestamp on the message
+ * the person sent.
+ *
+ * Every line of a Turn is stamped with it, so the Turn moves through the
+ * thread as one thing however the clocks disagree — see `transcript-order.ts`.
+ */
+export function turnStampV1(
+  messages: readonly WebChatMessage[],
+  runId: string,
+): string | undefined {
+  return messages.find(
+    (message) => message.runId === runId && message.role === "user",
+  )?.at;
 }
 
 /** Takes back both optimistic lines of a send the Bot never admitted. */

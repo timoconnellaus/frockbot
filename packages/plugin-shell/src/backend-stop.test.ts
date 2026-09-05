@@ -13,6 +13,7 @@ import {
   type StoredRun,
 } from "./backend-contracts.js";
 import { planInterruptedRunRecoveryV1 } from "./backend-recovery.js";
+import { SessionEventLog } from "@frockbot/kernel-do";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();
@@ -193,6 +194,38 @@ function stopReceiptKeys(storage: MemoryStorage): string[] {
 }
 
 describe("durable Stop", () => {
+  /*
+   * A Turn stopped mid-sentence keeps what it said. The run record stores its
+   * journal by range rather than inline, so the receipt has to hydrate it: the
+   * production sweep on v0.3.31 pressed Stop on a long reply and watched every
+   * word of it disappear, leaving "You stopped this." over an empty bubble.
+   */
+  test("keeps the words a stopped Turn had already streamed", async () => {
+    const streamed = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "assistant/chunk",
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: "Sheep farming begins with",
+      },
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+    const { storage, contribution } = await fixture(
+      storedRun({
+        events: [],
+        eventRange: { startSeq: 0, endSeq: streamed.length },
+      } as Partial<StoredRun>),
+    );
+    await new SessionEventLog(storage).rewrite(turn.sessionId, streamed);
+
+    const receipt = await contribution.stopRun(identity, stopCommand());
+
+    expect(receipt.run.partialText).toBe("Sheep farming begins with");
+  });
+
   test("records durable intent and an idempotency receipt", async () => {
     const { storage, contribution } = await fixture();
 

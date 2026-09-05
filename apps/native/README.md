@@ -26,7 +26,7 @@ Build with `flutter build macos --release`. The app is configured for Apple team
 
 ## Backend and auth
 
-No deployment enables the prototype by default. `NATIVE_SLICE_2_AUTH=android` enables Android qualification routes; `android,macos` additionally permits the macOS return after its signing gate passes. Deploying the routes and their well-known associations to `https://bot.frockbot.com` is required before device auth. The anonymous fallback bootstrap is on `https://ui.bot.frockbot.com`.
+Production enables Android qualification transport with `NATIVE_SLICE_2_AUTH=android`; `android,macos` additionally permits the macOS return after its signing gate passes. Wait for the orchestrator’s release and HTTP 200 from the association endpoint before device auth. See the [rollout ledger](../../docs/plans/native-acceptance-2026-09-05-slice3.md). The anonymous fallback bootstrap is on `https://ui.bot.frockbot.com`.
 
 The app persists PKCE state/verifier before opening the system browser. The gateway uses the existing Better Auth Google web client, returns to an exact HTTPS app link, and exchanges the single-use code under the User Durable Object. The seven-day native session is OS-protected and bound to its client protocol/version/catalog hello. Logout revokes it. Send and Stop persist stable ids before dispatch; uncertain sends use lookup then an admission fence; the Bot state channel advances a protected cursor only after the corresponding projection is applied. Disconnect/disposal does not cancel work.
 

@@ -134,7 +134,8 @@ import {
   type SetSignupsCommandV1,
 } from "@frockbot/plugin-admin/shared";
 import { gatewayAuth } from "./auth.js";
-import { createNativeAuth, NATIVE_RETURN_ANDROID } from "./native-auth.js";
+import { createNativeAuth, nativeReturnUris } from "./native-auth.js";
+import { accountIsAdmitted } from "./account-admission.js";
 import { isDeploymentAdminV1 } from "./admin-identities.js";
 import type { DebugGatewaySurface } from "./debug.js";
 import type { BotDebugQueryV1 } from "@frockbot/plugin-shell/debug-protocol";
@@ -2205,20 +2206,43 @@ export default {
           >;
           return rpc.saveNativeForm({ schemaVersion: 1, userId, command });
         },
-        ...(["android", "android,macos"].includes(
-          env.NATIVE_SLICE_2_AUTH ?? "",
-        ) && env.BETTER_AUTH_SECRET
+        ...(nativeReturnUris(env.NATIVE_SLICE_2_AUTH).length > 0 &&
+        env.BETTER_AUTH_SECRET
           ? {
               nativeAuth: createNativeAuth({
                 secret: env.BETTER_AUTH_SECRET,
                 auth: gatewayAuth(env),
-                returnUris:
-                  env.NATIVE_SLICE_2_AUTH === "android,macos"
-                    ? [
-                        NATIVE_RETURN_ANDROID,
-                        "https://bot.frockbot.com/native/return/macos",
-                      ]
-                    : [NATIVE_RETURN_ANDROID],
+                returnUris: nativeReturnUris(env.NATIVE_SLICE_2_AUTH),
+                canIssueSession: async (userId) => {
+                  const identity = await env.AUTH_DB.prepare(
+                    'select "id", "email" from "user" where "id" = ? limit 1',
+                  )
+                    .bind(userId)
+                    .first<{ id: string; email: string }>();
+                  if (!identity) return false;
+                  return accountIsAdmitted(
+                    userId,
+                    isDeploymentAdminV1(
+                      { ...identity, mode: "better-auth" },
+                      env.FROCKBOT_ADMIN_EMAILS,
+                    ),
+                    {
+                      userExists: (id) =>
+                        userConfigurationStub(env, id).isProvisioned({
+                          schemaVersion: 1,
+                          userId: id,
+                        }),
+                      readDeploymentPolicy: async () =>
+                        decodeDeploymentPolicyV1(
+                          rpcJsonSnapshot(
+                            await deploymentPolicyStub(env).readPolicy({
+                              schemaVersion: 1,
+                            }),
+                          ),
+                        ),
+                    },
+                  );
+                },
                 session: async (userId, operation) => {
                   const stub = env.USER_CONFIGURATIONS.get(
                     env.USER_CONFIGURATIONS.idFromName(userId),

@@ -116,12 +116,18 @@ export interface WebChatMessage {
    */
   notice?: string;
   /**
-   * The line offers to send the draft again. Set only where the client gave
-   * up on its own — it could not reach the backend — because that is the one
-   * ending the person cannot act on from the thread otherwise: their text is
-   * back in the composer, and this is the button that sends it.
+   * The way out of an ending the person cannot otherwise act on.
+   *
+   * `resend` offers to send the draft again, and is set only where the client
+   * gave up on its own — it could not reach the backend — because their text
+   * is back in the composer and this is the button that sends it.
+   *
+   * `resend-turn` sends this Turn's own message again, unchanged, as a new
+   * Turn. It stands where a reply broke after the message was admitted: the
+   * composer is empty, the message is in the thread, and retyping it was the
+   * only way to try again.
    */
-  retry?: "resend";
+  retry?: "resend" | "resend-turn";
   tools: WebToolActivity[];
   /** The typed payloads this Turn sent to the user, oldest first. */
   sends: WebSendPayload[];
