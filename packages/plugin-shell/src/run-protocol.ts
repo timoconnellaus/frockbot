@@ -23,6 +23,7 @@ import {
   type BotNotificationIntent,
   type BotTurnCompletion,
   type StoredRun,
+  type UnreadableStoredRunV1,
 } from "./backend-contracts.js";
 import {
   CLIENT_VERSION_DEGRADED_MESSAGE_V1,
@@ -1042,10 +1043,17 @@ export function projectClientTurnV1(result: BotTurnCompletion): ClientTurnV1 {
  * fail the whole transcript: `GET /turns` answered 500 for every request after
  * it, and the person's entire conversation disappeared behind one bad row. The
  * transcript keeps its shape and says which Turn it could not read.
+ *
+ * The storage decoder is strict and throws before this is ever reached, so the
+ * transcript reads through a display-only boundary that hands the undecodable
+ * record here as {@link UnreadableStoredRunV1} — the run id from the admission
+ * index plus whatever scraped strings were safe.
  */
-export function projectClientRunOrDegradedV1(run: StoredRun): ClientRunV1 {
+export function projectClientRunOrDegradedV1(
+  run: StoredRun | UnreadableStoredRunV1,
+): ClientRunV1 {
   try {
-    return projectClientRunV1(run);
+    return projectClientRunV1(run as StoredRun);
   } catch {
     const admittedAt =
       typeof run.acceptedAt === "string" &&

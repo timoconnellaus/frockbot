@@ -23,6 +23,7 @@ export {
   type StoredEffectAdmissionOutcome,
   type StoredRunPhase,
   type StoredRunStatus,
+  type UnreadableStoredRunV1,
 } from "@frockbot/kernel-do";
 
 export type StoredRun = StoredRunV1<BotSettingsViewV1>;
