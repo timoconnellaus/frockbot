@@ -8,13 +8,16 @@
 // a host binding or the kernel's own storage; a tool call routes through this
 // object into the facet; and a viewer token is scoped to one User, one Applet,
 // and one generation.
-import { env } from "cloudflare:test";
+import { env, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { createGateway } from "../src/gateway.js";
 import {
   appletStateNameV1,
   mintAppletViewerTokenV1,
   verifyAppletViewerTokenV1,
+  APPLET_FACET_NAME_V1,
+  APPLET_ROLLBACK_FACET_NAME_V1,
+  APPLET_TRIAL_KEY,
   APPLET_VIEWER_TOKEN_TTL_MS,
 } from "@frockbot/kernel-do";
 
@@ -1000,5 +1003,313 @@ describe("Applet viewer tokens", () => {
     socket.send("ping");
     expect(await echoed).toBe("A:echo:ping");
     socket.close(1000, "done");
+  });
+});
+
+const TODO_TOOLS = ["add_todo", "list_todos"];
+
+/**
+ * Cut one publish short at a chosen durable write.
+ *
+ * A Durable Object can be shut down between any two of its storage calls, and
+ * an individual call can fail on its own. Every write the object makes after
+ * the candidate's health check passes is a place a publish can stop without
+ * ever answering its caller, so this patches the object's durable surfaces —
+ * both key/value APIs, the synchronous transaction, and the facet copy — and
+ * throws at the nth of them. `evictDurableObject` supplies the other half of an
+ * interruption: nothing in memory, patches included, survives it.
+ */
+function instrumentDurableWrites(
+  state: DurableObjectState,
+  options: { cutAt?: number; breakInsideCommit?: boolean },
+): void {
+  type AnyFn = (...args: never[]) => unknown;
+  const storage = state.storage as unknown as Record<string, AnyFn> & {
+    kv: Record<string, AnyFn>;
+  };
+  const facets = state.facets as unknown as Record<string, AnyFn>;
+  const counter = { writes: 0 };
+  const instrumented = state as unknown as {
+    durableWrites: { writes: number };
+    restoreDurableWrites: () => void;
+  };
+  instrumented.durableWrites = counter;
+  const originalPut = Object.getOwnPropertyDescriptor(storage, "put");
+  const originalDelete = Object.getOwnPropertyDescriptor(storage, "delete");
+  const originalTransaction = Object.getOwnPropertyDescriptor(
+    storage,
+    "transactionSync",
+  );
+  const originalKv = Object.getOwnPropertyDescriptor(storage, "kv");
+  const originalFacets = Object.getOwnPropertyDescriptor(state, "facets");
+  const restore = (
+    target: object,
+    key: string,
+    descriptor: PropertyDescriptor | undefined,
+  ): void => {
+    if (descriptor) Object.defineProperty(target, key, descriptor);
+    else delete (target as Record<string, unknown>)[key];
+  };
+  instrumented.restoreDurableWrites = () => {
+    restore(storage, "put", originalPut);
+    restore(storage, "delete", originalDelete);
+    restore(storage, "transactionSync", originalTransaction);
+    restore(storage, "kv", originalKv);
+    restore(state, "facets", originalFacets);
+  };
+  const wrap =
+    (label: string, original: AnyFn) =>
+    (...args: never[]): unknown => {
+      counter.writes += 1;
+      if (counter.writes === options.cutAt) {
+        throw new Error(
+          `the Durable Object was interrupted before durable write ${counter.writes} (${label})`,
+        );
+      }
+      return original(...args);
+    };
+
+  const kv = storage.kv;
+  const patchedKv = {
+    ...kv,
+    get: kv.get.bind(kv),
+    list: kv.list?.bind(kv),
+    put: wrap("kv.put", kv.put.bind(kv)),
+    delete: wrap("kv.delete", kv.delete.bind(kv)),
+  };
+  Object.defineProperty(storage, "kv", {
+    configurable: true,
+    get: () => patchedKv,
+  });
+  const transactionSync = storage.transactionSync.bind(storage) as (
+    callback: () => unknown,
+  ) => unknown;
+  const guardTransaction = wrap(
+    "storage.transactionSync",
+    (() => undefined) as AnyFn,
+  ) as () => void;
+  storage.put = wrap("storage.put", storage.put.bind(storage)) as AnyFn;
+  storage.delete = wrap(
+    "storage.delete",
+    storage.delete.bind(storage),
+  ) as AnyFn;
+  storage.transactionSync = ((callback: () => unknown): unknown => {
+    guardTransaction();
+    return transactionSync(() => {
+      const result = callback();
+      if (options.breakInsideCommit) {
+        throw new Error("the Durable Object was interrupted inside the commit");
+      }
+      return result;
+    });
+  }) as AnyFn;
+  const patchedFacets = {
+    ...facets,
+    get: facets.get.bind(facets),
+    abort: facets.abort.bind(facets),
+    clone: wrap("facets.clone", facets.clone.bind(facets)),
+    delete: wrap("facets.delete", facets.delete.bind(facets)),
+  };
+  Object.defineProperty(state, "facets", {
+    configurable: true,
+    get: () => patchedFacets,
+  });
+}
+
+/**
+ * End an interruption: drop the instrumentation and, where the runtime lets go
+ * of the object, evict it so the next caller starts from durable state alone.
+ */
+async function endInterruption(
+  stub: ReturnType<typeof stateFor>,
+): Promise<void> {
+  await runInDurableObject(stub, (_instance, state) => {
+    (
+      state as unknown as { restoreDurableWrites?: () => void }
+    ).restoreDurableWrites?.();
+  });
+  // An Applet that was cut mid-mount can still hold a facet reference, which
+  // keeps the object resident. The durable state is what this test is about, so
+  // a refused eviction is not a failure, and it is not worth waiting out.
+  await Promise.race([
+    evictDurableObject(stub).catch(() => undefined),
+    new Promise((resolve) => setTimeout(resolve, 500)),
+  ]);
+}
+
+function generationIdFor(version: string): string {
+  const second = version === "A" ? "01" : version === "B" ? "02" : "03";
+  return `2026-09-05T00:00:${second}.000Z:${version}`;
+}
+
+/** How many durable writes an uninterrupted second publish makes. */
+async function countPublishWrites(): Promise<number> {
+  const applet = appletId("cutcount");
+  await publishGeneration(applet, {
+    version: "A",
+    tools: TODO_TOOLS,
+    generationId: generationIdFor("A"),
+  });
+  await invoke(applet, "add_todo", { title: "milk" });
+  const stub = stateFor(applet);
+  await runInDurableObject(stub, (_instance, state) => {
+    instrumentDurableWrites(state, {});
+  });
+  const published = await publishGeneration(applet, {
+    version: "B",
+    tools: TODO_TOOLS,
+    generationId: generationIdFor("B"),
+  });
+  expect(published.outcome).toMatchObject({ status: "active" });
+  const writes = await runInDurableObject(stub, (_instance, state) =>
+    Number(
+      (state as unknown as { durableWrites?: { writes: number } }).durableWrites
+        ?.writes ?? 0,
+    ),
+  );
+  await endInterruption(stub);
+  return writes;
+}
+
+describe("an interrupted Applet activation", () => {
+  test("leaves the Applet coherent however the publish is cut short", async () => {
+    const writes = await countPublishWrites();
+    expect(writes).toBeGreaterThan(2);
+    const cuts = [
+      ...Array.from({ length: writes }, (_value, index) => ({
+        label: `interrupted before durable write ${index + 1} of ${writes}`,
+        options: { cutAt: index + 1 },
+      })),
+      {
+        label: "interrupted inside the promotion commit",
+        options: { breakInsideCommit: true },
+      },
+    ];
+
+    for (const [index, cut] of cuts.entries()) {
+      // The suffix ends in a non-zero character: `appletId` pads with zeroes,
+      // and `cut1` and `cut10` would otherwise be the same Applet.
+      const applet = appletId(`cut${index}x`);
+      const previousId = generationIdFor("A");
+      const candidateId = generationIdFor("B");
+      expect(
+        (
+          await publishGeneration(applet, {
+            version: "A",
+            tools: TODO_TOOLS,
+            generationId: previousId,
+          })
+        ).outcome,
+      ).toMatchObject({ status: "active" });
+      expect(await invoke(applet, "add_todo", { title: "milk" })).toMatchObject(
+        {
+          status: "ok",
+        },
+      );
+
+      const stub = stateFor(applet);
+      await runInDurableObject(stub, (_instance, state) => {
+        instrumentDurableWrites(state, cut.options);
+      });
+      await publishGeneration(applet, {
+        version: "B",
+        tools: TODO_TOOLS,
+        generationId: candidateId,
+      }).catch(() => undefined);
+      await endInterruption(stub);
+
+      const view = await stateFor(applet).read({
+        schemaVersion: 1,
+        userId: OWNER,
+        appletId: applet,
+      });
+      const current = view.current?.generationId;
+      // Either generation is a correct answer; a pointer naming neither, or
+      // naming one whose code is not the resident code, is not.
+      expect([previousId, candidateId], cut.label).toContain(current);
+      expect(
+        view.generations.find(
+          (generation) => generation.generationId === current,
+        )?.status,
+        `${cut.label}: the current generation is not recorded active`,
+      ).toBe("active");
+      // The pinned call is the proof: the code that answers it is the code the
+      // pointer names, over the data the Applet held before the publish.
+      expect(
+        await invoke(applet, "list_todos", {}, current),
+        `${cut.label}: the resident generation does not match the pointer`,
+      ).toMatchObject({
+        status: "ok",
+        content: `${current === previousId ? "A" : "B"}:milk`,
+      });
+
+      // And the Applet is publishable again rather than stuck until some later
+      // publish happens to repair it.
+      expect(
+        (
+          await publishGeneration(applet, {
+            version: "C",
+            tools: TODO_TOOLS,
+            generationId: generationIdFor("C"),
+          })
+        ).outcome,
+        cut.label,
+      ).toMatchObject({ status: "active" });
+      expect(await invoke(applet, "list_todos", {}), cut.label).toMatchObject({
+        status: "ok",
+        content: "C:milk",
+      });
+    }
+  });
+
+  test("an unreadable trial marker restores the rollback copy instead of deleting the evidence", async () => {
+    const applet = appletId("corrupttrial");
+    const previousId = generationIdFor("A");
+    expect(
+      (
+        await publishGeneration(applet, {
+          version: "A",
+          tools: TODO_TOOLS,
+          generationId: previousId,
+        })
+      ).outcome,
+    ).toMatchObject({ status: "active" });
+    expect(await invoke(applet, "add_todo", { title: "milk" })).toMatchObject({
+      status: "ok",
+    });
+
+    const stub = stateFor(applet);
+    // The durable shape an activation leaves behind: a snapshot of the live
+    // facet parked in the rollback facet, and a trial marker over it.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.facets.abort(APPLET_FACET_NAME_V1, new Error("taking a snapshot"));
+      state.facets.clone(APPLET_FACET_NAME_V1, APPLET_ROLLBACK_FACET_NAME_V1);
+    });
+    // What a candidate generation writes to live storage before it is admitted.
+    expect(await invoke(applet, "add_todo", { title: "eggs" })).toMatchObject({
+      status: "ok",
+    });
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.kv.put(APPLET_TRIAL_KEY, "this is not a trial record");
+    });
+    await endInterruption(stub);
+
+    const view = await stateFor(applet).read({
+      schemaVersion: 1,
+      userId: OWNER,
+      appletId: applet,
+    });
+    expect(view.current?.generationId).toBe(previousId);
+    // The marker could not be read, so the snapshot is the only trusted state —
+    // and it is restored, rather than deleted along with the marker.
+    expect(await invoke(applet, "list_todos", {}, previousId)).toMatchObject({
+      status: "ok",
+      content: "A:milk",
+    });
+    expect(
+      await runInDurableObject(stub, (_instance, state) =>
+        state.storage.kv.get(APPLET_TRIAL_KEY),
+      ),
+    ).toBeUndefined();
   });
 });

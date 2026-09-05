@@ -361,7 +361,7 @@ export class AppletState extends DurableObject<AppletStateEnv> {
    * storage half-migrated, and the fix is to roll the whole trial back rather
    * than to let the next caller find code that never passed a health check.
    */
-  #settleInterruptedTrial(): void {
+  async #settleInterruptedTrial(): Promise<void> {
     const stored = this.ctx.storage.kv.get<unknown>(APPLET_TRIAL_KEY);
     if (stored === undefined) return;
     let trial: AppletTrialV1;
@@ -369,11 +369,55 @@ export class AppletState extends DurableObject<AppletStateEnv> {
       trial = decodeAppletTrialV1(stored);
     } catch {
       // An undecodable marker is still evidence of an interrupted trial, and
-      // the rollback facet is the only thing that can be trusted after one.
-      this.ctx.storage.kv.delete(APPLET_TRIAL_KEY);
+      // the rollback facet is the only thing that can be trusted after one —
+      // so restore it, rather than merely deleting the evidence.
+      await this.#rollBackUnreadableTrial();
       return;
     }
     this.#rollBackTrial(trial);
+  }
+
+  /**
+   * Undo a trial whose marker cannot be read.
+   *
+   * The marker is the only record of which mount input was resident before the
+   * candidate ran, so when it is unreadable the current pointer stands in for
+   * it: the pointer only ever moves inside the commit that also clears the
+   * marker, so while a marker exists the pointer still names the generation the
+   * rollback facet holds the storage of. Restoring both together is what makes
+   * this a rollback rather than a deletion of the evidence.
+   */
+  async #rollBackUnreadableTrial(): Promise<void> {
+    this.ctx.facets.abort(
+      APPLET_FACET_NAME_V1,
+      new Error("rolling back an unreadable activation trial"),
+    );
+    const current = await this.#pointer(APPLET_CURRENT_KEY);
+    const generation = current
+      ? await this.#generation(current.generationId)
+      : undefined;
+    const identity = this.#residentMountInput();
+    if (generation && identity) {
+      this.ctx.facets.clone(
+        APPLET_ROLLBACK_FACET_NAME_V1,
+        APPLET_FACET_NAME_V1,
+      );
+      this.ctx.storage.kv.put(
+        APPLET_MOUNT_INPUT_KEY,
+        await this.#mountInputFor(
+          generation,
+          identity.userId,
+          identity.appletId,
+        ),
+      );
+    } else {
+      // Nothing was current, so nothing is owed: the candidate's storage goes
+      // with the trial, exactly as a failed first activation's does.
+      this.ctx.facets.delete(APPLET_FACET_NAME_V1);
+      this.ctx.storage.kv.delete(APPLET_MOUNT_INPUT_KEY);
+    }
+    this.ctx.facets.delete(APPLET_ROLLBACK_FACET_NAME_V1);
+    this.ctx.storage.kv.delete(APPLET_TRIAL_KEY);
   }
 
   /**
@@ -407,6 +451,54 @@ export class AppletState extends DurableObject<AppletStateEnv> {
   }
 
   /**
+   * Promote the candidate: one atomic transaction, and it is the commit.
+   *
+   * A health check that passed is not yet a published generation. The
+   * generation's `active` status, the previous generation's `superseded`
+   * status, the current pointer, last-known-good, and the deletion of the trial
+   * marker are what make it one, and they go in together on the synchronous
+   * key/value surface inside `transactionSync` — no `await` between them, so
+   * there is no instant where the marker is gone and a pointer is stale.
+   * Without that, an eviction after the marker's deletion left the candidate's
+   * code resident, the pointer naming the previous generation, and no trial
+   * left to settle: the Applet refused every pinned tool call until some later
+   * publish happened to repair it.
+   *
+   * The rollback copy is dropped afterwards. Losing that delete costs storage
+   * until the next activation replaces the copy, and costs no correctness: the
+   * marker is what a reader settles on, and the marker is gone.
+   */
+  #commitActivation(input: {
+    generation: AppletGenerationV1;
+    superseded: AppletGenerationV1 | undefined;
+    setLastKnownGood: boolean;
+    now: string;
+  }): void {
+    const pointer: AppletPointerV1 = {
+      schemaVersion: 1,
+      generationId: input.generation.generationId,
+      changedAt: input.now,
+    };
+    this.ctx.storage.transactionSync(() => {
+      const kv = this.ctx.storage.kv;
+      kv.put(appletGenerationKey(input.generation.generationId), {
+        ...input.generation,
+        status: "active",
+      } satisfies AppletGenerationV1);
+      if (input.superseded && input.superseded.status === "active") {
+        kv.put(appletGenerationKey(input.superseded.generationId), {
+          ...input.superseded,
+          status: "superseded",
+        } satisfies AppletGenerationV1);
+      }
+      kv.put(APPLET_CURRENT_KEY, pointer);
+      if (input.setLastKnownGood) kv.put(APPLET_LAST_KNOWN_GOOD_KEY, pointer);
+      kv.delete(APPLET_TRIAL_KEY);
+    });
+    this.ctx.facets.delete(APPLET_ROLLBACK_FACET_NAME_V1);
+  }
+
+  /**
    * The guarded phase, as a commit boundary the kernel owns (ADR 0041).
    *
    * A candidate generation is never handed the Applet's live storage on the
@@ -434,19 +526,27 @@ export class AppletState extends DurableObject<AppletStateEnv> {
       candidate: input,
       ...(resident ? { previous: resident } : {}),
     };
-    // Intent before effect: from here until the commit below, this Applet's
-    // storage is provisional and any reader settles the trial first.
-    this.ctx.storage.kv.put(APPLET_TRIAL_KEY, trial);
+    // The snapshot comes before the marker, and the marker before the candidate
+    // touches anything. Taking the copy first costs nothing if this object is
+    // interrupted here — the live facet is untouched and there is no trial to
+    // settle — while writing the marker first would leave a reader promising to
+    // restore a copy that was never taken.
     if (resident) {
       this.ctx.facets.abort(
         APPLET_FACET_NAME_V1,
         new Error(`remounting generation "${input.generationId}"`),
       );
+      // A copy an interrupted activation left behind is not the copy this one
+      // owes anyone: the snapshot is always taken fresh.
+      this.ctx.facets.delete(APPLET_ROLLBACK_FACET_NAME_V1);
       this.ctx.facets.clone(
         APPLET_FACET_NAME_V1,
         APPLET_ROLLBACK_FACET_NAME_V1,
       );
     }
+    // Intent before effect: from here until the caller's commit, this Applet's
+    // storage is provisional and any reader settles the trial first.
+    this.ctx.storage.kv.put(APPLET_TRIAL_KEY, trial);
     try {
       const facet = await this.#facet(input);
       const health = decodeAppletHealthV1(
@@ -464,10 +564,13 @@ export class AppletState extends DurableObject<AppletStateEnv> {
           [`declared:${declared.join(",")}`, `reported:${reported.join(",")}`],
         );
       }
-      // Commit: the candidate is the Applet, and the copy is no longer owed to
-      // anyone. Deleting the marker is what ends the boundary.
-      this.ctx.facets.delete(APPLET_ROLLBACK_FACET_NAME_V1);
-      this.ctx.storage.kv.delete(APPLET_TRIAL_KEY);
+      // Health passed, and that is *not* the commit: the trial record and the
+      // rollback copy stay until `#commitActivation` writes the generation
+      // status and the pointers in the same atomic transaction that clears the
+      // marker. Anything that interrupts this object in between finds an open
+      // trial and rolls the whole activation back to the previous generation,
+      // which is also what the caller — whose publish never returned — and the
+      // User's directory still name.
       return { status: "active", tools: reported };
     } catch (error) {
       // Fail closed onto the previous generation, over the storage it had
@@ -625,7 +728,7 @@ export class AppletState extends DurableObject<AppletStateEnv> {
     setLastKnownGood: boolean;
   }): Promise<AppletActivationV1> {
     this.#assertIdentity(input.userId, input.appletId);
-    this.#settleInterruptedTrial();
+    await this.#settleInterruptedTrial();
     const now = new Date().toISOString();
     const generationId = input.generation.generationId;
     // Intent first: the record exists before the artifact is loaded, so an
@@ -637,6 +740,12 @@ export class AppletState extends DurableObject<AppletStateEnv> {
       input.appletId,
     );
     const previous = await this.#pointer(APPLET_CURRENT_KEY);
+    // Read before the trial opens, so the commit below needs no `await` of its
+    // own and can be one atomic transaction.
+    const superseded =
+      previous && previous.generationId !== generationId
+        ? await this.#generation(previous.generationId)
+        : undefined;
     const outcome = await this.#activate(
       mountInput,
       input.generation.tools.map((tool) => tool.name),
@@ -657,23 +766,11 @@ export class AppletState extends DurableObject<AppletStateEnv> {
         ...(previous ? { residentGenerationId: previous.generationId } : {}),
       };
     }
-    await this.#writeGeneration({ ...input.generation, status: "active" });
-    if (previous && previous.generationId !== generationId) {
-      const superseded = await this.#generation(previous.generationId);
-      if (superseded && superseded.status === "active") {
-        await this.#writeGeneration({ ...superseded, status: "superseded" });
-      }
-    }
-    const pointer: AppletPointerV1 = {
-      schemaVersion: 1,
-      generationId,
-      changedAt: now,
-    };
-    await this.ctx.storage.put({
-      [APPLET_CURRENT_KEY]: pointer,
-      ...(input.setLastKnownGood
-        ? { [APPLET_LAST_KNOWN_GOOD_KEY]: pointer }
-        : {}),
+    this.#commitActivation({
+      generation: input.generation,
+      superseded,
+      setLastKnownGood: input.setLastKnownGood,
+      now,
     });
     const lastKnownGood = await this.#pointer(APPLET_LAST_KNOWN_GOOD_KEY);
     await this.#pruneGenerations(
@@ -710,7 +807,7 @@ export class AppletState extends DurableObject<AppletStateEnv> {
       toolInput: rpcDecodedValue,
     });
     this.#assertIdentity(request.userId as string, request.appletId as string);
-    this.#settleInterruptedTrial();
+    await this.#settleInterruptedTrial();
     const resident = this.#residentMountInput();
     if (!resident) {
       return {
@@ -781,7 +878,7 @@ export class AppletState extends DurableObject<AppletStateEnv> {
     } catch {
       return new Response("forbidden", { status: 403 });
     }
-    this.#settleInterruptedTrial();
+    await this.#settleInterruptedTrial();
     const resident = this.#residentMountInput();
     if (!resident) {
       return new Response("this Applet has no active generation", {
@@ -821,7 +918,7 @@ export class AppletState extends DurableObject<AppletStateEnv> {
   }
 
   async #alarm(): Promise<void> {
-    this.#settleInterruptedTrial();
+    await this.#settleInterruptedTrial();
     const resident = this.#residentMountInput();
     if (!resident) return;
     try {
@@ -874,6 +971,10 @@ export class AppletState extends DurableObject<AppletStateEnv> {
       appletId: rpcString(129),
     });
     this.#assertIdentity(request.userId as string, request.appletId as string);
+    // A read is a caller-visible answer about which generation is running, so
+    // it settles an open trial like every other entry point rather than
+    // reporting provisional state as though it were committed.
+    await this.#settleInterruptedTrial();
     const failures = await this.ctx.storage.list<unknown>({
       prefix: "applet:failure:",
     });
