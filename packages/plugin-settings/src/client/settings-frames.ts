@@ -31,7 +31,10 @@ export interface SettingsPendingStore {
 
 /** Both UI projections retain command identity; neither decides the outcome. */
 export function createSettingsFrameClient(
-  transport: AgentTransport,
+  transport: Pick<
+    AgentTransport,
+    "readSettingsFrame" | "readSettingsOptions" | "changeSettings"
+  >,
   userId: () => string | undefined,
   store: SettingsPendingStore,
 ): SettingsFrameClient {
@@ -53,6 +56,7 @@ export function createSettingsFrameClient(
         await transport.readSettingsOptions(query),
       );
       if (
+        owner() !== id ||
         page.ownerId !== id ||
         page.source !== query.source ||
         page.revision !== query.revision
@@ -68,7 +72,7 @@ export function createSettingsFrameClient(
         "SettingsFrame",
         await transport.readSettingsFrame(home),
       );
-      if (frame.ownerId !== id || frame.home !== home)
+      if (owner() !== id || frame.ownerId !== id || frame.home !== home)
         throw new Error("Settings owner mismatch");
       return frame;
     },
@@ -85,6 +89,7 @@ export function createSettingsFrameClient(
       const pending = this.pending(home);
       if (pending && JSON.stringify(pending) !== JSON.stringify(command))
         throw new Error("Check the pending save first");
+      const id = owner();
       const commandKey = key(home);
       store.setItem(commandKey, JSON.stringify(command));
       try {
@@ -92,7 +97,7 @@ export function createSettingsFrameClient(
           "SettingsReceipt",
           await transport.changeSettings(home, command),
         );
-        if (receipt.commandId !== command.commandId)
+        if (owner() !== id || receipt.commandId !== command.commandId)
           throw new Error("Settings receipt mismatch");
         if (receipt.status !== "pending") store.removeItem(commandKey);
         return receipt.status;

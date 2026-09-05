@@ -2,6 +2,7 @@ import { decodeProtocol } from "@frockbot/protocol-schemas";
 import { describe, expect, test } from "bun:test";
 import {
   createNativeAuth,
+  readNativeJsonBody,
   NATIVE_ORIGIN,
   NATIVE_RETURN_ANDROID,
   NATIVE_RETURN_MACOS,
@@ -479,4 +480,183 @@ test("verified return associations name the existing Android signer and exact ma
     "61:E6:47:9F:9C:57:55:15:4C:1F:93:9C:DE:48:E8:A7:57:EF:F3:13:6E:54:ED:1D:DA:5F:61:E7:8B:3C:1E:37",
   );
   expect(await apple!.text()).toContain("Q444L76529.com.frockbot.mobile");
+});
+
+describe("native provider setup navigation", () => {
+  async function handoff(f: ReturnType<typeof fixture>, home = "models") {
+    const exchange = await f.authorize();
+    const response = await f.auth.route(
+      f.request("/api/auth/native/exchange", exchange),
+    );
+    const session = decodeProtocol("AuthSessionView", await response!.json());
+    const headers = { authorization: `Bearer ${session.sessionToken}` };
+    const start = await f.auth.route(
+      f.request(
+        "/api/auth/native/settings",
+        { schemaVersion: 1, home },
+        headers,
+      ),
+    );
+    expect(start?.status).toBe(200);
+    expect(start?.headers.get("cache-control")).toContain("no-store");
+    const view = decodeProtocol("AuthStartView", await start!.json());
+    expect(view.authorizationUrl).not.toContain(session.sessionToken);
+    return { view, headers, session };
+  }
+  test.each(["models", "connections"])(
+    "returns only to the exact %s home for the same browser User",
+    async (home) => {
+      const f = fixture();
+      const { view } = await handoff(f, home);
+      const response = await f.auth.route(
+        new Request(view.authorizationUrl, {
+          headers: { cookie: "test=signed-in" },
+        }),
+      );
+      expect(response?.status).toBe(302);
+      expect(response?.headers.get("location")).toBe(
+        `${NATIVE_ORIGIN}/?settings=${home}${home === "models" ? "#user-model-providers" : ""}`,
+      );
+      expect(response?.headers.get("set-cookie")).toBeNull();
+      expect(f.values.size).toBe(1);
+      for (const url of [
+        view.authorizationUrl + "&next=https://evil.test",
+        view.authorizationUrl + "&request=duplicate",
+        view.authorizationUrl.replace(/.$/, "x"),
+      ]) {
+        expect(
+          (
+            await f.auth.route(
+              new Request(url, { headers: { cookie: "test=signed-in" } }),
+            )
+          )?.status,
+        ).toBe(400);
+      }
+      f.advance(300_001);
+      expect(
+        (await f.auth.route(new Request(view.authorizationUrl)))?.status,
+      ).toBe(400);
+    },
+  );
+  test("a different browser User is refused and absent browser auth cannot be replaced by the native bearer", async () => {
+    let browserUser = "user-1";
+    const returns: string[] = [];
+    const f = fixture({
+      auth: {
+        getSession: async (headers) =>
+          headers.has("cookie") ? { user: { id: browserUser } } : null,
+        handler: async (request) => {
+          const body = (await request.json()) as { callbackURL: string };
+          returns.push(body.callbackURL);
+          return Response.json({
+            url: "https://accounts.google.com/o/oauth2/v2/auth?synthetic=1",
+          });
+        },
+      },
+    });
+    const { view, headers } = await handoff(f);
+    browserUser = "other-user";
+    expect(
+      (
+        await f.auth.route(
+          new Request(view.authorizationUrl, {
+            headers: { cookie: "signed-in" },
+          }),
+        )
+      )?.status,
+    ).toBe(403);
+    const signIn = await f.auth.route(
+      new Request(view.authorizationUrl, { headers }),
+    );
+    expect(signIn?.status).toBe(302);
+    expect(returns).toEqual([view.authorizationUrl]);
+    expect(f.values.size).toBe(1);
+  });
+  test("a missing/revoked bearer, incompatible client or arbitrary destination cannot mint a handoff", async () => {
+    const f = fixture();
+    const { headers, session } = await handoff(f);
+    for (const body of [
+      { schemaVersion: 1, home: "https://evil.test" },
+      { schemaVersion: 1, home: "models", returnUri: "https://evil.test" },
+    ]) {
+      expect(
+        (
+          await f.auth.route(
+            f.request("/api/auth/native/settings", body, headers),
+          )
+        )?.status,
+      ).toBe(400);
+    }
+    expect(
+      (
+        await f.auth.route(
+          f.request("/api/auth/native/settings", {
+            schemaVersion: 1,
+            home: "models",
+          }),
+        )
+      )?.status,
+    ).toBe(401);
+    expect(
+      (
+        await f.auth.route(
+          f.request(
+            "/api/auth/native/settings",
+            { schemaVersion: 1, home: "models" },
+            {
+              ...headers,
+              "x-frockbot-client": JSON.stringify({
+                ...hello,
+                protocolVersion: 99,
+              }),
+            },
+          ),
+        )
+      )?.status,
+    ).toBe(426);
+    await f.auth.route(
+      f.request(
+        "/api/auth/native/revoke",
+        {
+          schemaVersion: 1,
+          commandId: "sign-out-settings",
+          action: "sign-out",
+          sessionId: session.sessionId,
+        },
+        headers,
+      ),
+    );
+    expect(
+      (
+        await f.auth.route(
+          f.request(
+            "/api/auth/native/settings",
+            { schemaVersion: 1, home: "models" },
+            headers,
+          ),
+        )
+      )?.status,
+    ).toBe(401);
+  });
+});
+
+test("settings input is byte- and depth-bounded before JSON decoding", async () => {
+  const request = (body: string) =>
+    new Request(NATIVE_ORIGIN, { method: "POST", body });
+  const exact = JSON.stringify({
+    text: 'quoted \" {[[]]}',
+    value: "x".repeat(9_000),
+  });
+  expect(await readNativeJsonBody(request(exact), 512_000)).toEqual(
+    JSON.parse(exact),
+  );
+  await expect(readNativeJsonBody(request(exact))).rejects.toThrow(
+    "Too much input",
+  );
+  await expect(
+    readNativeJsonBody(request("[".repeat(17) + "0" + "]".repeat(17)), 512_000),
+  ).rejects.toThrow("nesting limit");
+  await expect(
+    readNativeJsonBody(request(JSON.stringify("🐑".repeat(10))), 20),
+  ).rejects.toThrow("Too much input");
 });

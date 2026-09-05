@@ -7,7 +7,7 @@ import type {
   SettingsFrame,
   SettingsChangeCommand,
 } from "@frockbot/protocol-schemas";
-import { inject, onMounted, ref } from "vue";
+import { inject, onMounted, ref, watch } from "vue";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import {
   settingsFrameClientKey,
@@ -77,6 +77,13 @@ function save(
     ...(unset.length ? { unset } : {}),
   });
 }
+watch(
+  () => JSON.stringify(web.value.userSettings?.connections),
+  (next, previous) => {
+    if (props.home === "models" && previous !== undefined && next !== previous)
+      void load();
+  },
+);
 onMounted(load);
 </script>
 <template>

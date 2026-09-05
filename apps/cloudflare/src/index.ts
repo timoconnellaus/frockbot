@@ -600,7 +600,7 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     readSettingsOptions: (request) => rpc.readSettingsOptions(request),
     changeSettings: (request) => rpc.changeSettings(request),
     readConfiguration: (request) =>
-      rpc.readConfiguration({ ...request, view: 2 }),
+      rpc.readConfiguration({ ...request, view: request.view ?? 2 }),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
     lookupConnectionCommand: (request) => rpc.lookupConnectionCommand(request),

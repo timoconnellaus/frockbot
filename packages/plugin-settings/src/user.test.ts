@@ -13,6 +13,7 @@ import {
 
 class MemoryStorage implements UserSettingsStorage {
   readonly values = new Map<string, unknown>();
+  failAfterWrite?: string;
 
   get<T>(key: string): Promise<T | undefined> {
     return Promise.resolve(this.values.get(key) as T | undefined);
@@ -25,13 +26,26 @@ class MemoryStorage implements UserSettingsStorage {
     else {
       for (const [entry, item] of Object.entries(key)) {
         this.values.set(entry, structuredClone(item));
+        if (this.failAfterWrite === entry) {
+          this.failAfterWrite = undefined;
+          return Promise.reject(new Error("injected atomic write failure"));
+        }
       }
     }
     return Promise.resolve();
   }
 
-  transaction<T>(callback: (storage: MemoryStorage) => Promise<T>): Promise<T> {
-    return callback(this);
+  async transaction<T>(
+    callback: (storage: MemoryStorage) => Promise<T>,
+  ): Promise<T> {
+    const before = new Map(this.values);
+    try {
+      return await callback(this);
+    } catch (error) {
+      this.values.clear();
+      for (const [key, value] of before) this.values.set(key, value);
+      throw error;
+    }
   }
 }
 
@@ -1792,6 +1806,56 @@ describe("Package-level setting values", () => {
 });
 
 describe("permanent account model migration", () => {
+  test("a failed migration restores the checkpoint boundary and retries once", async () => {
+    const storage = new MemoryStorage();
+    const model = { connectionId: "work", providerModelId: "model-1" };
+    const historical = {
+      schemaVersion: 1,
+      revision: 7,
+      profile: { name: "Tim" },
+      connections: [],
+      packages: [
+        {
+          packageId: "custom-models",
+          version: "0.0.1",
+          state: "installed",
+          values: { "account-model": model },
+        },
+      ],
+    };
+    await storage.put("user-configuration", historical);
+    await storage.put("user-id", "tim");
+    const before = new Map(storage.values);
+    storage.failAfterWrite = "user-account-model:v1";
+    const request = {
+      schemaVersion: 1,
+      userId: "tim",
+      command: {
+        schemaVersion: 1,
+        type: "user/update-profile",
+        commandId: "migration-retry",
+        expectedRevision: 7,
+        profile: { name: "Timothy" },
+      },
+    };
+    await expect(
+      contribution(storage).executeConfiguration(request),
+    ).rejects.toThrow("injected atomic write failure");
+    expect(storage.values).toEqual(before);
+    const receipt = await contribution(storage).executeConfiguration(request);
+    expect(receipt).toMatchObject({ status: "applied", revision: 8 });
+    expect(await contribution(storage).executeConfiguration(request)).toEqual(
+      receipt,
+    );
+    expect(await contribution(storage).readSnapshot()).toMatchObject({
+      revision: 8,
+      accountModel: model,
+    });
+    expect(
+      storage.values.get("user-account-model:migration-checkpoint:v1"),
+    ).toEqual({ schemaVersion: 1, settings: historical });
+  });
+
   for (const state of ["installed", "disabled"] as const) {
     test(`migrates the previous ${state} account shape and persists only current state`, async () => {
       const storage = new MemoryStorage();
@@ -1892,5 +1956,84 @@ describe("permanent account model migration", () => {
       },
     });
     expect((await restarted.readSnapshot()).accountModel).toBeUndefined();
+  });
+});
+
+describe("provider choice is one durable User decision", () => {
+  const provider: AvailableUserPackage = {
+    packageId: "provider",
+    version: "1.0.0",
+    capabilities: [
+      { id: "models", kind: "model", connectionTypes: ["account"] },
+    ],
+    dependencies: { support: "^1.0.0" },
+  };
+  const support: AvailableUserPackage = {
+    packageId: "support",
+    version: "1.0.0",
+  };
+  test("installs dependencies atomically, retains values on re-enable and replays after restart", async () => {
+    const storage = new MemoryStorage();
+    await storage.put("user-configuration", {
+      schemaVersion: 1,
+      revision: 4,
+      profile: { name: "Tim" },
+      connections: [],
+      packages: [
+        {
+          packageId: "provider",
+          version: "1.0.0",
+          state: "disabled",
+          values: { label: "Kept" },
+        },
+      ],
+    });
+    const owner = () =>
+      createUserSettingsBackendContribution({
+        storage,
+        availablePackages: [provider, support],
+      });
+    const command = {
+      schemaVersion: 1,
+      commandId: "choose-provider",
+      expectedRevision: 4,
+      sectionId: "provider.provider",
+      values: {},
+    };
+    const first = await owner().changeSettings("tim", "models", command);
+    expect(first).toMatchObject({ status: "applied", revision: 5 });
+    expect(await owner().changeSettings("tim", "models", command)).toEqual(
+      first,
+    );
+    expect((await owner().readSnapshot()).packages).toEqual([
+      { packageId: "support", version: "1.0.0", state: "installed" },
+      {
+        packageId: "provider",
+        version: "1.0.0",
+        state: "installed",
+        values: { label: "Kept" },
+      },
+    ]);
+  });
+  test("missing dependency is a replayable refusal, with no partial installation", async () => {
+    const storage = new MemoryStorage();
+    const owner = () =>
+      createUserSettingsBackendContribution({
+        storage,
+        availablePackages: [provider],
+      });
+    const command = {
+      schemaVersion: 1,
+      commandId: "choose-broken",
+      expectedRevision: 0,
+      sectionId: "provider.provider",
+      values: {},
+    };
+    const first = await owner().changeSettings("tim", "models", command);
+    expect(first).toMatchObject({ status: "rejected", revision: 0 });
+    expect(await owner().changeSettings("tim", "models", command)).toEqual(
+      first,
+    );
+    expect((await owner().readSnapshot()).packages).toEqual([]);
   });
 });

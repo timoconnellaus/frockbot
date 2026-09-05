@@ -58,6 +58,17 @@ function save() {
 <template>
   <form class="frame-section" @submit.prevent="save">
     <h3>{{ section.label }}</h3>
+    <p v-if="section.credentialStatus">
+      {{
+        section.credentialStatus === "connected"
+          ? "Account connected"
+          : section.credentialStatus === "revoked"
+            ? "Account revoked"
+            : section.credentialStatus === "missing"
+              ? "Connect an account to use this provider"
+              : "Ready to use"
+      }}
+    </p>
     <p v-if="section.failure" role="alert">{{ section.failure }}</p>
     <UiField
       v-for="field in section.fields"

@@ -439,6 +439,22 @@ class _SettingsSectionState extends State<_SettingsSection> {
             ),
           ),
           const SizedBox(height: 16),
+          if (widget.section['credentialStatus'] case final String status)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                status == 'connected'
+                    ? 'Account connected'
+                    : status == 'revoked'
+                    ? 'Account revoked'
+                    : status == 'missing'
+                    ? 'Connect an account to use this provider'
+                    : 'Ready to use',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
           if (widget.section['failure'] case final String failure)
             Text(failure),
           for (final item in fields)
@@ -451,7 +467,11 @@ class _SettingsSectionState extends State<_SettingsSection> {
               alignment: Alignment.centerRight,
               child: FilledButton(
                 onPressed: widget.disabled || dirty.isEmpty ? null : save,
-                child: Text(widget.section['id'] == 'profile' ? 'Save profile' : 'Save changes'),
+                child: Text(
+                  widget.section['id'] == 'profile'
+                      ? 'Save profile'
+                      : 'Save changes',
+                ),
               ),
             ),
           for (final action in (widget.section['actions'] as List?) ?? [])

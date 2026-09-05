@@ -29,6 +29,6 @@ test("a User edits and saves the prefilled profile name", async ({
   ).toHaveCount(1);
   await settings.getByRole("button", { name: "Save profile" }).click();
 
-  await expect(settings).toBeHidden();
+  await expect(settings.getByRole("status")).toContainText("Saved.");
   await expect(profileTrigger).toHaveText("Tim");
 });

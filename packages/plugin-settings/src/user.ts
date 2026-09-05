@@ -12,6 +12,7 @@ import {
   ConfigurationDecodeError,
   decodePackageSettingIdsV1,
   decodeModelBindingV1,
+  modelBindingFailureV1,
   decodePackageSettingsPatchV1,
   MAX_PACKAGE_SETTINGS_V1,
   decodeOperationReceiptV1,
@@ -994,13 +995,34 @@ export class UserSettingsBackendContribution {
     return { ...current, revision: current.revision + 1, packages };
   }
 
-  async readSettingsFrame(userId: string, home: "application" | "models") {
+  /** Previous readers have one fallback slot; preserve the current effective
+   * account fallback without restoring the removed Package setting/control. */
+  previousSettingsView(settings: UserSettingsViewV1): UserSettingsViewV1 {
+    const { accountModel, ...previous } = settings;
+    const packages = this.host.availablePackages.map((pkg) => ({
+      ...pkg,
+      settings: [...(pkg.settings ?? [])],
+      capabilities: [...(pkg.capabilities ?? [])],
+      connectionTypes: [...(pkg.connectionTypes ?? [])],
+    }));
+    return accountModel &&
+      !modelBindingFailureV1({ model: accountModel, user: settings, packages })
+      ? { ...previous, platformModel: accountModel }
+      : previous;
+  }
+
+  async readSettingsFrame(
+    userId: string,
+    home: "application" | "models",
+    identity?: { name?: string; email?: string },
+  ) {
     const frame =
       home === "models" ? modelsSettingsFrame : applicationSettingsFrame;
     return frame(
       userId,
       await this.readConfiguration({ schemaVersion: 1, userId }),
       this.host.availablePackages,
+      identity,
     );
   }
 

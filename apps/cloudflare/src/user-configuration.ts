@@ -653,19 +653,30 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       await this.settingsContribution()
     ).readConfiguration(request);
     if (request.view === 2) return settings;
-    const { accountModel: _accountModel, ...previousView } = settings;
-    return previousView;
+    return (await this.settingsContribution()).previousSettingsView(settings);
   }
 
   async readSettingsFrame(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      home: rpcEnum(["application", "models"]),
-    });
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        home: rpcEnum(["application", "models"]),
+      },
+      { identityName: rpcString(100), identityEmail: rpcString(320) },
+    );
     await this.assertUserIdentity(request.userId as string);
     return (await this.settingsContribution()).readSettingsFrame(
       request.userId as string,
       request.home as "application" | "models",
+      {
+        ...(request.identityName
+          ? { name: request.identityName as string }
+          : {}),
+        ...(request.identityEmail
+          ? { email: request.identityEmail as string }
+          : {}),
+      },
     );
   }
 

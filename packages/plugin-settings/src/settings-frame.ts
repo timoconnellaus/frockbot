@@ -1,3 +1,4 @@
+import { resolveUserDisplayName } from "./user-display-name.js";
 import {
   decodeConfigurationCommandV1,
   packageConfigurationHomeV1,
@@ -68,6 +69,7 @@ export function applicationSettingsFrame(
   userId: string,
   settings: UserSettingsViewV1,
   catalog: readonly AvailableUserPackage[],
+  identity?: { name?: string; email?: string },
 ): SettingsFrame {
   const sections: SettingsFrame["sections"] = [
     {
@@ -78,7 +80,11 @@ export function applicationSettingsFrame(
           id: "name",
           label: "Name",
           kind: "text",
-          value: settings.profile.name,
+          value: resolveUserDisplayName({
+            savedName: settings.profile.name,
+            sessionName: identity?.name,
+            sessionEmail: identity?.email,
+          }).slice(0, 100),
           editable: true,
           required: true,
           maxLength: 100,
@@ -87,7 +93,7 @@ export function applicationSettingsFrame(
           id: "email",
           label: "Email",
           kind: "text",
-          value: settings.profile.email ?? "",
+          value: settings.profile.email ?? identity?.email ?? "",
           editable: true,
           hint: "Optional",
           maxLength: 320,
@@ -221,6 +227,12 @@ function* modelChoices(
   for (const connection of settings.connections) {
     if (!connection.providerType) continue;
     for (const model of connection.modelCatalog?.models ?? []) {
+      // The platform's current binding is already represented by Auto.
+      if (
+        connection.connectionId === settings.platformModel?.connectionId &&
+        model.providerModelId === settings.platformModel.providerModelId
+      )
+        continue;
       const value = {
         connectionId: connection.connectionId,
         providerModelId: model.providerModelId,

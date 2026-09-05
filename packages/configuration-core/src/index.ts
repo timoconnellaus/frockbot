@@ -460,7 +460,7 @@ export interface UserConfigurationReadRpcV1 {
   schemaVersion: 1;
   userId: string;
   /** Omission is the previous pinned reader; view 2 includes permanent account choice. */
-  view?: 2;
+  view?: 1 | 2;
 }
 
 export interface UserConfigurationExecuteRpcV1 {
@@ -1504,12 +1504,12 @@ export function decodeUserConfigurationReadRpcV1(
     ["view"],
   );
   schemaVersion(value);
-  if (value.view !== undefined && value.view !== 2)
+  if (value.view !== undefined && value.view !== 1 && value.view !== 2)
     throw new ConfigurationDecodeError("Update the settings reader");
   return {
     schemaVersion: 1,
     userId: identifier(value.userId, "userId"),
-    ...(value.view === 2 ? { view: 2 as const } : {}),
+    ...(value.view === undefined ? {} : { view: value.view as 1 | 2 }),
   };
 }
 

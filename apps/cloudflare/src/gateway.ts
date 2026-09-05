@@ -1009,13 +1009,33 @@ export function createGateway(dependencies: GatewayDependencies) {
       const home = url.pathname.endsWith("/models") ? "models" : "application";
       try {
         const owner = dependencies.userConfigurationFor(userId);
-        if (request.method === "GET")
+        if (request.method === "GET") {
+          // Identity supplies only an unsaved profile suggestion. The User's
+          // saved profile wins and only a save command persists edited fields.
+          const identity =
+            home !== "application"
+              ? null
+              : development.userId
+                ? { name: "Local developer" }
+                : await dependencies.auth.profile?.(userId).catch(() => null);
           return Response.json(
             decodeProtocol(
               "SettingsFrame",
-              await owner.readSettingsFrame({ schemaVersion: 1, userId, home }),
+              await owner.readSettingsFrame({
+                schemaVersion: 1,
+                userId,
+                home,
+                ...(identity?.name?.trim()
+                  ? { identityName: identity.name.trim().slice(0, 100) }
+                  : {}),
+                ...(identity?.email?.trim()
+                  ? { identityEmail: identity.email.trim().slice(0, 320) }
+                  : {}),
+              }),
             ),
+            { headers: { "cache-control": "no-store" } },
           );
+        }
         if (request.method !== "POST")
           return jsonError(405, "method not allowed");
         let command;
@@ -1060,11 +1080,20 @@ export function createGateway(dependencies: GatewayDependencies) {
           : undefined;
         if (request.method === "GET") {
           if (!botSettingsMatch) {
+            if (
+              url.searchParams.has("view") &&
+              url.searchParams.get("view") !== "2"
+            )
+              return jsonError(426, "Refresh FrockBot to update Settings.");
             return Response.json(
               settingsProjection(
                 await dependencies
                   .userConfigurationFor(userId)
-                  .readConfiguration({ schemaVersion: 1, userId }),
+                  .readConfiguration({
+                    schemaVersion: 1,
+                    userId,
+                    view: url.searchParams.get("view") === "2" ? 2 : 1,
+                  }),
                 url.searchParams.get("view"),
               ),
             );

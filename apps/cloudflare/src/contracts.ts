@@ -505,6 +505,8 @@ export interface AuthSession {
 }
 
 export interface GatewayAuth {
+  /** Profile hints for the already authenticated User; no credential fields. */
+  profile?(userId: string): Promise<{ name?: string; email?: string } | null>;
   handler(request: Request): Promise<Response>;
   getSession(headers: Headers): Promise<AuthSession | null>;
 }

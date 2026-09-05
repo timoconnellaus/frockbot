@@ -32,8 +32,14 @@ describe("settings round-trip through the gateway", () => {
         values?: Record<string, unknown>;
       }>;
     };
-    expect(view.accountModel).toEqual({ connectionId, providerModelId: PROVISIONED_MODEL.providerModelId });
-    expect(view.packages.find((pkg) => pkg.packageId === CUSTOM_MODELS_PACKAGE_ID)?.values).not.toHaveProperty("account-model");
+    expect(view.accountModel).toEqual({
+      connectionId,
+      providerModelId: PROVISIONED_MODEL.providerModelId,
+    });
+    expect(
+      view.packages.find((pkg) => pkg.packageId === CUSTOM_MODELS_PACKAGE_ID)
+        ?.values ?? {},
+    ).not.toHaveProperty("account-model");
     const legacy = await expectOkJson(await asUser(userId, "/api/settings"));
     expect(legacy).not.toHaveProperty("accountModel");
     expect(view.packages).toContainEqual(
