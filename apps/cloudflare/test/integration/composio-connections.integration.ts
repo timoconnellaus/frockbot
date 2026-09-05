@@ -1,5 +1,7 @@
 import { expect, it } from "vitest";
-import { SELF } from "cloudflare:test";
+import { SELF, env, evictDurableObject } from "cloudflare:test";
+import { decodeProtocol } from "@frockbot/protocol-schemas";
+import { nativeHeaders } from "../native-session-fixture.ts";
 import {
   asUser,
   expectOkJson,
@@ -13,6 +15,15 @@ useApplicationArtifact();
 it("a direct Gmail connector completes a public callback, survives replay, and disconnects", async () => {
   const userId = freshUserId("gmail-connect");
   await provisionThroughGateway({ userId, botId: "gmail-integration-bot" });
+  const headers = await nativeHeaders(userId);
+  const nativeView = async () => {
+    const response = await SELF.fetch(
+      "https://bot.frockbot.com/api/settings/connections",
+      { headers },
+    );
+    expect(response.status).toBe(200);
+    return decodeProtocol("ConnectionsFrame", await response.json());
+  };
   const catalog = (await expectOkJson(
     await asUser(userId, "/api/plugins/composio/catalog"),
   )) as { items: Array<{ id: string; name: string }> };
@@ -32,6 +43,12 @@ it("a direct Gmail connector completes a public callback, survives replay, and d
   );
   expect(startResponse.status).toBe(201);
   const started = (await startResponse.json()) as { redirectUrl: string };
+  expect((await nativeView()).accounts).toEqual([
+    expect.objectContaining({
+      id: "gmail-integration-one",
+      state: "authorizing",
+    }),
+  ]);
   const callback = new URL(started.redirectUrl);
   callback.searchParams.set("user_id", "forged");
   // No as_user query or session: the callback is dispatched before auth.
@@ -48,6 +65,21 @@ it("a direct Gmail connector completes a public callback, survives replay, and d
       (row) => row.connectionId === "gmail-integration-one",
     ),
   ).toEqual([expect.objectContaining({ state: "ready" })]);
+  await evictDurableObject(env.USER_CONFIGURATIONS.getByName(userId));
+  const native = await nativeView();
+  expect(native.accounts).toEqual([
+    expect.objectContaining({
+      id: "gmail-integration-one",
+      service: "Gmail",
+      state: "ready",
+    }),
+  ]);
+  expect(
+    await (await asUser(userId, "/api/settings/connections")).json(),
+  ).toEqual(native);
+  expect(JSON.stringify(native)).not.toMatch(
+    /workerd-test-key|test-composio-backend-key|redirectUrl|authorizationStateId|safeMetadata|modelCatalog/,
+  );
   expect(JSON.stringify(settings)).not.toMatch(
     /test-composio-backend-key|redirectUrl|authorizationStateId/,
   );
@@ -60,4 +92,13 @@ it("a direct Gmail connector completes a public callback, survives replay, and d
       ),
     ),
   ).toMatchObject({ status: "revoked" });
+  expect((await nativeView()).accounts).toEqual([]);
+  const otherHeaders = await nativeHeaders(freshUserId("other-connections"));
+  const other = await SELF.fetch(
+    "https://bot.frockbot.com/api/settings/connections",
+    { headers: otherHeaders },
+  );
+  expect(
+    decodeProtocol("ConnectionsFrame", await other.json()).accounts,
+  ).toEqual([]);
 });

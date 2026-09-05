@@ -562,7 +562,10 @@ export interface UserConfigurationBinding {
   readConfiguration(
     request: UserConfigurationReadRpcV1,
   ): Promise<UserSettingsViewV1>;
-  readConnectionsFrame(request: { schemaVersion: 1; userId: string }): Promise<ConnectionsFrame>;
+  readConnectionsFrame(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<ConnectionsFrame>;
   readSettingsFrame(
     request: UserConfigurationReadRpcV1 & { home: "application" | "models" },
   ): Promise<SettingsFrame>;

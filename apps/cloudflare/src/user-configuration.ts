@@ -680,7 +680,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   async readConnectionsFrame(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
     await this.assertUserIdentity(request.userId as string);
-    return (await this.settingsContribution()).readConnectionsFrame(request.userId as string);
+    return (await this.settingsContribution()).readConnectionsFrame(
+      request.userId as string,
+    );
   }
 
   async readSettingsFrame(input: unknown) {

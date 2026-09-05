@@ -1014,7 +1014,11 @@ export class UserSettingsBackendContribution {
   }
 
   async readConnectionsFrame(userId: string) {
-    return connectionsFrame(userId, await this.readConfiguration({ schemaVersion: 1, userId }), this.host.availablePackages);
+    return connectionsFrame(
+      userId,
+      await this.readConfiguration({ schemaVersion: 1, userId }),
+      this.host.availablePackages,
+    );
   }
 
   async readSettingsFrame(

@@ -441,24 +441,43 @@ export function modelsSettingsCommand(
   throw new ConfigurationDecodeError("Unknown model section");
 }
 
-
 /** Redacted account status only. Authorization remains on Connectors. */
-export function connectionsFrame(userId: string, settings: UserSettingsViewV1, catalog: readonly AvailableUserPackage[]): ConnectionsFrame {
+export function connectionsFrame(
+  userId: string,
+  settings: UserSettingsViewV1,
+  catalog: readonly AvailableUserPackage[],
+): ConnectionsFrame {
   const accounts: ConnectionsFrame["accounts"] = [];
   for (const connection of settings.connections) {
     if (connection.state === "revoked") continue;
-    const installed = settings.packages.find(p => p.packageId === connection.packageId && p.state === "installed");
-    const item = catalog.find(p => p.packageId === installed?.packageId && p.version === installed?.version);
+    const installed = settings.packages.find(
+      (p) => p.packageId === connection.packageId && p.state === "installed",
+    );
+    const item = catalog.find(
+      (p) =>
+        p.packageId === installed?.packageId &&
+        p.version === installed?.version,
+    );
     if (!item || packageConfigurationHomeV1(item) !== "connections") continue;
-    const declared = item.connectionTypes?.find(type => type.id === connection.connectionTypeId);
+    const declared = item.connectionTypes?.find(
+      (type) => type.id === connection.connectionTypeId,
+    );
     if (!declared) continue;
     const name = connection.safeMetadata.connectorName;
     accounts.push({
       id: connection.connectionId,
       label: connection.displayName.slice(0, 200),
-      service: (typeof name === "string" && name.trim() ? name : item.displayName ?? declared.displayName).slice(0, 200),
+      service: (typeof name === "string" && name.trim()
+        ? name
+        : (item.displayName ?? declared.displayName)
+      ).slice(0, 200),
       state: connection.state,
     });
   }
-  return decodeProtocol("ConnectionsFrame", { schemaVersion: 1, ownerId: userId, revision: settings.revision, accounts });
+  return decodeProtocol("ConnectionsFrame", {
+    schemaVersion: 1,
+    ownerId: userId,
+    revision: settings.revision,
+    accounts,
+  });
 }

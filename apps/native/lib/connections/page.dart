@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/states.dart';
+import '../theme/frock_theme.dart';
 
 /// User-owned Connection status; grants stay on the backend Connectors surface.
 class ConnectionsPage extends StatefulWidget {
@@ -56,16 +57,18 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       final next = wire.ConnectionsFrame.fromJson(
         await widget.api.request('/api/settings/connections'),
       );
-      if (next.ownerId.value != widget.userId)
+      if (next.ownerId.value != widget.userId) {
         throw const FormatException('Wrong owner');
+      }
       if (mounted) setState(() => frame = next);
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           frame = null;
           message =
               'Couldn’t reach FrockBot. Check your connection and try again.';
         });
+      }
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -95,16 +98,18 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           await (widget.openBrowser?.call(uri) ??
               launchUrl(uri, mode: LaunchMode.externalApplication));
       if (!opened) throw const FormatException('Browser unavailable');
-      if (mounted)
+      if (mounted) {
         setState(
           () => message = 'Finish in your browser, then return here. Your connections will refresh automatically.',
         );
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(
           () => message =
               'Couldn’t open Connections. Check your connection and try again.',
         );
+      }
     } finally {
       if (mounted) setState(() => opening = false);
     }
@@ -207,7 +212,10 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                               ),
                             ),
                           for (final account in frame!.accounts)
-                            _ConnectionCard(account: account),
+                            _ConnectionCard(
+                              key: ValueKey(account['id']),
+                              account: account,
+                            ),
                         ],
                       ),
                     ),
@@ -221,7 +229,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
 
 class _ConnectionCard extends StatelessWidget {
   final Map<String, Object?> account;
-  const _ConnectionCard({required this.account});
+  const _ConnectionCard({super.key, required this.account});
   @override
   Widget build(BuildContext context) {
     final (icon, status) = switch (account['state']) {
@@ -238,40 +246,51 @@ class _ConnectionCard extends StatelessWidget {
       ),
       _ => (Icons.error_outline_rounded, 'Connection needs attention'),
     };
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 3, right: 14),
-              child: Icon(icon, color: Theme.of(context).colorScheme.primary),
-            ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    account['label']! as String,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    account['service']! as String,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    status,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
+    return TweenAnimationBuilder<double>(
+      duration: FrockTheme.motion(context),
+      tween: Tween(begin: 0, end: 1),
+      builder: (context, value, child) => Opacity(
+        opacity: value,
+        child: Transform.translate(
+          offset: Offset(0, 8 * (1 - value)),
+          child: child,
+        ),
+      ),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 3, right: 14),
+                child: Icon(icon, color: Theme.of(context).colorScheme.primary),
               ),
-            ),
-          ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      account['label']! as String,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      account['service']! as String,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      status,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
