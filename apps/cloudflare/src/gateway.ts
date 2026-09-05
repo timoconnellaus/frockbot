@@ -876,10 +876,17 @@ export function createGateway(dependencies: GatewayDependencies) {
         !/^[A-Za-z0-9_-]{16,64}$/.test(epoch)
       )
         return jsonError(400, "Invalid Applet");
-      return Response.json(
-        await dependencies.nativeAppletBootstrap(userId, appletId, epoch),
-        { headers: { "cache-control": "no-store" } },
-      );
+      try {
+        return Response.json(
+          await dependencies.nativeAppletBootstrap(userId, appletId, epoch),
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch {
+        return jsonError(
+          503,
+          "This Applet is unavailable. Reopen it to try again.",
+        );
+      }
     }
     if (request.method === "GET" && url.pathname === "/api/identity") {
       return Response.json({ schemaVersion: 1, userId, isAdmin });

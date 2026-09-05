@@ -2297,7 +2297,6 @@ export default {
             .UserBotState({ props: { userId } })
             .nativeAppletBootstrap({
               schemaVersion: 1,
-              userId,
               appletId,
               navigationEpoch,
             }),

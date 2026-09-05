@@ -9,6 +9,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import '../client/transport.dart';
+import '../theme/states.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 
 const artifactOrigin = 'https://ui.bot.frockbot.com';
@@ -77,29 +78,47 @@ class AppletDirectoryPage extends StatefulWidget {
 }
 
 class _AppletDirectoryPageState extends State<AppletDirectoryPage> {
-  late final Future<wire.AppletDirectory> directory = widget.api
-      .request('/api/applets')
-      .then(wire.AppletDirectory.fromJson);
+  late Future<wire.AppletDirectory> directory = loadDirectory();
+  Future<wire.AppletDirectory> loadDirectory() =>
+      widget.api.request('/api/applets').then(wire.AppletDirectory.fromJson);
+  void reload() => setState(() => directory = loadDirectory());
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Your Applets')),
+    appBar: AppBar(
+      title: const Text('Your Applets'),
+      actions: [
+        IconButton(
+          tooltip: 'Refresh Applets',
+          onPressed: reload,
+          icon: const Icon(Icons.refresh),
+        ),
+      ],
+    ),
     body: FutureBuilder(
       future: directory,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return const Center(
-            child: Text('Couldn’t load your Applets. Please try again.'),
+          return FrockEmptyState(
+            title: 'Couldn’t load your Applets',
+            detail: 'Check your connection and try again.',
+            action: 'Try again',
+            onAction: reload,
+            icon: Icons.wifi_off_rounded,
           );
         }
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const FrockLoading(label: 'Loading your Applets');
         }
         final applets = snapshot.data!.applets
             .where((a) => a.status == 'published')
             .toList();
         if (applets.isEmpty) {
-          return const Center(
-            child: Text('Your published Applets will appear here.'),
+          return FrockEmptyState(
+            title: 'A space for your Applets',
+            detail: 'Ask a Bot to make an Applet. Once published, it will appear here.',
+            action: 'Back to your Bots',
+            onAction: () => Navigator.of(context).pop(),
+            icon: Icons.widgets_outlined,
           );
         }
         return ListView(
@@ -175,8 +194,10 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
         _web = null;
       });
     }
+    var stage = 'viewer-lease';
     try {
       final lease = await _fetch(randomId());
+      stage = 'webview-configuration';
       if (!mounted || epoch != _epoch) return;
       final params = Platform.isMacOS
           ? WebKitWebViewControllerCreationParams(
@@ -193,6 +214,9 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
       await web.setJavaScriptMode(JavaScriptMode.unrestricted);
       if (web.platform is AndroidWebViewController) {
         final android = web.platform as AndroidWebViewController;
+        if (const bool.fromEnvironment('NATIVE_ACCEPTANCE')) {
+          await AndroidWebViewController.enableDebugging(true);
+        }
         await android.setAllowFileAccess(false);
         await android.setAllowContentAccess(false);
         await android.setGeolocationEnabled(false);
@@ -202,6 +226,9 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
       }
       if (web.platform is WebKitWebViewController) {
         final webkit = web.platform as WebKitWebViewController;
+        if (const bool.fromEnvironment('NATIVE_ACCEPTANCE')) {
+          await webkit.setInspectable(true);
+        }
         await webkit.setAllowsBackForwardNavigationGestures(false);
         await webkit.setAllowsLinkPreview(false);
       }
@@ -240,8 +267,16 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
         _web = web;
       });
       // Anonymous request: never use NativeApi headers in a WebView.
+      stage = 'anonymous-bootstrap';
       await web.loadRequest(lease.bootstrap);
-    } catch (_) {
+    } catch (failure) {
+      if (const bool.fromEnvironment('NATIVE_ACCEPTANCE')) {
+        // No URL, response, identifier, or credential enters device diagnostics.
+        // ignore: avoid_print -- compile-time local qualification instrumentation.
+        print(
+          'FROCKBOT_FALLBACK $stage ${failure.runtimeType} ${failure is RequestFailure ? failure.status : ""}',
+        );
+      }
       _fail(epoch);
     }
   }
@@ -400,8 +435,17 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
             ),
           ),
         if (_error != null)
-          Padding(padding: const EdgeInsets.all(24), child: Text(_error!)),
-        if (_error == null && !_ready) const LinearProgressIndicator(),
+          Expanded(
+            child: FrockEmptyState(
+              title: 'Couldn’t open this Applet',
+              detail: 'Your conversation is still available. Check your connection, then try opening the Applet again.',
+              action: 'Try again',
+              onAction: _open,
+              icon: Icons.widgets_outlined,
+            ),
+          ),
+        if (_error == null && !_ready)
+          const FrockLoading(label: 'Opening Applet'),
         if (_web != null) Expanded(child: WebViewWidget(controller: _web!)),
       ],
     ),
