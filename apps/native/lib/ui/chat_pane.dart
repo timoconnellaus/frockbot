@@ -8,7 +8,6 @@ import '../client/chat_controller.dart';
 import '../theme/frock_theme.dart' show FrockSkeleton;
 import 'frock_tokens.dart';
 import 'frock_widgets.dart';
-import 'receipts.dart';
 
 /// The conversation with one Bot: the thread, the composer, and the few lines
 /// of state that sit between them. Built on Frock UI; the shell around it
@@ -112,7 +111,6 @@ class _ChatPaneState extends State<ChatPane> {
       ),
     ];
     final events = run['events'] as List;
-    final receipts = receiptsFor(events);
     final replies = <String>[];
     for (final event in events) {
       if (event['type'] != 'send/to-user') continue;
@@ -142,22 +140,13 @@ class _ChatPaneState extends State<ChatPane> {
         streaming = status == 'running';
       }
     }
+    // Tool calls never appear in the thread: chat is the Bot's words, the
+    // way it is on the web. What a Bot did belongs to its Work view.
     final body = <Widget>[
-      for (final r in receipts)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: FrockReceipt(
-            icon: r.icon,
-            text: r.text,
-            detail: r.detail,
-            time: r.time,
-            tone: r.tone,
-          ),
-        ),
       for (var i = 0; i < replies.length; i++)
         Padding(
           key: ValueKey('$id:send:$i'),
-          padding: EdgeInsets.only(top: i == 0 && receipts.isNotEmpty ? 4 : 0),
+          padding: EdgeInsets.only(top: i == 0 ? 0 : 8),
           child: Semantics(
             label: 'Bot',
             child: streaming && i == replies.length - 1

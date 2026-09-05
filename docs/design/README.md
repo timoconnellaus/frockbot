@@ -7,7 +7,7 @@ The design system every FrockBot surface builds from: the web shell, the Flutter
 **The app is your Bots' office. Chat is one room in it.**
 
 - Chat with a Bot is the primary screen and the home: the last Bot's chat opens instantly. The flock lives in a drawer, not a tab bar. What needs you and what happened are surfaced inside chat and the drawer, not on a separate Today screen (decision 2026-09-05).
-- Every Bot action is a **receipt**: an icon tile, a verb-first sentence, a mono time. The same object appears in chat, on a Bot's Work tab, in the briefing, and in the Computer.
+- Every Bot action is a **receipt**: an icon tile, a verb-first sentence, a mono time. The same object appears on a Bot's Work tab, in the briefing, and in the Computer. **Never in chat** (Tim, 2026-09-05): the thread is the Bot's words only, the way it is on the web; what the Bot did is a different room.
 - Bots are **characters**: sheep avatars with a state ring (pink working, green ready, grey idle), names set in the display face.
 - The accent is **light**, not paint: a glow behind the working Bot, a glow under the one pink pill per screen. Everything else is tone on tone.
 - **Tone before line**: four depths (ground, window, sheet, tile), three ink tiers as alpha, hairlines only inside a group and starting at the text edge.

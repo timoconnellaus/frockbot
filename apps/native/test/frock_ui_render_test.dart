@@ -75,7 +75,7 @@ void main() {
 
     expect(find.text('Send it'), findsOneWidget);
     expect(find.text('Message Bob'), findsOneWidget);
-    expect(find.textContaining('Searched Gmail'), findsOneWidget);
+    expect(find.textContaining('Searched Gmail'), findsNothing);
     expect(tester.takeException(), isNull);
 
     if (Platform.environment['FROCK_EVIDENCE'] != '1') {

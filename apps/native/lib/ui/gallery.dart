@@ -16,7 +16,8 @@ class FrockGallery extends StatelessWidget {
 
 /// Chat with a Bot: the primary screen. Same content as screen 04 on
 /// docs/design/frock-ui.html. The Bot's reply is prose with its work shown
-/// inline as receipts, then the choice as pills.
+/// in its own words, then the choice as pills. Tool calls never appear in
+/// the thread.
 ///
 /// Safe areas: the status bar, notch and display cutouts are kept clear by
 /// `SafeArea` at the top and sides; the composer keeps the bottom inset (home
@@ -86,27 +87,7 @@ class FrockChatScreen extends StatelessWidget {
                     FrockBotMessage(
                       children: [
                         const Text(
-                          'Found it. She is asking for Q3 by region. Here is what I did:',
-                        ),
-                        const SizedBox(height: 6),
-                        const FrockReceipt(
-                          icon: Icons.mail_outline_rounded,
-                          text: 'Searched Gmail',
-                          detail: '“Thursday numbers”',
-                          time: '3 hits',
-                        ),
-                        const FrockReceipt(
-                          icon: Icons.table_chart_outlined,
-                          text: 'Read',
-                          detail: 'Q3 regions.xlsx',
-                          time: '4 sheets',
-                        ),
-                        const FrockReceipt(
-                          icon: Icons.check_rounded,
-                          tone: TileTone.good,
-                          text: 'Drafted reply',
-                          detail: '214 words',
-                          time: 'ready',
+                          'Found it. She is asking for Q3 by region. I searched Thursday’s thread, read the regions sheet and drafted a reply.',
                         ),
                         const SizedBox(height: 10),
                         Text.rich(

@@ -759,14 +759,45 @@ class FrockBar extends StatelessWidget {
   final Widget? trailing;
   @override
   Widget build(BuildContext context) {
+    // The ends size to what they hold (one or two icon buttons); the title
+    // is centred on the whole bar and keeps clear of the wider end, so a
+    // second action on the right never pushes the first off the screen.
     return SizedBox(
       height: FrockTokens.bar,
-      child: Row(
-        children: [
-          SizedBox(width: FrockTokens.controlMd, child: leading),
-          Expanded(child: Center(child: title)),
-          SizedBox(width: FrockTokens.controlMd, child: trailing),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const room = FrockTokens.controlMd * 2 + 8;
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: room),
+                  child: Center(child: title),
+                ),
+              ),
+              if (leading != null)
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [leading!],
+                  ),
+                ),
+              if (trailing != null)
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [trailing!],
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
   }
