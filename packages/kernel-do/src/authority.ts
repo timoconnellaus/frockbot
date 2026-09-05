@@ -5,6 +5,7 @@
 // detail here; everything above them is Package policy behind narrow hooks.
 import {
   decodeSessionEvent,
+  validateToolOccurrenceJournal,
   type NormalizedModelRequest,
   type SessionEvent,
 } from "@frockbot/kernel-contracts";
@@ -1982,7 +1983,14 @@ export class BotDurableAuthority<Snapshot> {
   ): Promise<BotTurnCompletion | undefined> {
     const provider = latestModelRequestProviderV1(events);
     const reconciles = this.hooks.providerReconciles ?? (() => true);
-    if (provider === undefined || reconciles(provider)) {
+    // A model's retrieval policy says nothing about an unresolved tool effect.
+    // Preserve its intent for the tool reconciliation path (ADR 0028).
+    const unresolvedTool =
+      events.some((event) => event.type === "tool/call") &&
+      [...validateToolOccurrenceJournal(events).values()].some(
+        (entry) => entry.intent && !entry.result,
+      );
+    if (unresolvedTool || provider === undefined || reconciles(provider)) {
       await this.requireRunReconciliation(runId, previous, events, reason);
       return undefined;
     }

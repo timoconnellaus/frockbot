@@ -1,3 +1,4 @@
+import { turnToolCatalogPin } from "./tool-catalog-pin.js";
 import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
 import {
   decodeIsolateMemoryReadRequestV1,
@@ -4885,6 +4886,17 @@ export class ShellBotBackendContribution {
         userId: identity.userId,
         readSecret,
         authorizeConnection: authorizeEnabledConnection,
+        ...(turn
+          ? {
+              pinToolCatalog: turnToolCatalogPin(this.ctx.storage, turn.turnId),
+            }
+          : {}),
+        composioRequest: (command) =>
+          userConfiguration.composioRequest(
+            identity.userId,
+            identity.botId,
+            command,
+          ),
         packageSettings,
         // Enabled Contributions reach the network through the same
         // outbound seam the model provider uses, so a deployment that stubs
@@ -6321,6 +6333,11 @@ export class ShellBotBackendContribution {
   }
 
   private userConfiguration(identity: BotIdentity): {
+    composioRequest(
+      userId: string,
+      botId: string,
+      command: unknown,
+    ): Promise<unknown>;
     readConfiguration(input: {
       schemaVersion: 1;
       userId: string;
@@ -6398,6 +6415,7 @@ export class ShellBotBackendContribution {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
     const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
+      composioRequest(input: unknown): Promise<unknown>;
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
       executeConfiguration(input: unknown): Promise<unknown>;
       readPackageRevisions(
@@ -6425,6 +6443,8 @@ export class ShellBotBackendContribution {
       readMachineResult(input: unknown): Promise<unknown>;
     };
     return {
+      composioRequest: (userId, botId, command) =>
+        rpc.composioRequest({ schemaVersion: 1, userId, botId, command }),
       readConfiguration: (input) => rpc.readConfiguration(input),
       executeConfiguration: async (command) =>
         decodeOperationReceiptV1(

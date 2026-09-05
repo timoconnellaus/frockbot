@@ -407,3 +407,35 @@ test("an early shared alarm preserves another contribution deadline", async () =
     await f.storage.get<string[]>("composio:auth-config-pending:v1"),
   ).toEqual(["gmail"]);
 });
+
+test("removing the optional key retains accounts and makes tools unavailable without errors", async () => {
+  const f = fixture();
+  await f.make().request("owner", start());
+  await f.make().request("owner", completion);
+  const before = f.calls.length;
+  const service = new ComposioUserService({
+    storage: f.storage,
+    settings: f.settings,
+    callbackBaseUrl: "https://bot.test",
+  });
+  expect(
+    await service.request("owner", {
+      schemaVersion: 1,
+      operation: "tool-availability",
+    }),
+  ).toEqual({ schemaVersion: 1, available: false });
+  expect(
+    await service.request("owner", {
+      schemaVersion: 1,
+      operation: "execute-tool",
+      connectionId: "connection-one",
+    }),
+  ).toMatchObject({
+    isError: true,
+    content: expect.stringContaining("not started"),
+  });
+  expect(f.calls).toHaveLength(before);
+  expect(
+    (await f.settings.getConnection("owner", "connection-one"))?.state,
+  ).toBe("ready");
+});

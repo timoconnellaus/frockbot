@@ -1,3 +1,4 @@
+import { createConfiguredComposioRuntimeContribution } from "@frockbot/plugin-composio/agent";
 import {
   compileApplicationDeclarations,
   compileApplicationPlan,
@@ -248,6 +249,11 @@ type EnabledRuntimeContributionFactory = (config: {
   packageSettings: Readonly<Record<string, PackageSettingValueV1>>;
   readSecret(name: string): string | undefined;
   authorizeConnection(): Promise<ConnectionView>;
+  composioRequest?(input: unknown): Promise<unknown>;
+  pinToolCatalog?(
+    connectionId: string,
+    read: () => Promise<unknown>,
+  ): Promise<unknown>;
   /** The Package's own outbound seam, when the host owns one. */
   fetch?: typeof fetch;
   /**
@@ -279,6 +285,10 @@ const enabledRuntimeContributionFactories = new Map<
   string,
   EnabledRuntimeContributionFactory
 >([
+  [
+    "@frockbot/plugin-composio/agent",
+    createConfiguredComposioRuntimeContribution,
+  ],
   [
     "@frockbot/plugin-mcp/agent",
     (config) =>
@@ -973,6 +983,11 @@ export async function createFoundationEnabledRuntimePackages(
   host: {
     userId: string;
     readSecret(name: string): string | undefined;
+    composioRequest?(input: unknown): Promise<unknown>;
+    pinToolCatalog?(
+      connectionId: string,
+      read: () => Promise<unknown>,
+    ): Promise<unknown>;
     authorizeConnection(
       capability: EnabledCapabilityV1,
     ): Promise<ConnectionView>;
@@ -1024,6 +1039,10 @@ export async function createFoundationEnabledRuntimePackages(
       userId: host.userId,
       packageSettings: host.packageSettings?.(pkg.id) ?? {},
       readSecret: host.readSecret,
+      ...(host.composioRequest
+        ? { composioRequest: host.composioRequest }
+        : {}),
+      ...(host.pinToolCatalog ? { pinToolCatalog: host.pinToolCatalog } : {}),
       authorizeConnection: () => host.authorizeConnection(capability),
       ...(connection ? { connection } : {}),
       ...(host.fetch ? { fetch: host.fetch } : {}),
