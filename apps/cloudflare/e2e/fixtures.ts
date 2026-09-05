@@ -190,14 +190,15 @@ export async function openApplication(
   }
   // Not the "Create Bot" button: for a User with no Bots the creation dialog
   // opens by itself, and its submit carries the same name. The sidebar's
-  // Connectors trigger renders once the shell has mounted and read the manifest.
+  // profile trigger renders once the shell has mounted and read the manifest.
   //
-  // On a phone the sidebar is a closed drawer — inert, and so invisible to a
-  // role query — and the menu button that opens it is the same signal: it too
-  // renders only once the shell has mounted.
+  // On a phone the sidebar is a closed drawer — inert — and the menu button
+  // that opens it is the same signal: it too renders only once the shell has
+  // mounted. Scoping the sidebar's trigger to a sidebar that is not `inert`
+  // means exactly one of the two matches at any width.
   await expect(
     page
-      .getByRole("button", { name: "Connectors", exact: true })
+      .locator(".sidebar:not([inert]) button.profile-trigger")
       .or(page.getByRole("button", { name: "Show navigation" })),
   ).toBeVisible();
 }
@@ -412,7 +413,7 @@ export async function provisionThroughUi(
     apiBaseUrl: options.apiBaseUrl,
   });
   await expect(
-    ollamaCard(page).getByText("ready · models fresh"),
+    ollamaCard(page).getByText("Ready · model list up to date"),
   ).toBeVisible();
   await closeOverlay(page);
   await chooseDefaultModel(

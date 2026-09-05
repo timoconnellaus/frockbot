@@ -818,7 +818,7 @@ describe("Bot selection", () => {
         },
       },
       platformModel: undefined,
-      expectedLabel: "Model name · Model provider · Account model",
+      expectedLabel: "Model name · Model provider · your choice for every Bot",
       expectedProjection: "default",
       ready: true,
     },

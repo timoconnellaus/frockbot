@@ -74,8 +74,8 @@ describe("declarative Package entries", () => {
       "middle",
       "later",
     ]);
-    // The Applets entry sits above the Connectors trigger, which registers at
-    // order 10 in the same slot.
+    // Order is the whole contract of this slot: a Package that asks for 5
+    // draws above one that asks for 10, whatever either of them is.
     expect(entries[0]!.order).toBe(5);
     expect(entries[0]!.order).toBeLessThan(10);
     expect(entries[2]!.order).toBeGreaterThan(10);
