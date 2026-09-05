@@ -4,6 +4,7 @@ import {
   type SessionEvent,
 } from "@frockbot/kernel-contracts";
 import type {
+  BotNotificationIntent,
   BotTurnCompletion,
   StoredRunCodecV1,
   StoredRunV1,
@@ -131,6 +132,26 @@ export type SupersededPackageRecords<Snapshot> = (input: {
   run: StoredRunV1<Snapshot>;
   read<T>(key: string): Promise<T | undefined>;
 }) => Promise<Record<string, unknown>>;
+
+/**
+ * The notification a Turn that ended `failed` owes the person who was waiting
+ * on it, decided by the Package that owns notification content.
+ *
+ * A completed Turn already tells them — "Bob replied", with what it said —
+ * through the completion's own intent. A failed Turn had none, so the only
+ * person who ever learned was the one still looking at that conversation. This
+ * is the same seam for the other outcome: the kernel hands over the settled
+ * record, whose `configurationSnapshot` is the durable copy of the settings
+ * the Turn was admitted under, and writes back whatever intent comes out
+ * without reading it.
+ *
+ * It is consulted only on the transition into `failed`, so a replay or a
+ * recovery pass over a run that already settled writes nothing — an
+ * acknowledged notification stays acknowledged.
+ */
+export type FailedRunNotification<Snapshot> = (
+  run: StoredRunV1<Snapshot>,
+) => BotNotificationIntent | undefined;
 
 /**
  * Settles a superseded run as terminal `superseded` and clears its active
@@ -325,12 +346,17 @@ export async function failStoredRun<Snapshot>(
   events: readonly SessionEvent[],
   failure: string,
   supersededRecords?: SupersededPackageRecords<Snapshot>,
+  failureNotification?: FailedRunNotification<Snapshot>,
 ): Promise<
   "failed" | "cancelled" | "superseded" | "preserved-completion" | "missing"
 > {
   const run = await hydratedRun(codec, storage, keys.run);
   if (!run) return "missing";
   if (run.status === "completed") return "preserved-completion";
+  // Whether this settlement is the one that fails the run. A run already
+  // `failed` can be settled again — recovery and the stale-run repair both
+  // re-enter — and the second pass owes nobody a second notification.
+  const alreadyFailed = run.status === "failed";
   // A stopped run never becomes `failed`: Stop is the durable outcome.
   if (run.stopRequestedAt) {
     return cancelStoredRun(codec, storage, keys, runId, previous, events);
@@ -357,8 +383,16 @@ export async function failStoredRun<Snapshot>(
     phase: run.phase === "reconciliation-required" ? "executing" : run.phase,
     failure,
   } satisfies StoredRunV1<Snapshot>);
+  const records: Record<string, unknown> = {
+    [keys.run]: structuredClone(storedRunRecordV2(failed)),
+  };
+  const intent = alreadyFailed ? undefined : failureNotification?.(failed);
+  if (intent) {
+    records[`${keys.notificationPrefix}${intent.notificationId}`] =
+      structuredClone(intent);
+  }
   await new SessionEventLog(storage).rewrite(run.sessionId, latestEvents);
-  await storage.put({ [keys.run]: structuredClone(storedRunRecordV2(failed)) });
+  await storage.put(records);
   if ((await storage.get<string>(keys.activeRun)) === runId) {
     await storage.delete(keys.activeRun);
   }

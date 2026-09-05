@@ -49,6 +49,10 @@ import {
   type ActivityTrailStateV1,
 } from "./activity-trail.js";
 import {
+  supersedeDrainLabelV1,
+  supersedeDrainStateV1,
+} from "./supersede-drain.js";
+import {
   TURN_TEXT_MAX_CHARACTERS_V1,
   turnTextCounterVisibleV1,
   turnTextRemainingV1,
@@ -776,6 +780,8 @@ let trailMemory: ActivityTrailMemoryV1 | null = null;
 let trailRunId: string | undefined;
 let trailSeq = 0;
 let trailTick = 0;
+/** The drain's clock, advanced by the same tick the trail runs on. */
+const drainNow = ref(Date.now());
 
 /**
  * The Turn still going, if any. Only one executes at a time, but a Turn queued
@@ -811,6 +817,9 @@ const workingSample = computed(() => {
 });
 
 function stepTrail(): void {
+  // The same tick the trail runs on carries the drain's clock: "this has been
+  // stopping for twenty seconds" is not an event either.
+  drainNow.value = Date.now();
   const sample = workingSample.value;
   const message = workingMessage.value;
   const now = Date.now();
@@ -843,6 +852,20 @@ function stepTrail(): void {
 watch(workingSample, () => {
   stepTrail();
 });
+
+/*
+ * A message sent into a running Turn supersedes it, and the new Turn starts
+ * only once the old one has settled. The row above the person's message is
+ * still the Turn they replaced, so for those seconds it says so.
+ * `supersede-drain.ts` holds the whole rule; this reads it against the
+ * transcript and the tick's clock.
+ */
+const supersedeDrain = computed(() =>
+  supersedeDrainStateV1({ messages: messages.value, now: drainNow.value }),
+);
+const workingLabel = computed(
+  () => supersedeDrainLabelV1(supersedeDrain.value) ?? "Working",
+);
 
 /*
  * One anchor per Turn, on its first visible line, so a deep link resolves to
@@ -1603,7 +1626,8 @@ function handleComposerKeydown(event: KeyboardEvent): void {
               v-if="workingMessage"
               class="bot-working"
               role="status"
-              aria-label="Working"
+              :aria-label="workingLabel"
+              :data-supersede="supersedeDrain"
             >
               <div
                 class="bot-avatar bot-avatar-live"
@@ -1620,6 +1644,11 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                 :bursts="trailBursts"
                 :state="trailState"
               />
+              <span
+                v-if="supersedeDrain !== 'none'"
+                class="bot-working-label"
+                >{{ workingLabel }}</span
+              >
             </div>
           </Transition>
         </section>
