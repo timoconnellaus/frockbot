@@ -109,6 +109,7 @@ class PagedTransport extends FakeTransport {
 }
 
 void main() {
+  replyTests();
   testWidgets(
     'chat opens on the latest row and earlier pages preserve the reading position',
     (tester) async {
@@ -359,6 +360,85 @@ void main() {
       first.completion.complete();
       await send;
       restored.dispose();
+    },
+  );
+}
+
+class ReplyTransport extends FakeTransport {
+  ReplyTransport(super.store);
+  @override
+  Future<Map<String, dynamic>> page(
+    String botId, {
+    String? before,
+    String? conversationId,
+  }) async => {
+    'runs': [
+      {
+        'runId': 'settled',
+        'admittedAt': '2026-09-05T01:00:00Z',
+        'input': 'Reply with one word.',
+        'status': 'completed',
+        'events': <Object>[],
+        'outcome': {'type': 'completed', 'text': 'Baa.'},
+      },
+      {
+        'runId': 'sent',
+        'admittedAt': '2026-09-05T01:01:00Z',
+        'input': 'Ping the tool.',
+        'status': 'completed',
+        'events': [
+          {
+            'type': 'send/to-user',
+            'payload': {'type': 'text', 'text': 'pong'},
+          },
+        ],
+        'outcome': {'type': 'completed', 'text': 'I sent pong.'},
+      },
+      {
+        'runId': 'live',
+        'admittedAt': '2026-09-05T01:02:00Z',
+        'input': 'Tell me a story.',
+        'status': 'running',
+        'events': <Object>[],
+        'partialText': 'Once upon',
+      },
+    ],
+    'page': {'truncated': false},
+  };
+}
+
+void replyTests() {
+  testWidgets(
+    'a Turn draws its sends, else its answer text, else the words so far',
+    (tester) async {
+      final store = MemoryStore();
+      final controller = ChatController(
+        transport: ReplyTransport(store),
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+      );
+      await controller.initialize();
+      controller.connection = ConnectionState.connected;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: child!,
+          ),
+          home: Scaffold(
+            body: ChatPane(controller: controller, onReconnect: () async {}),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Baa.'), findsOneWidget);
+      expect(find.text('pong'), findsOneWidget);
+      expect(find.text('I sent pong.'), findsNothing);
+      expect(find.textContaining('Once upon'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
     },
   );
 }

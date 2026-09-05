@@ -121,6 +121,21 @@ class _ChatPaneState extends State<ChatPane> {
       );
     }
     final status = run['status'];
+    // The Bot's voice is its sends. Only a Turn that sent nothing draws the
+    // model's own text: the settled answer, or the words so far while it runs.
+    // Drawing both is how one reply arrived twice (issue 153).
+    var streaming = false;
+    if (replies.isEmpty) {
+      final outcome = run['outcome'];
+      final settled = outcome is Map ? outcome['text'] : null;
+      final partial = run['partialText'];
+      if (settled is String && settled.isNotEmpty) {
+        replies.add(settled);
+      } else if (partial is String && partial.isNotEmpty) {
+        replies.add(partial);
+        streaming = status == 'running';
+      }
+    }
     final body = <Widget>[
       for (final r in receipts)
         Padding(
@@ -139,7 +154,9 @@ class _ChatPaneState extends State<ChatPane> {
           padding: EdgeInsets.only(top: i == 0 && receipts.isNotEmpty ? 4 : 0),
           child: Semantics(
             label: 'Bot',
-            child: SelectableText(replies[i], style: t.message),
+            child: streaming && i == replies.length - 1
+                ? _Streaming(text: replies[i])
+                : SelectableText(replies[i], style: t.message),
           ),
         ),
       if (status != 'completed')
@@ -332,6 +349,38 @@ class _Enter extends StatelessWidget {
         ),
       ),
       child: child,
+    );
+  }
+}
+
+/// Words still arriving: the text so far with the accent caret after it.
+class _Streaming extends StatelessWidget {
+  const _Streaming({required this.text});
+  final String text;
+  @override
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(text: text),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 2),
+              child: Container(
+                width: 7,
+                height: 15,
+                decoration: BoxDecoration(
+                  color: t.accent.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      style: t.message,
     );
   }
 }
