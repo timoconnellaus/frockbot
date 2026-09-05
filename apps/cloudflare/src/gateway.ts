@@ -1,3 +1,4 @@
+import { clientCompatibilityResponse } from "./client-compatibility.js";
 import {
   ConfigurationConflictError,
   ConfigurationDecodeError,
@@ -658,6 +659,8 @@ export function createGateway(dependencies: GatewayDependencies) {
   );
 
   const route = async (request: Request, url: URL): Promise<Response> => {
+    const incompatible = clientCompatibilityResponse(request, url);
+    if (incompatible) return incompatible;
     if (url.pathname.startsWith("/api/auth/")) {
       return dependencies.auth.handler(request);
     }

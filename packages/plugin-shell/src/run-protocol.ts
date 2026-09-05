@@ -45,6 +45,16 @@ const MAX_SESSION_ID_LENGTH = 320;
 const MAX_TASK_DESCRIPTION_BYTES = 800;
 const MAX_TASK_MODEL_BYTES = 512;
 export const CLIENT_RUN_PAGE_LIMIT = 32;
+/**
+ * How many run-index candidates one transcript page may walk past.
+ *
+ * The index is global and the transcript is one conversation, so filling a
+ * page can mean stepping over Turns of other conversations and over
+ * automation firings. Scanning is cheap — a run record, not its journal — but
+ * it is not free, so it stops at a budget and hands back a cursor rather than
+ * walking a Bot's whole history inside one request.
+ */
+export const CLIENT_RUN_SCAN_LIMIT = CLIENT_RUN_PAGE_LIMIT * 8;
 export const CLIENT_RUN_LIST_MAX_BYTES = 512_000;
 
 export type ClientRunStatusV1 =

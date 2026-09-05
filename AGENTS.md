@@ -4,7 +4,7 @@ These rules govern production features and architecture. Treat them as invariant
 
 ## Product intent
 
-- FrockBot reaches capability parity with GrokBot, and every parity capability is delivered as a Package on a minimal kernel. The parity register is the checklist in `docs/research/grokbot-computer.md`.
+- FrockBot reaches capability parity with GrokBot through a minimal kernel, a reviewed base application, and Packages at declared extension seams. Parity describes outcomes, not packaging. The parity register is the checklist in `docs/research/grokbot-computer.md`.
 - The parity register is a checklist, not a mandate to ship every row: the owner may decline or defer a register capability. A declined capability is recorded in the register with the date and reason and is removed from the product rather than left half-built; it may be reinstated later by the same route.
 - Users extend FrockBot beyond parity with installable Packages.
 - A Bot extends itself: it may author, activate, revise, and revert its own Packages, Skills, and Routines within the authority its User has granted. Self-modification is a product feature with the same durability, provenance, and trust rules as everything else.
@@ -25,6 +25,8 @@ These rules govern production features and architecture. Treat them as invariant
 - The User's Durable Object is the authority for everything User-scoped: Package availability, Connections, credentials, the Computer assignment, User settings, quotas, and the generation records of User and Project Memory roots.
 - The Workspace and its object-storage twin are the only durable state outside a Durable Object. They hold files, never authority: a Durable Object records every intent, effect, and generation that concerns them, and the rules under Computer and Workspace and Memory govern their reconciliation. Immutable content-addressed Package artifacts are durable content, not state: addressed by hash, never mutated, and holding no authority.
 - Durable state is migrated forward, never honoured backward. A stored record of an older shape is migrated to the current shape by a versioned, tested migration at the seam that reads it, and the migrated record is written back on the next write; a field that belonged to a removed feature is dropped by that migration, never read as the feature. A feature is never kept for compatibility: removing one removes its surfaces and code, and only the migration of its records remains.
+- Stored-state migration and client compatibility are separate seams. Supported wire protocols and compiled widget catalogs have a bounded, tested window and a minimum native version. An unsupported client protocol or native version receives a plain update response before commands are admitted; an unsupported extension catalog leaves that region visibly unavailable without disabling core workflows. Compatibility never revives a removed product feature.
+- Runnable generations declare a tested storage-schema compatibility window. Activation and revert check it before mounting. A migration crosses a guarded boundary with quiescence, recovery checkpoints, and validation before promotion; failed candidate code cannot damage the last runnable generation's data. Incompatible reverts are refused visibly. Reverting code never implies undoing data or external effects.
 - A Bot's conversational Turns run in its Bot Durable Object; each concurrent child Turn runs in a Subagent Durable Object of the same Bot that holds no authority — the Bot Durable Object admits it, pins its Composition, and records its lifecycle and terminal result. When resident, the Durable Object constructs one application root from the Bot's durable Composition. The root and its Plugins are ephemeral projections of durable state, not authorities that must remain resident.
 - Gateways, application Workers, and Dynamic Workers route commands, serve immutable artifacts, or execute Package code loaded for a Bot. They own no Agent loop and no durable state.
 - Admit input durably before acknowledging it.
@@ -35,7 +37,7 @@ These rules govern production features and architecture. Treat them as invariant
 ## One production path
 
 - Browser, desktop, and mobile clients use the same backend protocols and Agent runtime.
-- The hosted WebUI is the product UI. Electron and mobile containers are thin platform shells around it.
+- Native and browser renderers are first-class product clients over the same backend commands, projections, and execution semantics. Core workflows have parity across renderers; a shared document or renderer is not required.
 - Development and test adapters exercise the production architecture rather than introducing alternate product runtimes.
 - Platform capabilities such as notifications, clipboard access, file selection, authentication handoff, and deep links are progressive enhancements. Core workflows remain available without a native client process.
 
@@ -44,7 +46,7 @@ These rules govern production features and architecture. Treat them as invariant
 - Configuration is account-shaped. A Package, Capability, Connection, or external account a User enables is available to every Bot that User owns, immediately and without a second decision. Uniformity is the feature, not a limitation to be corrected with per-Bot overrides.
 - Per-Bot configuration exists only for what must genuinely differ between Bots: identity, instructions, notifications, and what the Bot has authored for itself. Any other per-Bot control ships only with a stated reason the choice cannot be account-level.
 - The product works out of the box. The platform chooses the model a Bot runs on, and a User who has configured nothing has a working Bot. Model choice is a platform control on one Models surface: the default reads as the platform provider on Auto, choosing another provider is itself the opt-in and installs what that provider needs, and connecting a provider happens where it is chosen.
-- Platform-owned Packages — the application root, a Package that offers no User- or Bot-scoped control, and the Package that owns the platform's ambient model Connection — are installed for every User, cannot be disabled or uninstalled, are repaired on every configuration read, and are not offered where Packages are enabled. Which Packages are platform-owned is derived from manifest facts, never from a list of ids.
+- The platform-owned required core is compiled into the reviewed base, always available, and cannot be disabled or uninstalled. It is absent from Package enablement surfaces. Platform-owned provider Packages needed for the working default are repaired on configuration reads and are not offered as enablement choices; that status is derived from manifest facts, never from a list of ids.
 - Configuration only some Users need is itself a Package, disabled by default, and this is the exception rather than the routine home for a knob: such a Package ships only with a stated reason the choice cannot be a platform default. The default experience carries no control for it. Enabling the Package adds the control; disabling it makes the values that control captured inert without destroying them, and re-enabling restores them.
 - Where such a Package adds a per-Bot override of an account-level value, the override is a Package-scoped Bot setting, so its inertness while the Package is disabled is a property of enablement rather than a special case. Absence of an override means inherit. Exactly one account-level value is authoritative when no override is set, and the product behaves correctly with the override Package disabled.
 - A control ships only when a User must make the choice. Otherwise choose a default and ship no control. A Capability that requires no credential and carries no cost or risk to the User is enabled when the User signs up.
@@ -53,42 +55,40 @@ These rules govern production features and architecture. Treat them as invariant
 
 ## Landing work
 
-- Merging integrates and tagging ships. A change reaching `main` moves nothing in production; only a version tag deploys it.
-- Opening a pull request or pushing a tag is not the end of the work. A session that does either watches it to a terminal state with `bun scripts/ci-watch.ts`, and owns what it finds: a red check, a merge that was never queued, and a release that published without deploying are all failures to fix, not results to report.
-- `ci-watch` exits 0 when the change landed, 1 when it failed, and 2 while it is still pending, so a session, a hook, and a person read one verdict rather than three.
-- A pull request that edits `.github/workflows/` can never be queued by `GITHUB_TOKEN` and is merged by hand. Every other pull request merges itself once its checks pass.
+- Integration and production release are separate acts. A session that opens a pull request or starts a release owns it through its terminal result, including repairing failed checks and verifying the intended landing or deployment.
+- When landing or releasing work, read `docs/architecture/delivery.md` for the current mechanism and `docs/plans/native-app.md` for the native rollout gates.
 
 ## Minimal kernel
 
-- The kernel is the only production code that is not a Package. It has exactly three parts: Durable Object authority (admission, event log, cursor, idempotency, cancellation, scheduling, and storage), the Agent loop (claim input, call the model, run the tools, record events, repeat), and Package composition (resolve durable desired state into a pinned generation set, mount it, verify it, commit or roll back, and bootstrap and dispose the host that does so).
-- The kernel declares the narrow interfaces it consumes, including model invocation, tool execution, and Memory access, and owns no implementation of them. Model providers, the tool registry, Memory, Computers, Skills, Routines, notifications, credentials, settings, and every UI surface are Packages.
+- The kernel has exactly three parts: Durable Object authority (admission, event log, cursor, idempotency, cancellation, scheduling, and storage), the Agent loop (claim input, call the model, run the tools, record events, repeat), and Package composition (resolve durable desired state into a pinned generation set, mount it, verify it, commit or roll back, and bootstrap and dispose the host that does so).
+- The kernel declares the narrow interfaces it consumes, including model invocation, tool execution, and Memory access, and owns no implementation of them. Implementations belong to the reviewed base or declared Packages, never to the kernel.
 - The kernel imports no Package and contains no product policy.
 - The kernel treats every Workspace file as data. Only Skills under a Bot's instruction roots — its own and its User's — written under the Bot's own authority or its User's, are loaded as instructions.
 
 ## Package composition
 
-- Every production capability beyond the kernel is implemented as a Plugin mounted from a declared Package Contribution.
+- The reviewed base owns permanent product behavior and explicit application construction. Runtime extensions mount only from declared, narrow Package Contributions: where implementations vary, code is installed after deployment, isolation is required, or independent disablement and revert matter. Fixed product behavior needs no Package lifecycle.
 - Built-in, User-installed, and Bot-authored Packages follow the same manifest, authority, lifecycle, provenance, and test requirements; only the execution host differs, and it follows provenance as stated below. A Package records its provenance as first-party, User, or Bot.
 - Package availability and Connections are User-level, and enabling them is the grant. Enabling a Package or Connection grants it to every Bot that User owns; disabling or revoking it removes it from every Bot. There is no second, per-Bot grant.
-- A Bot's authority is exactly that account-wide grant, never a narrower per-Package grant. Connecting is a User act performed out of band on the Connections surface; a Bot never requests, prompts for, or renders a way to make a Connection, and discovers a capability only once its User has connected it. A Package may make a service connectable by shipping its integration and Connection Type; the User still connects it.
-- The grant stays durable and inspectable without being a User decision: every admitted Turn records the enabled Package and Connection set it ran under as part of its Composition generation, and resolution fails closed when a Connection is missing, disabled, or revoked, recording a visible, repairable failure rather than silently running without it.
-- A Composition is the durable, versioned set of Package generations a Bot mounts. Every admitted Turn records the Composition generation it ran under. Changing a Composition creates a new generation; it never mutates a recorded one. Activation takes effect at the next admitted Turn; an in-flight Turn completes on its pinned Composition.
+- Account-wide availability does not imply ambient Package authority. Each Package is bound to an inspectable subset of capabilities it needs and is allowed, derived from the User's live enabled set and reviewed binding policy. The subset is uniform across that User's Bots, adds no per-Bot consent, and cannot be widened by a Bot-authored manifest. Connecting is a User act performed out of band on the Connections surface; a Bot never requests, prompts for, or renders a way to make a Connection, and discovers a capability only once its User has connected it. A Package may make a service connectable by shipping its integration and Connection Type; the User still connects it.
+- The resolved Package bindings stay durable and inspectable without a repeated User decision: every admitted Turn records the enabled Package and Connection set it ran under as part of its Composition generation, and resolution fails closed when a Connection is missing, disabled, or revoked, recording a visible, repairable failure rather than silently running without it.
+- A Composition is the durable, versioned set of Package generations a Bot mounts. Every admitted Turn records the Composition generation it ran under. Changing a Composition creates a new generation; it never mutates a recorded one. Activation takes effect at the next admitted Turn; an in-flight Turn keeps its pinned implementation and schema history. Before each new external effect, including from in-flight code, the durable owner checks live authorization. Revocation fences future use and records an explicit refusal; an already-dispatched effect is reconciled, never assumed cancelled or repeated.
 - Composition fails closed. A generation that fails to resolve, mount, or pass its declared checks leaves the last known-good generation resident and records a durable, visible, repairable failure. A generation that fails to activate three consecutive times is quarantined until a User acts. A failure is delivered to the Bot as durable input on its next admitted Turn, so the Bot can repair its own change without being told.
-- A kernel-declared required core set — the conversation surface, settings and undo, the audit view, the authoring tools, and the deny-only tool guards — is present in every generation with first-party provenance. Composition refuses a generation that lacks a required member or carries one under any other provenance: a Bot cannot remove its User's way to see and undo what it did.
+- The platform-owned required core — conversation, authentication, trusted settings, recovery, audit, undo, authoring entry points, and deny-only tool guards — is compiled into the reviewed base. Extensions cannot remove, replace, obscure, or impersonate its trust chrome or the User's way to see and undo what a Bot did.
 - Compilation and bundling happen outside Durable Objects. Composition consumes immutable, content-addressed artifacts and never builds them.
 - A Composition generation is keyed by its resolved artifact set. An isolate's loader identity is derived only from that artifact set and the digest of the bindings it was granted, so identical artifacts under identical authority share one isolate and a changed grant never reaches a cached isolate. Generation creation rate, artifact size, retained generations, Workspace disk, and Bot isolate CPU, subrequests, and model spend are bounded by durable per-User quotas; exceeding a quota refuses the operation and records a visible failure.
-- Every Package whose recorded provenance is not first-party executes in a Dynamic Worker isolate the Bot's Durable Object loads for it, with `globalOutbound` disabled, only the bindings that expose what the Bot holds — its resolved model, enabled tools, Memory, Workspace, and its User's enabled Connections as opaque leases — and no access to secrets, the keyring, or any Durable Object state other than the bindings expose. Network access exists only through those bindings. First-party Packages may run in the kernel's isolate only when reviewed and shipped with FrockBot.
-- A Package may declare an Instance Contribution: a server class, a UI page, and tools that run as one durable instance per User — an Applet. The kernel mounts the instance's server artifact as a Durable Object facet under a kernel-owned Applet Durable Object it loads through Worker Loader with `globalOutbound` disabled and the same capability bindings as any isolate. The facet's storage is User product state, not Composition: it survives every code generation, is migrated forward by the Applet, and is deleted only by the kernel when the User deletes the Applet. The kernel is the authority for the instance — its directory entry, current generation, version history, viewer sessions, tool routing, and deletion — and never for its contents. Composition Packages never own storage; facets exist only under the Applet Durable Object.
+- Every Package whose recorded provenance is not first-party executes in an isolated host the Bot's Durable Object loads for it, with ambient outbound access disabled, only the bindings its inspectable subset permits — its resolved model, enabled tools, Memory, Workspace, and its User's enabled Connections as opaque leases — and no access to secrets, the keyring, or any Durable Object state other than the bindings expose. Network access exists only through those bindings. First-party Packages may run in the kernel's isolate only when reviewed and shipped with FrockBot.
+- A Package may declare an Instance Contribution: a server class, a UI page, and tools that run as one durable instance per User — an Applet. The kernel mounts the instance's server artifact in isolated storage under a kernel-owned Applet Durable Object, with ambient outbound access disabled and capability bindings restricted as for any isolate. The facet's storage is User product state, not Composition: it survives every code generation, is migrated forward by the Applet, and is deleted only by the kernel when the User deletes the Applet. The kernel is the authority for the instance — its directory entry, current generation, version history, viewer sessions, tool routing, and deletion — and never for its contents. Composition Packages never own storage; facets exist only under the Applet Durable Object.
 - An Applet's declared tools are Composition members of every Bot its User owns, so each admitted Turn records the Applet generation whose tools it ran under, and a published generation activates at the next admitted Turn. A tool call routes through the Applet Durable Object to its facet.
 - Every Contribution kind is resolved from the manifest and an artifact, never from a switch over Package identity. A first-party Package that declares only Bot-authorable Contribution kinds ships as an artifact-backed member and loads through the same path as a Bot-authored one.
 
 ## Self-modification
 
-- A Bot may author, install from the catalog, or change anything above the kernel for itself: Packages, tools, model and integration adapters, Skills, UI Contributions, Routines, and settings it is permitted to edit. Conversation with the Bot is the primary path by which its setup changes. A Bot-authored model or integration adapter is a translation layer over a kernel-declared binding, never a network client.
+- A Bot may author, install from the catalog, or change declared extension points and permitted configuration for itself: Packages, tools, model and integration adapters, Skills, UI Contributions, Routines, and settings it is permitted to edit. Conversation with the Bot is the primary path by which its setup changes. A Bot cannot change reviewed base code, trust chrome, the kernel, this constitution, or its own grants. A Bot-authored model or integration adapter is a translation layer over a kernel-declared binding, never a network client.
 - Loop policy — what a Contribution adds to admission, context assembly, tool exposure, tool results, or termination — may execute in a loaded isolate through the loop's declared events. The loop's durable skeleton (claim input, record events, cursor, idempotency) stays in the Durable Object and no Contribution can bypass it.
 - A Bot-authored change is a durable effect: the Bot records intent, the resulting artifact is immutable and content-addressed, and its provenance names the Bot, Session, and Turn that produced it. Artifacts are superseded, never edited in place.
 - Activation is immediate and needs no human approval, subject to composition failing closed. The User can inspect, diff, disable, and revert any Bot-authored change; reverting is itself a recorded generation. A Bot may revert its own setup generations when its User asks; undo covers the Bot's setup, never actions taken through Connections, and last known-good is set only by a successful mount, never by a revert.
-- Self-modification never widens authority. Bot-authored and installed code runs with exactly what the Bot already holds; there is no path by which a Bot requests more, and a capability the Bot does not hold is unavailable to its code.
+- Self-modification never widens authority. Bot-authored and installed code runs within its allowed subset of what the Bot currently holds; there is no path by which a Bot requests more, and a capability the Bot does not hold is unavailable to its code.
 - An Applet is authored as TypeScript under the Applets Package's durable root on the User's Computer, checked, linted, and previewed there through the Applets SDK, and published as an immutable generation the Applet Durable Object mounts. The Computer is where an Applet is written and never where it runs: a Turn that uses an Applet's tools or a User who opens an Applet wakes nothing. Publishing reads the built artifact through the Workspace file surface; no credential reaches the Computer for it.
 - Skills are files under the Bot's instruction root. An edit is visible to the Bot on its next admitted Turn; the exact Skill generation each Turn used is reconstructable.
 - Bot-authored Packages are shareable: they are publishable and installable by other Bots and Users through the same catalog and manifest as first-party Packages. Publication beyond the authoring User is a User action.
@@ -126,16 +126,16 @@ These rules govern production features and architecture. Treat them as invariant
 - Cross-runtime communication uses narrow, versioned DTOs, and every inbound value is decoded at its seam.
 - Electron, Cloudflare, provider SDK, and Computer implementation types remain inside their adapters.
 - Core and runtime modules are independent of Electron and client-framework authority.
-- Backend runtime Contributions execute within Durable Object constraints; Bot isolate Contributions execute in a loaded Dynamic Worker; any other host must be declared in the manifest and remains non-authoritative.
+- Backend runtime Contributions execute within Durable Object constraints; Bot isolate Contributions execute in an isolated loaded host; any other host must be declared in the manifest and remains non-authoritative.
 - Prefer deep modules: substantial behavior behind a small interface that is also the module's test surface.
 
 ## Package contributions
 
-- A Package declares each Contribution by runtime: backend runtime, Bot isolate, hosted client, desktop shell, mobile shell, or instance.
-- A hosted client Contribution from a non-first-party Package is a sandboxed cookieless iframe page in a declared slot, or a declarative entry — a sidebar action or an overlay surface — the shell renders from the manifest with no Package JavaScript in the app origin. Core chrome is never Package-owned.
-- Canonical state and orchestration live in backend runtime Contributions.
+- A Package declares each Contribution by runtime: backend runtime, Bot isolate, browser client, native client, platform adapter, or instance. Declaring a client runtime never permits executable native code from an untrusted Package.
+- A non-first-party UI Contribution is a bounded declarative document rendered through a compiled, reviewed widget catalog, a declarative entry in a named slot, or an isolated cookieless web fallback. It loads no executable native code, gains no native API authority from its document, and runs no Package JavaScript in the application origin. The host owns attribution, navigation, authentication, credentials, recovery, and trust chrome. Unsupported documents fail visibly within their extension region.
+- Canonical state and orchestration live in the backend, under their durable owners; the reviewed base and backend Contributions implement policy through those owners.
 - Desktop and mobile Contributions provide optional platform adapters; their absence does not stop Agent execution.
-- The hosted client renders backend state and submits commands. It does not become an alternate authority.
+- Every client renders backend state and submits commands. It does not become an alternate authority.
 
 ## Settings surfaces
 
@@ -162,7 +162,7 @@ Before implementing a production feature, define and verify:
 3. behavior during client disconnect, Durable Object eviction, and Computer hibernation;
 4. cancellation, retry, idempotency, and reconciliation behavior;
 5. required authority, credentials, and trust boundaries;
-6. its hosted UI projection, optional platform enhancements, and the single surface that owns each of its controls; for any per-Bot control, why the choice cannot be account-level;
+6. its native and browser UI projections, optional platform enhancements, and the single surface that owns each of its controls; for any per-Bot control, why the choice cannot be account-level;
 7. observable failure states and recovery tests;
 8. the parity-register item it matches, or its explicit label as beyond parity.
 
@@ -180,18 +180,19 @@ Add automated checks for constitutional rules whenever they can be enforced mech
 - browser and native shells use the same backend execution path;
 - two provider Packages satisfy the model interface with no kernel diff;
 - the kernel imports no Package;
-- the Fly Sprites SDK is loaded only by the Computer host, never by a Worker or a Package;
+- Computer provider SDKs remain inside their Computer host adapter;
 - a Turn that does not use the Computer makes no Computer interface call;
 - Memory is readable and writable with no Computer interface call, a Workspace write into a Memory root is rejected, and conflicting Workspace and object-storage writes to any other durable root both survive as generations and are surfaced;
-- a non-first-party Package loads with `globalOutbound` disabled, its bindings derive only from what the Bot holds, and a missing, disabled, or revoked Connection is an `unavailable` outcome recorded as a visible, repairable failure; no request widens authority;
+- a non-first-party Package loads with ambient outbound access disabled, its bindings derive only from its allowed subset of what the Bot holds, and a missing, disabled, or revoked Connection is an `unavailable` outcome recorded as a visible, repairable failure; no request widens authority;
 - a Connection enabled at account level is usable by every Bot of that User at its next admitted Turn, and one revoked at account level is unavailable to every Bot at its next admitted Turn;
+- revocation during a pinned Turn refuses its next external effect through every binding path and records the refusal durably;
 - with a per-Bot override Package disabled, every Bot resolves the account-level value, and the overrides it captured survive to be restored when it is re-enabled;
 - a broken Bot-authored generation leaves the last known-good Composition running, records a visible failure, and delivers that failure to the Bot on its next Turn;
-- a generation that lacks a required core member, or carries one under non-first-party provenance, is refused;
-- an Applet's facet storage survives a code generation change and a revert; a generation whose health check fails leaves the prior facet resident; deleting an Applet deletes its storage, versions, and directory entry;
+- every renderer retains the compiled required core when all extensions fail or are disabled, and an extension cannot impersonate its trust chrome;
+- an Applet's facet storage survives a compatible code generation change and revert; an incompatible revert is refused visibly before mounting; a generation whose health check fails leaves the prior facet resident; deleting an Applet deletes its storage, versions, and directory entry;
 - the Applets Package authored through `package_author` mounts and behaves identically to the shipped artifact-backed member, and no Contribution is resolved by a switch over Package identity;
 - an open Applet's page carries no credential and reaches its facet only through a short-lived viewer token scoped to that Applet and User;
-- reverting a Bot-authored change restores the prior generation, whether the User or the Bot reverts, and a revert never sets last known-good;
+- reverting a Bot-authored change restores a compatible prior generation, whether the User or the Bot reverts; an incompatible revert preserves data and records a repairable refusal, and a revert never sets last known-good;
 - a Skill written outside the Bot's own authority is not loaded as an instruction;
 - an operation exceeding a durable per-User quota is refused and records a visible failure;
 - every declared Package setting and Connection Type resolves to exactly one configuration surface, and the Plugins surface offers enablement only;
@@ -203,7 +204,7 @@ Add automated checks for constitutional rules whenever they can be enforced mech
 
 - `AGENTS.md` contains enduring project invariants.
 - `CONTEXT.md` contains domain language only.
-- `docs/architecture.md` describes the current system shape.
+- `docs/architecture.md` and `docs/architecture/` describe the current system shape and replaceable mechanisms.
 - `docs/adr/` records hard-to-reverse decisions whose trade-offs would otherwise be surprising.
 - `docs/research/` records primary-source findings about external systems FrockBot copies or depends on.
 - Plans and issues contain migration steps and temporary constraints.

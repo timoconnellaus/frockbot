@@ -653,3 +653,75 @@ describe("UserConfiguration Connection routing", () => {
     expect(executed).toHaveLength(1);
   });
 });
+
+describe("UserConfiguration alarm", () => {
+  /**
+   * Everything the alarm calls, with the import recovery half recorded. An
+   * alarm has no caller, so this is the whole of what a woken object can rely
+   * on: its own storage and its own id.
+   */
+  function mountedFor(recovered: string[]) {
+    return Promise.resolve({
+      credentials: { expireLeases: () => Promise.resolve() },
+      connections: new Map(),
+      publisher: { recover: () => Promise.resolve() },
+      botTemplate: {
+        recoverImports: (userId: string) => {
+          recovered.push(userId);
+          return Promise.resolve();
+        },
+      },
+      flock: {
+        alarm: () => Promise.resolve(),
+        listBotLifecycles: () => Promise.resolve({ lifecycles: [] }),
+        listDeletedBotIds: () => Promise.resolve([]),
+      },
+      search: { purge: () => {} },
+      audit: { purgeAuditForBot: () => {} },
+    });
+  }
+
+  test("recovers imports for the identity pinned in storage, with no prior RPC", async () => {
+    const bound = identity("evicted-user");
+    const storage = new MemoryStorage();
+    // What an authenticated RPC left behind before the object was evicted.
+    await storage.put("user:identity", "evicted-user");
+    const configuration = new UserConfiguration(bound.ctx(storage), bound.env);
+    const recovered: string[] = [];
+    Reflect.set(configuration, "mounted", mountedFor(recovered));
+
+    // A fresh instance woken by its own alarm: no RPC has run on it.
+    await configuration.alarm();
+
+    expect(recovered).toEqual(["evicted-user"]);
+  });
+
+  test("runs no User-scoped recovery for an object with no pinned identity", async () => {
+    const bound = identity("never-provisioned");
+    const configuration = new UserConfiguration(
+      bound.ctx(new MemoryStorage()),
+      bound.env,
+    );
+    const recovered: string[] = [];
+    Reflect.set(configuration, "mounted", mountedFor(recovered));
+
+    await configuration.alarm();
+
+    expect(recovered).toEqual([]);
+  });
+
+  test("refuses a pin that does not derive to this object's own id", async () => {
+    const bound = identity("this-user");
+    const storage = new MemoryStorage();
+    // A pin naming someone else can only be corruption: the namespace check is
+    // what makes the pin trustworthy, and it is applied to the alarm too.
+    await storage.put("user:identity", "some-other-user");
+    const configuration = new UserConfiguration(bound.ctx(storage), bound.env);
+    const recovered: string[] = [];
+    Reflect.set(configuration, "mounted", mountedFor(recovered));
+
+    await configuration.alarm();
+
+    expect(recovered).toEqual([]);
+  });
+});

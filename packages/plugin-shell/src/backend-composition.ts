@@ -18,9 +18,13 @@ import {
 import type { ApplicationPlan } from "@frockbot/kernel-composition/compiler";
 import {
   bootstrapGeneration,
+  compositionArtifactSetHashV1,
+  compositionGenerationIdV1,
+  decodeCompositionGenerationV1,
   type CompositionGenerationV1,
   type CompositionHost,
   type CompositionMemberV1,
+  type CompositionStore,
   type MountedComposition,
 } from "@frockbot/kernel-composition/generation";
 import {
@@ -55,6 +59,92 @@ export function bootstrapCompositionGeneration(
     })),
     { createdAt },
   );
+}
+
+/** The audit line a deployment-following generation carries. */
+export const DEPLOYMENT_FOLLOW_SUMMARY_V1 =
+  "Updated the built-in Packages to this deployment's";
+
+/**
+ * Resolve the deployment's built-in Packages into this Bot's next generation.
+ *
+ * A first-party member's manifest and artifact live in the compiled
+ * application, keyed by hash. A deploy that changes one of them (2026-09-05:
+ * the Applets list page) leaves every pinned generation naming a manifest this
+ * deployment no longer ships, and every Turn of every Bot fails to mount. A
+ * built-in member is the deployment's to update, never the Bot's, so before a
+ * Turn is admitted the Bot's first-party members are brought up to the
+ * application's, as a new generation with the old one as its parent. Members
+ * the Bot or its User put in are carried over exactly as they are; Applet
+ * members stay pinned; a deployment that changes nothing proposes nothing.
+ *
+ * Only the manifest and the artifact decide. A version string that moved with
+ * a release while both stayed the same mounts exactly as before, and a
+ * generation per Bot per release would eat the User's retention quota for
+ * nothing.
+ */
+export async function resolveDeploymentCompositionV1(options: {
+  plan: ApplicationPlan;
+  composition: Pick<CompositionStore, "current" | "propose">;
+  now?: Date;
+}): Promise<CompositionGenerationV1 | undefined> {
+  const current = await options.composition.current();
+  const createdAt = (options.now ?? new Date()).toISOString();
+  const deployed = await bootstrapCompositionGeneration(
+    options.plan,
+    createdAt,
+  );
+  const shipped = new Map(
+    deployed.members.map((member) => [member.packageId, member]),
+  );
+  const members: CompositionMemberV1[] = [];
+  let changed = false;
+  for (const member of current.members) {
+    if (member.provenance.kind !== "first-party") {
+      members.push(member);
+      continue;
+    }
+    const replacement = shipped.get(member.packageId);
+    shipped.delete(member.packageId);
+    if (!replacement) {
+      // The deployment no longer ships it; nothing could mount it anyway.
+      changed = true;
+      continue;
+    }
+    if (
+      replacement.manifestHash !== member.manifestHash ||
+      replacement.artifact?.contentHash !== member.artifact?.contentHash
+    ) {
+      changed = true;
+      members.push(replacement);
+    } else {
+      members.push(member);
+    }
+  }
+  for (const added of shipped.values()) {
+    changed = true;
+    members.push(added);
+  }
+  if (!changed) return undefined;
+  const ordered = members.sort((left, right) =>
+    left.packageId.localeCompare(right.packageId),
+  );
+  const applets = current.applets ?? [];
+  const artifactSetHash = await compositionArtifactSetHashV1(ordered, applets);
+  const generation = decodeCompositionGenerationV1({
+    schemaVersion: 1,
+    generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+    artifactSetHash,
+    parentGenerationId: current.generationId,
+    summary: DEPLOYMENT_FOLLOW_SUMMARY_V1,
+    createdAt,
+    origin: { kind: "bootstrap" },
+    members: ordered,
+    ...(applets.length === 0 ? {} : { applets }),
+    status: "pending",
+  });
+  await options.composition.propose(generation, { pin: true });
+  return generation;
 }
 
 export interface ShellMountedComposition extends MountedComposition {
@@ -95,10 +185,16 @@ export interface ShellIsolateMountOptions {
  * (`docs/research/spike-applet-facets.md` §8). Absent when the Bot Durable
  * Object has no Applet binding: an Applet member's tools are then simply not
  * registered, exactly as an isolate member fails without a loader.
+ *
+ * `generationId` is the Applet generation this Turn's Composition pinned, and
+ * it is not decoration: the Applet Durable Object runs that generation or
+ * refuses the call (ADR 0041). Without it a publish landing mid-Turn would
+ * execute new code behind the schema and provenance the model was shown.
  */
 export interface ShellAppletMountOptions {
   invokeTool(request: {
     appletId: string;
+    generationId: string;
     tool: string;
     input: unknown;
   }): Promise<{ status: "ok" | "error"; content: string }>;
@@ -295,6 +391,9 @@ export function createShellCompositionHost(
               execute: async (input) => {
                 const outcome = await routing.invokeTool({
                   appletId: applet.appletId,
+                  // The pin the description above advertises, carried into the
+                  // call so the instance executes it or refuses.
+                  generationId: applet.generationId,
                   tool: tool.name,
                   input: input ?? null,
                 });

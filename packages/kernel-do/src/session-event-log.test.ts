@@ -250,6 +250,138 @@ describe("the paged Session event log", () => {
     expect(await log.readRange(SESSION_ID, 2, 3)).toEqual([repaired[2]]);
   });
 
+  test("reads a range without hydrating unrelated model requests", async () => {
+    const storage = new MemoryStorage();
+    const session = new Session(SESSION_ID, () => {});
+    for (let turn = 1; turn <= 12; turn += 1) {
+      session.appendBatch([
+        { type: "turn/start", turn },
+        {
+          type: "model/request",
+          turn,
+          step: 1,
+          request: {
+            requestId: `request-${turn}`,
+            provider: "fake",
+            model: "large-context",
+            system: "s".repeat(80_000),
+            messages: [],
+            tools: [],
+          },
+        },
+        { type: "turn/end", turn, outcome: "completed" },
+      ]);
+    }
+    const log = new SessionEventLog(storage);
+    await log.rewrite(SESSION_ID, [...session.events]);
+
+    const reads: string[] = [];
+    const get = storage.get.bind(storage);
+    storage.get = <T>(key: string): Promise<T | undefined> => {
+      reads.push(key);
+      return get<T>(key);
+    };
+
+    const range = await log.readRange(SESSION_ID, 0, 1);
+
+    expect(range).toEqual([session.events[0]!]);
+    expect(
+      reads.filter((key) =>
+        key.startsWith(sessionEventPayloadPrefixV1(SESSION_ID)),
+      ),
+    ).toEqual([]);
+    // The index, the bisected pages, and nothing else: the cost of a range is
+    // the range, not every request the conversation has ever retained.
+    expect(reads.length).toBeLessThanOrEqual(4);
+  });
+
+  test("hydrates only the payloads its own range references", async () => {
+    const storage = new MemoryStorage();
+    const session = new Session(SESSION_ID, () => {});
+    for (let turn = 1; turn <= 12; turn += 1) {
+      session.appendBatch([
+        { type: "turn/start", turn },
+        {
+          type: "model/request",
+          turn,
+          step: 1,
+          request: {
+            requestId: `request-${turn}`,
+            provider: "fake",
+            model: "large-context",
+            system: "s".repeat(80_000),
+            messages: [],
+            tools: [],
+          },
+        },
+        { type: "turn/end", turn, outcome: "completed" },
+      ]);
+    }
+    const log = new SessionEventLog(storage);
+    await log.rewrite(SESSION_ID, [...session.events]);
+
+    const reads: string[] = [];
+    const get = storage.get.bind(storage);
+    storage.get = <T>(key: string): Promise<T | undefined> => {
+      reads.push(key);
+      return get<T>(key);
+    };
+
+    const range = await log.readRange(SESSION_ID, 30, 33);
+
+    expect(range).toEqual(session.events.slice(30, 33));
+    const payloads = new Set(
+      reads
+        .filter((key) =>
+          key.startsWith(sessionEventPayloadPrefixV1(SESSION_ID)),
+        )
+        .map((key) => key.slice(0, key.lastIndexOf(":"))),
+    );
+    const requestSeq = session.events
+      .slice(30, 33)
+      .find((event) => event.type === "model/request")!.seq;
+    expect([...payloads]).toEqual([
+      `${sessionEventPayloadPrefixV1(SESSION_ID)}${String(requestSeq).padStart(12, "0")}`,
+    ]);
+  });
+
+  test("leaves exact model requests off the display range", async () => {
+    const storage = new MemoryStorage();
+    const log = new SessionEventLog(storage);
+    const events = journal();
+    await log.rewrite(SESSION_ID, events);
+
+    const reads: string[] = [];
+    const get = storage.get.bind(storage);
+    storage.get = <T>(key: string): Promise<T | undefined> => {
+      reads.push(key);
+      return get<T>(key);
+    };
+
+    const display = await log.readDisplayRange(SESSION_ID, 0, events.length);
+
+    expect(display.map((event) => event.type)).toEqual(
+      events.map((event) => event.type),
+    );
+    expect(display.map((event) => event.seq)).toEqual(
+      events.map((event) => event.seq),
+    );
+    expect(
+      reads.filter((key) =>
+        key.startsWith(sessionEventPayloadPrefixV1(SESSION_ID)),
+      ),
+    ).toEqual([]);
+    const request = display.find((event) => event.type === "model/request");
+    expect(request?.type === "model/request" && request.request.requestId).toBe(
+      "request-1",
+    );
+    // The excerpt says what it is; the exact request stays on the audit path.
+    expect(
+      request?.type === "model/request" && request.request.system.length,
+    ).toBeLessThan(80_000);
+    expect(await log.readRange(SESSION_ID, 0, events.length)).toEqual(events);
+  });
+
   test("migrates the legacy single value on demand", async () => {
     const storage = new MemoryStorage();
     const events = journal(1_900_000);

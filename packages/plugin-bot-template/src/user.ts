@@ -58,6 +58,7 @@ import {
   type TemplateImportRecordV1,
   type TemplateImportStepReceiptV1,
   templateCommandFingerprintV1,
+  templateImportRecordKeyV1,
   type TemplateCommandV1,
   type TemplateExportSummaryV1,
   type TemplateShareListViewV1,
@@ -70,6 +71,23 @@ export const BOT_TEMPLATE_PACKAGE_ID = "bot-template";
 const SHARE_PREFIX = "bot-template:share:";
 const IMPORT_PREFIX = "bot-template:import:";
 const IMPORT_INDEX_KEY = "bot-template:import-index";
+/**
+ * The durable record that a recovery pass is owed.
+ *
+ * An apply that is evicted mid-walk leaves its record `applying` and nothing
+ * in the process to finish it, so the intent to recover is written down before
+ * the record enters that state and is cleared only once no import is mid-apply.
+ * A value of `0` means nothing is owed.
+ */
+const IMPORT_RECOVERY_KEY = "bot-template:import-recovery-at";
+/**
+ * How long after entering `applying` the alarm is asked to fire.
+ *
+ * Short, because it is a recovery deadline rather than a schedule: an apply
+ * that finishes in-process clears it before it matters, and one that does not
+ * is work a User is waiting on.
+ */
+const IMPORT_RECOVERY_DELAY_MS = 5_000;
 const SHARE_INDEX_KEY = "bot-template:share-index";
 const RECEIPT_PREFIX = "bot-template:receipt:";
 
@@ -154,8 +172,22 @@ export interface TemplateImportWriterV1 {
   }): Promise<{ status: string; routineId?: string }>;
 }
 
+/**
+ * This Package's slice of the User Durable Object's storage.
+ *
+ * `setAlarm` is how an import that is still mid-apply keeps its own recovery
+ * scheduled instead of waiting for some other owner of the object's single
+ * alarm to happen to wake it. Both alarm methods are optional so a host with
+ * no alarm at all still imports; on such a host an interrupted import stays
+ * visible and repairable rather than resuming by itself.
+ */
+export interface BotTemplateStorageV1 extends UserSettingsStorage {
+  getAlarm?(): Promise<number | null>;
+  setAlarm?(scheduledTime: number | Date): Promise<void>;
+}
+
 export interface BotTemplateUserHostV1 {
-  storage: UserSettingsStorage;
+  storage: BotTemplateStorageV1;
   settings: UserSettingsBackendContribution;
   bots: TemplateBotReaderV1;
   blobs: TemplateBlobStoreV1;
@@ -613,6 +645,12 @@ export class BotTemplateUserBackendContribution {
     const plan = await this.readImportPlan(importId);
     if (!plan) throw new TemplateShareNotFoundError(importId);
 
+    // The recovery deadline is written *before* the record says `applying`.
+    // An eviction between the two then leaves an object that is owed a
+    // recovery it does not need, which the next pass simply clears; the other
+    // order would leave an import mid-apply that nothing is scheduled to
+    // finish.
+    await this.scheduleImportRecovery();
     record = await this.patchImport(importId, (current) => ({
       ...current,
       status: "applying",
@@ -626,7 +664,7 @@ export class BotTemplateUserBackendContribution {
         outcome = await this.runImportStep(userId, plan, step, writer);
       } catch (error) {
         const failure = error instanceof Error ? error.message : String(error);
-        return this.patchImport(importId, (current) => ({
+        const failed = await this.patchImport(importId, (current) => ({
           ...current,
           status: "failed",
           failure: `${step.key}: ${failure}`,
@@ -636,6 +674,10 @@ export class BotTemplateUserBackendContribution {
               : entry,
           ),
         }));
+        // Failed is terminal and visible: the card carries the failure and
+        // re-issuing the command retries. Nothing is owed a recovery.
+        await this.settleImportRecovery();
+        return failed;
       }
       record = await this.patchImport(importId, (current) => ({
         ...current,
@@ -654,10 +696,12 @@ export class BotTemplateUserBackendContribution {
         ),
       }));
     }
-    return this.patchImport(importId, (current) => ({
+    const applied = await this.patchImport(importId, (current) => ({
       ...current,
       status: "applied",
     }));
+    await this.settleImportRecovery();
+    return applied;
   }
 
   /** Every import left mid-apply, resumed. Called from the User DO's alarm. */
@@ -673,6 +717,45 @@ export class BotTemplateUserBackendContribution {
         // finish must not stop the other owners of this alarm from running.
       }
     }
+    // A pass that could not finish an import leaves it `applying`, so the
+    // deadline is re-armed here: recovery stays scheduled until every import
+    // is terminal, rather than depending on some other owner of this object's
+    // alarm to fire again.
+    await this.settleImportRecovery();
+  }
+
+  /**
+   * Write down that a recovery is owed, and pull the object's alarm forward to
+   * the deadline if nothing earlier is already scheduled.
+   */
+  private async scheduleImportRecovery(): Promise<void> {
+    const storage = this.host.storage;
+    if (!storage.setAlarm) return;
+    const at = this.now() + IMPORT_RECOVERY_DELAY_MS;
+    await storage.put(IMPORT_RECOVERY_KEY, at);
+    const scheduled = await storage.getAlarm?.();
+    if (scheduled === undefined || scheduled === null || scheduled > at) {
+      await storage.setAlarm(at);
+    }
+  }
+
+  /**
+   * Clear the recovery debt, or renew it if any import is still mid-apply.
+   *
+   * The object's single alarm belongs to every User-scoped owner of one, so
+   * this never cancels it: it only records that this Package no longer needs
+   * it, and re-arms when it does.
+   */
+  private async settleImportRecovery(): Promise<void> {
+    if (!this.host.storage.setAlarm) return;
+    for (const importId of await this.importIndex()) {
+      const record = await this.readImport(importId);
+      if (record?.status === "applying") {
+        await this.scheduleImportRecovery();
+        return;
+      }
+    }
+    await this.host.storage.put(IMPORT_RECOVERY_KEY, 0);
   }
 
   private async runImportStep(
@@ -805,7 +888,7 @@ export class BotTemplateUserBackendContribution {
         );
       }
       await transaction.put({
-        [`${IMPORT_PREFIX}${record.importId}`]: record,
+        [templateImportRecordKeyV1(record.importId)]: record,
         [`${IMPORT_PREFIX}plan:${record.importId}`]: plan,
         [IMPORT_INDEX_KEY]: [...index, record.importId],
       });
@@ -818,14 +901,14 @@ export class BotTemplateUserBackendContribution {
   ): Promise<TemplateImportRecordV1> {
     return this.host.storage.transaction(async (transaction) => {
       const stored = await transaction.get<unknown>(
-        `${IMPORT_PREFIX}${importId}`,
+        templateImportRecordKeyV1(importId),
       );
       if (stored === undefined) throw new TemplateShareNotFoundError(importId);
       const next = decodeTemplateImportRecordV1({
         ...patch(decodeTemplateImportRecordV1(stored)),
         updatedAt: new Date(this.now()).toISOString(),
       });
-      await transaction.put(`${IMPORT_PREFIX}${importId}`, next);
+      await transaction.put(templateImportRecordKeyV1(importId), next);
       return next;
     });
   }
@@ -834,7 +917,7 @@ export class BotTemplateUserBackendContribution {
     importId: string,
   ): Promise<TemplateImportRecordV1 | undefined> {
     const stored = await this.host.storage.get<unknown>(
-      `${IMPORT_PREFIX}${importId}`,
+      templateImportRecordKeyV1(importId),
     );
     return stored === undefined
       ? undefined

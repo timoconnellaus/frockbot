@@ -406,6 +406,31 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return userId;
   }
 
+  /**
+   * The identity this object can prove with no caller present.
+   *
+   * `assertUserIdentity` checks a `userId` a caller claimed, and an alarm has
+   * no caller: a fresh instance woken by its own alarm after an eviction is
+   * the normal case, not the exception, so the work an alarm exists to do
+   * cannot depend on an RPC having populated the in-memory field first.
+   *
+   * The pin is that claim made durable, so it is re-derived here and put
+   * through the same namespace check before it is trusted — a pin alone would
+   * be whatever the first caller said. An object that cannot prove an identity
+   * this way has no User-scoped recovery to run.
+   */
+  private async provenIdentity(): Promise<string | undefined> {
+    if (this.identity) return this.identity;
+    const pinned = await this.ctx.storage.get<string>(USER_IDENTITY_KEY);
+    if (pinned === undefined) return undefined;
+    const namespace = this.env.USER_CONFIGURATIONS;
+    if (!namespace || !namespace.idFromName(pinned).equals(this.ctx.id)) {
+      return undefined;
+    }
+    this.identity = pinned;
+    return pinned;
+  }
+
   private async settingsContribution(): Promise<
     MountedFoundationUserBackend["settings"]
   > {
@@ -1536,8 +1561,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     }
     await contributions.publisher.recover();
     // An import left mid-apply by an eviction resumes here, from the first
-    // step its record does not already mark done.
-    const importer = this.identity;
+    // step its record does not already mark done. The eviction is exactly what
+    // clears the in-memory identity, so the durable pin is what this reads.
+    const importer = await this.provenIdentity();
     if (importer) await contributions.botTemplate.recoverImports(importer);
     // The Bot lifecycle sagas (archive and restore) resume on the same firing.
     await contributions.flock.alarm();

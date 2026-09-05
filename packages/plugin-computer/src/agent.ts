@@ -488,7 +488,7 @@ function text(bytes: Uint8Array): string {
  * cannot record the same fact in two shapes. A Session that is gone or
  * disposed records nothing: a sync is never a reason to fail anything.
  */
-async function recordComputerSyncV1(
+export async function recordComputerSyncV1(
   sessions: SessionStore,
   sessionId: string,
   turn: number,
@@ -497,11 +497,16 @@ async function recordComputerSyncV1(
 ): Promise<void> {
   const session = sessions.get(sessionId);
   if (!session || session.disposed) return;
+  // The per-path answers a publish asked for travel back to that caller, not
+  // into the durable log: the `computer/sync` event has an exact field set,
+  // and a summary spread with `required` on it made every publish Turn fail
+  // with "session event has invalid fields" (v0.3.27, 2026-09-05).
+  const { required: _required, ...recorded } = summary;
   session.append({
     type: "computer/sync",
     turn: Math.max(1, turn),
     reason,
-    ...summary,
+    ...recorded,
   });
   // The record is durable before anything reports the sync happened.
   await session.flush();

@@ -11,7 +11,10 @@ import {
   type WorkspaceRootV1,
   type WorkspaceWriterV1,
 } from "@frockbot/kernel-contracts";
-import { createObjectWorkspaceFilesV1 } from "@frockbot/workspace-store";
+import {
+  createObjectWorkspaceFilesV1,
+  workspaceObjectKeyV1,
+} from "@frockbot/workspace-store";
 import {
   createInMemoryObjectBucketV1,
   createInMemoryWorkspaceGenerationsV1,
@@ -25,13 +28,15 @@ import {
   FlySpriteSyncSurface,
   isWorkspaceSyncIgnoredPathV1,
   WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1,
-  WORKSPACE_SYNC_CHUNK_BYTES_V1,
   WORKSPACE_SYNC_MANIFEST_MAX_BYTES_V1,
   WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1,
   WORKSPACE_SYNC_MAX_FILE_BYTES_V1,
   type WorkspaceSyncReportV1,
 } from "./sync.ts";
-import { WORKSPACE_EMPTY_SHA256 } from "./workspace.ts";
+import {
+  WORKSPACE_CHUNK_BYTES_V1,
+  WORKSPACE_EMPTY_SHA256,
+} from "./workspace.ts";
 
 const USER = "owner";
 const BOT = "health";
@@ -219,7 +224,7 @@ class FakeSyncSprite {
     if (bytes.byteLength > WORKSPACE_SYNC_MAX_FILE_BYTES_V1) {
       return "__TOO_LARGE__\n";
     }
-    const head = bytes.subarray(0, WORKSPACE_SYNC_CHUNK_BYTES_V1);
+    const head = bytes.subarray(0, WORKSPACE_CHUNK_BYTES_V1);
     return `${bytes.byteLength}\t${sha256(bytes)}\n${Buffer.from(head).toString("base64")}\n`;
   }
 
@@ -1349,7 +1354,7 @@ describe("the durable-root sync on the Computer handle", () => {
         { botId: BOT },
         { providerId: "fly-sprite", generation: 1 },
       );
-    return { sprite, store, generations, effects, provider, open };
+    return { sprite, store, bucket, generations, effects, provider, open };
   }
 
   test("pulls the store's durable roots onto the Computer before the Bot's first use", async () => {
@@ -1484,6 +1489,173 @@ describe("the durable-root sync on the Computer handle", () => {
       "publish",
     );
     expect(refused.status).toBe("refused");
+  });
+
+  // Production, 2026-09-04, run 76b4f8d9: `applet build` wrote `dist/`, the
+  // publish sync answered `pushed=0 removed=0 failures=0`, and the publish then
+  // read `dist/manifest.json` as `not-found` and told the Bot to build again.
+  // The reconcile had trusted the sidecar: hash matched, entry "clean",
+  // nothing to do — while the store held no object for it at all. A required
+  // path is the one thing the caller has asserted about, so the Computer's
+  // copy of it decides, not its sidecar.
+  test("pushes a required file the store is missing even when its sidecar says clean", async () => {
+    const { sprite, store, open } = providerHarness([
+      APPLET_SOURCE_PACKAGE_ROOT,
+    ]);
+    const handle = await open();
+    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const path = `${appletId}/dist/manifest.json`;
+    const manifest = '{"tools":[{"name":"add"},{"name":"list"}]}';
+    sprite.shellWrite(MOUNTS.appletSource, path, manifest);
+    // One good publish: the store takes the bytes and the Computer records the
+    // sidecar that attributes them.
+    await handle.sync!.reconcileRoot!(appletSourceRoot, "publish", {
+      requiredPaths: [path],
+    });
+    const stat = await store.stat({ root: appletSourceRoot, path });
+    expect(stat.status).toBe("ok");
+    if (stat.status !== "ok") return;
+    // The object goes; the sidecar and the built file do not.
+    await store.delete({
+      path: { root: appletSourceRoot, path },
+      writer: USER_WRITER,
+      expectedGenerationId: stat.entry.generation.generationId,
+    });
+    expect(
+      sprite.files.has(`${MOUNTS.appletSource}/.frockbot-generations/${path}`),
+    ).toBe(true);
+
+    const summary = await handle.sync!.reconcileRoot!(
+      appletSourceRoot,
+      "publish",
+      { requiredPaths: [path] },
+    );
+
+    expect(summary).toMatchObject({
+      status: "ok",
+      pushed: 1,
+      removed: 0,
+      failures: 0,
+    });
+    const read = await store.read({ root: appletSourceRoot, path });
+    expect(read.status).toBe("ok");
+    if (read.status === "ok")
+      expect(decoder.decode(read.file.bytes)).toBe(manifest);
+    expect(summary.required).toEqual([
+      { path, contentHash: sha256(encoder.encode(manifest)), durable: true },
+    ]);
+  });
+
+  // The same drift, the other way round: the file the publish needs must never
+  // be deleted from the Computer because the store is missing it. Before this,
+  // the reconcile read the absence as a store-side delete and removed the build
+  // output — the publish's own artifact — on the way past.
+  test("never removes a required file from the Computer because the store lacks it", async () => {
+    const { sprite, store, generations, open } = providerHarness([
+      APPLET_SOURCE_PACKAGE_ROOT,
+    ]);
+    const handle = await open();
+    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const path = `${appletId}/dist/server.js`;
+    sprite.shellWrite(MOUNTS.appletSource, path, "export class A{}");
+    await handle.sync!.reconcileRoot!(appletSourceRoot, "publish", {
+      requiredPaths: [path],
+    });
+    const stat = await store.stat({ root: appletSourceRoot, path });
+    if (stat.status !== "ok") throw new Error("the first push did not land");
+    // A recorded store-side delete: the ledger holds a tombstone, so this is a
+    // removal by every rule the sync knows — and a required path still wins.
+    await store.delete({
+      path: { root: appletSourceRoot, path },
+      writer: USER_WRITER,
+      expectedGenerationId: stat.entry.generation.generationId,
+    });
+    expect((await generations.current(appletSourceRoot, path))?.deleted).toBe(
+      true,
+    );
+
+    await handle.sync!.reconcileRoot!(appletSourceRoot, "publish", {
+      requiredPaths: [path],
+    });
+
+    expect(sprite.text(`${MOUNTS.appletSource}/${path}`)).toBe(
+      "export class A{}",
+    );
+    expect((await store.read({ root: appletSourceRoot, path })).status).toBe(
+      "ok",
+    );
+  });
+
+  // A store that lost the object but kept the generation the sidecar names is
+  // repaired rather than re-written: the bytes already match, so a second
+  // generation for identical content would be noise in the ledger.
+  test("repairs a required file's sidecar without writing a second generation", async () => {
+    const { sprite, store, open } = providerHarness([
+      APPLET_SOURCE_PACKAGE_ROOT,
+    ]);
+    const handle = await open();
+    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const path = `${appletId}/dist/manifest.json`;
+    sprite.shellWrite(MOUNTS.appletSource, path, '{"tools":[]}');
+    await handle.sync!.reconcileRoot!(appletSourceRoot, "publish", {
+      requiredPaths: [path],
+    });
+    // `rm -rf dist && applet build` reproducing byte-identical output, with the
+    // sidecar lost: the store already holds these bytes.
+    sprite.files.delete(`${MOUNTS.appletSource}/.frockbot-generations/${path}`);
+
+    const summary = await handle.sync!.reconcileRoot!(
+      appletSourceRoot,
+      "publish",
+      { requiredPaths: [path] },
+    );
+
+    expect(summary).toMatchObject({ status: "ok", pushed: 0, conflicts: 0 });
+    expect(summary.required).toMatchObject([{ path, durable: true }]);
+    expect(
+      sprite.files.has(`${MOUNTS.appletSource}/.frockbot-generations/${path}`),
+    ).toBe(true);
+  });
+
+  // A required file the Computer simply does not have is still a truthful
+  // answer, and the caller is owed the fact rather than a silent `ok`.
+  test("reports a required file the Computer does not hold", async () => {
+    const { open } = providerHarness([APPLET_SOURCE_PACKAGE_ROOT]);
+    const handle = await open();
+    const path = "pub-user-1.0123456789abcdef0123456789abcdef/dist/ui.html";
+
+    const summary = await handle.sync!.reconcileRoot!(
+      appletSourceRoot,
+      "publish",
+      { requiredPaths: [path] },
+    );
+
+    expect(summary.status).toBe("ok");
+    expect(summary.required).toEqual([{ path, durable: false }]);
+  });
+
+  // ADR 0013 makes a delete a recorded generation, so an absence the ledger
+  // never recorded is drift and not a removal. The general case: an ordinary
+  // Skill whose object went missing under a sidecar keeps its bytes, and the
+  // sync puts them back rather than deleting the User's file.
+  test("re-pushes rather than removes when the store recorded no removal", async () => {
+    const { sprite, store, bucket, open } = providerHarness();
+    const handle = await open();
+    sprite.shellWrite(MOUNTS.skills, "deploy/SKILL.md", "# deploy");
+    await handle.sync!.reconcile("turn-end");
+    expect(
+      (await store.read({ root: skillsRoot, path: "deploy/SKILL.md" })).status,
+    ).toBe("ok");
+    // The object disappears with no ledger tombstone: not a delete anyone made.
+    await bucket.delete(workspaceObjectKeyV1(skillsRoot, "deploy/SKILL.md"));
+
+    const summary = await handle.sync!.reconcile("turn-end");
+
+    expect(summary).toMatchObject({ removed: 0, failures: 0 });
+    expect(sprite.text(`${MOUNTS.skills}/deploy/SKILL.md`)).toBe("# deploy");
+    expect(
+      (await store.read({ root: skillsRoot, path: "deploy/SKILL.md" })).status,
+    ).toBe("ok");
   });
 
   // Production, 2026-09-04: `applet build` wrote a 470 KB `dist/ui.html`, and

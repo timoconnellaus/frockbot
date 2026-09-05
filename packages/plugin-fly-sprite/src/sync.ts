@@ -105,9 +105,12 @@ import {
   SYNC_CONFLICTS_DIR,
   SYNC_STAGING_DIR,
   SYNC_TOMBSTONES_DIR,
+  WORKSPACE_CHUNK_BYTES_V1,
   WORKSPACE_EMPTY_SHA256,
   WORKSPACE_GENERATIONS_DIR,
   WORKSPACE_SYNC_DIR,
+  workspaceChunkOffsetsV1,
+  workspaceStagingNameV1,
 } from "./workspace.js";
 
 /** Where the sync keeps notes that are not scoped to one root. */
@@ -147,17 +150,6 @@ export const WORKSPACE_SYNC_MANIFEST_MAX_BYTES_V1 = 400_000;
 export const WORKSPACE_SYNC_MANIFEST_MAX_ENTRIES_V1 = 2_000;
 
 /**
- * The most file bytes one storage command carries, in either direction.
- *
- * A command's answer travels as base64, so a chunk this size comes back as
- * roughly 350 KB — inside the 500 KB an answer may be — and goes out inside a
- * script well inside the 1 MB a script may be. A file larger than one chunk
- * travels as several commands rather than as one command that would be refused
- * for its size, which is the whole reason the sync reads and writes in chunks.
- */
-export const WORKSPACE_SYNC_CHUNK_BYTES_V1 = 256 * 1024;
-
-/**
  * The largest durable-root file the sync carries between the Computer and the
  * store.
  *
@@ -167,25 +159,6 @@ export const WORKSPACE_SYNC_CHUNK_BYTES_V1 = 256 * 1024;
  * of the commands that would have moved it.
  */
 export const WORKSPACE_SYNC_MAX_FILE_BYTES_V1 = 4 * 1024 * 1024;
-
-/** Every chunk offset after the first, in bytes, for a file of this size. */
-function chunkOffsets(size: number): number[] {
-  const offsets: number[] = [];
-  for (
-    let offset = WORKSPACE_SYNC_CHUNK_BYTES_V1;
-    offset < size;
-    offset += WORKSPACE_SYNC_CHUNK_BYTES_V1
-  ) {
-    offsets.push(offset);
-  }
-  return offsets;
-}
-
-/** A staging file name that is one path segment whatever the id looks like. */
-function stagingName(generationId: string, kind: string): string {
-  const safe = generationId.replaceAll(/[^A-Za-z0-9._-]/g, "-").slice(0, 128);
-  return `${safe}.${kind}`;
-}
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
@@ -336,6 +309,20 @@ export interface WorkspaceSyncFailureV1 extends WorkspaceFailureV1 {
   path?: string;
 }
 
+/**
+ * What the run saw for one path its caller declared required.
+ *
+ * `durable` is a statement about the store and not about the sidecar: it is
+ * true only when the store answered with the same content hash the Computer
+ * holds, or accepted a push of exactly those bytes during this run.
+ */
+export interface WorkspaceSyncRequiredPathV1 {
+  path: string;
+  /** sha-256 of the bytes on the Computer, absent when it held no such file. */
+  contentHash?: string;
+  durable: boolean;
+}
+
 export interface WorkspaceSyncRootReportV1 {
   root: WorkspaceRootV1;
   /** Store generations materialized on the Computer. */
@@ -356,6 +343,8 @@ export interface WorkspaceSyncRootReportV1 {
   omitted: number;
   conflicts: WorkspaceSyncConflictV1[];
   failures: WorkspaceSyncFailureV1[];
+  /** One row per path the caller declared required; empty when it named none. */
+  required: WorkspaceSyncRequiredPathV1[];
 }
 
 export interface WorkspaceSyncReportV1 {
@@ -432,6 +421,7 @@ function emptyReport(root: WorkspaceRootV1): WorkspaceSyncRootReportV1 {
     omitted: 0,
     conflicts: [],
     failures: [],
+    required: [],
   };
 }
 
@@ -466,6 +456,7 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     requiredPaths: readonly string[] = [],
   ): Promise<WorkspaceSyncRootReportV1> {
     const report = emptyReport(root);
+    const required = new Set(requiredPaths);
     const scanned = await this.options.computer.scan(root, requiredPaths);
     if (isFailure(scanned)) {
       report.failures.push({ ...scanned, root });
@@ -495,8 +486,28 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
       // Push first: a Computer-side write must reach the store's conditional
       // write before the pull could overwrite it.
       for (const entry of scanned.scan.entries) {
-        if (this.clean(entry)) continue;
-        const pushed = await this.push(root, entry, report);
+        // A required path is authoritative on the Computer. The caller has
+        // asserted that these exact bytes must be readable from the store when
+        // this returns, so the sidecar's opinion is not enough: ask the store
+        // what it holds, and push whenever it does not hold these bytes. A
+        // sidecar that survived its file (sidecars live outside `dist/`, so
+        // `rm -rf dist` never touches them) or an object the store lost after
+        // the push that recorded one otherwise leaves a "clean" entry nobody
+        // ever carries — the publish failure of 2026-09-04.
+        const drift = required.has(entry.path)
+          ? await this.requiredDrift(root, entry, report)
+          : undefined;
+        if (drift?.kind === "aligned") {
+          settled.add(entry.path);
+          continue;
+        }
+        if (!drift && this.clean(entry)) continue;
+        const pushed = await this.push(
+          root,
+          entry,
+          report,
+          drift ? { expected: drift.expected } : undefined,
+        );
         if (pushed === "pushed") settled.add(entry.path);
         else if (pushed === "conflict") conflicted.add(entry.path);
         else held.add(entry.path);
@@ -542,14 +553,89 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
       if (stored.generations.has(entry.path)) continue;
       if (held.has(entry.path) || settled.has(entry.path)) continue;
       if (conflicted.has(entry.path)) continue;
+      // A required path is never turned into a local removal. The caller named
+      // it because the Computer's copy is the thing being published; deleting
+      // it because the store is missing it destroys the very bytes the caller
+      // asked for, and the forced push above has already had its say.
+      if (required.has(entry.path)) continue;
       if (!entry.recorded) continue;
       // The Computer holds a file the store recorded and no longer holds: a
       // delete happened there. It becomes a removal here, recorded, never a
-      // silent overwrite.
-      const removed = await this.removeLocally(root, entry, report);
+      // silent overwrite — *if* the store actually recorded a removal. When
+      // the ledger is reachable and holds no tombstone for the path, this is
+      // sidecar/store drift rather than a delete, and re-pushing the bytes the
+      // Computer still holds is the repair. See ADR 0013: a removal is a
+      // recorded generation, so an absence with no record is not one.
+      const tombstone = await this.storeTombstone(root, entry);
+      if (tombstone === "no-removal-recorded") {
+        if (readOnlyOnComputer) continue;
+        const pushed = await this.push(root, entry, report, {
+          expected: null,
+        });
+        if (pushed === "pushed") settled.add(entry.path);
+        continue;
+      }
+      const removed = await this.removeLocally(root, entry, report, tombstone);
       if (removed) report.removedOnComputer.push(entry.path);
     }
+    for (const path of required) {
+      const entry = local.get(path);
+      report.required.push({
+        path,
+        ...(entry ? { contentHash: entry.contentHash } : {}),
+        // Either this run put those bytes in the store, or the listing already
+        // answered with them. Anything else is reported as not durable, which
+        // is what makes the caller's own failure honest.
+        durable:
+          entry !== undefined &&
+          (settled.has(path) ||
+            stored.generations.get(path)?.contentHash === entry.contentHash),
+      });
+    }
     return report;
+  }
+
+  /**
+   * What the store holds for one required path, when that differs from the
+   * Computer.
+   *
+   * `undefined` means nothing is provable — the store could not answer — and
+   * the sidecar rule stands. `aligned` means the store already holds these
+   * exact bytes, and the sidecar (missing or stale) is repaired rather than a
+   * second generation written. Otherwise the answer carries the generation the
+   * forced push must condition on, so the push cannot lose a race it started.
+   */
+  private async requiredDrift(
+    root: WorkspaceRootV1,
+    entry: ComputerSyncEntryV1,
+    report: WorkspaceSyncRootReportV1,
+  ): Promise<
+    { kind: "aligned" } | { kind: "push"; expected: string | null } | undefined
+  > {
+    const current = await this.options.store.stat({ root, path: entry.path });
+    if (current.status === "not-found") {
+      return this.clean(entry) ? { kind: "push", expected: null } : undefined;
+    }
+    if (current.status !== "ok") return undefined;
+    if (current.entry.generation.contentHash !== entry.contentHash) {
+      return { kind: "push", expected: current.entry.generation.generationId };
+    }
+    if (entry.recorded?.generationId === current.entry.generation.generationId)
+      return { kind: "aligned" };
+    // The store holds these bytes under a generation the Computer does not
+    // record. Repair the sidecar so the next run agrees, and carry nothing.
+    const bytes = await this.options.computer.read(root, entry.path);
+    if (isFailure(bytes)) return { kind: "aligned" };
+    const sidecar = await this.options.computer.materialize(
+      root,
+      entry.path,
+      bytes.bytes,
+      current.entry.generation,
+    );
+    if (sidecar.status !== "ok") {
+      report.failures.push({ ...sidecar, root, path: entry.path });
+    }
+    return { kind: "aligned" };
   }
 
   /** True when the file's bytes are still the ones its sidecar attributes. */
@@ -606,13 +692,21 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     root: WorkspaceRootV1,
     entry: ComputerSyncEntryV1,
     report: WorkspaceSyncRootReportV1,
+    /**
+     * The generation to condition on, when the caller has read the store and
+     * knows better than the sidecar. Absent means the sidecar decides, which
+     * is the ordinary case.
+     */
+    override?: { expected: string | null },
   ): Promise<"pushed" | "conflict" | "held"> {
     const bytes = await this.options.computer.read(root, entry.path);
     if (isFailure(bytes)) {
       report.failures.push({ ...bytes, root, path: entry.path });
       return "held";
     }
-    const expected = entry.recorded?.generationId ?? null;
+    const expected = override
+      ? override.expected
+      : (entry.recorded?.generationId ?? null);
     const effect: WorkspaceSyncEffectV1 = {
       effectId: workspaceSyncEffectIdV1(
         root,
@@ -841,8 +935,8 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     root: WorkspaceRootV1,
     entry: ComputerSyncEntryV1,
     report: WorkspaceSyncRootReportV1,
+    tombstone: WorkspaceGenerationV1,
   ): Promise<boolean> {
-    const tombstone = await this.storeTombstone(root, entry);
     const removed = await this.options.computer.remove(
       root,
       entry.path,
@@ -863,15 +957,23 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
    * The tombstone generation to record on the Computer for a store-side
    * delete. The ledger holds the writer when the Durable Object is reachable;
    * otherwise the removal is recorded with no writer, which is the truth.
+   *
+   * `"no-removal-recorded"` is the third answer, and the one that keeps the
+   * removal rule honest: the ledger answered, and it holds no tombstone for
+   * this path. ADR 0013 makes a delete a recorded generation, so an absence
+   * with no record is drift between the sidecar and the store rather than a
+   * delete, and the caller re-pushes instead of destroying the file. An
+   * unreachable ledger says nothing either way, so the removal stands.
    */
   private async storeTombstone(
     root: WorkspaceRootV1,
     entry: ComputerSyncEntryV1,
-  ): Promise<WorkspaceGenerationV1> {
+  ): Promise<WorkspaceGenerationV1 | "no-removal-recorded"> {
     if (this.options.generations) {
       try {
         const record = await this.options.generations.current(root, entry.path);
         if (record?.deleted) return record.generation;
+        return "no-removal-recorded";
       } catch {
         // The ledger is unreachable; record the removal without a writer.
       }
@@ -1205,7 +1307,7 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     const head = await this.run(
       [
         ...prelude,
-        `CHUNK=${WORKSPACE_SYNC_CHUNK_BYTES_V1}`,
+        `CHUNK=${WORKSPACE_CHUNK_BYTES_V1}`,
         'if [ ! -f "$FILE" ]; then echo __MISSING__; exit 0; fi',
         'SIZE=$(stat -c %s "$FILE")',
         `if [ "$SIZE" -gt ${WORKSPACE_SYNC_MAX_FILE_BYTES_V1} ]; then echo __TOO_LARGE__; exit 0; fi`,
@@ -1230,13 +1332,13 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
       return failure("unavailable", "Invalid Fly Workspace sync response");
     }
     const chunks = [Buffer.from(first.trim(), "base64")];
-    for (const offset of chunkOffsets(size)) {
+    for (const offset of workspaceChunkOffsetsV1(size)) {
       const next = await this.run(
         [
           ...prelude,
           // `tail -c +N` counts from one, so the offset is one past the bytes
           // already carried.
-          `tail -c +${offset + 1} "$FILE" | head -c ${WORKSPACE_SYNC_CHUNK_BYTES_V1} | base64 -w0; echo`,
+          `tail -c +${offset + 1} "$FILE" | head -c ${WORKSPACE_CHUNK_BYTES_V1} | base64 -w0; echo`,
         ].join("\n"),
       );
       if (typeof next !== "string") return next;
@@ -1271,17 +1373,14 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     name: string,
     bytes: Uint8Array,
   ): Promise<string | WorkspaceFailureV1 | undefined> {
-    if (bytes.byteLength <= WORKSPACE_SYNC_CHUNK_BYTES_V1) return undefined;
+    if (bytes.byteLength <= WORKSPACE_CHUNK_BYTES_V1) return undefined;
     const staged = `${mount}/${WORKSPACE_SYNC_DIR}/${SYNC_STAGING_DIR}/${name}`;
     for (
       let offset = 0;
       offset < bytes.byteLength;
-      offset += WORKSPACE_SYNC_CHUNK_BYTES_V1
+      offset += WORKSPACE_CHUNK_BYTES_V1
     ) {
-      const chunk = bytes.subarray(
-        offset,
-        offset + WORKSPACE_SYNC_CHUNK_BYTES_V1,
-      );
+      const chunk = bytes.subarray(offset, offset + WORKSPACE_CHUNK_BYTES_V1);
       const output = await this.run(
         [
           "set -eu",
@@ -1315,7 +1414,7 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     if (oversized) return oversized;
     const staged = await this.stage(
       mount,
-      stagingName(generation.generationId, "pull"),
+      workspaceStagingNameV1(generation.generationId, "pull"),
       bytes,
     );
     if (staged && typeof staged !== "string") return staged;
@@ -1462,7 +1561,7 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     if (oversized) return oversized;
     const staged = await this.stage(
       mount,
-      stagingName(generation.generationId, "conflict"),
+      workspaceStagingNameV1(generation.generationId, "conflict"),
       bytes,
     );
     if (staged && typeof staged !== "string") return staged;
