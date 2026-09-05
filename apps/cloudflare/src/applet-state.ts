@@ -18,7 +18,7 @@
 //  3. `facets.get` is lazy and synchronous, so mount and `health()` are one
 //     guarded phase; `facets.clone(src, dst)` copies a facet's whole storage,
 //     which is what makes that phase a commit boundary the kernel can undo
-//     (ADR 0038) rather than a mount the candidate is trusted to survive;
+//     (ADR 0041) rather than a mount the candidate is trusted to survive;
 //  4. a facet stub is not serializable (§8), so `invokeTool` and `connect`
 //     forward through this object. Only the 101 `Response` and its `webSocket`
 //     travel.
@@ -407,7 +407,7 @@ export class AppletState extends DurableObject<AppletStateEnv> {
   }
 
   /**
-   * The guarded phase, as a commit boundary the kernel owns (ADR 0038).
+   * The guarded phase, as a commit boundary the kernel owns (ADR 0041).
    *
    * A candidate generation is never handed the Applet's live storage on the
    * promise that it will fail cleanly: its constructor, the SDK's migrations,
@@ -692,7 +692,7 @@ export class AppletState extends DurableObject<AppletStateEnv> {
    * serializable`), and the call is bounded exactly like an isolate tool's.
    *
    * The caller names the generation its Turn pinned, and this object runs that
-   * generation or none (ADR 0038). A Turn's Composition advertises one Applet
+   * generation or none (ADR 0041). A Turn's Composition advertises one Applet
    * generation's tools, schemas, and provenance to the model; executing a
    * different generation behind that description would make the Turn
    * unreconstructable, so a mismatch is a plain refusal the Turn can read and

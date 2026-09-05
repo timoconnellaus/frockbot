@@ -188,7 +188,7 @@ export interface ShellIsolateMountOptions {
  *
  * `generationId` is the Applet generation this Turn's Composition pinned, and
  * it is not decoration: the Applet Durable Object runs that generation or
- * refuses the call (ADR 0038). Without it a publish landing mid-Turn would
+ * refuses the call (ADR 0041). Without it a publish landing mid-Turn would
  * execute new code behind the schema and provenance the model was shown.
  */
 export interface ShellAppletMountOptions {

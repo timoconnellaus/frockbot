@@ -1,0 +1,30 @@
+{
+  "name": "@frockbot/compose-frockbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure projections from FrockBot manifests and kernel contracts to the FrockBot Compose vocabulary.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/kernel-composition": "workspace:*",
+    "@frockbot/kernel-contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "typescript": "^7.0.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "packages/compose-frockbot"
+  }
+}

@@ -39,6 +39,9 @@ describe("Applet boundaries", () => {
       "apps/cloudflare/src/applet-state.ts",
       // The lane S1 spike, deliberately kept out of `test:workerd`.
       "apps/cloudflare/test/spike-applet-facet-worker.ts",
+      // This vendored reference host is deliberately outside the product
+      // dependency graph; the adjacent check keeps the exception inert.
+      "packages/compose-cloudflare/src/host.ts",
     ]);
     const offenders: string[] = [];
     for (const path of sourceFiles(
@@ -51,6 +54,36 @@ describe("Applet boundaries", () => {
       const source = read(path);
       if (/\bctx\.facets\.|\bstate\.facets\.|\bfacets\.get\(/.test(source)) {
         offenders.push(path);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test("the vendored Compose host stays outside the product dependency graph", () => {
+    const offenders: string[] = [];
+    for (const path of sourceFiles(
+      "package.json",
+      "packages/*/package.json",
+      "apps/*/package.json",
+      "applications/*/package.json",
+    )) {
+      if (path.startsWith("packages/compose-")) continue;
+      const manifest = JSON.parse(read(path)) as Record<string, unknown>;
+      for (const field of [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+        "peerDependencies",
+      ]) {
+        const dependencies = manifest[field];
+        if (!dependencies || typeof dependencies !== "object") continue;
+        if (
+          Object.keys(dependencies).some((name) =>
+            name.startsWith("@frockbot/compose-"),
+          )
+        ) {
+          offenders.push(`${path}:${field}`);
+        }
       }
     }
     expect(offenders).toEqual([]);

@@ -1498,6 +1498,58 @@ describe("the durable-root sync on the Computer handle", () => {
   // nothing to do — while the store held no object for it at all. A required
   // path is the one thing the caller has asserted about, so the Computer's
   // copy of it decides, not its sidecar.
+  // The state a fresh `applet build` leaves: three files under an ignored
+  // directory, none of them ever synced, so none of them has a sidecar. The
+  // publish names all three, and all three must be readable from the store
+  // when the reconcile returns — the last one included. (`sync-script.test.ts`
+  // is where the shell that emits their manifest rows is held to that; this is
+  // the reconcile above it.)
+  test("carries every required file of a fresh build that has no sidecars", async () => {
+    const { sprite, store, open } = providerHarness([
+      APPLET_SOURCE_PACKAGE_ROOT,
+    ]);
+    const handle = await open();
+    const appletId = "pub-user-1.0123456789abcdef0123456789abcdef";
+    const built = {
+      "dist/server.js": "export class Applet {}",
+      "dist/ui.html": "<h1>todo</h1>",
+      "dist/manifest.json": '{"contract":1,"tools":[]}',
+    };
+    for (const [file, text] of Object.entries(built)) {
+      sprite.shellWrite(MOUNTS.appletSource, `${appletId}/${file}`, text);
+    }
+    expect(sprite.keys(`${MOUNTS.appletSource}/.frockbot-generations`)).toEqual(
+      [],
+    );
+
+    const summary = await handle.sync!.reconcileRoot!(
+      appletSourceRoot,
+      "publish",
+      {
+        requiredPaths: Object.keys(built).map((file) => `${appletId}/${file}`),
+      },
+    );
+
+    expect(summary).toMatchObject({ status: "ok", pushed: 3, failures: 0 });
+    expect(summary.required).toEqual(
+      Object.entries(built).map(([file, text]) => ({
+        path: `${appletId}/${file}`,
+        contentHash: sha256(encoder.encode(text)),
+        durable: true,
+      })),
+    );
+    for (const [file, text] of Object.entries(built)) {
+      const read = await store.read({
+        root: appletSourceRoot,
+        path: `${appletId}/${file}`,
+      });
+      expect(read.status).toBe("ok");
+      if (read.status === "ok") {
+        expect(decoder.decode(read.file.bytes)).toBe(text);
+      }
+    }
+  });
+
   test("pushes a required file the store is missing even when its sidecar says clean", async () => {
     const { sprite, store, open } = providerHarness([
       APPLET_SOURCE_PACKAGE_ROOT,
