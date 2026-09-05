@@ -17,12 +17,18 @@ class ChatPane extends StatefulWidget {
   final Future<void> Function() onReconnect;
   final String botName;
   final SheepLook botLook;
+
+  /// Opens the Voice screen. Absent when this device cannot talk (a test
+  /// harness, or an account with no session yet), and the mic button is then
+  /// not drawn at all rather than drawn dead.
+  final VoidCallback? onVoice;
   const ChatPane({
     super.key,
     required this.controller,
     required this.onReconnect,
     this.botName = 'your Bot',
     this.botLook = SheepLook.plain,
+    this.onVoice,
   });
   @override
   State<ChatPane> createState() => _ChatPaneState();
@@ -278,6 +284,7 @@ class _ChatPaneState extends State<ChatPane> {
         const SizedBox(height: 10),
         FrockComposer(
           hint: 'Message ${widget.botName}',
+          onVoice: widget.onVoice,
           sendKey: const ValueKey('send'),
           stopKey: const ValueKey('stop'),
           onSend: c.canSend ? send : null,

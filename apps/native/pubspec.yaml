@@ -21,6 +21,9 @@ dependencies:
   path_provider: 2.1.6
   url_launcher: 6.3.2
   crypto: 3.0.7
+  record: ^7.1.1
+  audio_session: ^0.2.4
+  flutter_pcm_sound: ^3.3.3
 
 dev_dependencies:
   flutter_test:

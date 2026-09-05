@@ -148,9 +148,7 @@ class FlockDrawer extends StatelessWidget {
                 if (onManageBots != null)
                   FrockRow(
                     key: const ValueKey('manage-bots'),
-                    leading: const FrockIconTile(
-                      Icons.manage_accounts_rounded,
-                    ),
+                    leading: const FrockIconTile(Icons.manage_accounts_rounded),
                     title: 'Manage Bots',
                     chevron: true,
                     onTap: onManageBots,

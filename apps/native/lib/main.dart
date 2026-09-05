@@ -17,6 +17,10 @@ import 'ui/flock_drawer.dart' show lookOf;
 import 'ui/frock_tokens.dart';
 import 'ui/frock_widgets.dart';
 import 'ui/gallery.dart';
+import 'voice/audio.dart';
+import 'voice/controller.dart';
+import 'voice/page.dart';
+import 'voice/session.dart';
 import 'acceptance_metrics.dart';
 import 'client/bot_sessions.dart';
 import 'client/chat_controller.dart';
@@ -335,6 +339,23 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
     );
   }
 
+  /// Voice is the whole screen: a route, not a sheet over the conversation.
+  Future<void> openVoice(BuildContext context) async {
+    final look = selected == null ? null : lookOf(selected!.sheep);
+    final navigator = Navigator.of(context);
+    final controller = VoiceController(
+      backend: BackendVoice(api),
+      audio: DeviceVoiceAudio(),
+      deviceId: await voiceDeviceId(store),
+    );
+    await navigator.push(
+      MaterialPageRoute<void>(
+        builder: (_) => VoicePage(controller: controller, botLook: look),
+      ),
+    );
+    controller.dispose();
+  }
+
   BotState selectedState = BotState.none;
 
   void selectedActivity(BotState state) {
@@ -484,6 +505,7 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
                   botName: selected!.initialName,
                   botLook: lookOf(selected!.sheep),
                   onActivity: selectedActivity,
+                  onVoice: () => unawaited(openVoice(context)),
                 ),
         );
       },
@@ -509,6 +531,9 @@ class ConversationView extends StatefulWidget {
 
   /// Reports what the ring around this Bot's sheep should say.
   final ValueChanged<BotState>? onActivity;
+
+  /// Opens the whole-screen Voice route from the composer's mic.
+  final VoidCallback? onVoice;
   const ConversationView({
     super.key,
     required this.sessions,
@@ -517,6 +542,7 @@ class ConversationView extends StatefulWidget {
     this.botName = 'your Bot',
     this.botLook = SheepLook.plain,
     this.onActivity,
+    this.onVoice,
   });
   @override
   State<ConversationView> createState() => _ConversationViewState();
@@ -648,6 +674,7 @@ class _ConversationViewState extends State<ConversationView>
             onReconnect: session.channel.connect,
             botName: widget.botName,
             botLook: widget.botLook,
+            onVoice: widget.onVoice,
           ),
         ),
       ],

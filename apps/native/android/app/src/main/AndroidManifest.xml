@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Voice: the app-wide assistant listens through the phone's microphone. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
         android:label="FrockBot"
         android:name="com.frockbot.mobile.FrockBotApplication"
