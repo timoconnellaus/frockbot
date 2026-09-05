@@ -10,6 +10,9 @@ import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import '../client/transport.dart';
 import '../theme/states.dart';
+import '../ui/frock_page.dart';
+import '../ui/frock_tokens.dart';
+import '../ui/frock_widgets.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 
 const artifactOrigin = 'https://ui.bot.frockbot.com';
@@ -92,18 +95,14 @@ class _AppletDirectoryPageState extends State<AppletDirectoryPage> {
       widget.api.request('/api/applets').then(wire.AppletDirectory.fromJson);
   void reload() => setState(() => directory = loadDirectory());
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Your Applets'),
-      actions: [
-        IconButton(
-          tooltip: 'Refresh Applets',
-          onPressed: reload,
-          icon: const Icon(Icons.refresh),
-        ),
-      ],
+  Widget build(BuildContext context) => FrockPage(
+    title: 'Your Applets',
+    trailing: FrockIconButton(
+      Icons.refresh_rounded,
+      semanticLabel: 'Refresh Applets',
+      onTap: reload,
     ),
-    body: FutureBuilder(
+    child: FutureBuilder(
       future: directory,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
@@ -131,22 +130,34 @@ class _AppletDirectoryPageState extends State<AppletDirectoryPage> {
           );
         }
         return ListView(
+          padding: EdgeInsets.zero,
           children: [
-            for (final applet in applets)
-              ListTile(
-                leading: const Icon(Icons.widgets_outlined),
-                title: Text(applet.displayName),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => AppletPage(
-                      api: widget.api,
-                      userId: widget.userId,
-                      appletId: applet.appletId,
-                      name: applet.displayName,
+            const FrockLead(
+              'Small apps your Bots have built for you. Each one runs in its own space.',
+            ),
+            const FrockEyebrow('Published'),
+            const SizedBox(height: FrockTokens.eyebrowToGroup),
+            FrockGroup(
+              children: [
+                for (final applet in applets)
+                  FrockRow(
+                    key: ValueKey('applet-${applet.appletId}'),
+                    leading: const FrockIconTile(Icons.widgets_rounded),
+                    title: applet.displayName,
+                    chevron: true,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => AppletPage(
+                          api: widget.api,
+                          userId: widget.userId,
+                          appletId: applet.appletId,
+                          name: applet.displayName,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
+              ],
+            ),
           ],
         );
       },
@@ -403,63 +414,117 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: Text(widget.name),
-      actions: [
-        IconButton(
-          tooltip: 'Reopen Applet',
-          onPressed: _open,
-          icon: const Icon(Icons.refresh),
-        ),
-      ],
-    ),
-    body: Column(
-      children: [
-        // Compiled host attribution always sits outside the untrusted region.
-        ListTile(
-          leading: const Icon(Icons.widgets_outlined),
-          title: Text('Applet · ${widget.name}'),
-        ),
-        if (_externalLink != null)
-          ListTile(
-            title: const Text('Open this link in your browser?'),
-            subtitle: Text(
-              _externalLink.toString(),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    return FrockPage(
+      title: widget.name,
+      padded: false,
+      maxWidth: double.infinity,
+      trailing: FrockIconButton(
+        Icons.refresh_rounded,
+        semanticLabel: 'Reopen Applet',
+        onTap: _open,
+      ),
+      child: Column(
+        children: [
+          // Compiled host attribution always sits outside the untrusted region.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              FrockTokens.edge,
+              0,
+              FrockTokens.edge,
+              8,
             ),
-            trailing: TextButton(
-              onPressed: () {
-                final link = _externalLink!;
-                setState(() {
-                  _externalLink = null;
-                });
-                unawaited(
-                  launchUrl(link, mode: LaunchMode.externalApplication),
-                );
-              },
-              child: const Text('Open'),
-            ),
-          ),
-        if (_error != null)
-          Expanded(
-            child: FrockEmptyState(
-              title: _pageUnavailable
-                  ? 'Applet couldn’t start'
-                  : 'Couldn’t open this Applet',
-              detail: _pageUnavailable
-                  ? 'The page opened, but couldn’t connect to FrockBot. Try reopening it. If it still won’t connect, ask your Bot to publish it again.'
-                  : 'Your conversation is still available. Check your connection, then try opening the Applet again.',
-              action: 'Try again',
-              onAction: _open,
-              icon: Icons.widgets_outlined,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.widgets_rounded,
+                  size: FrockTokens.iconSm,
+                  color: t.ink3,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Applet · ${widget.name} · runs in its own space',
+                    style: t.caption,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
           ),
-        if (_error == null && !_ready)
-          const FrockLoading(label: 'Opening Applet'),
-        if (_web != null) Expanded(child: WebViewWidget(controller: _web!)),
-      ],
-    ),
-  );
+          if (_externalLink != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                FrockTokens.edge,
+                0,
+                FrockTokens.edge,
+                8,
+              ),
+              child: FrockGroup(
+                needsYou: true,
+                children: [
+                  FrockNotice(
+                    title: 'Open this link in your browser?',
+                    body: _externalLink.toString(),
+                    actions: [
+                      FrockPill(
+                        'Open',
+                        size: PillSize.sm,
+                        icon: Icons.open_in_new_rounded,
+                        onTap: () {
+                          final link = _externalLink!;
+                          setState(() {
+                            _externalLink = null;
+                          });
+                          unawaited(
+                            launchUrl(
+                              link,
+                              mode: LaunchMode.externalApplication,
+                            ),
+                          );
+                        },
+                      ),
+                      FrockPill(
+                        'Not now',
+                        kind: PillKind.ghost,
+                        size: PillSize.sm,
+                        color: t.ink2,
+                        onTap: () => setState(() => _externalLink = null),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          if (_error != null)
+            Expanded(
+              child: FrockEmptyState(
+                title: _pageUnavailable
+                    ? 'Applet couldn’t start'
+                    : 'Couldn’t open this Applet',
+                detail: _pageUnavailable
+                    ? 'The page opened, but couldn’t connect to FrockBot. Try reopening it. If it still won’t connect, ask your Bot to publish it again.'
+                    : 'Your conversation is still available. Check your connection, then try opening the Applet again.',
+                action: 'Try again',
+                onAction: _open,
+                icon: Icons.widgets_outlined,
+              ),
+            ),
+          if (_error == null && !_ready)
+            const FrockLoading(label: 'Opening Applet'),
+          if (_web != null)
+            Expanded(
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(FrockTokens.radiusGroup),
+                ),
+                child: WebViewWidget(controller: _web!),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }

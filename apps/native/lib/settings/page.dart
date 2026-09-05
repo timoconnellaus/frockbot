@@ -10,6 +10,8 @@ import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/states.dart';
 import 'controller.dart';
 import 'model_picker.dart';
+import '../ui/frock_page.dart';
+import '../ui/frock_widgets.dart';
 
 class SettingsPage extends StatefulWidget {
   final NativeApi api;
@@ -93,18 +95,15 @@ class _SettingsPageState extends State<SettingsPage>
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: state,
-    builder: (context, _) => Scaffold(
-      appBar: AppBar(
-        title: Text(widget.home == 'models' ? 'Models' : 'Settings'),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh settings',
-            onPressed: state.busy ? null : state.load,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
+    builder: (context, _) => FrockPage(
+      title: widget.home == 'models' ? 'Models' : 'Settings',
+      padded: false,
+      trailing: FrockIconButton(
+        Icons.refresh_rounded,
+        semanticLabel: 'Refresh settings',
+        onTap: state.busy ? null : state.load,
       ),
-      body: SafeArea(
+      child: SafeArea(
         top: false,
         child: state.frame == null
             ? state.busy
