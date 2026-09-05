@@ -10,6 +10,7 @@
 // and one generation.
 import { env } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
+import { createGateway } from "../src/gateway.js";
 import {
   appletStateNameV1,
   mintAppletViewerTokenV1,
@@ -826,6 +827,84 @@ describe("Applet directory", () => {
 });
 
 describe("Applet viewer tokens", () => {
+  test.each(["query", "subprotocol"])(
+    "the %s viewer handshake crosses the gateway and real facet without forwarding credentials",
+    async (transport) => {
+      const applet = appletId(`gateway-${transport}`);
+      const { generation } = await publishGeneration(applet, {
+        version: "A",
+        tools: ["list_todos"],
+      });
+      const secret = "gateway-viewer-proof-secret-0123456789abcdef";
+      const token = await mintAppletViewerTokenV1(secret, {
+        u: OWNER,
+        a: applet,
+        g: generation.generationId,
+        exp: Math.floor((Date.now() + 120_000) / 1_000),
+      });
+      const unused = (): never => {
+        throw new Error("A viewer must not enter an app-session path");
+      };
+      const gateway = createGateway({
+        loader: { get: unused },
+        artifacts: { load: unused },
+        auth: { getSession: unused, handler: unused },
+        userExists: unused,
+        readDeploymentPolicy: unused,
+        applicationHashFor: unused,
+        botStateFor: unused,
+        userConfigurationFor: unused,
+        botConfigurationFor: unused,
+        appletViewerSecret: secret,
+        appletStateFor: (userId, appletId) => {
+          expect([userId, appletId]).toEqual([OWNER, applet]);
+          return {
+            fetch: async (request) => {
+              expect(request.url).not.toContain(token);
+              for (const header of [
+                "sec-websocket-protocol",
+                "authorization",
+                "cookie",
+                "referer",
+              ])
+                expect(request.headers.get(header)).toBeNull();
+              return stateFor(applet).fetch(request);
+            },
+          };
+        },
+      });
+      const url = new URL(`https://bot.example/api/applets/${applet}/socket`);
+      const headers = new Headers({
+        upgrade: "websocket",
+        authorization: "Bearer synthetic-app-session",
+        cookie: "synthetic=app-cookie",
+        referer: "https://bot.example/",
+      });
+      if (transport === "subprotocol")
+        headers.set(
+          "sec-websocket-protocol",
+          `frockbot.applet.v1, frockbot.viewer.${token}`,
+        );
+      else url.searchParams.set("token", token);
+      const response = await gateway(new Request(url, { headers }));
+      expect(response.status).toBe(101);
+      expect(response.headers.get("sec-websocket-protocol")).toBe(
+        transport === "subprotocol" ? "frockbot.applet.v1" : null,
+      );
+      expect(JSON.stringify([...response.headers])).not.toContain(token);
+      const socket = response.webSocket!;
+      expect(socket).not.toBeNull();
+      socket.accept();
+      const echoed = new Promise<string>((resolve) => {
+        socket.addEventListener("message", (event) =>
+          resolve(String(event.data)),
+        );
+      });
+      socket.send("gateway-ping");
+      expect(await echoed).toBe("A:echo:gateway-ping");
+      socket.close(1000, "done");
+    },
+  );
   const secret = env.APPLET_VIEWER_SECRET;
 
   test("a scoped token verifies, and one for another Applet or User does not", async () => {

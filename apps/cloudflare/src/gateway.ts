@@ -464,7 +464,7 @@ async function routeAppletSocket(
   headers.delete("authorization");
   headers.delete("cookie");
   headers.delete("referer");
-  return dependencies
+  const response = await dependencies
     .appletStateFor(claims.u, claims.a)
     .fetch(
       forwardingBodyV1(
@@ -472,6 +472,24 @@ async function routeAppletSocket(
         new Request(forwarded, { method: request.method, headers }),
       ),
     );
+  if (
+    response.status === 101 &&
+    response.webSocket &&
+    request.headers.has("sec-websocket-protocol") &&
+    !url.searchParams.has("token")
+  ) {
+    // A browser that offered protocols requires a selected protocol in the
+    // upgrade response. Select only the public application protocol; the
+    // credential-bearing offer was consumed here and never reaches the facet.
+    const responseHeaders = new Headers(response.headers);
+    responseHeaders.set("sec-websocket-protocol", "frockbot.applet.v1");
+    return new Response(null, {
+      status: 101,
+      headers: responseHeaders,
+      webSocket: response.webSocket,
+    });
+  }
+  return response;
 }
 
 /** Native fallback carries the scoped token in the handshake, never the URL. */
