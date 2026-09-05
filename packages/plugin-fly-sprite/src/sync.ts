@@ -186,6 +186,19 @@ function isFailure(value: { status: string }): value is WorkspaceFailureV1 {
   return value.status !== "ok";
 }
 
+/**
+ * A durable-root-relative path in the one shape everything here compares.
+ * A path the normalizer refuses is kept as it came: it will match nothing,
+ * which is the truth about it, rather than throwing out of a reconcile.
+ */
+function normalizedOrRaw(path: string): string {
+  try {
+    return normalizeWorkspaceRelativePathV1(path);
+  } catch {
+    return path;
+  }
+}
+
 /** A file the Computer holds under one durable root. */
 export interface ComputerSyncEntryV1 {
   path: string;
@@ -456,7 +469,11 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     requiredPaths: readonly string[] = [],
   ): Promise<WorkspaceSyncRootReportV1> {
     const report = emptyReport(root);
-    const required = new Set(requiredPaths);
+    // Normalized on the way in, because every path this compares it against —
+    // a scan row, a store listing entry — has been through the same
+    // normalization, and a required path that missed it would silently match
+    // nothing.
+    const required = new Set(requiredPaths.map(normalizedOrRaw));
     const scanned = await this.options.computer.scan(root, requiredPaths);
     if (isFailure(scanned)) {
       report.failures.push({ ...scanned, root });
@@ -658,7 +675,7 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     | WorkspaceFailureV1
   > {
     const generations = new Map<string, WorkspaceGenerationV1>();
-    const required = new Set(requiredPaths);
+    const required = new Set(requiredPaths.map(normalizedOrRaw));
     let ignored = 0;
     let cursor: string | undefined;
     for (let page = 0; page < MAX_STORE_PAGES; page += 1) {
@@ -1186,7 +1203,17 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
       // Required artifact files go first: the source manifest may be full,
       // but an explicit one-root publisher must still receive the exact bytes
       // it named. They remain subject to the same byte and entry bounds.
-      "while IFS= read -r REL; do",
+      //
+      // `|| [ -n "$REL" ]` is not defensive style, it is the loop's last
+      // iteration. The list is newline-*separated*, not newline-terminated, so
+      // `read` consumes the final path and then reports EOF, and a plain
+      // `while read` throws that path away. Every publish therefore lost the
+      // last file it named: `dist/manifest.json`, which is why an Applet that
+      // had just been built was published as "not-found: run `applet build`"
+      // (production, 2026-09-04 and 2026-09-05). `REL` is primed so `set -u`
+      // has something to read on an empty list.
+      'REL=""',
+      'while IFS= read -r REL || [ -n "$REL" ]; do',
       '  [ -n "$REL" ] || continue',
       '  FILE="$ROOT/$REL"',
       '  if [ -f "$FILE" ]; then',
