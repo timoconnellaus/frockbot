@@ -1985,9 +1985,11 @@ export class BotDurableAuthority<Snapshot> {
     const reconciles = this.hooks.providerReconciles ?? (() => true);
     // A model's retrieval policy says nothing about an unresolved tool effect.
     // Preserve its intent for the tool reconciliation path (ADR 0028).
-    const unresolvedTool = [
-      ...validateToolOccurrenceJournal(events).values(),
-    ].some((entry) => entry.intent && !entry.result);
+    const unresolvedTool =
+      events.some((event) => event.type === "tool/call") &&
+      [...validateToolOccurrenceJournal(events).values()].some(
+        (entry) => entry.intent && !entry.result,
+      );
     if (unresolvedTool || provider === undefined || reconciles(provider)) {
       await this.requireRunReconciliation(runId, previous, events, reason);
       return undefined;
