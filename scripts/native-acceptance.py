@@ -151,7 +151,7 @@ def tap(label, timeout=120):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         for node in snapshot().iter("node"):
-            if label not in (node.get("text"), node.get("content-desc")):
+            if label not in (node.get("text"), node.get("content-desc"), node.get("hint")):
                 continue
             points = [int(n) for n in re.findall(r"\d+", node.get("bounds", ""))]
             if len(points) == 4:
