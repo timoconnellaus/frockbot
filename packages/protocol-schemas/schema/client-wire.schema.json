@@ -3333,6 +3333,84 @@
       },
       "required": ["schemaVersion", "ownerId", "revision", "accounts"],
       "additionalProperties": false
+    },
+    "NotificationDirectory": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "notifications": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "properties": {
+              "notificationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "runId": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "createdAt": {
+                "$ref": "#/$defs/Instant"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 512
+              },
+              "body": {
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 2000
+              },
+              "urgency": {
+                "enum": ["normal", "critical"]
+              },
+              "schemaVersion": {
+                "const": 1
+              },
+              "botId": {
+                "$ref": "#/$defs/BotId"
+              }
+            },
+            "required": [
+              "notificationId",
+              "runId",
+              "createdAt",
+              "title",
+              "body",
+              "schemaVersion",
+              "botId"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["schemaVersion", "notifications"],
+      "additionalProperties": false
+    },
+    "MarkReadReceipt": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "commandId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "status": {
+          "const": "applied"
+        },
+        "unread": {
+          "$ref": "#/$defs/UnreadView"
+        }
+      },
+      "required": ["schemaVersion", "commandId", "status", "unread"],
+      "additionalProperties": false
     }
   },
   "x-frockbot-compatibility": {

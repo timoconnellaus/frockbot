@@ -642,6 +642,7 @@ export function decodeBotUnreadReceiptV1(input: unknown): BotUnreadReceiptV1 {
  * fan-out that lets a completion on a Bot nobody is looking at surface.
  */
 export interface BotPendingNotificationV1 {
+  urgency?: "normal" | "critical";
   schemaVersion: 1;
   botId: string;
   notificationId: string;
@@ -691,7 +692,7 @@ function decodeBotPendingNotificationV1(
       "title",
       "body",
     ],
-    [],
+    ["urgency"],
     "pending notification",
   );
   if (value.schemaVersion !== 1) {
@@ -702,6 +703,12 @@ function decodeBotPendingNotificationV1(
   if (typeof value.botId !== "string" || !isPublicIdentifier(value.botId)) {
     throw new UnreadDecodeError("pending notification botId is invalid");
   }
+  if (
+    value.urgency !== undefined &&
+    value.urgency !== "normal" &&
+    value.urgency !== "critical"
+  )
+    throw new UnreadDecodeError("notification urgency is invalid");
   const createdAt = optionalTimestamp(
     value,
     "createdAt",
@@ -713,6 +720,7 @@ function decodeBotPendingNotificationV1(
   return {
     schemaVersion: 1,
     botId: value.botId,
+    ...(value.urgency === undefined ? {} : { urgency: value.urgency }),
     notificationId: boundedText(
       value.notificationId,
       MAX_NOTIFICATION_ID_LENGTH,

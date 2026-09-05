@@ -660,6 +660,25 @@ export type ConnectionsFrame = {
       | "failed";
   }>;
 };
+export type NotificationDirectory = {
+  schemaVersion: 1;
+  notifications: Array<{
+    notificationId: string;
+    runId: Identifier;
+    createdAt: Instant;
+    title: string;
+    body: string;
+    urgency?: "normal" | "critical";
+    schemaVersion: 1;
+    botId: BotId;
+  }>;
+};
+export type MarkReadReceipt = {
+  schemaVersion: 1;
+  commandId: Identifier;
+  status: "applied";
+  unread: UnreadView;
+};
 export interface ProtocolTypes {
   Identifier: Identifier;
   BotId: BotId;
@@ -740,4 +759,6 @@ export interface ProtocolTypes {
   SettingsOptionsQuery: SettingsOptionsQuery;
   SettingsOptionsPage: SettingsOptionsPage;
   ConnectionsFrame: ConnectionsFrame;
+  NotificationDirectory: NotificationDirectory;
+  MarkReadReceipt: MarkReadReceipt;
 }

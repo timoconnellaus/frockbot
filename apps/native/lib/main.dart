@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 
 import 'client/auth.dart';
 import 'settings/page.dart';
+import 'activity/controller.dart';
+import 'activity/page.dart';
 import 'auth/sign_in_page.dart';
 import 'theme/frock_theme.dart';
 import 'theme/states.dart';
@@ -32,7 +34,7 @@ class FrockBotApp extends StatefulWidget {
   State<FrockBotApp> createState() => _FrockBotAppState();
 }
 
-class _FrockBotAppState extends State<FrockBotApp> {
+class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
   final navigatorKey = GlobalKey<NavigatorState>();
   final scaffoldKey = GlobalKey<ScaffoldState>();
   late final LocalStore store = widget.store ?? nativeStore();
@@ -40,6 +42,9 @@ class _FrockBotAppState extends State<FrockBotApp> {
   late final NativeSignIn auth = NativeSignIn(api, store);
   late final BotSessions sessions = BotSessions(api: api, store: store);
   StreamSubscription<Uri>? links;
+  ActivityController? activity;
+  Timer? activityTimer;
+  String? pendingBot;
   String? userId;
   String? error;
   bool busy = true;
@@ -49,6 +54,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final appLinks = AppLinks();
     links = appLinks.uriLinkStream.listen(
       (uri) {
@@ -66,10 +72,17 @@ class _FrockBotAppState extends State<FrockBotApp> {
   }
 
   Future<void> accept(Uri uri) async {
+    final target = botLink(uri);
+    if (target != null) {
+      pendingBot = target;
+      if (userId != null) await followBotLink();
+      return;
+    }
     try {
       if (await auth.accept(uri)) {
         navigatorKey.currentState?.popUntil((route) => route.isFirst);
         sessions.clear();
+        clearActivity();
         if (mounted) {
           setState(() {
             userId = null;
@@ -135,6 +148,8 @@ class _FrockBotAppState extends State<FrockBotApp> {
           selected = bots.where((b) => b.botId.value == saved).firstOrNull;
           error = null;
         });
+        bindActivity(identity.userId.value);
+        if (pendingBot != null) unawaited(followBotLink());
         unawaited(
           sessions.prefetch(identity.userId.value, [
             for (final bot in directory.bots) bot.botId.value,
@@ -154,6 +169,85 @@ class _FrockBotAppState extends State<FrockBotApp> {
         setState(() {
           busy = false;
         });
+      }
+    }
+  }
+
+  void activityChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void clearActivity() {
+    activityTimer?.cancel();
+    activityTimer = null;
+    activity?.removeListener(activityChanged);
+    activity?.dispose();
+    activity = null;
+  }
+
+  void bindActivity(String owner) {
+    if (activity?.userId == owner) {
+      activity!.botNames = {
+        for (final bot in bots) bot.botId.value: bot.initialName,
+      };
+      return;
+    }
+    clearActivity();
+    activity = ActivityController(api, store, owner)
+      ..addListener(activityChanged);
+    activity!.botNames = {
+      for (final bot in bots) bot.botId.value: bot.initialName,
+    };
+    unawaited(activity!.load());
+    activityTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => unawaited(activity?.load()),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    activityTimer?.cancel();
+    activityTimer = null;
+    if (state == AppLifecycleState.resumed) {
+      unawaited(activity?.load());
+      activityTimer = Timer.periodic(
+        const Duration(seconds: 10),
+        (_) => unawaited(activity?.load()),
+      );
+    }
+  }
+
+  Future<void> openBot(String botId) async {
+    final owner = userId;
+    if (owner == null) return;
+    final directory = wire.BotDirectory.fromJson(
+      await api.request('/api/bots'),
+    );
+    if (!mounted || userId != owner) return;
+    final bot = directory.bots.where((b) => b.botId.value == botId).firstOrNull;
+    if (bot == null) throw const FormatException('Unavailable Bot');
+    navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    setState(() => bots = directory.bots);
+    select(bot);
+  }
+
+  Future<void> followBotLink() async {
+    final botId = pendingBot;
+    pendingBot = null;
+    if (botId == null) return;
+    try {
+      await openBot(botId);
+    } catch (_) {
+      final context = scaffoldKey.currentContext;
+      if (context != null && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'That Bot isn’t available. Refresh your Bots and try again.',
+            ),
+          ),
+        );
       }
     }
   }
@@ -229,6 +323,24 @@ class _FrockBotAppState extends State<FrockBotApp> {
                 key: ValueKey('bot-${bot.botId.value}'),
                 leading: const SheepAvatar(),
                 title: Text(bot.initialName),
+                subtitle: activity?.unread[bot.botId.value]?.lastMessage == null
+                    ? null
+                    : Text(
+                        (activity!.unread[bot.botId.value]!.lastMessage
+                                as Map)['text']
+                            as String,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                trailing: activity?.unread[bot.botId.value]?.unread == true
+                    ? Badge(
+                        label: Text(
+                          activity!.unread[bot.botId.value]!.count == 0
+                              ? '•'
+                              : '${activity!.unread[bot.botId.value]!.count}${activity!.unread[bot.botId.value]!.capped ? '+' : ''}',
+                        ),
+                      )
+                    : null,
                 selected: bot.botId.value == selected?.botId.value,
                 onTap: () {
                   select(bot);
@@ -236,6 +348,17 @@ class _FrockBotAppState extends State<FrockBotApp> {
                     Navigator.pop(context);
                   }
                 },
+              ),
+            if (activity != null)
+              ListTile(
+                leading: const Icon(Icons.inbox_outlined),
+                title: const Text('Inbox'),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        ActivityPage(controller: activity!, openBot: openBot),
+                  ),
+                ),
               ),
             ListTile(
               leading: const Icon(Icons.refresh),
@@ -257,6 +380,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
               title: const Text('Sign out'),
               onTap: () async {
                 try {
+                  clearActivity();
                   await auth.signOut();
                   sessions.clear();
                   if (mounted) {
@@ -284,6 +408,29 @@ class _FrockBotAppState extends State<FrockBotApp> {
           appBar: AppBar(
             title: Text(selected?.initialName ?? 'FrockBot'),
             actions: [
+              if (selected != null && activity != null)
+                PopupMenuButton<String>(
+                  tooltip: 'Conversation actions',
+                  enabled: !activity!.saving && !activity!.pending,
+                  onSelected: (value) => activity!.mark(
+                    selected!.botId.value,
+                    read: value == 'read',
+                  ),
+                  itemBuilder: (_) => [
+                    if (activity!
+                            .unread[selected!.botId.value]
+                            ?.lastActivityCursor !=
+                        null)
+                      const PopupMenuItem(
+                        value: 'read',
+                        child: Text('Mark as read'),
+                      ),
+                    const PopupMenuItem(
+                      value: 'unread',
+                      child: Text('Mark as unread'),
+                    ),
+                  ],
+                ),
               IconButton(
                 tooltip: 'Your Applets',
                 icon: const Icon(Icons.widgets_outlined),
@@ -344,6 +491,8 @@ class _FrockBotAppState extends State<FrockBotApp> {
   @override
   void dispose() {
     unawaited(links?.cancel());
+    WidgetsBinding.instance.removeObserver(this);
+    clearActivity();
     sessions.clear();
     api.close();
     super.dispose();

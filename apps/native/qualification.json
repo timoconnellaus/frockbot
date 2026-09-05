@@ -52,6 +52,13 @@
       "pixel": "awaiting an unlocked phone",
       "nativeCatalog": "system-browser-backend-surface",
       "supportedDistribution": "not-promoted"
+    },
+    "inboxUnread": {
+      "backendAndRenderers": "paired-acknowledgement-and-unread-replay-after-eviction",
+      "macosRelease": "inbox-failed-notice-empty-offline-captured-with-local-user",
+      "pixel": "awaiting an unlocked phone",
+      "backgroundOsDelivery": "not-implemented-or-qualified",
+      "supportedDistribution": "not-promoted"
     }
   }
 }
