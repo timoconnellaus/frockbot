@@ -104,6 +104,7 @@ onMounted(load);
       v-for="section in frame?.sections"
       :key="`${section.id}.${frame?.revision}`"
       :section="section"
+      :revision="frame!.revision"
       :busy="busy || !!pending"
       @save="save"
       @manage="emit('manage')"

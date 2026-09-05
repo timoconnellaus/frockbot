@@ -15,31 +15,27 @@ import {
 useApplicationArtifact();
 
 describe("settings round-trip through the gateway", () => {
-  it("carries the account-model choice from the Package setting to the User view", async () => {
+  it("carries the account-model choice from its User owner to the current view", async () => {
     const userId = freshUserId("settings-model");
     const botId = "settings-bot";
     // `provisionThroughGateway` is itself the command half: it writes the
-    // Custom models Package's account-scoped `model` setting.
+    // platform-owned account model.
     const { connectionId } = await provisionThroughGateway({ userId, botId });
 
     const view = (await expectOkJson(
-      await asUser(userId, "/api/settings"),
+      await asUser(userId, "/api/settings?view=2"),
     )) as {
+      accountModel: { connectionId: string; providerModelId: string };
       packages: Array<{
         packageId: string;
         state: string;
         values?: Record<string, unknown>;
       }>;
     };
-    expect(
-      view.packages.find((pkg) => pkg.packageId === CUSTOM_MODELS_PACKAGE_ID)
-        ?.values,
-    ).toMatchObject({
-      "account-model": {
-        connectionId,
-        providerModelId: PROVISIONED_MODEL.providerModelId,
-      },
-    });
+    expect(view.accountModel).toEqual({ connectionId, providerModelId: PROVISIONED_MODEL.providerModelId });
+    expect(view.packages.find((pkg) => pkg.packageId === CUSTOM_MODELS_PACKAGE_ID)?.values).not.toHaveProperty("account-model");
+    const legacy = await expectOkJson(await asUser(userId, "/api/settings"));
+    expect(legacy).not.toHaveProperty("accountModel");
     expect(view.packages).toContainEqual(
       expect.objectContaining({
         packageId: PROVISIONED_MODEL.packageId,

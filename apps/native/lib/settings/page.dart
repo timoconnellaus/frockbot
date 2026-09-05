@@ -8,6 +8,7 @@ import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/states.dart';
 import 'controller.dart';
+import 'model_picker.dart';
 
 class SettingsPage extends StatefulWidget {
   final NativeApi api;
@@ -182,6 +183,7 @@ class _SettingsPageState extends State<SettingsPage>
                                     handingOff,
                                 onSave: state.save,
                                 onManage: manageProvider,
+                                loadOptions: state.options,
                               ),
                           ],
                         ),
@@ -205,12 +207,14 @@ class _SettingsSection extends StatefulWidget {
   })
   onSave;
   final Future<void> Function() onManage;
+  final Future<wire.SettingsOptionsPage> Function(String, int?) loadOptions;
   const _SettingsSection({
     super.key,
     required this.section,
     required this.disabled,
     required this.onSave,
     required this.onManage,
+    required this.loadOptions,
   });
   @override
   State<_SettingsSection> createState() => _SettingsSectionState();
@@ -220,6 +224,8 @@ class _SettingsSectionState extends State<_SettingsSection> {
   final form = GlobalKey<FormState>();
   final values = <String, Object?>{};
   final dirty = <String>{};
+  final reset = <String>{};
+  final selectedLabels = <String, String>{};
   late final fields = (widget.section['fields'] as List)
       .map(wire.SettingField.fromJson)
       .toList();
@@ -234,7 +240,11 @@ class _SettingsSectionState extends State<_SettingsSection> {
   void change(String id, Object? value) => setState(() {
     values[id] = value;
     dirty.add(id);
+    reset.remove(id);
   });
+  bool isDefault(wire.SettingField field) =>
+      reset.contains(field.id.value) ||
+      (!dirty.contains(field.id.value) && field.isSet == false);
   Future<void> save() async {
     if (!form.currentState!.validate()) return;
     final id = widget.section['id'] as String;
@@ -242,7 +252,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
     final patch = <String, Object?>{};
     final unset = <String>[];
     for (final key in selected) {
-      if (id.startsWith('package.') && values[key] == null) {
+      if (reset.contains(key)) {
         unset.add(key);
       } else {
         patch[key] = values[key];
@@ -259,6 +269,66 @@ class _SettingsSectionState extends State<_SettingsSection> {
       helperText: field.hint,
       helperMaxLines: 4,
     );
+    if (field.choiceSource == 'account-models') {
+      final choices = field.choices ?? [];
+      final selected = choices.where(
+        (c) => jsonEncode(c.value.value) == jsonEncode(values[id]),
+      );
+      final label =
+          selectedLabels[id] ??
+          (selected.isEmpty ? 'Choose a model' : selected.first.label);
+      return Card(
+        child: ListTile(
+          title: Text(label),
+          subtitle: Text(field.hint ?? ''),
+          leading: const Icon(Icons.auto_awesome_rounded),
+          trailing: const Icon(Icons.expand_more_rounded),
+          onTap: enabled
+              ? () async {
+                  final choice = await Navigator.of(context)
+                      .push<wire.SettingChoice>(
+                        MaterialPageRoute(
+                          builder: (_) => ModelPicker(
+                            load: widget.loadOptions,
+                            selected: values[id],
+                          ),
+                        ),
+                      );
+                  if (!mounted || choice == null) return;
+                  change(id, choice.value.value);
+                  setState(() => selectedLabels[id] = choice.label);
+                }
+              : null,
+        ),
+      );
+    }
+    if (field.kind == 'boolean' && field.canReset == true) {
+      return DropdownButtonFormField<String>(
+        initialValue: isDefault(field)
+            ? 'default'
+            : values[id] == true
+            ? 'on'
+            : 'off',
+        decoration: decoration,
+        items: const [
+          DropdownMenuItem(value: 'default', child: Text('Use default')),
+          DropdownMenuItem(value: 'on', child: Text('On')),
+          DropdownMenuItem(value: 'off', child: Text('Off')),
+        ],
+        onChanged: enabled
+            ? (v) {
+                if (v == 'default') {
+                  setState(() {
+                    reset.add(id);
+                    dirty.add(id);
+                  });
+                } else {
+                  change(id, v == 'on');
+                }
+              }
+            : null,
+      );
+    }
     if (field.kind == 'boolean') {
       return SwitchListTile.adaptive(
         contentPadding: EdgeInsets.zero,
@@ -270,15 +340,20 @@ class _SettingsSectionState extends State<_SettingsSection> {
     }
     if (field.kind == 'select') {
       return DropdownButtonFormField<String>(
-        initialValue: jsonEncode(values[id]),
+        initialValue: isDefault(field) ? '__default__' : jsonEncode(values[id]),
         decoration: decoration,
         isExpanded: true,
         items: [
+          if (field.canReset == true)
+            const DropdownMenuItem(
+              value: '__default__',
+              child: Text('Use default'),
+            ),
           for (final choice in field.choices ?? [])
             DropdownMenuItem(
-              value: jsonEncode(choice['value']),
+              value: jsonEncode(choice.value.value),
               child: Text(
-                choice['label'] as String,
+                choice.label,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -286,15 +361,39 @@ class _SettingsSectionState extends State<_SettingsSection> {
         ],
         onChanged: enabled
             ? (v) {
-                if (v != null) change(id, jsonDecode(v));
+                if (v == '__default__') {
+                  setState(() {
+                    reset.add(id);
+                    dirty.add(id);
+                  });
+                } else if (v != null) {
+                  change(id, jsonDecode(v));
+                }
               }
             : null,
       );
     }
     return TextFormField(
-      initialValue: values[id]?.toString() ?? '',
+      key: ValueKey('$id.${reset.contains(id)}'),
+      initialValue: isDefault(field) ? '' : values[id]?.toString() ?? '',
       enabled: enabled,
-      decoration: decoration,
+      decoration: decoration.copyWith(
+        helperText: isDefault(field)
+            ? 'Using default${field.hint == null ? '' : ' · ${field.hint}'}'
+            : field.hint,
+        suffixIcon: field.canReset == true && !isDefault(field)
+            ? IconButton(
+                tooltip: 'Use default for ${field.label}',
+                onPressed: enabled
+                    ? () => setState(() {
+                        reset.add(id);
+                        dirty.add(id);
+                      })
+                    : null,
+                icon: const Icon(Icons.restart_alt_rounded),
+              )
+            : null,
+      ),
       maxLength: field.maxLength,
       keyboardType: field.kind == 'number'
           ? const TextInputType.numberWithOptions(decimal: true, signed: true)

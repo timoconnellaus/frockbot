@@ -230,6 +230,9 @@ export interface VoiceAssistantSessionV1 {
 }
 
 export interface AgentTransport {
+  readSettingsOptions?(
+    query: import("@frockbot/protocol-schemas").SettingsOptionsQuery,
+  ): Promise<import("@frockbot/protocol-schemas").SettingsOptionsPage>;
   readSettingsFrame?(home: "application" | "models"): Promise<SettingsFrame>;
   changeSettings?(
     home: "application" | "models",

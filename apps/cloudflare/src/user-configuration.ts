@@ -669,6 +669,20 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     );
   }
 
+  async readSettingsOptions(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      query: rpcDecoded((value) =>
+        decodeProtocol("SettingsOptionsQuery", value),
+      ),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.settingsContribution()).readSettingsOptions(
+      request.userId as string,
+      request.query,
+    );
+  }
+
   async changeSettings(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

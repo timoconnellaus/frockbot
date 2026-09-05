@@ -195,6 +195,16 @@ const application = new ClientApplication({
     }
     return decodeClientTurnV1(await readJsonResponseV1(response));
   },
+  async readSettingsOptions(query) {
+    return decodeProtocol(
+      "SettingsOptionsPage",
+      await apiRequest(
+        "/api/settings/models/options",
+        "POST",
+        JSON.stringify(query),
+      ),
+    );
+  },
   async readSettingsFrame(home) {
     return decodeProtocol(
       "SettingsFrame",

@@ -6,10 +6,13 @@ import {
   decodeProtocol,
   type SettingsChangeCommand,
   type SettingsFrame,
+  type SettingsOptionsQuery,
+  type SettingsOptionsPage,
 } from "@frockbot/protocol-schemas";
 import type { InjectionKey } from "vue";
 export type SettingsHome = "application" | "models";
 export interface SettingsFrameClient {
+  options(query: SettingsOptionsQuery): Promise<SettingsOptionsPage>;
   load(home: SettingsHome): Promise<SettingsFrame>;
   pending(home: SettingsHome): SettingsChangeCommand | undefined;
   save(
@@ -40,6 +43,23 @@ export function createSettingsFrameClient(
   const key = (home: SettingsHome) =>
     `frockbot.settings-pending.${owner()}.${home}`;
   return {
+    async options(input) {
+      const id = owner();
+      if (!transport.readSettingsOptions)
+        throw new Error("Update FrockBot to browse models");
+      const query = decodeProtocol("SettingsOptionsQuery", input);
+      const page = decodeProtocol(
+        "SettingsOptionsPage",
+        await transport.readSettingsOptions(query),
+      );
+      if (
+        page.ownerId !== id ||
+        page.source !== query.source ||
+        page.revision !== query.revision
+      )
+        throw new Error("Model catalog changed");
+      return page;
+    },
     async load(home) {
       const id = owner();
       if (!transport.readSettingsFrame)

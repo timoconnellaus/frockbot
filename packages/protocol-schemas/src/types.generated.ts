@@ -437,7 +437,10 @@ export type SettingField = {
   maximum?: number;
   maxLength?: number;
   required?: boolean;
-  choices?: Array<{ label: string; value: Json }>;
+  choices?: Array<SettingChoice>;
+  choiceSource?: "account-models";
+  isSet?: boolean;
+  canReset?: boolean;
 };
 export type SettingsFrame = {
   schemaVersion: 1;
@@ -623,6 +626,22 @@ export type SettingsHandoffCommand = {
   home: "models" | "connections";
 };
 export type GenerationId = string;
+export type SettingChoice = { label: string; value: Json };
+export type SettingsOptionsQuery = {
+  schemaVersion: 1;
+  source: "account-models";
+  revision: number;
+  query: string;
+  cursor?: number;
+};
+export type SettingsOptionsPage = {
+  schemaVersion: 1;
+  source: "account-models";
+  ownerId: Identifier;
+  revision: number;
+  items: Array<SettingChoice>;
+  nextCursor?: number;
+};
 export interface ProtocolTypes {
   Identifier: Identifier;
   BotId: BotId;
@@ -699,4 +718,7 @@ export interface ProtocolTypes {
   SettingsReceipt: SettingsReceipt;
   SettingsHandoffCommand: SettingsHandoffCommand;
   GenerationId: GenerationId;
+  SettingChoice: SettingChoice;
+  SettingsOptionsQuery: SettingsOptionsQuery;
+  SettingsOptionsPage: SettingsOptionsPage;
 }

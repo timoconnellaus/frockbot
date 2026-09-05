@@ -123,7 +123,10 @@ function redirect(url: string, extra?: Headers): Response {
     headers.append("set-cookie", cookie);
   return new Response(null, { status: 302, headers });
 }
-export async function readNativeJsonBody(request: Request): Promise<unknown> {
+export async function readNativeJsonBody(
+  request: Request,
+  maximumBytes = 8192,
+): Promise<unknown> {
   const reader = request.body?.getReader();
   if (!reader) throw new Error("Missing input");
   let size = 0;
@@ -132,7 +135,7 @@ export async function readNativeJsonBody(request: Request): Promise<unknown> {
     const next = await reader.read();
     if (next.done) break;
     size += next.value.length;
-    if (size > 8192) {
+    if (size > maximumBytes) {
       await reader.cancel();
       throw new Error("Too much input");
     }
@@ -144,7 +147,21 @@ export async function readNativeJsonBody(request: Request): Promise<unknown> {
     data.set(chunk, offset);
     offset += chunk.length;
   }
-  return JSON.parse(new TextDecoder().decode(data));
+  const text = new TextDecoder().decode(data);
+  let depth = 0,
+    quoted = false,
+    escaped = false;
+  for (const character of text) {
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+    } else if (character === '"') quoted = true;
+    else if (character === "{" || character === "[") {
+      if (++depth > 16) throw new Error("Input nesting limit");
+    } else if (character === "}" || character === "]") depth--;
+  }
+  return JSON.parse(text);
 }
 
 export function createNativeAuth(options: NativeAuthOptions): NativeAuth {

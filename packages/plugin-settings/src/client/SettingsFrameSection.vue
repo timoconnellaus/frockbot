@@ -2,9 +2,11 @@
 import { UiButton, UiField } from "@frockbot/client-ui";
 import type { Json, SettingsFrame } from "@frockbot/protocol-schemas";
 import { ref } from "vue";
+import SettingsModelPicker from "./SettingsModelPicker.vue";
 const props = defineProps<{
   section: SettingsFrame["sections"][number];
   busy: boolean;
+  revision: number;
 }>();
 const emit = defineEmits<{
   save: [id: string, values: Record<string, Json>, unset: string[]];
@@ -16,8 +18,18 @@ const values = ref<Record<string, Json>>(
   ),
 );
 const dirty = ref<string[]>([]);
+const reset = ref<string[]>([]);
+const labels = ref<Record<string, string>>({});
+function useDefault(id: string) {
+  if (!dirty.value.includes(id)) dirty.value.push(id);
+  if (!reset.value.includes(id)) reset.value.push(id);
+}
+function isDefault(id: string) {
+  return reset.value.includes(id) || (!dirty.value.includes(id) && props.section.fields.find((f) => f.id === id)?.isSet === false);
+}
 function change(id: string, value: Json) {
   values.value[id] = value;
+  reset.value = reset.value.filter((key) => key !== id);
   if (!dirty.value.includes(id)) dirty.value.push(id);
 }
 function input(event: Event) {
@@ -26,10 +38,7 @@ function input(event: Event) {
 function save() {
   const ids =
     props.section.id === "profile" ? Object.keys(values.value) : dirty.value;
-  const unset = ids.filter(
-    (id) =>
-      props.section.id.startsWith("package.") && values.value[id] === null,
-  );
+  const unset = ids.filter((id) => reset.value.includes(id));
   emit(
     "save",
     props.section.id,
@@ -52,8 +61,22 @@ function save() {
       :label="field.label"
       :hint="field.hint"
     >
+      <SettingsModelPicker
+        v-if="field.choiceSource === 'account-models'"
+        :revision="revision"
+        :value="values[field.id]!"
+        :label="labels[field.id] ?? field.choices?.find((c) => JSON.stringify(c.value) === JSON.stringify(values[field.id]))?.label ?? 'Choose a model'"
+        :disabled="busy || !field.editable"
+        @choose="(choice) => { change(field.id, choice.value); labels[field.id] = choice.label; }"
+      />
+      <select v-else-if="field.kind === 'boolean' && field.canReset"
+        :value="isDefault(field.id) ? 'default' : values[field.id] === true ? 'on' : 'off'"
+        :disabled="busy || !field.editable"
+        @change="input($event) === 'default' ? useDefault(field.id) : change(field.id, input($event) === 'on')">
+        <option value="default">Use default</option><option value="on">On</option><option value="off">Off</option>
+      </select>
       <input
-        v-if="field.kind === 'boolean'"
+        v-else-if="field.kind === 'boolean'"
         type="checkbox"
         :checked="values[field.id] === true"
         :disabled="busy || !field.editable"
@@ -61,10 +84,11 @@ function save() {
       />
       <select
         v-else-if="field.kind === 'select'"
-        :value="JSON.stringify(values[field.id])"
+        :value="isDefault(field.id) ? '__default__' : JSON.stringify(values[field.id])"
         :disabled="busy || !field.editable"
-        @change="change(field.id, JSON.parse(input($event)))"
+        @change="input($event) === '__default__' ? useDefault(field.id) : change(field.id, JSON.parse(input($event)))"
       >
+        <option v-if="field.canReset" value="__default__">Use default</option>
         <option
           v-for="choice in field.choices"
           :key="JSON.stringify(choice.value)"
@@ -82,7 +106,7 @@ function save() {
               ? 'email'
               : 'text'
         "
-        :value="values[field.id] ?? ''"
+        :value="isDefault(field.id) ? '' : values[field.id] ?? ''"
         :disabled="busy || !field.editable"
         :min="field.minimum"
         :max="field.maximum"
@@ -99,6 +123,10 @@ function save() {
           )
         "
       />
+      <div v-if="field.canReset && field.kind !== 'select' && field.kind !== 'boolean'" class="field-default">
+        <span v-if="isDefault(field.id)">Using default</span>
+        <UiButton v-else type="button" :disabled="busy || !field.editable" @click="useDefault(field.id)">Use default</UiButton>
+      </div>
     </UiField>
     <div
       v-if="section.fields.some((field) => field.editable)"

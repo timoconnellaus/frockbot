@@ -597,6 +597,7 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
     readSettingsFrame: (request) => rpc.readSettingsFrame(request),
+    readSettingsOptions: (request) => rpc.readSettingsOptions(request),
     changeSettings: (request) => rpc.changeSettings(request),
     readConfiguration: (request) =>
       rpc.readConfiguration({ ...request, view: 2 }),

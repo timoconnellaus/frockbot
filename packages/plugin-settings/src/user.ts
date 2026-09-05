@@ -3,6 +3,7 @@ import {
   applicationSettingsCommand,
   modelsSettingsFrame,
   modelsSettingsCommand,
+  modelSettingsOptions,
 } from "./settings-frame.js";
 import {
   configurationCommandFingerprintV1,
@@ -21,6 +22,7 @@ import {
   MAX_USER_CONNECTIONS_V1,
   USER_PROFILE_PLACEHOLDER_NAME_V1,
   type ConnectionView,
+  type ExecutionPackageDefinition,
   type JsonValue,
   type PackageSettingValueV1,
   type OperationReceiptV1,
@@ -37,7 +39,10 @@ import {
   type CatalogPinV1,
 } from "@frockbot/catalog-core";
 import type { ConnectionCommandV1 } from "@frockbot/connection-core";
-import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
+import type {
+  PackageSettingDefinition,
+  ConnectionTypeDefinition,
+} from "@frockbot/kernel-composition";
 import type { Plugin } from "cordis";
 import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
@@ -138,8 +143,8 @@ export interface AvailableUserPackage {
   packageId: string;
   version: string;
   displayName?: string;
-  capabilities?: readonly { kind: string }[];
-  connectionTypes?: readonly unknown[];
+  capabilities?: readonly ExecutionPackageDefinition["capabilities"][number][];
+  connectionTypes?: readonly ConnectionTypeDefinition[];
   /**
    * True when the immutable application manifest declares a Connection Type
    * or Capability for this Package. These are the Packages a new User owns
@@ -999,6 +1004,15 @@ export class UserSettingsBackendContribution {
     );
   }
 
+  async readSettingsOptions(userId: string, input: unknown) {
+    return modelSettingsOptions(
+      userId,
+      await this.readConfiguration({ schemaVersion: 1, userId }),
+      this.host.availablePackages,
+      input,
+    );
+  }
+
   async changeSettings(
     userId: string,
     home: "application" | "models",
@@ -1200,12 +1214,30 @@ export class UserSettingsBackendContribution {
       await storage.put(receiptKey, { commandFingerprint, receipt });
       return receipt;
     }
-    const applied = applyUserCommand(
-      current,
-      command,
-      (current, id) => this.chooseModelProvider(current, id),
-      (packageId, version) => this.settingDefinitions(packageId, version),
-    );
+    let applied: UserSettingsViewV1;
+    try {
+      applied = applyUserCommand(
+        current,
+        command,
+        (current, id) => this.chooseModelProvider(current, id),
+        (packageId, version) => this.settingDefinitions(packageId, version),
+      );
+    } catch (error) {
+      if (
+        command.type !== "user/choose-model-provider" ||
+        !(error instanceof ConfigurationDecodeError)
+      )
+        throw error;
+      const receipt: OperationReceiptV1 = {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        revision: current.revision,
+        status: "rejected",
+        failure: error.message,
+      };
+      await storage.put(receiptKey, { commandFingerprint, receipt });
+      return receipt;
+    }
     // One command, one revision: the cascade is part of the disable the User
     // asked for, not a second write they have to reconcile against.
     const next =

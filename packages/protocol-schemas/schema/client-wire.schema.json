@@ -2385,20 +2385,17 @@
           "minItems": 0,
           "maxItems": 100,
           "items": {
-            "type": "object",
-            "properties": {
-              "label": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 200
-              },
-              "value": {
-                "$ref": "#/$defs/Json"
-              }
-            },
-            "required": ["label", "value"],
-            "additionalProperties": false
+            "$ref": "#/$defs/SettingChoice"
           }
+        },
+        "choiceSource": {
+          "const": "account-models"
+        },
+        "isSet": {
+          "type": "boolean"
+        },
+        "canReset": {
+          "type": "boolean"
         }
       },
       "required": ["id", "label", "kind", "value", "editable"],
@@ -3205,6 +3202,81 @@
       "minLength": 1,
       "maxLength": 256,
       "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}$"
+    },
+    "SettingChoice": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "value": {
+          "$ref": "#/$defs/Json"
+        }
+      },
+      "required": ["label", "value"],
+      "additionalProperties": false
+    },
+    "SettingsOptionsQuery": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "source": {
+          "const": "account-models"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "query": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "required": ["schemaVersion", "source", "revision", "query"],
+      "additionalProperties": false
+    },
+    "SettingsOptionsPage": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "source": {
+          "const": "account-models"
+        },
+        "ownerId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/SettingChoice"
+          }
+        },
+        "nextCursor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "required": ["schemaVersion", "source", "ownerId", "revision", "items"],
+      "additionalProperties": false
     }
   },
   "x-frockbot-compatibility": {

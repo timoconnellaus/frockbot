@@ -946,6 +946,38 @@ export function createGateway(dependencies: GatewayDependencies) {
       if (response) return response;
     }
 
+    if (url.pathname === "/api/settings/models/options") {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      let query;
+      try {
+        query = decodeProtocol(
+          "SettingsOptionsQuery",
+          await readNativeJsonBody(request),
+        );
+      } catch {
+        return jsonError(400, "Invalid model search");
+      }
+      try {
+        return Response.json(
+          decodeProtocol(
+            "SettingsOptionsPage",
+            await dependencies
+              .userConfigurationFor(userId)
+              .readSettingsOptions({ schemaVersion: 1, userId, query }),
+          ),
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.name === "ConfigurationConflictError"
+        )
+          return jsonError(409, "Models changed. Refresh and try again.");
+        return jsonError(503, "Models are temporarily unavailable.");
+      }
+    }
+
     if (
       ["/api/settings/application", "/api/settings/models"].includes(
         url.pathname,
@@ -967,7 +999,7 @@ export function createGateway(dependencies: GatewayDependencies) {
         try {
           command = decodeProtocol(
             "SettingsChangeCommand",
-            await request.json(),
+            await readNativeJsonBody(request, 512_000),
           );
         } catch {
           return jsonError(400, "Invalid settings command");

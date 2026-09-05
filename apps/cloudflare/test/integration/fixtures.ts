@@ -380,15 +380,12 @@ export async function provisionThroughGateway(options: {
   await expectOkJson(
     await postAsUser(userId, "/api/settings", {
       schemaVersion: 1,
-      type: "user/set-package-settings",
+      type: "user/set-account-model",
       commandId: `model-${botId}`,
       expectedRevision: settings.revision,
-      packageId: CUSTOM_MODELS_PACKAGE_ID,
-      values: {
-        "account-model": {
-          connectionId: receipt.connectionId,
-          providerModelId: PROVISIONED_MODEL.providerModelId,
-        },
+      model: {
+        connectionId: receipt.connectionId,
+        providerModelId: PROVISIONED_MODEL.providerModelId,
       },
     }),
   );

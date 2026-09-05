@@ -120,5 +120,12 @@ declare const validators: {
     value: unknown,
   ): value is ProtocolTypes["SettingsHandoffCommand"];
   isGenerationId(value: unknown): value is ProtocolTypes["GenerationId"];
+  isSettingChoice(value: unknown): value is ProtocolTypes["SettingChoice"];
+  isSettingsOptionsQuery(
+    value: unknown,
+  ): value is ProtocolTypes["SettingsOptionsQuery"];
+  isSettingsOptionsPage(
+    value: unknown,
+  ): value is ProtocolTypes["SettingsOptionsPage"];
 };
 export default validators;

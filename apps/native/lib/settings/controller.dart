@@ -49,6 +49,30 @@ class SettingsController extends ChangeNotifier {
     }
   }
 
+  Future<wire.SettingsOptionsPage> options(String query, int? cursor) async {
+    final revision = frame?.revision;
+    if (revision == null) throw const FormatException('Settings unavailable');
+    final page = wire.SettingsOptionsPage.fromJson(
+      await api.request(
+        '/api/settings/models/options',
+        body: wire.SettingsOptionsQuery.fromJson({
+          'schemaVersion': 1,
+          'source': 'account-models',
+          'revision': revision,
+          'query': query,
+          'cursor': ?cursor,
+        }).toJson(),
+      ),
+    );
+    if (page.ownerId.value != userId ||
+        page.revision != revision ||
+        page.source != 'account-models' ||
+        frame?.revision != revision) {
+      throw const FormatException('Model catalog changed');
+    }
+    return page;
+  }
+
   Future<void> save(
     String sectionId,
     Map<String, Object?> values, {

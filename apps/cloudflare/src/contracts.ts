@@ -562,6 +562,11 @@ export interface UserConfigurationBinding {
   readSettingsFrame(
     request: UserConfigurationReadRpcV1 & { home: "application" | "models" },
   ): Promise<SettingsFrame>;
+  readSettingsOptions(
+    request: UserConfigurationReadRpcV1 & {
+      query: import("@frockbot/protocol-schemas").SettingsOptionsQuery;
+    },
+  ): Promise<import("@frockbot/protocol-schemas").SettingsOptionsPage>;
   changeSettings(
     request: UserConfigurationReadRpcV1 & {
       home: "application" | "models";

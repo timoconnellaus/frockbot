@@ -1027,5 +1027,39 @@
       "tools": ["increment"],
       "createdAt": "2026-09-05T00:00:00.000Z"
     }
+  },
+  {
+    "name": "SettingChoice typed value",
+    "schema": "SettingChoice",
+    "value": {
+      "label": "Example model",
+      "value": {
+        "connectionId": "model-connection",
+        "providerModelId": "model"
+      }
+    }
+  },
+  {
+    "name": "SettingsOptionsQuery valid",
+    "schema": "SettingsOptionsQuery",
+    "value": {
+      "schemaVersion": 1,
+      "source": "account-models",
+      "revision": 1,
+      "query": "model",
+      "cursor": 50
+    }
+  },
+  {
+    "name": "SettingsOptionsPage valid",
+    "schema": "SettingsOptionsPage",
+    "value": {
+      "schemaVersion": 1,
+      "source": "account-models",
+      "ownerId": "user-1",
+      "revision": 1,
+      "items": [],
+      "nextCursor": 50
+    }
   }
 ]

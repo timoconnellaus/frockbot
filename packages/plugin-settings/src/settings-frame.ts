@@ -2,6 +2,9 @@ import {
   decodeConfigurationCommandV1,
   packageConfigurationHomeV1,
   ConfigurationDecodeError,
+  ConfigurationConflictError,
+  modelBindingFailureV1,
+  MAX_PACKAGE_SETTING_TEXT_V1,
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
@@ -9,6 +12,8 @@ import {
   decodeProtocol,
   type SettingField,
   type SettingsFrame,
+  type SettingChoice,
+  type SettingsOptionsPage,
 } from "@frockbot/protocol-schemas";
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import type { AvailableUserPackage } from "./user.js";
@@ -34,10 +39,19 @@ function field(
     kind,
     value: value ?? null,
     editable: true,
+    isSet: value !== undefined,
+    canReset: true,
     ...(schema.description ? { hint: schema.description } : {}),
     ...(schema.minimum === undefined ? {} : { minimum: schema.minimum }),
     ...(schema.maximum === undefined ? {} : { maximum: schema.maximum }),
-    ...(schema.maxLength === undefined ? {} : { maxLength: schema.maxLength }),
+    ...(kind === "text"
+      ? {
+          maxLength: Math.min(
+            schema.maxLength ?? MAX_PACKAGE_SETTING_TEXT_V1,
+            MAX_PACKAGE_SETTING_TEXT_V1,
+          ),
+        }
+      : {}),
     ...(schema.enum
       ? {
           choices: schema.enum.map((value) => ({
@@ -186,48 +200,99 @@ function userCommand(value: unknown): UserConfigurationCommandV1 {
   return command;
 }
 
+function* modelChoices(
+  settings: UserSettingsViewV1,
+  catalog: readonly AvailableUserPackage[],
+): Generator<SettingChoice> {
+  const platform = settings.connections.find(
+    (connection) =>
+      connection.connectionId === settings.platformModel?.connectionId,
+  );
+  const label =
+    catalog.find((pkg) => pkg.packageId === platform?.packageId)?.displayName ??
+    "Platform";
+  yield { label: `${label} · Auto`.slice(0, 200), value: null };
+  const packages = catalog.map((pkg) => ({
+    ...pkg,
+    settings: [...(pkg.settings ?? [])],
+    capabilities: [...(pkg.capabilities ?? [])],
+    connectionTypes: [...(pkg.connectionTypes ?? [])],
+  }));
+  for (const connection of settings.connections) {
+    if (!connection.providerType) continue;
+    for (const model of connection.modelCatalog?.models ?? []) {
+      const value = {
+        connectionId: connection.connectionId,
+        providerModelId: model.providerModelId,
+      };
+      if (modelBindingFailureV1({ model: value, user: settings, packages }))
+        continue;
+      yield {
+        label: `${model.displayName} · ${connection.displayName}`.slice(0, 200),
+        value,
+      };
+    }
+  }
+}
+
+export function modelSettingsOptions(
+  userId: string,
+  settings: UserSettingsViewV1,
+  catalog: readonly AvailableUserPackage[],
+  input: unknown,
+): SettingsOptionsPage {
+  const query = decodeProtocol("SettingsOptionsQuery", input);
+  if (query.revision !== settings.revision)
+    throw new ConfigurationConflictError(settings.revision);
+  const needle = query.query.trim().toLocaleLowerCase();
+  const offset = query.cursor ?? 0;
+  const items: SettingChoice[] = [];
+  let matched = 0;
+  let more = false;
+  for (const choice of modelChoices(settings, catalog)) {
+    if (
+      needle &&
+      !choice.label.toLocaleLowerCase().includes(needle) &&
+      !JSON.stringify(choice.value).toLocaleLowerCase().includes(needle)
+    )
+      continue;
+    if (matched++ < offset) continue;
+    if (items.length === 50) {
+      more = true;
+      break;
+    }
+    items.push(choice);
+  }
+  return decodeProtocol("SettingsOptionsPage", {
+    schemaVersion: 1,
+    ownerId: userId,
+    source: query.source,
+    revision: settings.revision,
+    items,
+    ...(more ? { nextCursor: offset + items.length } : {}),
+  });
+}
+
 export function modelsSettingsFrame(
   userId: string,
   settings: UserSettingsViewV1,
   catalog: readonly AvailableUserPackage[],
 ): SettingsFrame {
-  const providers = catalog.filter((pkg) =>
-    pkg.capabilities?.some((capability) => capability.kind === "model"),
+  const providers = catalog.filter(
+    (pkg) =>
+      !pkg.platformOwned &&
+      pkg.capabilities?.some((capability) => capability.kind === "model"),
   );
-  const choices: NonNullable<SettingField["choices"]> = [
-    { label: "FrockBot · Auto", value: null },
-  ];
-  for (const connection of settings.connections) {
-    if (
-      connection.state !== "ready" ||
-      !settings.packages.some(
-        (pkg) =>
-          pkg.packageId === connection.packageId && pkg.state === "installed",
-      )
-    )
-      continue;
-    const provider = providers.find(
-      (pkg) => pkg.packageId === connection.packageId,
-    );
-    if (!provider) continue;
-    for (const model of connection.modelCatalog?.models ?? []) {
-      if (choices.length === 99) break;
-      choices.push({
-        label: `${model.displayName} · ${connection.displayName}`,
-        value: {
-          connectionId: connection.connectionId,
-          providerModelId: model.providerModelId,
-        },
-      });
-    }
-  }
   const selected = settings.accountModel ? { ...settings.accountModel } : null;
-  if (
-    selected &&
-    !choices.some(
-      (choice) => JSON.stringify(choice.value) === JSON.stringify(selected),
+  const choices: SettingChoice[] = [];
+  for (const choice of modelChoices(settings, catalog)) {
+    if (
+      choice.value === null ||
+      JSON.stringify(choice.value) === JSON.stringify(selected)
     )
-  )
+      choices.push(choice);
+  }
+  if (selected && choices.length === 1)
     choices.push({
       label: "Your saved model · currently unavailable",
       value: selected,
@@ -244,12 +309,23 @@ export function modelsSettingsFrame(
           value: selected,
           editable: true,
           choices,
-          hint: "Used by all your Bots. Auto follows FrockBot’s platform model.",
+          choiceSource: "account-models",
+          hint: "Used by all your Bots. Auto follows the platform model.",
         },
       ],
     },
   ];
-  for (const provider of providers.slice(0, 63)) {
+  for (const provider of providers) {
+    if (sections.length === 63) {
+      sections.push({
+        id: "provider-overflow",
+        label: "More providers",
+        fields: [],
+        failure:
+          "Additional provider setup is unavailable in this version. Your default model is still available.",
+      });
+      break;
+    }
     const installed = settings.packages.find(
       (pkg) => pkg.packageId === provider.packageId,
     );
