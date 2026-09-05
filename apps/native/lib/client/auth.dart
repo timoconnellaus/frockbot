@@ -98,7 +98,11 @@ class NativeSignIn {
           limit: 8192,
         ),
       );
-      await store.write('session', jsonEncode(session.toJson()));
+      final saved = jsonEncode(session.toJson());
+      await store.write('session', saved);
+      // The request path reads the session from memory, so it learns of this
+      // one here rather than from the keystore.
+      api.adoptSession(saved);
       await store.delete('sign-in');
       return true;
     } finally {
@@ -133,6 +137,7 @@ class NativeSignIn {
       }
     }
     await store.delete('session');
+    api.adoptSession(null);
     await store.delete('sign-in');
   }
 }
