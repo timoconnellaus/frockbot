@@ -11,8 +11,9 @@ import 'auth/sign_in_page.dart';
 import 'theme/frock_theme.dart';
 import 'theme/states.dart';
 import 'acceptance_metrics.dart';
+import 'client/bot_sessions.dart';
 import 'client/chat_controller.dart';
-import 'client/state_channel.dart';
+import 'client/plain_store.dart';
 import 'client/transport.dart';
 import 'extensions/catalog.dart';
 import 'extensions/fallback.dart';
@@ -25,7 +26,8 @@ void main() {
 }
 
 class FrockBotApp extends StatefulWidget {
-  const FrockBotApp({super.key});
+  final LocalStore? store;
+  const FrockBotApp({super.key, this.store});
   @override
   State<FrockBotApp> createState() => _FrockBotAppState();
 }
@@ -33,9 +35,10 @@ class FrockBotApp extends StatefulWidget {
 class _FrockBotAppState extends State<FrockBotApp> {
   final navigatorKey = GlobalKey<NavigatorState>();
   final scaffoldKey = GlobalKey<ScaffoldState>();
-  final LocalStore store = ProtectedStore();
+  late final LocalStore store = widget.store ?? nativeStore();
   late final NativeApi api = NativeApi(store);
   late final NativeSignIn auth = NativeSignIn(api, store);
+  late final BotSessions sessions = BotSessions(api: api, store: store);
   StreamSubscription<Uri>? links;
   String? userId;
   String? error;
@@ -66,6 +69,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
     try {
       if (await auth.accept(uri)) {
         navigatorKey.currentState?.popUntil((route) => route.isFirst);
+        sessions.clear();
         if (mounted) {
           setState(() {
             userId = null;
@@ -92,6 +96,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
       final cachedSession = wire.AuthSessionView.fromJson(
         jsonDecode(savedSession),
       );
+      api.adoptSession(savedSession);
       final cachedDirectory = await store.read(
         'directory/${cachedSession.userId.value}',
       );
@@ -130,6 +135,11 @@ class _FrockBotAppState extends State<FrockBotApp> {
           selected = bots.where((b) => b.botId.value == saved).firstOrNull;
           error = null;
         });
+        unawaited(
+          sessions.prefetch(identity.userId.value, [
+            for (final bot in directory.bots) bot.botId.value,
+          ], after: selected?.botId.value),
+        );
       }
     } catch (failure) {
       if (mounted) {
@@ -173,13 +183,17 @@ class _FrockBotAppState extends State<FrockBotApp> {
     }
   }
 
-  Future<void> select(wire.BotRegistration bot) async {
-    await store.write('selection.$userId', bot.botId.value);
-    if (mounted) {
-      setState(() {
-        selected = bot;
-      });
-    }
+  void select(wire.BotRegistration bot) {
+    // The switch is the User's; remembering it is bookkeeping and never delays
+    // the pane behind a store write.
+    setState(() {
+      selected = bot;
+    });
+    unawaited(
+      store.write('selection.$userId', bot.botId.value).catchError((Object _) {
+        /* A selection that could not be remembered still switched. */
+      }),
+    );
   }
 
   @override
@@ -217,7 +231,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
                 title: Text(bot.initialName),
                 selected: bot.botId.value == selected?.botId.value,
                 onTap: () {
-                  unawaited(select(bot));
+                  select(bot);
                   if (MediaQuery.sizeOf(context).width < 800) {
                     Navigator.pop(context);
                   }
@@ -244,6 +258,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
               onTap: () async {
                 try {
                   await auth.signOut();
+                  sessions.clear();
                   if (mounted) {
                     setState(() {
                       userId = null;
@@ -314,8 +329,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
                         )
                       : ConversationView(
                           key: ValueKey('$userId:${selected!.botId.value}'),
-                          api: api,
-                          store: store,
+                          sessions: sessions,
                           userId: userId!,
                           botId: selected!.botId.value,
                         ),
@@ -330,20 +344,19 @@ class _FrockBotAppState extends State<FrockBotApp> {
   @override
   void dispose() {
     unawaited(links?.cancel());
+    sessions.clear();
     api.close();
     super.dispose();
   }
 }
 
 class ConversationView extends StatefulWidget {
-  final NativeApi api;
-  final LocalStore store;
+  final BotSessions sessions;
   final String userId;
   final String botId;
   const ConversationView({
     super.key,
-    required this.api,
-    required this.store,
+    required this.sessions,
     required this.userId,
     required this.botId,
   });
@@ -353,72 +366,43 @@ class ConversationView extends StatefulWidget {
 
 class _ConversationViewState extends State<ConversationView>
     with WidgetsBindingObserver {
-  late final ChatController controller;
-  late final BotStateChannel channel;
-  List<wire.Conversation> conversations = [];
+  late final BotSession session = widget.sessions.open(
+    widget.userId,
+    widget.botId,
+  );
+  ChatController get controller => session.controller;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    controller = ChatController(
-      transport: BackendChatTransport(widget.api),
-      store: widget.store,
-      userId: widget.userId,
-      botId: widget.botId,
-    );
-    channel = BotStateChannel(
-      api: widget.api,
-      store: widget.store,
-      key: 'cursor/${widget.userId}/${widget.botId}',
-      botId: widget.botId,
-      invalidate: controller.invalidate,
-      status: (state) {
-        controller.connection = state;
-        controller.changed();
-      },
-    );
-    unawaited(start());
+    controller.addListener(update);
+    unawaited(session.start());
   }
 
-  Future<void> start() async {
-    await controller.initialize();
-    try {
-      final list = wire.ConversationList.fromJson(
-        await widget.api.request(
-          '/api/bots/${Uri.encodeComponent(widget.botId)}/conversations',
-        ),
-      );
-      if (mounted) {
-        setState(() {
-          conversations = list.conversations;
-        });
-      }
-    } catch (_) {
-      /* History itself has its own retry state. */
-    }
-    if (mounted) await channel.connect();
+  void update() {
+    if (mounted) setState(() {});
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      channel.resume();
+      widget.sessions.resume();
     } else {
-      channel.pause();
+      widget.sessions.pause();
     }
   }
 
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      if (conversations.length > 1)
+      if (session.conversations.length > 1)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: DropdownButton<String>(
             isExpanded: true,
             value: controller.conversationId,
             hint: const Text('Current conversation'),
-            items: conversations
+            items: session.conversations
                 .map(
                   (c) => DropdownMenuItem(
                     value: c.conversationId,
@@ -433,15 +417,19 @@ class _ConversationViewState extends State<ConversationView>
           ),
         ),
       Expanded(
-        child: ChatPane(controller: controller, onReconnect: channel.connect),
+        child: ChatPane(
+          controller: controller,
+          onReconnect: session.channel.connect,
+        ),
       ),
     ],
   );
   @override
   void dispose() {
+    // The session outlives this view so that switching back to this Bot is a
+    // lookup rather than a reconnection.
     WidgetsBinding.instance.removeObserver(this);
-    channel.dispose();
-    controller.dispose();
+    controller.removeListener(update);
     super.dispose();
   }
 }

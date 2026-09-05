@@ -53,7 +53,24 @@ abstract interface class LocalStore {
   Future<void> delete(String key);
 }
 
-class ProtectedStore implements LocalStore {
+/// A store whose values are resident in memory, so the first frame after a
+/// switch is painted without awaiting the platform.
+abstract interface class SnapshotStore implements LocalStore {
+  /// Whether [peek] is authoritative. While this is false a null answer only
+  /// means "not loaded yet" and the asynchronous read still has to be awaited.
+  bool get resident;
+
+  /// The value already held in memory, without a platform round trip.
+  String? peek(String key);
+}
+
+/// A store that can list what it holds, which a migration to another store
+/// needs and ordinary reads and writes do not.
+abstract interface class EnumerableStore implements LocalStore {
+  Future<Map<String, String>> readAll();
+}
+
+class ProtectedStore implements LocalStore, EnumerableStore {
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   Future<void> _writes = Future.value();
   Future<void> _enqueue(Future<void> Function() operation) {
@@ -74,6 +91,17 @@ class ProtectedStore implements LocalStore {
   @override
   Future<void> delete(String key) =>
       _enqueue(() => _storage.delete(key: 'native.v1.$key'));
+  @override
+  Future<Map<String, String>> readAll() async {
+    await _writes;
+    const prefix = 'native.v1.';
+    final all = await _storage.readAll();
+    return {
+      for (final entry in all.entries)
+        if (entry.key.startsWith(prefix))
+          entry.key.substring(prefix.length): entry.value,
+    };
+  }
 }
 
 class RequestFailure implements Exception {
@@ -90,14 +118,48 @@ class NativeApi {
   final HttpClient _client = HttpClient()
     ..connectionTimeout = const Duration(seconds: 10);
   NativeApi(this.store);
+  String? _authorization;
+  bool _sessionKnown = false;
+  Future<void>? _sessionRead;
+
+  /// The session is the one secret this client holds, and every request needs
+  /// it. It is read from the keystore once and then kept in memory; sign-in,
+  /// sign-out and restore hand the new value straight in, so no request waits
+  /// on the platform keystore or on writes queued ahead of it.
+  void adoptSession(String? session) {
+    _authorization = session == null ? null : _bearer(session);
+    _sessionKnown = true;
+    _sessionRead = null;
+  }
+
+  static String _bearer(String session) =>
+      'Bearer ${wire.AuthSessionView.fromJson(jsonDecode(session)).sessionToken}';
+
+  Future<String?> _authorizationHeader() async {
+    if (_sessionKnown) return _authorization;
+    final read = _sessionRead ??= store.read('session').then((session) {
+      // A sign-in that landed while this read was in flight already holds
+      // the current session and must not be overwritten by the older one.
+      if (_sessionKnown) return;
+      _authorization = session == null ? null : _bearer(session);
+      _sessionKnown = true;
+    });
+    try {
+      await read;
+    } catch (_) {
+      // A failed read stays retryable rather than caching its failure.
+      if (identical(_sessionRead, read)) _sessionRead = null;
+      rethrow;
+    }
+    return _authorization;
+  }
+
   Future<Map<String, String>> headers() async {
-    final session = await store.read('session');
+    final authorization = await _authorizationHeader();
     return {
       'content-type': 'application/json',
       'x-frockbot-client': jsonEncode(clientHello),
-      if (session != null)
-        'authorization':
-            'Bearer ${wire.AuthSessionView.fromJson(jsonDecode(session)).sessionToken}',
+      'authorization': ?authorization,
     };
   }
 

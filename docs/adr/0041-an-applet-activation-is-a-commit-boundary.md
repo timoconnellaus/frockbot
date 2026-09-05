@@ -80,12 +80,19 @@ Composition" and makes the Turn unreconstructable from its recorded generation.
 ## Decision
 
 **An activation is a commit boundary the kernel owns, with a recoverable
-snapshot.** Before a candidate generation is mounted, `AppletState` writes an
-`applet:trial` record naming the candidate and the previous mount input, and
-clones the live facet into a second facet, `applet-rollback`, that never has
-code mounted against it. The candidate then mounts against the real storage and
-is asked `health()` under the existing deadline. On success the rollback facet is
-deleted and the trial record is cleared — that deletion is the commit. On any
+snapshot.** Before a candidate generation is mounted, `AppletState` clones the
+live facet into a second facet, `applet-rollback`, that never has code mounted
+against it, and then writes an `applet:trial` record naming the candidate and
+the previous mount input. The snapshot precedes the marker, so a marker never
+promises a copy that was never taken. The candidate then mounts against the real
+storage and is asked `health()` under the existing deadline. On success the
+promotion is one atomic transaction: the generation's `active` status, the
+previous generation's `superseded` status, the current pointer, last-known-good,
+and the deletion of the trial record go in together, and the rollback facet is
+dropped afterwards. That transaction is the commit — a health check that passed
+is not, because an eviction between the two would leave the candidate resident
+under a pointer still naming the previous generation, with no trial left to
+settle and every pinned tool call refused. On any
 failure — a throwing constructor, a throwing migration, a health answer that
 contradicts the manifest, or a blown deadline — the kernel aborts the candidate
 facet first, clones the rollback copy back over it, restores the previous mount
@@ -94,11 +101,16 @@ candidate still running past its deadline cannot write behind the restore.
 
 **An interrupted activation is settled before anything else reads the Applet.**
 While `applet:trial` exists the facet's storage is provisional. `publish`,
-`revert`, `invokeTool`, `connectViewer` and `alarm()` all settle an open trial
-first, which rolls it back. A Durable Object eviction between the snapshot and
+`revert`, `invokeTool`, `connectViewer`, `read` and `alarm()` all settle an open
+trial first, which rolls it back — including a trial record that cannot be
+decoded, which is rolled back onto the generation the current pointer names
+rather than merely deleted. A Durable Object eviction between the snapshot and
 the commit therefore leaves a half-migrated Applet for exactly as long as it
 takes the next caller to arrive, rather than promoting code that never passed a
-health check.
+health check. Rolling back is also what keeps the rest of the account
+consistent: a publish that was interrupted before its commit never returned to
+its caller, so the User's Applet directory — which follows the mount and is
+written by that caller — still names the previous generation too.
 
 **An Applet's first generation has nothing to protect.** With no previous mount
 input there is no snapshot and no restore: a failed first activation deletes the
