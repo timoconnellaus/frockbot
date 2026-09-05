@@ -728,13 +728,24 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
    * reaches no server and wakes nothing.
    */
   async composioRequest(input: unknown): Promise<unknown> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      command: rpcDecodedValue,
-    });
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        command: rpcDecodedValue,
+      },
+      { botId: rpcIdentifier },
+    );
     const userId = request.userId as string;
     await this.assertUserIdentity(userId);
-    const contribution = (await this.contributions()).composio;
+    const contributions = await this.contributions();
+    const operation = (request.command as { operation?: unknown })?.operation;
+    if (operation === "list-tools" || operation === "execute-tool") {
+      if (typeof request.botId !== "string")
+        throw new Error("Bot identity is required for tools");
+      await contributions.flock.registration(request.botId);
+    }
+    const contribution = contributions.composio;
     if (!contribution) throw new Error("Connected apps are unavailable");
     return contribution.request(userId, request.command);
   }

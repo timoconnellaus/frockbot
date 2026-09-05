@@ -1,3 +1,4 @@
+import type { ConnectedToolV1 } from "./tool-contracts.js";
 export interface ToolkitSummary {
   slug: string;
   name: string;
@@ -35,12 +36,6 @@ export interface ConnectLink {
   expiresAt: string;
 }
 
-export interface ComposioToolSummary {
-  slug: string;
-  name: string;
-  description?: string;
-}
-
 export interface ConnectedAccountSummary {
   id: string;
   status: string;
@@ -48,6 +43,7 @@ export interface ConnectedAccountSummary {
   alias?: string;
   userId?: string;
   disabled?: boolean;
+  authConfigId?: string;
 }
 
 export interface ExecuteComposioToolInput {
@@ -95,6 +91,11 @@ function connectedAccountSummary(
     toolkitSlug: requiredString(toolkit, "slug"),
     alias: typeof account.alias === "string" ? account.alias : undefined,
     ...(userId ? { userId } : {}),
+    ...(typeof account.auth_config === "object" &&
+    account.auth_config !== null &&
+    typeof (account.auth_config as Record<string, unknown>).id === "string"
+      ? { authConfigId: (account.auth_config as { id: string }).id }
+      : {}),
   };
 }
 
@@ -262,24 +263,48 @@ export class ComposioClient {
     throw new Error("Connector catalog pagination exceeded its limit");
   }
 
-  async searchTools(
+  async listTools(
     toolkitSlug: string,
-    search?: string,
-  ): Promise<ComposioToolSummary[]> {
-    const query = new URLSearchParams();
-    query.append("toolkit_slugs", toolkitSlug);
-    if (search?.trim()) query.append("search", search.trim());
-    const value = asRecord(await this.request(`/tools?${query.toString()}`));
-    if (!Array.isArray(value.items)) {
-      throw new Error("Composio returned an invalid tool list");
-    }
-    return value.items.map((candidate) => {
-      const tool = asRecord(candidate);
+    authConfigId: string,
+  ): Promise<ConnectedToolV1[]> {
+    const query = new URLSearchParams({
+      toolkit_slug: toolkitSlug,
+      auth_config_ids: authConfigId,
+      include_deprecated: "false",
+      toolkit_versions: "latest",
+      limit: "100",
+    });
+    const values = await this.pages(`/tools?${query}`);
+    return values.map((value) => {
+      const tool = asRecord(value);
+      if (
+        asRecord(tool.toolkit).slug !== toolkitSlug ||
+        !requiredString(tool, "slug").startsWith(
+          `${toolkitSlug.toUpperCase()}_`,
+        )
+      )
+        throw new Error("The service returned a tool for another connector");
+      const parameters = asRecord(tool.input_parameters);
+      const inputSchema =
+        parameters.type === "object"
+          ? parameters
+          : {
+              type: "object",
+              properties: Object.fromEntries(
+                Object.entries(parameters).map(([key, value]) => {
+                  const { required: _, ...schema } = asRecord(value);
+                  return [key, schema];
+                }),
+              ),
+              required: Object.entries(parameters)
+                .filter(([, value]) => asRecord(value).required === true)
+                .map(([key]) => key),
+            };
       return {
-        slug: requiredString(tool, "slug"),
-        name: requiredString(tool, "name"),
-        description:
-          typeof tool.description === "string" ? tool.description : undefined,
+        name: requiredString(tool, "slug"),
+        description: requiredString(tool, "description"),
+        inputSchema,
+        version: requiredString(tool, "version"),
       };
     });
   }
@@ -347,7 +372,27 @@ export class ComposioClient {
         throw new ComposioRequestError(response.status);
       }
       if (response.status === 204) return {};
-      return await response.json();
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("The service returned an empty response");
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 8_000_000) {
+          await reader.cancel();
+          throw new Error("The service response exceeded its size limit");
+        }
+        chunks.push(value);
+      }
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return JSON.parse(new TextDecoder().decode(bytes));
     } finally {
       clearTimeout(timeout);
     }

@@ -102,6 +102,7 @@ describe("foundation application", () => {
         "authoring",
         "bot-template",
         "clock",
+        "composio",
         "computer",
         "credentials",
         "echo",
@@ -628,7 +629,7 @@ describe("foundation application", () => {
 
     const capability = {
       packageId: "composio",
-      capabilityId: "gmail-tools",
+      capabilityId: "app-tools",
       kind: "tool" as const,
       connectionId: "connection-1",
     };
@@ -644,10 +645,26 @@ describe("foundation application", () => {
         userId: "user-1",
         readSecret: () => undefined,
         authorizeConnection: () =>
-          Promise.reject(new Error("unavailable Package must not authorize")),
+          Promise.resolve({
+            connectionId: "connection-1",
+            packageId: "composio",
+            connectionTypeId: "app",
+            displayName: "Gmail",
+            generation: "generation-one",
+            state: "ready",
+            safeMetadata: { connectorId: "gmail" },
+          }),
+        composioRequest: async () => ({
+          schemaVersion: 1,
+          namespace: "gmail--account-one",
+          label: "Gmail",
+          tools: [],
+        }),
       },
     );
-    expect(runtime).toEqual([]);
+    expect(runtime.map((pkg) => pkg.specifier)).toEqual([
+      "@frockbot/plugin-composio",
+    ]);
 
     const webCapability = {
       packageId: "web",

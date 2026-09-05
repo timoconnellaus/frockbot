@@ -16,7 +16,10 @@
         "entry": "./user-configuration",
         "host": "user"
       }
-    ]
+    ],
+    "runtime": {
+      "entry": "./agent"
+    }
   },
   "permissions": ["connections:manage", "tools:execute"],
   "configuration": {
@@ -31,9 +34,19 @@
           "kind": "grant",
           "driverId": "composio"
         },
-        "capabilities": []
+        "capabilities": ["app-tools"]
       }
     ],
-    "capabilities": []
+    "capabilities": [
+      {
+        "id": "app-tools",
+        "kind": "tool",
+        "connectionTypes": ["app"],
+        "admission": {
+          "turnTypes": ["chat", "automation", "subagent"],
+          "subagentRoles": ["executor"]
+        }
+      }
+    ]
   }
 }

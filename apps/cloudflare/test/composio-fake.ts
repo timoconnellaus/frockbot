@@ -8,6 +8,7 @@ export function createComposioFake(authorizationOrigin?: string) {
       alias: string;
       status: string;
       toolkit: { slug: string };
+      auth_config: { id: string };
     }
   >();
   const configs = new Map<string, string>();
@@ -56,6 +57,7 @@ export function createComposioFake(authorizationOrigin?: string) {
         alias: input.alias,
         status: "ACTIVE",
         toolkit: { slug: "gmail" },
+        auth_config: { id: input.auth_config_id },
       });
       const redirect = new URL(input.callback_url);
       redirect.searchParams.set("connected_account_id", id);
@@ -69,6 +71,42 @@ export function createComposioFake(authorizationOrigin?: string) {
         connected_account_id: id,
         redirect_url: authorization.toString(),
         expires_at: new Date(Date.now() + 600_000).toISOString(),
+      });
+    }
+    if (path === "/tools")
+      return Response.json({
+        items: [
+          {
+            slug: "GMAIL_FETCH_EMAILS",
+            name: "Fetch emails",
+            description: "Read recent Gmail messages",
+            toolkit: { slug: "gmail" },
+            version: "20260905_00",
+            input_parameters: {
+              type: "object",
+              properties: { query: { type: "string" } },
+            },
+          },
+        ],
+      });
+    if (path === "/tools/execute/GMAIL_FETCH_EMAILS") {
+      const input = (await request.json()) as {
+        connected_account_id: string;
+        user_id: string;
+        version: string;
+      };
+      const account = accounts.get(input.connected_account_id);
+      if (
+        account?.user_id !== input.user_id ||
+        account?.status !== "ACTIVE" ||
+        input.version !== "20260905_00"
+      )
+        return Response.json({}, { status: 403 });
+      return Response.json({
+        successful: true,
+        data: {
+          messages: [{ id: "mail-one", subject: "Hello from your inbox" }],
+        },
       });
     }
     if (path === "/connected_accounts")

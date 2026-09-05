@@ -1,3 +1,4 @@
+import { ConnectedAccountTools } from "./tools.js";
 import {
   decodeStartConnectionCommandV1,
   isConnectionIdentifier,
@@ -237,6 +238,15 @@ export class ComposioUserService {
       throw new Error("Connection command version is unsupported");
     const fields: Record<string, string[]> = {
       catalog: [],
+      "list-tools": ["connectionId"],
+      "execute-tool": [
+        "connectionId",
+        "toolName",
+        "version",
+        "arguments",
+        "effectId",
+        "sessionId",
+      ],
       start: ["command", "start"],
       revoke: ["connectionId"],
       fail: ["connectionId", "authorizationStateId"],
@@ -254,6 +264,37 @@ export class ComposioUserService {
     ]);
     if (Object.keys(value).some((key) => !allowed.has(key)))
       throw new Error("Connection command has invalid fields");
+    if (
+      value.operation === "list-tools" ||
+      value.operation === "execute-tool"
+    ) {
+      if (!isConnectionIdentifier(value.connectionId))
+        throw new Error("Connection is invalid");
+      const tools = new ConnectedAccountTools({
+        client: this.requireClient(),
+        storage: this.host.storage,
+        connection: async (owner, id) => {
+          const snapshot = await this.host.settings.readSnapshot();
+          if (
+            !snapshot.packages.some(
+              (item) =>
+                item.packageId === this.packageId && item.state === "installed",
+            )
+          )
+            throw new Error("This connector is unavailable");
+          const connection = snapshot.connections.find(
+            (item) =>
+              item.packageId === this.packageId && item.connectionId === id,
+          );
+          if (!connection || connection.state !== "ready")
+            throw new Error("This connection is unavailable");
+          return connection;
+        },
+      });
+      return value.operation === "list-tools"
+        ? tools.list(userId, value.connectionId)
+        : tools.execute(userId, value);
+    }
     if (value.operation === "catalog") {
       await this.reconcile(userId);
       return this.catalog(userId);
