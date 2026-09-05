@@ -131,7 +131,9 @@ describe("applet dev", () => {
     try {
       const page = await fetch(server.url);
       expect(page.status).toBe(200);
-      expect(await page.text()).toContain("applet-root");
+      const markup = await page.text();
+      expect(markup).toContain("applet-root");
+      expect(markup).toContain("#applet-root{margin:0;height:100%");
 
       const socketUrl = (suffix: string) =>
         `${server.url.toString().replace(/^http/, "ws")}socket?token=${server.token}&viewer=${suffix}`;
