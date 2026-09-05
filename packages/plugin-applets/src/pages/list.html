@@ -37,12 +37,6 @@
         padding: 16px;
       }
 
-      h1 {
-        margin: 0 0 4px;
-        font-size: 18px;
-        font-weight: 600;
-      }
-
       .row {
         display: flex;
         align-items: center;
@@ -88,16 +82,6 @@
         cursor: pointer;
       }
 
-      /* A draft has nothing to open yet; the row says so in the button's place. */
-      .pending {
-        flex: 0 0 auto;
-        padding: 6px 12px;
-        border: 1px solid var(--frockbot-border);
-        border-radius: 999px;
-        color: var(--frockbot-text-muted);
-        font-size: 13px;
-      }
-
       .empty {
         padding: 24px 12px;
         color: var(--frockbot-text-muted);
@@ -113,8 +97,12 @@
     </style>
   </head>
   <body>
+    <!--
+      No heading. The surface hosting this page already says "Applets" above
+      it, and the frame's own attribution said it a third time: three copies
+      of one word, stacked, before a single Applet (2026-09-05).
+    -->
     <main>
-      <h1>Applets</h1>
       <div id="applets" aria-live="polite">
         <p class="empty">Loading…</p>
       </div>
@@ -168,9 +156,12 @@
             detail.className = "meta";
             detail.textContent = meta(applet);
             grow.append(name, detail);
-            let action;
+            row.append(grow);
+            // A draft has nothing to open, and the line under its name has
+            // already said why. The pill beside it said the same fact a
+            // second time, in fewer words (2026-09-05).
             if (applet.currentGenerationId) {
-              action = document.createElement("button");
+              const action = document.createElement("button");
               action.type = "button";
               action.textContent =
                 state.focused && state.focused.appletId === applet.appletId
@@ -179,12 +170,8 @@
               action.addEventListener("click", () => {
                 window.frockbot.focus(applet.appletId);
               });
-            } else {
-              action = document.createElement("span");
-              action.className = "pending";
-              action.textContent = "Not ready yet";
+              row.append(action);
             }
-            row.append(grow, action);
             host.append(row);
           }
           window.frockbot.resize();

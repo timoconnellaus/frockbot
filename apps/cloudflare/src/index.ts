@@ -177,7 +177,9 @@ import {
 import {
   appletStateNameV1,
   mintAppletViewerTokenV1,
+  APPLETS_UNAVAILABLE_MESSAGE_V1,
   APPLET_VIEWER_TOKEN_TTL_MS,
+  APPLET_VIEWER_UNCONFIGURED_DETAIL_V1,
 } from "@frockbot/kernel-do";
 import {
   decodeAppletGenerationV1,
@@ -302,6 +304,17 @@ interface Env {
   DEBUG_TOKEN?: string;
   /** Set only by the end-to-end harness; opens the Workspace seed door. */
   WORKSPACE_SEED_TOKEN?: string;
+}
+
+/**
+ * The deployment cannot sign Applet viewer tokens.
+ *
+ * The operator detail names the secret and goes to the Worker log; the thrown
+ * message is the sentence a person reads, and carries no configuration.
+ */
+function appletsUnconfigured(): Error {
+  console.error(APPLET_VIEWER_UNCONFIGURED_DETAIL_V1);
+  return new Error(APPLETS_UNAVAILABLE_MESSAGE_V1);
 }
 
 /**
@@ -905,6 +918,13 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
 
   // --- Applets (ADR 0022) --------------------------------------------------
   //
+  // A deployment with no `APPLET_VIEWER_SECRET` can sign nothing, so it says
+  // so once, honestly, in two places at once: a final sentence for the person
+  // whose Applet will not open, and the secret's name in the Worker log for
+  // whoever can fix it. The release now refuses to ship without the secret
+  // (`apps/cloudflare/src/production-secrets.ts`); this is what happens if it
+  // ever goes missing anyway.
+  //
   // Applets are the User's, not a Bot's, so these three sit on the User-scoped
   // entrypoint the hosted application already holds. The application Worker
   // reaches the User Durable Object only through here; it never gets a
@@ -938,9 +958,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     const userId = this.ctx.props.userId;
     const appletId = request.appletId as string;
     const secret = this.env.APPLET_VIEWER_SECRET;
-    if (!secret) {
-      throw new Error("Applet viewer sessions are not configured");
-    }
+    if (!secret) throw appletsUnconfigured();
     const state = await this.appletCurrentGeneration(userId, appletId);
     const expiresAt = new Date(Date.now() + APPLET_VIEWER_TOKEN_TTL_MS);
     return {
@@ -966,7 +984,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     const appletId = request.appletId as string;
     const navigationEpoch = request.navigationEpoch as string;
     const secret = this.env.APPLET_VIEWER_SECRET;
-    if (!secret) throw new Error("Applet viewer sessions are not configured");
+    if (!secret) throw appletsUnconfigured();
     const state = await this.appletCurrentGeneration(userId, appletId);
     const expiresAt = new Date(Date.now() + 120_000);
     const artifactOrigin = "https://ui.bot.frockbot.com";

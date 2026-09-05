@@ -30,6 +30,7 @@ import type { McpServerStatusViewV1 } from "@frockbot/plugin-mcp/records";
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import type { ClientSkillCatalogEntryV1 } from "./skill-protocol.js";
 import type { ApprovalCardViewV1 } from "./approvals.js";
+import type { AppletCanvasFailureV1 } from "./client/applet-canvas-failure.js";
 import type { TaskViewV1 } from "@frockbot/plugin-subagents/shared";
 import type { InjectionKey, Ref } from "vue";
 
@@ -371,7 +372,11 @@ export interface FrockBotWebData {
    * has everything it needs to draw either of its states.
    */
   appletCanvas: "idle" | "loading" | "ready" | "failed";
-  appletCanvasError?: string;
+  /**
+   * How the canvas's read failed, classified once: the sentence to show, and
+   * whether retrying it can help. Absent when nothing has failed.
+   */
+  appletCanvasFailure?: AppletCanvasFailureV1;
   /**
    * The User's MCP servers: state, tool count, last handshake, instructions,
    * failure, and the durable refusal ledger. Absent until it is loaded, and

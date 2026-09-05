@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  appletCanvasIsFirstReadV1,
+  appletSourceFilesV1,
+  appletViewerStillCurrentV1,
   appletSourceFingerprintV1,
   mostRecentlyChangedFileV1,
   readAppletList,
@@ -262,5 +265,127 @@ describe("the applets feed a page receives", () => {
     expect(state.focused).toBeNull();
     expect(state.viewer).toBeNull();
     expect(state.list).toEqual([summary]);
+  });
+});
+
+describe("the Applet's own files", () => {
+  const sourceWith = (paths: string[]) => ({
+    appletId: "u1abc.todo",
+    truncated: false,
+    files: paths.map((path, index) => ({
+      path,
+      text: "{}",
+      generationId: `w-${index}`,
+      // The cache is the most recently written thing in the tree, which is
+      // exactly why it used to win the "open on this" contest.
+      changedAt: `2026-09-05T00:0${index}:00.000Z`,
+    })),
+  });
+
+  test("leaves out build output, caches and dependency trees", () => {
+    const source = sourceWith([
+      "applet.json",
+      "server.ts",
+      ".wrangler/cache/cf.json",
+      "node_modules/left-pad/index.js",
+      "dist/manifest.json",
+      ".frockbot-generations/server.ts.json",
+    ]);
+    expect(appletSourceFilesV1(source).map((file) => file.path)).toEqual([
+      "applet.json",
+      "server.ts",
+    ]);
+  });
+
+  test("never opens on a cache file", () => {
+    // The panel listed `.wrangler/cache/cf.json` first, selected it, and drew
+    // one unwrapped line of minified JSON as the Applet (2026-09-05).
+    expect(
+      mostRecentlyChangedFileV1(
+        sourceWith(["server.ts", ".wrangler/cache/cf.json"]),
+      ),
+    ).toBe("server.ts");
+  });
+
+  test("opens on the Applet's manifest when nothing has been written yet", () => {
+    const scaffold = {
+      appletId: "u1abc.todo",
+      truncated: false,
+      files: ["README.md", "applet.json"].map((path) => ({
+        path,
+        text: "",
+        generationId: "w-1",
+        changedAt: "2026-09-05T00:00:00.000Z",
+      })),
+    };
+    expect(mostRecentlyChangedFileV1(scaffold)).toBe("applet.json");
+  });
+
+  test("a cache write does not change the source fingerprint", () => {
+    // The fingerprint decides whether a Turn wrote source. A toolchain
+    // rewriting its own cache is not the Bot writing code, and must not pull
+    // the User off a live Applet.
+    const before = appletSourceFingerprintV1(sourceWith(["server.ts"]));
+    const after = appletSourceFingerprintV1(
+      sourceWith(["server.ts", ".wrangler/cache/cf.json"]),
+    );
+    expect(after).toBe(before);
+  });
+});
+
+describe("what a re-read of the Applet canvas does", () => {
+  test("only the first read of an Applet draws a skeleton", () => {
+    // The panel reset to four grey bars on every Turn: the cadence that
+    // follows a running Turn re-read the source, and the re-read claimed the
+    // loading state each time (2026-09-05).
+    expect(appletCanvasIsFirstReadV1({ appletId: "u1abc.todo" })).toBe(true);
+    expect(
+      appletCanvasIsFirstReadV1({
+        appletId: "u1abc.todo",
+        sourceAppletId: "u1abc.todo",
+      }),
+    ).toBe(false);
+    expect(
+      appletCanvasIsFirstReadV1({
+        appletId: "u1abc.todo",
+        viewerAppletId: "u1abc.todo",
+      }),
+    ).toBe(false);
+    // Focusing a different Applet is a first read again.
+    expect(
+      appletCanvasIsFirstReadV1({
+        appletId: "u1abc.notes",
+        viewerAppletId: "u1abc.todo",
+        sourceAppletId: "u1abc.todo",
+      }),
+    ).toBe(true);
+  });
+
+  test("a running Applet is only reloaded when its generation changes", () => {
+    const now = Date.parse("2026-09-05T00:00:00.000Z");
+    const held = {
+      appletId: "u1abc.todo",
+      generationId: "generation-2",
+      expiresAt: "2026-09-05T00:15:00.000Z",
+    };
+    const current = (
+      overrides: Partial<Parameters<typeof appletViewerStillCurrentV1>[0]> = {},
+    ) =>
+      appletViewerStillCurrentV1({
+        held,
+        appletId: "u1abc.todo",
+        generationId: "generation-2",
+        now,
+        ...overrides,
+      });
+    expect(current()).toBe(true);
+    // A publish is the one thing that has to replace the frame.
+    expect(current({ generationId: "generation-3" })).toBe(false);
+    expect(current({ appletId: "u1abc.notes" })).toBe(false);
+    expect(current({ held: undefined })).toBe(false);
+    // A credential about to expire is renewed before it stops working.
+    expect(current({ now: Date.parse("2026-09-05T00:13:00.000Z") })).toBe(
+      false,
+    );
   });
 });

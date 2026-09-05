@@ -201,6 +201,42 @@ export interface AppletBuildViewV1 {
   diagnostics?: string[];
 }
 
+/**
+ * Directories under an Applet's root that hold machine output, not source.
+ *
+ * `dist/` is what `applet build` wrote; `.wrangler/` is a local toolchain
+ * cache; `node_modules/` is a dependency tree; `.frockbot-generations/` is the
+ * Workspace sync's own bookkeeping. None of it is the Applet, and one of them
+ * — `.wrangler/cache/cf.json`, a single line of minified JSON — sorted first
+ * and became the file the canvas opened on (2026-09-05).
+ */
+export const APPLET_SOURCE_ARTEFACT_DIRECTORIES_V1 = [
+  "dist",
+  "build",
+  "node_modules",
+  ".wrangler",
+  ".frockbot-generations",
+  ".git",
+  ".cache",
+  ".turbo",
+  ".vite",
+  "coverage",
+] as const;
+
+/**
+ * True when an Applet-relative path lies in a machine-output directory.
+ *
+ * Matched as a path segment at any depth, so a nested project's own build
+ * output is covered by the same rule as the Applet's.
+ */
+export function appletSourceArtefactPathV1(relativePath: string): boolean {
+  const artefacts = new Set<string>(APPLET_SOURCE_ARTEFACT_DIRECTORIES_V1);
+  const segments = relativePath.split("/");
+  return segments
+    .slice(0, Math.max(segments.length - 1, 0))
+    .some((segment) => artefacts.has(segment));
+}
+
 /** Bounds on the source read, so a canvas load can never be unbounded. */
 export const APPLET_SOURCE_MAX_BYTES_V1 = 512 * 1024;
 export const APPLET_SOURCE_MAX_FILES_V1 = 256;
