@@ -69,12 +69,12 @@ test("browser and native share failed notices and idempotent unread/acknowledgem
     "UnreadDirectory",
     await (await native("/api/bots/unread")).json(),
   ).unread[0]!;
+  expect(unread.botId).toBe(botId);
   const command = {
     schemaVersion: 1,
-    type: "bot/mark-read",
+    type: "bot/mark-unread",
     commandId: "native-read-1",
     botId,
-    upToCursor: unread.lastActivityCursor,
   };
   const receipt = decodeProtocol(
     "MarkReadReceipt",

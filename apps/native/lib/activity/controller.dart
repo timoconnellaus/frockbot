@@ -49,8 +49,9 @@ class ActivityController extends ChangeNotifier {
     _notify();
     try {
       final saved = await store.read(_key);
-      if (saved != null)
+      if (saved != null) {
         _pending = Map<String, dynamic>.from(jsonDecode(saved) as Map);
+      }
       final views = wire.UnreadDirectory.fromJson(
         await api.request('/api/bots/unread'),
       );
@@ -74,8 +75,9 @@ class ActivityController extends ChangeNotifier {
       loaded = true;
       error = null;
     } catch (_) {
-      if (!_disposed)
+      if (!_disposed) {
         error = 'Couldn’t reach FrockBot. Check your connection and try again.';
+      }
     } finally {
       loading = false;
       _notify();
@@ -144,8 +146,9 @@ class ActivityController extends ChangeNotifier {
         ),
       );
       if (receipt.commandId.value != body['commandId'] ||
-          receipt.unread.botId.value != body['botId'])
+          receipt.unread.botId.value != body['botId']) {
         throw const FormatException('Mismatched unread receipt');
+      }
       await store.delete(_key);
       _pending = null;
       unread[receipt.unread.botId.value] = receipt.unread;

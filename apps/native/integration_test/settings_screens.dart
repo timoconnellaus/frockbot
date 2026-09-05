@@ -10,6 +10,8 @@ import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/client/plain_store.dart';
 import 'package:frockbot_native/settings/page.dart';
 import 'package:frockbot_native/connections/page.dart';
+import 'package:frockbot_native/activity/controller.dart';
+import 'package:frockbot_native/activity/page.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 class LocalSettingsApi extends NativeApi {
@@ -73,7 +75,7 @@ void main() {
     'NATIVE_TEST_HOME',
     defaultValue: 'application',
   );
-  if (!{'application', 'models', 'connections'}.contains(home)) {
+  if (!{'application', 'models', 'connections', 'inbox'}.contains(home)) {
     throw StateError('Unknown design page');
   }
   runApp(
@@ -81,7 +83,16 @@ void main() {
       title: 'FrockBot',
       debugShowCheckedModeBanner: false,
       theme: FrockTheme.theme(Brightness.dark),
-      home: home == 'connections'
+      home: home == 'inbox'
+          ? ActivityPage(
+              controller: ActivityController(
+                api,
+                store,
+                'native-settings-local',
+              )..botNames = {'native-inbox-design': 'Mira'},
+              openBot: (_) async {},
+            )
+          : home == 'connections'
           ? ConnectionsPage(api: api, userId: 'native-settings-local')
           : SettingsPage(
               api: api,

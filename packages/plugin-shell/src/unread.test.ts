@@ -16,6 +16,7 @@ import {
   sidebarMessagePreviewFromRunsV1,
   UNREAD_COUNT_CAP,
   type UnreadStateV1,
+  type BotPendingNotificationV1,
 } from "./unread.js";
 
 /** A cursor in the exact shape the Bot's admission index writes. */
@@ -466,7 +467,7 @@ test("notification fan-out preserves critical urgency without accepting arbitrar
     title: "Your decision is needed",
     body: "Open the Bot",
     urgency: "critical",
-  };
+  } satisfies BotPendingNotificationV1;
   expect(
     decodeBotNotificationDirectoryViewV1({
       schemaVersion: 1,

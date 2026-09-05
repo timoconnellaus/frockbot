@@ -240,7 +240,7 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
       await openBot(botId);
     } catch (_) {
       final context = scaffoldKey.currentContext;
-      if (context != null && context.mounted)
+      if (context != null && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -248,6 +248,7 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
             ),
           ),
         );
+      }
     }
   }
 

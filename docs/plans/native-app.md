@@ -206,6 +206,23 @@ origin refusal, return refresh, single-home navigation, 200% text and reduced
 motion. See [the Connections seam plan](native-connections.md). The dated
 acceptance ledger records release captures and remaining physical gates.
 
+### C3 — Inbox, unread and Bot links (2026-09-05)
+
+Native now shows the same pending Bot notices and unread cursors as Vue. Refresh
+is read-only; explicit acknowledgements and mark-read/unread commands reach the
+same Bot owner. Lost read-status receipts retain their command across client
+restart. Notification and root `?bot=` links select only a Bot present in the
+signed-in User's live directory, and Android declares the verified root path.
+The fan-out now accepts the existing critical urgency field.
+
+Paired gateway scenarios cover failed-Turn notices, repeated acknowledgement,
+Bot owner eviction and cross-User refusal. Native tests cover deduplication,
+offline recovery, large text/reduced motion and strict link validation. See
+[the inbox seam plan](native-notifications.md). This lands inbox/unread state
+convergence; background OS push, notification channels and cross-device OS
+alert delivery claims remain unimplemented and unqualified. The native app
+emits no additional OS alert. Device and release evidence stays in the ledger.
+
 ## Slice 4 — Qualify A2UI and Compose independently
 
 Promote the qualified A2UI manifest/catalog/action contract with immutable snapshots, declared slots, live subset checks and host unavailable states. In a separate backend slice, pin one reviewed vendored `@frockbot/compose-*` commit behind a FrockBot adapter and run one real extension. Native rendering must remain releasable without a wholesale Cordis-to-Compose rewrite.

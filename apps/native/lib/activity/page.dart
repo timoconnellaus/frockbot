@@ -55,11 +55,12 @@ class _ActivityPageState extends State<ActivityPage>
     try {
       await widget.openBot(botId);
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(
           () => navigationError =
               'That Bot isn’t available. Refresh your Bots and try again.',
         );
+      }
     }
   }
 
@@ -81,9 +82,10 @@ class _ActivityPageState extends State<ActivityPage>
           constraints: const BoxConstraints(maxWidth: 680),
           child: Builder(
             builder: (context) {
-              if (!controller.loaded && controller.loading)
+              if (!controller.loaded && controller.loading) {
                 return const FrockLoading(label: 'Loading your inbox');
-              if (!controller.loaded && controller.error != null)
+              }
+              if (!controller.loaded && controller.error != null) {
                 return FrockEmptyState(
                   title: 'Your inbox is unavailable',
                   detail: controller.error!,
@@ -91,6 +93,7 @@ class _ActivityPageState extends State<ActivityPage>
                   onAction: controller.load,
                   icon: Icons.cloud_off_outlined,
                 );
+              }
               return RefreshIndicator(
                 onRefresh: controller.load,
                 child: ListView(

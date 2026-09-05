@@ -17,10 +17,11 @@ void main() {
       final writes = <Map>[];
       var lost = true;
       final api = SettingsApi(store, (path, body) async {
-        if (body == null)
+        if (body == null) {
           return path.endsWith('unread')
               ? {'schemaVersion': 1, 'unread': []}
               : {'schemaVersion': 1, 'notifications': []};
+        }
         final command = body as Map;
         expect(jsonDecode(store.values['activity-pending.tim']!), command);
         writes.add(command);
@@ -65,8 +66,9 @@ void main() {
         var mode = 'empty';
         final api = SettingsApi(store, (path, body) async {
           if (mode == 'offline') throw StateError('private detail');
-          if (path.endsWith('unread'))
+          if (path.endsWith('unread')) {
             return {'schemaVersion': 1, 'unread': []};
+          }
           return {
             'schemaVersion': 1,
             'notifications': mode == 'empty'
@@ -156,8 +158,9 @@ void main() {
           }
           return {'schemaVersion': 1, 'status': 'acknowledged'};
         }
-        if (path == '/api/bots/unread')
+        if (path == '/api/bots/unread') {
           return {'schemaVersion': 1, 'unread': []};
+        }
         return {
           'schemaVersion': 1,
           'notifications': pending ? [notification, notification] : [],
