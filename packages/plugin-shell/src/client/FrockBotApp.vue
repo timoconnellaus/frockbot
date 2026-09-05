@@ -780,6 +780,8 @@ let trailMemory: ActivityTrailMemoryV1 | null = null;
 let trailRunId: string | undefined;
 let trailSeq = 0;
 let trailTick = 0;
+/** The drain's clock, advanced by the same tick the trail runs on. */
+const drainNow = ref(Date.now());
 
 /**
  * The Turn still going, if any. Only one executes at a time, but a Turn queued
@@ -858,7 +860,6 @@ watch(workingSample, () => {
  * `supersede-drain.ts` holds the whole rule; this reads it against the
  * transcript and the tick's clock.
  */
-const drainNow = ref(Date.now());
 const supersedeDrain = computed(() =>
   supersedeDrainStateV1({ messages: messages.value, now: drainNow.value }),
 );
