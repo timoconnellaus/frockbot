@@ -849,18 +849,19 @@ describe("client run protocol v1", () => {
         page: { truncated: false },
       }),
     ).toThrow("run.outcome does not match run.status");
+    // A *malformed* event of a type this client owns is still a wire fault.
     expect(() =>
       decodeClientRunListV1({
         schemaVersion: 1,
         runs: [
           {
             ...completed,
-            events: [{ type: "model/request" }],
+            events: [{ type: "tool/result" }],
           },
         ],
         page: { truncated: false },
       }),
-    ).toThrow("run event.type is invalid");
+    ).toThrow("run event.isError must be a boolean");
     expect(() =>
       decodeClientRunPageV1({
         schemaVersion: 1,
@@ -1681,5 +1682,117 @@ describe("Computer sync degradation in the run projection", () => {
     expect(
       decodeClientRunPageV1(structuredClone(page)).runs[0]?.events,
     ).toEqual(projected.events);
+  });
+});
+
+/*
+ * Production, 2026-09-05: a Bot's transcript was the empty state — "Bob is
+ * ready. Say anything to get started." — while the sidebar row beside it
+ * showed the reply from that same conversation, and the Worker tail showed
+ * `GET /api/bots/<bot>/turns` answering 200 every time. The page was fine. The
+ * *client* refused it: one Turn on the page carried a run event this bundle
+ * had never heard of, `decodeEvent` threw "run event.type is invalid", and the
+ * throw travelled all the way out of `decodeClientRunPageV1`, so `listRuns`
+ * rejected and the transcript was never handed a single Turn.
+ *
+ * The skew is structural, not a mistake: a Bot Durable Object projects a Turn
+ * from the Composition generation it is pinned to, and the browser decodes it
+ * with whatever bundle it loaded. Neither half can assume it is the newer one.
+ */
+describe("a transcript page a client cannot fully read", () => {
+  const run = {
+    schemaVersion: 1,
+    runId: "run-1",
+    admittedAt: timestamp,
+    input: "hi",
+    status: "completed",
+    events: [] as unknown[],
+    outcome: { type: "completed", text: "Hi! What can I do for you?" },
+  };
+  const page = (runs: unknown[]) => ({
+    schemaVersion: 1,
+    runs,
+    page: { truncated: false },
+  });
+
+  test("keeps the Turn when it carries an event type this client lacks", () => {
+    const decoded = decodeClientRunListV1(
+      page([
+        {
+          ...run,
+          events: [
+            { type: "tool/call", call: { id: "tool-1", name: "read" } },
+            { type: "shell/telepathy", intensity: 11 },
+            {
+              type: "tool/result",
+              callId: "tool-1",
+              content: "ok",
+              isError: false,
+            },
+          ],
+        },
+      ]),
+    );
+    expect(decoded).toHaveLength(1);
+    expect(decoded[0]?.responseText).toBe("Hi! What can I do for you?");
+    // The unknown event is dropped, and everything around it still renders.
+    expect(decoded[0]?.events).toEqual([
+      { type: "tool/call", call: { id: "tool-1", name: "read" } },
+      { type: "tool/result", callId: "tool-1", content: "ok", isError: false },
+    ]);
+  });
+
+  test("a known event that is malformed is still refused", () => {
+    // Forgiving this would hide bugs: the type is one this client owns, so a
+    // body it cannot read is a wire fault and not a version gap.
+    expect(() =>
+      decodeClientRunListV1(
+        page([
+          {
+            ...run,
+            events: [
+              { type: "computer/sync", status: "sideways", message: "" },
+            ],
+          },
+        ]),
+      ),
+    ).toThrow("run event.status is invalid");
+  });
+
+  test("drops an unknown event that sits between a tool call and its result", () => {
+    // The journal interleaves by construction — a Computer sync notice is
+    // written while a tool call is outstanding — so the call/result walk must
+    // still pair after the unknown event in the middle is dropped.
+    const decoded = decodeClientRunListV1(
+      page([
+        {
+          ...run,
+          events: [
+            { type: "tool/call", call: { id: "tool-1", name: "read" } },
+            { type: "workspace/telepathy", intensity: 11 },
+            {
+              type: "tool/result",
+              callId: "tool-1",
+              content: "ok",
+              isError: false,
+            },
+            { type: "tool/call", call: { id: "tool-2", name: "write" } },
+          ],
+        },
+      ]),
+    );
+    expect(decoded[0]?.events.map((event) => event.type)).toEqual([
+      "tool/call",
+      "tool/result",
+      "tool/call",
+    ]);
+  });
+
+  test("the page itself is still refused when the envelope is wrong", () => {
+    // Tolerating an unknown event is not tolerating anything else: a list
+    // shape this client cannot trust is a wire fault and stays one.
+    expect(() => decodeClientRunListV1({ schemaVersion: 2, runs: [] })).toThrow(
+      "run list.schemaVersion is invalid",
+    );
   });
 });

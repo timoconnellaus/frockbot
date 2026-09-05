@@ -27,6 +27,13 @@ const props = withDefaults(
     layout?: "flow" | "fill";
     /** A page hosted in a surface has its attribution drawn by the surface. */
     attribution?: boolean;
+    /**
+     * The title the surface around this frame already shows. When it is the
+     * Package's own name, the attribution drops the name and keeps only the
+     * provenance: "Applets" over "Applets" over "Applets" said one thing
+     * three times (2026-09-05).
+     */
+    surfaceTitle?: string;
   }>(),
   { layout: "flow", attribution: true },
 );
@@ -41,6 +48,10 @@ const provenanceLabel = computed(() => {
   if (props.contribution.provenance === "User-installed") return "Added by you";
   return undefined;
 });
+/** Whose page this is, unless the surface around it has already said. */
+const showsName = computed(
+  () => props.contribution.displayName !== props.surfaceTitle,
+);
 const height = ref(240);
 const failure = ref<string>();
 const lastStateWireByName = new Map<string, string>();
@@ -239,8 +250,11 @@ onBeforeUnmount(() => window.removeEventListener("message", onMessage));
 
 <template>
   <section class="package-iframe-frame" :class="`package-iframe-${layout}`">
-    <header v-if="attribution" class="package-iframe-attribution">
-      <strong>{{ contribution.displayName }}</strong>
+    <header
+      v-if="attribution && (showsName || provenanceLabel)"
+      class="package-iframe-attribution"
+    >
+      <strong v-if="showsName">{{ contribution.displayName }}</strong>
       <span v-if="provenanceLabel">{{ provenanceLabel }}</span>
     </header>
     <!-- Load eagerly because lazy iframes defer the init/resize handshake until the browser decides the frame is near the viewport, which headless Chromium may never do. -->

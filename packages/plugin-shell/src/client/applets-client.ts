@@ -8,6 +8,7 @@
  * strict decoder before it reaches the shell.
  */
 import {
+  appletSourceArtefactPathV1,
   decodeAppletBuildViewV1,
   decodeAppletFocusViewV1,
   decodeAppletListViewV1,
@@ -113,18 +114,38 @@ export async function writeFocusedAppletId(
 }
 
 /**
- * The file the canvas shows while a Bot is writing an Applet: the one that
+ * The Applet's own files, with machine output left out.
+ *
+ * A Workspace root that has been synced from a Computer carries whatever the
+ * toolchain left behind — a wrangler cache, a dependency tree, a build. The
+ * store stops carrying those from now on, but a root synced before that still
+ * holds them, so the canvas filters what it draws rather than trusting the
+ * listing to be clean.
+ */
+export function appletSourceFilesV1(
+  source: AppletSourceViewV1 | undefined,
+): AppletSourceViewV1["files"] {
+  return (source?.files ?? []).filter(
+    (file) => !appletSourceArtefactPathV1(file.path),
+  );
+}
+
+/**
+ * The file the canvas opens on while a Bot is writing an Applet: the one that
  * changed most recently, falling back to the first path in sorted order so a
  * store with no timestamps still opens on something.
  */
 export function mostRecentlyChangedFileV1(
   source: AppletSourceViewV1 | undefined,
 ): string | undefined {
-  if (!source || source.files.length === 0) return undefined;
+  const files = appletSourceFilesV1(source);
+  if (files.length === 0) return undefined;
   // A tie on time — a fresh scaffold, one sync — opens on the file a Bot edits
-  // first, not on the README the alphabet would pick.
-  const preferred = ["server.ts", "ui.tsx"];
-  const ordered = source.files.toSorted((left, right) => {
+  // first, not on the README the alphabet would pick. `applet.json` is the
+  // Applet's own manifest and is what a person recognises when nothing else
+  // has been written yet.
+  const preferred = ["applet.json", "server.ts", "ui.tsx"];
+  const ordered = files.toSorted((left, right) => {
     const leftAt = left.changedAt ?? "";
     const rightAt = right.changedAt ?? "";
     if (leftAt !== rightAt) return rightAt.localeCompare(leftAt);
@@ -151,8 +172,57 @@ export function appletSourceFingerprintV1(
   source: AppletSourceViewV1 | undefined,
 ): string {
   if (!source) return "";
-  return source.files
+  return appletSourceFilesV1(source)
     .map((file) => `${file.path}@${file.generationId}@${file.changedAt ?? ""}`)
     .toSorted()
     .join("\n");
+}
+
+/** Re-mint the viewer credential once it is this close to expiring. */
+export const APPLET_VIEWER_REFRESH_MS_V1 = 3 * 60_000;
+
+/**
+ * Whether a read of this Applet is the first one, and so may draw a skeleton.
+ *
+ * A skeleton is for an empty panel. The canvas re-reads the source on a
+ * cadence while a Turn runs, and showing the loading state on each of those
+ * replaced a live Applet — mid-use, mid-scroll — with four grey bars twice a
+ * minute. Once anything for this Applet is on screen, a re-read happens
+ * behind it.
+ */
+export function appletCanvasIsFirstReadV1(input: {
+  appletId: string;
+  viewerAppletId?: string;
+  sourceAppletId?: string;
+}): boolean {
+  return (
+    input.viewerAppletId !== input.appletId &&
+    input.sourceAppletId !== input.appletId
+  );
+}
+
+/**
+ * Whether the viewer credential already in hand still opens this Applet.
+ *
+ * The published generation is what the open Applet *is*: while it is
+ * unchanged and the credential has life left in it, nothing is re-fetched and
+ * the frame keeps running. Re-minting a token on every Turn changed the props
+ * the iframe host reads and reloaded a working Applet for no reason.
+ */
+export function appletViewerStillCurrentV1(input: {
+  held?: { appletId: string; generationId: string; expiresAt: string };
+  appletId: string;
+  generationId: string;
+  now?: number;
+  refreshWithinMs?: number;
+}): boolean {
+  const held = input.held;
+  if (!held) return false;
+  if (held.appletId !== input.appletId) return false;
+  if (held.generationId !== input.generationId) return false;
+  const expiresAt = Date.parse(held.expiresAt);
+  if (Number.isNaN(expiresAt)) return false;
+  const now = input.now ?? Date.now();
+  const within = input.refreshWithinMs ?? APPLET_VIEWER_REFRESH_MS_V1;
+  return expiresAt - now >= within;
 }

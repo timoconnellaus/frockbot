@@ -99,6 +99,7 @@ import {
   decodeIsolateWorkspaceWriteRequestV1,
   decodeNormalizedModelRequestV1,
   decodeWorkspaceRootV1,
+  appletSourceArtefactPathV1,
 } from "@frockbot/kernel-contracts";
 import type {
   AppletBuildViewV1,
@@ -1504,9 +1505,11 @@ export class BotState extends DurableObject<BotStateEnv> {
     for (const entry of listing.entries) {
       const relative = entry.path.path.slice(appletId.length + 1);
       if (!relative) continue;
-      // `dist/` is what `applet build` wrote, not what the Bot wrote: the
-      // canvas shows source, and the publish reads the build.
-      if (relative === "dist" || relative.startsWith("dist/")) continue;
+      // Machine output is not source: `dist/` is what `applet build` wrote,
+      // `.wrangler/` is a toolchain cache, `node_modules/` is a dependency
+      // tree. The canvas shows what the Bot wrote, and the publish reads the
+      // build.
+      if (appletSourceArtefactPathV1(relative)) continue;
       if (bytes + entry.generation.size > APPLET_SOURCE_MAX_BYTES_V1) {
         truncated = true;
         continue;

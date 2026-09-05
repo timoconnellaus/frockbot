@@ -1228,7 +1228,7 @@ function status(value: unknown): ClientRunStatusV1 {
   return value;
 }
 
-function decodeEvent(value: unknown): ClientRunEventV1 {
+function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
   const event = record(value, "run event");
   if (event.type === "run/events-truncated") {
     exactKeys(event, ["type", "omittedInteractions"], "run event");
@@ -1366,7 +1366,23 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
       background: event.background,
     };
   }
-  throw new Error("run event.type is invalid");
+  // An event type this client has never heard of is a newer Bot talking, not a
+  // bad message.
+  //
+  // The Bot Durable Object projects a Turn from the Composition generation it
+  // is pinned to, and the browser decodes it with whatever bundle it loaded;
+  // the two are versioned separately by design, so "the Bot emits an event the
+  // client does not know" is an ordinary Tuesday and not a wire fault. It used
+  // to throw, which failed the decode of the whole page: one `computer/sync`
+  // in one Turn and the person's entire transcript was the empty state, over a
+  // request the server had answered 200. `sendsFrom` already states the rule
+  // for payloads — "a run has to render on a client older than the Bot that
+  // produced it, so an unknown shape is a line in the conversation and never
+  // an exception" — and this is that rule for the events themselves.
+  //
+  // A *known* type that is malformed still throws: that is a real wire fault
+  // and forgiving it would hide bugs.
+  return undefined;
 }
 
 /**
@@ -1375,7 +1391,11 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
  * has already degraded, not a message to refuse.
  */
 function decodeEvents(values: unknown[]): ClientTurnEvent[] {
-  const events = values.map(decodeEvent);
+  // Events this client does not recognise are dropped here, so the rest of the
+  // Turn — what it said, what it called, what it sent — still renders.
+  const events = values
+    .map(decodeEvent)
+    .filter((event): event is ClientRunEventV1 => event !== undefined);
   let index = 0;
   if (events[0]?.type === "run/events-truncated") index = 1;
   if (

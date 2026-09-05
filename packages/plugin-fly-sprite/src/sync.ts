@@ -128,6 +128,10 @@ const STORE_PAGE_LIMIT = 500;
 export const WORKSPACE_SYNC_IGNORED_DIRECTORIES_V1 = [
   "node_modules",
   ".git",
+  // Wrangler's local cache. It is regenerated on demand and its first file,
+  // `.wrangler/cache/cf.json`, is a single minified line — which is what the
+  // Applet canvas opened on before this was excluded (2026-09-05).
+  ".wrangler",
   "dist",
   "build",
   "out",
