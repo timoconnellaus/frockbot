@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../acceptance_metrics.dart';
 import '../client/chat_controller.dart';
 import '../theme/frock_theme.dart' show FrockSkeleton;
+import '../voice/dictation_controller.dart';
 import 'frock_tokens.dart';
 import 'frock_widgets.dart';
 
@@ -18,17 +19,18 @@ class ChatPane extends StatefulWidget {
   final String botName;
   final SheepLook botLook;
 
-  /// Opens the Voice screen. Absent when this device cannot talk (a test
-  /// harness, or an account with no session yet), and the mic button is then
-  /// not drawn at all rather than drawn dead.
-  final VoidCallback? onVoice;
+  /// Dictation for the composer's mic. Absent when this device cannot listen
+  /// (a test harness, or an account with no session yet), and the mic is then
+  /// not drawn at all rather than drawn dead. Gemini Live is not here: it is
+  /// app-wide and lives at the top of the screen.
+  final DictationController? dictation;
   const ChatPane({
     super.key,
     required this.controller,
     required this.onReconnect,
     this.botName = 'your Bot',
     this.botLook = SheepLook.plain,
-    this.onVoice,
+    this.dictation,
   });
   @override
   State<ChatPane> createState() => _ChatPaneState();
@@ -42,6 +44,15 @@ class _ChatPaneState extends State<ChatPane> {
     super.initState();
     editor.text = widget.controller.draft;
     widget.controller.addListener(update);
+    widget.dictation?.addListener(update);
+    attachDictation();
+  }
+
+  /// Dictation writes into this pane's field, so the draft it produces is
+  /// saved by this pane's controller — the one for the Bot on screen.
+  void attachDictation() {
+    widget.dictation?.onDraft = (text) =>
+        unawaited(widget.controller.saveDraft(text));
   }
 
   @override
@@ -52,14 +63,22 @@ class _ChatPaneState extends State<ChatPane> {
       widget.controller.addListener(update);
       editor.text = widget.controller.draft;
     }
+    if (old.dictation != widget.dictation) {
+      old.dictation?.removeListener(update);
+      widget.dictation?.addListener(update);
+    }
+    attachDictation();
   }
 
   void update() {
     if (!mounted) return;
     final draft = widget.controller.draft;
     // A composing region (Android keyboards hold one on the last word) must
-    // not stop the box from emptying once the message has gone through.
+    // not stop the box from emptying once the message has gone through. While
+    // dictation is writing into the field, the field is the truth: the saved
+    // draft is chasing it, not the other way round.
     if (editor.text != draft &&
+        widget.dictation?.capturing != true &&
         (draft.isEmpty || !editor.value.composing.isValid)) {
       editor.text = draft;
     }
@@ -184,6 +203,9 @@ class _ChatPaneState extends State<ChatPane> {
   Widget build(BuildContext context) {
     final c = widget.controller;
     final t = FrockTokens.of(context);
+    final dictation = widget.dictation;
+    final listening =
+        dictation != null && dictation.capturing && !dictation.heard;
     final runs = c.runs;
     final rows = <Widget>[];
     DateTime? previous;
@@ -281,10 +303,31 @@ class _ChatPaneState extends State<ChatPane> {
               ),
             ),
           ),
+        if (dictation?.notice != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+            child: Text(
+              dictation!.notice!,
+              key: const ValueKey('dictation-notice'),
+              style: t.caption.copyWith(color: t.danger),
+            ),
+          ),
         const SizedBox(height: 10),
         FrockComposer(
-          hint: 'Message ${widget.botName}',
-          onVoice: widget.onVoice,
+          hint: listening ? 'Listening…' : 'Message ${widget.botName}',
+          onDictate: dictation == null
+              ? null
+              : () => unawaited(dictation.start(editor)),
+          dictating: dictation?.capturing ?? false,
+          onDictateDone: dictation == null
+              ? null
+              : () {
+                  unawaited(HapticFeedback.lightImpact());
+                  unawaited(dictation.done());
+                },
+          onDictateCancel: dictation == null
+              ? null
+              : () => unawaited(dictation.cancel()),
           sendKey: const ValueKey('send'),
           stopKey: const ValueKey('stop'),
           onSend: c.canSend ? send : null,
@@ -312,7 +355,11 @@ class _ChatPaneState extends State<ChatPane> {
               keyboardType: TextInputType.multiline,
               textInputAction: TextInputAction.newline,
               decoration: InputDecoration.collapsed(
-                hintText: 'Message ${widget.botName}',
+                // While dictation is listening and has heard nothing yet, the
+                // empty field says so rather than inviting typing.
+                hintText: listening
+                    ? 'Listening…'
+                    : 'Message ${widget.botName}',
                 hintStyle: t.composerText.copyWith(color: t.ink3),
               ),
               onChanged: (value) {
@@ -329,6 +376,7 @@ class _ChatPaneState extends State<ChatPane> {
   @override
   void dispose() {
     widget.controller.removeListener(update);
+    widget.dictation?.removeListener(update);
     editor.dispose();
     focus.dispose();
     super.dispose();

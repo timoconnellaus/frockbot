@@ -5,6 +5,7 @@ import 'package:audio_session/audio_session.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart' as pcm;
 import 'package:record/record.dart';
 
+import 'dictation.dart';
 import 'protocol.dart';
 
 /// Why the microphone could not be opened, in the User's terms.
@@ -22,7 +23,16 @@ class VoiceAudioRefusal implements Exception {
 abstract interface class VoiceAudio {
   /// Opens the microphone. Throws [VoiceAudioRefusal] when the User says no,
   /// with a sentence the screen can show unchanged.
-  Future<void> listen(void Function(Uint8List pcm16) onFrame);
+  ///
+  /// [sampleRate] is the rate the far end was told to expect: the assistant's
+  /// [voiceInputSampleRate], or dictation's [voiceDictationSampleRate]. Set
+  /// [playback] false for dictation, which never plays anything back and so
+  /// must not claim the speaker.
+  Future<void> listen(
+    void Function(Uint8List pcm16) onFrame, {
+    int sampleRate,
+    bool playback,
+  });
 
   /// Closes the microphone but leaves playback able to finish a sentence.
   Future<void> silence();
@@ -50,7 +60,8 @@ class DeviceVoiceAudio implements VoiceAudio {
   /// rather than dropped.
   final BytesBuilder _spare = BytesBuilder(copy: true);
 
-  static const int _frameBytes = voiceInputFrameSamples * 2;
+  /// 32 ms of PCM16 at whatever rate this capture was opened with.
+  static int _frameBytes(int sampleRate) => (sampleRate * 32 ~/ 1000) * 2;
 
   /// Speaker by default, and a headset when there is one.
   static final AVAudioSessionCategoryOptions _voiceRouteOptions =
@@ -77,7 +88,11 @@ class DeviceVoiceAudio implements VoiceAudio {
   }
 
   @override
-  Future<void> listen(void Function(Uint8List pcm16) onFrame) async {
+  Future<void> listen(
+    void Function(Uint8List pcm16) onFrame, {
+    int sampleRate = voiceInputSampleRate,
+    bool playback = true,
+  }) async {
     if (!await _recorder.hasPermission()) {
       throw const VoiceAudioRefusal(
         'FrockBot needs the microphone to hear you. Turn it on for FrockBot in '
@@ -85,7 +100,7 @@ class DeviceVoiceAudio implements VoiceAudio {
       );
     }
     await _configureSession();
-    if (!_playing) {
+    if (playback && !_playing) {
       await pcm.FlutterPcmSound.setup(
         sampleRate: voiceOutputSampleRate,
         channelCount: 1,
@@ -96,9 +111,9 @@ class DeviceVoiceAudio implements VoiceAudio {
     final Stream<Uint8List> stream;
     try {
       stream = await _recorder.startStream(
-        const RecordConfig(
+        RecordConfig(
           encoder: AudioEncoder.pcm16bits,
-          sampleRate: voiceInputSampleRate,
+          sampleRate: sampleRate,
           numChannels: 1,
           echoCancel: true,
           noiseSuppress: true,
@@ -113,16 +128,17 @@ class DeviceVoiceAudio implements VoiceAudio {
     }
     // The platform hands over whatever size it likes; the socket wants the
     // browser's 32 ms frame, so the stream is re-cut here.
+    final frameBytes = _frameBytes(sampleRate);
     _capture = stream.listen((chunk) {
       _spare.add(chunk);
-      if (_spare.length < _frameBytes) return;
+      if (_spare.length < frameBytes) return;
       final buffered = _spare.takeBytes();
       var offset = 0;
-      while (buffered.length - offset >= _frameBytes) {
+      while (buffered.length - offset >= frameBytes) {
         onFrame(
-          Uint8List.fromList(buffered.sublist(offset, offset + _frameBytes)),
+          Uint8List.fromList(buffered.sublist(offset, offset + frameBytes)),
         );
-        offset += _frameBytes;
+        offset += frameBytes;
       }
       if (offset < buffered.length) _spare.add(buffered.sublist(offset));
     }, cancelOnError: false);

@@ -64,9 +64,19 @@ class FrockChatScreen extends StatelessWidget {
                     Text('Bob', style: t.barTitle),
                   ],
                 ),
-                trailing: const FrockIconButton(
-                  Icons.grid_view_outlined,
-                  semanticLabel: 'Applets',
+                reserve: FrockTokens.controlMd * 3 + 8,
+                trailing: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FrockIconButton(
+                      Icons.graphic_eq_rounded,
+                      semanticLabel: 'Voice',
+                    ),
+                    FrockIconButton(
+                      Icons.grid_view_outlined,
+                      semanticLabel: 'Applets',
+                    ),
+                  ],
                 ),
               ),
               Expanded(
@@ -140,7 +150,7 @@ class FrockChatScreen extends StatelessWidget {
               const SizedBox(height: 12),
               const FrockComposer(
                 hint: 'Message Bob',
-                onVoice: _noop,
+                onDictate: _noop,
                 onSend: _noop,
               ),
             ],

@@ -523,7 +523,10 @@ class FrockComposer extends StatelessWidget {
     super.key,
     required this.hint,
     this.field,
-    this.onVoice,
+    this.onDictate,
+    this.dictating = false,
+    this.onDictateDone,
+    this.onDictateCancel,
     this.onSend,
     this.onStop,
     this.stopping = false,
@@ -535,7 +538,16 @@ class FrockComposer extends StatelessWidget {
   /// The live text field. When null the composer draws [hint] as a placeholder
   /// (the gallery and the match check use that form).
   final Widget? field;
-  final VoidCallback? onVoice;
+
+  /// Starts dictation. Absent on a platform that cannot listen, and the mic
+  /// is then not drawn at all rather than drawn dead.
+  final VoidCallback? onDictate;
+
+  /// True while dictation is capturing: the mic becomes Done, with Cancel
+  /// beside it. Gemini Live is not here — it lives at the top of the screen.
+  final bool dictating;
+  final VoidCallback? onDictateDone;
+  final VoidCallback? onDictateCancel;
 
   /// Null disables Send: the button stays, dimmed, so the pill keeps its shape.
   final VoidCallback? onSend;
@@ -583,12 +595,30 @@ class FrockComposer extends StatelessWidget {
               ),
             ),
           ),
-          if (onVoice != null)
+          if (dictating) ...[
+            FrockIconButton(
+              Icons.close_rounded,
+              key: const ValueKey('dictate-cancel'),
+              size: FrockTokens.composerButton,
+              onTap: onDictateCancel,
+              semanticLabel: 'Cancel',
+            ),
+            const SizedBox(width: 4),
+            FrockIconButton(
+              Icons.stop_rounded,
+              key: const ValueKey('dictate-done'),
+              primary: true,
+              size: FrockTokens.composerButton,
+              onTap: onDictateDone,
+              semanticLabel: 'Done',
+            ),
+          ] else if (onDictate != null)
             FrockIconButton(
               Icons.mic_none_rounded,
+              key: const ValueKey('dictate'),
               size: FrockTokens.composerButton,
-              onTap: onVoice,
-              semanticLabel: 'Voice',
+              onTap: onDictate,
+              semanticLabel: 'Dictate',
             ),
           if (onStop != null) ...[
             const SizedBox(width: 4),
@@ -753,10 +783,21 @@ class _FrockPulseState extends State<FrockPulse>
 
 /// The 44px app bar: leading, centred title, trailing.
 class FrockBar extends StatelessWidget {
-  const FrockBar({super.key, this.leading, this.title, this.trailing});
+  const FrockBar({
+    super.key,
+    this.leading,
+    this.title,
+    this.trailing,
+    this.reserve,
+  });
   final Widget? leading;
   final Widget? title;
   final Widget? trailing;
+
+  /// How much room each end needs. Defaults to two icon buttons; a bar with
+  /// three actions passes its own, so a long Bot name is trimmed rather than
+  /// drawn under them.
+  final double? reserve;
   @override
   Widget build(BuildContext context) {
     // The ends size to what they hold (one or two icon buttons); the title
@@ -766,12 +807,12 @@ class FrockBar extends StatelessWidget {
       height: FrockTokens.bar,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          const room = FrockTokens.controlMd * 2 + 8;
+          final room = reserve ?? FrockTokens.controlMd * 2 + 8;
           return Stack(
             children: [
               Positioned.fill(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: room),
+                  padding: EdgeInsets.symmetric(horizontal: room),
                   child: Center(child: title),
                 ),
               ),
