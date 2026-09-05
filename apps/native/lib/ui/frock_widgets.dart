@@ -390,9 +390,16 @@ class FrockPill extends StatelessWidget {
           Icon(icon, size: 16, color: fg),
           const SizedBox(width: 6),
         ],
-        Text(
-          label,
-          style: t.pillLabel.copyWith(color: fg, fontSize: fs),
+        // A pill keeps one line. At very large text sizes the label scales
+        // down inside the pill rather than spilling out of it.
+        Flexible(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              style: t.pillLabel.copyWith(color: fg, fontSize: fs),
+            ),
+          ),
         ),
       ],
     );
@@ -478,17 +485,34 @@ class FrockComposer extends StatelessWidget {
   const FrockComposer({
     super.key,
     required this.hint,
+    this.field,
     this.onVoice,
     this.onSend,
+    this.onStop,
+    this.stopping = false,
+    this.sendKey,
+    this.stopKey,
   });
   final String hint;
+
+  /// The live text field. When null the composer draws [hint] as a placeholder
+  /// (the gallery and the match check use that form).
+  final Widget? field;
   final VoidCallback? onVoice;
+
+  /// Null disables Send: the button stays, dimmed, so the pill keeps its shape.
   final VoidCallback? onSend;
+
+  /// Non-null while a reply is running; shows Stop beside Send.
+  final VoidCallback? onStop;
+  final bool stopping;
+  final Key? sendKey;
+  final Key? stopKey;
   @override
   Widget build(BuildContext context) {
     final t = FrockTokens.of(context);
     return Container(
-      height: FrockTokens.composer,
+      constraints: const BoxConstraints(minHeight: FrockTokens.composer),
       padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
       decoration: BoxDecoration(
         color: t.sheet,
@@ -505,9 +529,16 @@ class FrockComposer extends StatelessWidget {
         ],
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
-            child: Text(hint, style: t.message.copyWith(color: t.ink3)),
+            child: Padding(
+              // Centres a one-line field in the 44px pill; a taller field
+              // grows upward from the same baseline.
+              padding: const EdgeInsets.symmetric(vertical: 7),
+              child:
+                  field ?? Text(hint, style: t.message.copyWith(color: t.ink3)),
+            ),
           ),
           if (onVoice != null)
             FrockIconButton(
@@ -516,13 +547,31 @@ class FrockComposer extends StatelessWidget {
               onTap: onVoice,
               semanticLabel: 'Voice',
             ),
+          if (onStop != null) ...[
+            const SizedBox(width: 4),
+            Opacity(
+              opacity: stopping ? 0.5 : 1,
+              child: FrockIconButton(
+                Icons.stop_rounded,
+                key: stopKey,
+                filled: true,
+                size: FrockTokens.composerButton,
+                onTap: stopping ? null : onStop,
+                semanticLabel: 'Stop',
+              ),
+            ),
+          ],
           const SizedBox(width: 4),
-          FrockIconButton(
-            Icons.arrow_upward_rounded,
-            primary: true,
-            size: FrockTokens.composerButton,
-            onTap: onSend,
-            semanticLabel: 'Send',
+          Opacity(
+            opacity: onSend == null ? 0.45 : 1,
+            child: FrockIconButton(
+              Icons.arrow_upward_rounded,
+              key: sendKey,
+              primary: true,
+              size: FrockTokens.composerButton,
+              onTap: onSend,
+              semanticLabel: 'Send',
+            ),
           ),
         ],
       ),
@@ -616,7 +665,20 @@ class _FrockPulseState extends State<FrockPulse>
   late final AnimationController c = AnimationController(
     vsync: this,
     duration: FrockTokens.pulse,
-  )..repeat(reverse: true);
+  );
+
+  // Reduced motion means no ticker at all, not a hidden one: a dot that still
+  // schedules frames keeps the screen awake and never lets a test settle.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      c.stop();
+    } else if (!c.isAnimating) {
+      c.repeat(reverse: true);
+    }
+  }
+
   @override
   void dispose() {
     c.dispose();
@@ -662,6 +724,54 @@ class FrockBar extends StatelessWidget {
           Expanded(child: Center(child: title)),
           SizedBox(width: FrockTokens.controlMd, child: trailing),
         ],
+      ),
+    );
+  }
+}
+
+/// The User's message: a soft bubble, one step above the ground, right-aligned.
+class FrockUserMessage extends StatelessWidget {
+  const FrockUserMessage(this.text, {super.key});
+  final String text;
+  @override
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    return Align(
+      alignment: Alignment.centerRight,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width * 0.78,
+        ),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(13, 8, 13, 8),
+          decoration: BoxDecoration(
+            color: t.tile,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(18),
+              topRight: Radius.circular(18),
+              bottomLeft: Radius.circular(18),
+              bottomRight: Radius.circular(6),
+            ),
+          ),
+          child: Text(text, style: t.message),
+        ),
+      ),
+    );
+  }
+}
+
+/// The Bot's reply: plain text, no bubble, receipts inline.
+class FrockBotMessage extends StatelessWidget {
+  const FrockBotMessage({super.key, required this.children});
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    return DefaultTextStyle(
+      style: t.message,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
       ),
     );
   }

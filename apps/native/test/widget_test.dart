@@ -5,7 +5,7 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/main.dart';
+import 'package:frockbot_native/ui/chat_pane.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 class MemoryStore implements LocalStore {
@@ -293,7 +293,10 @@ void main() {
       ),
     );
     await tester.tap(find.byKey(const ValueKey('reconnect')));
-    await tester.pumpAndSettle();
+    // The offline line pulses, so the tree never settles; two frames are
+    // enough for the reconnect to run.
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
     expect(reconnects, 1);
     await tester.pumpWidget(const SizedBox());
     c.dispose();
