@@ -26,6 +26,7 @@ apps/native/build/
 apps/native/.dart_tool/
 apps/native/macos/Flutter/ephemeral/
 apps/native/android/.gradle/
+apps/native/android/build/
 apps/native/spec/a2ui-0.9.1/*.json
 apps/native/android/local.properties
 apps/native/android/.kotlin/

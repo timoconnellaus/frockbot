@@ -134,5 +134,10 @@ declare const validators: {
     value: unknown,
   ): value is ProtocolTypes["NotificationDirectory"];
   isMarkReadReceipt(value: unknown): value is ProtocolTypes["MarkReadReceipt"];
+  isBotLifecycleDirectory(
+    value: unknown,
+  ): value is ProtocolTypes["BotLifecycleDirectory"];
+  isAuditPage(value: unknown): value is ProtocolTypes["AuditPage"];
+  isSetupHistory(value: unknown): value is ProtocolTypes["SetupHistory"];
 };
 export default validators;

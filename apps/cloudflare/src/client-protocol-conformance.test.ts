@@ -43,8 +43,12 @@ import {
   decodeBotLifecycleCommandV1,
   decodeBotLifecycleViewV1,
   decodeBotLifecycleReceiptV1,
+  decodeBotLifecycleDirectoryViewV1,
   decodeCreateBotCommandV1,
 } from "@frockbot/plugin-flock/shared";
+
+import { decodeClientAuditPageV1 } from "@frockbot/plugin-audit";
+import { decodeCompositionGenerationListViewV1 } from "@frockbot/configuration-core";
 
 const existing: Record<string, (value: unknown) => unknown> = {
   TurnCommand: decodeClientTurnCommandV1,
@@ -84,6 +88,9 @@ const existing: Record<string, (value: unknown) => unknown> = {
   Acknowledgement: decodeAcknowledgement,
   BotDirectory: decodeDirectoryViewV1,
   BotLifecycle: decodeBotLifecycleViewV1,
+  BotLifecycleDirectory: decodeBotLifecycleDirectoryViewV1,
+  AuditPage: decodeClientAuditPageV1,
+  SetupHistory: decodeCompositionGenerationListViewV1,
   BotLifecycleCommand: decodeBotLifecycleCommandV1,
   BotLifecycleReceipt: decodeBotLifecycleReceiptV1,
   BotCreateCommand: decodeCreateBotCommandV1,

@@ -679,6 +679,93 @@ export type MarkReadReceipt = {
   status: "applied";
   unread: UnreadView;
 };
+export type BotLifecycleDirectory = {
+  schemaVersion: 1;
+  lifecycles: Array<BotLifecycle>;
+};
+export type AuditPage = {
+  schemaVersion: 1;
+  entries: Array<{
+    schemaVersion: 1;
+    botId: BotId;
+    runId: string;
+    occurrenceId: string;
+    turn: number;
+    step: number;
+    ordinal: number;
+    effectId: string;
+    at: Instant;
+    kind: "shell" | "browser" | "mcp" | "file" | "process";
+    target: string;
+    toolName: string;
+    argumentDigest: Digest;
+    preview: string;
+    outcome: "ok" | "error" | "refused" | "interrupted" | "unknown";
+    exitCode?: number;
+    durationMs?: number;
+    bytesOut?: number;
+  }>;
+  page: { truncated: boolean; nextCursor?: string };
+  total: number;
+  indexState: "ready" | "rebuilding" | "truncated";
+};
+export type SetupHistory = {
+  schemaVersion: 1;
+  botId: BotId;
+  currentGenerationId: GenerationId;
+  generations: Array<{
+    schemaVersion: 1;
+    botId: BotId;
+    generationId: GenerationId;
+    createdAt: Instant;
+    status: "pending" | "active" | "superseded" | "failed" | "quarantined";
+    origin:
+      | { kind: "bootstrap" }
+      | {
+          kind: "bot-authored";
+          runId: string;
+          sessionId: string;
+          turnId: string;
+        }
+      | { kind: "user-install"; userId: Identifier }
+      | { kind: "revert"; revertsTo: GenerationId; userId: Identifier }
+      | {
+          kind: "revert";
+          revertsTo: GenerationId;
+          botId: BotId;
+          runId: string;
+          turnId: string;
+        };
+    parentGenerationId?: GenerationId;
+    isCurrent: boolean;
+    members: Array<{
+      packageId: Identifier;
+      version: string;
+      provenance:
+        | { kind: "first-party" }
+        | { kind: "catalog"; catalogId: string; catalogGeneration: string }
+        | { kind: "user"; userId: Identifier; authoredAt: Instant }
+        | {
+            kind: "bot";
+            botId: BotId;
+            sessionId: string;
+            turnId: string;
+            runId: string;
+            authoredAt: Instant;
+          };
+      contentHash?: Digest;
+      source?: string;
+    }>;
+    failures: Array<{
+      attempt: number;
+      at: Instant;
+      phase: "resolve" | "bundle" | "mount" | "health";
+      message: string;
+    }>;
+    quarantine?: { quarantinedAt: Instant; reason: string; failures: number };
+  }>;
+  cursor?: string;
+};
 export interface ProtocolTypes {
   Identifier: Identifier;
   BotId: BotId;
@@ -761,4 +848,7 @@ export interface ProtocolTypes {
   ConnectionsFrame: ConnectionsFrame;
   NotificationDirectory: NotificationDirectory;
   MarkReadReceipt: MarkReadReceipt;
+  BotLifecycleDirectory: BotLifecycleDirectory;
+  AuditPage: AuditPage;
+  SetupHistory: SetupHistory;
 }
