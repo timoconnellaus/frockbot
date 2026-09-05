@@ -137,6 +137,8 @@
     },
   ],
   "vars": {
+    // Android development upgrade track. macOS awaits its signed return gate.
+    "NATIVE_SLICE_2_AUTH": "android",
     "DEFAULT_APPLICATION_HASH": "foundation-v1",
     // The provider is Frock AI; these two values are the *Cloudflare dashboard*
     // resource names, which are still spelled `flock`. Renaming them there is a
