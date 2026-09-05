@@ -1,4 +1,5 @@
 import type { ClientPlugin } from "@frockbot/client-core";
+import "./tokens.generated.css";
 import "./theme.css";
 import { defineClientContribution } from "@frockbot/kernel-contracts/contributions";
 
