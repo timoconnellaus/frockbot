@@ -1352,8 +1352,26 @@ describe("the GUI is never driven from the shell", () => {
       "cat /home/box/chromium.log",
       "ls /home/box/bin/xdotool",
       "printf '%s' scrotum",
+      // A file written through a heredoc is data, however its lines start.
+      // This is the Applet case: a Bot writing ui.tsx was refused because
+      // the TypeScript began with `import`.
+      'D=/tmp/applet; cat > "$D/ui.tsx" <<\'EOF\'\nimport { useState } from "react";\nimport { mount } from "@frockbot/applet-sdk/client";\nEOF\nls "$D"',
+      "python3 - <<EOF\nimport os\nprint(os.getcwd())\nEOF",
+      "cat <<-'DONE'\n\tchromium --headless\n\tDONE",
+      'echo "xdotool key Return"',
+      "node -e 'import(\"fs\")'",
     ]) {
       expect(shellGuiCommandV1(command), command).toBeUndefined();
+    }
+  });
+
+  test("a heredoc's own command and a substitution inside quotes still count", () => {
+    for (const command of [
+      "xdotool - <<EOF\nkey Return\nEOF",
+      'echo "$(xdotool key Return)"',
+      "cat <<EOF\nnothing\nEOF\nscrot out.png",
+    ]) {
+      expect(shellGuiCommandV1(command), command).toBeDefined();
     }
   });
 
