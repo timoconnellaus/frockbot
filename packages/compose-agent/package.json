@@ -1,0 +1,33 @@
+{
+  "name": "@frockbot/compose-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Framework-neutral agent primitives built on FrockBot Compose.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/compose-core": "workspace:*",
+    "@frockbot/compose-tools": "workspace:*",
+    "@tanstack/store": "^0.11.1"
+  },
+  "devDependencies": {
+    "@frockbot/compose-typescript": "workspace:*",
+    "@types/bun": "1.4.0",
+    "@types/node": "26.4.0",
+    "typescript": "^7.0.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "packages/compose-agent"
+  }
+}

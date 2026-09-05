@@ -1,0 +1,35 @@
+{
+  "name": "@frockbot/compose-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Framework-agnostic runtime extension surface for FrockBot Compose.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./base": "./src/base.ts",
+    "./catalog": "./src/catalog.ts",
+    "./generations": "./src/generations.ts",
+    "./grants": "./src/grants/index.ts",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@tanstack/store": "^0.11.1"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "@types/node": "26.4.0",
+    "rolldown": "^1.2.6",
+    "typescript": "^7.0.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "packages/compose-core"
+  }
+}
