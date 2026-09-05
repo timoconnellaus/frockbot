@@ -1,3 +1,4 @@
+import type { ConnectionTriggerTypeV1 } from "@frockbot/connection-core";
 import type { InjectionKey, Ref } from "vue";
 import type {
   RoutineHookMintV1,
@@ -22,6 +23,8 @@ export interface RoutinesClientState {
   /** The Bot the loaded Routines belong to; nothing is shown for another. */
   botId?: string;
   routines: RoutineViewV1[];
+  triggers?: ConnectionTriggerTypeV1[];
+  triggerError?: string;
   /** Run logs by Routine, loaded on demand when a log is opened. */
   runs: Record<string, RoutineRunEntryViewV1[]>;
   /**

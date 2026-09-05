@@ -1,3 +1,4 @@
+import { composioEventRoute } from "./webhook-route.js";
 import {
   ConfigurationDecodeError,
   decodeRevokeConnectionCommandV1,
@@ -88,7 +89,7 @@ export interface ComposioBackendHost {
   composioRequest?(userId: string, input: unknown): Promise<unknown>;
 }
 
-export function createConfiguredComposioBackendContribution(
+function createConfiguredComposioConnections(
   host: ComposioBackendHost,
 ): BackendRouteContribution {
   const secret = host.readSecret?.("FROCKBOT_AUTHORIZATION_STATE_SECRET");
@@ -192,6 +193,18 @@ export function createConfiguredComposioBackendContribution(
         ),
     }),
   });
+}
+
+export function createConfiguredComposioBackendContribution(
+  host: ComposioBackendHost,
+): BackendRouteContribution {
+  const connections = createConfiguredComposioConnections(host);
+  return {
+    ...connections,
+    publicRoute: async (request, url, context) =>
+      (await composioEventRoute(host, request, url)) ??
+      (await connections.publicRoute?.(request, url, context)),
+  };
 }
 
 function decodeCompletion(

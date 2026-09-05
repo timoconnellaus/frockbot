@@ -21,7 +21,8 @@
     "./shared": "./src/shared.ts",
     "./storage-keys": "./src/storage-keys.ts",
     "./store": "./src/store.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./subscriptions": "./src/subscriptions.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"
@@ -40,7 +41,8 @@
     "@frockbot/plugin-shell": "workspace:*",
     "cordis": "4.0.0-rc.8",
     "croner": "10.0.1",
-    "vue": "3.5.41"
+    "vue": "3.5.41",
+    "@frockbot/connection-core": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",
