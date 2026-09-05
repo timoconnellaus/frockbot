@@ -37,6 +37,10 @@ describe("Applet boundaries", () => {
   test("only the Applet Durable Object mounts a facet", () => {
     const allowed = new Set([
       "apps/cloudflare/src/applet-state.ts",
+      // That object's own proof. It reaches the facet surface only through
+      // `runInDurableObject` on the Applet Durable Object itself — to snapshot
+      // and instrument what the object does — and mounts nothing of its own.
+      "apps/cloudflare/test/applets.workerd.ts",
       // The lane S1 spike, deliberately kept out of `test:workerd`.
       "apps/cloudflare/test/spike-applet-facet-worker.ts",
       // This vendored reference host is deliberately outside the product
