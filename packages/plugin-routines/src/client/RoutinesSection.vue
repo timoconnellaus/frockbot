@@ -19,6 +19,7 @@ import {
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import { computed, inject, reactive, ref, watch } from "vue";
+import { triggerObject } from "@frockbot/connection-core";
 import type { RoutineViewV1 } from "../shared.js";
 import { routinesStateKey } from "./state.js";
 
@@ -56,10 +57,84 @@ const form = reactive({
   routineId: undefined as string | undefined,
   name: "",
   prompt: "",
-  timing: "schedule" as "schedule" | "webhook",
+  timing: "schedule" as "schedule" | "webhook" | "connection",
   schedule: "",
+  connectionId: "",
+  triggerType: "",
+  config: {} as Record<string, unknown>,
   timezone: "UTC",
 });
+
+const accounts = computed(() => [
+  ...new Map(
+    (routines.value.triggers ?? []).map((item) => [item.connectionId, item]),
+  ).values(),
+]);
+const events = computed(() =>
+  (routines.value.triggers ?? []).filter(
+    (item) => item.connectionId === form.connectionId,
+  ),
+);
+const selectedEvent = computed(() =>
+  events.value.find((item) => item.triggerType === form.triggerType),
+);
+const eventFields = computed(() => {
+  const schema = selectedEvent.value?.configSchema;
+  if (!schema || !triggerObject(schema.properties)) return [];
+  return Object.entries(schema.properties).flatMap(([key, value]) =>
+    triggerObject(value)
+      ? [
+          {
+            key,
+            label:
+              typeof value.title === "string"
+                ? value.title
+                : key
+                    .replaceAll("_", " ")
+                    .replace(/^./, (letter) => letter.toUpperCase()),
+            hint:
+              typeof value.description === "string"
+                ? value.description
+                : undefined,
+            type: value.type,
+            options: Array.isArray(value.enum)
+              ? value.enum.filter(
+                  (item): item is string => typeof item === "string",
+                )
+              : [],
+            required:
+              Array.isArray(schema.required) && schema.required.includes(key),
+          },
+        ]
+      : [],
+  );
+});
+function selectEvent(): void {
+  form.config = {};
+  const properties = selectedEvent.value?.configSchema.properties;
+  if (triggerObject(properties))
+    for (const [key, value] of Object.entries(properties)) {
+      if (triggerObject(value) && value.default !== undefined)
+        form.config[key] = structuredClone(value.default);
+    }
+}
+function selectAccount(): void {
+  form.triggerType = events.value[0]?.triggerType ?? "";
+  selectEvent();
+}
+function eventState(routine: RoutineViewV1): string {
+  return (
+    {
+      active: "Listening",
+      starting: "Starting…",
+      paused: "Paused",
+      missing: "Listening stopped — edit and save to restart",
+      failed: "Could not start listening — review the event settings",
+      unavailable: "Connection unavailable — check Connectors",
+    }[routine.eventStatus ?? "unavailable"] ??
+    "Connection unavailable — check Connectors"
+  );
+}
 
 /**
  * The reason the last save was refused, held beside the form rather than in
@@ -125,7 +200,9 @@ async function copyHook(): Promise<void> {
 function summary(routine: RoutineViewV1): string {
   return routine.schedule
     ? `${routine.schedule} · ${routine.timezone}`
-    : "Webhook trigger";
+    : routine.trigger?.kind === "connection"
+      ? (routine.eventName ?? "Connected account event")
+      : "Webhook trigger";
 }
 
 /** A durable moment, read in the Routine's own zone — the one it fires on. */
@@ -138,6 +215,8 @@ function startCreate(): void {
   form.name = "";
   form.prompt = "";
   form.timing = "schedule";
+  form.connectionId = accounts.value[0]?.connectionId ?? "";
+  selectAccount();
   form.schedule = "0 9 * * *";
   // The reader's own zone, not UTC: a schedule is almost always meant in the
   // day the person writing it is living in, and the Bot picks the same when it
@@ -151,7 +230,16 @@ function startEdit(routine: RoutineViewV1): void {
   form.routineId = routine.routineId;
   form.name = routine.name;
   form.prompt = routine.prompt;
-  form.timing = routine.schedule ? "schedule" : "webhook";
+  form.timing = routine.schedule
+    ? "schedule"
+    : routine.trigger?.kind === "connection"
+      ? "connection"
+      : "webhook";
+  if (routine.trigger?.kind === "connection") {
+    form.connectionId = routine.trigger.connectionId;
+    form.triggerType = routine.trigger.triggerType;
+    form.config = structuredClone(routine.trigger.config);
+  }
   form.schedule = routine.schedule ?? "";
   form.timezone = routine.timezone;
   saveError.value = undefined;
@@ -163,13 +251,46 @@ async function submit(): Promise<void> {
   if (!id) return;
   saveError.value = undefined;
   try {
+    if (form.timing === "connection" && !selectedEvent.value)
+      throw new Error("Choose an available account and event");
+    const config = Object.fromEntries(
+      Object.entries(form.config).filter(
+        ([, value]) => value !== "" && value !== undefined,
+      ),
+    );
+    for (const field of eventFields.value) {
+      if (field.required && config[field.key] === undefined)
+        throw new Error(`Enter ${field.label.toLowerCase()}`);
+      if (
+        config[field.key] !== undefined &&
+        (field.type === "array" || field.type === "object") &&
+        typeof config[field.key] === "string"
+      ) {
+        try {
+          config[field.key] = JSON.parse(String(config[field.key]));
+        } catch {
+          throw new Error(
+            `Check ${field.label.toLowerCase()}: enter valid JSON`,
+          );
+        }
+      }
+    }
     await routines.value.save(id, {
       ...(form.routineId ? { routineId: form.routineId } : {}),
       name: form.name.trim(),
       prompt: form.prompt.trim(),
       ...(form.timing === "schedule"
         ? { schedule: form.schedule.trim() }
-        : { trigger: { kind: "webhook" as const } }),
+        : form.timing === "connection"
+          ? {
+              trigger: {
+                kind: "connection" as const,
+                connectionId: form.connectionId,
+                triggerType: form.triggerType,
+                config,
+              },
+            }
+          : { trigger: { kind: "webhook" as const } }),
       timezone: form.timezone.trim(),
     });
     formOpen.value = false;
@@ -185,7 +306,9 @@ async function submit(): Promise<void> {
     saveError.value =
       serverRefusalMessageV1(error) ??
       routines.value.error ??
-      presentClientFailureV1(error, "save the Routine");
+      (error instanceof Error
+        ? error.message
+        : presentClientFailureV1(error, "save the Routine"));
   }
 }
 
@@ -232,8 +355,8 @@ async function toggleLog(routineId: string): Promise<void> {
       <span class="routines__intro">
         <strong>Routines</strong>
         <small>
-          Standing instructions this Bot runs on a schedule, or when a webhook
-          fires.
+          Standing instructions this Bot runs on a schedule or when something
+          happens.
         </small>
       </span>
       <UiButton type="button" :disabled="!botId" @click="startCreate">
@@ -291,6 +414,13 @@ async function toggleLog(routineId: string): Promise<void> {
           </UiButton>
         </div>
       </div>
+      <p
+        v-if="routine.trigger?.kind === 'connection'"
+        class="routines__note"
+        role="status"
+      >
+        {{ eventState(routine) }}
+      </p>
       <dl class="routine-card__facts">
         <div>
           <dt>Next run</dt>
@@ -301,7 +431,7 @@ async function toggleLog(routineId: string): Promise<void> {
             <template v-else>—</template>
           </dd>
         </div>
-        <div v-if="routine.trigger">
+        <div v-if="routine.trigger?.kind === 'webhook'">
           <dt>Webhook key</dt>
           <dd>
             {{
@@ -354,7 +484,7 @@ async function toggleLog(routineId: string): Promise<void> {
           Run now
         </UiButton>
         <UiButton
-          v-if="routine.trigger"
+          v-if="routine.trigger?.kind === 'webhook'"
           type="button"
           :disabled="routines.busy"
           @click="botId && routines.rotateKey(botId, routine.routineId)"
@@ -362,7 +492,7 @@ async function toggleLog(routineId: string): Promise<void> {
           {{ routine.hookKeyVersion ? "Rotate key" : "Mint key" }}
         </UiButton>
         <UiButton
-          v-if="routine.trigger && routine.hookKeyVersion"
+          v-if="routine.trigger?.kind === 'webhook' && routine.hookKeyVersion"
           type="button"
           :disabled="routines.busy"
           @click="botId && routines.revokeKey(botId, routine.routineId)"
@@ -469,7 +599,103 @@ async function toggleLog(routineId: string): Promise<void> {
           <input v-model="form.timing" type="radio" value="webhook" />
           <span>A webhook</span>
         </label>
+        <label>
+          <input v-model="form.timing" type="radio" value="connection" />
+          <span>An event in a connected account</span>
+        </label>
       </fieldset>
+      <template v-if="form.timing === 'connection'">
+        <p
+          v-if="routines.triggerError"
+          class="routine-form__error"
+          role="alert"
+        >
+          {{ routines.triggerError }}
+        </p>
+        <p v-else-if="!accounts.length" class="routines__note">
+          No events are available for your connected accounts yet.
+        </p>
+        <template v-else>
+          <UiField label="Account">
+            <select v-model="form.connectionId" @change="selectAccount">
+              <option disabled value="">Choose an account</option>
+              <option
+                v-for="account in accounts"
+                :key="account.connectionId"
+                :value="account.connectionId"
+              >
+                {{ account.connectorName }} · {{ account.accountName }}
+              </option>
+            </select>
+          </UiField>
+          <UiField label="When" :hint="selectedEvent?.description">
+            <select v-model="form.triggerType" @change="selectEvent">
+              <option disabled value="">Choose an event</option>
+              <option
+                v-for="event in events"
+                :key="event.triggerType"
+                :value="event.triggerType"
+              >
+                {{ event.name }}
+              </option>
+            </select>
+          </UiField>
+          <UiField
+            v-for="field in eventFields"
+            :key="field.key"
+            :label="field.label"
+            :hint="field.hint"
+          >
+            <select
+              v-if="field.options.length"
+              v-model="form.config[field.key]"
+              :required="field.required"
+            >
+              <option v-if="!field.required" value="">Any</option>
+              <option
+                v-for="option in field.options"
+                :key="option"
+                :value="option"
+              >
+                {{ option }}
+              </option>
+            </select>
+            <input
+              v-else-if="field.type === 'boolean'"
+              v-model="form.config[field.key]"
+              type="checkbox"
+            />
+            <input
+              v-else-if="field.type === 'number' || field.type === 'integer'"
+              v-model.number="form.config[field.key]"
+              type="number"
+              :step="field.type === 'integer' ? 1 : 'any'"
+              :required="field.required"
+            />
+            <textarea
+              v-else-if="field.type === 'array' || field.type === 'object'"
+              :value="
+                typeof form.config[field.key] === 'string'
+                  ? String(form.config[field.key])
+                  : JSON.stringify(form.config[field.key], null, 2)
+              "
+              @input="
+                form.config[field.key] = (
+                  $event.target as HTMLTextAreaElement
+                ).value
+              "
+              :required="field.required"
+              rows="3"
+            />
+            <input
+              v-else
+              v-model="form.config[field.key]"
+              :required="field.required"
+              maxlength="8000"
+            />
+          </UiField>
+        </template>
+      </template>
       <UiField
         v-if="form.timing === 'schedule'"
         label="Schedule"
@@ -493,7 +719,7 @@ async function toggleLog(routineId: string): Promise<void> {
       >
         {{ scheduleError }}
       </p>
-      <p v-else class="routines__note">
+      <p v-if="form.timing === 'webhook'" class="routines__note">
         A delivery key is minted when the Routine is saved, and shown once.
       </p>
       <UiField label="Time zone">

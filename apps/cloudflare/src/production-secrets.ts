@@ -92,6 +92,12 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
 export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1[] =
   [
     {
+      name: "COMPOSIO_WEBHOOK_SECRET",
+      why: "Verifies service event deliveries against the project webhook subscription.",
+      degraded:
+        "service-event Routines are unavailable; existing Connections and tools keep working",
+    },
+    {
       name: "COMPOSIO_API_KEY",
       why: "Connect Link and toolkit API for external services.",
       degraded:
