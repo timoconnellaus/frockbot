@@ -1370,13 +1370,15 @@ describe("detached Turn projection", () => {
     );
 
     // The failure is a notice under the reply, never a bubble that reads as
-    // the Bot saying the provider's own words.
+    // the Bot saying the provider's own words — and the retry the sentence
+    // used to only ask for is the action beside it.
     expect(messages).toMatchObject([
       { role: "user", status: "completed" },
       {
         role: "assistant",
         text: "",
-        notice: "This Bot couldn't finish its reply. Try again.",
+        notice: "This Bot couldn't finish its reply.",
+        retry: "resend-turn",
         status: "error",
       },
     ]);

@@ -23,6 +23,23 @@ const NO_STORE = {
   "referrer-policy": "no-referrer",
 };
 
+/** Deployment policy, never a client-selected target or a per-Bot grant. */
+export function nativeReturnUris(flag: string | undefined): readonly string[] {
+  if (flag === "android") return [NATIVE_RETURN_ANDROID];
+  if (flag === "android,macos")
+    return [NATIVE_RETURN_ANDROID, NATIVE_RETURN_MACOS];
+  return [];
+}
+
+export function isNativeAuthPath(path: string): boolean {
+  return (
+    path.startsWith("/api/auth/native/") ||
+    path.startsWith("/native/") ||
+    path === "/.well-known/assetlinks.json" ||
+    path === "/.well-known/apple-app-site-association"
+  );
+}
+
 interface StartClaims {
   kind: "start";
   start: AuthStartCommand;
@@ -50,6 +67,8 @@ export interface NativeAuthOptions {
   auth: GatewayAuth;
   // Only associated, signed targets belong here. No request can add an entry.
   returnUris: readonly string[];
+  /** Existing account/signup policy, checked before the first User-DO write. */
+  canIssueSession(userId: string): Promise<boolean>;
   session(
     userId: string,
     operation: NativeSessionOperation,
@@ -256,13 +275,8 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
     },
     async route(request) {
       const url = new URL(request.url);
-      if (
-        !url.pathname.startsWith("/api/auth/native/") &&
-        !url.pathname.startsWith("/native/") &&
-        !url.pathname.startsWith("/.well-known/")
-      )
-        return undefined;
-      // This prototype's callback origin is deliberately not configurable by input.
+      if (!isNativeAuthPath(url.pathname)) return undefined;
+      // The signed application's callback origin is not configurable by input.
       if (url.origin !== NATIVE_ORIGIN) return error(403);
       try {
         if (
@@ -335,6 +349,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           ["/native/authorize", "/native/complete"].includes(url.pathname) &&
           request.method === "GET"
         ) {
+          if ([...url.searchParams.keys()].join() !== "request") return error();
           const token = url.searchParams.get("request") ?? "";
           const claims = await verify(token, "start");
           if (claims.kind !== "start") return error();
@@ -366,8 +381,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
               return error();
             const providerUrl = new URL(result.url);
             if (
-              providerUrl.protocol !== "https:" ||
-              providerUrl.hostname !== "accounts.google.com" ||
+              providerUrl.origin !== "https://accounts.google.com" ||
               providerUrl.username ||
               providerUrl.password
             )
@@ -416,9 +430,26 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
             hello: claims.hello,
             expires: now() + 7 * 86400_000,
           };
+          if (!(await options.canIssueSession(session.userId)))
+            return error(
+              403,
+              "FrockBot isn’t accepting new accounts right now.",
+            );
           // Admission is committed before the bearer is returned. Replaying the
           // same authorization, including a repeated callback, cannot issue twice.
-          await options.session(session.userId, operation(session, "issue"));
+          const issued = await options.session(
+            session.userId,
+            operation(session, "issue"),
+          );
+          if (
+            !issued ||
+            issued.revoked ||
+            issued.userId !== session.userId ||
+            issued.sessionId !== session.sessionId ||
+            issued.expiresAt !== session.expires ||
+            JSON.stringify(issued.hello) !== JSON.stringify(session.hello)
+          )
+            return error();
           return Response.json(
             {
               schemaVersion: 1,

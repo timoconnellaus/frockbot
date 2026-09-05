@@ -1633,8 +1633,14 @@ export class ShellBotBackendContribution {
       sessionId: admitted.sessionId,
       runId: command.runId,
     });
+    // Hydrated, like every other read the transcript is drawn from. A run
+    // record stores its journal by range, not inline, so reading the record on
+    // its own gives a Turn with no events — and a Turn with no events has said
+    // nothing. The receipt is what the thread redraws the stopped Turn from,
+    // so that erased the words the person had just watched arrive and left
+    // "You stopped this." standing alone over an empty bubble.
     const current =
-      optionalStoredRun(await this.ctx.storage.get<unknown>(key)) ?? admitted;
+      (await this.authority.readStoredRunForDisplay(command.runId)) ?? admitted;
     return createClientRunStopReceiptV1(command, projectClientRunV1(current));
   }
 

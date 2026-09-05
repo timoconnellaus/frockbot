@@ -4,7 +4,11 @@ import {
   createNativeAuth,
   NATIVE_ORIGIN,
   NATIVE_RETURN_ANDROID,
+  NATIVE_RETURN_MACOS,
+  nativeReturnUris,
+  type NativeAuthOptions,
 } from "./native-auth.js";
+import { createGateway } from "./gateway.js";
 import {
   nativeSessionOperation,
   type NativeSessionStorage,
@@ -21,7 +25,7 @@ const state = "b".repeat(64);
 const challenge = Buffer.from(
   await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
 ).toString("base64url");
-function fixture() {
+function fixture(overrides: Partial<NativeAuthOptions> = {}) {
   let time = Date.parse("2026-09-05T01:00:00Z");
   const values = new Map<string, unknown>();
   const storage: NativeSessionStorage = {
@@ -33,6 +37,7 @@ function fixture() {
   const auth = createNativeAuth({
     secret: "test-only-secret-that-is-not-a-credential",
     returnUris: [NATIVE_RETURN_ANDROID],
+    canIssueSession: async () => true,
     now: () => time,
     auth: {
       handler: async () =>
@@ -49,6 +54,7 @@ function fixture() {
     },
     session: async (_user, input) =>
       nativeSessionOperation(storage, input, time),
+    ...overrides,
   });
   function request(
     path: string,
@@ -241,6 +247,172 @@ describe("native system browser exchange", () => {
       expect(result?.refusal?.status).toBe(426);
     }
   });
+});
+
+test("deployment targets are an exact fail-closed switch", () => {
+  expect(nativeReturnUris("android")).toEqual([NATIVE_RETURN_ANDROID]);
+  expect(nativeReturnUris("android,macos")).toEqual([
+    NATIVE_RETURN_ANDROID,
+    NATIVE_RETURN_MACOS,
+  ]);
+  for (const value of [
+    undefined,
+    "",
+    "true",
+    "macos",
+    "android, macos",
+    "android,ios",
+  ])
+    expect(nativeReturnUris(value)).toEqual([]);
+});
+
+function gateway(nativeAuth?: ReturnType<typeof createNativeAuth>) {
+  const unexpected = (): never => {
+    throw new Error("Application must not load");
+  };
+  return {
+    fetch: createGateway({
+      ...(nativeAuth ? { nativeAuth } : {}),
+      auth: {
+        getSession: async () => null,
+        handler: async () => new Response("browser auth"),
+      },
+      loader: { get: unexpected },
+      artifacts: { load: unexpected },
+      userExists: unexpected,
+      readDeploymentPolicy: unexpected,
+      applicationHashFor: unexpected,
+      botStateFor: unexpected,
+      userConfigurationFor: unexpected,
+      botConfigurationFor: unexpected,
+    }),
+  };
+}
+
+test("gateway serves public associations and exact returns without loading Vue; disabled routes never fall through", async () => {
+  const f = fixture();
+  const enabled = gateway(f.auth);
+  const disabled = gateway();
+  for (const path of [
+    "/.well-known/assetlinks.json",
+    "/.well-known/apple-app-site-association",
+    "/native/return/android",
+  ]) {
+    const response = await enabled.fetch(f.request(path));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+    expect((await disabled.fetch(f.request(path))).status).toBe(503);
+  }
+  expect(
+    (await disabled.fetch(f.request("/api/auth/native/start", f.start))).status,
+  ).toBe(503);
+  expect(
+    await (await disabled.fetch(f.request("/api/auth/get-session"))).text(),
+  ).toBe("browser auth");
+  for (const target of [
+    NATIVE_RETURN_MACOS,
+    `${NATIVE_RETURN_ANDROID}/extra`,
+    `${NATIVE_RETURN_ANDROID}?next=evil`,
+    `${NATIVE_RETURN_ANDROID}#fragment`,
+    NATIVE_RETURN_ANDROID.replace("https:", "http:"),
+  ]) {
+    expect(
+      (
+        await enabled.fetch(
+          f.request("/api/auth/native/start", {
+            ...f.start,
+            returnUri: target,
+          }),
+        )
+      ).status,
+    ).toBe(400);
+  }
+  expect(
+    (
+      await enabled.fetch(
+        new Request("https://evil.test/.well-known/assetlinks.json"),
+      )
+    ).status,
+  ).toBe(403);
+});
+
+test("gateway concurrent exchange replay issues exactly one session", async () => {
+  const f = fixture();
+  const command = await f.authorize();
+  const g = gateway(f.auth);
+  const replies = await Promise.all(
+    [1, 2].map(() => g.fetch(f.request("/api/auth/native/exchange", command))),
+  );
+  expect(replies.map((r) => r.status).sort()).toEqual([200, 400]);
+  expect(f.values.size).toBe(1);
+});
+
+test("failed durable issuance cannot return a bearer", async () => {
+  const f = fixture({ session: async () => null });
+  const response = await gateway(f.auth).fetch(
+    f.request("/api/auth/native/exchange", await f.authorize()),
+  );
+  expect(response.status).toBe(400);
+  expect(await response.text()).not.toContain("sessionToken");
+});
+
+test("closed or unavailable signup policy refuses before User provisioning", async () => {
+  for (const unavailable of [false, true]) {
+    const f = fixture({
+      canIssueSession: async () => {
+        if (unavailable) throw new Error("Policy unavailable");
+        return false;
+      },
+    });
+    const response = await gateway(f.auth).fetch(
+      f.request("/api/auth/native/exchange", await f.authorize()),
+    );
+    expect(response.status).toBe(unavailable ? 400 : 403);
+    expect(f.values.size).toBe(0);
+  }
+});
+
+test.each([
+  "http://accounts.google.com/auth",
+  "https://accounts.google.com:444/auth",
+  "https://accounts.google.com.evil.test/auth",
+  "https://user@accounts.google.com/auth",
+])("gateway refuses provider redirect %s", async (url) => {
+  const f = fixture({
+    auth: {
+      getSession: async () => null,
+      handler: async () => Response.json({ url }),
+    },
+  });
+  const g = gateway(f.auth);
+  const view = decodeProtocol(
+    "AuthStartView",
+    await (await g.fetch(f.request("/api/auth/native/start", f.start))).json(),
+  );
+  const response = await g.fetch(new Request(view.authorizationUrl));
+  expect(response.status).toBe(400);
+  expect(response.headers.get("location")).toBeNull();
+});
+
+test("ambiguous browser callbacks are refused before identity resolution", async () => {
+  const f = fixture();
+  const view = decodeProtocol(
+    "AuthStartView",
+    await (await f.auth.route(
+      f.request("/api/auth/native/start", f.start),
+    ))!.json(),
+  );
+  for (const suffix of ["&request=other", "&next=https://evil.test"]) {
+    expect(
+      (
+        await gateway(f.auth).fetch(
+          new Request(view.authorizationUrl + suffix, {
+            headers: { cookie: "test=signed-in" },
+          }),
+        )
+      ).status,
+    ).toBe(400);
+  }
 });
 
 test("native Applet token transport rejects ambiguous or URL credentials", async () => {

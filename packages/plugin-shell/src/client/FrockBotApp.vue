@@ -52,6 +52,7 @@ import {
   supersedeDrainLabelV1,
   supersedeDrainStateV1,
 } from "./supersede-drain.js";
+import { orderTranscriptV1 } from "./transcript-order.js";
 import {
   TURN_TEXT_MAX_CHARACTERS_V1,
   turnTextCounterVisibleV1,
@@ -733,22 +734,16 @@ function isVisible(message: WebChatMessage): boolean {
 }
 /*
  * System lines happen between Turns, so the thread orders by when each line
- * happened. A line with no timestamp is treated as arriving now, so an
- * incomplete projection can never jump above the durable history.
+ * happened — but a Turn moves as a unit, anchored on the message the person
+ * sent, or a reply stamped from this tab's clock sorts above the durable
+ * timestamps of the messages it answers. `transcript-order.ts` holds the rule.
  */
-const messages = computed(() => {
-  const missingAt = new Date().toISOString();
-  return state.value.messages
-    .filter(isVisible)
-    .map((message, index) => ({ message, index }))
-    .sort(
-      (left, right) =>
-        (left.message.at ?? missingAt).localeCompare(
-          right.message.at ?? missingAt,
-        ) || left.index - right.index,
-    )
-    .map((entry) => entry.message);
-});
+const messages = computed(() =>
+  orderTranscriptV1(
+    state.value.messages.filter(isVisible),
+    new Date().toISOString(),
+  ),
+);
 
 /**
  * The comet trail: what the Turn the User is watching is actually doing.
@@ -1293,6 +1288,27 @@ async function sendMessage(): Promise<void> {
   }
 }
 
+/**
+ * Sends the message a broken Turn was answering, again, as a new Turn.
+ *
+ * The same words the person already sent — read back off their own line in the
+ * thread — and nothing else: a retry is not an edit, and it starts a Turn of
+ * its own rather than reopening the one that ended.
+ */
+async function retryTurn(message: WebChatMessage): Promise<void> {
+  if (!canSend.value) return;
+  const text = messages.value
+    .find(
+      (candidate) =>
+        candidate.runId === message.runId && candidate.role === "user",
+    )
+    ?.text.trim();
+  if (!text) return;
+  pinnedToLatest.value = true;
+  void scrollToLatest();
+  await web.value.sendPrompt(text);
+}
+
 function handleComposerKeydown(event: KeyboardEvent): void {
   if (skillPopoverOpen.value) {
     const count = skillCandidates.value.length;
@@ -1499,6 +1515,22 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                   @click="sendMessage()"
                 >
                   Retry
+                </button>
+                <!--
+                  The reply broke after the message was admitted, so the
+                  message is in the thread and the composer is empty: this
+                  sends the same words again as a new Turn, in place of the
+                  "Try again." the notice used to end with and nobody could
+                  press.
+                -->
+                <button
+                  v-if="message.retry === 'resend-turn'"
+                  type="button"
+                  class="message-retry"
+                  :disabled="!canSend"
+                  @click="retryTurn(message)"
+                >
+                  Try again
                 </button>
                 <template v-for="tool in message.tools" :key="tool.id">
                   <PackageIframeHost
