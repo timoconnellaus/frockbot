@@ -13,6 +13,10 @@ The design system every FrockBot surface builds from: the web shell, the Flutter
 - **Tone before line**: four depths (ground, window, sheet, tile), three ink tiers as alpha, hairlines only inside a group and starting at the text edge.
 - **Small, quiet type**: messages at 15px on a phone, chrome at 14 and below, nothing under 20px heavier than 600. Archivo Black only for greetings, Bot names, and big numbers.
 
+## Voice (spec, 2026-09-05; not built yet)
+
+Voice is **the whole app screen**, not a sheet over chat. It has a **Pause** control that stops the Gemini session outright. Bots do not know the assistant is paused: anything they send while paused is queued, and on unpause the queue is handed to the voice agent to work through with the person. The paused screen must show that Bots have written while paused (a count on the resume control), so the person knows there is a reason to come back. Four states to design: live, paused and quiet, paused with messages waiting, resuming.
+
 ## Files
 
 - `frock-ui.html` — the system: colour, type, space and shape tokens, components, and ten reference screens. Open it in a browser. This is the source of truth for both platforms until `tokens.json` drives generated CSS and Dart.

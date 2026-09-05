@@ -4,6 +4,14 @@ import '../protocol/client_wire.generated.dart' as wire;
 import 'frock_tokens.dart';
 import 'frock_widgets.dart';
 
+/// The wire's recipe as the widget set's look.
+SheepLook lookOf(wire.SheepRecipe sheep) => SheepLook(
+  background: sheep.background,
+  upper: sheep.upper,
+  middle: sheep.middle,
+  lower: sheep.lower,
+);
+
 /// The flock: every Bot in the account, one row each, with the selected Bot
 /// named in accent. Chat is the room; this is the corridor. On a phone it is
 /// the drawer behind the menu button; on a wide window it stays open beside
@@ -61,6 +69,7 @@ class FlockDrawer extends StatelessWidget {
                               FrockRow(
                                 key: ValueKey('bot-${bot.botId.value}'),
                                 leading: FrockSheep(
+                                  look: lookOf(bot.sheep),
                                   size: FrockTokens.avatarMd,
                                   state:
                                       stateOf?.call(bot.botId.value) ??

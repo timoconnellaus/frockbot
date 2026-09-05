@@ -48,7 +48,16 @@ class FrockChatScreen extends StatelessWidget {
                 title: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const FrockSheep(size: 24, state: BotState.working),
+                    const FrockSheep(
+                      look: SheepLook(
+                        background: 'hot-pink',
+                        upper: 'upper-neutral',
+                        middle: 'rose-heart-sunglasses',
+                        lower: 'lower-neutral',
+                      ),
+                      size: 24,
+                      state: BotState.working,
+                    ),
                     const SizedBox(width: 8),
                     Text('Bob', style: t.barTitle),
                   ],

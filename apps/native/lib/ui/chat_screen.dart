@@ -78,6 +78,7 @@ class ChatScreen extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         FrockSheep(
+                          look: lookOf(selected!.sheep),
                           size: FrockTokens.avatarSm,
                           state: selectedState,
                         ),

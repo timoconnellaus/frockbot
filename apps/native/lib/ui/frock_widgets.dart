@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import 'frock_tokens.dart';
+import 'sheep_layers.dart';
+
+export 'sheep_layers.dart' show SheepLook;
 
 /// Frock UI widgets. Each mirrors one component on docs/design/frock-ui.html.
 
@@ -11,9 +14,14 @@ enum BotState { working, ready, idle, none }
 class FrockSheep extends StatelessWidget {
   const FrockSheep({
     super.key,
+    this.look = SheepLook.plain,
     this.size = FrockTokens.avatarMd,
     this.state = BotState.none,
   });
+
+  /// The Bot's own sheep: the Flock's recipe, drawn as the same stacked
+  /// layers the web draws, so a Bot is recognisably itself everywhere.
+  final SheepLook look;
   final double size;
   final BotState state;
 
@@ -28,11 +36,24 @@ class FrockSheep extends StatelessWidget {
     };
     final image = ClipRRect(
       borderRadius: BorderRadius.circular(size * FrockTokens.avatarRadiusRatio),
-      child: Image.asset(
-        'assets/sheep.png',
+      child: SizedBox(
         width: size,
         height: size,
-        excludeFromSemantics: true,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            for (final id in sheepLayerIds(look))
+              Image.asset(
+                sheepLayerAsset(id),
+                fit: BoxFit.fill,
+                excludeFromSemantics: true,
+                // Filter at the sizes a row uses; the art is 256px.
+                filterQuality: FilterQuality.medium,
+                // A layer that fails to load leaves a sheep, not a hole.
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              ),
+          ],
+        ),
       ),
     );
     if (ringColor == null) return image;
@@ -532,12 +553,18 @@ class FrockComposer extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
-            child: Padding(
-              // Centres a one-line field in the 44px pill; a taller field
-              // grows upward from the same baseline.
-              padding: const EdgeInsets.symmetric(vertical: 7),
-              child:
-                  field ?? Text(hint, style: t.message.copyWith(color: t.ink3)),
+            // One line of text sits centred against the buttons; a taller
+            // field grows upward while the buttons keep the bottom line.
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                minHeight: FrockTokens.composerButton,
+              ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child:
+                    field ??
+                    Text(hint, style: t.message.copyWith(color: t.ink3)),
+              ),
             ),
           ),
           if (onVoice != null)

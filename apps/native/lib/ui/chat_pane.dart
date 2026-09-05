@@ -17,11 +17,13 @@ class ChatPane extends StatefulWidget {
   final ChatController controller;
   final Future<void> Function() onReconnect;
   final String botName;
+  final SheepLook botLook;
   const ChatPane({
     super.key,
     required this.controller,
     required this.onReconnect,
     this.botName = 'your Bot',
+    this.botLook = SheepLook.plain,
   });
   @override
   State<ChatPane> createState() => _ChatPaneState();
@@ -255,7 +257,9 @@ class _ChatPaneState extends State<ChatPane> {
                       ),
                     ),
                   if (runs.isEmpty && c.pendingId == null)
-                    c.loading ? const _Loading() : _Empty(name: widget.botName),
+                    c.loading
+                        ? const _Loading()
+                        : _Empty(name: widget.botName, look: widget.botLook),
                 ].reversed.toList(),
               ),
             ),
@@ -484,8 +488,9 @@ class _Loading extends StatelessWidget {
 }
 
 class _Empty extends StatelessWidget {
-  const _Empty({required this.name});
+  const _Empty({required this.name, required this.look});
   final String name;
+  final SheepLook look;
   @override
   Widget build(BuildContext context) {
     final t = FrockTokens.of(context);
@@ -494,7 +499,11 @@ class _Empty extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const FrockSheep(size: FrockTokens.avatarLg, state: BotState.ready),
+          FrockSheep(
+            look: look,
+            size: FrockTokens.avatarLg,
+            state: BotState.ready,
+          ),
           const SizedBox(height: 16),
           Text('What would you like to work on?', style: t.nameStyle),
           const SizedBox(height: 6),

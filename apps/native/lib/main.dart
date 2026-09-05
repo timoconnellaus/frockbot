@@ -9,6 +9,7 @@ import 'client/auth.dart';
 import 'auth/sign_in_page.dart';
 import 'ui/chat_pane.dart';
 import 'ui/chat_screen.dart';
+import 'ui/flock_drawer.dart' show lookOf;
 import 'ui/frock_tokens.dart';
 import 'ui/frock_widgets.dart';
 import 'ui/gallery.dart';
@@ -302,6 +303,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
                   userId: userId!,
                   botId: selected!.botId.value,
                   botName: selected!.initialName,
+                  botLook: lookOf(selected!.sheep),
                   onActivity: selectedActivity,
                 ),
         );
@@ -322,6 +324,7 @@ class ConversationView extends StatefulWidget {
   final String userId;
   final String botId;
   final String botName;
+  final SheepLook botLook;
 
   /// Reports what the ring around this Bot's sheep should say.
   final ValueChanged<BotState>? onActivity;
@@ -331,6 +334,7 @@ class ConversationView extends StatefulWidget {
     required this.userId,
     required this.botId,
     this.botName = 'your Bot',
+    this.botLook = SheepLook.plain,
     this.onActivity,
   });
   @override
@@ -462,6 +466,7 @@ class _ConversationViewState extends State<ConversationView>
             controller: controller,
             onReconnect: session.channel.connect,
             botName: widget.botName,
+            botLook: widget.botLook,
           ),
         ),
       ],
