@@ -41,11 +41,14 @@ void main() {
     }
   }
 
-  testWidgets('Today renders at phone size with the brand fonts', (
+  testWidgets('Chat renders at phone size with the brand fonts', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(390 * 3, 780 * 3);
     tester.view.devicePixelRatio = 3;
+    // An iPhone-style safe area: status bar and notch at the top, home
+    // indicator at the bottom. The screen must keep both clear.
+    tester.view.padding = const FakeViewPadding(top: 47 * 3, bottom: 34 * 3);
     addTearDown(tester.view.reset);
 
     final key = GlobalKey();
@@ -54,7 +57,7 @@ void main() {
       MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: FrockTokens.themeData(FrockTokens.dark),
-        home: RepaintBoundary(key: key, child: const FrockTodayScreen()),
+        home: RepaintBoundary(key: key, child: const FrockChatScreen()),
       ),
     );
     await tester.runAsync(() async {
@@ -66,9 +69,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('Good afternoon,\nTim.'), findsOneWidget);
-    expect(find.text('Bob wants to send an email'), findsOneWidget);
-    expect(find.text('Ask any Bot'), findsOneWidget);
+    expect(find.text('Send it'), findsOneWidget);
+    expect(find.text('Message Bob'), findsOneWidget);
+    expect(find.textContaining('Searched Gmail'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     if (Platform.environment['FROCK_EVIDENCE'] != '1') return;
@@ -78,7 +81,7 @@ void main() {
     final bytes = await tester.runAsync(
       () => image!.toByteData(format: ui.ImageByteFormat.png),
     );
-    final out = File('../../docs/design/evidence/flutter-today.png');
+    final out = File('../../docs/design/evidence/flutter-chat.png');
     out.parent.createSync(recursive: true);
     out.writeAsBytesSync(bytes!.buffer.asUint8List());
   });

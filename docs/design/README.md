@@ -6,7 +6,7 @@ The design system every FrockBot surface builds from: the web shell, the Flutter
 
 **The app is your Bots' office. Chat is one room in it.**
 
-- The home is a **briefing**, not a chat list: what needs you, what happened, what is running.
+- Chat with a Bot is the primary screen and the home: the last Bot's chat opens instantly. The flock lives in a drawer, not a tab bar. What needs you and what happened are surfaced inside chat and the drawer, not on a separate Today screen (decision 2026-09-05).
 - Every Bot action is a **receipt**: an icon tile, a verb-first sentence, a mono time. The same object appears in chat, on a Bot's Work tab, in the briefing, and in the Computer.
 - Bots are **characters**: sheep avatars with a state ring (pink working, green ready, grey idle), names set in the display face.
 - The accent is **light**, not paint: a glow behind the working Bot, a glow under the one pink pill per screen. Everything else is tone on tone.
@@ -25,4 +25,4 @@ The design system every FrockBot surface builds from: the web shell, the Flutter
 1. HTML system and reference screens (this folder). Done.
 2. Wire `tokens.json` into `packages/plugin-ui-theme` so the shell, the Applet kit and A2UI consume generated CSS.
 3. Flutter port: `FrockTokens` theme extension and widgets mirroring each component here.
-4. Match check: the same screens rendered by Playwright at 390px and by the Pixel, side by side, in `docs/design/evidence/`.
+4. Match check: the same screens rendered by Playwright at 390px and by the Flutter render test with the real fonts and a simulated safe area, side by side, in `docs/design/evidence/` (Chat first).

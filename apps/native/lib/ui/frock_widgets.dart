@@ -36,27 +36,31 @@ class FrockSheep extends StatelessWidget {
       ),
     );
     if (ringColor == null) return image;
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        image,
-        Positioned.fill(
-          child: Transform.scale(
-            scale: (size + FrockTokens.ringInset * 2) / size,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(
-                  (size + 6) * FrockTokens.ringRadiusRatio,
-                ),
-                border: Border.all(
-                  color: ringColor,
-                  width: FrockTokens.ringWidth,
-                ),
-              ),
+    // The ring is a box 3px outside the avatar with a 2px border. Its corner
+    // radius is the avatar's radius plus the 3px offset, so the two curves are
+    // concentric, the way the CSS `inset: -3px` ring is. OverflowBox keeps the
+    // widget's layout size at `size`, so a ringed and an unringed avatar line
+    // up in the same row.
+    const grow = FrockTokens.ringInset;
+    final outer = size + grow * 2;
+    return SizedBox(
+      width: size,
+      height: size,
+      child: OverflowBox(
+        maxWidth: outer,
+        maxHeight: outer,
+        child: Container(
+          width: outer,
+          height: outer,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(
+              size * FrockTokens.avatarRadiusRatio + grow,
             ),
+            border: Border.all(color: ringColor, width: FrockTokens.ringWidth),
           ),
+          child: Center(child: image),
         ),
-      ],
+      ),
     );
   }
 }
@@ -392,28 +396,33 @@ class FrockPill extends StatelessWidget {
         ),
       ],
     );
-    return Material(
-      color: bg,
-      borderRadius: BorderRadius.circular(FrockTokens.radiusPill),
-      child: InkWell(
-        onTap: onTap,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: bg,
         borderRadius: BorderRadius.circular(FrockTokens.radiusPill),
-        child: Container(
-          height: height,
-          padding: EdgeInsets.symmetric(horizontal: pad),
-          decoration: kind == PillKind.primary
-              ? BoxDecoration(
-                  borderRadius: BorderRadius.circular(FrockTokens.radiusPill),
-                  boxShadow: [
-                    BoxShadow(
-                      color: t.accentGlow,
-                      blurRadius: 24,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                )
-              : null,
-          child: child,
+        // The glow lives on the outer box so it falls behind the pill, never
+        // on top of it.
+        boxShadow: kind == PillKind.primary
+            ? [
+                BoxShadow(
+                  color: t.accentGlow.withValues(alpha: 0.22),
+                  blurRadius: 28,
+                  offset: const Offset(0, 8),
+                ),
+              ]
+            : null,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(FrockTokens.radiusPill),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(FrockTokens.radiusPill),
+          child: Container(
+            height: height,
+            padding: EdgeInsets.symmetric(horizontal: pad),
+            child: child,
+          ),
         ),
       ),
     );
@@ -485,11 +494,13 @@ class FrockComposer extends StatelessWidget {
         color: t.sheet,
         borderRadius: BorderRadius.circular(FrockTokens.composer / 2),
         border: Border.all(color: t.line),
+        // Soft lift, not a band: a wide, faint shadow that the dock's hairline
+        // reads through. Flutter's blur is tighter than CSS at the same radius.
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
-            blurRadius: 30,
-            offset: const Offset(0, 10),
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 36,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
@@ -650,58 +661,6 @@ class FrockBar extends StatelessWidget {
           SizedBox(width: FrockTokens.controlMd, child: leading),
           Expanded(child: Center(child: title)),
           SizedBox(width: FrockTokens.controlMd, child: trailing),
-        ],
-      ),
-    );
-  }
-}
-
-/// The dock: four destinations, the active glyph takes the accent.
-class FrockDock extends StatelessWidget {
-  const FrockDock({
-    super.key,
-    required this.items,
-    required this.active,
-    this.onSelect,
-  });
-  final List<(IconData, String)> items;
-  final int active;
-  final ValueChanged<int>? onSelect;
-  @override
-  Widget build(BuildContext context) {
-    final t = FrockTokens.of(context);
-    return Container(
-      height: FrockTokens.dock,
-      decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: t.line)),
-      ),
-      child: Row(
-        children: [
-          for (var i = 0; i < items.length; i++)
-            Expanded(
-              child: InkWell(
-                onTap: onSelect == null ? null : () => onSelect!(i),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      items[i].$1,
-                      size: 20,
-                      color: i == active ? t.accent : t.ink3,
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      items[i].$2.toUpperCase(),
-                      style: t.eyebrow.copyWith(
-                        fontSize: 10,
-                        letterSpacing: 0.4,
-                        color: i == active ? t.ink : t.ink3,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
         ],
       ),
     );

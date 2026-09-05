@@ -5,148 +5,204 @@ import 'frock_widgets.dart';
 
 /// The Frock UI gallery: reference screens rendered by Flutter so they can be
 /// set beside the HTML system page. Launch with
-/// `flutter run --dart-define=FROCK_GALLERY=true`; the golden test renders it
+/// `flutter run --dart-define=FROCK_GALLERY=true`; the render test writes it
 /// headlessly into docs/design/evidence/.
 class FrockGallery extends StatelessWidget {
   const FrockGallery({super.key});
   @override
-  Widget build(BuildContext context) => const FrockTodayScreen();
+  Widget build(BuildContext context) => const FrockChatScreen();
 }
 
-/// Screen 01, Today: the briefing. Same content as docs/design/frock-ui.html.
-class FrockTodayScreen extends StatelessWidget {
-  const FrockTodayScreen({super.key});
+/// Chat with a Bot: the primary screen. Same content as screen 04 on
+/// docs/design/frock-ui.html. The Bot's reply is prose with its work shown
+/// inline as receipts, then the choice as pills.
+///
+/// Safe areas: the status bar, notch and display cutouts are kept clear by
+/// `SafeArea` at the top and sides; the composer keeps the bottom inset (home
+/// indicator, gesture bar) clear. The keyboard inset is handled by `Scaffold`.
+class FrockChatScreen extends StatelessWidget {
+  const FrockChatScreen({super.key});
   @override
   Widget build(BuildContext context) {
     final t = FrockTokens.of(context);
+    final bottom = MediaQuery.paddingOf(context).bottom;
     return Scaffold(
       backgroundColor: t.window,
       body: SafeArea(
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            const Positioned(left: -80, top: 40, child: FrockGlow()),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: FrockTokens.edge),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  FrockBar(
-                    leading: null,
-                    title: Align(
-                      alignment: Alignment.centerLeft,
+        bottom: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            FrockTokens.edge,
+            0,
+            FrockTokens.edge,
+            bottom + 8,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              FrockBar(
+                leading: const FrockIconButton(
+                  Icons.menu_rounded,
+                  semanticLabel: 'Your Bots',
+                ),
+                title: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const FrockSheep(size: 24, state: BotState.working),
+                    const SizedBox(width: 8),
+                    Text('Bob', style: t.barTitle),
+                  ],
+                ),
+                trailing: const FrockIconButton(
+                  Icons.grid_view_outlined,
+                  semanticLabel: 'Applets',
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.only(top: 8),
+                  children: [
+                    Center(
                       child: Text(
-                        'SATURDAY · 5 SEP',
-                        style: t.eyebrow.copyWith(color: t.accentInk),
+                        'Today 13:36',
+                        style: t.monoStyle.copyWith(fontSize: 11),
                       ),
                     ),
-                    trailing: Container(
-                      width: FrockTokens.controlMd,
-                      height: FrockTokens.controlMd,
-                      decoration: BoxDecoration(
-                        color: t.tile,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Center(child: FrockSheep(size: 22)),
+                    const SizedBox(height: 12),
+                    const FrockUserMessage(
+                      'Find Sarah\'s email about Thursday\'s numbers and draft a reply with the totals from the sheet.',
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text('Good afternoon,\nTim.', style: t.displayStyle),
-                  const SizedBox(height: 14),
-                  const FrockEyebrow('Needs you'),
-                  FrockGroup(
-                    needsYou: true,
-                    children: [
-                      FrockRow(
-                        leading: const FrockSheep(
-                          size: 32,
-                          state: BotState.working,
+                    const SizedBox(height: 12),
+                    FrockBotMessage(
+                      children: [
+                        const Text(
+                          'Found it. She is asking for Q3 by region. Here is what I did:',
                         ),
-                        title: 'Bob wants to send an email',
-                        caption: 'To Sarah · “Re: Thursday\'s numbers” · draft ready',
-                        trailing: const FrockPill(
-                          'Review',
+                        const SizedBox(height: 6),
+                        const FrockReceipt(
+                          icon: Icons.mail_outline_rounded,
+                          text: 'Searched Gmail',
+                          detail: '“Thursday numbers”',
+                          time: '3 hits',
+                        ),
+                        const FrockReceipt(
+                          icon: Icons.table_chart_outlined,
+                          text: 'Read',
+                          detail: 'Q3 regions.xlsx',
+                          time: '4 sheets',
+                        ),
+                        const FrockReceipt(
+                          icon: Icons.check_rounded,
+                          tone: TileTone.good,
+                          text: 'Drafted reply',
+                          detail: '214 words',
+                          time: 'ready',
+                        ),
+                        const SizedBox(height: 10),
+                        Text.rich(
+                          TextSpan(
+                            children: [
+                              const TextSpan(
+                                text: 'APAC is up 18%, EMEA flat, Americas down 4%. The draft leads with APAC and flags the Americas dip as timing. Want me to send it',
+                              ),
+                              WidgetSpan(
+                                alignment: PlaceholderAlignment.middle,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(left: 2),
+                                  child: Container(
+                                    width: 7,
+                                    height: 15,
+                                    decoration: BoxDecoration(
+                                      color: t.accent.withValues(alpha: 0.85),
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          style: t.message,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    const Row(
+                      children: [
+                        FrockPill(
+                          'Send it',
                           kind: PillKind.primary,
                           size: PillSize.sm,
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: FrockTokens.groupGap),
-                  const FrockEyebrow('While you were away'),
-                  FrockGroup(
-                    children: [
-                      FrockRow(
-                        leading: const FrockIconTile(
-                          Icons.check_rounded,
-                          tone: TileTone.good,
+                        SizedBox(width: 8),
+                        FrockPill('Show draft', size: PillSize.sm),
+                        SizedBox(width: 8),
+                        FrockPill(
+                          'Edit',
+                          kind: PillKind.ghost,
+                          size: PillSize.sm,
                         ),
-                        title: 'Research finished the draft',
-                        caption: 'Q3 pricing memo · 1,240 words',
-                        trailing: Text('1h', style: t.monoStyle),
-                      ),
-                      FrockRow(
-                        leading: const FrockIconTile(
-                          Icons.mail_outline_rounded,
-                          tone: TileTone.accent,
-                        ),
-                        title: 'Inbox digest ran',
-                        caption: '14 emails · 2 need a reply',
-                        trailing: Text('2h', style: t.monoStyle),
-                      ),
-                      FrockRow(
-                        leading: const FrockIconTile(Icons.grid_view_rounded),
-                        title: 'Weekly Todos updated',
-                        caption: 'Added Call mum',
-                        trailing: Text('4h', style: t.monoStyle),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: FrockTokens.groupGap),
-                  const FrockEyebrow('Running now'),
-                  Row(
-                    children: [
-                      const FrockSheep(size: 28, state: BotState.working),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Bob · running tests', style: t.row),
-                            Text(
-                              'bun test · 2m 14s',
-                              style: t.monoStyle.copyWith(color: t.ink2),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const FrockPulse(),
-                    ],
-                  ),
-                  const Spacer(),
-                  const FrockComposer(
-                    hint: 'Ask any Bot',
-                    onVoice: _noop,
-                    onSend: _noop,
-                  ),
-                  const SizedBox(height: 6),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 0),
-                    child: FrockDock(
-                      active: 0,
-                      items: const [
-                        (Icons.home_outlined, 'Today'),
-                        (Icons.groups_outlined, 'Bots'),
-                        (Icons.grid_view_outlined, 'Applets'),
-                        (Icons.person_outline_rounded, 'You'),
                       ],
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              const FrockComposer(
+                hint: 'Message Bob',
+                onVoice: _noop,
+                onSend: _noop,
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+/// The User's message: a soft bubble, one step above the ground, right-aligned.
+class FrockUserMessage extends StatelessWidget {
+  const FrockUserMessage(this.text, {super.key});
+  final String text;
+  @override
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    return Align(
+      alignment: Alignment.centerRight,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width * 0.78,
+        ),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(13, 8, 13, 8),
+          decoration: BoxDecoration(
+            color: t.tile,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(18),
+              topRight: Radius.circular(18),
+              bottomLeft: Radius.circular(18),
+              bottomRight: Radius.circular(6),
+            ),
+          ),
+          child: Text(text, style: t.message),
+        ),
+      ),
+    );
+  }
+}
+
+/// The Bot's reply: plain text, no bubble, receipts inline.
+class FrockBotMessage extends StatelessWidget {
+  const FrockBotMessage({super.key, required this.children});
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    return DefaultTextStyle(
+      style: t.message,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
       ),
     );
   }
