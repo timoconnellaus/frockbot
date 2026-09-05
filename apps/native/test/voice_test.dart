@@ -37,6 +37,13 @@ class FakeSession implements VoiceSession {
   Future<void> close() async {
     closed = true;
   }
+
+  /// The socket going away, as the real session reports it: the frame stream
+  /// ends, which is all the screen ever sees of a server that stopped talking.
+  void finish() {
+    unawaited(_frames.close());
+    unawaited(_audio.close());
+  }
 }
 
 class FakeBackend implements VoiceBackend {
@@ -409,6 +416,64 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Pause'), findsNothing);
+    });
+
+    testWidgets('a session that closes before ready stops saying Connecting', (
+      tester,
+    ) async {
+      final backend = FakeBackend();
+      final audio = FakeAudio();
+      final controller = build(backend, audio);
+      await pumpVoice(tester, controller);
+      expect(controller.phase, VoicePhase.connecting);
+
+      backend.latest.finish();
+      await flush(tester);
+      await tester.pump();
+
+      expect(controller.phase, VoicePhase.ended);
+      expect(find.text('Voice couldn’t connect. Try again.'), findsOneWidget);
+      expect(find.text('Connecting'), findsNothing);
+      expect(audio.listening, isFalse);
+    });
+
+    testWidgets('a server that never answers gives up instead of waiting', (
+      tester,
+    ) async {
+      final backend = FakeBackend();
+      final audio = FakeAudio();
+      final controller = build(backend, audio);
+      await pumpVoice(tester, controller);
+      expect(controller.phase, VoicePhase.connecting);
+
+      // Neither `ready` nor `offline` ever arrives, and the socket stays open.
+      await tester.pump(voiceConnectDeadline + const Duration(seconds: 1));
+      await flush(tester);
+
+      expect(controller.phase, VoicePhase.ended);
+      expect(
+        find.text('Voice took too long to connect. Try again.'),
+        findsOneWidget,
+      );
+      expect(backend.latest.closed, isTrue);
+      expect(audio.listening, isFalse);
+    });
+
+    testWidgets('a session that goes live is not cut off by the deadline', (
+      tester,
+    ) async {
+      final backend = FakeBackend();
+      final controller = build(backend, FakeAudio());
+      await pumpVoice(tester, controller);
+      await emit(tester, backend.latest, const VoiceReady('session-1', 3600));
+      await tester.pump();
+      expect(controller.phase, VoicePhase.listening);
+
+      await tester.pump(voiceConnectDeadline + const Duration(seconds: 1));
+      await tester.pump();
+      expect(controller.phase, VoicePhase.listening);
+      expect(find.text('Listening'), findsOneWidget);
+      controller.dispose();
     });
 
     testWidgets('speaking, then spoken over, returns to listening', (
