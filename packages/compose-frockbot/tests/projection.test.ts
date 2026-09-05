@@ -197,6 +197,7 @@ describe("adaptFrockBotManifestV1", () => {
         backend: [
           { entry: "./server.js", host: "bot" },
           { entry: "./edge.js", host: "gateway" },
+          { entry: "./user.js", host: "user" },
         ],
       },
       permissions: [],
@@ -205,6 +206,7 @@ describe("adaptFrockBotManifestV1", () => {
     expect(projected.execution.backend).toEqual([
       { entry: "./server.js", host: "bot" },
       { entry: "./edge.js", host: "gateway" },
+      { entry: "./user.js", host: "user" },
     ]);
     expect(projected.execution.runtime).toBe("none");
     expect(projected.execution.instance).toBe("none");
