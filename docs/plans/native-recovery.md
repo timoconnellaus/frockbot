@@ -1,0 +1,11 @@
+# Native Bot recovery
+
+The User owner holds the Bot directory, lifecycle intents and receipts. The Bot owner fences admission, settles admitted work and owns Composition generations and their activation history. Native renders those owners and sends their existing explicit commands. It never deletes local history as a substitute for deleting a Bot. An archive is reversible; deletion is terminal and requires a specific confirmation. A retained command survives app restart, uncertain acknowledgement and owner eviction. A different command cannot replace an uncertain one.
+
+The User's audit projection indexes redacted Bot effects. Reading and paging audit does not replay an effect, wake the Computer or assert a known outcome when it is unknown. Setup history is read-only in this milestone. A new native setup-restore control is blocked by the existing backend gate described below. Failed-Turn notices remain visible through C3's inbox.
+
+All navigation, confirmation and recovery controls are compiled native base widgets. Per-Bot archive, deletion, history and setup concern the Bot's own lifecycle and authored generations; account-level settings and Connections keep their existing single homes. DTOs are decoded at the API seam and carry no provider credential. Paired gateway tests, native uncertain-command/large-text tests and release screenshots establish the implemented subset; physical and unimplemented seams are listed explicitly in the acceptance ledger and PR.
+
+## Setup undo gate
+
+AGENTS.md requires: “Runnable generations declare a tested storage-schema compatibility window. Activation and revert check it before mounting.” The current Composition generation shape and `BotCompositionStore.revert` have no declared storage window. `ShellBotBackendContribution.revertComposition` also records its command receipt after separately proposing/pinning a generation, leaving interrupted receipt reconciliation unproven. Those boundaries must be implemented and tested before exposing a new native setup-restore control. No constitution amendment is proposed; that part is deferred while the complete lifecycle/audit controls ship under the owner’s instruction to list unfinished work. Archive restoration is a distinct existing User-owned lifecycle command and does not revert code or data.
