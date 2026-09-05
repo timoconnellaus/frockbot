@@ -89,7 +89,7 @@ function redirect(url: string, extra?: Headers): Response {
     headers.append("set-cookie", cookie);
   return new Response(null, { status: 302, headers });
 }
-async function body(request: Request): Promise<unknown> {
+export async function readNativeJsonBody(request: Request): Promise<unknown> {
   const reader = request.body?.getReader();
   if (!reader) throw new Error("Missing input");
   let size = 0;
@@ -258,19 +258,58 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       const url = new URL(request.url);
       if (
         !url.pathname.startsWith("/api/auth/native/") &&
-        !url.pathname.startsWith("/native/")
+        !url.pathname.startsWith("/native/") &&
+        !url.pathname.startsWith("/.well-known/")
       )
         return undefined;
       // This prototype's callback origin is deliberately not configurable by input.
       if (url.origin !== NATIVE_ORIGIN) return error(403);
       try {
         if (
+          url.pathname === "/.well-known/assetlinks.json" &&
+          request.method === "GET"
+        ) {
+          return Response.json(
+            [
+              {
+                relation: ["delegate_permission/common.handle_all_urls"],
+                target: {
+                  namespace: "android_app",
+                  package_name: "com.frockbot.mobile",
+                  sha256_cert_fingerprints: [
+                    "61:E6:47:9F:9C:57:55:15:4C:1F:93:9C:DE:48:E8:A7:57:EF:F3:13:6E:54:ED:1D:DA:5F:61:E7:8B:3C:1E:37",
+                  ],
+                },
+              },
+            ],
+            { headers: { "cache-control": "public, max-age=300" } },
+          );
+        }
+        if (
+          url.pathname === "/.well-known/apple-app-site-association" &&
+          request.method === "GET"
+        ) {
+          return Response.json(
+            {
+              applinks: {
+                details: [
+                  {
+                    appIDs: ["Q444L76529.com.frockbot.mobile"],
+                    components: [{ "/": "/native/return/macos" }],
+                  },
+                ],
+              },
+            },
+            { headers: { "cache-control": "public, max-age=300" } },
+          );
+        }
+        if (
           url.pathname === "/api/auth/native/start" &&
           request.method === "POST"
         ) {
           const invalid = clientCompatibilityResponse(request, url);
           if (invalid) return invalid;
-          const start = await body(request);
+          const start = await readNativeJsonBody(request);
           if (
             !isProtocolValue("AuthStartCommand", start) ||
             !options.returnUris.includes(start.returnUri)
@@ -351,7 +390,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
         ) {
           const invalid = clientCompatibilityResponse(request, url);
           if (invalid) return invalid;
-          const command = await body(request);
+          const command = await readNativeJsonBody(request);
           if (!isProtocolValue("AuthExchangeCommand", command)) return error();
           const claims = await verify(command.code, "exchange");
           if (claims.kind !== "exchange") return error();
@@ -402,7 +441,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
             "session",
           );
           if (claims.kind !== "session") return error(401);
-          const command = await body(request);
+          const command = await readNativeJsonBody(request);
           if (
             !isProtocolValue("SessionRevokeCommand", command) ||
             command.sessionId !== claims.sessionId ||

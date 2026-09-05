@@ -13,6 +13,7 @@ import { AppletTransport, type AppletSocket } from "../src/client/transport.js";
 
 interface RecordedSocket extends AppletSocket {
   readonly url: string;
+  readonly protocols?: string[];
   closed: boolean;
 }
 
@@ -20,9 +21,10 @@ function harness() {
   const sockets: RecordedSocket[] = [];
   const timers: Array<() => void> = [];
   const transport = new AppletTransport({
-    socketFactory: (url) => {
+    socketFactory: (url, protocols) => {
       const socket: RecordedSocket = {
         url,
+        ...(protocols ? { protocols } : {}),
         closed: false,
         send() {},
         close() {
@@ -132,4 +134,26 @@ describe("reconnection", () => {
     expect(sockets).toHaveLength(1);
     expect(transport.state.status).toBe("closed");
   });
+});
+
+it("native viewer credentials stay out of URLs through token renewal", () => {
+  const { transport, sockets } = harness();
+  const init = {
+    socketUrl: "wss://bot.frockbot.com/api/applets/user.counter/socket",
+    generationId: "gen-1",
+    tokenTransport: "subprotocol-v1" as const,
+  };
+  transport.connect({ ...init, token: "synthetic-one" });
+  transport.connect({ ...init, token: "synthetic-two" });
+  expect(sockets.map((s) => s.url)).toEqual([init.socketUrl, init.socketUrl]);
+  expect(sockets[0]!.protocols).toEqual([
+    "frockbot.applet.v1",
+    "frockbot.viewer.synthetic-one",
+  ]);
+  expect(sockets[1]!.protocols).toEqual([
+    "frockbot.applet.v1",
+    "frockbot.viewer.synthetic-two",
+  ]);
+  expect(sockets[0]!.closed).toBe(true);
+  transport.close();
 });

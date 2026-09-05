@@ -11,6 +11,8 @@ import {
 } from "@frockbot/protocol";
 import {
   decodeAppletViewerTokenV1,
+  decodeAppletListViewV1,
+  decodeAppletSummaryV1,
   decodeSendToUserPayloadV1,
   decodeSkillRefV1,
 } from "@frockbot/kernel-contracts";
@@ -25,6 +27,7 @@ import {
   decodeClientRunStopCommandV1,
   decodeClientRunStopReceiptV1,
   decodeClientTurnCommandV1,
+  decodeClientTurnV1,
   decodeClientTurnRefusalV1,
   decodeRunCursorV1,
 } from "@frockbot/plugin-shell/run-protocol";
@@ -42,6 +45,9 @@ import {
 
 const existing: Record<string, (value: unknown) => unknown> = {
   TurnCommand: decodeClientTurnCommandV1,
+  TurnResponse: decodeClientTurnV1,
+  AppletDirectory: decodeAppletListViewV1,
+  AppletSummary: decodeAppletSummaryV1,
   StopCommand: decodeClientRunStopCommandV1,
   StopReceipt: decodeClientRunStopReceiptV1,
   RunFenceCommand: decodeClientRunAdmissionFenceCommandV1,

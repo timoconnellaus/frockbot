@@ -15,7 +15,7 @@
   "candidateCatalogId": "com.frockbot.qualification.v1",
   "advertisedCatalogs": [],
   "implementationSha256": {
-    "lib/extensions/catalog.dart": "a663c0a466750aa37133f2a3cec03badcbf21ad37583bee42913af83b5bdd59a",
+    "lib/extensions/catalog.dart": "6f98033b2ec4dae896eaaa60608ed1f35ada21c12605f30145852926dc9a6009",
     "vendor/webview_flutter_wkwebview/darwin/webview_flutter_wkwebview/Sources/webview_flutter_wkwebview/WebViewConfigurationProxyAPIDelegate.swift": "9a7a56036f9cf335dd50f4e96dd4dc642a531370a1ad140afaa6ff065cc97fb3"
   }
 }

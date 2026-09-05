@@ -158,6 +158,7 @@ class CatalogRegion extends StatefulWidget {
 class _CatalogRegionState extends State<CatalogRegion> {
   genui.SurfaceController? controller;
   String? failure;
+  int epoch = 0;
   String? result;
   bool busy = false;
   final input = <String, Object>{};
@@ -178,6 +179,9 @@ class _CatalogRegionState extends State<CatalogRegion> {
   }
 
   void mount() {
+    ++epoch;
+    busy = false;
+    result = null;
     failure = null;
     input.clear();
     try {
@@ -298,25 +302,26 @@ class _CatalogRegionState extends State<CatalogRegion> {
       });
       return;
     }
+    final admittedEpoch = epoch;
     setState(() {
       busy = true;
       result = null;
     });
     try {
       await widget.submit(Map.unmodifiable(input));
-      if (mounted) {
+      if (mounted && epoch == admittedEpoch) {
         setState(() {
           result = 'Saved.';
         });
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && epoch == admittedEpoch) {
         setState(() {
           result = 'Couldn’t save. Please try again.';
         });
       }
     } finally {
-      if (mounted) {
+      if (mounted && epoch == admittedEpoch) {
         setState(() {
           busy = false;
         });
@@ -358,6 +363,7 @@ class _CatalogRegionState extends State<CatalogRegion> {
   );
   @override
   void dispose() {
+    ++epoch;
     controller?.dispose();
     super.dispose();
   }

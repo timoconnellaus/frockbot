@@ -1,3 +1,5 @@
+import { nativeFallbackResponse } from "./native-fallback.js";
+import { readNativeJsonBody } from "./native-auth.js";
 import { clientCompatibilityResponse } from "./client-compatibility.js";
 import {
   ConfigurationConflictError,
@@ -436,7 +438,7 @@ async function routeAppletSocket(
   try {
     claims = await verifyAppletViewerTokenV1(
       dependencies.appletViewerSecret,
-      url.searchParams.get("token"),
+      appletViewerTokenFromRequest(request, url),
     );
   } catch (error) {
     return jsonError(
@@ -457,9 +459,40 @@ async function routeAppletSocket(
   // `fetch`, not an RPC method: a 101 response with its WebSocket only
   // crosses the stub boundary on the object's HTTP door. The body goes with
   // it, so the outer drain must not reach for it afterwards.
+  const headers = new Headers(request.headers);
+  headers.delete("sec-websocket-protocol");
+  headers.delete("authorization");
+  headers.delete("cookie");
+  headers.delete("referer");
   return dependencies
     .appletStateFor(claims.u, claims.a)
-    .fetch(forwardingBodyV1(request, new Request(forwarded, request)));
+    .fetch(
+      forwardingBodyV1(
+        request,
+        new Request(forwarded, { method: request.method, headers }),
+      ),
+    );
+}
+
+/** Native fallback carries the scoped token in the handshake, never the URL. */
+export function appletViewerTokenFromRequest(
+  request: Request,
+  url: URL,
+): string | null {
+  const protocols = (request.headers.get("sec-websocket-protocol") ?? "")
+    .split(",")
+    .map((v) => v.trim());
+  const tokens = protocols.filter((v) => v.startsWith("frockbot.viewer."));
+  if (tokens.length > 0) {
+    if (
+      tokens.length !== 1 ||
+      !protocols.includes("frockbot.applet.v1") ||
+      url.searchParams.has("token")
+    )
+      return null;
+    return tokens[0]!.slice("frockbot.viewer.".length);
+  }
+  return url.searchParams.get("token");
 }
 
 const WORKSPACE_SEED_PATH = /^\/api\/workspace-seed\/([^/]+)\/([^/]+)$/;
@@ -745,6 +778,63 @@ export function createGateway(dependencies: GatewayDependencies) {
         );
       }
     }
+    if (
+      url.pathname === "/api/native/qualification-form" &&
+      dependencies.nativeAuth &&
+      dependencies.saveNativeForm
+    ) {
+      if (!nativeIdentity?.session)
+        return jsonError(401, "Please sign in again.");
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      try {
+        const result = await dependencies.saveNativeForm(
+          userId,
+          await readNativeJsonBody(request),
+        );
+        if (
+          !result ||
+          typeof result !== "object" ||
+          !("status" in result) ||
+          result.status !== "saved"
+        )
+          return jsonError(
+            409,
+            "Could not save this form. Reopen it and try again.",
+          );
+        return Response.json(result, {
+          headers: { "cache-control": "no-store" },
+        });
+      } catch {
+        return jsonError(
+          409,
+          "Could not save this form. Reopen it and try again.",
+        );
+      }
+    }
+    const nativeApplet = url.pathname.match(
+      /^\/api\/native\/applets\/([^/]+)\/bootstrap$/,
+    );
+    if (
+      nativeApplet &&
+      dependencies.nativeAuth &&
+      dependencies.nativeAppletBootstrap
+    ) {
+      if (!nativeIdentity?.session)
+        return jsonError(401, "Please sign in again.");
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      const appletId = decodeURIComponent(nativeApplet[1]!);
+      const epoch = url.searchParams.get("epoch") ?? "";
+      if (
+        !/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}\.[a-z0-9-]{1,64}$/.test(appletId) ||
+        !/^[A-Za-z0-9_-]{16,64}$/.test(epoch)
+      )
+        return jsonError(400, "Invalid Applet");
+      return Response.json(
+        await dependencies.nativeAppletBootstrap(userId, appletId, epoch),
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
     if (request.method === "GET" && url.pathname === "/api/identity") {
       return Response.json({ schemaVersion: 1, userId, isAdmin });
     }
@@ -991,6 +1081,12 @@ export function createGateway(dependencies: GatewayDependencies) {
       return jsonError(400, "invalid request URL");
     }
 
+    if (
+      dependencies.nativeAuth &&
+      url.pathname === "/native-fallback" &&
+      url.hostname === "ui.bot.frockbot.com"
+    )
+      return nativeFallbackResponse(request);
     if (dependencies.uiArtifactHosts?.includes(url.hostname)) {
       return servePackageUiArtifact(request, url, dependencies.artifacts);
     }

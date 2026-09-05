@@ -1,10 +1,40 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/extensions/catalog.dart';
 
 void main() {
+  testWidgets('replacing a form fences an earlier asynchronous receipt', (
+    tester,
+  ) async {
+    final pending = Completer<void>();
+    Widget page(Object document) => MaterialApp(
+      home: Scaffold(
+        body: CatalogRegion(
+          key: const ValueKey('region'),
+          document: document,
+          submit: (_) => pending.future,
+        ),
+      ),
+    );
+    await tester.pumpWidget(page(deterministicForm));
+    await tester.enterText(find.byKey(const ValueKey('form-name')), 'Pixel');
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    await tester.pumpWidget(
+      page([
+        {'id': 'root', 'component': 'Unknown'},
+      ]),
+    );
+    pending.complete();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('couldn’t be opened'), findsOneWidget);
+    expect(find.text('Saved.'), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+  });
+
   test('deterministic tree detaches caller state', () {
     final decoded = validateDocument(deterministicForm);
     decoded[0]['children'] = [];

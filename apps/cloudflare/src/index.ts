@@ -956,6 +956,42 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     };
   }
 
+  /** One generation read supplies both the native iframe artifact and its lease. */
+  async nativeAppletBootstrap(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      appletId: rpcString(129),
+      navigationEpoch: rpcIdentifier,
+    });
+    const userId = this.ctx.props.userId;
+    const appletId = request.appletId as string;
+    const navigationEpoch = request.navigationEpoch as string;
+    const secret = this.env.APPLET_VIEWER_SECRET;
+    if (!secret) throw new Error("Applet viewer sessions are not configured");
+    const state = await this.appletCurrentGeneration(userId, appletId);
+    const expiresAt = new Date(Date.now() + 120_000);
+    const artifactOrigin = "https://ui.bot.frockbot.com";
+    return {
+      schemaVersion: 1 as const,
+      appletId,
+      userId,
+      generationId: state.generationId,
+      navigationEpoch,
+      bootstrapUrl: `${artifactOrigin}/native-fallback?artifact=${state.uiContentHash}&epoch=${encodeURIComponent(navigationEpoch)}`,
+      artifactOrigin,
+      artifact: state.ui,
+      viewer: {
+        token: await mintAppletViewerTokenV1(secret, {
+          u: userId,
+          a: appletId,
+          g: state.generationId,
+          exp: Math.floor(expiresAt.getTime() / 1000),
+        }),
+        expiresAt: expiresAt.toISOString(),
+        socketUrl: `wss://bot.frockbot.com/api/applets/${encodeURIComponent(appletId)}/socket`,
+      },
+    };
+  }
+
   /** The current generation's UI artifact, for the canvas to nest. */
   async readAppletUi(input: unknown): Promise<{
     appletId: string;
@@ -976,7 +1012,11 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   private async appletCurrentGeneration(
     userId: string,
     appletId: string,
-  ): Promise<{ generationId: string; uiContentHash: string }> {
+  ): Promise<{
+    generationId: string;
+    uiContentHash: string;
+    ui: ReturnType<typeof decodeAppletGenerationV1>["ui"];
+  }> {
     const directory = decodeAppletSummaryV1(
       await this.requireAppletSummary(userId, appletId),
     );
@@ -996,7 +1036,11 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     if (!generation) {
       throw new Error(`Applet "${appletId}" has no active generation`);
     }
-    return { generationId, uiContentHash: generation.ui.contentHash };
+    return {
+      generationId,
+      uiContentHash: generation.ui.contentHash,
+      ui: generation.ui,
+    };
   }
 
   private async requireAppletSummary(
@@ -2132,13 +2176,32 @@ export default {
           .map((host) => host.trim())
           .filter(Boolean),
         auth: gatewayAuth(env),
-        ...(env.NATIVE_SLICE_2_AUTH === "android" && env.BETTER_AUTH_SECRET
+        saveNativeForm: (userId, command) => {
+          const stub = env.USER_CONFIGURATIONS.get(
+            env.USER_CONFIGURATIONS.idFromName(userId),
+          );
+          // SAFETY: USER_CONFIGURATIONS is bound to the reviewed UserConfiguration class.
+          const rpc = stub as unknown as Pick<
+            UserConfiguration,
+            "saveNativeForm"
+          >;
+          return rpc.saveNativeForm({ schemaVersion: 1, userId, command });
+        },
+        ...(["android", "android,macos"].includes(
+          env.NATIVE_SLICE_2_AUTH ?? "",
+        ) && env.BETTER_AUTH_SECRET
           ? {
               nativeAuth: createNativeAuth({
                 secret: env.BETTER_AUTH_SECRET,
                 auth: gatewayAuth(env),
-                returnUris: [NATIVE_RETURN_ANDROID],
-                session: (userId, operation) => {
+                returnUris:
+                  env.NATIVE_SLICE_2_AUTH === "android,macos"
+                    ? [
+                        NATIVE_RETURN_ANDROID,
+                        "https://bot.frockbot.com/native/return/macos",
+                      ]
+                    : [NATIVE_RETURN_ANDROID],
+                session: async (userId, operation) => {
                   const stub = env.USER_CONFIGURATIONS.get(
                     env.USER_CONFIGURATIONS.idFromName(userId),
                   );
@@ -2147,7 +2210,10 @@ export default {
                     UserConfiguration,
                     "nativeSession"
                   >;
-                  return rpc.nativeSession(operation);
+                  const result = await rpc.nativeSession(operation);
+                  if (result.schemaVersion !== 1 || result.status !== "ok")
+                    throw new Error("Sign-in was refused");
+                  return result.record;
                 },
               }),
             }
@@ -2171,6 +2237,15 @@ export default {
             schemaVersion: 1,
             userId,
           })) ?? env.DEFAULT_APPLICATION_HASH,
+        nativeAppletBootstrap: (userId, appletId, navigationEpoch) =>
+          runtimeExports
+            .UserBotState({ props: { userId } })
+            .nativeAppletBootstrap({
+              schemaVersion: 1,
+              userId,
+              appletId,
+              navigationEpoch,
+            }),
         botStateFor: (userId) =>
           runtimeExports.UserBotState({ props: { userId } }),
         userConfigurationFor: (userId): UserConfigurationBinding =>

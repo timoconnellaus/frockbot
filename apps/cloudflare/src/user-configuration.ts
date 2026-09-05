@@ -1,3 +1,4 @@
+import { saveNativeQualificationForm } from "./native-form.js";
 import { DurableObject } from "cloudflare:workers";
 import {
   decodeNativeSessionOperation,
@@ -211,12 +212,38 @@ interface UserConfigurationEnv {
 const SEARCH_REBUILD_BOT_LIMIT = 200;
 
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
+  async saveNativeForm(input: unknown) {
+    try {
+      const rpc = decodeRpcEnvelopeV1(input, {
+        userId: rpcIdentifier,
+        command: rpcJsonRecord,
+      });
+      await this.assertUserIdentity(rpc.userId as string);
+      return this.ctx.storage.transactionSync(() =>
+        saveNativeQualificationForm(
+          this.ctx.storage.kv,
+          rpc.userId as string,
+          rpc.command,
+        ),
+      );
+    } catch {
+      return { schemaVersion: 1 as const, status: "refused" as const };
+    }
+  }
+
   async nativeSession(input: unknown) {
-    const operation = decodeNativeSessionOperation(input);
-    await this.assertUserIdentity(operation.userId);
-    return this.ctx.storage.transactionSync(() =>
-      nativeSessionOperation(this.ctx.storage.kv, operation, Date.now()),
-    );
+    try {
+      const operation = decodeNativeSessionOperation(input);
+      await this.assertUserIdentity(operation.userId);
+      const record = this.ctx.storage.transactionSync(() =>
+        nativeSessionOperation(this.ctx.storage.kv, operation, Date.now()),
+      );
+      return { schemaVersion: 1 as const, status: "ok" as const, record };
+    } catch {
+      // RPC refusals are data. Expected failures must not escape a DO entry
+      // as unhandled promise rejections in workerd.
+      return { schemaVersion: 1 as const, status: "refused" as const };
+    }
   }
 
   private mounted: Promise<MountedFoundationUserBackend> | undefined;

@@ -36,12 +36,19 @@ export function decodeNativeSessionOperation(
     !isProtocolValue("Identifier", v.userId) ||
     !isProtocolValue("Identifier", v.sessionId) ||
     !isProtocolValue("ClientHello", v.hello) ||
-    !["issue", "read", "revoke"].includes(String(v.action)) ||
+    (v.action !== "issue" && v.action !== "read" && v.action !== "revoke") ||
     typeof v.expiresAt !== "number" ||
     !Number.isSafeInteger(v.expiresAt)
   )
     throw new Error("Invalid native session");
-  return v as unknown as NativeSessionOperation;
+  return {
+    schemaVersion: 1,
+    userId: v.userId,
+    sessionId: v.sessionId,
+    hello: v.hello,
+    action: v.action,
+    expiresAt: v.expiresAt,
+  };
 }
 
 // Called only inside the User DO's synchronous transaction. Bounded, versioned

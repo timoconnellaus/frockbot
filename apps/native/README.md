@@ -18,7 +18,7 @@ On this task's restricted Mac, the SDK cache could not be written. An APFS clone
 
 Use `scripts/native-acceptance.sh inventory`, then `scripts/native-acceptance.sh install` from the repository root. The runner waits for the already-paired Pixel, pulls the installed APK, compares its certificate, reads its installed versionCode, and builds `1.1.0` with the next code. Gradle refuses a missing existing keystore or an absent/stale installed code. The runner uses `adb install -r`; it never uninstalls, clears data or generates a key. No signing key is committed.
 
-The application retains `com.frockbot.mobile`. Its API-28+ WebView directory is separate from Capacitor's retained directory, and cookies are disabled before the first WebView. API 24–27 isolation remains unqualified. The acceptance build checks only a random continuity sentinel; same-User/Bot re-auth is a separate device check.
+The application retains `com.frockbot.mobile`. Compile SDK 37 is required by secure storage 11; minSdk 24 and targetSdk 36 remain unchanged. Its API-28+ WebView directory is separate from Capacitor's retained directory, and cookies are disabled before the first WebView. API 24–27 isolation remains unqualified. The acceptance build checks only a random continuity sentinel; same-User/Bot re-auth is a separate device check.
 
 ## macOS
 

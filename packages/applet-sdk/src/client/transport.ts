@@ -22,6 +22,7 @@ export interface AppletInitV1 {
   /** Short-lived viewer token; appended as `?token=`. */
   token: string;
   generationId: string;
+  tokenTransport?: "subprotocol-v1";
 }
 
 export type AppletStatus =
@@ -43,7 +44,10 @@ export interface AppletSocket {
   onerror: ((event: unknown) => void) | null;
 }
 
-export type AppletSocketFactory = (url: string) => AppletSocket;
+export type AppletSocketFactory = (
+  url: string,
+  protocols?: string[],
+) => AppletSocket;
 
 /** What a TanStack DB collection hands the transport for one table. */
 export interface AppletTableSink {
@@ -69,8 +73,8 @@ export interface AppletTransportOptions {
 
 class RejectedMutation extends Error {}
 
-function defaultSocketFactory(url: string): AppletSocket {
-  return new WebSocket(url) as unknown as AppletSocket;
+function defaultSocketFactory(url: string, protocols?: string[]): AppletSocket {
+  return new WebSocket(url, protocols) as unknown as AppletSocket;
 }
 
 export class AppletTransport {
@@ -185,8 +189,12 @@ export class AppletTransport {
       status: this.#attempt === 0 ? "connecting" : "reconnecting",
     });
     const url = new URL(this.#init.socketUrl);
-    url.searchParams.set("token", this.#init.token);
-    const socket = this.#options.socketFactory(url.toString());
+    const protocols =
+      this.#init.tokenTransport === "subprotocol-v1"
+        ? ["frockbot.applet.v1", `frockbot.viewer.${this.#init.token}`]
+        : undefined;
+    if (!protocols) url.searchParams.set("token", this.#init.token);
+    const socket = this.#options.socketFactory(url.toString(), protocols);
     this.#socket = socket;
     socket.onopen = () => {
       if (this.#currentSocketId === id) this.#handshake();

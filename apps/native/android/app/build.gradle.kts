@@ -14,7 +14,8 @@ check(flutter.versionCode > installedCode) { "The build must upgrade the install
 
 android {
     namespace = "com.frockbot.mobile"
-    compileSdk = 36
+    // Secure storage 11 requires API 37 at compile time; device floor/target remain 24/36.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
     buildFeatures { buildConfig = true }
 

@@ -242,3 +242,46 @@ describe("native system browser exchange", () => {
     }
   });
 });
+
+test("native Applet token transport rejects ambiguous or URL credentials", async () => {
+  const { appletViewerTokenFromRequest } = await import("./gateway.js");
+  const url = new URL(
+    "https://bot.frockbot.com/api/applets/user.counter/socket",
+  );
+  const request = (protocols: string) =>
+    new Request(url, { headers: { "sec-websocket-protocol": protocols } });
+  expect(
+    appletViewerTokenFromRequest(
+      request("frockbot.applet.v1, frockbot.viewer.synthetic"),
+      url,
+    ),
+  ).toBe("synthetic");
+  expect(
+    appletViewerTokenFromRequest(request("frockbot.viewer.synthetic"), url),
+  ).toBeNull();
+  expect(
+    appletViewerTokenFromRequest(
+      request("frockbot.applet.v1, frockbot.viewer.a, frockbot.viewer.b"),
+      url,
+    ),
+  ).toBeNull();
+  url.searchParams.set("token", "other");
+  expect(
+    appletViewerTokenFromRequest(
+      request("frockbot.applet.v1, frockbot.viewer.synthetic"),
+      url,
+    ),
+  ).toBeNull();
+});
+
+test("verified return associations name the existing Android signer and exact macOS path", async () => {
+  const f = fixture();
+  const android = await f.auth.route(f.request("/.well-known/assetlinks.json"));
+  const apple = await f.auth.route(
+    f.request("/.well-known/apple-app-site-association"),
+  );
+  expect(await android!.text()).toContain(
+    "61:E6:47:9F:9C:57:55:15:4C:1F:93:9C:DE:48:E8:A7:57:EF:F3:13:6E:54:ED:1D:DA:5F:61:E7:8B:3C:1E:37",
+  );
+  expect(await apple!.text()).toContain("Q444L76529.com.frockbot.mobile");
+});
