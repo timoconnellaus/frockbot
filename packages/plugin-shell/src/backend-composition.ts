@@ -21,6 +21,7 @@ import {
   compositionArtifactSetHashV1,
   compositionGenerationIdV1,
   decodeCompositionGenerationV1,
+  pinCompositionWithRetryV1,
   type CompositionGenerationV1,
   type CompositionHost,
   type CompositionMemberV1,
@@ -82,8 +83,22 @@ export const DEPLOYMENT_FOLLOW_SUMMARY_V1 =
  * a release while both stayed the same mounts exactly as before, and a
  * generation per Bot per release would eat the User's retention quota for
  * nothing.
+ *
+ * Compiling the deployment yields, and an active Turn can pin a generation of
+ * its own — a Package it just authored — in that window. The pin is therefore
+ * a compare-and-swap against the generation this proposal was derived from,
+ * and a lost race re-reads and re-derives, which carries the Bot's own members
+ * over because they are read from the pointer that won.
  */
 export async function resolveDeploymentCompositionV1(options: {
+  plan: ApplicationPlan;
+  composition: Pick<CompositionStore, "current" | "propose">;
+  now?: Date;
+}): Promise<CompositionGenerationV1 | undefined> {
+  return pinCompositionWithRetryV1(() => deploymentCompositionAttempt(options));
+}
+
+async function deploymentCompositionAttempt(options: {
   plan: ApplicationPlan;
   composition: Pick<CompositionStore, "current" | "propose">;
   now?: Date;
@@ -143,7 +158,10 @@ export async function resolveDeploymentCompositionV1(options: {
     ...(applets.length === 0 ? {} : { applets }),
     status: "pending",
   });
-  await options.composition.propose(generation, { pin: true });
+  await options.composition.propose(generation, {
+    pin: true,
+    expectedCurrentGenerationId: current.generationId,
+  });
   return generation;
 }
 

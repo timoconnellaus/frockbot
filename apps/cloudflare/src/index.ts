@@ -259,8 +259,8 @@ interface Env {
   /**
    * The direct OpenAI realtime key. Present, dictation takes the direct path;
    * absent, it takes the AI Gateway's BYOK key. A Worker secret, so the
-   * release workflow's `--secrets-file` list carries the name or a deploy
-   * would delete it (ADR 0025).
+   * release workflow's `--secrets-file` list carries the name or no release
+   * ever updates it (ADR 0025).
    */
   OPENAI_API_KEY?: string;
   /**
