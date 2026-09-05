@@ -157,72 +157,110 @@ test("deleting a Routine asks first, and Cancel keeps it", async ({
   await expect(section.getByText("No Routines yet.")).toBeVisible();
 });
 
-test("an account event Routine uses named accounts, event fields and listening states", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await provisionThroughUi(page, {
+for (const scenario of [
+  {
+    connector: "Gmail",
+    slug: "gmail",
+    alias: "Work inbox",
+    name: "New email summary",
+    prompt: "Summarize the email that just arrived.",
+    event: "When a new email arrives in Gmail",
+    field: "Mailbox label",
+    value: "Important",
+  },
+  {
+    connector: "Google Calendar",
+    slug: "googlecalendar",
+    alias: "Work calendar",
+    name: "Meeting brief",
+    prompt: "Prepare a brief for the meeting that is about to start.",
+    event: "Event starting soon in Google Calendar",
+    field: "Minutes Before Start",
+    value: "15",
+  },
+]) {
+  test(`${scenario.connector} account event Routine uses named accounts, event fields and listening states`, async ({
+    page,
     userId,
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-    botName: "Inbox helper",
+    ollamaBaseUrl,
+  }) => {
+    await provisionThroughUi(page, {
+      userId,
+      apiKey: E2E_OLLAMA_GOOD_API_KEY,
+      apiBaseUrl: ollamaBaseUrl,
+      botName: "Account helper",
+    });
+    // Authorize through the same backend start/callback protocol; the form itself only reads projections.
+    const start = await page.request.post("/api/plugins/composio/connections", {
+      headers: { "x-frockbot-user-id": userId },
+      data: {
+        schemaVersion: 1,
+        type: "connection/start",
+        commandId: `routine-ui-${scenario.slug}`,
+        connectionTypeId: "app",
+        connectorId: scenario.slug,
+        alias: scenario.alias,
+      },
+    });
+    expect(start.status()).toBe(201);
+    const link = (await start.json()) as { redirectUrl: string };
+    const callback = new URL(link.redirectUrl).searchParams.get("callback");
+    if (!callback) throw new Error("Fake authorization callback is missing");
+    expect(
+      (await page.request.get(callback, { maxRedirects: 0 })).status(),
+    ).toBe(303);
+    const section = await openRoutines(page);
+    await section.getByRole("button", { name: "New Routine" }).click();
+    const form = section.locator(".routine-form");
+    await form.getByLabel("Name", { exact: true }).fill(scenario.name);
+    await form.getByLabel("Prompt").fill(scenario.prompt);
+    await form.getByLabel("An event in a connected account").check();
+    await expect(
+      form.getByRole("combobox", { name: "Account", exact: true }),
+    ).toContainText(`${scenario.connector} · ${scenario.alias}`);
+    await form
+      .getByRole("combobox", { name: "Account", exact: true })
+      .selectOption({ label: `${scenario.connector} · ${scenario.alias}` });
+    await form
+      .getByRole("combobox", { name: /^When/ })
+      .selectOption({ label: scenario.event });
+    await form.getByText("Event options", { exact: true }).click();
+    if (scenario.slug === "googlecalendar") {
+      await expect(form.getByLabel("Calendar Id", { exact: true })).toHaveValue(
+        "primary",
+      );
+      await expect(
+        form.getByLabel("Countdown Window Minutes", { exact: true }),
+      ).toHaveValue("60");
+      await expect(
+        form.getByLabel("Include All Day", { exact: true }),
+      ).not.toBeChecked();
+    }
+    await form.getByLabel(scenario.field).fill(scenario.value);
+    await expect(form).not.toContainText("Composio");
+    await expect(form).not.toContainText("delivery key");
+    await form.getByRole("button", { name: "Save Routine" }).click();
+    const card = section
+      .locator(".routine-card")
+      .filter({ hasText: scenario.name });
+    await expect(card.getByRole("status")).toHaveText("Listening");
+    await expect(card).toContainText(scenario.event);
+    await expect(card.getByRole("button", { name: "Mint key" })).toHaveCount(0);
+    await card.getByRole("button", { name: "Pause", exact: true }).click();
+    await expect(card.getByRole("status")).toHaveText("Paused");
+    await card.getByRole("button", { name: "Resume", exact: true }).click();
+    await expect(card.getByRole("status")).toHaveText("Listening");
+    await card.getByRole("button", { name: "Edit", exact: true }).click();
+    await form.getByText("Event options", { exact: true }).click();
+    await expect(form.getByLabel(scenario.field)).toHaveValue(scenario.value);
+    await form.getByText("Event options", { exact: true }).click();
+    await form
+      .getByRole("combobox", { name: "Account", exact: true })
+      .scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: `e2e/test-results/${scenario.slug}-routine.png`,
+      fullPage: true,
+      animations: "disabled",
+    });
   });
-  // Authorize through the same backend start/callback protocol; the form itself only reads projections.
-  const start = await page.request.post("/api/plugins/composio/connections", {
-    headers: { "x-frockbot-user-id": userId },
-    data: {
-      schemaVersion: 1,
-      type: "connection/start",
-      commandId: "routine-ui-gmail",
-      connectionTypeId: "app",
-      connectorId: "gmail",
-      alias: "Work inbox",
-    },
-  });
-  expect(start.status()).toBe(201);
-  const link = (await start.json()) as { redirectUrl: string };
-  const callback = new URL(link.redirectUrl).searchParams.get("callback");
-  if (!callback) throw new Error("Fake authorization callback is missing");
-  expect((await page.request.get(callback, { maxRedirects: 0 })).status()).toBe(
-    303,
-  );
-  const section = await openRoutines(page);
-  await section.getByRole("button", { name: "New Routine" }).click();
-  const form = section.locator(".routine-form");
-  await form.getByLabel("Name", { exact: true }).fill("New email summary");
-  await form
-    .getByLabel("Prompt")
-    .fill("Summarize the email that just arrived.");
-  await form.getByLabel("An event in a connected account").check();
-  await expect(
-    form.getByRole("combobox", { name: "Account", exact: true }),
-  ).toContainText("Gmail · Work inbox");
-  await form
-    .getByRole("combobox", { name: "Account", exact: true })
-    .selectOption({ label: "Gmail · Work inbox" });
-  await form
-    .getByRole("combobox", { name: /^When/ })
-    .selectOption({ label: "When a new email arrives in Gmail" });
-  await form.getByLabel("Mailbox label").fill("Important");
-  await expect(form).not.toContainText("Composio");
-  await expect(form).not.toContainText("delivery key");
-  await form.getByRole("button", { name: "Save Routine" }).click();
-  const card = section
-    .locator(".routine-card")
-    .filter({ hasText: "New email summary" });
-  await expect(card.getByRole("status")).toHaveText("Listening");
-  await expect(card).toContainText("When a new email arrives in Gmail");
-  await expect(card.getByRole("button", { name: "Mint key" })).toHaveCount(0);
-  await card.getByRole("button", { name: "Pause", exact: true }).click();
-  await expect(card.getByRole("status")).toHaveText("Paused");
-  await card.getByRole("button", { name: "Resume", exact: true }).click();
-  await expect(card.getByRole("status")).toHaveText("Listening");
-  await card.getByRole("button", { name: "Edit", exact: true }).click();
-  await expect(form.getByLabel("Mailbox label")).toHaveValue("Important");
-  await page.screenshot({
-    path: "e2e/test-results/gmail-routine.png",
-    fullPage: true,
-    animations: "disabled",
-  });
-});
+}

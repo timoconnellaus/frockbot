@@ -1,3 +1,5 @@
+import { composioFixtures } from "./composio-fixtures.ts";
+
 /** A provider stand-in at the HTTP boundary; the production User DO owns all product state. */
 export function createComposioFake(authorizationOrigin?: string) {
   const accounts = new Map<
@@ -29,18 +31,18 @@ export function createComposioFake(authorizationOrigin?: string) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     if (path === "/toolkits")
       return Response.json({
-        items: [
-          {
-            slug: "gmail",
-            name: "Gmail",
-            meta: { description: "Read and send email" },
-            composio_managed_auth_schemes: ["oauth2"],
-          },
-        ],
+        items: composioFixtures.map((item) => ({
+          slug: item.slug,
+          name: item.name,
+          meta: { description: item.description },
+          composio_managed_auth_schemes: ["oauth2"],
+        })),
       });
     if (path === "/auth_configs") {
       if (request.method === "POST") {
         const input = (await request.json()) as { toolkit: { slug: string } };
+        if (!composioFixtures.some((item) => item.slug === input.toolkit.slug))
+          return Response.json({}, { status: 400 });
         const id = `ac_${input.toolkit.slug}`;
         configs.set(input.toolkit.slug, id);
         return Response.json({ auth_config: { id }, toolkit: input.toolkit });
@@ -60,13 +62,17 @@ export function createComposioFake(authorizationOrigin?: string) {
         auth_config_id: string;
         callback_url: string;
       };
+      const slug = [...configs].find(
+        ([, id]) => id === input.auth_config_id,
+      )?.[0];
+      if (!slug) return Response.json({}, { status: 400 });
       const id = `ca_${input.alias}`;
       accounts.set(id, {
         id,
         user_id: input.user_id,
         alias: input.alias,
         status: "ACTIVE",
-        toolkit: { slug: "gmail" },
+        toolkit: { slug },
         auth_config: { id: input.auth_config_id },
       });
       const redirect = new URL(input.callback_url);
@@ -85,67 +91,57 @@ export function createComposioFake(authorizationOrigin?: string) {
     }
     if (path === "/tools")
       return Response.json({
-        items: [
-          {
-            slug: "GMAIL_FETCH_EMAILS",
-            name: "Fetch emails",
-            description: "Read recent Gmail messages",
-            toolkit: { slug: "gmail" },
-            version: "20260905_00",
-            input_parameters: {
-              type: "object",
-              properties: { query: { type: "string" } },
-            },
-          },
-        ],
+        items: composioFixtures
+          .filter(
+            (item) =>
+              item.slug === url.searchParams.get("toolkit_slug") &&
+              configs.get(item.slug) ===
+                url.searchParams.get("auth_config_ids"),
+          )
+          .map((item) => ({
+            ...item.tool,
+            toolkit: { slug: item.slug },
+            version: item.version,
+          })),
       });
-    if (path === "/tools/execute/GMAIL_FETCH_EMAILS") {
+    const execute = /^\/tools\/execute\/([A-Z_]+)$/.exec(path);
+    if (execute) {
+      const fixture = composioFixtures.find(
+        (item) => item.tool.slug === execute[1],
+      );
       const input = (await request.json()) as {
         connected_account_id: string;
         user_id: string;
         version: string;
-        arguments?: { query?: string };
+        arguments?: { query?: string; calendarId?: string };
       };
       const account = accounts.get(input.connected_account_id);
       if (
+        !fixture ||
         account?.user_id !== input.user_id ||
         account?.status !== "ACTIVE" ||
-        input.version !== "20260905_00"
+        account.toolkit.slug !== fixture.slug ||
+        input.version !== fixture.version
       )
         return Response.json({}, { status: 403 });
       if (input.arguments?.query === "fake-response-lost")
         return Response.json({}, { status: 503 });
-      if (input.arguments?.query === "fake-refusal")
+      if (
+        input.arguments?.query === "fake-refusal" ||
+        input.arguments?.calendarId === "me"
+      )
         return Response.json({}, { status: 422 });
-      return Response.json({
-        successful: true,
-        data: {
-          messages: [{ id: "mail-one", subject: "Hello from your inbox" }],
-        },
-      });
+      return Response.json({ successful: true, data: fixture.result });
     }
     if (path === "/triggers_types")
       return Response.json({
-        items: [
-          {
-            slug: "GMAIL_NEW_GMAIL_MESSAGE",
-            name: "When a new email arrives in Gmail",
-            description: "Run when your inbox receives a new message.",
-            toolkit: { slug: "gmail" },
-            config: {
-              type: "object",
-              properties: {
-                label: {
-                  type: "string",
-                  title: "Mailbox label",
-                  description:
-                    "Optional: listen only to messages with this label.",
-                },
-              },
-            },
-            version: "20260905_00",
-          },
-        ],
+        items: composioFixtures
+          .filter((item) => item.slug === url.searchParams.get("toolkit_slugs"))
+          .map((item) => ({
+            ...item.trigger,
+            toolkit: { slug: item.slug },
+            version: item.version,
+          })),
       });
     if (path === "/trigger_instances/active")
       return Response.json({
@@ -160,10 +156,51 @@ export function createComposioFake(authorizationOrigin?: string) {
       const input = (await request.json()) as {
         connected_account_id: string;
         trigger_config: Record<string, unknown>;
+        toolkit_versions: Record<string, string>;
       };
-      if (accounts.get(input.connected_account_id)?.status !== "ACTIVE")
+      const account = accounts.get(input.connected_account_id);
+      const fixture = composioFixtures.find(
+        (item) => item.trigger.slug === upsert[1],
+      );
+      if (
+        !fixture ||
+        account?.status !== "ACTIVE" ||
+        account.toolkit.slug !== fixture.slug ||
+        input.toolkit_versions[fixture.slug] !== fixture.version
+      )
         return Response.json({}, { status: 403 });
-      const id = `ti_${input.connected_account_id}`;
+      const propertyNames =
+        fixture.slug === "googlecalendar"
+          ? [
+              "calendarId",
+              "countdownWindowMinutes",
+              "includeAllDay",
+              "interval",
+              "minutesBeforeStart",
+            ]
+          : ["label"];
+      if (
+        Object.keys(input.trigger_config).some(
+          (key) => !propertyNames.includes(key),
+        )
+      )
+        return Response.json({}, { status: 422 });
+      const configKey = (config: Record<string, unknown>) =>
+        JSON.stringify(
+          Object.fromEntries(
+            Object.entries(config).sort(([a], [b]) => a.localeCompare(b)),
+          ),
+        );
+      const existing = [...triggers.values()].find(
+        (item) =>
+          item.connected_account_id === input.connected_account_id &&
+          item.trigger_name === upsert[1] &&
+          configKey(item.trigger_config) === configKey(input.trigger_config),
+      );
+      const baseId = `ti_${input.connected_account_id}`;
+      const id =
+        existing?.id ??
+        (triggers.has(baseId) ? `${baseId}_${crypto.randomUUID()}` : baseId);
       triggers.set(id, {
         id,
         connected_account_id: input.connected_account_id,
