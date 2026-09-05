@@ -199,6 +199,10 @@ export interface FrockBotComposeGenerationV1 {
   revertsTo?: string;
 }
 
+// The authoritative key-to-source map is
+// BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1 in
+// packages/kernel-composition/src/isolate-wrapper.ts; these two sets only
+// classify its entries, so keep them in step with it.
 const CAPABILITY_CONTEXT_KEYS_V1 = new Set<ContextKeyNameV1>([
   "capabilities",
   "model",

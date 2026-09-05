@@ -47,7 +47,7 @@ existing exact decoders, then project:
 - hosted client outlets and mounts to slot declarations and fills;
 - Package tools, loop hooks, and declarative client entries to named actions;
 - the generated Bot-isolate context contract to readonly context keys;
-- the exact per-Turn capability list to named, credential-free grants; and
+- the exact per-Turn capability list to named, credential-free grants;
 - first-party backend Contributions to execution entries that keep their
   `gateway`, `bot`, or `user` Durable Object host; and
 - immutable Composition members and Applet generations to their Cloudflare
