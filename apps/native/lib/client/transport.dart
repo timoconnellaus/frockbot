@@ -139,11 +139,16 @@ class NativeApi {
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
         final message = switch (response.statusCode) {
-          401 => 'Please sign in again.',
+          401 =>
+            path.startsWith('/api/auth/native/')
+                ? 'That sign-in couldn’t be completed. Open sign-in again to continue.'
+                : 'Please sign in again.',
+          400 when path.startsWith('/api/auth/native/') => 'That sign-in has expired or is unavailable on this device. Please sign in again.',
+          503 when path.startsWith('/api/auth/native/') => 'Native sign-in is temporarily unavailable. Please try again in a few minutes.',
           426 => 'Update the app to continue using FrockBot.',
           413 => 'That message is too long. Please shorten it.',
           409 => 'That action could not be completed. Refresh and try again.',
-          _ => 'Couldn’t connect to FrockBot. Please try again.',
+          _ => 'FrockBot couldn’t complete that request. Please try again.',
         };
         throw RequestFailure(message, response.statusCode);
       }
@@ -154,7 +159,7 @@ class NativeApi {
       throw const RequestFailure('Couldn’t read that reply. Please reconnect.');
     } on Exception {
       throw const RequestFailure(
-        'Couldn’t connect to FrockBot. Please try again.',
+        'Couldn’t reach FrockBot. Check your connection and try again.',
       );
     }
   }

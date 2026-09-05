@@ -1,5 +1,6 @@
 import { nativeFallbackResponse } from "./native-fallback.js";
-import { readNativeJsonBody } from "./native-auth.js";
+import { accountIsAdmitted } from "./account-admission.js";
+import { isNativeAuthPath, readNativeJsonBody } from "./native-auth.js";
 import { clientCompatibilityResponse } from "./client-compatibility.js";
 import {
   ConfigurationConflictError,
@@ -13,7 +14,6 @@ import {
   isApplicationDeploymentHash,
   isPublicIdentifier,
 } from "@frockbot/configuration-core";
-import { decodeDeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
 import { DEPLOYMENT_HEADER_V1 } from "@frockbot/protocol";
 import {
   AppletViewerTokenError,
@@ -714,6 +714,18 @@ export function createGateway(dependencies: GatewayDependencies) {
     if (incompatible) return incompatible;
     const nativeResponse = await dependencies.nativeAuth?.route(request);
     if (nativeResponse) return nativeResponse;
+    // A disabled or misconfigured native door never falls through to Better
+    // Auth or the authenticated application. Browser/Capacitor routes keep
+    // their existing path, including unrelated well-known endpoints.
+    if (isNativeAuthPath(url.pathname)) {
+      return Response.json(
+        { error: "Native sign-in is unavailable. Please try again later." },
+        {
+          status: 503,
+          headers: { "cache-control": "no-store" },
+        },
+      );
+    }
     if (url.pathname.startsWith("/api/auth/")) {
       return dependencies.auth.handler(request);
     }
@@ -778,15 +790,8 @@ export function createGateway(dependencies: GatewayDependencies) {
       !isAdmin
     ) {
       try {
-        const exists = await dependencies.userExists(userId);
-        if (!exists) {
-          const policy = decodeDeploymentPolicyV1(
-            await dependencies.readDeploymentPolicy(),
-          );
-          if (!policy.signups.open) {
-            return signupClosedResponse(request, url);
-          }
-        }
+        if (!(await accountIsAdmitted(userId, isAdmin, dependencies)))
+          return signupClosedResponse(request, url);
       } catch (error) {
         return jsonError(
           503,
