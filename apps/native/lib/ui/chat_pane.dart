@@ -49,9 +49,12 @@ class _ChatPaneState extends State<ChatPane> {
 
   void update() {
     if (!mounted) return;
-    if (editor.text != widget.controller.draft &&
-        !editor.value.composing.isValid) {
-      editor.text = widget.controller.draft;
+    final draft = widget.controller.draft;
+    // A composing region (Android keyboards hold one on the last word) must
+    // not stop the box from emptying once the message has gone through.
+    if (editor.text != draft &&
+        (draft.isEmpty || !editor.value.composing.isValid)) {
+      editor.text = draft;
     }
     setState(() {});
     if (widget.controller.ready) AcceptanceMetrics.instance.editableShown();
@@ -64,7 +67,9 @@ class _ChatPaneState extends State<ChatPane> {
     if (!widget.controller.canSend || editor.text.trim().isEmpty) return;
     unawaited(HapticFeedback.lightImpact());
     await widget.controller.send(editor.text);
-    if (mounted) focus.requestFocus();
+    if (!mounted) return;
+    if (widget.controller.draft.isEmpty) editor.clear();
+    focus.requestFocus();
   }
 
   Future<void> refreshHistory({bool older = false}) async {
@@ -239,7 +244,10 @@ class _ChatPaneState extends State<ChatPane> {
                       ),
                     ),
                   ...rows,
-                  if (c.pendingId != null)
+                  // Once the run is observed it is drawn as a Turn above;
+                  // the pending bubble would otherwise repeat it below.
+                  if (c.pendingId != null &&
+                      !runs.any((run) => run['runId'] == c.pendingId))
                     _Enter(
                       key: ValueKey('pending-${c.pendingId}'),
                       child: Padding(

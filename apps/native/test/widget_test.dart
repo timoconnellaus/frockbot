@@ -110,6 +110,7 @@ class PagedTransport extends FakeTransport {
 
 void main() {
   replyTests();
+  sendTests();
   testWidgets(
     'chat opens on the latest row and earlier pages preserve the reading position',
     (tester) async {
@@ -441,4 +442,57 @@ void replyTests() {
       controller.dispose();
     },
   );
+}
+
+void sendTests() {
+  testWidgets('an observed run is drawn once and the box empties after send', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final t = FakeTransport(store);
+    final c = ChatController(
+      transport: t,
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+      nextId: () => 'send-1',
+    );
+    await c.initialize();
+    c.connection = ConnectionState.connected;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(disableAnimations: true),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: ChatPane(controller: c, onReconnect: () async {}),
+        ),
+      ),
+    );
+    await tester.enterText(find.byKey(const ValueKey('composer')), 'Hello');
+    await tester.tap(find.byKey(const ValueKey('send')));
+    await tester.pump();
+    // The observed run and the pending bubble carry the same message; the
+    // thread draws it once, with its status under it.
+    t.observed = running();
+    c.changed();
+    await tester.pump();
+    final inThread = find.descendant(
+      of: find.byType(ListView),
+      matching: find.text('Hello'),
+    );
+    expect(inThread, findsOneWidget);
+    t.completion.complete();
+    await tester.pumpAndSettle();
+    expect(inThread, findsOneWidget);
+    expect(find.text('Working…'), findsOneWidget);
+    final field = tester.widget<TextField>(
+      find.byKey(const ValueKey('composer')),
+    );
+    expect(field.controller!.text, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
 }
