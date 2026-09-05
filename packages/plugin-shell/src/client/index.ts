@@ -1538,6 +1538,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     appletSource: undefined,
     appletBuild: undefined,
     appletCanvas: "idle",
+    botChoices: 0,
     /*
      * The focused Applet, joined with the list the User owns. A getter rather
      * than a stored field so the two can never disagree: the id is what the
@@ -1549,6 +1550,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       return web.value.applets.find((applet) => applet.appletId === appletId);
     },
     async selectBot(botId: string): Promise<void> {
+      // The choice happened, whichever Bot it landed on. The layout listens to
+      // this rather than to `activeBotId`, so re-choosing the open Bot still
+      // closes the drawer that offered it.
+      web.value.botChoices += 1;
       // Re-selecting the open Bot is not a switch: aborting the live Turn and
       // clearing the transcript would discard state the User is watching.
       if (web.value.activeBotId === botId) return;
