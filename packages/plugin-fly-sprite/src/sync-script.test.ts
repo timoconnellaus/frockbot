@@ -15,7 +15,7 @@
 // what CI has; on a machine without them it says so rather than pretending to
 // pass.
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { WorkspaceRootV1 } from "@frockbot/kernel-contracts";
@@ -45,22 +45,22 @@ async function gnuShell(): Promise<{ bash: string; path: string } | undefined> {
   const prefixes = [
     "/opt/homebrew/opt/coreutils/libexec/gnubin",
     "/usr/local/opt/coreutils/libexec/gnubin",
-  ].filter((entry) => {
-    try {
-      return Bun.file(`${entry}/base64`).size >= 0;
-    } catch {
-      return false;
-    }
-  });
+  ].filter((entry) => existsSync(`${entry}/base64`));
   for (const bash of candidates) {
     for (const prefix of [...prefixes, undefined]) {
       const path = prefix ? `${prefix}:${process.env.PATH}` : process.env.PATH;
-      const probe = Bun.spawn([bash, "-c", "printf '' | base64 -w0"], {
-        env: { ...process.env, ...(path ? { PATH: path } : {}) },
-        stdout: "ignore",
-        stderr: "ignore",
-      });
-      if ((await probe.exited) === 0) return { bash, path: path ?? "" };
+      try {
+        // A missing interpreter throws out of `spawn` rather than exiting
+        // non-zero, so the probe for one has to catch as well as check.
+        const probe = Bun.spawn([bash, "-c", "printf '' | base64 -w0"], {
+          env: { ...process.env, ...(path ? { PATH: path } : {}) },
+          stdout: "ignore",
+          stderr: "ignore",
+        });
+        if ((await probe.exited) === 0) return { bash, path: path ?? "" };
+      } catch {
+        // No such bash on this machine; try the next candidate.
+      }
     }
   }
   return undefined;
