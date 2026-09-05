@@ -25,7 +25,7 @@ describe("the published package", () => {
       miniflare: "5.20260828.0-alpha",
       react: "19.2.8",
       "react-dom": "19.2.8",
-      typescript: "5.9.3",
+      typescript: "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
       "typescript-eslint": "8.69.0",
     });
   });
