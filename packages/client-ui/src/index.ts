@@ -13,6 +13,8 @@ export {
   type ActivityTrailBurstEventV1,
 } from "./activity-trail-field.js";
 export { default as UiButton } from "./UiButton.vue";
+export { default as UiConfirmDialog } from "./UiConfirmDialog.vue";
+export { dialogFocusWrapTarget } from "./dialog-focus.js";
 export { default as UiField } from "./UiField.vue";
 export { default as UiIcon } from "./UiIcon.vue";
 export { uiIconPaths, type UiIconName } from "./icons.js";

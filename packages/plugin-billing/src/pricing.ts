@@ -50,6 +50,25 @@ export const MODEL_PRICE_TABLE_V1: readonly ModelPriceV1[] = [
     outputUsdPerMillion: 1.32,
     sourceUrl: CLOUDFLARE_SOURCE,
   },
+  /*
+   * Auto is what almost every Bot runs on, and it was absent from this table:
+   * every platform-model Turn was priced at the unknown-model fallback, which
+   * is $10/$50 per million — twenty-three times what the model it routes to
+   * actually costs. Two short Turns read as fifty cents.
+   *
+   * Auto is a Cloudflare AI Gateway dynamic route over Frock AI's text
+   * models, and Frock AI publishes exactly one, so the route's price is that
+   * model's price. A second text model would make this an approximation and
+   * the honest fix then is to record the model the route chose.
+   */
+  {
+    provider: "flock-ai",
+    model: "@frock/auto",
+    inputUsdPerMillion: 0.44,
+    cachedInputUsdPerMillion: 0.014,
+    outputUsdPerMillion: 1.32,
+    sourceUrl: CLOUDFLARE_SOURCE,
+  },
   ...[
     ["gpt-6-astra", 10, 1, 50],
     ["gpt-5.6", 4, 0.4, 20],

@@ -52,6 +52,81 @@ describe("usage projection", () => {
     ]);
   });
 
+  test("prices two short platform-model turns in cents, not dollars", () => {
+    /*
+     * The defect this pins. A Bot on the platform default runs `@frock/auto`,
+     * which was absent from the price table, so every Turn a User has ever had
+     * was priced at the unknown-model fallback of $10 per million input
+     * tokens. The token counts here are the real shape of a two-sentence Turn:
+     * the transport reports nothing, so the loop estimates from the normalized
+     * request, and that request carries the system prompt and every tool
+     * schema whatever the person typed. Two of them read as "$0.50".
+     */
+    const turnEvents = (turn: number, requestId: string): SessionEvent[] =>
+      [
+        {
+          type: "model/usage",
+          seq: turn * 10,
+          timestamp: `2026-09-05T0${turn}:00:00.000Z`,
+          turn,
+          step: 1,
+          requestId,
+          provider: "flock-ai",
+          model: "@frock/auto",
+          modelBinding: { connectionId: "flock-ai-ambient" },
+          inputTokens: 24_000,
+          outputTokens: 40,
+          cachedInputTokens: 0,
+          reasoningTokens: 0,
+          latencyMs: 1_200,
+          estimated: true,
+        },
+        {
+          type: "turn/end",
+          seq: turn * 10 + 1,
+          timestamp: `2026-09-05T0${turn}:00:01.000Z`,
+          turn,
+          outcome: "completed",
+        },
+      ] as SessionEvent[];
+
+    const entries = [
+      ...usageEntriesFromTurnV1({
+        botId: "bot-a",
+        runId: "run-a",
+        turn: 1,
+        events: turnEvents(1, "request-1"),
+      }),
+      ...usageEntriesFromTurnV1({
+        botId: "bot-a",
+        runId: "run-a",
+        turn: 2,
+        events: turnEvents(2, "request-2"),
+      }),
+    ];
+
+    // 24,000 input at $0.44/M plus 40 output at $1.32/M, per Turn.
+    expect(entries.map((entry) => entry.costMicros)).toEqual([10_613, 10_613]);
+    // Priced, not guessed: the total is two cents rather than fifty.
+    expect(entries.every((entry) => entry.unknownPrice)).toBe(false);
+    expect(entries.reduce((total, entry) => total + entry.costMicros, 0)).toBe(
+      21_226,
+    );
+    // The legacy spelling of the same model is the same price, not a fallback.
+    expect(
+      usageEntriesFromTurnV1({
+        botId: "bot-a",
+        runId: "run-b",
+        turn: 1,
+        events: turnEvents(1, "request-3").map((event) =>
+          event.type === "model/usage"
+            ? { ...event, model: "@flock/auto" }
+            : event,
+        ) as SessionEvent[],
+      })[0],
+    ).toMatchObject({ costMicros: 10_613, unknownPrice: false });
+  });
+
   test("keeps entries until an idempotent sink accepts them", async () => {
     const values = new Map<string, unknown>();
     const outbox = new UsageOutboxV1({
