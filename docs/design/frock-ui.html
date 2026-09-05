@@ -1,0 +1,618 @@
+<title>Frock UI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Archivo+Black&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* A deliberately single-theme page: this direction is dark-first and every colour is painted. */
+  :root {
+    --ground: #151419;
+    --window: #1b1a20;
+    --sheet: #221f27;
+    --tile: #2b282f;
+    --tile-2: #35313a;
+    --line: rgb(244 242 246 / 8%);
+    --line-2: rgb(244 242 246 / 16%);
+    --ink: rgb(244 242 246 / 92%);
+    --ink-2: rgb(244 242 246 / 60%);
+    --ink-3: rgb(244 242 246 / 42%);
+    --accent: #ec386b;
+    --accent-ink: #f3a3ba;
+    --accent-tint: rgb(236 56 107 / 14%);
+    --accent-glow: rgb(236 56 107 / 34%);
+    --good: #7cc9a6; --good-tint: rgb(124 201 166 / 14%);
+    --warn: #dfc07f; --warn-tint: rgb(223 192 127 / 14%);
+    --danger: #ef9aa5; --danger-tint: rgb(239 154 165 / 14%);
+    --sans: "Manrope", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+    --display: "Archivo Black", "Manrope", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sheep: url("data:image/png;base64,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");
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--ground); }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 400 14px/20px var(--sans); -webkit-font-smoothing: antialiased; }
+  ::selection { background: rgb(236 56 107 / 26%); }
+
+  /* ---------- page ---------- */
+  .wrap { max-width: 1320px; margin: 0 auto; padding: 48px 32px 96px; }
+  header.top { max-width: 70ch; margin-bottom: 40px; }
+  .eyebrow { font: 600 11px/16px var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); }
+  header.top h1 { font: 400 40px/44px var(--display); letter-spacing: -.02em; margin: 10px 0 14px; text-wrap: balance; }
+  header.top p { margin: 0 0 8px; color: var(--ink-2); font-size: 15px; line-height: 23px; }
+  header.top p b { color: var(--ink); font-weight: 600; }
+  .ideas { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 28px 0 48px; }
+  .idea { padding: 14px 16px; border-radius: 14px; background: var(--window); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .idea b { display: block; font-weight: 600; margin-bottom: 4px; }
+  .idea span { color: var(--ink-2); font-size: 13px; line-height: 19px; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(390px, 1fr)); gap: 40px 28px; justify-items: center; }
+  figure { margin: 0; width: 390px; }
+  figcaption { margin-top: 14px; }
+  figcaption b { display: block; font-weight: 600; font-size: 14px; }
+  figcaption b i { font-style: normal; color: var(--ink-3); font-weight: 500; margin-right: 8px; font-family: var(--mono); font-size: 12px; }
+  figcaption span { display: block; color: var(--ink-2); font-size: 13px; line-height: 19px; margin-top: 3px; }
+
+  /* ---------- phone ---------- */
+  .phone { width: 390px; height: 800px; border-radius: 40px; background: var(--window); border: 1px solid var(--line-2); position: relative; overflow: hidden; box-shadow: 0 30px 80px rgb(0 0 0 / 55%), inset 0 1px 0 rgb(255 255 255 / 6%); display: flex; flex-direction: column; }
+  .status { height: 48px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px 0 32px; font: 600 13px var(--sans); flex: none; }
+  .status .r { display: inline-flex; gap: 5px; align-items: center; }
+  .status .r i { width: 15px; height: 9px; border-radius: 3px; border: 1px solid var(--ink-2); position: relative; display: inline-block; }
+  .status .r i::after { content: ""; position: absolute; inset: 2px; right: 4px; background: var(--ink); border-radius: 1px; }
+  .screen { flex: 1; min-height: 0; padding: 0 20px; display: flex; flex-direction: column; position: relative; }
+  .homebar { height: 22px; flex: none; display: grid; place-items: center; }
+  .homebar i { width: 120px; height: 4px; border-radius: 2px; background: var(--ink-3); display: block; }
+
+  /* ---------- primitives ---------- */
+  .bar { height: 44px; display: flex; align-items: center; gap: 8px; margin: 0 -4px; }
+  .bar .t { flex: 1; text-align: center; font: 600 16px/22px var(--sans); letter-spacing: -.01em; }
+  .bar .t.l { text-align: left; }
+  .ib { width: 36px; height: 36px; border-radius: 18px; display: grid; place-items: center; background: transparent; color: var(--ink); border: 0; }
+  .ib svg, .ico svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  .ib.f { background: var(--tile); }
+  .pill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 0 16px; border-radius: 18px; font: 600 14px var(--sans); background: var(--tile); color: var(--ink); border: 0; white-space: nowrap; }
+  .pill.p { background: var(--accent); color: #fff; box-shadow: 0 8px 24px var(--accent-glow); }
+  .pill.g { background: transparent; color: var(--ink-2); }
+  .pill.sm { height: 30px; padding: 0 12px; font-size: 13px; }
+  .pill.lg { height: 46px; padding: 0 22px; font-size: 15px; border-radius: 23px; }
+  .pill svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  .sheep { background: var(--sheep) center/cover; border-radius: 27%; flex: none; }
+  .ring { position: relative; }
+  .ring::before { content: ""; position: absolute; inset: -3px; border-radius: 32%; border: 2px solid var(--accent); opacity: .9; }
+  .ring.good::before { border-color: var(--good); }
+  .ring.idle::before { border-color: var(--line-2); }
+  .glow { position: absolute; width: 260px; height: 260px; border-radius: 50%; background: radial-gradient(circle, var(--accent-glow) 0%, transparent 62%); pointer-events: none; }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums slashed-zero; }
+  .h-display { font: 400 28px/32px var(--display); letter-spacing: -.02em; }
+  .h-name { font: 400 20px/24px var(--display); letter-spacing: -.015em; }
+  .sec { font: 600 11px/16px var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin: 18px 0 8px; }
+  .muted { color: var(--ink-2); }
+  .faint { color: var(--ink-3); }
+  .sm { font-size: 12px; line-height: 16px; }
+  .group { background: var(--sheet); border-radius: 18px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); padding: 4px 14px; }
+  .row { display: flex; align-items: center; gap: 12px; min-height: 50px; padding: 6px 0; position: relative; }
+  .row + .row::before { content: ""; position: absolute; left: 44px; right: 0; top: 0; height: 1px; background: var(--line); }
+  .row .ico { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--tile); color: var(--ink-2); flex: none; }
+  .row .ico.a { background: var(--accent-tint); color: var(--accent-ink); }
+  .row .ico.g { background: var(--good-tint); color: var(--good); }
+  .row .ico.w { background: var(--warn-tint); color: var(--warn); }
+  .row .main { flex: 1; min-width: 0; }
+  .row .main b { display: block; font-weight: 600; font-size: 14px; line-height: 18px; letter-spacing: -.005em; }
+  .row .main span { display: block; font-size: 12px; line-height: 16px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .tr { color: var(--ink-3); font: 500 12px var(--mono); display: inline-flex; align-items: center; gap: 6px; }
+  .row .tr svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.75; }
+  .chev { width: 14px; height: 14px; stroke: var(--ink-3); fill: none; stroke-width: 1.75; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; }
+  .sw { width: 42px; height: 26px; border-radius: 13px; background: var(--tile-2); position: relative; flex: none; }
+  .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 40%); }
+  .sw.on { background: var(--accent); } .sw.on::after { left: 19px; }
+  .composer { display: flex; align-items: center; gap: 4px; height: 44px; padding: 4px 4px 4px 16px; border-radius: 22px; background: var(--sheet); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%), 0 10px 30px rgb(0 0 0 / 35%); }
+  .composer > span:not(.ib) { flex: 1; color: var(--ink-3); font-size: 15px; } .composer .ib { flex: none; }
+  .composer .ib { width: 34px; height: 34px; }
+  .composer .ib.p { background: var(--accent); color: #fff; }
+  .receipt { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--sheet); margin-top: 6px; }
+  .receipt .ico { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--tile); color: var(--ink-2); flex: none; }
+  .receipt .ico svg { width: 14px; height: 14px; }
+  .receipt b { font-weight: 600; font-size: 13px; line-height: 17px; flex: 1; min-width: 0; letter-spacing: -.005em; }
+  .receipt b span { color: var(--ink-2); font-weight: 500; }
+  .receipt .t { font: 500 11px var(--mono); color: var(--ink-3); }
+  .stats { display: flex; gap: 8px; }
+  .stat { flex: 1; background: var(--sheet); border-radius: 14px; padding: 12px 12px 10px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .stat b { display: block; font: 400 22px/26px var(--display); letter-spacing: -.02em; }
+  .stat span { display: block; font-size: 11px; line-height: 14px; color: var(--ink-3); margin-top: 2px; letter-spacing: .04em; text-transform: uppercase; font-weight: 600; }
+  .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 3px; border-radius: 12px; background: var(--sheet); }
+  .seg span { text-align: center; padding: 7px 0; font: 600 13px var(--sans); color: var(--ink-2); border-radius: 9px; }
+  .seg span.on { background: var(--tile-2); color: var(--ink); }
+  .msg { max-width: 78%; padding: 8px 13px; border-radius: 18px; font-size: 15px; line-height: 22px; letter-spacing: -.004em; }
+  .msg.u { align-self: flex-end; background: var(--tile); border-bottom-right-radius: 6px; }
+  .msg.b { align-self: stretch; max-width: 100%; padding: 0; }
+  .caret { display: inline-block; width: 8px; height: 16px; background: var(--accent); border-radius: 2px; vertical-align: -3px; margin-left: 2px; opacity: .8; }
+  .sheetcard { background: var(--sheet); border-radius: 24px 24px 0 0; padding: 12px 20px 24px; box-shadow: 0 -20px 60px rgb(0 0 0 / 50%), inset 0 1px 0 rgb(255 255 255 / 6%); margin: auto -20px 0; }
+  .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--ink-3); margin: 0 auto 14px; }
+  .preview { background: var(--window); border-radius: 14px; padding: 12px 14px; border: 1px solid var(--line); }
+  .preview .k { font: 600 11px/16px var(--sans); color: var(--ink-3); letter-spacing: .06em; text-transform: uppercase; }
+  .preview .v { font-size: 14px; line-height: 20px; margin-bottom: 8px; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .btile { position: relative; overflow: hidden; background: var(--sheet); border-radius: 22px; padding: 16px 14px 14px; min-height: 168px; display: flex; flex-direction: column; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .btile .sheep { width: 56px; height: 56px; margin-bottom: auto; }
+  .btile .n { font: 400 18px/22px var(--display); letter-spacing: -.015em; margin-top: 12px; }
+  .btile .s { font-size: 12px; line-height: 16px; color: var(--ink-2); margin-top: 3px; display: flex; align-items: center; gap: 6px; }
+  .btile .glow { width: 200px; height: 200px; left: -40px; top: -60px; }
+  .btile.new { border: 1px dashed var(--line-2); background: transparent; align-items: center; justify-content: center; color: var(--ink-2); box-shadow: none; }
+  .ctile { background: var(--sheet); border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 92px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .ctile .logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font: 700 13px var(--sans); }
+  .ctile b { font-weight: 600; font-size: 14px; }
+  .ctile .st { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+  .term { background: #0f0e12; border-radius: 16px; padding: 12px 14px; font: 400 12px/18px var(--mono); color: rgb(244 242 246 / 78%); border: 1px solid var(--line); overflow: hidden; }
+  .term .p { color: var(--accent-ink); }
+  .term .ok { color: var(--good); }
+  .term .dim { color: var(--ink-3); }
+  .flow { display: flex; flex-direction: column; gap: 0; }
+  .step { display: flex; gap: 12px; align-items: flex-start; position: relative; padding: 6px 0; }
+  .step .n { width: 32px; height: 32px; border-radius: 9px; background: var(--tile); display: grid; place-items: center; color: var(--ink-2); flex: none; font: 600 12px var(--mono); }
+  .step .n.a { background: var(--accent-tint); color: var(--accent-ink); }
+  .step + .step::before { content: ""; position: absolute; left: 15px; top: -10px; height: 16px; width: 2px; background: var(--line-2); border-radius: 1px; }
+  .step b { display: block; font-weight: 600; font-size: 14px; line-height: 18px; }
+  .step span { display: block; font-size: 12px; line-height: 16px; color: var(--ink-2); }
+  .bars { display: flex; align-items: flex-end; gap: 4px; height: 36px; }
+  .bars i { flex: 1; background: var(--good); border-radius: 2px 2px 0 0; opacity: .8; display: block; }
+  .bars i.f { background: var(--danger); }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font: 600 12px/16px var(--sans); color: var(--ink-2); }
+  .field .in { height: 44px; border-radius: 14px; background: var(--sheet); border: 1px solid var(--line-2); display: flex; align-items: center; padding: 0 14px; font-size: 16px; box-shadow: 0 0 0 3px var(--accent-tint); }
+  .todo { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+  .todo .cb { width: 22px; height: 22px; border-radius: 7px; border: 1.5px solid var(--line-2); flex: none; display: grid; place-items: center; }
+  .todo .cb.on { background: var(--accent); border-color: var(--accent); }
+  .todo .cb svg { width: 12px; height: 12px; stroke: #fff; fill: none; stroke-width: 2.5; }
+  .todo .cb.on + span { color: var(--ink-3); text-decoration: line-through; }
+  .todo span { flex: 1; font-size: 15px; }
+  .fab { position: absolute; right: 20px; bottom: 30px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 14px; background: var(--tile); font: 600 12px var(--sans); color: var(--ink); white-space: nowrap; }
+  .chip.a { background: var(--accent-tint); color: var(--accent-ink); }
+  .chip.g { background: var(--good-tint); color: var(--good); }
+  .chips { display: flex; gap: 8px; overflow: hidden; }
+  .dock { display: flex; justify-content: space-around; align-items: center; height: 56px; margin: 6px -20px 0; border-top: 1px solid var(--line); padding: 0 12px; }
+  .dock div { display: flex; flex-direction: column; align-items: center; gap: 3px; font: 600 10px var(--sans); color: var(--ink-3); letter-spacing: .04em; }
+  .dock div.on { color: var(--ink); }
+  .dock svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  .dock div.on svg { stroke: var(--accent); }
+  /* ---------- system section ---------- */
+  .sys { margin: 8px 0 56px; }
+  .sys h2 { font: 400 26px/30px var(--display); letter-spacing: -.02em; margin: 0 0 6px; }
+  .sys > p { margin: 0 0 22px; color: var(--ink-2); max-width: 70ch; }
+  .sec-h { font: 600 11px/16px var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); margin: 34px 0 10px; }
+  .spec { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
+  .stage { background: var(--window); border: 1px solid var(--line); border-radius: 18px; padding: 20px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .stage h4 { margin: 0 0 12px; font: 600 11px/16px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+  .stage + .stage { margin-top: 16px; }
+  .notes { color: var(--ink-2); font-size: 13px; line-height: 19px; display: flex; flex-direction: column; gap: 10px; }
+  .notes p { margin: 0; } .notes b { color: var(--ink); font-weight: 600; }
+  .tok { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .tok th { text-align: left; font: 600 11px/16px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 0 8px 6px 0; border-bottom: 1px solid var(--line-2); }
+  .tok td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--ink-2); }
+  .tok td:first-child { font-family: var(--mono); color: var(--ink); font-size: 11.5px; }
+  .sw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
+  .swatch { border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--sheet); }
+  .swatch i { display: block; height: 44px; }
+  .swatch b { display: block; font: 600 12px/16px var(--sans); padding: 6px 9px 0; }
+  .swatch span { display: block; font: 500 10.5px/14px var(--mono); color: var(--ink-3); padding: 0 9px 7px; }
+  .trow { display: grid; grid-template-columns: 130px minmax(0,1fr); gap: 16px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .trow:last-child { border-bottom: 0; }
+  .trow .k { font: 600 11px/14px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+  .trow .k small { display: block; font: 500 10.5px var(--mono); letter-spacing: 0; text-transform: none; margin-top: 2px; }
+  .comp { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px 24px; }
+  .comp > div { display: flex; flex-direction: column; gap: 10px; }
+  .comp h5 { margin: 0; font: 600 12px/16px var(--sans); color: var(--ink-2); }
+  .rowline { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .desk { font-size: 13px; }
+  @media (max-width: 900px) { .spec { grid-template-columns: 1fr; } }
+
+  @media (prefers-reduced-motion: no-preference) { .pulse { animation: pulse 1.6s ease-in-out infinite; } }
+  @keyframes pulse { 0%,100% { opacity: .5 } 50% { opacity: 1 } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">Frock UI · the system · v1 draft</div>
+    <h1>The app is your Bots' office. Chat is one room in it.</h1>
+    <p>Today the app is a chat list with settings behind it. That is how every AI product looks, and it hides the thing FrockBot actually does: Bots that work while you are away, with real accounts, real Applets and a real Computer.</p>
+    <p>So the home is a <b>briefing</b>, not a thread list. Every action a Bot takes is a <b>receipt</b> you can read in a second. Bots are <b>characters</b> with a state you can see across the room. And the pink stops being paint and becomes <b>light</b>: it glows behind whichever Bot is working, and it marks the one thing that needs you.</p>
+  </header>
+
+  <div class="ideas">
+    <div class="idea"><b>Briefing over inbox</b><span>Open the app and read what happened, what needs you, and what is running. You never hunt through chats to find out.</span></div>
+    <div class="idea"><b>Receipts, not logs</b><span>Each tool call becomes a one-line receipt: icon tile, plain sentence, mono time. In chat, on the Bot's Work tab, and in the briefing.</span></div>
+    <div class="idea"><b>Bots as characters</b><span>Sheep avatars with a state ring: pink working, green ready, grey idle. Names set in the display face like a wordmark.</span></div>
+    <div class="idea"><b>Accent as light</b><span>Radial glow behind a working Bot, a glow under the one primary pill. Everything else is tone on tone.</span></div>
+    <div class="idea"><b>One universal input</b><span>"Ask any Bot" lives on the briefing. Routing to the right Bot is the product's job, not yours.</span></div>
+    <div class="idea"><b>Mono where it counts</b><span>Times, counts, ids and the Computer's output in JetBrains Mono. It signals precision without a terminal aesthetic.</span></div>
+  </div>
+
+
+  <div class="sys">
+    <h2>The system</h2>
+    <p>Everything the ten screens below are built from. Names are shared with Flutter; the phone values are the ones shown, the desktop shell uses the compact column.</p>
+
+    <div class="sec-h">Colour · tone before line</div>
+    <div class="spec">
+      <div>
+        <div class="stage"><h4>Four depths, three inks, one light</h4>
+          <div class="sw-grid">
+            <div class="swatch"><i style="background:var(--ground)"></i><b>ground</b><span>#151419</span></div>
+            <div class="swatch"><i style="background:var(--window)"></i><b>window</b><span>#1b1a20</span></div>
+            <div class="swatch"><i style="background:var(--sheet)"></i><b>sheet</b><span>#221f27</span></div>
+            <div class="swatch"><i style="background:var(--tile)"></i><b>tile</b><span>#2b282f</span></div>
+            <div class="swatch"><i style="background:var(--tile-2)"></i><b>tile.2</b><span>#35313a</span></div>
+            <div class="swatch"><i style="background:rgb(244 242 246 / 92%)"></i><b>ink</b><span>92%</span></div>
+            <div class="swatch"><i style="background:rgb(244 242 246 / 60%)"></i><b>ink.2</b><span>60%</span></div>
+            <div class="swatch"><i style="background:rgb(244 242 246 / 42%)"></i><b>ink.3</b><span>42%</span></div>
+            <div class="swatch"><i style="background:var(--accent)"></i><b>accent</b><span>#ec386b</span></div>
+            <div class="swatch"><i style="background:var(--accent-ink)"></i><b>accent.ink</b><span>#f3a3ba</span></div>
+            <div class="swatch"><i style="background:var(--accent-tint)"></i><b>accent.tint</b><span>14%</span></div>
+            <div class="swatch"><i style="background:radial-gradient(circle at 50% 50%, var(--accent-glow), transparent 70%)"></i><b>accent.glow</b><span>34% radial</span></div>
+            <div class="swatch"><i style="background:var(--good)"></i><b>good</b><span>#7cc9a6</span></div>
+            <div class="swatch"><i style="background:var(--warn)"></i><b>warn</b><span>#dfc07f</span></div>
+            <div class="swatch"><i style="background:var(--danger)"></i><b>danger</b><span>#ef9aa5</span></div>
+            <div class="swatch"><i style="background:var(--line-2)"></i><b>line / line.2</b><span>8% / 16%</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="notes">
+        <p><b>Depth is tone.</b> ground → window → sheet → tile → tile.2. Each step is 3 to 4% lighter and a raised surface carries a 1px top highlight at 5% white. No drop shadows except under things that float.</p>
+        <p><b>Ink is alpha.</b> Three tiers of the same colour, so text sits correctly on every depth without a per-surface grey.</p>
+        <p><b>Accent is light.</b> Solid for the one action per screen and the state ring. Tint for tiles, selection and chips. Ink for tinted words. Glow behind a working Bot and under the one pink pill.</p>
+        <p><b>Status is desaturated.</b> Good, warn and danger have their chroma pulled down so they read without glowing; each has a 14% tint for tiles.</p>
+        <p><b>Light theme</b> exists for Applets and previews: cream ground, the same names, the same tints. It is a second palette, not an inversion.</p>
+      </div>
+    </div>
+
+    <div class="sec-h">Type · three faces, ten roles</div>
+    <div class="spec">
+      <div class="stage">
+        <div class="trow"><div class="k">Display<small>Archivo Black · 28/32 · −.02em</small></div><div class="h-display">Good afternoon, Tim.</div></div>
+        <div class="trow"><div class="k">Name<small>Archivo Black · 20/24</small></div><div class="h-name">Bob</div></div>
+        <div class="trow"><div class="k">Number<small>Archivo Black · 22/26</small></div><div style="font:400 22px/26px var(--display);letter-spacing:-.02em">3 <span style="font:400 18px var(--display)">$0.04</span> <span style="font:400 18px var(--display)">14%</span></div></div>
+        <div class="trow"><div class="k">Bar title<small>Manrope 600 · 16/22 · −.01em</small></div><div style="font:600 16px/22px var(--sans);letter-spacing:-.01em">Bob's Computer</div></div>
+        <div class="trow"><div class="k">Message<small>Manrope 400 · 15/22 · −.004em</small></div><div style="font:400 15px/22px var(--sans);letter-spacing:-.004em;max-width:52ch">Found it. She is asking for Q3 by region. APAC is up 18%, EMEA flat, Americas down 4%.</div></div>
+        <div class="trow"><div class="k">Row<small>Manrope 600 · 14/18</small></div><div style="font:600 14px/18px var(--sans)">Research finished the draft</div></div>
+        <div class="trow"><div class="k">Body<small>Manrope 400 · 14/20</small></div><div style="font:400 14px/20px var(--sans);max-width:52ch">Connections belong to you, not to a Bot. Any Bot you allow can use them.</div></div>
+        <div class="trow"><div class="k">Caption<small>Manrope 500 · 12/16 · ink.2</small></div><div style="font:500 12px/16px var(--sans);color:var(--ink-2)">Q3 pricing memo · 1,240 words</div></div>
+        <div class="trow"><div class="k">Eyebrow<small>Manrope 600 · 11/16 · .1em caps</small></div><div class="eyebrow" style="color:var(--ink-3)">While you were away</div></div>
+        <div class="trow"><div class="k">Mono<small>JetBrains Mono 500 · 11–12 · tabular</small></div><div class="mono" style="font-size:12px;color:var(--ink-3)">14:02 · 2m 14s · bob-daff7ee3 · 212 passed</div></div>
+      </div>
+      <div class="notes">
+        <p><b>Archivo Black is the voice.</b> Greetings, Bot names, the big numbers on a stat. Never in a control, never below 18px.</p>
+        <p><b>Manrope does the work</b> at 400 and 600 only. Nothing under 20px is heavier than 600.</p>
+        <p><b>Mono is for time, count and id.</b> Receipts' right column, timestamps, terminal output. Always tabular, slashed zero.</p>
+        <p><b>Desktop compact:</b> message 14/20, row 13/18, body 13/18, caption 12/16, bar title 15/20. Display and Name unchanged.</p>
+        <p><b>Line heights are on the 4px grid</b>, tracking tightens as size grows.</p>
+      </div>
+    </div>
+
+    <div class="sec-h">Space, shape, motion</div>
+    <div class="spec">
+      <div class="stage">
+        <table class="tok">
+          <thead><tr><th>Token</th><th>Phone</th><th>Desktop</th><th>Used for</th></tr></thead>
+          <tbody>
+            <tr><td>space.edge</td><td>18–20</td><td>20–24</td><td>Screen edge</td></tr>
+            <tr><td>space.row</td><td>10</td><td>8</td><td>Between fields; rows in a group have no gap</td></tr>
+            <tr><td>space.group</td><td>18</td><td>16</td><td>Between groups; eyebrow sits 8 above its group</td></tr>
+            <tr><td>row.height</td><td>50</td><td>40</td><td>Group rows; 44px tap area regardless</td></tr>
+            <tr><td>control.sm / md / lg</td><td>30 / 36 / 46</td><td>28 / 32 / 36</td><td>Pills, icon buttons, composer (44)</td></tr>
+            <tr><td>tile</td><td>32</td><td>28</td><td>Icon tile in a row; receipt tile 24</td></tr>
+            <tr><td>avatar.sm / md / lg / hero</td><td>24 / 32 / 56 / 84</td><td>22 / 28 / 48 / 72</td><td>Sheep; radius 27% of size; ring at −3px, 2px</td></tr>
+            <tr><td>radius.pill</td><td>999</td><td>999</td><td>Buttons, chips, composer</td></tr>
+            <tr><td>radius.group</td><td>18</td><td>14</td><td>Groups, cards, stats</td></tr>
+            <tr><td>radius.tile</td><td>22</td><td>18</td><td>Bot tiles, canvases</td></tr>
+            <tr><td>radius.sheet</td><td>24</td><td>20</td><td>Bottom sheets, dialogs</td></tr>
+            <tr><td>radius.receipt</td><td>12</td><td>10</td><td>Receipts, previews</td></tr>
+            <tr><td>motion.fast / enter</td><td colspan="2">140ms / 260ms · cubic-bezier(.2,0,0,1)</td><td>State changes / things entering</td></tr>
+            <tr><td>glow</td><td colspan="2">260px radial, accent 34% → transparent 62%</td><td>Behind a working Bot, above the fold only</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="notes">
+        <p><b>Rows never have gaps.</b> A group is one sheet; rows inside are separated by a hairline that starts at the text edge.</p>
+        <p><b>Pills everywhere on the phone.</b> Desktop keeps 10px radius on controls so it sits beside other desktop apps.</p>
+        <p><b>One glow per screen</b>, always behind the thing that is working or the thing that needs you.</p>
+        <p><b>Motion:</b> one curve, two durations, no bounce, no ripple. Pressed darkens one step. Sheets follow the finger.</p>
+      </div>
+    </div>
+
+    <div class="sec-h">Components</div>
+    <div class="stage">
+      <div class="comp">
+        <div><h5>Bot avatar + state ring</h5><div class="rowline"><div class="sheep ring" style="width:56px;height:56px"></div><div class="sheep ring good" style="width:56px;height:56px"></div><div class="sheep ring idle" style="width:56px;height:56px"></div><div class="sheep" style="width:32px;height:32px"></div><div class="sheep" style="width:24px;height:24px"></div></div><div class="notes"><p>Pink working · green ready · grey idle · no ring when state is irrelevant.</p></div></div>
+        <div><h5>Pills</h5><div class="rowline"><span class="pill p">Approve and send</span><span class="pill">Decline</span><span class="pill g">Edit</span><span class="pill sm p">Review</span><span class="pill sm">Run now</span></div><div class="rowline"><span class="ib f"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span><span class="ib"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span><span class="pill" style="color:var(--danger)">Stop</span></div><div class="notes"><p>One pink pill per screen, with a glow. Destructive is calm: ink in danger on a tile, never a red fill.</p></div></div>
+        <div><h5>Group and rows</h5><div class="group"><div class="row"><div class="ico a"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><div class="main"><b>Inbox digest ran</b><span>14 emails · 2 need a reply</span></div><span class="tr">2h</span></div><div class="row"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><div class="main"><b>Research finished the draft</b><span>Q3 pricing memo · 1,240 words</span></div><svg class="chev" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></div><div class="row"><div class="main"><b>Notify me on failure</b></div><span class="sw on"></span></div></div></div>
+        <div><h5>Receipt</h5><div class="receipt" style="margin:0"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Searched Gmail · <span>“Thursday numbers”</span></b><span class="t">3 hits</span></div><div class="receipt"><div class="ico" style="background:var(--good-tint);color:var(--good)"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><b>Drafted reply · <span>214 words</span></b><span class="t">ready</span></div><div class="receipt" style="border:1px solid rgb(236 56 107 / 30%)"><div class="ico" style="background:var(--accent-tint);color:var(--accent-ink)"><svg viewBox="0 0 24 24"><path d="M12 8v5M12 16h.01"/><circle cx="12" cy="12" r="9"/></svg></div><b>Waiting to send an email</b><span class="pill sm p">Review</span></div><div class="notes"><p>Tile, verb-first sentence, mono right column. Same object in chat, on a Bot's Work tab, in the briefing, in the Computer.</p></div></div>
+        <div><h5>Needs-you group</h5><div class="group" style="border:1px solid rgb(236 56 107 / 35%);box-shadow:0 0 0 4px var(--accent-tint), inset 0 1px 0 rgb(255 255 255 / 5%)"><div class="row"><div class="sheep ring" style="width:32px;height:32px"></div><div class="main"><b>Bob wants to send an email</b><span>To Sarah · draft ready</span></div><span class="pill sm p">Review</span></div></div><div class="notes"><p>The only bordered group. Accent border at 35% plus a 4px tint halo.</p></div></div>
+        <div><h5>Stats</h5><div class="stats"><div class="stat"><b>3</b><span>Routines</span></div><div class="stat"><b>1</b><span>Applet</span></div><div class="stat"><b style="font-family:var(--display)">$0.04</b><span>Today</span></div></div><div class="notes"><p>Number in the display face, label as an eyebrow. Three across, never more.</p></div></div>
+        <div><h5>Composer</h5><div class="composer" style="margin:0"><span>Ask any Bot</span><span class="ib"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span class="ib p"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div><div class="notes"><p>44px pill, 15px text, 34px buttons inside. Floats over the dock with a soft shadow.</p></div></div>
+        <div><h5>Chips and segments</h5><div class="chips"><span class="chip a">All 4</span><span class="chip">Working 1</span><span class="chip g"><span class="dot"></span>Live</span><span class="chip">Idle 2</span></div><div class="seg"><span>Chat</span><span class="on">Work</span><span>Setup</span></div></div>
+        <div><h5>Bot tile</h5><div class="tiles"><div class="btile" style="min-height:150px"><div class="glow"></div><div class="sheep ring" style="width:56px;height:56px"></div><div class="n">Bob</div><div class="s"><span class="dot" style="color:var(--accent)"></span>Running tests</div></div><div class="btile" style="min-height:150px"><div class="sheep ring idle" style="width:56px;height:56px"></div><div class="n">Ops</div><div class="s"><span class="dot" style="color:var(--ink-3)"></span>Idle · 3 days</div></div></div></div>
+        <div><h5>Steps, bars, well</h5><div class="flow"><div class="step"><div class="n a">✉</div><div><b>An email arrives in Gmail</b><span>any label</span></div></div><div class="step"><div class="n">1</div><div><b>Write a digest</b><span>Group by sender</span></div></div></div><div class="bars" style="height:28px"><i style="height:60%"></i><i style="height:80%"></i><i class="f" style="height:30%"></i><i style="height:75%"></i><i style="height:90%"></i><i style="height:70%"></i></div><div class="term" style="padding:8px 12px"><div><span class="p">$</span> bun test</div><div><span class="ok">✓</span> add.test.ts <span class="dim">(12)</span></div></div></div>
+        <div><h5>Field and sheet</h5><div class="field"><label>Name your Bot</label><div class="in">Bob<span class="caret"></span></div></div><div class="preview"><div class="k">To</div><div class="v" style="margin:0">Sarah Chen</div></div><div class="notes"><p>Label above, 44px field, focus is a 3px tint halo. Sheets have a grab handle, 24px top radius, and rise from the dock.</p></div></div>
+        <div><h5>Dock</h5><div class="dock" style="margin:0;border-top:1px solid var(--line)"><div class="on"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9H4z"/></svg>TODAY</div><div><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M3 19a5 5 0 0 1 10 0M11 19a5 5 0 0 1 10 0"/></svg>BOTS</div><div><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>APPLETS</div><div><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>YOU</div></div><div class="notes"><p>Four destinations. Today is home. The active glyph takes the accent, the label stays ink.</p></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec-h" style="margin-top:8px">The ten screens</div>
+  <div class="gallery">
+
+    <!-- 01 Today -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="glow" style="left:-80px;top:40px"></div>
+          <div class="bar"><span class="t l"><span class="eyebrow">Saturday · 5 Sep</span></span><span class="ib f"><div class="sheep" style="width:22px;height:22px"></div></span></div>
+          <div class="h-display" style="margin:6px 0 14px">Good afternoon,<br>Tim.</div>
+          <div class="sec" style="margin-top:6px">Needs you</div>
+          <div class="group" style="border:1px solid rgb(236 56 107 / 35%);box-shadow:0 0 0 4px var(--accent-tint), inset 0 1px 0 rgb(255 255 255 / 5%)">
+            <div class="row"><div class="sheep ring" style="width:32px;height:32px"></div><div class="main"><b>Bob wants to send an email</b><span>To Sarah · “Re: Thursday's numbers” · draft ready</span></div><span class="pill sm p">Review</span></div>
+          </div>
+          <div class="sec">While you were away</div>
+          <div class="group">
+            <div class="row"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><div class="main"><b>Research finished the draft</b><span>Q3 pricing memo · 1,240 words</span></div><span class="tr">1h</span></div>
+            <div class="row"><div class="ico a"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><div class="main"><b>Inbox digest ran</b><span>14 emails · 2 need a reply</span></div><span class="tr">2h</span></div>
+            <div class="row"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg></div><div class="main"><b>Weekly Todos updated</b><span>Added Call mum</span></div><span class="tr">4h</span></div>
+          </div>
+          <div class="sec">Running now</div>
+          <div class="row" style="min-height:40px"><div class="sheep ring" style="width:28px;height:28px"></div><div class="main"><b>Bob · running tests</b><span class="mono">bun test · 2m 14s</span></div><span class="dot pulse" style="color:var(--accent)"></span></div>
+          <div style="margin-top:auto"></div>
+          <div class="composer"><span>Ask any Bot</span><span class="ib"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span class="ib p"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+          <div class="dock">
+            <div class="on"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9H4z"/></svg>TODAY</div>
+            <div><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M3 19a5 5 0 0 1 10 0M11 19a5 5 0 0 1 10 0"/></svg>BOTS</div>
+            <div><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>APPLETS</div>
+            <div><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>YOU</div>
+          </div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>01</i>Today</b><span>The briefing. What needs you glows. What happened reads as receipts. What is running has a pulse. One input asks any Bot.</span></figcaption>
+    </figure>
+
+    <!-- 02 Bots -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="t l h-name" style="font-size:22px">Bots</span><span class="ib f"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span></div>
+          <div class="chips" style="margin:6px 0 14px"><span class="chip a">All 4</span><span class="chip">Working 1</span><span class="chip">Needs you 1</span><span class="chip">Idle 2</span></div>
+          <div class="tiles">
+            <div class="btile"><div class="glow"></div><div class="sheep ring" style="width:56px;height:56px"></div><div class="n">Bob</div><div class="s"><span class="dot" style="color:var(--accent)"></span>Running tests</div></div>
+            <div class="btile"><div class="sheep ring good" style="width:56px;height:56px"></div><div class="n">Research</div><div class="s"><span class="dot" style="color:var(--good)"></span>Draft ready</div></div>
+            <div class="btile"><div class="sheep ring idle" style="width:56px;height:56px"></div><div class="n">Inbox</div><div class="s"><span class="dot" style="color:var(--ink-3)"></span>Next run 6 pm</div></div>
+            <div class="btile"><div class="sheep ring idle" style="width:56px;height:56px"></div><div class="n">Ops</div><div class="s"><span class="dot" style="color:var(--ink-3)"></span>Idle · 3 days</div></div>
+            <div class="btile new"><svg viewBox="0 0 24 24" style="width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.75"><path d="M12 5v14M5 12h14"/></svg><div class="sm" style="margin-top:6px;font-weight:600">New Bot</div></div>
+          </div>
+          <div class="sec" style="margin-top:22px">Shared</div>
+          <div class="group"><div class="row"><div class="sheep" style="width:32px;height:32px"></div><div class="main"><b>Family</b><span>with Sarah · groceries, calendar</span></div><svg class="chev" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></div></div>
+          <div style="margin-top:auto"></div>
+          <div class="dock">
+            <div><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9H4z"/></svg>TODAY</div>
+            <div class="on"><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M3 19a5 5 0 0 1 10 0M11 19a5 5 0 0 1 10 0"/></svg>BOTS</div>
+            <div><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>APPLETS</div>
+            <div><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>YOU</div>
+          </div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>02</i>The flock</b><span>Bots as characters. A state ring and a glow tell you who is busy from across the room. Names in the display face, like a wordmark.</span></figcaption>
+    </figure>
+
+    <!-- 03 Bot home -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="glow" style="left:65px;top:-40px"></div>
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t"></span><span class="ib"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:4px 0 16px;position:relative">
+            <div class="sheep ring" style="width:84px;height:84px"></div>
+            <div class="h-display" style="font-size:30px">Bob</div>
+            <div class="muted sm" style="display:flex;gap:6px;align-items:center"><span class="dot pulse" style="color:var(--accent)"></span>Running tests on your Computer · <span class="mono">2m 14s</span></div>
+          </div>
+          <div class="stats">
+            <div class="stat"><b>3</b><span>Routines</span></div>
+            <div class="stat"><b>1</b><span>Applet</span></div>
+            <div class="stat"><b class="mono" style="font-family:var(--display)">$0.04</b><span>Today</span></div>
+          </div>
+          <div class="seg" style="margin:14px 0 4px"><span>Chat</span><span class="on">Work</span><span>Setup</span></div>
+          <div class="sec">Today</div>
+          <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 17l6-6-6-6M12 19h8"/></svg></div><b>Ran <span>bun test</span> · 212 passed</b><span class="t">14:02</span></div>
+          <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM9 9h6v6H9z"/></svg></div><b>Published <span>Weekly Todos</span> · gen 7</b><span class="t">13:40</span></div>
+          <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Read <span>12 emails</span> from Gmail</b><span class="t">13:38</span></div>
+          <div class="receipt" style="border:1px solid rgb(236 56 107 / 30%)"><div class="ico" style="background:var(--accent-tint);color:var(--accent-ink)"><svg viewBox="0 0 24 24"><path d="M12 8v5M12 16h.01"/><circle cx="12" cy="12" r="9"/></svg></div><b>Waiting to send an email</b><span class="pill sm p">Review</span></div>
+          <div class="sec">Yesterday</div>
+          <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></div><b>Inbox digest · <span>3 runs, all good</span></b><span class="t">18:00</span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>03</i>A Bot's home</b><span>Not a chat. Who it is, what it is doing, three numbers, and its Work as receipts. Chat is one tab of three.</span></figcaption>
+    </figure>
+
+    <!-- 04 Chat -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t" style="display:inline-flex;align-items:center;justify-content:center;gap:8px"><div class="sheep ring" style="width:24px;height:24px"></div>Bob</span><span class="ib"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg></span></div>
+          <div style="display:flex;flex-direction:column;gap:12px;flex:1;padding-top:8px">
+            <div class="faint sm mono" style="text-align:center">Today 13:36</div>
+            <div class="msg u">Find Sarah's email about Thursday's numbers and draft a reply with the totals from the sheet.</div>
+            <div class="msg b">
+              <div>Found it. She is asking for Q3 by region. Here is what I did:</div>
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><b>Searched Gmail · <span>“Thursday numbers”</span></b><span class="t">3 hits</span></div>
+              <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 10h16M10 4v16"/></svg></div><b>Read <span>Q3 regions.xlsx</span></b><span class="t">4 sheets</span></div>
+              <div class="receipt"><div class="ico" style="background:var(--good-tint);color:var(--good)"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></div><b>Drafted reply · <span>214 words</span></b><span class="t">ready</span></div>
+              <div style="margin-top:10px">APAC is up 18%, EMEA flat, Americas down 4%. The draft leads with APAC and flags the Americas dip as timing. Want me to send it<span class="caret"></span></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:2px"><span class="pill sm p">Send it</span><span class="pill sm">Show draft</span><span class="pill sm g">Edit</span></div>
+          </div>
+          <div class="composer" style="margin-top:12px"><span>Message Bob</span><span class="ib"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span class="ib p"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>04</i>Chat with receipts</b><span>The Bot's reply is prose with its work shown inline as receipts, then the choice as pills. No tool-call JSON, no spinner, no “thinking”.</span></figcaption>
+    </figure>
+
+    <!-- 05 Approval -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen" style="background:linear-gradient(rgb(0 0 0 / 0%), rgb(0 0 0 / 45%))">
+          <div class="bar" style="opacity:.35"><span class="t l"><span class="eyebrow">Saturday · 5 Sep</span></span></div>
+          <div class="h-display" style="opacity:.35;margin:6px 0 14px">Good afternoon,<br>Tim.</div>
+          <div class="sheetcard">
+            <div class="grab"></div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><div class="sheep ring" style="width:40px;height:40px"></div><div><div style="font-weight:600;font-size:16px;line-height:20px">Bob wants to send an email</div><div class="muted sm">Approval needed · expires in 20 min</div></div></div>
+            <div class="preview">
+              <div class="k">To</div><div class="v">Sarah Chen</div>
+              <div class="k">Subject</div><div class="v">Re: Thursday's numbers</div>
+              <div class="k">Message</div><div class="v muted" style="margin:0">Hi Sarah, here are the Q3 totals by region. APAC is up 18% on the quarter, EMEA is flat, and the Americas are down 4%, which looks like timing on two deals that closed…</div>
+            </div>
+            <div class="sm faint" style="margin:12px 2px 14px">Bob will remember this choice for replies to Sarah.</div>
+            <div style="display:flex;gap:8px"><span class="pill lg" style="flex:1">Decline</span><span class="pill lg p" style="flex:2">Approve and send</span></div>
+          </div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>05</i>Approval</b><span>The one screen where the accent is spent in full. A sheet over the briefing, the exact effect previewed, two pills, and what the Bot will learn.</span></figcaption>
+    </figure>
+
+    <!-- 06 Applet -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t"></span><span class="ib"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span></div>
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;margin:4px 0 16px">
+            <div><div class="h-display">Weekly Todos</div><div class="muted sm" style="margin-top:6px;display:flex;align-items:center;gap:8px"><div class="sheep" style="width:18px;height:18px"></div>by Bob · <span class="chip g" style="height:22px;padding:0 8px"><span class="dot"></span>Live</span></div></div>
+            <div class="stat" style="flex:none;padding:8px 12px 6px;text-align:center"><b>2</b><span>open</span></div>
+          </div>
+          <div class="sec">This week</div>
+          <div class="group" style="padding:4px 14px">
+            <div class="todo"><span class="cb"></span><span>Buy milk</span><span class="tr mono faint sm">Tue</span></div>
+            <div class="todo" style="border-top:1px solid var(--line)"><span class="cb"></span><span>Call mum</span><span class="tr mono faint sm">6 pm</span></div>
+            <div class="todo" style="border-top:1px solid var(--line)"><span class="cb on"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></span><span>Send Q3 memo</span></div>
+            <div class="todo" style="border-top:1px solid var(--line)"><span class="cb on"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></span><span>Book dentist</span></div>
+          </div>
+          <div class="sec">Bob added</div>
+          <div class="receipt" style="margin-top:0"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div><b>Call mum <span>· from your chat</span></b><span class="t">4h</span></div>
+          <div class="fab"><span class="pill lg p"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add</span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>06</i>An Applet</b><span>Built by a Bot, but it looks native because it uses the same kit: display title, a group, receipts for what the Bot changed, one pink pill.</span></figcaption>
+    </figure>
+
+    <!-- 07 Routine -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t"></span><span class="sw on"></span></div>
+          <div class="eyebrow" style="margin-top:4px">Routine · Inbox</div>
+          <div class="h-display" style="margin:6px 0 4px">Inbox digest</div>
+          <div class="muted sm">Runs when an email arrives, at most once an hour.</div>
+          <div class="sec" style="margin-top:20px">When</div>
+          <div class="flow">
+            <div class="step"><div class="n a"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.75"><path d="M3 6h18v12H3zM3 7l9 6 9-6"/></svg></div><div><b>An email arrives in Gmail</b><span>tim@… · any label · via Composio</span></div></div>
+          </div>
+          <div class="sec">Then</div>
+          <div class="flow">
+            <div class="step"><div class="n">1</div><div><b>Read new mail since last run</b><span>Skip newsletters and receipts</span></div></div>
+            <div class="step"><div class="n">2</div><div><b>Write a digest</b><span>Group by sender, flag anything that needs a reply</span></div></div>
+            <div class="step"><div class="n">3</div><div><b>Send it to you</b><span>Notify only if something needs a reply</span></div></div>
+          </div>
+          <div class="sec" style="display:flex;justify-content:space-between;align-items:baseline">Last 14 runs <span class="mono" style="letter-spacing:0;text-transform:none;color:var(--good)">13 ok · 1 failed</span></div>
+          <div class="bars"><i style="height:60%"></i><i style="height:70%"></i><i style="height:55%"></i><i style="height:80%"></i><i style="height:65%"></i><i class="f" style="height:30%"></i><i style="height:75%"></i><i style="height:60%"></i><i style="height:90%"></i><i style="height:70%"></i><i style="height:65%"></i><i style="height:80%"></i><i style="height:72%"></i><i style="height:68%"></i></div>
+          <div class="sm faint" style="margin-top:6px;display:flex;justify-content:space-between"><span class="mono">4 Sep</span><span class="mono">avg 6.2 s · $0.002</span><span class="mono">today</span></div>
+          <div style="margin-top:auto;display:flex;gap:8px"><span class="pill" style="flex:1">Run now</span><span class="pill g" style="flex:1">Ask Bob to change it</span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>07</i>A Routine</b><span>When, then, and how it has been going. The Bot wrote the steps in plain sentences; you edit by asking, or run it now.</span></figcaption>
+    </figure>
+
+    <!-- 08 Connect -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t l h-name" style="font-size:22px">Connect</span></div>
+          <div class="composer" style="height:40px;box-shadow:none;margin:6px 0 16px"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:var(--ink-3);fill:none;stroke-width:1.75;margin-right:8px"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search 300+ services</span></div>
+          <div class="sec" style="margin-top:0">Connected</div>
+          <div class="tiles">
+            <div class="ctile"><div class="logo" style="background:#fff;color:#d44638">M</div><div><b>Gmail</b><div class="st" style="color:var(--good)"><span class="dot"></span>tim@…</div></div></div>
+            <div class="ctile"><div class="logo" style="background:#fff;color:#1a73e8">31</div><div><b>Calendar</b><div class="st" style="color:var(--good)"><span class="dot"></span>2 calendars</div></div></div>
+          </div>
+          <div class="sec">Popular</div>
+          <div class="tiles">
+            <div class="ctile"><div class="logo" style="background:#4a154b;color:#fff">S</div><div><b>Slack</b><div class="st">Messages, channels</div></div></div>
+            <div class="ctile"><div class="logo" style="background:#fff;color:#000">N</div><div><b>Notion</b><div class="st">Pages, databases</div></div></div>
+            <div class="ctile"><div class="logo" style="background:#24292f;color:#fff">G</div><div><b>GitHub</b><div class="st">Issues, PRs</div></div></div>
+            <div class="ctile"><div class="logo" style="background:#5e6ad2;color:#fff">L</div><div><b>Linear</b><div class="st">Issues, cycles</div></div></div>
+          </div>
+          <div class="sm faint" style="margin-top:14px;line-height:17px">Connections belong to you, not to a Bot. Any Bot you allow can use them, and every use shows up as a receipt.</div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>08</i>Connect a service</b><span>Services as tiles you already recognise, connected ones first. No “Composio”, no “connector” vocabulary, one sentence on trust.</span></figcaption>
+    </figure>
+
+    <!-- 09 Computer -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="bar"><span class="ib"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></span><span class="t" style="display:inline-flex;align-items:center;justify-content:center;gap:8px"><div class="sheep ring" style="width:24px;height:24px"></div>Bob's Computer</span><span class="ib"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/></svg></span></div>
+          <div style="display:flex;align-items:center;gap:8px;margin:6px 0 12px"><span class="dot pulse" style="color:var(--accent)"></span><span style="font-weight:600">Running tests</span><span class="mono faint sm" style="margin-left:auto">2m 14s</span></div>
+          <div class="term">
+            <div><span class="p">$</span> bun test</div>
+            <div class="dim">bun test v1.3.2 (frockbot-applets)</div>
+            <div><span class="ok">✓</span> weekly-todos/add.test.ts <span class="dim">(12)</span></div>
+            <div><span class="ok">✓</span> weekly-todos/list.test.ts <span class="dim">(9)</span></div>
+            <div><span class="ok">✓</span> weekly-todos/publish.test.ts <span class="dim">(4)</span></div>
+            <div><span class="dim">›</span> weekly-todos/sync.test.ts <span class="pulse">…</span></div>
+            <div class="dim" style="margin-top:6px">25 pass · 0 fail · 187 expect() calls</div>
+          </div>
+          <div class="stats" style="margin-top:12px">
+            <div class="stat"><b class="mono" style="font-family:var(--display);font-size:18px">14%</b><span>CPU</span></div>
+            <div class="stat"><b class="mono" style="font-family:var(--display);font-size:18px">412<small style="font-size:11px;letter-spacing:0"> MB</small></b><span>Memory</span></div>
+            <div class="stat"><b class="mono" style="font-family:var(--display);font-size:18px">$0.01</b><span>This session</span></div>
+          </div>
+          <div class="sec">Recent</div>
+          <div class="receipt" style="margin-top:0"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 17l6-6-6-6M12 19h8"/></svg></div><b>bun run build <span>· 1.8 s</span></b><span class="t">14:00</span></div>
+          <div class="receipt"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 10h16"/></svg></div><b>Wrote 3 files in <span>weekly-todos/</span></b><span class="t">13:58</span></div>
+          <div style="margin-top:auto;display:flex;gap:8px"><span class="pill" style="flex:1">Open terminal</span><span class="pill" style="flex:1;color:var(--danger)">Stop</span></div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>09</i>The Computer</b><span>You can watch a Bot work. Mono output in a deep well, three live numbers, receipts for what it did, and a Stop that is calm, not red.</span></figcaption>
+    </figure>
+
+    <!-- 10 First run -->
+    <figure>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="r"><span class="mono sm">5G</span><i></i></span></div>
+        <div class="screen">
+          <div class="glow" style="left:65px;top:60px;width:260px;height:260px"></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;position:relative;text-align:center">
+            <div class="sheep ring" style="width:112px;height:112px;margin-bottom:8px"></div>
+            <div class="eyebrow">Your first Bot</div>
+            <div class="h-display" style="font-size:32px;line-height:36px">Meet<br><span style="color:var(--accent-ink)">Bob</span></div>
+            <div class="muted" style="max-width:26ch;font-size:15px;line-height:22px">Bob will read what you connect, build what you ask for, and show you every step.</div>
+          </div>
+          <div class="field" style="margin-bottom:12px"><label>Name your Bot</label><div class="in">Bob<span class="caret"></span></div></div>
+          <span class="pill lg p" style="width:100%">Continue</span>
+          <div class="sm faint" style="text-align:center;margin:12px 0 4px">You can rename Bob any time.</div>
+        </div>
+        <div class="homebar"><i></i></div>
+      </div>
+      <figcaption><b><i>10</i>First run</b><span>One sheep, one name, one pill. The name you type becomes the wordmark above it, so the Bot feels like a character before it has said a word.</span></figcaption>
+    </figure>
+
+  </div>
+</div>
