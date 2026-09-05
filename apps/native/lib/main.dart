@@ -8,6 +8,8 @@ import 'package:flutter/services.dart';
 import 'client/auth.dart';
 import 'auth/sign_in_page.dart';
 import 'theme/frock_theme.dart';
+import 'ui/frock_tokens.dart';
+import 'ui/gallery.dart';
 import 'theme/states.dart';
 import 'acceptance_metrics.dart';
 import 'client/chat_controller.dart';
@@ -19,6 +21,17 @@ import 'protocol/client_wire.generated.dart' as wire;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Frock UI gallery: `flutter run --dart-define=FROCK_GALLERY=true`.
+  if (const bool.fromEnvironment('FROCK_GALLERY')) {
+    runApp(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: FrockTokens.themeData(FrockTokens.dark),
+        home: const FrockGallery(),
+      ),
+    );
+    return;
+  }
   AcceptanceMetrics.instance.start();
   runApp(const FrockBotApp());
 }
