@@ -157,7 +157,7 @@ class _SettingsPageState extends State<SettingsPage>
                                     leading: const FrockIconTile(
                                       Icons.hub_outlined,
                                     ),
-                                    title: 'Connectors',
+                                    title: 'Connect',
                                     caption:
                                         'Accounts and services for every Bot',
                                     chevron: true,
@@ -166,6 +166,7 @@ class _SettingsPageState extends State<SettingsPage>
                                         builder: (_) => ConnectionsPage(
                                           api: widget.api,
                                           userId: widget.userId,
+                                          store: widget.store,
                                         ),
                                       ),
                                     ),
