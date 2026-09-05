@@ -64,9 +64,16 @@ export default defineConfig<E2EOptions>({
   // runner sees the whole suite and none of them can write the whole HTML
   // report. Each shard emits a blob instead, and CI merges the blobs into one
   // report when a shard fails.
+  // `balanced-shard-reporter` is a reporter only because that is where
+  // Playwright lets sharding be taken over; it prints nothing. Without it one
+  // runner is handed a third of the suite — see `shard-plan.ts`.
   reporter: process.env.CI
-    ? [["list"], ["blob", { outputDir: "blob-report" }]]
-    : [["list"]],
+    ? [
+        ["./balanced-shard-reporter.ts"],
+        ["list"],
+        ["blob", { outputDir: "blob-report" }],
+      ]
+    : [["./balanced-shard-reporter.ts"], ["list"]],
   use: {
     ...devices["Desktop Chrome"],
     baseURL,
