@@ -9,7 +9,10 @@ import {
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
-import { SessionEventLog } from "@frockbot/kernel-do";
+import {
+  SessionEventLog,
+  UNRECONCILABLE_RUN_FAILURE_V1,
+} from "@frockbot/kernel-do";
 import { createShellBotBackendContribution } from "./backend.js";
 import {
   botTurnCommandFingerprintV1,
@@ -107,6 +110,71 @@ async function compileWithoutIsolateMembers(): ReturnType<
     ...application,
     packages: application.packages.filter((pkg) => pkg.artifact === undefined),
   };
+}
+
+/**
+ * A Turn caught mid-model-request by a restart: the request is journalled, no
+ * outcome ever arrived, and `provider-1` cannot be asked what happened. ADR
+ * 0028 settles it `failed` on the sentence written for the person.
+ */
+function interruptedModelRequestEvents(): SessionEvent[] {
+  return [
+    {
+      type: "turn/start" as const,
+      seq: 0,
+      timestamp: "2026-08-28T00:00:00.000Z",
+      turn: 1,
+    },
+    {
+      type: "step/start" as const,
+      seq: 1,
+      timestamp: "2026-08-28T00:00:00.000Z",
+      turn: 1,
+      step: 1,
+    },
+    {
+      type: "model/request" as const,
+      seq: 2,
+      timestamp: "2026-08-28T00:00:00.000Z",
+      turn: 1,
+      step: 1,
+      request: {
+        requestId: "request-interrupted",
+        provider: "provider-1",
+        model: "model-1",
+        system: "",
+        messages: [],
+        tools: [],
+      },
+    },
+  ] satisfies SessionEvent[];
+}
+
+function interruptedModelRequestRun(
+  events: SessionEvent[],
+  settings: StoredRun["configurationSnapshot"],
+): StoredRun {
+  return {
+    runId: "run-interrupted",
+    commandFingerprint: botTurnCommandFingerprintV1({
+      userId: "user-1",
+      botId: "primary",
+      runId: "run-interrupted",
+      sessionId: "user:primary",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      text: "hello",
+    }),
+    sessionId: "user:primary",
+    acceptedAt: "2026-08-28T00:00:00.000Z",
+    input: "hello",
+    events,
+    effectAdmissions: [],
+    status: "running",
+    phase: "executing",
+    compositionGenerationId: "test-composition-generation",
+    configurationSnapshot: settings,
+    previousEventCount: 0,
+  } satisfies StoredRun;
 }
 
 describe("Bot recovery", () => {
@@ -712,6 +780,78 @@ describe("Bot recovery", () => {
     // nobody can make.
     expect(storage.values.get("active-run")).toBeUndefined();
     expect(storage.alarmAt).toBeUndefined();
+  });
+
+  // A completed Turn already says "Bob replied" in the inbox. A failed one said
+  // nothing at all, so a person who was not watching that conversation never
+  // learned their Bot had given up.
+  test("tells the person once when a Turn settles failed", async () => {
+    const storage = new MemoryStorage();
+    const settings = {
+      ...initializeBotSettingsV1("primary"),
+      profile: { name: "Bob" },
+      notifications: { enabled: true },
+    };
+    const events = interruptedModelRequestEvents();
+    const run = interruptedModelRequestRun(events, settings);
+    await storage.put({
+      "active-run": run.runId,
+      [`run:${run.runId}`]: run,
+      "latest-events": events,
+    });
+    const recovered = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await recovered.listRuns();
+
+    const [notification, ...rest] = await recovered.listNotifications();
+    expect(rest).toEqual([]);
+    expect(notification).toMatchObject({
+      runId: run.runId,
+      title: "Bob couldn't finish",
+      // The sentence written for the person, never the stored diagnostic.
+      body: UNRECONCILABLE_RUN_FAILURE_V1,
+    });
+    expect(notification?.body).not.toContain("provider-1");
+
+    // Acknowledged, then recovered again: one failure is one notification, and
+    // a replay never resurrects one the person has already read.
+    await recovered.acknowledgeNotification(notification!.notificationId);
+    const again = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+    await again.listRuns();
+    expect(await again.listNotifications()).toEqual([]);
+  });
+
+  test("records no failure notification when the Bot is muted", async () => {
+    const storage = new MemoryStorage();
+    const settings = {
+      ...initializeBotSettingsV1("primary"),
+      profile: { name: "Bob" },
+      notifications: { enabled: false },
+    };
+    const events = interruptedModelRequestEvents();
+    const run = interruptedModelRequestRun(events, settings);
+    await storage.put({
+      "active-run": run.runId,
+      [`run:${run.runId}`]: run,
+      "latest-events": events,
+    });
+    const recovered = createShellBotBackendContribution({
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    await recovered.listRuns();
+
+    expect((storage.values.get(`run:${run.runId}`) as StoredRun).status).toBe(
+      "failed",
+    );
+    expect(await recovered.listNotifications()).toEqual([]);
   });
 
   test("resumes a request whose durable journal proves no effect started", () => {

@@ -9,6 +9,7 @@ import {
   asUser,
   expectOkJson,
   freshUserId,
+  OLLAMA_REVOKED_API_KEY,
   postAsUser,
   provisionThroughGateway,
   useApplicationArtifact,
@@ -168,5 +169,65 @@ describe("unread and notifications through the gateway", () => {
     expect(directory.notifications).toContainEqual(
       expect.objectContaining({ botId, runId: "unread-notify-turn-1" }),
     );
+  });
+
+  // A Turn that fails is the one a person most needs to hear about, and it
+  // used to be the only outcome that told them nothing: the notice existed for
+  // "Bob replied" and for nothing else.
+  it("lists the intent a failed Turn raises, in the person's own words", async () => {
+    const userId = freshUserId("unread-failed");
+    const botId = "unread-failed-bot";
+    // The key validates at setup and the provider rejects the streaming call,
+    // exactly as a key revoked afterwards would: the Turn settles `failed`.
+    await provisionThroughGateway({
+      userId,
+      botId,
+      apiKey: OLLAMA_REVOKED_API_KEY,
+    });
+    const settings = (await expectOkJson(
+      await asUser(userId, `/api/bots/${botId}/settings`),
+    )) as { revision: number; profile: { name: string } };
+    await expectOkJson(
+      await postAsUser(userId, `/api/bots/${botId}/settings`, {
+        schemaVersion: 1,
+        type: "bot/update-notifications",
+        commandId: "unread-failed-1",
+        expectedRevision: settings.revision,
+        botId,
+        notifications: { enabled: true },
+      }),
+    );
+
+    expect(
+      await postAsUser(userId, `/api/bots/${botId}/turns`, {
+        schemaVersion: 1,
+        commandId: "unread-failed-turn-1",
+        text: "hello",
+      }),
+    ).toMatchObject({ status: 200 });
+
+    const directory = (await expectOkJson(
+      await asUser(userId, "/api/bots/notifications"),
+    )) as {
+      notifications: Array<{
+        botId: string;
+        runId: string;
+        title: string;
+        body: string;
+      }>;
+    };
+    const raised = directory.notifications.find(
+      (intent) =>
+        intent.botId === botId && intent.runId === "unread-failed-turn-1",
+    );
+    expect(raised).toBeDefined();
+    expect(raised?.title).toBe(`${settings.profile.name} couldn't finish`);
+    // The sentence written for the person. The provider's status code and the
+    // outcome's name stay on the stored record, where the debug surface reads
+    // them.
+    expect(raised?.body).not.toBe("");
+    expect(raised?.body).not.toContain("model-error");
+    expect(raised?.body).not.toContain("401");
+    expect(raised?.body).not.toContain("Ollama");
   });
 });

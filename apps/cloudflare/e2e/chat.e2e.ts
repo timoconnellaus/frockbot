@@ -446,9 +446,46 @@ test("a message sent mid-Turn lands above the working sheep, unlabelled", async 
     timeout: 60_000,
   });
 
+  // The drain is a window, not a resting state, so what it said is recorded as
+  // it happens rather than sampled afterwards.
+  await page.evaluate(() => {
+    const scope = window as unknown as { supersedeSaidStopping: boolean };
+    scope.supersedeSaidStopping = false;
+    const read = () => {
+      const row = document.querySelector(".bot-working");
+      if (
+        row &&
+        (row.textContent ?? "").includes("Stopping the previous reply")
+      ) {
+        scope.supersedeSaidStopping = true;
+      }
+    };
+    read();
+    new MutationObserver(read).observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
+  });
+
   await composer.fill("second");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(composer).toHaveValue("", { timeout: 120_000 });
+
+  // While the Turn they replaced is winding down, the row above their message
+  // says what is happening to it. It used to say nothing at all, so two Turns
+  // of waiting read as one Turn being slow.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          () =>
+            (window as unknown as { supersedeSaidStopping: boolean })
+              .supersedeSaidStopping,
+        ),
+      { timeout: 60_000 },
+    )
+    .toBe(true);
 
   // The order the reader sees: their new message, then the sheep, with nothing
   // of the thread after it.
@@ -486,6 +523,10 @@ test("a message sent mid-Turn lands above the working sheep, unlabelled", async 
   );
   await expect(page.locator(".thread")).not.toContainText(
     "Interrupted by your next message.",
+  );
+  // And the words go with the drain: the new Turn is the one running now.
+  await expect(page.locator(".thread")).not.toContainText(
+    "Stopping the previous reply",
   );
 });
 

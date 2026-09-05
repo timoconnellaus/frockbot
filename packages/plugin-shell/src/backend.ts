@@ -429,6 +429,7 @@ import {
   type ClientTurnV1,
 } from "./run-protocol.js";
 import { notificationIdV1 } from "./notification-id.js";
+import { runFailureCopyV1 } from "./run-failure-copy.js";
 import {
   type CompositionManifestSourcesV1,
   compositionMemberManifestDocumentV1,
@@ -845,6 +846,8 @@ export class ShellBotBackendContribution {
         executeTurn: (input) => this.executeTurn(input),
         notification: (snapshot, result) =>
           this.createNotification(snapshot, result),
+        failureNotification: (snapshot, failed) =>
+          this.createFailureNotification(snapshot, failed),
         terminalRecords: (input) => this.terminalPackageRecords(input),
         supersededRecords: (input) => this.supersededPackageRecords(input),
         interruptTurn: (runId, reason) =>
@@ -5790,6 +5793,51 @@ export class ShellBotBackendContribution {
       createdAt: new Date().toISOString(),
       title: `${settings.profile.name} replied`,
       body: result.text.slice(0, 240),
+    };
+  }
+
+  /**
+   * What a Turn that did not finish tells the person who was waiting on it.
+   *
+   * A completed Turn notifies ("Bob replied", with what it said); a failed one
+   * used to notify nobody, so a deadline, a provider outage, a restart or a
+   * Composition that would not mount was visible only to whoever happened to
+   * still be looking at that conversation. This is the same intent for the
+   * other outcome, written in the transaction that settles the run, once per
+   * failed run.
+   *
+   * The body is the product's own sentence for the failure — `runFailureCopyV1`
+   * is the one place a stored diagnostic becomes something a person reads —
+   * and never the diagnostic itself, which stays on the debug surface.
+   */
+  private createFailureNotification(
+    settings: BotSettingsViewV1,
+    failed: {
+      runId: string;
+      failure: string;
+      events: readonly SessionEvent[];
+    },
+  ): BotNotificationIntent | undefined {
+    // The mute on updates covers this one: a failure is an update about a Turn
+    // that ended, not a decision the Bot is waiting on.
+    if (!settings.notifications.enabled) return undefined;
+    // An automation Turn does not speak to its User here. A Routine firing that
+    // fails already records its own `routine-failed` notification, and a
+    // subagent task its own; a second intent for the same failure would be two
+    // rows for one event.
+    const automation = failed.events.some(
+      (event) => event.type === "turn/admission" && event.turnType !== "chat",
+    );
+    if (automation) return undefined;
+    return {
+      notificationId: notificationIdV1("run-failed", failed.runId),
+      runId: failed.runId,
+      createdAt: new Date().toISOString(),
+      title: `${settings.profile.name} couldn't finish`,
+      body: runFailureCopyV1({
+        failure: failed.failure,
+        events: failed.events,
+      }).slice(0, 240),
     };
   }
 
