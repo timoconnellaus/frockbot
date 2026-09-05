@@ -485,6 +485,10 @@ class MemoryConfiguration
   async readSettingsOptions(): Promise<never> {
     throw new Error("No settings-options fixture");
   }
+  async readConnectionsFrame(): Promise<never> {
+    throw new Error("Connections frame not configured in this fixture");
+  }
+
   async readSettingsFrame(): Promise<never> {
     throw new Error("Settings frame not configured in this fixture");
   }

@@ -127,5 +127,8 @@ declare const validators: {
   isSettingsOptionsPage(
     value: unknown,
   ): value is ProtocolTypes["SettingsOptionsPage"];
+  isConnectionsFrame(
+    value: unknown,
+  ): value is ProtocolTypes["ConnectionsFrame"];
 };
 export default validators;

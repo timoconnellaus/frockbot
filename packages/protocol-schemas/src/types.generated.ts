@@ -643,6 +643,23 @@ export type SettingsOptionsPage = {
   items: Array<SettingChoice>;
   nextCursor?: number;
 };
+export type ConnectionsFrame = {
+  schemaVersion: 1;
+  ownerId: Identifier;
+  revision: number;
+  accounts: Array<{
+    id: Identifier;
+    label: string;
+    service: string;
+    state:
+      | "authorizing"
+      | "ready"
+      | "disabled"
+      | "revoking"
+      | "reconciliation-required"
+      | "failed";
+  }>;
+};
 export interface ProtocolTypes {
   Identifier: Identifier;
   BotId: BotId;
@@ -722,4 +739,5 @@ export interface ProtocolTypes {
   SettingChoice: SettingChoice;
   SettingsOptionsQuery: SettingsOptionsQuery;
   SettingsOptionsPage: SettingsOptionsPage;
+  ConnectionsFrame: ConnectionsFrame;
 }
