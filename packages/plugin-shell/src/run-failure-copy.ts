@@ -81,6 +81,10 @@ export const MODEL_PROVIDER_FAILURE_COPY_V1: Record<
 export const RUN_FAILURE_FALLBACK_COPY_V1 =
   "This Bot couldn't finish its reply. Try again.";
 
+/** What an older client says for the one run projection it cannot decode. */
+export const CLIENT_VERSION_DEGRADED_MESSAGE_V1 =
+  "This message can't be shown in this version. Reload to update.";
+
 /** The outcome the run's own log records, or `undefined` on an unclosed Turn. */
 function terminalTurnOutcomeV1(
   events: readonly SessionEvent[],
@@ -118,6 +122,7 @@ const KNOWN_FAILURE_COPY_V1 = new Set<string>([
   ...Object.values(RUN_FAILURE_COPY_V1),
   ...USER_FACING_FAILURE_REASONS_V1,
   RUN_FAILURE_FALLBACK_COPY_V1,
+  CLIENT_VERSION_DEGRADED_MESSAGE_V1,
 ]);
 
 /** The failure if the product wrote it, else the line every failure can use. */
