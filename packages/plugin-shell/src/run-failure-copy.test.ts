@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/kernel-contracts";
 import { MODEL_FIRST_BYTE_DEADLINE_REASON_V1 } from "@frockbot/kernel-contracts";
 import {
+  CLIENT_VERSION_DEGRADED_MESSAGE_V1,
   failureNoticeV1,
   knownFailureCopyV1,
   MODEL_PROVIDER_FAILURE_COPY_V1,
@@ -122,6 +123,7 @@ describe("runFailureCopyV1", () => {
     for (const written of [
       ...Object.values(RUN_FAILURE_COPY_V1),
       ...USER_FACING_FAILURE_REASONS_V1,
+      CLIENT_VERSION_DEGRADED_MESSAGE_V1,
     ]) {
       expect(knownFailureCopyV1(written)).toBe(written);
     }
