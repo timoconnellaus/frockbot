@@ -18,6 +18,11 @@ interface DesktopApiResponse {
   status: number;
   contentType: string | null;
   body: string;
+  /**
+   * The application that answered, as the deployment header named it. Without
+   * it the desktop shell cannot see a release land behind an open window.
+   */
+  deployment?: string;
 }
 
 interface Window {

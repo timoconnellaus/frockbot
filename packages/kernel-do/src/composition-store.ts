@@ -8,6 +8,7 @@ import { decodeCompositionFailureV1 } from "@frockbot/kernel-composition/activat
 import {
   assertCompositionArtifactSetHashV1,
   compositionGenerationIdV1,
+  CompositionPinConflictError,
   type CompositionGenerationV1,
   type CompositionOriginV1,
   type CompositionStore,
@@ -151,7 +152,7 @@ export class DurableCompositionStore implements CompositionStore {
 
   async propose(
     generation: CompositionGenerationV1,
-    options: { pin?: boolean } = {},
+    options: { pin?: boolean; expectedCurrentGenerationId?: string } = {},
   ): Promise<void> {
     const proposed = decodeCompositionGenerationV1(generation);
     if (proposed.status !== "pending") {
@@ -164,6 +165,23 @@ export class DurableCompositionStore implements CompositionStore {
     await this.ctx.storage.transaction(async (transaction) => {
       const bootstrap = await this.bootstrapGeneration(transaction);
       this.assertRequiredCoreSet(bootstrap, proposed);
+      // Compare-and-swap before anything is written: a proposal derived from a
+      // pointer that has since moved would drop whatever the winner added, so
+      // it is refused whole rather than merged blind. Nothing has been put yet,
+      // so the caller re-derives from the pointer it lost to and tries again.
+      if (options.pin && options.expectedCurrentGenerationId !== undefined) {
+        const pointer = await transaction.get<unknown>(COMPOSITION_CURRENT_KEY);
+        const currentId =
+          pointer === undefined
+            ? undefined
+            : decodeCompositionPinV1(pointer).generationId;
+        if (currentId !== options.expectedCurrentGenerationId) {
+          throw new CompositionPinConflictError(
+            options.expectedCurrentGenerationId,
+            currentId,
+          );
+        }
+      }
       const key = compositionGenerationKey(proposed.generationId);
       if ((await transaction.get<unknown>(key)) !== undefined) {
         throw new Error(

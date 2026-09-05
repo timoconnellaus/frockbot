@@ -37,7 +37,10 @@ import {
 } from "@frockbot/plugin-shell/run-protocol";
 import { decodeClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 import type { SkillRefV1 } from "@frockbot/kernel-contracts";
-import { DEPLOYMENT_HEADER_V1 } from "@frockbot/protocol";
+import {
+  DEPLOYMENT_HEADER_V1,
+  responseFromDesktopApiV1,
+} from "@frockbot/protocol";
 import { BrowserBotStateChannel } from "./bot-state-channel.js";
 import { openVoiceDictationV1 } from "./voice-dictation.js";
 import { openVoiceAssistantV1 } from "./voice-assistant.js";
@@ -93,15 +96,7 @@ async function apiRequest(
   const response = window.frockbotDesktop
     ? await window.frockbotDesktop
         .request({ schemaVersion: 1, path, method, body })
-        .then(
-          (result: DesktopApiResponse) =>
-            new Response(result.body, {
-              status: result.status,
-              headers: result.contentType
-                ? { "content-type": result.contentType }
-                : undefined,
-            }),
-        )
+        .then(responseFromDesktopApiV1)
     : await fetch(path, {
         method,
         headers: body ? { "content-type": "application/json" } : undefined,
@@ -152,15 +147,7 @@ const application = new ClientApplication({
       ? await Promise.race([
           window.frockbotDesktop
             .request({ schemaVersion: 1, path, method: "POST", body })
-            .then(
-              (result: DesktopApiResponse) =>
-                new Response(result.body, {
-                  status: result.status,
-                  headers: result.contentType
-                    ? { "content-type": result.contentType }
-                    : undefined,
-                }),
-            ),
+            .then(responseFromDesktopApiV1),
           new Promise<never>((_, reject) => {
             const aborted = () =>
               reject(new DOMException("Aborted", "AbortError"));

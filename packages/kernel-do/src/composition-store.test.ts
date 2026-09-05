@@ -3,6 +3,9 @@ import {
   bootstrapGeneration,
   compositionArtifactSetHashV1,
   compositionGenerationIdV1,
+  CompositionPinConflictError,
+  COMPOSITION_PIN_ATTEMPTS_V1,
+  pinCompositionWithRetryV1,
   type CompositionGenerationV1,
   type CompositionMemberV1,
 } from "@frockbot/kernel-composition/generation";
@@ -503,6 +506,123 @@ describe("Bot Durable Object Composition records", () => {
     await expect(
       store.list({ limit: 2, cursor: "run-index:x" }),
     ).rejects.toThrow("cursor is invalid");
+  });
+});
+
+describe("a pinning proposal compares and swaps the pointer", () => {
+  test("a proposal derived from the generation the pointer still names wins", async () => {
+    const storage = new MemoryStorage();
+    const store = createStore(storage);
+    const parent = await store.current();
+    const next = await grownSuccessor(parent, "2026-09-01T00:00:00.000Z");
+
+    await store.propose(next, {
+      pin: true,
+      expectedCurrentGenerationId: parent.generationId,
+    });
+
+    expect((await store.current()).generationId).toBe(next.generationId);
+  });
+
+  test("a proposal derived from a pointer that has since moved is refused whole", async () => {
+    const storage = new MemoryStorage();
+    const store = createStore(storage);
+    // What the losing writer snapshotted before it yielded.
+    const stale = await store.current();
+    // What landed while it was yielded: a Package the Bot authored.
+    const authored = await grownSuccessor(stale, "2026-09-01T00:00:00.000Z");
+    await store.propose(authored, {
+      pin: true,
+      expectedCurrentGenerationId: stale.generationId,
+    });
+
+    const derivedFromStale = await successor(stale, "2026-09-01T00:00:01.000Z");
+    await expect(
+      store.propose(derivedFromStale, {
+        pin: true,
+        expectedCurrentGenerationId: stale.generationId,
+      }),
+    ).rejects.toBeInstanceOf(CompositionPinConflictError);
+
+    // The pointer still names the winner, and the loser wrote nothing at all:
+    // no generation record, no index entry, so no retention quota was spent on
+    // a proposal that never applied.
+    expect((await store.current()).generationId).toBe(authored.generationId);
+    expect(await store.read(derivedFromStale.generationId)).toBeUndefined();
+    expect(await store.retainedCount()).toBe(2);
+    // And the authored member is still there — the whole point of refusing.
+    expect(
+      (await store.current()).members.map((member) => member.packageId),
+    ).toEqual(["bot-authored-greeter", "shell"]);
+  });
+
+  test("the loser re-derives from the winner and keeps both members", async () => {
+    const storage = new MemoryStorage();
+    const store = createStore(storage);
+    const stale = await store.current();
+    const authored = await grownSuccessor(stale, "2026-09-01T00:00:00.000Z");
+    await store.propose(authored, {
+      pin: true,
+      expectedCurrentGenerationId: stale.generationId,
+    });
+
+    let derivedFrom = stale;
+    let attempts = 0;
+    const pinned = await pinCompositionWithRetryV1(async () => {
+      attempts += 1;
+      // A first attempt that derives from the snapshot it took before it
+      // yielded, and a retry that re-reads — which is the merge.
+      const parent = attempts === 1 ? stale : await store.current();
+      derivedFrom = parent;
+      const generation = await successor(
+        parent,
+        `2026-09-01T00:00:0${attempts}.000Z`,
+      );
+      await store.propose(generation, {
+        pin: true,
+        expectedCurrentGenerationId: parent.generationId,
+      });
+      return generation;
+    });
+
+    expect(attempts).toBe(2);
+    expect(derivedFrom.generationId).toBe(authored.generationId);
+    expect((await store.current()).generationId).toBe(pinned.generationId);
+    expect(pinned.members.map((member) => member.packageId)).toEqual([
+      "bot-authored-greeter",
+      "shell",
+    ]);
+  });
+
+  test("gives up after a bounded number of losses rather than spinning", async () => {
+    const storage = new MemoryStorage();
+    const store = createStore(storage);
+    const stale = await store.current();
+    let attempts = 0;
+
+    await expect(
+      pinCompositionWithRetryV1(async () => {
+        attempts += 1;
+        // Someone else always wins: every attempt derives from a pointer that
+        // has already moved by the time it proposes.
+        const winner = await successor(
+          await store.current(),
+          `2026-09-0${attempts}T00:00:00.000Z`,
+        );
+        await store.propose(winner, { pin: true });
+        const generation = await successor(
+          stale,
+          `2026-09-0${attempts}T00:00:01.000Z`,
+        );
+        await store.propose(generation, {
+          pin: true,
+          expectedCurrentGenerationId: stale.generationId,
+        });
+        return generation;
+      }),
+    ).rejects.toBeInstanceOf(CompositionPinConflictError);
+
+    expect(attempts).toBe(COMPOSITION_PIN_ATTEMPTS_V1);
   });
 });
 
