@@ -9,7 +9,10 @@ import {
   createUserApplication,
   HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1,
 } from "./user-application.js";
-import { BotTurnRefusedError } from "@frockbot/kernel-do";
+import {
+  APPLETS_UNAVAILABLE_MESSAGE_V1,
+  BotTurnRefusedError,
+} from "@frockbot/kernel-do";
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
@@ -927,6 +930,35 @@ describe("run list failures", () => {
     expect(response.headers.get("content-type")).toContain("application/json");
     expect((await response.json()) as { error: string }).toEqual({
       error: 'run "run-1" has no valid Composition generation',
+    });
+  });
+});
+
+describe("the Applet viewer token route", () => {
+  test("a deployment that cannot sign tokens says so, once and finally", async () => {
+    // Production ran for weeks with no `APPLET_VIEWER_SECRET`: the route threw
+    // "Applet viewer sessions are not configured", the body carried that
+    // sentence to the browser, and the panel — which never shows a 5xx body —
+    // drew "Couldn't reach FrockBot." and retried forever (2026-09-05).
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        mintAppletViewerToken: () =>
+          Promise.reject(new Error(APPLETS_UNAVAILABLE_MESSAGE_V1)),
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/applets/alice.todo/token"),
+      env,
+    );
+    expect(response.status).toBe(503);
+    // The sentence is the User's; `definitive` is the panel's instruction to
+    // stop retrying. Neither carries the secret's name — that is in the log.
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toEqual({
+      error: "Applets are unavailable right now.",
+      definitive: true,
     });
   });
 });

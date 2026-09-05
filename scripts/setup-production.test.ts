@@ -336,7 +336,12 @@ exit 0
     expect(deploy?.env?.ROUTINE_HOOK_SECRET).toBe(
       "${{ secrets.ROUTINE_HOOK_SECRET }}",
     );
-    expect(deploy?.run).toContain("'ROUTINE_HOOK_SECRET'");
+    // The names the secrets file carries come from the manifest now, not from
+    // a list written out inside this workflow, so the deploy step is checked
+    // for the manifest and the forwarded file is checked for the values.
+    expect(deploy?.run).toContain(
+      'check-production-secrets.ts" write-secrets-file',
+    );
     // Every registered-machine token and pairing code is signed with it, so a
     // deploy that forgot it would leave the enrollment door answering 503.
     expect(validation?.env?.MACHINE_TOKEN_SECRET).toBe(
@@ -345,14 +350,12 @@ exit 0
     expect(deploy?.env?.MACHINE_TOKEN_SECRET).toBe(
       "${{ secrets.MACHINE_TOKEN_SECRET }}",
     );
-    expect(deploy?.run).toContain("'MACHINE_TOKEN_SECRET'");
     expect(validation?.env?.FROCKBOT_ADMIN_EMAILS).toBe(
       "${{ secrets.FROCKBOT_ADMIN_EMAILS }}",
     );
     expect(deploy?.env?.FROCKBOT_ADMIN_EMAILS).toBe(
       "${{ secrets.FROCKBOT_ADMIN_EMAILS }}",
     );
-    expect(deploy?.run).toContain("'FROCKBOT_ADMIN_EMAILS'");
 
     const productionEnvironment = {
       ...process.env,
@@ -373,6 +376,10 @@ exit 0
         "5c1b7b0e5b0b4d1a9e6f3c2d8a7b6e5f4d3c2b1a0f9e8d7c6b5a4938271605f4",
       MACHINE_TOKEN_SECRET:
         "9f2c4a6e8d0b1357913579bdf02468ace13579bdf02468ace13579bdf02468ac",
+      // Required since 2026-09-05: without it every published Applet answers
+      // 503, which is what production did until the manifest was added.
+      APPLET_VIEWER_SECRET:
+        "1d6f7c2b9a3e4058c7d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7",
     };
     const validConfiguration = Bun.spawnSync(
       ["bash", "-c", validation?.run ?? ""],
@@ -462,6 +469,9 @@ exit 1
       PATH: `${bin}:${process.env.PATH ?? ""}`,
       RUNNER_TEMP: runner,
       WORKFLOW_CAPTURE: capture,
+      // The deploy step runs from `apps/cloudflare`, so it reaches the
+      // secrets manifest through the workspace rather than a relative path.
+      GITHUB_WORKSPACE: fileURLToPath(new URL("..", import.meta.url)),
     };
     const hostExecution = Bun.spawnSync(
       ["bash", "-c", computerHost?.run ?? ""],
@@ -506,6 +516,16 @@ exit 1
       productionEnvironment.CREDENTIAL_KEYRING,
     );
     expect(forwarded.FROCKBOT_ADMIN_EMAILS).toBe("owner@example.com");
+    expect(forwarded.ROUTINE_HOOK_SECRET).toBe(
+      productionEnvironment.ROUTINE_HOOK_SECRET,
+    );
+    expect(forwarded.MACHINE_TOKEN_SECRET).toBe(
+      productionEnvironment.MACHINE_TOKEN_SECRET,
+    );
+    // The secret whose absence closed every published Applet in production.
+    expect(forwarded.APPLET_VIEWER_SECRET).toBe(
+      productionEnvironment.APPLET_VIEWER_SECRET,
+    );
     expect(forwarded).not.toHaveProperty("COMPOSIO_API_KEY");
     expect(forwarded).not.toHaveProperty("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
     expect(forwarded).not.toHaveProperty("FROCKBOT_AUTHORIZATION_STATE_SECRET");
