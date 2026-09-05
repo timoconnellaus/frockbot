@@ -200,6 +200,7 @@ describe("ComposioClient", () => {
       status: "REVOKED",
       toolkitSlug: "gmail",
       alias: undefined,
+      disabled: false,
     });
     expect(requestedUrl).toBe(
       "https://backend.composio.dev/api/v3.1/connected_accounts/ca_exact",

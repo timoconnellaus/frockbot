@@ -40,6 +40,10 @@ export interface OptionalProductionSecretV1 extends ProductionSecretV1 {
  */
 export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   {
+    name: "FROCKBOT_AUTHORIZATION_STATE_SECRET",
+    why: "Signs and binds public Connection callbacks to their durable User and pending authorization; independent of the session secret.",
+  },
+  {
     name: "BETTER_AUTH_URL",
     why: "The deployment's own origin; every sign-in redirect is built from it.",
   },
@@ -87,6 +91,12 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
  */
 export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1[] =
   [
+    {
+      name: "COMPOSIO_API_KEY",
+      why: "Connect Link and toolkit API for external services.",
+      degraded:
+        "Composio Connections are unavailable; the Package advertises nothing",
+    },
     {
       name: "FROCKBOT_ADMIN_EMAILS",
       why: "The identities allowed to open Admin.",
@@ -151,10 +161,6 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly ProductionSecretV1[] = [
   {
     name: "FLOCK_AI_GATEWAY_TOKEN",
     why: "The pre-rename secret twin; the workflow resolves it into FROCK_AI_GATEWAY_TOKEN.",
-  },
-  {
-    name: "FROCKBOT_AUTHORIZATION_STATE_SECRET",
-    why: "Signs the callback `state` of a redirect-based Connection. Deliberately not provisioned: redirect-based Connections left production with Composio, and `scripts/setup-production.test.ts` holds it out. Deploying it again is a decision, not an omission.",
   },
   {
     name: "ALLOW_DEVELOPMENT_AUTH",

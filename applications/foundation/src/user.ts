@@ -1,3 +1,4 @@
+import type { ComposioUserService } from "@frockbot/plugin-composio/user";
 import type { ApplicationPlan } from "@frockbot/kernel-composition/compiler";
 import {
   type AuditUserBackendContribution,
@@ -64,6 +65,7 @@ import {
   frockAiUserContribution,
   flockUserContribution,
   machineUserContribution,
+  composioUserContribution,
   mcpUserContribution,
   ollamaCloudUserContribution,
   packagePublisherUserContribution,
@@ -146,6 +148,7 @@ export interface MountedFoundationUserBackend {
    * protocol every provider answers.
    */
   mcp: McpUserBackendContribution;
+  composio?: ComposioUserService;
   /**
    * The User's transcript index. It is User-scoped state like every other
    * Contribution here, and it is the only one that is a *projection*: the rows
@@ -211,7 +214,11 @@ export async function createFoundationUserBackendContributions(
         setAlarm(scheduledTime: number | Date): Promise<void>;
       };
     readSecret(
-      name: "CREDENTIAL_KEYRING" | "MACHINE_TOKEN_SECRET",
+      name:
+        | "CREDENTIAL_KEYRING"
+        | "MACHINE_TOKEN_SECRET"
+        | "COMPOSIO_API_KEY"
+        | "BETTER_AUTH_URL",
     ): string | undefined;
     /**
      * The publication seam: the User Durable Object's own object storage and
@@ -354,6 +361,17 @@ export async function createFoundationUserBackendContributions(
       }
       return { storage: host.storage, settings };
     },
+    get composio() {
+      const settings = mountedContributions.get(settingsUserContribution);
+      if (!settings) throw new Error("Connected apps require Settings");
+      return {
+        storage: host.storage,
+        settings,
+        apiKey: host.readSecret("COMPOSIO_API_KEY"),
+        callbackBaseUrl:
+          host.readSecret("BETTER_AUTH_URL") ?? "http://localhost:8787",
+      };
+    },
     get mcp() {
       const settings = mountedContributions.get(settingsUserContribution);
       const credentials = mountedContributions.get(credentialsUserContribution);
@@ -473,6 +491,7 @@ export async function createFoundationUserBackendContributions(
     | CredentialUserBackendContribution
     | OllamaCloudUserBackendContribution
     | FrockAiUserBackendContribution
+    | ComposioUserService
     | McpUserBackendContribution
     | FlockUserBackendContribution
     | BotTemplateUserBackendContribution
@@ -488,6 +507,7 @@ export async function createFoundationUserBackendContributions(
   const credentials = mounted.get(credentialsUserContribution);
   const ollama = mounted.get(ollamaCloudUserContribution);
   const frockAi = mounted.get(frockAiUserContribution);
+  const composio = mounted.get(composioUserContribution);
   const mcp = mounted.get(mcpUserContribution);
   const flock = mounted.get(flockUserContribution);
   const botTemplate = mounted.get(botTemplateUserContribution);
@@ -534,11 +554,20 @@ export async function createFoundationUserBackendContributions(
       };
     });
 
+  if (composio)
+    unregister.push(
+      settings.registerConfigurationReadBootstrap({
+        packageId: "composio",
+        bootstrap: (userId) => composio.reconcile(userId),
+      }),
+    );
+
   return {
     settings,
     credentials,
     connections,
     mcp,
+    composio,
     flock,
     botTemplate,
     publisher,

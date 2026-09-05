@@ -1281,7 +1281,7 @@ describe("Connection provider reconciliation alarms", () => {
         authorizationStateConsumed: true,
       },
     });
-    expect(storage.alarmAt).toBeUndefined();
+    expect(storage.alarmAt).toBeDefined(); // A shared User alarm is never cancelled by this Package.
   });
 
   test("keeps failed reads scheduled without repeating the Link effect", async () => {
@@ -1400,7 +1400,7 @@ describe("Connection provider reconciliation alarms", () => {
       state: "revoked",
       safeMetadata: { connectedAccountId: "account-1" },
     });
-    expect(storage.alarmAt).toBeUndefined();
+    expect(storage.alarmAt).toBeDefined(); // A shared User alarm is never cancelled by this Package.
   });
 
   test("keeps a provider-absent expired Link pending for durable reconciliation", async () => {
@@ -1488,7 +1488,7 @@ describe("Connection provider reconciliation alarms", () => {
       state: "failed",
       failure: "Authorization failed",
     });
-    expect(storage.alarmAt).toBeUndefined();
+    expect(storage.alarmAt).toBeDefined(); // A shared User alarm is never cancelled by this Package.
 
     const recovered = createComposioUserBackendContribution(
       backendHost(storage),
@@ -1560,7 +1560,7 @@ describe("Connection provider reconciliation alarms", () => {
     expect(
       await recovered.getConnection("user-1", "connection-1"),
     ).toMatchObject({ state: "revoked" });
-    expect(storage.alarmAt).toBeUndefined();
+    expect(storage.alarmAt).toBeDefined(); // A shared User alarm is never cancelled by this Package.
   });
 
   test("accepts an ACTIVE account after callback authorization expires", async () => {
@@ -1611,7 +1611,7 @@ describe("Connection provider reconciliation alarms", () => {
         authorizationStateConsumed: true,
       },
     });
-    expect(storage.alarmAt).toBeUndefined();
+    expect(storage.alarmAt).toBeDefined(); // A shared User alarm is never cancelled by this Package.
   });
 
   test("dispatches a requested revocation after Link identity recovery", async () => {
@@ -1742,7 +1742,7 @@ describe("Connection provider reconciliation alarms", () => {
       state: "revoked",
       safeMetadata: { connectedAccountId: "account-1" },
     });
-    expect(storage.alarmAt).toBeUndefined();
+    expect(storage.alarmAt).toBeDefined(); // A shared User alarm is never cancelled by this Package.
   });
 
   test("keeps non-definitive revocation status scheduled", async () => {

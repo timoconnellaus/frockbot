@@ -1,3 +1,16 @@
+export interface ToolkitSummary {
+  slug: string;
+  name: string;
+  description: string;
+  logo?: string;
+  managedOAuth: boolean;
+}
+export interface AuthConfigSummary {
+  id: string;
+  toolkitSlug: string;
+  name?: string;
+}
+
 export type ComposioFetch = (
   input: string | URL | Request,
   init?: RequestInit,
@@ -34,6 +47,7 @@ export interface ConnectedAccountSummary {
   toolkitSlug: string;
   alias?: string;
   userId?: string;
+  disabled?: boolean;
 }
 
 export interface ExecuteComposioToolInput {
@@ -73,6 +87,11 @@ function connectedAccountSummary(
   return {
     id: requiredString(account, "id"),
     status: requiredString(account, "status"),
+    disabled:
+      account.is_disabled === true ||
+      (typeof account.auth_config === "object" &&
+        account.auth_config !== null &&
+        (account.auth_config as Record<string, unknown>).is_disabled === true),
     toolkitSlug: requiredString(toolkit, "slug"),
     alias: typeof account.alias === "string" ? account.alias : undefined,
     ...(userId ? { userId } : {}),
@@ -156,6 +175,93 @@ export class ComposioClient {
     throw new Error("Composio account pagination exceeded its limit");
   }
 
+  async listToolkits(): Promise<ToolkitSummary[]> {
+    const items = await this.pages(
+      "/toolkits?limit=100&sort_by=alphabetically&include_deprecated=false",
+    );
+    return items.map((candidate) => {
+      const toolkit = asRecord(candidate);
+      const meta = asRecord(toolkit.meta);
+      return {
+        slug: requiredString(toolkit, "slug"),
+        name: requiredString(toolkit, "name").slice(0, 120),
+        description: (typeof meta.description === "string"
+          ? meta.description
+          : ""
+        ).slice(0, 500),
+        ...(typeof meta.logo === "string" && meta.logo.startsWith("https://")
+          ? { logo: meta.logo }
+          : {}),
+        managedOAuth:
+          Array.isArray(toolkit.composio_managed_auth_schemes) &&
+          toolkit.composio_managed_auth_schemes.some(
+            (scheme) => String(scheme).toLowerCase() === "oauth2",
+          ),
+      };
+    });
+  }
+
+  async listAuthConfigs(): Promise<AuthConfigSummary[]> {
+    return (await this.pages("/auth_configs?limit=50")).flatMap((candidate) => {
+      const config = asRecord(candidate);
+      if (config.status !== "ENABLED") return [];
+      return [
+        {
+          id: requiredString(config, "id"),
+          toolkitSlug: requiredString(asRecord(config.toolkit), "slug"),
+          ...(typeof config.name === "string" ? { name: config.name } : {}),
+        },
+      ];
+    });
+  }
+
+  async createManagedAuthConfig(
+    toolkitSlug: string,
+    name: string,
+  ): Promise<AuthConfigSummary> {
+    const result = asRecord(
+      await this.request("/auth_configs", {
+        method: "POST",
+        body: JSON.stringify({
+          toolkit: { slug: toolkitSlug },
+          auth_config: { type: "use_composio_managed_auth", name },
+        }),
+      }),
+    );
+    return {
+      id: requiredString(asRecord(result.auth_config), "id"),
+      toolkitSlug: requiredString(asRecord(result.toolkit), "slug"),
+      name,
+    };
+  }
+
+  private async pages(path: string): Promise<unknown[]> {
+    const items: unknown[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const result = asRecord(
+        await this.request(
+          path + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""),
+        ),
+      );
+      if (!Array.isArray(result.items) || result.items.length > 1000)
+        throw new Error("Connector catalog is invalid");
+      items.push(...result.items);
+      if (items.length > 1000)
+        throw new Error("Connector catalog exceeded its limit");
+      if (!result.next_cursor) return items;
+      if (
+        typeof result.next_cursor !== "string" ||
+        seen.has(result.next_cursor)
+      )
+        throw new Error("Connector catalog cursor is invalid");
+      cursor = result.next_cursor;
+      seen.add(cursor);
+    }
+    throw new Error("Connector catalog pagination exceeded its limit");
+  }
+
   async searchTools(
     toolkitSlug: string,
     search?: string,
@@ -223,10 +329,13 @@ export class ComposioClient {
     const response = await this.fetcher(`${this.baseUrl}${path}`, {
       ...init,
       headers,
+      redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) {
       throw new ComposioRequestError(response.status);
     }
+    if (response.status === 204) return {};
     return response.json();
   }
 }

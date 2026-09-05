@@ -44,6 +44,7 @@ describe("foundation application", () => {
       "billing",
       "bot-template",
       "clock",
+      "composio",
       "computer",
       "credentials",
       "custom-models",
@@ -81,6 +82,7 @@ describe("foundation application", () => {
         "settings",
         "billing",
         "bot-template",
+        "composio",
         "computer",
         "credentials",
         "user-machine",
@@ -160,7 +162,7 @@ describe("foundation application", () => {
       { entry: "./backend", host: "gateway" },
       { entry: "./user", host: "user" },
     ]);
-    expect(first.packages.some((pkg) => pkg.id === "composio")).toBe(false);
+    expect(first.packages.some((pkg) => pkg.id === "composio")).toBe(true);
   });
 
   test("seeds a default-disabled Package and its dependencies", async () => {
@@ -306,6 +308,7 @@ describe("foundation application", () => {
     expect(listed).toEqual([
       "flock",
       "bot-template",
+      "composio",
       "custom-models",
       "image",
       "user-machine",
@@ -505,6 +508,7 @@ describe("foundation application", () => {
       "audit",
       "billing",
       "bot-template",
+      "composio",
       "computer",
       "flock",
       "mcp",
@@ -534,7 +538,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(3);
-    expect(userBackend.contributions).toHaveLength(13);
+    expect(userBackend.contributions).toHaveLength(14);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );

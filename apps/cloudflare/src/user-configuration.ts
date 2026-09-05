@@ -171,6 +171,8 @@ const MEMORY_PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const USER_IDENTITY_KEY = "user:identity";
 
 interface UserConfigurationEnv {
+  COMPOSIO_API_KEY?: string;
+  BETTER_AUTH_URL?: string;
   CREDENTIAL_KEYRING?: string;
   /**
    * Signs every machine token and pairing code. Absent closes the door: a
@@ -256,7 +258,11 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
           readSecret: (name) =>
             name === "MACHINE_TOKEN_SECRET"
               ? this.env.MACHINE_TOKEN_SECRET
-              : this.env.CREDENTIAL_KEYRING,
+              : name === "COMPOSIO_API_KEY"
+                ? this.env.COMPOSIO_API_KEY
+                : name === "BETTER_AUTH_URL"
+                  ? this.env.BETTER_AUTH_URL
+                  : this.env.CREDENTIAL_KEYRING,
           packagePublisher: createPackagePublicationHost(
             this.env,
             this.ctx.storage,
@@ -715,6 +721,18 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
    * `GetMcpServerStatus`. A read of durable records this object owns; it
    * reaches no server and wakes nothing.
    */
+  async composioRequest(input: unknown): Promise<unknown> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      command: rpcDecodedValue,
+    });
+    const userId = request.userId as string;
+    await this.assertUserIdentity(userId);
+    const contribution = (await this.contributions()).composio;
+    if (!contribution) throw new Error("Connected apps are unavailable");
+    return contribution.request(userId, request.command);
+  }
+
   async readMcpServers(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
     await this.assertUserIdentity(request.userId as string);

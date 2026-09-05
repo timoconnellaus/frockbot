@@ -7,13 +7,15 @@ import {
   type StartConnectionCommandV1,
 } from "@frockbot/configuration-core";
 import {
+  decodeStartConnectionResultV1,
+  decodeRevokeConnectionResultV1,
   decodeAuthorizationState,
   encodeAuthorizationState,
   isStrongAuthorizationStateSecretV1,
   type AuthorizationState,
 } from "@frockbot/connection-core";
 import type { Plugin } from "cordis";
-import { ComposioClient } from "./composio-client.js";
+import { defineGatewayContribution } from "@frockbot/kernel-contracts/contributions";
 /**
  * The signed callback `state` moved to `@frockbot/connection-core` when a
  * second Package began minting one (`plugin-mcp`'s `mcp-oauth` driver). The
@@ -31,7 +33,7 @@ export type {
   StartConnectionResult,
 } from "./backend-contracts.js";
 import {
-  ComposioConnectionCoordinator,
+  type ComposioConnectionCoordinator,
   DefinitiveConnectionOperationError,
   type ComposioConnectionStore,
   type ComposioConnectionTypeConfig,
@@ -71,50 +73,149 @@ export interface BackendRouteContribution {
 }
 
 export interface ComposioBackendConfig {
-  client: ComposioClient;
-  callbackBaseUrl: string;
-  connectionTypes: Record<string, ComposioConnectionTypeConfig>;
   authorizationStateSecret: string;
-  storeFor(userId: string): ComposioConnectionStore;
+  connectionsFor(
+    userId: string,
+  ): Pick<
+    ComposioConnectionCoordinator,
+    "replayStart" | "start" | "complete" | "fail" | "revoke"
+  >;
+  catalog?(userId: string): Promise<unknown>;
 }
 
 export interface ComposioBackendHost {
-  callbackBaseUrl: string;
-  readSecret(name: string): string | undefined;
-  storeFor(userId: string): ComposioConnectionStore;
+  readSecret?(name: string): string | undefined;
+  composioRequest?(userId: string, input: unknown): Promise<unknown>;
 }
 
 export function createConfiguredComposioBackendContribution(
   host: ComposioBackendHost,
 ): BackendRouteContribution {
-  const apiKey = host.readSecret("COMPOSIO_API_KEY");
-  const gmailAuthConfigId = host.readSecret("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
-  const authorizationStateSecret = host.readSecret(
-    "FROCKBOT_AUTHORIZATION_STATE_SECRET",
-  );
-  const betterAuthSecret = host.readSecret("BETTER_AUTH_SECRET");
-  if (
-    !apiKey ||
-    !gmailAuthConfigId ||
-    !authorizationStateSecret ||
-    !isStrongAuthorizationStateSecretV1(authorizationStateSecret) ||
-    authorizationStateSecret === betterAuthSecret
-  ) {
-    throw new Error("Composio backend Contribution is not configured");
-  }
-  return createComposioBackendContribution({
-    client: new ComposioClient({ apiKey }),
-    storeFor: host.storeFor,
-    callbackBaseUrl: host.callbackBaseUrl,
-    authorizationStateSecret,
-    connectionTypes: {
-      gmail: {
-        authConfigId: gmailAuthConfigId,
-        displayName: "Gmail",
-        toolkitSlug: "gmail",
+  const secret = host.readSecret?.("FROCKBOT_AUTHORIZATION_STATE_SECRET");
+  if (!host.readSecret?.("COMPOSIO_API_KEY")?.trim())
+    return {
+      packageId: "composio",
+      route: async (request, url, context) => {
+        if (url.pathname !== "/api/plugins/composio/catalog") return undefined;
+        if (!context.userId)
+          return Response.json(
+            { error: "authentication required" },
+            { status: 401 },
+          );
+        if (request.method !== "GET")
+          return Response.json(
+            { error: "method not allowed" },
+            { status: 405 },
+          );
+        return Response.json({ schemaVersion: 1, items: [] });
       },
-    },
+    };
+  if (
+    !secret ||
+    !isStrongAuthorizationStateSecretV1(secret) ||
+    secret === host.readSecret?.("BETTER_AUTH_SECRET") ||
+    !host.composioRequest
+  ) {
+    return {
+      packageId: "composio",
+      route: async (request, url, context) => {
+        if (url.pathname !== "/api/plugins/composio/catalog") return undefined;
+        if (!context.userId)
+          return Response.json(
+            { error: "authentication required" },
+            { status: 401 },
+          );
+        if (request.method !== "GET")
+          return Response.json(
+            { error: "method not allowed" },
+            { status: 405 },
+          );
+        return Response.json({ schemaVersion: 1, items: [] });
+      },
+    };
+  }
+  const request = host.composioRequest;
+  return createComposioBackendContribution({
+    authorizationStateSecret: secret,
+    catalog: (userId) =>
+      request(userId, { schemaVersion: 1, operation: "catalog" }),
+    connectionsFor: (userId) => ({
+      replayStart: async () => undefined,
+      start: async (_user, input) =>
+        decodeStartConnectionResultV1(
+          await request(userId, {
+            schemaVersion: 1,
+            operation: "start",
+            command: {
+              schemaVersion: 1,
+              type: "connection/start",
+              commandId: input.commandId,
+              connectionTypeId: input.connectionTypeId,
+              ...(input.connectorId ? { connectorId: input.connectorId } : {}),
+              ...(input.alias ? { alias: input.alias } : {}),
+              ...(input.nativeReturnNonce
+                ? { nativeReturnNonce: input.nativeReturnNonce }
+                : {}),
+            },
+            start: {
+              callbackState: input.callbackState,
+              authorizationStateId: input.authorizationStateId,
+              authorizationStateExpiresAt: input.authorizationStateExpiresAt,
+              returnTarget: input.returnTarget,
+            },
+          }),
+        ),
+      complete: async (_user, input) =>
+        decodeCompletion(
+          await request(userId, {
+            schemaVersion: 1,
+            operation: "complete",
+            ...input,
+          }),
+        ),
+      fail: async (_user, connectionId, _failure, authorizationStateId) =>
+        decodeCompletion(
+          await request(userId, {
+            schemaVersion: 1,
+            operation: "fail",
+            connectionId,
+            authorizationStateId,
+          }),
+        ),
+      revoke: async (_user, connectionId) =>
+        decodeRevokeConnectionResultV1(
+          await request(userId, {
+            schemaVersion: 1,
+            operation: "revoke",
+            connectionId,
+          }),
+        ),
+    }),
   });
+}
+
+function decodeCompletion(
+  value: unknown,
+): import("./backend-contracts.js").ConnectionCompletionResult {
+  if (!value || typeof value !== "object")
+    throw new Error("Connection result is invalid");
+  const result = value as Record<string, unknown>;
+  if (
+    (result.returnTarget !== "browser" && result.returnTarget !== "desktop") ||
+    (result.status !== "ready" &&
+      result.status !== "pending" &&
+      result.status !== "failed") ||
+    (result.nativeReturnNonce !== undefined &&
+      !isConnectionIdentifier(result.nativeReturnNonce))
+  )
+    throw new Error("Connection result is invalid");
+  return {
+    returnTarget: result.returnTarget,
+    status: result.status,
+    ...(typeof result.nativeReturnNonce === "string"
+      ? { nativeReturnNonce: result.nativeReturnNonce }
+      : {}),
+  };
 }
 
 export namespace createConfiguredComposioBackendContribution {
@@ -137,18 +238,6 @@ function jsonError(
 
 function requiredUser(context: BackendRouteContext): string | Response {
   return context.userId ?? jsonError(401, "authentication required");
-}
-
-function coordinator(
-  config: ComposioBackendConfig,
-  userId: string,
-): ComposioConnectionCoordinator {
-  return new ComposioConnectionCoordinator({
-    client: config.client,
-    store: config.storeFor(userId),
-    callbackBaseUrl: config.callbackBaseUrl,
-    connectionTypes: config.connectionTypes,
-  });
 }
 
 /**
@@ -196,6 +285,20 @@ export function createComposioBackendContribution(
   const contribution: BackendRouteContribution = {
     packageId: "composio",
     async route(request, url, context) {
+      if (url.pathname === "/api/plugins/composio/catalog" && config.catalog) {
+        const user = requiredUser(context);
+        if (user instanceof Response) return user;
+        if (request.method !== "GET")
+          return jsonError(405, "method not allowed");
+        try {
+          return Response.json(await config.catalog(user));
+        } catch {
+          return jsonError(
+            503,
+            "Could not load your connectors. Try again shortly.",
+          );
+        }
+      }
       const isStart = url.pathname === "/api/plugins/composio/connections";
       const revokeMatch = url.pathname.match(
         /^\/api\/plugins\/composio\/connections\/([^/]+)\/revoke$/,
@@ -216,6 +319,8 @@ export function createComposioBackendContribution(
 
       let callbackState: AuthorizationState | undefined;
       if (isCallback) {
+        if (request.method !== "GET")
+          return jsonError(405, "method not allowed");
         const encodedState = url.searchParams.get("state");
         if (!encodedState) {
           return callbackFailureResponse(
@@ -256,9 +361,6 @@ export function createComposioBackendContribution(
           );
         }
         const { commandId, connectionTypeId } = value;
-        if (!Object.hasOwn(config.connectionTypes, connectionTypeId)) {
-          return jsonError(400, "connectionTypeId is invalid");
-        }
         if (
           (context.client === "desktop" && !value.nativeReturnNonce) ||
           (context.client === "browser" &&
@@ -272,11 +374,12 @@ export function createComposioBackendContribution(
           const startInput = {
             commandId,
             connectionTypeId,
+            ...(value.connectorId ? { connectorId: value.connectorId } : {}),
             alias: value.alias,
             returnTarget: context.client,
             nativeReturnNonce,
           };
-          const connections = coordinator(config, user);
+          const connections = config.connectionsFor(user);
           const replay = await connections.replayStart(user, startInput);
           if (replay) return Response.json(replay);
           const authorizationStateId = crypto.randomUUID();
@@ -326,7 +429,7 @@ export function createComposioBackendContribution(
           );
         }
         try {
-          const connections = coordinator(config, user);
+          const connections = config.connectionsFor(user);
           return Response.json(
             await connections.revoke(user, revokeConnectionId),
           );
@@ -341,7 +444,7 @@ export function createComposioBackendContribution(
       if (request.method !== "GET") {
         return jsonError(405, "method not allowed");
       }
-      const connections = coordinator(config, user);
+      const connections = config.connectionsFor(user);
       const connectionId = callbackState?.connectionId;
       const connectedAccountId =
         url.searchParams.get("connected_account_id") ??
@@ -351,7 +454,7 @@ export function createComposioBackendContribution(
           const result = await connections.fail(
             user,
             connectionId,
-            "Composio authorization was not completed",
+            "Authorization was not completed",
             callbackState!.authorizationStateId,
           );
           return connectionCompletionResponse(
@@ -404,3 +507,12 @@ export function createComposioBackendContribution(
 }
 
 export type { ComposioConnectionStore, ConnectionView };
+
+export const backendContribution = defineGatewayContribution<
+  ComposioBackendHost,
+  BackendRouteContribution
+>({
+  specifier: "@frockbot/plugin-composio/backend",
+  create: (host, lifecycle) =>
+    createConfiguredComposioBackendContribution.plugin(host, lifecycle),
+});

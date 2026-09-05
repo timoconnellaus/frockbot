@@ -1,3 +1,4 @@
+import { createComposioFake } from "../composio-fake.js";
 // Harness pieces shared by the two workerd Vitest projects:
 // `vitest.config.ts` (the hermetic Durable Object compatibility suite, whose
 // `SELF` is the probe Worker) and `vitest.integration.config.ts` (the
@@ -592,8 +593,11 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
 export function createOutboundService(): (
   request: Request,
 ) => Promise<Response> {
+  const composio = createComposioFake();
   return (request: Request): Promise<Response> =>
-    Promise.resolve(ollamaCloudStub(request));
+    new URL(request.url).hostname === "backend.composio.dev"
+      ? composio(request)
+      : Promise.resolve(ollamaCloudStub(request));
 }
 
 /**

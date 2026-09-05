@@ -28,6 +28,7 @@ export interface ComposioConnectionStore {
       connectionId: string;
       packageId: string;
       connectionTypeId: string;
+      connectorId?: string;
       displayName: string;
       safeMetadata?: ConnectionView["safeMetadata"];
     },
@@ -127,6 +128,7 @@ function connectionStartCommandFingerprintV1(
   userId: string,
   input: {
     connectionTypeId: string;
+    connectorId?: string;
     alias?: string;
     returnTarget: "browser" | "desktop";
     nativeReturnNonce?: string;
@@ -136,6 +138,7 @@ function connectionStartCommandFingerprintV1(
     userId,
     packageId: "composio",
     connectionTypeId: input.connectionTypeId,
+    ...(input.connectorId ? { connectorId: input.connectorId } : {}),
     alias: input.alias ?? null,
     safeMetadata: {
       returnTarget: input.returnTarget,
@@ -219,6 +222,7 @@ export class ComposioConnectionCoordinator {
     input: {
       commandId: string;
       connectionTypeId: string;
+      connectorId?: string;
       alias?: string;
       returnTarget?: "browser" | "desktop";
       nativeReturnNonce?: string;
@@ -229,6 +233,7 @@ export class ComposioConnectionCoordinator {
     }
     const commandFingerprint = connectionStartCommandFingerprintV1(userId, {
       connectionTypeId: input.connectionTypeId,
+      ...(input.connectorId ? { connectorId: input.connectorId } : {}),
       alias: input.alias?.trim() || undefined,
       returnTarget: input.returnTarget ?? "browser",
       nativeReturnNonce: input.nativeReturnNonce,
@@ -256,6 +261,7 @@ export class ComposioConnectionCoordinator {
     input: {
       commandId: string;
       connectionTypeId: string;
+      connectorId?: string;
       alias?: string;
       returnTarget?: "browser" | "desktop";
       callbackState: string;
@@ -282,6 +288,7 @@ export class ComposioConnectionCoordinator {
     const returnTarget = input.returnTarget ?? "browser";
     const commandFingerprint = connectionStartCommandFingerprintV1(userId, {
       connectionTypeId: input.connectionTypeId,
+      ...(input.connectorId ? { connectorId: input.connectorId } : {}),
       alias,
       returnTarget,
       nativeReturnNonce: input.nativeReturnNonce,
@@ -294,7 +301,10 @@ export class ComposioConnectionCoordinator {
       if (!(await this.config.store.isPackageInstalled(userId, "composio"))) {
         throw new Error("Composio Package is not installed");
       }
-      type = this.config.connectionTypes[input.connectionTypeId];
+      type =
+        this.config.connectionTypes[
+          input.connectorId ?? input.connectionTypeId
+        ];
       if (!type) throw new Error("Unknown Composio Connection Type");
       claimed = await this.config.store.startConnection(userId, {
         connectionId,
@@ -303,6 +313,7 @@ export class ComposioConnectionCoordinator {
         displayName: alias ?? type.displayName,
         safeMetadata: {
           toolkitSlug: type.toolkitSlug,
+          toolkitName: type.displayName,
           providerAlias: connectionId,
           returnTarget,
           startCommandFingerprint: commandFingerprint,
@@ -770,7 +781,11 @@ export class ComposioConnectionCoordinator {
       const account = await this.config.client.getConnectedAccount(
         input.connectedAccountId,
       );
-      if (account.userId !== userId || account.status !== "ACTIVE") {
+      if (
+        account.userId !== userId ||
+        account.status !== "ACTIVE" ||
+        account.disabled
+      ) {
         throw new Error("Composio connected account is not active");
       }
       if (account.toolkitSlug !== connection.safeMetadata.toolkitSlug) {

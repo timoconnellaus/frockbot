@@ -569,6 +569,11 @@ export interface UserConfigurationBinding {
     packageId: string;
     commandId: string;
   }): Promise<ConnectionCommandReceiptV1 | undefined>;
+  composioRequest(request: {
+    schemaVersion: 1;
+    userId: string;
+    command: unknown;
+  }): Promise<unknown>;
   readMcpServers(request: {
     schemaVersion: 1;
     userId: string;

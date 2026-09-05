@@ -1,3 +1,4 @@
+import { decodeConnectorCatalogV1 } from "@frockbot/connection-core";
 /// <reference path="../env.d.ts" />
 
 import {
@@ -987,6 +988,9 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
         connection.authorization.kind;
       return {
         id: connection.id,
+        ...(connection.catalogPath
+          ? { catalogPath: connection.catalogPath }
+          : {}),
         displayName: connection.displayName,
         allowMultiple: connection.allowMultiple,
         authorizationKind,
@@ -2232,6 +2236,23 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           }),
         ]);
         const pluginCatalog = decodePluginCatalog(manifest);
+        const connectorCatalog: Record<
+          string,
+          ReturnType<typeof decodeConnectorCatalogV1>
+        > = {};
+        await Promise.all(
+          pluginCatalog.flatMap((item) =>
+            item.connectionTypes
+              .filter((type) => type.catalogPath)
+              .map(async (type) => {
+                if (!ctx.transport.hostedRequest || !type.catalogPath) return;
+                connectorCatalog[`${item.packageId}/${type.id}`] =
+                  decodeConnectorCatalogV1(
+                    await ctx.transport.hostedRequest(type.catalogPath),
+                  );
+              }),
+          ),
+        );
         const userSettings = settings as UserSettingsViewV1;
         retireSettledConnectionOperations(connectionOperations, userSettings);
         await reconcileRetainedConnectionCommands(
@@ -2240,7 +2261,17 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         );
         let committed = false;
         if (catalogGeneration === pluginCatalogGeneration) {
-          web.value.pluginCatalog = pluginCatalog;
+          web.value.pluginCatalog = pluginCatalog.filter(
+            (item) =>
+              !item.connectionTypes.some((type) => type.catalogPath) ||
+              item.connectionTypes.some(
+                (type) =>
+                  !type.catalogPath ||
+                  (connectorCatalog[`${item.packageId}/${type.id}`]?.length ??
+                    0) > 0,
+              ),
+          );
+          web.value.connectorCatalog = connectorCatalog;
           updateSettingsLoadError("catalog");
           committed = true;
         }
@@ -2519,6 +2550,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     async startConnection(
       packageId: string,
       connectionTypeId: string,
+      connectorId?: string,
     ): Promise<string | undefined> {
       if (!ctx.transport.startConnection) {
         throw new Error("Connections are unavailable");
@@ -2531,6 +2563,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         userId,
         packageId,
         connectionTypeId,
+        ...(connectorId ? [connectorId] : []),
       ]);
       const operation = await reserveConnectionOperation(
         connectionOperations,
@@ -2549,6 +2582,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           commandId: operation.commandId,
           packageId,
           connectionTypeId,
+          ...(connectorId ? { connectorId } : {}),
           nativeReturnNonce: operation.nativeReturnNonce,
         });
       } catch (error) {

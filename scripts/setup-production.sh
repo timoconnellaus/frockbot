@@ -368,6 +368,19 @@ else
   set_required_production_secret ROUTINE_HOOK_SECRET "$ROUTINE_HOOK_SECRET"
   unset ROUTINE_HOOK_SECRET
 fi
+
+if awk '{print $1}' <<<"$PRODUCTION_SECRETS" | grep -qx FROCKBOT_AUTHORIZATION_STATE_SECRET; then
+  note "Preserving the existing FROCKBOT_AUTHORIZATION_STATE_SECRET so already-issued Connection callbacks keep verifying."
+else
+  say "Provision the secret every Routine webhook key is signed with."
+  FROCKBOT_AUTHORIZATION_STATE_SECRET="$(openssl rand -hex 32)"
+  [[ -n "$FROCKBOT_AUTHORIZATION_STATE_SECRET" ]] || {
+    warn "Routine hook secret generation failed"
+    exit 1
+  }
+  set_required_production_secret FROCKBOT_AUTHORIZATION_STATE_SECRET "$FROCKBOT_AUTHORIZATION_STATE_SECRET"
+  unset FROCKBOT_AUTHORIZATION_STATE_SECRET
+fi
 if awk '{print $1}' <<<"$PRODUCTION_SECRETS" | grep -qx MACHINE_TOKEN_SECRET; then
   note "Preserving the existing MACHINE_TOKEN_SECRET so enrolled machines keep their tokens."
 else
