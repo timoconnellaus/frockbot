@@ -492,3 +492,48 @@ describe("computer agent contribution", () => {
     });
   });
 });
+
+describe("the computer/sync event", () => {
+  test("records a publish sync without the per-path answers the caller asked for", async () => {
+    const { recordComputerSyncV1 } = await import("./agent.js");
+    const { decodeSessionEvent } = await import("@frockbot/kernel-contracts");
+    const appended: unknown[] = [];
+    const sessions = {
+      get: () => ({
+        disposed: false,
+        append: (event: unknown) => appended.push(event),
+        flush: () => Promise.resolve(),
+      }),
+    } as unknown as SessionStore;
+    await recordComputerSyncV1(sessions, "session-1", 3, "publish", {
+      status: "ok",
+      detail: "",
+      pulled: 0,
+      pushed: 1,
+      restored: 0,
+      removed: 0,
+      adopted: 0,
+      ignored: 5,
+      omitted: 0,
+      conflicts: 0,
+      failures: 0,
+      required: [
+        {
+          path: "dist/manifest.json",
+          contentHash: "a".repeat(64),
+          durable: true,
+        },
+      ],
+    } as never);
+    expect(appended).toHaveLength(1);
+    expect(appended[0]).not.toHaveProperty("required");
+    // The durable log's decoder has an exact field set; the event must pass it.
+    expect(() =>
+      decodeSessionEvent({
+        ...(appended[0] as object),
+        seq: 1,
+        timestamp: "2026-09-05T00:00:00.000Z",
+      }),
+    ).not.toThrow();
+  });
+});
