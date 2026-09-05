@@ -60,6 +60,11 @@ import {
   turnTextRemainingV1,
   turnTextTooLongV1,
 } from "./turn-limits.js";
+import {
+  draftSendableV1,
+  resendableTurnTextV1,
+  sendReadyV1,
+} from "./send-readiness.js";
 import SendPayloadView from "./SendPayloadView.vue";
 import AppletCanvas from "./AppletCanvas.vue";
 import { appletProgressToolsV1, appletProgressV1 } from "./applet-progress.js";
@@ -409,13 +414,21 @@ const draftCounterLabel = computed(() => {
     ? `${count} characters over the ${TURN_TEXT_MAX_CHARACTERS_V1.toLocaleString("en-US")} limit`
     : `${count} characters left`;
 });
+/**
+ * Whether this client could start a Turn at all — the transport, the Bot and
+ * the model — with nothing said about the composer. Sending needs this and a
+ * draft; retrying a failed Turn needs only this, because its words are already
+ * in the thread.
+ */
+const sendReady = computed(() =>
+  sendReadyV1({
+    connection: state.value.connection,
+    modelReady: state.value.modelReady,
+    activeBotId: state.value.activeBotId,
+  }),
+);
 const canSend = computed(
-  () =>
-    state.value.connection === "ready" &&
-    state.value.modelReady &&
-    Boolean(state.value.activeBotId) &&
-    draftText.value.length > 0 &&
-    !draftTooLong.value,
+  () => sendReady.value && draftSendableV1(draftText.value),
 );
 /**
  * Stop takes the button only while there is nothing to send. The moment the
@@ -1324,15 +1337,28 @@ async function sendMessage(): Promise<void> {
  * thread — and nothing else: a retry is not an edit, and it starts a Turn of
  * its own rather than reopening the one that ended.
  */
-async function retryTurn(message: WebChatMessage): Promise<void> {
-  if (!canSend.value) return;
-  const text = messages.value
-    .find(
+function retryTurnText(message: WebChatMessage): string | undefined {
+  return resendableTurnTextV1(
+    messages.value.find(
       (candidate) =>
         candidate.runId === message.runId && candidate.role === "user",
-    )
-    ?.text.trim();
-  if (!text) return;
+    )?.text,
+  );
+}
+
+/**
+ * Whether trying again is available: this client can start a Turn, and the
+ * broken one has words worth sending again. Deliberately not `canSend` — the
+ * composer is empty in the case this button exists for, and what it sends is
+ * never what is typed there.
+ */
+function canRetryTurn(message: WebChatMessage): boolean {
+  return sendReady.value && retryTurnText(message) !== undefined;
+}
+
+async function retryTurn(message: WebChatMessage): Promise<void> {
+  const text = retryTurnText(message);
+  if (!sendReady.value || !text) return;
   pinnedToLatest.value = true;
   void scrollToLatest();
   await web.value.sendPrompt(text);
@@ -1556,7 +1582,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
                   v-if="message.retry === 'resend-turn'"
                   type="button"
                   class="message-retry"
-                  :disabled="!canSend"
+                  :disabled="!canRetryTurn(message)"
                   @click="retryTurn(message)"
                 >
                   Try again
