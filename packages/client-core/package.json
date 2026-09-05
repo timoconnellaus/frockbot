@@ -17,7 +17,8 @@
     "@frockbot/connection-core": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/protocol": "workspace:*",
-    "vue": "3.5.41"
+    "vue": "3.5.41",
+    "@frockbot/protocol-schemas": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

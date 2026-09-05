@@ -885,5 +885,57 @@
         }
       ]
     }
+  },
+  {
+    "name": "SettingsChangeCommand valid",
+    "schema": "SettingsChangeCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "settings-command-1",
+      "expectedRevision": 1,
+      "sectionId": "profile",
+      "values": {
+        "name": "Tim"
+      }
+    }
+  },
+  {
+    "name": "typed settings choices and constraints",
+    "schema": "SettingField",
+    "value": {
+      "id": "count",
+      "label": "Count",
+      "kind": "select",
+      "value": 2,
+      "editable": true,
+      "choices": [
+        {
+          "label": "Two",
+          "value": 2
+        }
+      ],
+      "minimum": 1,
+      "maximum": 5,
+      "required": true,
+      "hint": "A declared setting"
+    }
+  },
+  {
+    "name": "settings-receipt-valid",
+    "schema": "SettingsReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "save-1",
+      "revision": 2,
+      "status": "applied"
+    }
+  },
+  {
+    "name": "settings-handoff-valid",
+    "schema": "SettingsHandoffCommand",
+    "value": {
+      "schemaVersion": 1,
+      "home": "models"
+    }
   }
 ]

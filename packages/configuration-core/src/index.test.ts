@@ -1558,9 +1558,10 @@ describe("effective Bot model resolution", () => {
     expect(effective.binding?.state).toBe("ready");
   });
 
-  test("prefers an enabled Package's User value, then its Bot value", () => {
+  test("prefers the account value, then an enabled Package Bot override", () => {
     const configured = {
       ...user(),
+      accountModel,
       packages: [
         ...user().packages,
         {
@@ -1587,6 +1588,49 @@ describe("effective Bot model resolution", () => {
     expect(bot.source).toBe("bot");
     expect(bot.model).toEqual(platformModel);
     expect(bot.binding?.state).toBe("ready");
+  });
+
+  test("disabled Bot overrides preserve every Bot's account choice and restore on enable", () => {
+    const configured = {
+      ...user(),
+      accountModel,
+      packages: [
+        ...user().packages,
+        {
+          packageId: "custom-models",
+          version: "0.0.1",
+          state: "disabled" as const,
+        },
+      ],
+    };
+    const bot = {
+      packageValues: { "custom-models": { model: platformModel } },
+    };
+    for (const projection of [bot, { packageValues: {} }]) {
+      expect(
+        resolveEffectiveBotModelV1({
+          bot: projection,
+          user: configured,
+          packages: modelPackages,
+        }),
+      ).toMatchObject({ source: "account", model: accountModel });
+    }
+    expect(bot.packageValues["custom-models"].model).toEqual(platformModel);
+    const enabled = {
+      ...configured,
+      packages: configured.packages.map((pkg) =>
+        pkg.packageId === "custom-models"
+          ? { ...pkg, state: "installed" as const }
+          : pkg,
+      ),
+    };
+    expect(
+      resolveEffectiveBotModelV1({
+        bot,
+        user: enabled,
+        packages: modelPackages,
+      }),
+    ).toMatchObject({ source: "bot", model: platformModel });
   });
 
   test("ignores disabled Package values without deleting them", () => {
@@ -1725,6 +1769,7 @@ describe("effective Bot model resolution", () => {
         },
       ],
       platformModel: flockModel,
+      accountModel,
     };
   }
   const flockPackages = [...modelPackages, flockPackage];

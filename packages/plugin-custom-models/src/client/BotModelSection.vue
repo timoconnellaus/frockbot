@@ -10,7 +10,6 @@ import {
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { computed, inject, onMounted, ref, watch } from "vue";
 import {
-  ACCOUNT_MODEL_SETTING_ID_V1,
   BOT_MODEL_SETTING_ID_V1,
   storedModelBindingV1,
 } from "../model-settings.js";
@@ -40,9 +39,7 @@ const readyConnections = computed(() =>
 );
 const options = computed(() => modelSelectOptions(readyConnections.value));
 const accountModel = computed(() =>
-  storedModelBindingV1(
-    installation.value?.values?.[ACCOUNT_MODEL_SETTING_ID_V1],
-  ),
+  storedModelBindingV1(web.value.userSettings?.accountModel),
 );
 const inheritedModel = computed(
   () => accountModel.value ?? web.value.userSettings?.platformModel,

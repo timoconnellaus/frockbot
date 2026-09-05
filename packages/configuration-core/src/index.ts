@@ -8,6 +8,11 @@ import {
 } from "@frockbot/connection-core";
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import { ConfigurationDecodeError } from "./errors.js";
+export {
+  packageConfigurationHomeV1,
+  type PackageConfigurationHomeV1,
+  type ConfigurationHomeFactsV1,
+} from "./configuration-home.js";
 import {
   decodeInstalledPackageSettingsPatchV1,
   decodeInstalledPackageSettingIdsV1,
@@ -235,6 +240,8 @@ export interface UserSettingsViewV1 {
    * writes it; no User command may do so (AGENTS.md Configuration shape).
    */
   platformModel?: ModelBindingV1;
+  /** Permanent account choice; the legacy browser projection omits this field. */
+  accountModel?: ModelBindingV1;
   /**
    * The remote Catalog generation this User is pinned to, and the content hash
    * of that generation's index. Pinned on the first read that finds a Catalog
@@ -295,6 +302,14 @@ export type ConfigurationCommandV1 =
        */
       type: "user/set-platform-model";
       model: ModelBindingV1;
+    })
+  | (CommandMetaV1 & {
+      type: "user/choose-model-provider";
+      packageId: string;
+    })
+  | (CommandMetaV1 & {
+      type: "user/set-account-model";
+      model: ModelBindingV1 | null;
     })
   | (CommandMetaV1 & {
       type: "user/install-package";
@@ -442,6 +457,8 @@ export function configurationCommandFingerprintV1(
 export interface UserConfigurationReadRpcV1 {
   schemaVersion: 1;
   userId: string;
+  /** Omission is the previous pinned reader; view 2 includes permanent account choice. */
+  view?: 2;
 }
 
 export interface UserConfigurationExecuteRpcV1 {
@@ -743,7 +760,8 @@ export function resolveEffectiveBotModelV1(input: {
   };
 
   for (const scope of ["bot", "user"] as const) {
-    const resolved = fromScope(scope);
+    const resolved =
+      scope === "bot" ? fromScope(scope) : { model: input.user.accountModel };
     const source = scope === "bot" ? "bot" : "account";
     if (resolved?.conflict) {
       return {
@@ -1266,6 +1284,23 @@ export function decodeConfigurationCommandV1(
         },
       };
     }
+    case "user/choose-model-provider": {
+      const command = exactCommand(input, ["packageId"]);
+      return {
+        ...commandMeta(command),
+        type: value.type,
+        packageId: identifier(command.packageId, "packageId"),
+      };
+    }
+    case "user/set-account-model": {
+      const command = exactCommand(input, ["model"]);
+      return {
+        ...commandMeta(command),
+        type: value.type,
+        model:
+          command.model === null ? null : decodeModelBindingV1(command.model),
+      };
+    }
     case "user/set-platform-model": {
       const command = exactCommand(input, ["model"]);
       return {
@@ -1455,14 +1490,19 @@ export function decodeConfigurationCommandV1(
 export function decodeUserConfigurationReadRpcV1(
   input: unknown,
 ): UserConfigurationReadRpcV1 {
-  const value = exactRecord(input, "User configuration read RPC", [
-    "schemaVersion",
-    "userId",
-  ]);
+  const value = exactRecord(
+    input,
+    "User configuration read RPC",
+    ["schemaVersion", "userId"],
+    ["view"],
+  );
   schemaVersion(value);
+  if (value.view !== undefined && value.view !== 2)
+    throw new ConfigurationDecodeError("Update the settings reader");
   return {
     schemaVersion: 1,
     userId: identifier(value.userId, "userId"),
+    ...(value.view === 2 ? { view: 2 as const } : {}),
   };
 }
 
@@ -2244,10 +2284,40 @@ export function migrateStoredUserSettingsV1(
     }
   }
 
+  let accountModel = storedDataValueV1(settings, "accountModel");
+  const storedPackages = storedDataValueV1(settings, "packages");
+  let installations = storedPackages;
+  if (Array.isArray(storedPackages)) {
+    installations = storedPackages.map((row) => {
+      const pkg = storedPlainRecordV1(row);
+      if (!pkg || storedDataValueV1(pkg, "packageId") !== "custom-models")
+        return row;
+      const values = storedPlainRecordV1(storedDataValueV1(pkg, "values"));
+      if (!values || !Object.hasOwn(values, "account-model")) return row;
+      const previous = storedDataValueV1(values, "account-model");
+      if (
+        accountModel === undefined &&
+        storedDataValueV1(pkg, "state") === "installed"
+      ) {
+        accountModel = decodeModelBindingV1(previous);
+      }
+      changed = true;
+      return cloneStoredRecordV1(pkg, {
+        values: cloneStoredRecordV1(values, {}, ["account-model"]),
+      });
+    });
+  }
+  const modelMigration = {
+    ...(accountModel === undefined ? {} : { accountModel }),
+    ...(installations === storedPackages ? {} : { packages: installations }),
+  };
   const migrated = changed
     ? cloneStoredRecordV1(
         settings,
-        connections === storedConnections ? {} : { connections },
+        {
+          ...modelMigration,
+          ...(connections === storedConnections ? {} : { connections }),
+        },
         removedSettingsFields,
       )
     : settings;
@@ -2261,7 +2331,7 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
     input,
     "User settings",
     ["schemaVersion", "revision", "profile", "packages", "connections"],
-    ["platformModel", "catalogGeneration", "catalogIndexHash"],
+    ["platformModel", "accountModel", "catalogGeneration", "catalogIndexHash"],
   );
   schemaVersion(value);
   const profile = exactRecord(value.profile, "profile", ["name"], ["email"]);
@@ -2283,6 +2353,9 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
     },
     packages: value.packages.map(packageInstallation),
     connections: value.connections.map(connectionView),
+    ...(value.accountModel === undefined
+      ? {}
+      : { accountModel: decodeModelBindingV1(value.accountModel) }),
     ...(value.platformModel === undefined
       ? {}
       : { platformModel: decodeModelBindingV1(value.platformModel) }),

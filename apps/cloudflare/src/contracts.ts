@@ -1,3 +1,7 @@
+import type {
+  SettingsFrame,
+  SettingsChangeCommand,
+} from "@frockbot/protocol-schemas";
 import {
   type BotIsolateEntrypoint,
   type BotIsolateEnv,
@@ -555,6 +559,15 @@ export interface UserConfigurationBinding {
   readConfiguration(
     request: UserConfigurationReadRpcV1,
   ): Promise<UserSettingsViewV1>;
+  readSettingsFrame(
+    request: UserConfigurationReadRpcV1 & { home: "application" | "models" },
+  ): Promise<SettingsFrame>;
+  changeSettings(
+    request: UserConfigurationReadRpcV1 & {
+      home: "application" | "models";
+      command: SettingsChangeCommand;
+    },
+  ): Promise<OperationReceiptV1>;
   executeConfiguration(
     request: UserConfigurationExecuteRpcV1,
   ): Promise<OperationReceiptV1>;

@@ -1090,5 +1090,53 @@
       "schemaVersion": 2,
       "applets": []
     }
+  },
+  {
+    "name": "SettingsChangeCommand invalid",
+    "schema": "SettingsChangeCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "settings-command-1",
+      "expectedRevision": -1,
+      "sectionId": "profile",
+      "values": {}
+    }
+  },
+  {
+    "name": "settings choices do not load remote widgets",
+    "schema": "SettingField",
+    "value": {
+      "id": "count",
+      "label": "Count",
+      "kind": "select",
+      "value": 2,
+      "editable": true,
+      "choices": [
+        {
+          "label": "Two",
+          "value": 2,
+          "script": "https://evil.test/widget.js"
+        }
+      ]
+    }
+  },
+  {
+    "name": "settings-receipt-invalid",
+    "schema": "SettingsReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "save-1",
+      "revision": 2,
+      "status": "rejected"
+    }
+  },
+  {
+    "name": "settings-handoff-invalid",
+    "schema": "SettingsHandoffCommand",
+    "value": {
+      "schemaVersion": 1,
+      "home": "models",
+      "returnUri": "https://evil.example"
+    }
   }
 ]

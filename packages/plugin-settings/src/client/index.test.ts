@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import { ref } from "vue";
+import { authSessionClientKey } from "@frockbot/plugin-auth/shared";
+import { settingsFrameClientKey } from "./settings-frames.js";
 import {
   clientSurfaceRegistryKey,
   type ClientPluginContext,
@@ -18,6 +21,10 @@ describe("settings client contribution", () => {
         turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
       },
       inject: (key) => {
+        if (key === authSessionClientKey)
+          return {
+            projection: ref({ schemaVersion: 1, status: "anonymous" }),
+          } as never;
         if (key !== clientSurfaceRegistryKey) {
           throw new Error("unexpected client provider");
         }
@@ -42,9 +49,7 @@ describe("settings client contribution", () => {
       "frockbot.right-panel",
       "frockbot.bot-actions",
     ]);
-    // Composition is an internal detail the Settings Package no longer shows,
-    // so it provides no client state of its own.
-    expect(provided).toEqual([]);
+    expect(provided).toEqual([settingsFrameClientKey]);
     for (const id of [
       "bot-settings",
       "plugins",

@@ -1,4 +1,8 @@
-import type { PackageInstallationView } from "@frockbot/configuration-core";
+import {
+  packageConfigurationHomeV1,
+  type PackageConfigurationHomeV1,
+  type PackageInstallationView,
+} from "@frockbot/configuration-core";
 import type { PluginCatalogItem } from "@frockbot/plugin-shell/shared";
 
 /**
@@ -10,8 +14,7 @@ import type { PluginCatalogItem } from "@frockbot/plugin-shell/shared";
  * configures. This function is the whole routing table, so a Package that adds
  * a Connection Type or a setting lands somewhere without an edit to a surface.
  */
-export type PackageConfigurationHome =
-  "models" | "connections" | "user-settings" | "none";
+export type PackageConfigurationHome = PackageConfigurationHomeV1;
 
 /** A Package that provides a model, whose accounts and catalogs are Models'. */
 export function isModelProviderPackage(item: PluginCatalogItem): boolean {
@@ -26,19 +29,7 @@ export function declaresConnections(item: PluginCatalogItem): boolean {
 export function packageConfigurationHome(
   item: PluginCatalogItem,
 ): PackageConfigurationHome {
-  if (
-    isModelProviderPackage(item) ||
-    item.settings?.some((setting) => setting.role === "model")
-  )
-    return "models";
-  if (declaresConnections(item)) return "connections";
-  if (
-    item.settings?.some(
-      (setting) => setting.role !== "model" && setting.scopes.includes("user"),
-    )
-  )
-    return "user-settings";
-  return "none";
+  return packageConfigurationHomeV1(item);
 }
 
 /** The catalog entries one configuration surface is responsible for. */

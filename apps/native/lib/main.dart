@@ -6,6 +6,7 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 
 import 'client/auth.dart';
+import 'settings/page.dart';
 import 'auth/sign_in_page.dart';
 import 'theme/frock_theme.dart';
 import 'theme/states.dart';
@@ -226,6 +227,16 @@ class _FrockBotAppState extends State<FrockBotApp> {
               leading: const Icon(Icons.refresh),
               title: const Text('Refresh'),
               onTap: restore,
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('Settings'),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      SettingsPage(api: api, store: store, userId: userId!),
+                ),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.logout),

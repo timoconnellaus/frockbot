@@ -460,7 +460,7 @@ class MemoryConfiguration
               : pkg,
           ),
         };
-      } else {
+      } else if (command.type === "user/set-package-settings") {
         this.user = {
           ...user,
           revision,
@@ -480,6 +480,13 @@ class MemoryConfiguration
     };
     this.receipts.set(command.commandId, receipt);
     return receipt;
+  }
+
+  async readSettingsFrame(): Promise<never> {
+    throw new Error("Settings frame not configured in this fixture");
+  }
+  async changeSettings(): Promise<never> {
+    throw new Error("Settings frame not configured in this fixture");
   }
 
   readConfiguration(

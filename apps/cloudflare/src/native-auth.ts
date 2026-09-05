@@ -68,7 +68,14 @@ interface SessionClaims {
   hello: ClientHello;
   expires: number;
 }
-type Claims = StartClaims | ExchangeClaims | SessionClaims;
+interface SettingsClaims {
+  kind: "settings";
+  userId: string;
+  hello: ClientHello;
+  home: "models" | "connections";
+  expires: number;
+}
+type Claims = StartClaims | ExchangeClaims | SessionClaims | SettingsClaims;
 
 export interface NativeAuthOptions {
   secret: string;
@@ -191,6 +198,20 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       !isProtocolValue("ClientHello", v.hello)
     )
       throw new Error("Expired sign-in");
+    if (kind === "settings") {
+      if (
+        !isProtocolValue("Identifier", v.userId) ||
+        (v.home !== "models" && v.home !== "connections")
+      )
+        throw new Error("Invalid settings destination");
+      return {
+        kind,
+        userId: v.userId,
+        home: v.home,
+        hello: v.hello,
+        expires: v.expires,
+      };
+    }
     if (kind !== "session") {
       if (
         !isProtocolValue("AuthStartCommand", v.start) ||
@@ -251,6 +272,42 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       expiresAt: claims.expires,
       action,
     };
+  }
+  async function browserSignIn(
+    request: Request,
+    callbackURL: string,
+  ): Promise<Response> {
+    const response = await options.auth.handler(
+      new Request(`${NATIVE_ORIGIN}/api/auth/sign-in/social`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: NATIVE_ORIGIN,
+          cookie: request.headers.get("cookie") ?? "",
+        },
+        body: JSON.stringify({
+          provider: "google",
+          callbackURL: callbackURL,
+        }),
+      }),
+    );
+    if (!response.ok) return error(401);
+    const result: unknown = await response.json();
+    if (
+      !result ||
+      typeof result !== "object" ||
+      !("url" in result) ||
+      typeof result.url !== "string"
+    )
+      return error();
+    const providerUrl = new URL(result.url);
+    if (
+      providerUrl.origin !== "https://accounts.google.com" ||
+      providerUrl.username ||
+      providerUrl.password
+    )
+      return error();
+    return redirect(providerUrl.toString(), response.headers);
   }
   return {
     async authenticate(request) {
@@ -337,6 +394,61 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
             { headers: { "cache-control": "public, max-age=300" } },
           );
         }
+        // This signed link grants no browser session and no Connection. It only
+        // carries a short-lived navigation intent to the same authenticated User.
+        if (
+          url.pathname === "/api/auth/native/settings" &&
+          request.method === "POST"
+        ) {
+          const principal = await this.authenticate(request);
+          if (principal?.refusal) return principal.refusal;
+          if (!principal?.session) return error(401);
+          const command = await readNativeJsonBody(request);
+          if (!isProtocolValue("SettingsHandoffCommand", command))
+            return error();
+          const expires = now() + 300_000;
+          const token = await sign({
+            kind: "settings",
+            userId: principal.session.user.id,
+            home: command.home,
+            hello: hello(request),
+            expires,
+          });
+          return Response.json(
+            {
+              schemaVersion: 1,
+              authorizationUrl: `${NATIVE_ORIGIN}/native/settings?request=${token}`,
+              expiresAt: new Date(expires).toISOString(),
+            },
+            { headers: NO_STORE },
+          );
+        }
+        if (url.pathname === "/native/settings" && request.method === "GET") {
+          if ([...url.searchParams.keys()].join() !== "request") return error();
+          const token = url.searchParams.get("request") ?? "";
+          const claims = await verify(token, "settings");
+          if (claims.kind !== "settings") return error();
+          const session = await browserIdentity(request);
+          if (!session)
+            return browserSignIn(
+              request,
+              `${NATIVE_ORIGIN}/native/settings?request=${token}`,
+            );
+          if (session.user.id !== claims.userId)
+            return new Response(
+              "This browser is signed in to a different FrockBot account. Switch accounts in the browser, then return to the app and try again.",
+              {
+                status: 403,
+                headers: {
+                  ...NO_STORE,
+                  "content-type": "text/plain; charset=utf-8",
+                },
+              },
+            );
+          return redirect(
+            `${NATIVE_ORIGIN}/?settings=${claims.home}${claims.home === "models" ? "#user-model-providers" : ""}`,
+          );
+        }
         if (
           url.pathname === "/api/auth/native/start" &&
           request.method === "POST"
@@ -376,37 +488,10 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           const session = await browserIdentity(request);
           if (!session) {
             if (url.pathname === "/native/complete") return error(401);
-            const response = await options.auth.handler(
-              new Request(`${NATIVE_ORIGIN}/api/auth/sign-in/social`, {
-                method: "POST",
-                headers: {
-                  "content-type": "application/json",
-                  origin: NATIVE_ORIGIN,
-                  cookie: request.headers.get("cookie") ?? "",
-                },
-                body: JSON.stringify({
-                  provider: "google",
-                  callbackURL: `${NATIVE_ORIGIN}/native/complete?request=${token}`,
-                }),
-              }),
+            return browserSignIn(
+              request,
+              `${NATIVE_ORIGIN}/native/complete?request=${token}`,
             );
-            if (!response.ok) return error(401);
-            const result: unknown = await response.json();
-            if (
-              !result ||
-              typeof result !== "object" ||
-              !("url" in result) ||
-              typeof result.url !== "string"
-            )
-              return error();
-            const providerUrl = new URL(result.url);
-            if (
-              providerUrl.origin !== "https://accounts.google.com" ||
-              providerUrl.username ||
-              providerUrl.password
-            )
-              return error();
-            return redirect(providerUrl.toString(), response.headers);
           }
           const code = await sign({
             ...claims,

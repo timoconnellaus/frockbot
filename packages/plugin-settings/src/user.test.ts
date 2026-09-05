@@ -1790,3 +1790,107 @@ describe("Package-level setting values", () => {
     });
   });
 });
+
+describe("permanent account model migration", () => {
+  for (const state of ["installed", "disabled"] as const) {
+    test(`migrates the previous ${state} account shape and persists only current state`, async () => {
+      const storage = new MemoryStorage();
+      const model = { connectionId: "work", providerModelId: "model-1" };
+      await storage.put("user-configuration", {
+        schemaVersion: 1,
+        revision: 7,
+        profile: { name: "Tim" },
+        connections: [],
+        packages: [
+          {
+            packageId: "custom-models",
+            version: "0.0.1",
+            state,
+            values: { "account-model": model },
+          },
+        ],
+      });
+      const owner = contribution(storage);
+      const current = await owner.readSnapshot();
+      expect(current.accountModel).toEqual(
+        state === "installed" ? model : undefined,
+      );
+      expect(current.packages[0]!.values).not.toHaveProperty("account-model");
+      const command = {
+        schemaVersion: 1,
+        type: "user/update-profile",
+        commandId: "save-profile",
+        expectedRevision: 7,
+        profile: { name: "Timothy" },
+      };
+      const first = await owner.executeConfiguration({
+        schemaVersion: 1,
+        userId: "tim",
+        command,
+      });
+      const restarted = contribution(storage);
+      expect(
+        await restarted.executeConfiguration({
+          schemaVersion: 1,
+          userId: "tim",
+          command,
+        }),
+      ).toEqual(first);
+      const stored =
+        await storage.get<UserSettingsViewV1>("user-configuration");
+      const { accountModel: projectedModel, ...previousShape } =
+        await restarted.readSnapshot();
+      expect(stored).toEqual(previousShape);
+      expect(stored).not.toHaveProperty("accountModel");
+      expect(
+        await storage.get<Record<string, unknown>>("user-account-model:v1"),
+      ).toEqual({ schemaVersion: 1, model: projectedModel ?? null });
+      expect(
+        await storage.get<Record<string, unknown>>(
+          "user-account-model:migration-checkpoint:v1",
+        ),
+      ).toMatchObject({
+        schemaVersion: 1,
+        settings: { revision: 7, profile: { name: "Tim" } },
+      });
+      expect(stored!.packages[0]!.values).not.toHaveProperty("account-model");
+    });
+  }
+  test("account selection replays across owner restart and clearing restores Auto", async () => {
+    const storage = new MemoryStorage();
+    const command = {
+      schemaVersion: 1,
+      type: "user/set-account-model",
+      commandId: "account-choice",
+      expectedRevision: 0,
+      model: { connectionId: "work", providerModelId: "model-1" },
+    };
+    const first = await contribution(storage).executeConfiguration({
+      schemaVersion: 1,
+      userId: "tim",
+      command,
+    });
+    const restarted = contribution(storage);
+    expect(
+      await restarted.executeConfiguration({
+        schemaVersion: 1,
+        userId: "tim",
+        command,
+      }),
+    ).toEqual(first);
+    expect((await restarted.readSnapshot()).accountModel).toEqual(
+      command.model,
+    );
+    await restarted.executeConfiguration({
+      schemaVersion: 1,
+      userId: "tim",
+      command: {
+        ...command,
+        commandId: "auto-choice",
+        expectedRevision: 1,
+        model: null,
+      },
+    });
+    expect((await restarted.readSnapshot()).accountModel).toBeUndefined();
+  });
+});

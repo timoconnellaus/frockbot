@@ -1,4 +1,5 @@
 /// <reference path="./env.d.ts" />
+import { decodeProtocol } from "@frockbot/protocol-schemas";
 
 import { foundationClientPlugins } from "@frockbot/application-foundation/client";
 import { foundationMobilePackages } from "@frockbot/application-foundation/mobile";
@@ -194,10 +195,26 @@ const application = new ClientApplication({
     }
     return decodeClientTurnV1(await readJsonResponseV1(response));
   },
+  async readSettingsFrame(home) {
+    return decodeProtocol(
+      "SettingsFrame",
+      await apiRequest(`/api/settings/${home}`),
+    );
+  },
+  async changeSettings(home, command) {
+    return decodeProtocol(
+      "SettingsReceipt",
+      await apiRequest(
+        `/api/settings/${home}`,
+        "POST",
+        JSON.stringify(command),
+      ),
+    );
+  },
   readConfiguration(query: ConfigurationQueryV1) {
     const path =
       query.type === "user/get"
-        ? "/api/settings"
+        ? "/api/settings?view=2"
         : `/api/bots/${encodeURIComponent(query.botId)}/settings`;
     return apiRequest(path).then((value) =>
       query.type === "user/get"

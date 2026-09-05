@@ -112,5 +112,12 @@ declare const validators: {
   isTurnResponse(value: unknown): value is ProtocolTypes["TurnResponse"];
   isAppletSummary(value: unknown): value is ProtocolTypes["AppletSummary"];
   isAppletDirectory(value: unknown): value is ProtocolTypes["AppletDirectory"];
+  isSettingsChangeCommand(
+    value: unknown,
+  ): value is ProtocolTypes["SettingsChangeCommand"];
+  isSettingsReceipt(value: unknown): value is ProtocolTypes["SettingsReceipt"];
+  isSettingsHandoffCommand(
+    value: unknown,
+  ): value is ProtocolTypes["SettingsHandoffCommand"];
 };
 export default validators;

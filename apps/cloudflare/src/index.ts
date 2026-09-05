@@ -594,7 +594,10 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     createBot: (request) => rpc.createBot(request),
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
-    readConfiguration: (request) => rpc.readConfiguration(request),
+    readSettingsFrame: (request) => rpc.readSettingsFrame(request),
+    changeSettings: (request) => rpc.changeSettings(request),
+    readConfiguration: (request) =>
+      rpc.readConfiguration({ ...request, view: 2 }),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
     lookupConnectionCommand: (request) => rpc.lookupConnectionCommand(request),
@@ -2163,7 +2166,7 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
  * language one: a runtime that does not offer it must not fail to boot.
  */
 try {
-  addEventListener("unhandledrejection", (event) => {
+  addEventListener("unhandledrejection", (event: unknown) => {
     const reason = (event as { reason?: unknown }).reason;
     console.error(
       `Unhandled rejection escaped an entry point: ${

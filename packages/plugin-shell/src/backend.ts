@@ -6417,7 +6417,8 @@ export class ShellBotBackendContribution {
       readMachineResult(input: unknown): Promise<unknown>;
     };
     return {
-      readConfiguration: (input) => rpc.readConfiguration(input),
+      readConfiguration: (input) =>
+        rpc.readConfiguration({ ...input, view: 2 }),
       executeConfiguration: async (command) =>
         decodeOperationReceiptV1(
           await rpc.executeConfiguration({
