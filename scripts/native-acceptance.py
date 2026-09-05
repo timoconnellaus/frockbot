@@ -38,12 +38,17 @@ def adb(*args, **kwargs):
 
 
 def wait_device():
-    print("Waiting for the already-paired Pixel; no other device will be used.", flush=True)
-    while True:
-        devices = run([ADB, "devices"]).stdout.splitlines()
-        if any(line.split() == [SERIAL, "device"] for line in devices):
-            return
-        time.sleep(10)
+    # Read-only gate. A locked/offline phone must not hold up other milestones.
+    devices = run([ADB, "devices"]).stdout.splitlines()
+    if not any(line.split() == [SERIAL, "device"] for line in devices):
+        raise RuntimeError("awaiting an unlocked phone: Pixel is offline")
+    window = adb("shell", "dumpsys", "window").stdout
+    policy = adb("shell", "dumpsys", "window", "policy").stdout
+    keyguard = policy.split("KeyguardServiceDelegate", 1)[-1]
+    if ("mDreamingLockscreen=true" in window or "isStatusBarKeyguard=true" in window
+            or not re.search(r"^\s+showing=false$", keyguard, re.M)
+            or not re.search(r"^\s+inputRestricted=false$", keyguard, re.M)):
+        raise RuntimeError("awaiting an unlocked phone: keyguard is active or unconfirmed")
 
 
 def write(name, value):
@@ -137,6 +142,7 @@ def install():
 
 
 def snapshot():
+    wait_device()
     adb("shell", "uiautomator", "dump", "/data/local/tmp/frockbot-acceptance.xml", timeout=20)
     return ET.fromstring(adb("shell", "cat", "/data/local/tmp/frockbot-acceptance.xml").stdout)
 
@@ -224,6 +230,7 @@ def measure():
     wait_device()
     cold, warm, flutter = [], [], []
     for index in range(30):
+        wait_device()
         adb("shell", "am", "force-stop", PACKAGE)
         cold.append(adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity").stdout)
         time.sleep(2)
@@ -237,6 +244,7 @@ def measure():
         write("flutter-launch-metrics.json", flutter)
     write("base-memory.txt", adb("shell", "dumpsys", "meminfo", PACKAGE).stdout)
     for _ in range(20):
+        wait_device()
         adb("shell", "input", "keyevent", "KEYCODE_HOME")
         time.sleep(1)
         adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity")

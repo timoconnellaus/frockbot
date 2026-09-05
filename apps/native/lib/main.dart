@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'client/auth.dart';
 import 'auth/sign_in_page.dart';
 import 'theme/frock_theme.dart';
+import 'theme/states.dart';
 import 'acceptance_metrics.dart';
 import 'client/chat_controller.dart';
 import 'client/state_channel.dart';
@@ -30,6 +31,7 @@ class FrockBotApp extends StatefulWidget {
 
 class _FrockBotAppState extends State<FrockBotApp> {
   final navigatorKey = GlobalKey<NavigatorState>();
+  final scaffoldKey = GlobalKey<ScaffoldState>();
   final LocalStore store = ProtectedStore();
   late final NativeApi api = NativeApi(store);
   late final NativeSignIn auth = NativeSignIn(api, store);
@@ -252,6 +254,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
         );
         final wide = MediaQuery.sizeOf(context).width >= 800;
         return Scaffold(
+          key: scaffoldKey,
           appBar: AppBar(
             title: Text(selected?.initialName ?? 'FrockBot'),
             actions: [
@@ -284,7 +287,20 @@ class _FrockBotAppState extends State<FrockBotApp> {
                 if (wide) SizedBox(width: 260, child: directory),
                 Expanded(
                   child: selected == null
-                      ? const Center(child: Text('Choose a Bot to begin.'))
+                      ? FrockEmptyState(
+                          title: bots.isEmpty
+                              ? 'No Bots yet'
+                              : 'Choose a Bot to begin',
+                          detail: bots.isEmpty
+                              ? 'Your Bots will appear here once they’re created.'
+                              : 'Pick a Bot from your list to catch up or start something new.',
+                          action: bots.isEmpty || wide
+                              ? 'Refresh Bots'
+                              : 'Your Bots',
+                          onAction: bots.isEmpty || wide
+                              ? restore
+                              : () => scaffoldKey.currentState?.openDrawer(),
+                        )
                       : ConversationView(
                           key: ValueKey('$userId:${selected!.botId.value}'),
                           api: api,
@@ -455,8 +471,25 @@ class _ChatPaneState extends State<ChatPane> {
     if (editor.value.composing.isValid && !editor.value.composing.isCollapsed) {
       return;
     }
+    if (!widget.controller.canSend || editor.text.trim().isEmpty) return;
+    unawaited(HapticFeedback.lightImpact());
     await widget.controller.send(editor.text);
     if (mounted) focus.requestFocus();
+  }
+
+  Future<void> refreshHistory({bool older = false}) async {
+    try {
+      await widget.controller.refresh(older: older);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Couldn’t refresh your messages. Check your connection and try again.',
+          ),
+        ),
+      );
+    }
   }
 
   List<Widget> messages(Map<String, dynamic> run) {
@@ -474,7 +507,7 @@ class _ChatPaneState extends State<ChatPane> {
         bubble(
           text is String
               ? text
-              : 'A message with content this preview can’t display.',
+              : 'This message contains content that is not available here yet.',
           false,
           '${run['runId']}:send:${index++}',
         ),
@@ -502,20 +535,42 @@ class _ChatPaneState extends State<ChatPane> {
     return widgets;
   }
 
-  Widget bubble(String text, bool user, String id) => Align(
-    key: ValueKey(id),
-    alignment: user ? Alignment.centerRight : Alignment.centerLeft,
-    child: Container(
-      constraints: const BoxConstraints(maxWidth: 720),
-      margin: EdgeInsets.fromLTRB(user ? 56 : 16, 6, user ? 16 : 56, 6),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: user ? const Color(0xff432330) : const Color(0xff2c2a33),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: SelectableText(text),
-    ),
-  );
+  Widget bubble(String text, bool user, String id) =>
+      TweenAnimationBuilder<double>(
+        key: ValueKey(id),
+        tween: Tween(begin: 0, end: 1),
+        duration: FrockTheme.motion(context),
+        curve: Curves.easeOutCubic,
+        builder: (context, value, child) => Opacity(
+          opacity: 0.7 + value * 0.3,
+          child: Transform.translate(
+            offset: Offset(0, 6 * (1 - value)),
+            child: child,
+          ),
+        ),
+        child: Align(
+          alignment: user ? Alignment.centerRight : Alignment.centerLeft,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 720),
+            margin: EdgeInsets.fromLTRB(user ? 56 : 16, 6, user ? 16 : 56, 6),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: user
+                  ? Theme.of(context).colorScheme.primary
+                        .withValues(alpha: 0.16)
+                  : Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Semantics(
+              label: user ? 'You' : 'Bot',
+              child: SelectableText(
+                text,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+            ),
+          ),
+        ),
+      );
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
@@ -538,23 +593,64 @@ class _ChatPaneState extends State<ChatPane> {
           ),
         Expanded(
           child: SelectionArea(
-            child: ListView(
-              key: PageStorageKey('history-${c.botId}-${c.conversationId}'),
-              children: [
-                if (c.before != null)
-                  TextButton(
-                    onPressed: c.loading ? null : () => c.refresh(older: true),
-                    child: const Text('Earlier messages'),
-                  ),
-                for (final run in c.runs) ...messages(run),
-                if (c.pendingId != null)
-                  bubble(c.pendingText ?? '', true, 'pending-${c.pendingId}'),
-                if (c.runs.isEmpty && c.pendingId == null)
-                  const Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Text('What would you like to work on?'),
-                  ),
-              ],
+            child: RefreshIndicator(
+              onRefresh: refreshHistory,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                key: PageStorageKey('history-${c.botId}-${c.conversationId}'),
+                children: [
+                  if (c.before != null)
+                    TextButton(
+                      onPressed: c.loading
+                          ? null
+                          : () => refreshHistory(older: true),
+                      child: const Text('Earlier messages'),
+                    ),
+                  for (final run in c.runs) ...messages(run),
+                  if (c.pendingId != null)
+                    bubble(c.pendingText ?? '', true, 'pending-${c.pendingId}'),
+                  if (c.runs.isEmpty && c.pendingId == null)
+                    Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: c.loading
+                          ? const Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                FrockSkeleton(width: 180, height: 20),
+                                SizedBox(height: 20),
+                                FrockSkeleton(height: 64),
+                                SizedBox(height: 16),
+                                FrockSkeleton(width: 220, height: 64),
+                              ],
+                            )
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SheepAvatar(size: 64),
+                                const SizedBox(height: 24),
+                                Text(
+                                  'What would you like to work on?',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineMedium,
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Ask a question, make a plan, or give your Bot something to do.',
+                                  style: Theme.of(context).textTheme.bodyLarge
+                                      ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                      ),
+                                ),
+                              ],
+                            ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -608,7 +704,12 @@ class _ChatPaneState extends State<ChatPane> {
                 IconButton.filledTonal(
                   key: const ValueKey('stop'),
                   tooltip: 'Stop',
-                  onPressed: c.stopping ? null : c.stop,
+                  onPressed: c.stopping
+                      ? null
+                      : () {
+                          unawaited(HapticFeedback.mediumImpact());
+                          unawaited(c.stop());
+                        },
                   icon: const Icon(Icons.stop_rounded),
                 ),
               IconButton.filled(

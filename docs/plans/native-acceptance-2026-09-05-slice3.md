@@ -33,8 +33,22 @@ Actual release-window captures: [Pixel sign-in](native-evidence-2026-09-05-slice
 | Computer, Workspace, Memory                         | No Computer invocation or durable-root/Memory behavior change. Applet-with-hibernated-Computer evidence is still required in B.                                                             |
 | Architecture checks, documentation, landing         | Mandatory checks and actual release builds recorded; existing plan/acceptance gaps retained. This milestone requests integration only; the orchestrator tags/releases.                      |
 
+### A follow-up — verification hostname
+
+PR #263 merged as `86d8f5fe`; the orchestrator deployed v0.3.32. The canonical association URL returned 200 at 13:05 AEST. On the real Pixel, Google sign-in reached the HTTPS return, but Android still reported domain-verification error 1024. Google's Digital Asset Links response reported a cached 401 from `https://bot.frockbot.com./.well-known/assetlinks.json` and a 600-second cache window. A direct probe reproduced a current **403 for the root-dot hostname versus 200 for the canonical hostname**.
+
+[PR #267](https://github.com/timoconnellaus/frockbot/pull/267), opened by the concurrent production QA session, normalizes the fully qualified hostname at the gateway and supplies HEAD for both association files. The exact return-URI allowlist and PKCE binding remain in force. This is a gateway correction with no durable-state, authority, credential, settings or UI change. The physical verification and authenticated flow must be repeated after its release and verifier cache refresh; HTTP 200 alone does not prove Android verification.
+
 ## B — authenticated devices and budget ledger
 
-Awaiting A's release and HTTP 200 from `https://bot.frockbot.com/.well-known/assetlinks.json`. The Pixel is currently unlocked; do not wait on a future locked device or bypass keyguard. macOS verified return requires a FrockBot provisioning/signing profile. All unchanged Slice 2 budgets remain unaccepted until measured against the specified fixture.
+Canonical association delivery passed; Android verification currently awaits the A hostname follow-up and Google's cache refresh. The Pixel is currently unlocked; do not wait on a future locked device or bypass keyguard. macOS verified return requires a FrockBot provisioning/signing profile. All unchanged Slice 2 budgets remain unaccepted until measured against the specified fixture.
 
 Outstanding: sign-in/selection/paged chat/send/Stop/uncertain delivery/reconnect; durable deterministic save; the published Todo Applet `vgpqfaCcwnPlzjYdb2mIfNcOW1YV0SkG.e1f813c4b3398e3ee947b323b9996491` with hibernated Computer; physical fallback isolation; client kill plus forced DO eviction; 10,000-Turn performance, 30 editable cold/warm launches, three five-minute runs and 20 Applet/lifecycle cycles; IME, accessibility and remaining native platform gates.
+
+### B preparation before authenticated qualification
+
+The dedicated `Native QA Sep 5` Bot (`native-qa-20260905`) was created through the production directory command with receipt `native-qa-create-20260905-codexnative3`, revision 14. Browser identity matches Tim's User, and the original Bots remain present. Android release **1.1.0+6** upgraded in place through greater version codes 4, 5 and 6 with the original signer. Chat now uses themed message surfaces, finite insertion motion, explicit empty/loading states, pull-to-refresh, keyboard dismissal and send/Stop haptics. Applet directory/fallback regions have explicit loading, empty and retry states. WebView inspection is enabled only in `NATIVE_ACCEPTANCE` builds for the pending physical isolation checks. The runner checks for an unlocked phone before UI/launch loops and refuses an offline or locked device promptly.
+
+Flutter analyzer and 210 widget/contract tests passed, including all six chat states at 200% text with reduced motion. These tests and the Android/macOS release builds establish preparation only; none substitutes for the still-open authenticated, isolation and budget rows. [Actual Pixel browser-handoff state](native-evidence-2026-09-05-slice3/pixel-sign-in-handoff.png) is captured in release mode. The shared Pixel is also being used by a concurrent QA session; further input awaits coordination.
+
+The production QA session's PR #265 identifies a missing `APPLET_VIEWER_SECRET` in the GitHub `production` environment, confirmed by reading secret names. That secret must persist in release configuration for the real Applet flow; its value is never requested from or passed into Dart.

@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/main.dart';
+import 'package:frockbot_native/theme/frock_theme.dart';
 
 class MemoryStore implements LocalStore {
   final values = <String, String>{};
@@ -79,6 +80,76 @@ class FakeTransport implements ChatTransport {
 }
 
 void main() {
+  testWidgets(
+    'chat states preserve controls at 200% text with reduced motion',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 720);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      for (final state in [
+        'empty',
+        'loading',
+        'offline',
+        'uncertain',
+        'running',
+        'failed',
+      ]) {
+        final store = MemoryStore();
+        final transport = FakeTransport(store);
+        if (state == 'running' || state == 'failed') {
+          transport.observed = {...running(), 'status': state};
+        }
+        final controller = ChatController(
+          transport: transport,
+          store: store,
+          userId: 'user-1',
+          botId: 'bot-1',
+        );
+        await controller.initialize();
+        controller.connection = state == 'offline'
+            ? ConnectionState.disconnected
+            : ConnectionState.connected;
+        controller.loading = state == 'loading';
+        if (state == 'uncertain') {
+          controller.pendingId = 'pending-1';
+          controller.pendingText = 'Keep my draft';
+          controller.draft = 'Keep my draft';
+          controller.error =
+              'Couldn’t confirm your message. Reconnect or check again.';
+        }
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: const TextScaler.linear(2),
+                disableAnimations: true,
+              ),
+              child: child!,
+            ),
+            home: Scaffold(
+              body: ChatPane(controller: controller, onReconnect: () async {}),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: state);
+        expect(find.byKey(const ValueKey('composer')), findsOneWidget);
+        expect(find.byKey(const ValueKey('send')), findsOneWidget);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+        if (state == 'uncertain') {
+          expect(find.byKey(const ValueKey('check-delivery')), findsOneWidget);
+        }
+        if (state == 'running') {
+          expect(find.byKey(const ValueKey('stop')), findsOneWidget);
+        }
+        await tester.pumpWidget(const SizedBox());
+        controller.dispose();
+      }
+    },
+  );
+
   testWidgets(
     'send persists identity; Stop is explicit and remains until terminal',
     (tester) async {
