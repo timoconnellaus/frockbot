@@ -5929,8 +5929,13 @@ export class ShellBotBackendContribution {
     const conversationId =
       query.conversationId ??
       (await this.authority.readConversationSessionId());
-    const inConversation = (run: { sessionId: string }) =>
-      conversationId === undefined || run.sessionId === conversationId;
+    // A record nobody can decode has no trustworthy session id, and a
+    // transcript that hid it would be back to silently losing the Turn. An
+    // unknown session belongs to the conversation being read.
+    const inConversation = (run: { sessionId?: string }) =>
+      conversationId === undefined ||
+      run.sessionId === undefined ||
+      run.sessionId === conversationId;
     const activeRunId = query.before
       ? undefined
       : await this.authority.readActiveRunId();
@@ -5951,13 +5956,14 @@ export class ShellBotBackendContribution {
 
     const selected = new Map<string, { cursor?: string; run: ClientRunV1 }>();
     if (activeRunId) {
-      const active = await this.authority.readStoredRunForDisplay(activeRunId);
+      const active =
+        await this.authority.readStoredRunForDisplayOrDegraded(activeRunId);
       // An automation firing occupies the object like any other run, and is
       // still not part of the conversation: the visible transcript never
       // shows one, running or settled.
-      if (active && isVisibleRunV1(active) && inConversation(active))
-        selected.set(active.runId, {
-          run: projectClientRunOrDegradedV1(active),
+      if (active && isVisibleRunV1(active.run) && inConversation(active.run))
+        selected.set(active.run.runId, {
+          run: projectClientRunOrDegradedV1(active.run),
         });
     }
     // The run index is global and the transcript is one conversation, so a
@@ -5989,19 +5995,21 @@ export class ShellBotBackendContribution {
           scanCursor = candidate.cursor;
           continue;
         }
-        const header = await this.authority.readRunHeader(candidate.runId);
-        if (!header || !isVisibleRunV1(header) || !inConversation(header)) {
-          scanCursor = candidate.cursor;
-          continue;
-        }
-        const stored = await this.authority.readStoredRunForDisplay(
+        // Display-only reads: strictness here would throw the whole page away
+        // over one bad row, which is exactly the transcript that vanished.
+        const header = await this.authority.readRunHeaderForDisplay(
           candidate.runId,
         );
-        if (!stored) {
+        if (
+          !header ||
+          !isVisibleRunV1(header.run) ||
+          !inConversation(header.run)
+        ) {
           scanCursor = candidate.cursor;
           continue;
         }
-        const projected = projectClientRunOrDegradedV1(stored);
+        const stored = await this.authority.hydrateRunForDisplay(header);
+        const projected = projectClientRunOrDegradedV1(stored.run);
         const tentative = [
           ...selected.values(),
           { cursor: candidate.cursor, run: projected },
@@ -6031,7 +6039,7 @@ export class ShellBotBackendContribution {
           stoppedEarly = true;
           break;
         }
-        selected.set(stored.runId, {
+        selected.set(stored.run.runId, {
           cursor: candidate.cursor,
           run: projected,
         });

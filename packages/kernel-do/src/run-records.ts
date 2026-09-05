@@ -980,3 +980,60 @@ export interface BotTurnCompletion {
   events: SessionEvent[];
   notification?: BotNotificationIntent;
 }
+
+/**
+ * The little that can be trusted about a run record nobody can decode.
+ *
+ * A transcript read is display-only: it never resumes, settles or recovers a
+ * Turn, so it does not need the record to be valid — it needs enough to draw
+ * one row saying which Turn could not be read. The run id comes from the
+ * admission index key, which is authority; everything else is scraped from the
+ * raw value and kept only where it is plainly a safe, bounded string, so a
+ * record corrupt in any other field still yields a renderable row.
+ */
+export interface UnreadableStoredRunV1 {
+  readonly runId: string;
+  readonly sessionId?: string;
+  readonly acceptedAt?: string;
+  readonly input?: string;
+  readonly admission?: { readonly turnType?: TurnTypeV1 };
+}
+
+/** Scrape a record that failed to decode down to {@link UnreadableStoredRunV1}. */
+export function unreadableStoredRunV1(
+  runId: string,
+  raw: unknown,
+): UnreadableStoredRunV1 {
+  const candidate =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  const admission =
+    candidate.admission &&
+    typeof candidate.admission === "object" &&
+    !Array.isArray(candidate.admission)
+      ? (candidate.admission as Record<string, unknown>)
+      : undefined;
+  let turnType: TurnTypeV1 | undefined;
+  try {
+    if (admission?.turnType !== undefined) {
+      turnType = decodeTurnTypeV1(admission.turnType);
+    }
+  } catch {
+    turnType = undefined;
+  }
+  return {
+    runId,
+    ...(boundedString(candidate.sessionId, 257)
+      ? { sessionId: candidate.sessionId }
+      : {}),
+    ...(boundedString(candidate.acceptedAt, 64) &&
+    Number.isFinite(Date.parse(candidate.acceptedAt))
+      ? { acceptedAt: candidate.acceptedAt }
+      : {}),
+    ...(boundedString(candidate.input, 32_000)
+      ? { input: candidate.input }
+      : {}),
+    ...(turnType ? { admission: { turnType } } : {}),
+  };
+}
