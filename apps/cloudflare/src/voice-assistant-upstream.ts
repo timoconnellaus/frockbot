@@ -233,3 +233,22 @@ export function voiceAssistantToolResponseV1(input: {
 
 export const VOICE_ASSISTANT_UPSTREAM_ERROR_V1 =
   "Voice went offline because the speech service stopped responding. Try again.";
+
+/**
+ * How long one setup may go unanswered before the client is told Voice is off.
+ *
+ * A provider that neither answers nor closes is indistinguishable from a dead
+ * socket to anyone waiting on a microphone, so the deadline exists to make
+ * sure the browser and the phone always receive either `ready` or `offline`.
+ */
+export const VOICE_ASSISTANT_READY_TIMEOUT_MS_V1 = 20_000;
+
+/**
+ * How many setups may go unanswered in a row before Voice gives up. The first
+ * carries the stored resumption handle; the retry deliberately does not, which
+ * is the whole repair a stale handle needs.
+ */
+export const VOICE_ASSISTANT_MAX_SETUP_ATTEMPTS_V1 = 3;
+
+export const VOICE_ASSISTANT_READY_TIMEOUT_ERROR_V1 =
+  "Voice took too long to connect to the speech service. Try again.";

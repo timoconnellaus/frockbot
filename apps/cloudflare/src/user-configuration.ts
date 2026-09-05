@@ -1295,6 +1295,21 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     });
   }
 
+  async clearVoiceResumptionHandle(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      sessionId: rpcString(128),
+      at: rpcString(64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await (
+      await this.voiceContribution()
+    ).clearResumptionHandle({
+      sessionId: request.sessionId as string,
+      at: request.at as string,
+    });
+  }
+
   async appendVoiceTranscript(input: unknown): Promise<void> {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

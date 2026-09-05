@@ -45,6 +45,10 @@ export class VoiceUserBackendContributionV1 {
     return this.ledger.saveResumptionHandle(input);
   }
 
+  clearResumptionHandle(input: { sessionId: string; at: string }) {
+    return this.ledger.clearResumptionHandle(input);
+  }
+
   appendTranscript(sessionId: string, entry: VoiceTranscriptEntryV1) {
     return this.ledger.appendTranscript(sessionId, entry);
   }

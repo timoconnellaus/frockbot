@@ -243,4 +243,43 @@ describe("VoiceLedgerV1", () => {
     expect(view.pendingAnswers).toHaveLength(32);
     expect(view.pendingAnswers[0]?.answerId).toBe("answer-08");
   });
+
+  test("a cleared resumption handle stays gone, so the next session starts fresh", async () => {
+    const ledger = new VoiceLedgerV1(memoryStorage());
+    await ledger.start({ sessionId: "session-1", deviceId: "phone", at: AT });
+    await ledger.saveResumptionHandle({
+      sessionId: "session-1",
+      handle: "handle-1",
+      at: AT,
+    });
+    expect((await ledger.view()).state.resumptionHandle).toBe("handle-1");
+
+    await ledger.clearResumptionHandle({ sessionId: "session-1", at: AT });
+    expect((await ledger.view()).state.resumptionHandle).toBeUndefined();
+
+    await ledger.end({
+      sessionId: "session-1",
+      at: AT,
+      reason: "error",
+      seconds: 1,
+    });
+    const restarted = await ledger.start({
+      sessionId: "session-2",
+      deviceId: "phone",
+      at: AT,
+    });
+    expect(restarted.state.resumptionHandle).toBeUndefined();
+  });
+
+  test("a resumption handle clear from a session that is not active is ignored", async () => {
+    const ledger = new VoiceLedgerV1(memoryStorage());
+    await ledger.start({ sessionId: "session-1", deviceId: "phone", at: AT });
+    await ledger.saveResumptionHandle({
+      sessionId: "session-1",
+      handle: "handle-1",
+      at: AT,
+    });
+    await ledger.clearResumptionHandle({ sessionId: "session-other", at: AT });
+    expect((await ledger.view()).state.resumptionHandle).toBe("handle-1");
+  });
 });
