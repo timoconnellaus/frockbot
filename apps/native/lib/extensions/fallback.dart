@@ -61,6 +61,15 @@ class FallbackLease {
     'socketUrl': (value['viewer'] as Map)['socketUrl'],
     'tokenTransport': 'subprotocol-v1',
   };
+  Future<bool> isReady(WebViewController web) async {
+    // Return a JS boolean. Android's bridge JSON-encodes strings once more
+    // than WebKit; comparing an epoch string in Dart rejects valid Android pages.
+    final ready = await web.runJavaScriptReturningResult(
+      'window.frockbotFallback?.ready() === ${jsonEncode(epoch)}',
+    );
+    return ready == true || ready == 'true';
+  }
+
   bool allows(String url, bool mainFrame) =>
       mainFrame ? url == bootstrap.toString() : url == artifactUrl;
 }
@@ -165,6 +174,7 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
   WebViewController? _web;
   Timer? _renewal;
   String? _error;
+  bool _pageUnavailable = false;
   Uri? _externalLink;
   int _epoch = 0;
   bool _ready = false;
@@ -190,6 +200,7 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
     if (mounted) {
       setState(() {
         _error = null;
+        _pageUnavailable = false;
         _ready = false;
         _web = null;
       });
@@ -294,17 +305,13 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
         if (await web.currentUrl() != lease.bootstrap.toString()) {
           throw const FormatException('Navigation changed');
         }
-        final ready = await web.runJavaScriptReturningResult(
-          'JSON.stringify(window.frockbotFallback?.ready() ?? null)',
-        );
-        // WebKit and Android return JS strings differently; compare bounded values.
-        if (ready == jsonEncode(lease.epoch) || ready == lease.epoch) {
+        if (await lease.isReady(web)) {
           await _provide(web, lease, epoch);
           return;
         }
         await Future<void>.delayed(const Duration(milliseconds: 100));
       }
-      _fail(epoch);
+      _fail(epoch, pageUnavailable: true);
     } catch (_) {
       _fail(epoch);
     } finally {
@@ -352,7 +359,7 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
     );
   }
 
-  void _fail(int epoch) {
+  void _fail(int epoch, {bool pageUnavailable = false}) {
     if (!mounted || epoch != _epoch) return;
     ++_epoch;
     _renewal?.cancel();
@@ -367,6 +374,7 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
     setState(() {
       _web = null;
       _ready = false;
+      _pageUnavailable = pageUnavailable;
       _error = 'This Applet couldn’t be opened. Your conversation is still available.';
     });
   }
@@ -437,8 +445,12 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
         if (_error != null)
           Expanded(
             child: FrockEmptyState(
-              title: 'Couldn’t open this Applet',
-              detail: 'Your conversation is still available. Check your connection, then try opening the Applet again.',
+              title: _pageUnavailable
+                  ? 'Applet couldn’t start'
+                  : 'Couldn’t open this Applet',
+              detail: _pageUnavailable
+                  ? 'The page opened, but couldn’t connect to FrockBot. Try reopening it. If it still won’t connect, ask your Bot to publish it again.'
+                  : 'Your conversation is still available. Check your connection, then try opening the Applet again.',
               action: 'Try again',
               onAction: _open,
               icon: Icons.widgets_outlined,
