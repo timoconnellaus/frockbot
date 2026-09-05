@@ -28,6 +28,7 @@ class ChatScreen extends StatelessWidget {
     required this.body,
     this.extraActions = const [],
     this.onInbox,
+    this.onVoice,
     this.inboxCount = 0,
     this.unreadOf,
     this.scaffoldKey,
@@ -52,6 +53,11 @@ class ChatScreen extends StatelessWidget {
 
   /// Opens the Inbox; absent until the account's activity has loaded.
   final VoidCallback? onInbox;
+
+  /// Opens Voice (Gemini Live). It is a conversation with the whole account,
+  /// not with the Bot on screen, so it sits at the top and is there even
+  /// before a Bot is chosen.
+  final VoidCallback? onVoice;
   final int inboxCount;
 
   /// What the account knows about unread activity per Bot.
@@ -64,6 +70,16 @@ class ChatScreen extends StatelessWidget {
     final t = FrockTokens.of(context);
     final wide = MediaQuery.sizeOf(context).width >= wideBreakpoint;
     final bottom = MediaQuery.paddingOf(context).bottom;
+    final actions = <Widget>[
+      if (onVoice != null)
+        FrockIconButton(
+          Icons.graphic_eq_rounded,
+          key: const ValueKey('voice'),
+          semanticLabel: 'Voice',
+          onTap: onVoice,
+        ),
+      ...extraActions,
+    ];
     final flock = FlockDrawer(
       bots: bots,
       selectedId: selected?.botId.value,
@@ -123,23 +139,19 @@ class ChatScreen extends StatelessWidget {
                         ],
                       ),
                     ),
-              trailing: extraActions.isEmpty
-                  ? FrockIconButton(
-                      Icons.grid_view_outlined,
-                      semanticLabel: 'Applets',
-                      onTap: onApplets,
-                    )
-                  : Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ...extraActions,
-                        FrockIconButton(
-                          Icons.grid_view_outlined,
-                          semanticLabel: 'Applets',
-                          onTap: onApplets,
-                        ),
-                      ],
-                    ),
+              // Voice first, then whatever this screen adds, then Applets.
+              reserve: (actions.length + 1) * FrockTokens.controlMd + 8,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ...actions,
+                  FrockIconButton(
+                    Icons.grid_view_outlined,
+                    semanticLabel: 'Applets',
+                    onTap: onApplets,
+                  ),
+                ],
+              ),
             ),
           ),
           Expanded(child: body),
