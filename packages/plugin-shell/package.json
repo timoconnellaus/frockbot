@@ -42,6 +42,7 @@
     "./settings-links": "./src/settings-links.ts",
     "./shared": "./src/shared.ts",
     "./skill-protocol": "./src/skill-protocol.ts",
+    "./tool-catalog-pin": "./src/tool-catalog-pin.ts",
     "./unread": "./src/unread.ts"
   },
   "frockbot": {
