@@ -1,0 +1,7 @@
+# Native Connections
+
+The User Durable Object owns Connection grants, credentials, lifecycle and reconciliation. Native Connectors projects only labels, service names and lifecycle states from the same manifest-filtered User configuration as Vue. The Connections surface remains the single home for grants; Models retains model provider accounts. Native opens the existing same-User backend browser handoff for catalog search, authorization, reconnect and revocation. No secret-entry form, provider URL or provider SDK is introduced in Dart.
+
+Closing or disconnecting the native page cancels no admitted grant. Returning from the browser or refreshing reads the User projection again. The existing backend records grant intent, callback consumption and uncertain outcomes; this milestone adds no durable record or effect. Its read works across owner eviction and while the Computer is hibernated. Revoked and disabled Package accounts follow the same surface policy as Vue. Invalid sessions and mismatched owners fail closed with a recoverable native state.
+
+Verification seams, already requested in the brief: browser/native gateway reads over one User owner, grant lifecycle and replay at the existing backend boundary, strict shared DTO fixtures, and native UI recovery/large text. Release screenshots and remaining physical gates go into the dated acceptance ledger. This renderer milestone extends the existing Connections parity capability under ADRs 0019, 0039 and 0042. It depends on C1's same-User browser handoff and settings navigation.

@@ -691,7 +691,9 @@
       "schemaVersion": 1,
       "commandId": "command-1",
       "text": "1.1.0",
-      "grant": ["*"]
+      "grant": [
+        "*"
+      ]
     }
   },
   {
@@ -1079,7 +1081,9 @@
       "displayName": "Counter",
       "status": "unknown",
       "currentGenerationId": "generation-1",
-      "tools": ["increment"],
+      "tools": [
+        "increment"
+      ],
       "createdAt": "2026-09-05T00:00:00.000Z"
     }
   },
@@ -1402,6 +1406,41 @@
       "values": {
         "name": "Tim"
       }
+    }
+  },
+  {
+    "name": "ConnectionsFrame refuses credential metadata",
+    "schema": "ConnectionsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "ownerId": "tim",
+      "revision": 1,
+      "accounts": [
+        {
+          "id": "calendar-work",
+          "label": "Work calendar",
+          "service": "Calendar",
+          "state": "ready",
+          "token": "synthetic-test-secret"
+        }
+      ]
+    }
+  },
+  {
+    "name": "ConnectionsFrame rejects unknown lifecycle",
+    "schema": "ConnectionsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "ownerId": "tim",
+      "revision": 1,
+      "accounts": [
+        {
+          "id": "calendar-work",
+          "label": "Work calendar",
+          "service": "Calendar",
+          "state": "whatever"
+        }
+      ]
     }
   }
 ]

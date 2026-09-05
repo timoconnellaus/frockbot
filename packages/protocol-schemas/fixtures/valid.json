@@ -865,7 +865,9 @@
       "displayName": "Counter",
       "status": "published",
       "currentGenerationId": "generation-1",
-      "tools": ["increment"],
+      "tools": [
+        "increment"
+      ],
       "createdAt": "2026-09-05T00:00:00.000Z"
     }
   },
@@ -880,7 +882,9 @@
           "displayName": "Counter",
           "status": "published",
           "currentGenerationId": "generation-1",
-          "tools": ["increment"],
+          "tools": [
+            "increment"
+          ],
           "createdAt": "2026-09-05T00:00:00.000Z"
         }
       ]
@@ -1025,7 +1029,9 @@
       "displayName": "Counter",
       "status": "published",
       "currentGenerationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
-      "tools": ["increment"],
+      "tools": [
+        "increment"
+      ],
       "createdAt": "2026-09-05T00:00:00.000Z"
     }
   },
@@ -1061,6 +1067,23 @@
       "revision": 1,
       "items": [],
       "nextCursor": 50
+    }
+  },
+  {
+    "name": "ConnectionsFrame valid",
+    "schema": "ConnectionsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "ownerId": "tim",
+      "revision": 1,
+      "accounts": [
+        {
+          "id": "calendar-work",
+          "label": "Work calendar",
+          "service": "Calendar",
+          "state": "ready"
+        }
+      ]
     }
   }
 ]
