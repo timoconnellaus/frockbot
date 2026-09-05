@@ -8,6 +8,7 @@ import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import {
   MAX_RESTARTS,
+  RESTART_WINDOW_MS,
   OutputTail,
   restartDelayMs,
   superviseProcess,
@@ -35,7 +36,13 @@ interface Harness {
   ready: { value: () => Promise<void> };
 }
 
-function harness(overrides: { maxRestarts?: number } = {}): Harness {
+function harness(
+  overrides: {
+    maxRestarts?: number;
+    windowMs?: number;
+    now?: () => number;
+  } = {},
+): Harness {
   const spawned: ChildProcess[] = [];
   const reports: string[] = [];
   const ready = { value: async () => {} };
@@ -54,6 +61,8 @@ function harness(overrides: { maxRestarts?: number } = {}): Harness {
     delayMs: () => 0,
     report: (message) => reports.push(message),
     maxRestarts: overrides.maxRestarts,
+    windowMs: overrides.windowMs,
+    now: overrides.now,
   });
   return { spawned, reports, supervised, ready };
 }
@@ -131,8 +140,50 @@ describe("superviseProcess", () => {
     expect(supervised.child()).toBeUndefined();
   });
 
-  test("tolerates five crashes by default", () => {
+  test("tolerates five crashes a window by default", () => {
     expect(MAX_RESTARTS).toBe(5);
+    expect(RESTART_WINDOW_MS).toBe(5 * 60_000);
+  });
+
+  test("crashes spread over a long shard never exhaust the budget", async () => {
+    // The failure this exists for: `wrangler dev` exits every few minutes on
+    // a CI runner, so a lifetime budget is really a limit on how long a shard
+    // may run. Ten crashes, ten minutes apart, are ten recoveries.
+    let clock = 0;
+    const { spawned, supervised, reports } = harness({
+      maxRestarts: 5,
+      windowMs: 5 * 60_000,
+      now: () => clock,
+    });
+    await supervised.start();
+    for (let index = 0; index < 10; index += 1) {
+      clock += 10 * 60_000;
+      const child = supervised.child();
+      expect(child).toBeDefined();
+      (child as unknown as FakeChild).exit(1);
+      await settle();
+    }
+    expect(spawned).toHaveLength(11);
+    expect(supervised.restarts()).toBe(10);
+    expect(reports.join("\n")).not.toContain("giving up");
+  });
+
+  test("a server knocked over again and again inside one window is given up on", async () => {
+    let clock = 0;
+    const { supervised, reports } = harness({
+      maxRestarts: 3,
+      windowMs: 5 * 60_000,
+      now: () => clock,
+    });
+    await supervised.start();
+    for (let index = 0; index < 5; index += 1) {
+      clock += 1_000;
+      const child = supervised.child();
+      if (!child) break;
+      (child as unknown as FakeChild).exit(1);
+      await settle();
+    }
+    expect(reports.join("\n")).toContain("giving up");
   });
 
   test("a restart whose replacement never becomes ready is retried", async () => {
