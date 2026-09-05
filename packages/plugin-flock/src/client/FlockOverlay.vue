@@ -84,15 +84,15 @@ onBeforeUnmount(() => restoreFocus?.focus());
   <UiConfirmDialog
     :open="flock.overlay === 'archive'"
     eyebrow="Archive Bot"
-    title="Archive this Bot?"
+    :title="`Archive ${pendingName}?`"
     confirm-label="Archive Bot"
     :error="flock.error"
     @cancel="flock.closeOverlay"
     @confirm="flock.archive"
   >
     <p>
-      Archiving stops new work and hides the Bot from your active flock. Its
-      history and settings are kept, and you can restore it at any time.
+      Archiving stops new work and takes the Bot out of your flock. You can
+      restore it later.
     </p>
   </UiConfirmDialog>
   <UiConfirmDialog

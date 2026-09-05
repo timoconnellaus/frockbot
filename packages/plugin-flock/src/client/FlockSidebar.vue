@@ -250,21 +250,32 @@ onMounted(() => void flock.value.load());
                 </span>
                 <small>{{ previewText(bot.botId) }}</small>
               </span>
+              <!--
+                One slot, one meaning. A glowing dot for "this is the open Bot"
+                sat where the unread badge sits and read as news arriving; the
+                row's own background and `aria-current` already say which Bot
+                is open, in both directions. So the slot carries unread and
+                the archived state, which are the two things a row can say
+                that its appearance does not.
+              -->
               <span
-                v-if="unreadLabel(bot.botId) || active === bot.botId"
+                v-if="
+                  unreadLabel(bot.botId) ||
+                  flock.lifecycles[bot.botId] === 'archived'
+                "
                 class="flock-bot-indicators"
               >
+                <span
+                  v-if="flock.lifecycles[bot.botId] === 'archived'"
+                  class="flock-bot-tag"
+                  >Archived</span
+                >
                 <span
                   v-if="unreadLabel(bot.botId)"
                   class="flock-unread-badge"
                   :aria-label="`${unreadLabel(bot.botId)} unread`"
                   >{{ unreadLabel(bot.botId) }}</span
                 >
-                <i
-                  v-if="active === bot.botId"
-                  class="flock-bot-dot"
-                  aria-hidden="true"
-                />
               </span>
             </button>
             <!--

@@ -324,6 +324,38 @@ test("the shell is usable on a phone", async ({
   await expect(page.locator(".ui-sidebar-overlay__scrim")).toHaveCount(0);
   await expect(page.locator(".app-shell")).not.toHaveAttribute("inert", "");
 
+  /*
+   * A Package's own page, hosted as a surface.
+   *
+   * On a phone the surface is the whole window, so the page inside it gets the
+   * sheet's insets and fills it. It used to be a card butted against the left
+   * edge that stopped at its content's height, leaving the bottom half of the
+   * sheet empty behind it (2026-09-05).
+   */
+  await openNavigation(page);
+  await page.getByRole("button", { name: "Applets" }).first().click();
+  await expect(page.getByRole("heading", { name: "Applets" })).toBeVisible();
+  await shot(page, "08-applets-surface");
+  await expectNoHorizontalOverflow(page);
+  const sheetBody = await page
+    .locator(".ui-sidebar-overlay__content")
+    .boundingBox();
+  const hostedFrame = await page
+    .locator(".package-surface-page .package-iframe-frame")
+    .boundingBox();
+  expect(hostedFrame, "the hosted page has no box").not.toBeNull();
+  expect(hostedFrame!.x, "the hosted page touches the left edge").toBe(
+    sheetBody!.x + 24,
+  );
+  expect(
+    hostedFrame!.x + hostedFrame!.width,
+    "the hosted page touches the right edge",
+  ).toBe(sheetBody!.x + sheetBody!.width - 24);
+  // A short page fills the sheet rather than stopping part-way down it.
+  expect(hostedFrame!.height).toBeGreaterThanOrEqual(sheetBody!.height - 40);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("heading", { name: "Applets" })).toBeHidden();
+
   // The proof is that the click lands at all: a surviving scrim swallows it
   // and the row simply never answers.
   await openNavigation(page);
@@ -331,8 +363,20 @@ test("the shell is usable on a phone", async ({
     .getByRole("button", { name: /Pocket/u })
     .first()
     .click({ timeout: 15_000 });
-  await closeNavigation(page);
+  /*
+   * And the choice closes the drawer behind it.
+   *
+   * Pocket is the Bot already open, which is the case that failed: the drawer
+   * closed on a change of Bot, and choosing the only Bot in the list changes
+   * nothing. So the drawer stayed over four fifths of the window, its profile
+   * trigger took the taps meant for the composer, and Escape or the strip of
+   * conversation beside it was the only way out (2026-09-05).
+   */
+  await expect(page.locator(".sidebar")).toBeHidden();
+  // The composer is where it is, and takes a tap: nothing is over it.
   await expect(composerInput(page)).toBeEnabled();
+  await composerInput(page).click();
+  await expect(composerInput(page)).toBeFocused();
 });
 
 test("the sign-in page clears the native system bars", async ({ page }) => {

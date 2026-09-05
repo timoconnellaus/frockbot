@@ -402,6 +402,16 @@ export interface FrockBotWebData {
    * Bot is a paint rather than a reload.
    */
   transcripts: TranscriptMemoryV1;
+  /**
+   * How many times a Bot has been chosen in this client.
+   *
+   * `activeBotId` says which Bot is open; it does not say that somebody just
+   * picked one. Choosing the Bot already open is a no-op for the transcript
+   * and still a choice — the drawer that offered it has done its job — so the
+   * count moves on every {@link FrockBotWebData.selectBot} call and the layout
+   * reacts to the act rather than to the state change it may not produce.
+   */
+  botChoices: number;
   selectBot(botId: string): Promise<void>;
   loadBotSettings(): Promise<void>;
   saveBotProfile(profile: BotProfile): Promise<void>;

@@ -34,3 +34,18 @@ export function modelRuntimeLabel(input: {
   if (input.fallback) return `${runtime} · your chosen model is unavailable`;
   return runtime;
 }
+
+/**
+ * The same line, cut to a phone's topbar.
+ *
+ * The full line is the model and then what it is bound to — the provider, and
+ * whose choice it was — joined by "·". A 390pt topbar has room for the first
+ * part and nothing else, so a phone read "Auto (recommende…", which says less
+ * than the model's own name does. The qualifiers are not lost: Models is the
+ * surface where the binding is read and changed.
+ */
+export function topbarModelLabelV1(label: string, phone: boolean): string {
+  if (!phone) return label;
+  const [model] = label.split(" · ");
+  return model ?? label;
+}

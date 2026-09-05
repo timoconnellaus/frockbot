@@ -154,4 +154,28 @@ test("manage mode offers Archive and Delete, and Delete confirms first", async (
     .click();
   await expect(doomed).toHaveCount(0);
   await expect(keeper).toHaveCount(1);
+
+  /*
+   * Archiving asks in the same voice as deleting: it names the Bot, and it
+   * says what it does in the words a person would use. "History and settings
+   * are preserved for restoration" described a mechanism; "You can restore it
+   * later" answers the question the dialog is asked (2026-09-05).
+   */
+  await keeper.getByRole("button", { name: "Archive" }).click();
+  const archiveDialog = page.getByRole("alertdialog");
+  await expect(archiveDialog.locator("#ui-confirm-title")).toHaveText(
+    "Archive Keeper?",
+  );
+  await expect(
+    archiveDialog.getByText("You can restore it later."),
+  ).toBeVisible();
+  await archiveDialog.getByRole("button", { name: "Archive Bot" }).click();
+
+  // And the row that comes back says what it is. Before this, an archived Bot
+  // looked exactly like a working one and only the word on its action — the
+  // difference between "Archive" and "Restore" — said otherwise.
+  await expect(archiveDialog).toBeHidden();
+  await expect(keeper).toHaveClass(/archived/u);
+  await expect(keeper.getByText("Archived")).toBeVisible();
+  await expect(keeper.getByRole("button", { name: "Restore" })).toBeVisible();
 });
