@@ -1070,5 +1070,25 @@
       "events": [],
       "sessionToken": "forbidden"
     }
+  },
+  {
+    "name": "AppletSummary invalid",
+    "schema": "AppletSummary",
+    "value": {
+      "appletId": "tim.counter",
+      "displayName": "Counter",
+      "status": "unknown",
+      "currentGenerationId": "generation-1",
+      "tools": ["increment"],
+      "createdAt": "2026-09-05T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "AppletDirectory invalid",
+    "schema": "AppletDirectory",
+    "value": {
+      "schemaVersion": 2,
+      "applets": []
+    }
   }
 ]

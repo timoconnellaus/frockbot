@@ -110,5 +110,7 @@ declare const validators: {
   isBotIdentity(value: unknown): value is ProtocolTypes["BotIdentity"];
   isBotWriter(value: unknown): value is ProtocolTypes["BotWriter"];
   isTurnResponse(value: unknown): value is ProtocolTypes["TurnResponse"];
+  isAppletSummary(value: unknown): value is ProtocolTypes["AppletSummary"];
+  isAppletDirectory(value: unknown): value is ProtocolTypes["AppletDirectory"];
 };
 export default validators;

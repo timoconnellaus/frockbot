@@ -1,0 +1,21 @@
+{
+  "status": "unqualified-prototype",
+  "flutter": "3.47.0",
+  "dart": "3.13.0",
+  "frameworkRevision": "4cf24164269a5ebf0c16a028a00727d0e77bbb05",
+  "engineRevision": "5f77625673248ee5846fbcaf5d3e1a3878386fd7",
+  "engineContentHash": "59d54a2b2896a6bbf356c94b7fac7b9e235bdacd",
+  "genui": "0.10.2",
+  "a2uiCore": "0.1.1",
+  "a2uiSpecification": "0.9.1",
+  "webviewFlutter": "4.14.1",
+  "webviewAndroid": "4.14.1",
+  "webviewWebkit": "3.26.1",
+  "secureStorage": "11.0.0",
+  "candidateCatalogId": "com.frockbot.qualification.v1",
+  "advertisedCatalogs": [],
+  "implementationSha256": {
+    "lib/extensions/catalog.dart": "a663c0a466750aa37133f2a3cec03badcbf21ad37583bee42913af83b5bdd59a",
+    "vendor/webview_flutter_wkwebview/darwin/webview_flutter_wkwebview/Sources/webview_flutter_wkwebview/WebViewConfigurationProxyAPIDelegate.swift": "9a7a56036f9cf335dd50f4e96dd4dc642a531370a1ad140afaa6ff065cc97fb3"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/a2ui-project/a2ui",
+  "commit": "8ff4651232ab0e02b0123730b502711170637a3a",
+  "version": "0.9.1",
+  "sha256": {
+    "server_to_client.json": "ed1ee11b4f1e94dd08ebe0d57bedb436cb452cc546d26cae407858ae477af288",
+    "common_types.json": "ac79788e95e5bdf0a39808953593a53c1bc9fcdcdb55480f4610613c6591e94c",
+    "client_to_server.json": "f049f8a554296a603cd3c1cef37dd6811006dc90e3ff52ce845d1674cd00a6b7"
+  }
+}

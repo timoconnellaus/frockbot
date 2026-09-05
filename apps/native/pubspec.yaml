@@ -1,0 +1,36 @@
+name: frockbot_native
+description: FrockBot native qualification prototype.
+publish_to: none
+version: 1.1.0+2
+
+environment:
+  sdk: ">=3.13.0 <3.14.0"
+  flutter: "3.47.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  genui: 0.10.2
+  a2ui_core: 0.1.1
+  json_schema_builder: 0.1.7
+  webview_flutter: 4.14.1
+  webview_flutter_android: 4.14.1
+  webview_flutter_wkwebview: 3.26.1
+  flutter_secure_storage: 11.0.0
+  app_links: 7.2.1
+  url_launcher: 6.3.2
+  crypto: 3.0.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: 6.0.0
+
+flutter:
+  uses-material-design: true
+
+dependency_overrides:
+  webview_flutter_wkwebview:
+    path: vendor/webview_flutter_wkwebview

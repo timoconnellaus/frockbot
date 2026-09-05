@@ -856,5 +856,34 @@
       "text": "Done",
       "events": []
     }
+  },
+  {
+    "name": "AppletSummary valid",
+    "schema": "AppletSummary",
+    "value": {
+      "appletId": "tim.counter",
+      "displayName": "Counter",
+      "status": "published",
+      "currentGenerationId": "generation-1",
+      "tools": ["increment"],
+      "createdAt": "2026-09-05T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "AppletDirectory valid",
+    "schema": "AppletDirectory",
+    "value": {
+      "schemaVersion": 1,
+      "applets": [
+        {
+          "appletId": "tim.counter",
+          "displayName": "Counter",
+          "status": "published",
+          "currentGenerationId": "generation-1",
+          "tools": ["increment"],
+          "createdAt": "2026-09-05T00:00:00.000Z"
+        }
+      ]
+    }
   }
 ]

@@ -571,6 +571,18 @@ export type TurnResponse = {
   events: Array<RunEvent>;
   notification?: Notification;
 };
+export type AppletSummary = {
+  appletId: string;
+  displayName: string;
+  status: "draft" | "published" | "deleted";
+  currentGenerationId?: Identifier;
+  tools: Array<string>;
+  createdAt: Instant;
+};
+export type AppletDirectory = {
+  schemaVersion: 1;
+  applets: Array<AppletSummary>;
+};
 export interface ProtocolTypes {
   Identifier: Identifier;
   BotId: BotId;
@@ -641,4 +653,6 @@ export interface ProtocolTypes {
   BotIdentity: BotIdentity;
   BotWriter: BotWriter;
   TurnResponse: TurnResponse;
+  AppletSummary: AppletSummary;
+  AppletDirectory: AppletDirectory;
 }
