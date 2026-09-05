@@ -12,6 +12,16 @@ export function createComposioFake(authorizationOrigin?: string) {
     }
   >();
   const configs = new Map<string, string>();
+  const triggers = new Map<
+    string,
+    {
+      id: string;
+      connected_account_id: string;
+      trigger_name: string;
+      trigger_config: Record<string, unknown>;
+      disabled_at: string | null;
+    }
+  >();
   return async (request: Request): Promise<Response> => {
     const url = new URL(request.url),
       path = url.pathname.replace("/api/v3.1", "");
@@ -113,6 +123,67 @@ export function createComposioFake(authorizationOrigin?: string) {
           messages: [{ id: "mail-one", subject: "Hello from your inbox" }],
         },
       });
+    }
+    if (path === "/triggers_types")
+      return Response.json({
+        items: [
+          {
+            slug: "GMAIL_NEW_GMAIL_MESSAGE",
+            name: "When a new email arrives in Gmail",
+            description: "Run when your inbox receives a new message.",
+            toolkit: { slug: "gmail" },
+            config: {
+              type: "object",
+              properties: {
+                label: {
+                  type: "string",
+                  title: "Mailbox label",
+                  description:
+                    "Optional: listen only to messages with this label.",
+                },
+              },
+            },
+            version: "20260905_00",
+          },
+        ],
+      });
+    if (path === "/trigger_instances/active")
+      return Response.json({
+        items: [...triggers.values()].filter(
+          (item) =>
+            item.connected_account_id ===
+            url.searchParams.get("connected_account_ids"),
+        ),
+      });
+    const upsert = /^\/trigger_instances\/([A-Z_]+)\/upsert$/.exec(path);
+    if (upsert && request.method === "POST") {
+      const input = (await request.json()) as {
+        connected_account_id: string;
+        trigger_config: Record<string, unknown>;
+      };
+      if (accounts.get(input.connected_account_id)?.status !== "ACTIVE")
+        return Response.json({}, { status: 403 });
+      const id = `ti_${input.connected_account_id}`;
+      triggers.set(id, {
+        id,
+        connected_account_id: input.connected_account_id,
+        trigger_name: upsert[1]!,
+        trigger_config: input.trigger_config,
+        disabled_at: null,
+      });
+      return Response.json({ trigger_id: id });
+    }
+    const managed = /^\/trigger_instances\/manage\/([^/]+)$/.exec(path);
+    if (managed) {
+      const instance = triggers.get(managed[1]!);
+      if (!instance) return Response.json({}, { status: 404 });
+      if (request.method === "DELETE") triggers.delete(instance.id);
+      else if (request.method === "PATCH")
+        instance.disabled_at =
+          ((await request.json()) as { status: string }).status === "disable"
+            ? new Date().toISOString()
+            : null;
+      return Response.json({ status: "success" });
     }
     if (path === "/connected_accounts")
       return Response.json({

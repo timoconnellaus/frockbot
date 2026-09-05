@@ -521,3 +521,21 @@ describe("helpers", () => {
     expect(description).toContain("Nothing is shared until you choose");
   });
 });
+
+it("omits account-event Routines instead of exporting a grant or converting them to webhooks", () => {
+  const { template, summary } = buildBotTemplateV1(
+    source({
+      routines: [
+        {
+          routineId: "mail",
+          name: "Mail",
+          prompt: "Read the incoming message",
+          trigger: { kind: "connection" },
+          timezone: "UTC",
+        },
+      ],
+    }),
+  );
+  expect(template.routines).toEqual([]);
+  expect(omitted(summary, "connection")).toBe(1);
+});
