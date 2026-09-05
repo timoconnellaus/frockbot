@@ -1,3 +1,11 @@
+import {
+  backendContribution as composioGatewayContribution,
+  type ComposioBackendHost,
+} from "@frockbot/plugin-composio/backend";
+import {
+  userContribution as composioUserContribution,
+  type ComposioUserApplicationHostV1,
+} from "@frockbot/plugin-composio/user";
 /**
  * The foundation application's Contribution table.
  *
@@ -166,6 +174,7 @@ export {
   botTemplateGatewayContribution,
   computerGatewayContribution,
   flockGatewayContribution,
+  composioGatewayContribution,
   mcpGatewayContribution,
   packagePublisherGatewayContribution,
   routinesGatewayContribution,
@@ -178,6 +187,7 @@ export {
   credentialsUserContribution,
   ollamaCloudUserContribution,
   frockAiUserContribution,
+  composioUserContribution,
   mcpUserContribution,
   botTemplateUserContribution,
   packagePublisherUserContribution,
@@ -256,6 +266,7 @@ export type FoundationGatewayHost = {
   BotTemplateGatewayHostV1 &
   ComputerGatewayHost &
   FlockGatewayHost &
+  ComposioBackendHost &
   McpGatewayHost &
   SettingsGatewayHost &
   RoutinesGatewayHost &
@@ -282,6 +293,7 @@ export type FoundationUserBackendHostV1 = {
   CredentialsUserApplicationHostV1 &
   OllamaCloudUserApplicationHostV1 &
   FrockAiUserApplicationHostV1 &
+  ComposioUserApplicationHostV1 &
   McpUserApplicationHostV1 &
   BotTemplateUserApplicationHostV1 &
   PackagePublisherUserApplicationHostV1 &
@@ -347,6 +359,7 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     botTemplateGatewayContribution,
     computerGatewayContribution,
     flockGatewayContribution,
+    composioGatewayContribution,
     mcpGatewayContribution,
     packagePublisherGatewayContribution,
     routinesGatewayContribution,
@@ -359,6 +372,7 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     credentialsUserContribution,
     ollamaCloudUserContribution,
     frockAiUserContribution,
+    composioUserContribution,
     mcpUserContribution,
     botTemplateUserContribution,
     packagePublisherUserContribution,

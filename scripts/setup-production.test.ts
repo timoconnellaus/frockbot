@@ -135,8 +135,8 @@ describe("production setup", () => {
       calls.some((call) => call.startsWith("secret-value:CREDENTIAL_KEYRING:")),
     ).toBe(true);
     expect(calls.join("\n")).not.toContain("COMPOSIO");
-    expect(calls.join("\n")).not.toContain(
-      "FROCKBOT_AUTHORIZATION_STATE_SECRET",
+    expect(calls).toContain(
+      "secret set FROCKBOT_AUTHORIZATION_STATE_SECRET --repo timoconnellaus/frockbot --env production",
     );
     expect(stdout).not.toContain("Composio");
   });
@@ -296,10 +296,12 @@ exit 0
     const deploy = deploymentSteps.find(
       (step) => step.name === "Deploy Worker",
     );
-    expect(validation?.env).not.toHaveProperty("COMPOSIO_API_KEY");
+    expect(validation?.env?.COMPOSIO_API_KEY).toBe(
+      "${{ secrets.COMPOSIO_API_KEY }}",
+    );
     expect(validation?.env).not.toHaveProperty("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
-    expect(validation?.env).not.toHaveProperty(
-      "FROCKBOT_AUTHORIZATION_STATE_SECRET",
+    expect(validation?.env?.FROCKBOT_AUTHORIZATION_STATE_SECRET).toBe(
+      "${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}",
     );
     expect(computerHost?.env?.SPRITES_TOKEN).toBe(
       "${{ secrets.SPRITES_TOKEN }}",
@@ -358,6 +360,9 @@ exit 0
     );
 
     const productionEnvironment = {
+      COMPOSIO_API_KEY: "composio-production",
+      FROCKBOT_AUTHORIZATION_STATE_SECRET:
+        "6f0d6ae3ec5c4c448ef2ccdd08b0d4d834422c873244420f8879b6a2e99504fa",
       ...process.env,
       CLOUDFLARE_API_TOKEN: "cloudflare-token",
       CLOUDFLARE_ACCOUNT_ID: "cloudflare-account",
@@ -526,8 +531,12 @@ exit 1
     expect(forwarded.APPLET_VIEWER_SECRET).toBe(
       productionEnvironment.APPLET_VIEWER_SECRET,
     );
-    expect(forwarded).not.toHaveProperty("COMPOSIO_API_KEY");
+    expect(forwarded.COMPOSIO_API_KEY).toBe(
+      productionEnvironment.COMPOSIO_API_KEY,
+    );
     expect(forwarded).not.toHaveProperty("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
-    expect(forwarded).not.toHaveProperty("FROCKBOT_AUTHORIZATION_STATE_SECRET");
+    expect(forwarded.FROCKBOT_AUTHORIZATION_STATE_SECRET).toBe(
+      productionEnvironment.FROCKBOT_AUTHORIZATION_STATE_SECRET,
+    );
   });
 });

@@ -349,6 +349,8 @@ jobs:
           FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
+          FROCKBOT_AUTHORIZATION_STATE_SECRET: ${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}
         shell: bash
         run: |
           missing=()
@@ -540,6 +542,8 @@ jobs:
           # Carried now so the secret survives the deploys before that lands —
           # `--secrets-file` replaces the whole set every time.
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
+          FROCKBOT_AUTHORIZATION_STATE_SECRET: ${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-production.env"

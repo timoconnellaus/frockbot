@@ -152,6 +152,11 @@ export interface SendPromptResult {
 }
 
 export interface PluginCatalogItem {
+  /** A catalog variant; only the Connectors projection creates these rows. */
+  connectorId?: string;
+  connectorDescription?: string;
+  connectorIcon?: string;
+  connectionId?: string;
   packageId: string;
   displayName: string;
   version: string;
@@ -163,6 +168,7 @@ export interface PluginCatalogItem {
     connectionTypes: string[];
   }>;
   connectionTypes: Array<{
+    catalogPath?: string;
     id: string;
     displayName: string;
     allowMultiple: boolean;
@@ -317,6 +323,11 @@ export interface FrockBotWebData {
   botSettings?: BotSettingsViewV1;
   userSettings?: UserSettingsViewV1;
   pluginCatalog: PluginCatalogItem[];
+  connectorCatalogErrors?: Record<string, string>;
+  connectorCatalog?: Record<
+    string,
+    import("@frockbot/connection-core").ConnectorCatalogEntryV1[]
+  >;
   /**
    * The remote Catalog index, read through `/catalog/v1/index`. Separate from
    * `pluginCatalog`, which projects the compiled-in application manifest: the
@@ -402,6 +413,16 @@ export interface FrockBotWebData {
    * Bot is a paint rather than a reload.
    */
   transcripts: TranscriptMemoryV1;
+  /**
+   * How many times a Bot has been chosen in this client.
+   *
+   * `activeBotId` says which Bot is open; it does not say that somebody just
+   * picked one. Choosing the Bot already open is a no-op for the transcript
+   * and still a choice — the drawer that offered it has done its job — so the
+   * count moves on every {@link FrockBotWebData.selectBot} call and the layout
+   * reacts to the act rather than to the state change it may not produce.
+   */
+  botChoices: number;
   selectBot(botId: string): Promise<void>;
   loadBotSettings(): Promise<void>;
   saveBotProfile(profile: BotProfile): Promise<void>;
@@ -514,6 +535,8 @@ export interface FrockBotWebData {
   startConnection(
     packageId: string,
     connectionTypeId: string,
+    connectorId?: string,
+    alias?: string,
   ): Promise<string | undefined>;
   openConnectionAuthorization(url: string): Promise<void>;
   revokeConnection(packageId: string, connectionId: string): Promise<void>;

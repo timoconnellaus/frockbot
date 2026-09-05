@@ -1,3 +1,4 @@
+import { decodeConnectorCatalogV1 } from "@frockbot/connection-core";
 /// <reference path="../env.d.ts" />
 
 import {
@@ -987,6 +988,9 @@ export function decodePluginCatalog(value: unknown): PluginCatalogItem[] {
         connection.authorization.kind;
       return {
         id: connection.id,
+        ...(connection.catalogPath
+          ? { catalogPath: connection.catalogPath }
+          : {}),
         displayName: connection.displayName,
         allowMultiple: connection.allowMultiple,
         authorizationKind,
@@ -1538,6 +1542,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     appletSource: undefined,
     appletBuild: undefined,
     appletCanvas: "idle",
+    botChoices: 0,
     /*
      * The focused Applet, joined with the list the User owns. A getter rather
      * than a stored field so the two can never disagree: the id is what the
@@ -1549,6 +1554,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       return web.value.applets.find((applet) => applet.appletId === appletId);
     },
     async selectBot(botId: string): Promise<void> {
+      // The choice happened, whichever Bot it landed on. The layout listens to
+      // this rather than to `activeBotId`, so re-choosing the open Bot still
+      // closes the drawer that offered it.
+      web.value.botChoices += 1;
       // Re-selecting the open Bot is not a switch: aborting the live Turn and
       // clearing the transcript would discard state the User is watching.
       if (web.value.activeBotId === botId) return;
@@ -2232,6 +2241,31 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           }),
         ]);
         const pluginCatalog = decodePluginCatalog(manifest);
+        const connectorCatalog: Record<
+          string,
+          ReturnType<typeof decodeConnectorCatalogV1>
+        > = {};
+        const connectorCatalogErrors: Record<string, string> = {};
+        await Promise.all(
+          pluginCatalog.flatMap((item) =>
+            item.connectionTypes
+              .filter((type) => type.catalogPath)
+              .map(async (type) => {
+                if (!ctx.transport.hostedRequest || !type.catalogPath) return;
+                const key = `${item.packageId}/${type.id}`;
+                try {
+                  connectorCatalog[key] = decodeConnectorCatalogV1(
+                    await ctx.transport.hostedRequest(type.catalogPath),
+                  );
+                } catch {
+                  connectorCatalog[key] =
+                    web.value.connectorCatalog?.[key] ?? [];
+                  connectorCatalogErrors[key] =
+                    "Some connectors could not be refreshed. Try again shortly.";
+                }
+              }),
+          ),
+        );
         const userSettings = settings as UserSettingsViewV1;
         retireSettledConnectionOperations(connectionOperations, userSettings);
         await reconcileRetainedConnectionCommands(
@@ -2240,7 +2274,21 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         );
         let committed = false;
         if (catalogGeneration === pluginCatalogGeneration) {
-          web.value.pluginCatalog = pluginCatalog;
+          web.value.pluginCatalog = pluginCatalog.filter(
+            (item) =>
+              !item.connectionTypes.some((type) => type.catalogPath) ||
+              item.connectionTypes.some(
+                (type) =>
+                  !type.catalogPath ||
+                  (connectorCatalog[`${item.packageId}/${type.id}`]?.length ??
+                    0) > 0 ||
+                  Boolean(
+                    connectorCatalogErrors[`${item.packageId}/${type.id}`],
+                  ),
+              ),
+          );
+          web.value.connectorCatalog = connectorCatalog;
+          web.value.connectorCatalogErrors = connectorCatalogErrors;
           updateSettingsLoadError("catalog");
           committed = true;
         }
@@ -2519,6 +2567,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     async startConnection(
       packageId: string,
       connectionTypeId: string,
+      connectorId?: string,
+      alias?: string,
     ): Promise<string | undefined> {
       if (!ctx.transport.startConnection) {
         throw new Error("Connections are unavailable");
@@ -2531,6 +2581,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         userId,
         packageId,
         connectionTypeId,
+        ...(connectorId ? [connectorId] : []),
+        alias ?? "",
       ]);
       const operation = await reserveConnectionOperation(
         connectionOperations,
@@ -2549,6 +2601,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           commandId: operation.commandId,
           packageId,
           connectionTypeId,
+          ...(connectorId ? { connectorId } : {}),
+          ...(alias ? { alias } : {}),
           nativeReturnNonce: operation.nativeReturnNonce,
         });
       } catch (error) {

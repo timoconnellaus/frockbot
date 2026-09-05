@@ -113,6 +113,8 @@ export default defineConfig({
           },
         },
         bindings: {
+          COMPOSIO_API_KEY: "test-composio-backend-key",
+          BETTER_AUTH_URL: "https://bot.frockbot.com",
           TEST_MIGRATIONS: authMigrations,
           FOUNDATION_ARTIFACT: foundationArtifact,
           DEFAULT_APPLICATION_HASH: "foundation-v1",

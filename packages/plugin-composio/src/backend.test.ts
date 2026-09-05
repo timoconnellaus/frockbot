@@ -3,22 +3,42 @@ import type { ConnectionView } from "@frockbot/configuration-core";
 import {
   callbackFailureResponse,
   connectionCompletionResponse,
-  createComposioBackendContribution,
+  createComposioBackendContribution as createRoutes,
   createConfiguredComposioBackendContribution,
   decodeAuthorizationState,
   encodeAuthorizationState,
 } from "./backend.js";
 import type { ComposioClient } from "./composio-client.js";
-import type { ComposioConnectionStore } from "./connections.js";
+import {
+  ComposioConnectionCoordinator,
+  type ComposioConnectionStore,
+  type ComposioConnectionCoordinatorConfig,
+} from "./connections.js";
+
+function createComposioBackendContribution(
+  config: Omit<ComposioConnectionCoordinatorConfig, "store"> & {
+    authorizationStateSecret: string;
+    storeFor(userId: string): ComposioConnectionStore;
+  },
+) {
+  return createRoutes({
+    authorizationStateSecret: config.authorizationStateSecret,
+    connectionsFor: (userId) =>
+      new ComposioConnectionCoordinator({
+        ...config,
+        store: config.storeFor(userId),
+      }),
+  });
+}
 
 describe("configured Composio backend", () => {
   const configuredHost = (secrets: Record<string, string>) => ({
     callbackBaseUrl: "https://bot.frockbot.com",
     readSecret: (name: string) => secrets[name],
-    storeFor: () => ({}) as ComposioConnectionStore,
+    composioRequest: async () => undefined,
   });
 
-  test("requires a strong dedicated authorization-state secret without auth fallback", () => {
+  test("advertises nothing without a strong dedicated authorization-state secret", async () => {
     const invalidSecrets: Array<Record<string, string>> = [
       {
         COMPOSIO_API_KEY: "api-secret",
@@ -55,9 +75,16 @@ describe("configured Composio backend", () => {
       },
     ];
     for (const secrets of invalidSecrets) {
-      expect(() =>
-        createConfiguredComposioBackendContribution(configuredHost(secrets)),
-      ).toThrow("Composio backend Contribution is not configured");
+      const contribution = createConfiguredComposioBackendContribution(
+        configuredHost(secrets),
+      );
+      const url = new URL(
+        "https://bot.frockbot.com/api/plugins/composio/callback",
+      );
+      expect(contribution.publicRoute).toBeUndefined();
+      expect(
+        await contribution.route(new Request(url), url, { client: "browser" }),
+      ).toBeUndefined();
     }
 
     expect(
@@ -275,7 +302,6 @@ describe("Composio Connection start route", () => {
       { commandId: "connection-1", connectionTypeId: "constructor" },
       { commandId: "connection-1", connectionTypeId: "prototype" },
       { commandId: "connection-1", connectionTypeId: "__proto__" },
-      { commandId: "connection-1", connectionTypeId: "unconfigured" },
     ];
 
     for (const input of invalidCommands) {
@@ -360,5 +386,106 @@ describe("Composio Connection start route", () => {
     );
     expect(revokeResponse?.status).toBe(400);
     expect(storeLookups).toBe(0);
+  });
+});
+
+describe("public Connect callback security", () => {
+  const secret = "an-independent-random-secret-0123456789";
+  function fixture() {
+    const calls: Array<{ userId: string; input: unknown }> = [];
+    const contribution = createConfiguredComposioBackendContribution({
+      readSecret: (name) =>
+        name === "COMPOSIO_API_KEY"
+          ? "backend-only-secret"
+          : name === "FROCKBOT_AUTHORIZATION_STATE_SECRET"
+            ? secret
+            : undefined,
+      composioRequest: async (userId, input) => {
+        calls.push({ userId, input });
+        return { returnTarget: "browser", status: "ready" };
+      },
+    });
+    return { calls, contribution };
+  }
+  async function signed(expiresAt = Date.now() + 600_000, key = secret) {
+    return encodeAuthorizationState(
+      {
+        schemaVersion: 1,
+        authorizationStateId: "opaque-state",
+        userId: "owner",
+        connectionId: "opaque-connection",
+        returnTarget: "browser",
+        expiresAt,
+      },
+      key,
+    );
+  }
+  test("dispatches before session auth using only verified state identity", async () => {
+    const { calls, contribution } = fixture();
+    const url = new URL(
+      `https://bot.test/api/plugins/composio/callback?connected_account_id=ca_one&user_id=attacker&connectionId=attacker&state=${encodeURIComponent(await signed())}`,
+    );
+    const response = await contribution.publicRoute!(new Request(url), url, {
+      userId: "attacker",
+      client: "browser",
+    });
+    expect(response?.status).toBe(303);
+    expect(calls).toEqual([
+      {
+        userId: "owner",
+        input: {
+          schemaVersion: 1,
+          operation: "complete",
+          connectionId: "opaque-connection",
+          connectedAccountId: "ca_one",
+          authorizationStateId: "opaque-state",
+        },
+      },
+    ]);
+    expect(JSON.stringify(calls)).not.toContain("backend-only-secret");
+  });
+  test("missing, expired, forged, and wrong-method callbacks never resolve a User DO", async () => {
+    for (const state of [
+      "",
+      await signed(Date.now() - 1),
+      await signed(Date.now() + 600_000, "another-independent-random-secret"),
+    ]) {
+      const { calls, contribution } = fixture();
+      const url = new URL(
+        `https://bot.test/api/plugins/composio/callback?connected_account_id=ca_one&state=${encodeURIComponent(state)}`,
+      );
+      await contribution.publicRoute!(new Request(url), url, {
+        client: "browser",
+      });
+      expect(calls).toHaveLength(0);
+    }
+    const { calls, contribution } = fixture();
+    const url = new URL(
+      `https://bot.test/api/plugins/composio/callback?state=${encodeURIComponent(await signed())}`,
+    );
+    expect(
+      (
+        await contribution.publicRoute!(
+          new Request(url.toString(), { method: "POST" }),
+          url,
+          { client: "browser" },
+        )
+      )?.status,
+    ).toBe(405);
+    expect(calls).toHaveLength(0);
+  });
+  test("no API key advertises an empty catalog and no callback", async () => {
+    const contribution = createConfiguredComposioBackendContribution({
+      readSecret: () => undefined,
+    });
+    const url = new URL("https://bot.test/api/plugins/composio/catalog");
+    const response = await contribution.route(new Request(url), url, {
+      userId: "owner",
+      client: "browser",
+    });
+    if (!response) throw new Error("Expected catalog");
+    const body: unknown = await response.json();
+    expect(body).toEqual({ schemaVersion: 1, items: [] });
+    expect(contribution.publicRoute).toBeUndefined();
   });
 });

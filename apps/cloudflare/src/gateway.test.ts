@@ -540,6 +540,9 @@ class MemoryConfiguration
     return Promise.resolve(receipt);
   }
 
+  composioRequest(): Promise<unknown> {
+    return Promise.resolve({ schemaVersion: 1, items: [] });
+  }
   readMcpServers(): ReturnType<UserConfigurationBinding["readMcpServers"]> {
     return Promise.reject(new Error("MCP status is not used in these tests"));
   }

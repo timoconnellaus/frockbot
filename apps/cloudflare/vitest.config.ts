@@ -78,6 +78,8 @@ export default defineConfig({
           },
         },
         bindings: {
+          COMPOSIO_API_KEY: "test-composio-backend-key",
+          BETTER_AUTH_URL: "https://bot.frockbot.com",
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
           // Signs the `mcp-oauth` callback state. Fixed, so a test can mint a
           // state the gateway accepts and forge one it must refuse; strong

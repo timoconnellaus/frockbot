@@ -35,9 +35,44 @@ const connections = computed<ConnectionView[]>(() =>
   (web.value.userSettings?.connections ?? []).filter(
     (connection) =>
       connection.packageId === props.item.packageId &&
+      (!props.item.connectorId ||
+        connection.safeMetadata.connectorId === props.item.connectorId) &&
+      (!props.item.connectionId ||
+        connection.connectionId === props.item.connectionId) &&
       connection.state !== "revoked",
   ),
 );
+
+function accountStatus(connection: ConnectionView): string {
+  if (!props.item.connectorId) return connectionStateLabel(connection.state);
+  if (connection.state === "ready")
+    return connection.displayName === props.item.displayName
+      ? "Connected"
+      : `Connected as ${connection.displayName}`;
+  if (connection.state === "failed") return "Reconnect needed";
+  if (connection.state === "authorizing") return "Waiting for sign-in";
+  if (connection.state === "revoking") return "Disconnecting…";
+  if (connection.state === "reconciliation-required")
+    return "Checking connection…";
+  return "Paused";
+}
+async function reconnectAccount(connection: ConnectionView): Promise<void> {
+  try {
+    await web.value.revokeConnection(
+      connection.packageId,
+      connection.connectionId,
+    );
+    const url = await web.value.startConnection(
+      connection.packageId,
+      connection.connectionTypeId,
+      props.item.connectorId,
+      connection.displayName,
+    );
+    if (url) await web.value.openConnectionAuthorization(url);
+  } catch {
+    web.value.settingsError = `Could not reconnect ${props.item.displayName}. Try again shortly.`;
+  }
+}
 
 /**
  * A Connection's state, in words rather than in the field name.
@@ -156,12 +191,17 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
           aria-hidden="true"
         />
         <strong>{{ connection.displayName }}</strong>
-        <small>{{ connectionStateLabel(connection.state) }}</small>
+        <small>{{ accountStatus(connection) }}</small>
         <small v-if="connection.modelCatalog">
           · {{ modelCatalogLabel(connection.modelCatalog.state) }}
         </small>
       </div>
       <div class="account-actions">
+        <UiButton
+          v-if="props.item.connectorId && connection.state === 'failed'"
+          @click="reconnectAccount(connection)"
+          >Reconnect</UiButton
+        >
         <UiButton @click="beginLabeling(connection)">Rename</UiButton>
         <template v-if="connection.authorization?.kind === 'api-key'">
           <UiButton
@@ -203,7 +243,7 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
           variant="danger"
           @click="revoke(connection.packageId, connection.connectionId)"
         >
-          Revoke
+          Disconnect
         </UiButton>
       </div>
       <p v-if="connection.failure" class="connection-failure" role="alert">

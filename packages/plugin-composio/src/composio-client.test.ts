@@ -93,7 +93,7 @@ describe("ComposioClient", () => {
     }
     expect(failure).toBeInstanceOf(Error);
     expect(failure instanceof Error ? failure.message : "").toBe(
-      "Composio request failed (401)",
+      "The service could not complete this request (401)",
     );
   });
 
@@ -200,6 +200,7 @@ describe("ComposioClient", () => {
       status: "REVOKED",
       toolkitSlug: "gmail",
       alias: undefined,
+      disabled: false,
     });
     expect(requestedUrl).toBe(
       "https://backend.composio.dev/api/v3.1/connected_accounts/ca_exact",
