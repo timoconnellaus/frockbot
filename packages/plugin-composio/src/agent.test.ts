@@ -32,8 +32,11 @@ test("every Bot receives the same account namespace, only through progressive di
         capabilityId: "app-tools",
         connectionId: "account-one",
       },
+      pinToolCatalog: (_id, read) => read(),
       composioRequest: async (value) => {
         requests.push(value);
+        if ((value as { operation: string }).operation === "tool-availability")
+          return { schemaVersion: 1, available: true };
         return (value as { operation: string }).operation === "list-tools"
           ? catalog
           : { content: '{"messages":[]}', isError: false };
@@ -116,4 +119,25 @@ test("an ungranted capability advertises no tool", async () => {
       capability: { packageId: "composio", capabilityId: "app-tools" },
     }),
   ).toBeUndefined();
+});
+
+test("an existing account advertises nothing when the backend key is absent", async () => {
+  const requests: unknown[] = [];
+  expect(
+    await createConfiguredComposioRuntimeContribution({
+      capability: {
+        packageId: "composio",
+        capabilityId: "app-tools",
+        connectionId: "account-one",
+      },
+      pinToolCatalog: async () => catalog,
+      composioRequest: async (command) => {
+        requests.push(command);
+        return { schemaVersion: 1, available: false };
+      },
+    }),
+  ).toBeUndefined();
+  expect(requests).toEqual([
+    { schemaVersion: 1, operation: "tool-availability" },
+  ]);
 });

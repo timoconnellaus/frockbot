@@ -94,6 +94,7 @@ export function createComposioFake(authorizationOrigin?: string) {
         connected_account_id: string;
         user_id: string;
         version: string;
+        arguments?: { query?: string };
       };
       const account = accounts.get(input.connected_account_id);
       if (
@@ -102,6 +103,10 @@ export function createComposioFake(authorizationOrigin?: string) {
         input.version !== "20260905_00"
       )
         return Response.json({}, { status: 403 });
+      if (input.arguments?.query === "fake-response-lost")
+        return Response.json({}, { status: 503 });
+      if (input.arguments?.query === "fake-refusal")
+        return Response.json({}, { status: 422 });
       return Response.json({
         successful: true,
         data: {

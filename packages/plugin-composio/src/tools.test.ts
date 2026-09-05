@@ -124,19 +124,22 @@ test("revocation during the provider status read refuses the next external effec
   const f = fixture();
   await f.tools.list("owner", "connection-one");
   f.revokeDuringRead();
-  await expect(f.tools.execute("owner", command)).rejects.toThrow(
-    "unavailable",
-  );
+  expect(await f.tools.execute("owner", command)).toMatchObject({
+    isError: true,
+    content: expect.stringContaining("not started"),
+  });
   expect(f.executions()).toBe(0);
 });
 test("disabled provider accounts and undisclosed tools never execute", async () => {
   const f = fixture();
-  await expect(f.tools.execute("owner", command)).rejects.toThrow("Discover");
+  expect(await f.tools.execute("owner", command)).toMatchObject({
+    isError: true,
+  });
   await f.tools.list("owner", "connection-one");
   f.setDisabled();
-  await expect(f.tools.execute("owner", command)).rejects.toThrow(
-    "reconnecting",
-  );
+  expect(await f.tools.execute("owner", command)).toMatchObject({
+    isError: true,
+  });
   expect(f.executions()).toBe(0);
 });
 test("an uncertain provider outcome is visible and never retried by the integration", async () => {
@@ -146,6 +149,7 @@ test("an uncertain provider outcome is visible and never retried by the integrat
   expect(await f.tools.execute("owner", command)).toMatchObject({
     isError: true,
     content: expect.stringContaining("Do not repeat"),
+    outcome: "unknown",
   });
   expect(f.executions()).toBe(1);
 });

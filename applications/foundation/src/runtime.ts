@@ -250,6 +250,10 @@ type EnabledRuntimeContributionFactory = (config: {
   readSecret(name: string): string | undefined;
   authorizeConnection(): Promise<ConnectionView>;
   composioRequest?(input: unknown): Promise<unknown>;
+  pinToolCatalog?(
+    connectionId: string,
+    read: () => Promise<unknown>,
+  ): Promise<unknown>;
   /** The Package's own outbound seam, when the host owns one. */
   fetch?: typeof fetch;
   /**
@@ -980,6 +984,10 @@ export async function createFoundationEnabledRuntimePackages(
     userId: string;
     readSecret(name: string): string | undefined;
     composioRequest?(input: unknown): Promise<unknown>;
+    pinToolCatalog?(
+      connectionId: string,
+      read: () => Promise<unknown>,
+    ): Promise<unknown>;
     authorizeConnection(
       capability: EnabledCapabilityV1,
     ): Promise<ConnectionView>;
@@ -1034,6 +1042,7 @@ export async function createFoundationEnabledRuntimePackages(
       ...(host.composioRequest
         ? { composioRequest: host.composioRequest }
         : {}),
+      ...(host.pinToolCatalog ? { pinToolCatalog: host.pinToolCatalog } : {}),
       authorizeConnection: () => host.authorizeConnection(capability),
       ...(connection ? { connection } : {}),
       ...(host.fetch ? { fetch: host.fetch } : {}),

@@ -93,44 +93,46 @@ export class ConnectedAccountTools {
     return catalog;
   }
   async execute(userId: string, value: Record<string, unknown>) {
-    const {
-      connectionId,
-      toolName,
-      version,
-      arguments: args,
-      effectId,
-      sessionId,
-    } = value;
-    if (
-      typeof connectionId !== "string" ||
-      typeof toolName !== "string" ||
-      !/^[A-Z][A-Z0-9_]{0,199}$/.test(toolName) ||
-      typeof version !== "string" ||
-      !/^[0-9]{8}_[0-9]+$/.test(version) ||
-      !object(args) ||
-      typeof effectId !== "string" ||
-      !effectId ||
-      effectId.length > 200 ||
-      typeof sessionId !== "string" ||
-      !sessionId ||
-      sessionId.length > 200 ||
-      new TextEncoder().encode(JSON.stringify(args)).byteLength > 64_000
-    )
-      throw new Error("The action request is invalid");
-    const tool = await this.host.storage.get<ConnectedToolV1>(
-      `composio:tool-catalog:${connectionId}:v1:${toolName}:${version}`,
-    );
-    if (!tool)
-      throw new Error("Discover this account’s tools before using one");
-    const { connection, account } = await this.active(userId, connectionId);
-    if (!toolName.startsWith(`${account.toolkitSlug.toUpperCase()}_`))
-      throw new Error("This tool belongs to another connector");
-    // Last check is with the durable owner after all provider reads. No await
-    // separates its result from starting the provider call.
-    const live = await this.host.connection(userId, connectionId);
-    if (live.generation !== connection.generation)
-      throw new Error("This account changed before the action could start");
+    let dispatched = false;
     try {
+      const {
+        connectionId,
+        toolName,
+        version,
+        arguments: args,
+        effectId,
+        sessionId,
+      } = value;
+      if (
+        typeof connectionId !== "string" ||
+        typeof toolName !== "string" ||
+        !/^[A-Z][A-Z0-9_]{0,199}$/.test(toolName) ||
+        typeof version !== "string" ||
+        !/^[0-9]{8}_[0-9]+$/.test(version) ||
+        !object(args) ||
+        typeof effectId !== "string" ||
+        !effectId ||
+        effectId.length > 200 ||
+        typeof sessionId !== "string" ||
+        !sessionId ||
+        sessionId.length > 200 ||
+        new TextEncoder().encode(JSON.stringify(args)).byteLength > 64_000
+      )
+        throw new Error("The action request is invalid");
+      const tool = await this.host.storage.get<ConnectedToolV1>(
+        `composio:tool-catalog:${connectionId}:v1:${toolName}:${version}`,
+      );
+      if (!tool)
+        throw new Error("Discover this account’s tools before using one");
+      const { connection, account } = await this.active(userId, connectionId);
+      if (!toolName.startsWith(`${account.toolkitSlug.toUpperCase()}_`))
+        throw new Error("This tool belongs to another connector");
+      // Last check is with the durable owner after all provider reads. No await
+      // separates its result from starting the provider call.
+      const live = await this.host.connection(userId, connectionId);
+      if (live.generation !== connection.generation)
+        throw new Error("This account changed before the action could start");
+      dispatched = true;
       const result = await this.host.client.executeTool({
         userId,
         connectedAccountId: account.id,
@@ -152,13 +154,15 @@ export class ConnectedAccountTools {
       };
     } catch (error) {
       const refused =
-        error instanceof ComposioRequestError &&
-        [400, 401, 403, 404, 422].includes(error.status);
+        !dispatched ||
+        (error instanceof ComposioRequestError &&
+          [400, 401, 403, 404, 422].includes(error.status));
       return {
         content: refused
-          ? "The service refused this action. Check its inputs and connection status."
+          ? "The action was not started. Check its inputs and connection status."
           : "The action’s outcome could not be confirmed. Do not repeat it; check the account for its result.",
         isError: true,
+        ...(!refused ? { outcome: "unknown" as const } : {}),
       };
     }
   }

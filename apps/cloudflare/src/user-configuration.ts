@@ -740,7 +740,11 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     await this.assertUserIdentity(userId);
     const contributions = await this.contributions();
     const operation = (request.command as { operation?: unknown })?.operation;
-    if (operation === "list-tools" || operation === "execute-tool") {
+    if (
+      operation === "list-tools" ||
+      operation === "execute-tool" ||
+      operation === "tool-availability"
+    ) {
       if (typeof request.botId !== "string")
         throw new Error("Bot identity is required for tools");
       await contributions.flock.registration(request.botId);

@@ -99,7 +99,9 @@ it("one Gmail connection lets both Bots discover and call tools with durable int
     expect(
       events.some(
         (event) =>
-          event.type === "tool/result" && event.name === "get_dynamic_tools",
+          event.type === "tool/result" &&
+          event.name === "get_dynamic_tools" &&
+          !event.isError,
       ),
     ).toBe(true);
     expect(JSON.stringify(events)).not.toMatch(
@@ -154,5 +156,96 @@ it("one Gmail connection lets both Bots discover and call tools with durable int
           event.type === "tool/result" && event.name === "call_dynamic_tool",
       ),
     ).toMatchObject({ isError: true });
+  }
+});
+
+it("a refused action completes, while a lost provider response stays unresolved after eviction", async () => {
+  const userId = freshUserId("gmail-recovery"),
+    botId = "recovery-bot",
+    connectionId = "recovery-gmail";
+  await provisionThroughGateway({ userId, botId });
+  const started = await postAsUser(
+    userId,
+    "/api/plugins/composio/connections",
+    {
+      schemaVersion: 1,
+      type: "connection/start",
+      commandId: connectionId,
+      connectionTypeId: "app",
+      connectorId: "gmail",
+      alias: "Recovery inbox",
+    },
+  );
+  const link = (await started.json()) as { redirectUrl: string };
+  expect(
+    (await SELF.fetch(link.redirectUrl, { redirect: "manual" })).status,
+  ).toBe(303);
+  const hash = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(connectionId),
+  );
+  const namespace = `gmail--${Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 16)}`;
+  for (const query of ["fake-refusal", "fake-response-lost"]) {
+    const command = {
+      schemaVersion: 1,
+      commandId: query,
+      text: toolCallTriggerPrompt([
+        "call_dynamic_tool",
+        {
+          namespace,
+          toolName: "GMAIL_FETCH_EMAILS",
+          arguments: { query },
+          mcpDetails: { description: "Read messages" },
+        },
+      ]),
+    };
+    const response = await postAsUser(
+      userId,
+      `/api/bots/${botId}/turns`,
+      command,
+    );
+    expect(response.status).toBe(query === "fake-refusal" ? 200 : 500);
+    await response.arrayBuffer();
+    const read = () =>
+      readStoredRunWithEventsV1<{ status: string; events: SessionEvent[] }>(
+        userId,
+        botId,
+        query,
+      );
+    const run = await read();
+    if (query === "fake-refusal") {
+      expect(run?.status).toBe("completed");
+      expect(
+        run?.events.find(
+          (event) =>
+            event.type === "tool/result" && event.name === "call_dynamic_tool",
+        ),
+      ).toMatchObject({ status: "completed", isError: true });
+    } else {
+      expect(run?.status).toBe("reconciliation-required");
+      expect(
+        run?.events.filter(
+          (event) =>
+            event.type === "tool/result" && event.name === "call_dynamic_tool",
+        ),
+      ).toHaveLength(0);
+      await evictDurableObject(env.BOT_STATES.getByName(`${userId}:${botId}`));
+      const replay = await postAsUser(
+        userId,
+        `/api/bots/${botId}/turns`,
+        command,
+      );
+      await replay.arrayBuffer();
+      expect((await read())?.status).toBe("reconciliation-required");
+      expect(
+        (await read())?.events.filter(
+          (event) =>
+            event.type === "tool/call" && event.name === "call_dynamic_tool",
+        ),
+      ).toHaveLength(1);
+    }
   }
 });

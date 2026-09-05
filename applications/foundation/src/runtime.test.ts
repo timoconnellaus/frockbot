@@ -654,12 +654,16 @@ describe("foundation application", () => {
             state: "ready",
             safeMetadata: { connectorId: "gmail" },
           }),
-        composioRequest: async () => ({
-          schemaVersion: 1,
-          namespace: "gmail--account-one",
-          label: "Gmail",
-          tools: [],
-        }),
+        pinToolCatalog: (_id, read) => read(),
+        composioRequest: async (value) =>
+          (value as { operation: string }).operation === "tool-availability"
+            ? { schemaVersion: 1, available: true }
+            : {
+                schemaVersion: 1,
+                namespace: "gmail--account-one",
+                label: "Gmail",
+                tools: [],
+              },
       },
     );
     expect(runtime.map((pkg) => pkg.specifier)).toEqual([

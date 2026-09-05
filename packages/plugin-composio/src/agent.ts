@@ -9,6 +9,10 @@ export async function createConfiguredComposioRuntimeContribution(config: {
     connectionId?: string;
   };
   composioRequest?(input: unknown): Promise<unknown>;
+  pinToolCatalog?(
+    connectionId: string,
+    read: () => Promise<unknown>,
+  ): Promise<unknown>;
 }): Promise<Plugin.Function | undefined> {
   if (
     config.capability.packageId !== "composio" ||
@@ -20,8 +24,21 @@ export async function createConfiguredComposioRuntimeContribution(config: {
     throw new Error("Connected account tools are unavailable");
   const request = config.composioRequest;
   const connectionId = config.capability.connectionId;
+  const availability = await request({
+    schemaVersion: 1,
+    operation: "tool-availability",
+  });
+  if (
+    !object(availability) ||
+    availability.schemaVersion !== 1 ||
+    typeof availability.available !== "boolean"
+  )
+    throw new Error("Connected account availability is invalid");
+  if (!availability.available || !config.pinToolCatalog) return undefined;
   const catalog = decodeConnectedToolsV1(
-    await request({ schemaVersion: 1, operation: "list-tools", connectionId }),
+    await config.pinToolCatalog(connectionId, () =>
+      request({ schemaVersion: 1, operation: "list-tools", connectionId }),
+    ),
   );
   const plugin: Plugin.Function = (ctx: Context) => {
     const removeNamespace = ctx.tools.registerNamespace({
@@ -66,6 +83,8 @@ export async function createConfiguredComposioRuntimeContribution(config: {
             typeof result.isError !== "boolean"
           )
             throw new Error("Connected account returned an invalid result");
+          if (result.outcome === "unknown")
+            throw new Error("The action outcome requires reconciliation");
           return { content: result.content, isError: result.isError };
         },
       }),

@@ -1,3 +1,4 @@
+import { turnToolCatalogPin } from "./tool-catalog-pin.js";
 import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
 import {
   decodeIsolateMemoryReadRequestV1,
@@ -4885,6 +4886,11 @@ export class ShellBotBackendContribution {
         userId: identity.userId,
         readSecret,
         authorizeConnection: authorizeEnabledConnection,
+        ...(turn
+          ? {
+              pinToolCatalog: turnToolCatalogPin(this.ctx.storage, turn.turnId),
+            }
+          : {}),
         composioRequest: (command) =>
           userConfiguration.composioRequest(
             identity.userId,

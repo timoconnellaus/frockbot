@@ -238,6 +238,7 @@ export class ComposioUserService {
       throw new Error("Connection command version is unsupported");
     const fields: Record<string, string[]> = {
       catalog: [],
+      "tool-availability": [],
       "list-tools": ["connectionId"],
       "execute-tool": [
         "connectionId",
@@ -264,6 +265,19 @@ export class ComposioUserService {
     ]);
     if (Object.keys(value).some((key) => !allowed.has(key)))
       throw new Error("Connection command has invalid fields");
+    if (value.operation === "tool-availability")
+      return {
+        schemaVersion: 1,
+        available:
+          !!this.client &&
+          (await this.host.settings.isPackageInstalled(userId, this.packageId)),
+      };
+    if (value.operation === "execute-tool" && !this.client)
+      return {
+        content:
+          "This connector is temporarily unavailable. The action was not started.",
+        isError: true,
+      };
     if (
       value.operation === "list-tools" ||
       value.operation === "execute-tool"
