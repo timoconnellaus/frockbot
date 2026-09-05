@@ -51,6 +51,10 @@ void main() {
     tester.view.padding = const FakeViewPadding(top: 47 * 3, bottom: 34 * 3);
     addTearDown(tester.view.reset);
 
+    // The test binding draws shadows as solid shapes unless told otherwise;
+    // the evidence must show real blur. The flag is restored before the test
+    // body ends because the binding checks painting variables before teardown.
+    debugDisableShadows = false;
     final key = GlobalKey();
     await tester.runAsync(loadFonts);
     await tester.pumpWidget(
@@ -74,7 +78,10 @@ void main() {
     expect(find.textContaining('Searched Gmail'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    if (Platform.environment['FROCK_EVIDENCE'] != '1') return;
+    if (Platform.environment['FROCK_EVIDENCE'] != '1') {
+      debugDisableShadows = true;
+      return;
+    }
     final boundary =
         key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     final image = await tester.runAsync(() => boundary.toImage(pixelRatio: 3));
@@ -84,5 +91,6 @@ void main() {
     final out = File('../../docs/design/evidence/flutter-chat.png');
     out.parent.createSync(recursive: true);
     out.writeAsBytesSync(bytes!.buffer.asUint8List());
+    debugDisableShadows = true;
   });
 }
