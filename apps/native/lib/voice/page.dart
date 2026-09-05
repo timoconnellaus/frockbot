@@ -14,12 +14,21 @@ import 'protocol.dart';
 /// (Pause) and one while paused (Resume, carrying the count of what waits).
 /// Close leaves Voice entirely.
 class VoicePage extends StatefulWidget {
-  const VoicePage({super.key, required this.controller, this.botLook});
+  const VoicePage({
+    super.key,
+    required this.controller,
+    this.botLook,
+    this.lookOfBot,
+  });
   final VoiceController controller;
 
   /// The sheep to show. The assistant is the User's, not a Bot's, so this is
   /// the Bot you came from — a face you already recognise.
   final SheepLook? botLook;
+
+  /// Each waiting Bot's own sheep, from the flock. Unknown Bots get the plain
+  /// one.
+  final SheepLook? Function(String botId)? lookOfBot;
 
   @override
   State<VoicePage> createState() => _VoicePageState();
@@ -92,7 +101,7 @@ class _VoicePageState extends State<VoicePage> {
               ),
               if (paused && waiting.isNotEmpty) ...[
                 const FrockEyebrow('Waiting for you'),
-                _WaitingGroup(waiting: waiting),
+                _WaitingGroup(lookOfBot: widget.lookOfBot, waiting: waiting),
                 const SizedBox(height: 12),
               ],
               _Control(controller: c),
@@ -205,8 +214,9 @@ class _Caption extends StatelessWidget {
 
 /// What arrived while nobody was listening, one row per Bot answer.
 class _WaitingGroup extends StatelessWidget {
-  const _WaitingGroup({required this.waiting});
+  const _WaitingGroup({required this.waiting, this.lookOfBot});
   final List<VoicePendingAnswer> waiting;
+  final SheepLook? Function(String botId)? lookOfBot;
 
   @override
   Widget build(BuildContext context) {
@@ -224,7 +234,10 @@ class _WaitingGroup extends StatelessWidget {
             for (final answers in byBot.values)
               FrockRow(
                 key: ValueKey('waiting-${answers.first.botId}'),
-                leading: const FrockSheep(size: FrockTokens.avatarMd),
+                leading: FrockSheep(
+                  look: lookOfBot?.call(answers.first.botId) ?? SheepLook.plain,
+                  size: FrockTokens.avatarMd,
+                ),
                 title: answers.last.botName,
                 caption: answers.last.answer,
                 trailing: FrockChip('${answers.length}', tone: TileTone.accent),

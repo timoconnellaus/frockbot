@@ -350,7 +350,16 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
     );
     await navigator.push(
       MaterialPageRoute<void>(
-        builder: (_) => VoicePage(controller: controller, botLook: look),
+        builder: (_) => VoicePage(
+          controller: controller,
+          botLook: look,
+          lookOfBot: (id) {
+            for (final bot in bots) {
+              if (bot.botId.value == id) return lookOf(bot.sheep);
+            }
+            return null;
+          },
+        ),
       ),
     );
     controller.dispose();
