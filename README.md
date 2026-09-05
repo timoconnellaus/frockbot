@@ -85,10 +85,13 @@ when you have the headroom:
 TYPECHECK_CONCURRENCY=8 bun run typecheck # 0 means unbounded
 ```
 
-Most packages are on TypeScript 7's native compiler. The Vue packages,
-`packages/applet-sdk` and the workspace root stay on 5.9.3 because they depend
-on tools that embed the TypeScript compiler API, which TypeScript 7 does not
-ship — see [ADR 0029](docs/adr/0029-typescript-7-where-the-toolchain-allows-it.md).
+Every package checks with TypeScript 7. Most declare `typescript` at `^7.0.2`
+directly. The rest — the Vue packages, `packages/applet-sdk` and the workspace
+root — depend on a tool that embeds the TypeScript compiler API, which
+TypeScript 7's package does not ship, so they alias `typescript` to the
+`typescript-native-bridge` build that keeps the TS 6 JavaScript API while
+checking on tsgo 7.0.2. No TypeScript 5 is left in the repo. See
+[ADR 0029](docs/adr/0029-typescript-7-where-the-toolchain-allows-it.md).
 
 ### Editor setup
 

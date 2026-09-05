@@ -46,11 +46,12 @@ blocker:
   config.
 - **`packages/applet-sdk`** does `import ts from "typescript"` in
   `src/cli/check.ts` and imports `typescript-eslint` in `src/lint/index.ts`.
-- **The workspace root** keeps `typescript` at `5.9.3` because
-  `scripts/generate-isolate-context-catalog.ts` imports the compiler API, and
-  that script runs as part of `bun run typecheck`.
+- **The workspace root** because `scripts/generate-isolate-context-catalog.ts`
+  imports the compiler API, and that script runs as part of `bun run typecheck`.
 
-Everything else — 57 of 73 packages — is on 7.0.2.
+Everything else — 57 of 73 packages — is on 7.0.2. The two holdouts above were
+held on `5.9.3` when this ADR was first written; both now run on the same tsgo
+bridge as the Vue tier (second addendum below).
 
 This is expected to be temporary. TypeScript 7.1 is scoped to ship the stable
 programmatic API that Volar and the other template typecheckers need. When it
@@ -85,6 +86,30 @@ combination the config's own comment says `plugin-shell` compiles under.
 This is a stopgap, not the destination. Once TS 7.1 lands with content mappers
 (microsoft/typescript-go#4712), `tsc` checks `.vue` directly and `vue-tsc` is
 deprecated; the bridge alias comes out then. Revisit around October 2026.
+
+**Addendum (2026-09-05): no TypeScript 5 is left anywhere.** The two remaining
+`5.9.3` pins — the workspace root and `packages/applet-sdk` — move to the same
+`typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2` alias the Vue tier uses,
+so every `tsc` in the repo now checks on tsgo 7.0.2 while the compiler API those
+two need still resolves. The root move matters beyond the root's own scripts:
+`node_modules/typescript` is what the hoisted resolution and editor tooling
+pick up, and it was still 5.9.
+
+`typescript-eslint@8.69.0` is the reason `applet-sdk` cannot declare `^7.0.2`
+outright: it throws `typescript-eslint does not support TS 7.0` at import time
+and points at the same side-by-side bridge (typescript-eslint#10940). Under the
+bridge, `applet check` needed one code change — `src/cli/check.ts` passed
+`baseUrl` to `ts.createProgram`, which TS 7 rejects as deprecated, and the
+diagnostic surfaced on every Applet as a spurious `applet.json:1:1` error. It
+was never needed: every mapping `typeCheckerPaths()` returns is absolute, so
+`baseUrl` is dropped rather than silenced with `ignoreDeprecations`.
+
+`packages/compose-typescript` stays on plain `typescript@6.0.2`. That is not a
+compiler pin: TypeScript is a runtime dependency there, bundled into the Worker
+so a Bot's written plugin source can be checked in-process, and the bridge
+resolves a per-platform native binary that has no place in a Worker bundle. Its
+own `tsc` therefore runs at 6.0.3-equivalent rather than on tsgo, which is the
+one exception left.
 
 **Typechecking is bounded, not fanned out.** `scripts/typecheck.ts` runs the
 packages through a pool capped at `min(4, cores/2)`, overridable with

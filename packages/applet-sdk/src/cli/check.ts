@@ -64,9 +64,10 @@ export async function typeCheckApplet(
       },
     ];
   }
+  // No `baseUrl`: TypeScript 7 rejects it, and it was never needed — every
+  // mapping `typeCheckerPaths()` returns is already an absolute path.
   const program = ts.createProgram([...files, SDK_WORKERS_TYPES], {
     ...COMPILER_OPTIONS,
-    baseUrl: root,
     paths: typeCheckerPaths(),
   });
   return ts
