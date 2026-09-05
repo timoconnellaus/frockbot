@@ -43,7 +43,14 @@
       "backendAndRenderers": "passed-paired-owner-and-recovery-scenarios",
       "flutterTests": 247,
       "macosReleaseBuild": "passed-local-production-worker",
-      "releaseScreenshots": "macos-settings-and-offline-captured; models-interaction-blocked-accessibility; pixel-awaits-deployment",
+      "releaseScreenshots": "macos-settings-and-offline-captured; pixel-awaiting-unlocked-phone",
+      "supportedDistribution": "not-promoted"
+    },
+    "connections": {
+      "backendAndRenderers": "passed-paired-grant-replay-eviction-revocation",
+      "macosRelease": "connected-empty-loading-offline-captured-with-local-test-user",
+      "pixel": "awaiting an unlocked phone",
+      "nativeCatalog": "system-browser-backend-surface",
       "supportedDistribution": "not-promoted"
     }
   }

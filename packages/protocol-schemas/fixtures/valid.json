@@ -1064,6 +1064,23 @@
     }
   },
   {
+    "name": "ConnectionsFrame valid",
+    "schema": "ConnectionsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "ownerId": "tim",
+      "revision": 1,
+      "accounts": [
+        {
+          "id": "calendar-work",
+          "label": "Work calendar",
+          "service": "Calendar",
+          "state": "ready"
+        }
+      ]
+    }
+  },
+  {
     "name": "NotificationDirectory valid",
     "schema": "NotificationDirectory",
     "value": {

@@ -1405,6 +1405,41 @@
     }
   },
   {
+    "name": "ConnectionsFrame refuses credential metadata",
+    "schema": "ConnectionsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "ownerId": "tim",
+      "revision": 1,
+      "accounts": [
+        {
+          "id": "calendar-work",
+          "label": "Work calendar",
+          "service": "Calendar",
+          "state": "ready",
+          "token": "synthetic-test-secret"
+        }
+      ]
+    }
+  },
+  {
+    "name": "ConnectionsFrame rejects unknown lifecycle",
+    "schema": "ConnectionsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "ownerId": "tim",
+      "revision": 1,
+      "accounts": [
+        {
+          "id": "calendar-work",
+          "label": "Work calendar",
+          "service": "Calendar",
+          "state": "whatever"
+        }
+      ]
+    }
+  },
+  {
     "name": "NotificationDirectory rejects credential metadata",
     "schema": "NotificationDirectory",
     "value": {

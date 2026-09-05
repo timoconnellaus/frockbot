@@ -643,6 +643,23 @@ export type SettingsOptionsPage = {
   items: Array<SettingChoice>;
   nextCursor?: number;
 };
+export type ConnectionsFrame = {
+  schemaVersion: 1;
+  ownerId: Identifier;
+  revision: number;
+  accounts: Array<{
+    id: Identifier;
+    label: string;
+    service: string;
+    state:
+      | "authorizing"
+      | "ready"
+      | "disabled"
+      | "revoking"
+      | "reconciliation-required"
+      | "failed";
+  }>;
+};
 export type NotificationDirectory = {
   schemaVersion: 1;
   notifications: Array<{
@@ -741,6 +758,7 @@ export interface ProtocolTypes {
   SettingChoice: SettingChoice;
   SettingsOptionsQuery: SettingsOptionsQuery;
   SettingsOptionsPage: SettingsOptionsPage;
+  ConnectionsFrame: ConnectionsFrame;
   NotificationDirectory: NotificationDirectory;
   MarkReadReceipt: MarkReadReceipt;
 }
