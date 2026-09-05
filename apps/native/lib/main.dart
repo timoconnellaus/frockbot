@@ -12,6 +12,7 @@ import 'activity/page.dart';
 import 'recovery/page.dart';
 import 'auth/sign_in_page.dart';
 import 'ui/chat_pane.dart';
+import 'ui/bot_page.dart';
 import 'ui/chat_screen.dart';
 import 'ui/flock_drawer.dart' show lookOf;
 import 'ui/frock_tokens.dart';
@@ -397,6 +398,19 @@ class _FrockBotAppState extends State<FrockBotApp> with WidgetsBindingObserver {
           bots: bots,
           selected: selected,
           selectedState: selectedState,
+          onBotTap: selected == null
+              ? null
+              : () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => BotPage(
+                      bot: selected!,
+                      state: selectedState,
+                      controller: sessions
+                          .open(userId!, selected!.botId.value)
+                          .controller,
+                    ),
+                  ),
+                ),
           onSelect: (bot) {
             select(bot);
             scaffoldKey.currentState?.closeDrawer();

@@ -24,6 +24,7 @@ class ChatScreen extends StatelessWidget {
     required this.onApplets,
     required this.onSettings,
     this.onManageBots,
+    this.onBotTap,
     required this.body,
     this.extraActions = const [],
     this.onInbox,
@@ -45,6 +46,9 @@ class ChatScreen extends StatelessWidget {
   final VoidCallback? onManageBots;
   final Widget body;
   final List<Widget> extraActions;
+
+  /// Tapping the Bot's name in the bar opens its home (the Work view).
+  final VoidCallback? onBotTap;
 
   /// Opens the Inbox; absent until the account's activity has loaded.
   final VoidCallback? onInbox;
@@ -95,24 +99,29 @@ class ChatScreen extends StatelessWidget {
                     ),
               title: selected == null
                   ? Text('FrockBot', style: t.barTitle)
-                  : Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        FrockSheep(
-                          look: lookOf(selected!.sheep),
-                          size: FrockTokens.avatarSm,
-                          state: selectedState,
-                        ),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            selected!.initialName,
-                            style: t.barTitle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                  : GestureDetector(
+                      key: const ValueKey('bot-title'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: onBotTap,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          FrockSheep(
+                            look: lookOf(selected!.sheep),
+                            size: FrockTokens.avatarSm,
+                            state: selectedState,
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              selected!.initialName,
+                              style: t.barTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
               trailing: extraActions.isEmpty
                   ? FrockIconButton(
