@@ -194,8 +194,10 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
         _web = null;
       });
     }
+    var stage = 'viewer-lease';
     try {
       final lease = await _fetch(randomId());
+      stage = 'webview-configuration';
       if (!mounted || epoch != _epoch) return;
       final params = Platform.isMacOS
           ? WebKitWebViewControllerCreationParams(
@@ -265,8 +267,16 @@ class _AppletPageState extends State<AppletPage> with WidgetsBindingObserver {
         _web = web;
       });
       // Anonymous request: never use NativeApi headers in a WebView.
+      stage = 'anonymous-bootstrap';
       await web.loadRequest(lease.bootstrap);
-    } catch (_) {
+    } catch (failure) {
+      if (const bool.fromEnvironment('NATIVE_ACCEPTANCE')) {
+        // No URL, response, identifier, or credential enters device diagnostics.
+        // ignore: avoid_print -- compile-time local qualification instrumentation.
+        print(
+          'FROCKBOT_FALLBACK $stage ${failure.runtimeType} ${failure is RequestFailure ? failure.status : ""}',
+        );
+      }
       _fail(epoch);
     }
   }

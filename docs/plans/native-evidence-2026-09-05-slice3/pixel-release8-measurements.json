@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "versionCode": 8,
+  "fixture": "authenticated two-Turn QA chat; NATIVE_ACCEPTANCE release; uncontrolled refresh rate",
+  "qualified": false,
+  "coldWarmPairs": 30,
+  "resumeCycles": 20,
+  "dartStartupEditableMs": {
+    "count": 30,
+    "p95": 129.927,
+    "p99": 139.088,
+    "scope": "Dart stopwatch to editable widget post-frame; excludes OS/engine startup"
+  },
+  "startupFrameCallbacks": {
+    "count": 30,
+    "scope": "one initial timing callback per launch, not interaction qualification",
+    "buildMs": {
+      "p95": 1.23,
+      "p99": 1.288
+    },
+    "rasterMs": {
+      "p95": 8.665,
+      "p99": 9.104
+    },
+    "totalMs": {
+      "p95": 43.822,
+      "p99": 47.744
+    }
+  },
+  "fullInputToPaint": "unmeasured",
+  "fullFixture": "not-run",
+  "activityCold": {
+    "count": 30,
+    "p95Ms": 214,
+    "scope": "Android activity proxy only"
+  },
+  "activityWarm": {
+    "count": 0,
+    "p95Ms": null,
+    "scope": "Android activity proxy only"
+  },
+  "basePssMiB": 199.28,
+  "afterResumePssMiB": 191.73,
+  "baseMemoryBudgetMiB": 180,
+  "baseMemoryBudgetMet": false
+}

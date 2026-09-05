@@ -5,6 +5,7 @@ import type { D1Migration } from "cloudflare:test";
  * merge into one `Cloudflare.Env`, so nothing declared there is repeated here.
  */
 interface IntegrationTestEnv {
+  BETTER_AUTH_SECRET: string;
   APPLICATION_ARTIFACTS: R2Bucket;
   AUTH_DB: D1Database;
   DEFAULT_APPLICATION_HASH: string;

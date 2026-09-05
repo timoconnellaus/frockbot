@@ -2163,7 +2163,7 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
  * language one: a runtime that does not offer it must not fail to boot.
  */
 try {
-  addEventListener("unhandledrejection", (event) => {
+  addEventListener("unhandledrejection", (event: unknown) => {
     const reason = (event as { reason?: unknown }).reason;
     console.error(
       `Unhandled rejection escaped an entry point: ${
@@ -2284,7 +2284,6 @@ export default {
             .UserBotState({ props: { userId } })
             .nativeAppletBootstrap({
               schemaVersion: 1,
-              userId,
               appletId,
               navigationEpoch,
             }),
