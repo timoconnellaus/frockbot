@@ -42,6 +42,7 @@ import {
   compositionArtifactSetHashV1,
   compositionGenerationIdV1,
   decodeCompositionGenerationV1,
+  pinCompositionWithRetryV1,
   type CompositionAppletMemberV1,
   type CompositionJsonValueV1,
   type CompositionGenerationV1,
@@ -564,6 +565,20 @@ export async function resolveAppletCompositionV1(options: {
   origin: CompositionGenerationV1["origin"];
   now?: Date;
 }): Promise<CompositionGenerationV1 | undefined> {
+  // Reading the User object yields, so the pointer can move under this
+  // proposal exactly as it can under deployment-follow: the pin is a
+  // compare-and-swap, and a lost race re-reads the directory and the winner's
+  // members rather than replacing them.
+  return pinCompositionWithRetryV1(() => appletCompositionAttempt(options));
+}
+
+async function appletCompositionAttempt(options: {
+  directory: Pick<AppletUserDirectoryV1, "compositionInput">;
+  composition: Pick<CompositionStore, "current" | "propose">;
+  storage: AppletCapabilityStorageV1;
+  origin: CompositionGenerationV1["origin"];
+  now?: Date;
+}): Promise<CompositionGenerationV1 | undefined> {
   const current = await options.composition.current();
   const seen = await options.storage.get<number>(
     APPLET_DIRECTORY_REVISION_SEEN_KEY,
@@ -598,7 +613,10 @@ export async function resolveAppletCompositionV1(options: {
     ...(members.length === 0 ? {} : { applets: members }),
     status: "pending",
   });
-  await options.composition.propose(generation, { pin: true });
+  await options.composition.propose(generation, {
+    pin: true,
+    expectedCurrentGenerationId: current.generationId,
+  });
   await options.storage.put({
     [APPLET_DIRECTORY_REVISION_SEEN_KEY]: input.revision,
   });
