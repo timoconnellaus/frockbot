@@ -578,6 +578,20 @@ export interface AppletViewerClaimsV1 {
 /** Fifteen minutes, per plan §4. */
 export const APPLET_VIEWER_TOKEN_TTL_MS = 15 * 60_000;
 
+/*
+ * The two halves of one failure: the deployment cannot sign a viewer token,
+ * because it was never given the secret that signs them.
+ *
+ * A User can do nothing about that and does not need to know its name, so they
+ * get a sentence that is true and final. The operator needs the name and gets
+ * it in the Worker log, where a secret's absence is a fact about the
+ * deployment rather than something to say over somebody's conversation.
+ */
+export const APPLETS_UNAVAILABLE_MESSAGE_V1 =
+  "Applets are unavailable right now.";
+export const APPLET_VIEWER_UNCONFIGURED_DETAIL_V1 =
+  "APPLET_VIEWER_SECRET is not set on this deployment, so no Applet viewer token can be signed and every published Applet answers 503. See docs/architecture/delivery.md.";
+
 export class AppletViewerTokenError extends Error {
   override readonly name = "AppletViewerTokenError";
   readonly status: number;

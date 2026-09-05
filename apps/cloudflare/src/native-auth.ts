@@ -31,6 +31,14 @@ export function nativeReturnUris(flag: string | undefined): readonly string[] {
   return [];
 }
 
+/** The request origin with a fully qualified (trailing-dot) host normalised. */
+export function requestOrigin(url: URL): string {
+  const host = url.hostname.endsWith(".")
+    ? url.hostname.slice(0, -1)
+    : url.hostname;
+  return `${url.protocol}//${host}${url.port ? `:${url.port}` : ""}`;
+}
+
 export function isNativeAuthPath(path: string): boolean {
   return (
     path.startsWith("/api/auth/native/") ||
@@ -277,7 +285,19 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       const url = new URL(request.url);
       if (!isNativeAuthPath(url.pathname)) return undefined;
       // The signed application's callback origin is not configurable by input.
-      if (url.origin !== NATIVE_ORIGIN) return error(403);
+      // Google's asset-links fetcher asks for the fully qualified host
+      // ("bot.frockbot.com."); that trailing dot names the same origin.
+      if (requestOrigin(url) !== NATIVE_ORIGIN) return error(403);
+      const association =
+        url.pathname === "/.well-known/assetlinks.json" ||
+        url.pathname === "/.well-known/apple-app-site-association";
+      if (association && request.method === "HEAD") {
+        const full = await this.route(new Request(request.url));
+        return new Response(null, {
+          status: full?.status ?? 404,
+          headers: full?.headers,
+        });
+      }
       try {
         if (
           url.pathname === "/.well-known/assetlinks.json" &&

@@ -26,6 +26,7 @@ const states = computed(() => ({ applets: appletsBridgeStateV2(web.value) }));
       :page="props.entry.page"
       :slot="props.entry.slot"
       :states="states"
+      :surface-title="props.entry.entry.label"
     />
   </div>
 </template>

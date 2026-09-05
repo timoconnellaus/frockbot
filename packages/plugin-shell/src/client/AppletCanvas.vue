@@ -19,6 +19,7 @@ import { computed, inject, onBeforeUnmount, ref, watch } from "vue";
 import { frockBotWebDataKey } from "../shared.js";
 import { appletsBridgeStateV2 } from "./applets-state.js";
 import {
+  appletSourceFilesV1,
   appletSourceFingerprintV1,
   mostRecentlyChangedFileV1,
 } from "./applets-client.js";
@@ -49,7 +50,7 @@ const source = computed(() => web.value.appletSource);
 const build = computed(() => web.value.appletBuild);
 const isRunning = computed(() => Boolean(web.value.activeRunId));
 const canvasState = computed(() => web.value.appletCanvas);
-const failure = computed(() => web.value.appletCanvasError);
+const failure = computed(() => web.value.appletCanvasFailure);
 
 /*
  * What the Bot is doing to this Applet, in one line.
@@ -130,10 +131,18 @@ const currentPath = computed(
   () => openedPath.value ?? mostRecentlyChangedFileV1(source.value),
 );
 const currentFile = computed(() =>
-  source.value?.files.find((file) => file.path === currentPath.value),
+  sortedFiles.value.find((file) => file.path === currentPath.value),
 );
+/*
+ * The files the code view lists.
+ *
+ * Machine output is left out — a build, a dependency tree, a wrangler cache.
+ * `.wrangler/cache/cf.json` sorted first, so it was the file the panel opened
+ * on: one minified line of a Cloudflare handshake, presented as the Applet
+ * somebody had asked their Bot to write (2026-09-05).
+ */
 const sortedFiles = computed(() =>
-  (source.value?.files ?? []).toSorted((left, right) =>
+  appletSourceFilesV1(source.value).toSorted((left, right) =>
     left.path.localeCompare(right.path),
   ),
 );
@@ -347,7 +356,12 @@ async function clearFocus(): Promise<void> {
             role="alert"
             data-testid="applet-canvas-failure"
           >
-            <span>{{ failure }}</span>
+            <span>
+              {{ failure.message }}
+              <template v-if="failure.retry === 'auto'">
+                Trying again…</template
+              >
+            </span>
             <button type="button" @click="retry">Try again</button>
           </div>
           <div
@@ -537,6 +551,7 @@ async function clearFocus(): Promise<void> {
 .applet-canvas-code {
   position: absolute;
   display: flex;
+  min-width: 0;
   overflow-y: auto;
   flex-direction: column;
   gap: 10px;
@@ -616,7 +631,13 @@ async function clearFocus(): Promise<void> {
   font-size: var(--frock-text-sm);
   line-height: var(--frock-leading-snug);
   tab-size: 2;
-  white-space: pre;
+  /*
+   * Source wraps, and what will not wrap scrolls. A minified line used to run
+   * off the right edge of the panel with nothing to say it had: the panel is
+   * 300-odd pixels wide and clipped the rest in silence.
+   */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Where the work has got to: the panel's own header for the building state. */

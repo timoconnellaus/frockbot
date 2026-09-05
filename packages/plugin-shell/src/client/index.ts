@@ -105,6 +105,8 @@ import {
 } from "./package-iframe-entries.js";
 import { appletsAvailableV1 } from "./applets-state.js";
 import {
+  appletCanvasIsFirstReadV1,
+  appletViewerStillCurrentV1,
   readAppletBuild,
   readAppletList,
   readAppletSource,
@@ -113,6 +115,11 @@ import {
   readFocusedAppletId,
   writeFocusedAppletId,
 } from "./applets-client.js";
+import {
+  APPLET_CANVAS_MAX_AUTO_RETRIES_V1,
+  appletCanvasFailureV1,
+  appletCanvasRetryDelayMsV1,
+} from "./applet-canvas-failure.js";
 import { modelRuntimeLabel } from "./model-presentation.js";
 import { showClientNotificationV1 } from "./notify.js";
 import "@frockbot/client-core/fonts.css";
@@ -1010,6 +1017,44 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   let runObserver: AbortController | undefined;
   let selectionGeneration = 0;
   /*
+   * The canvas's retry policy.
+   *
+   * A network that might come back is worth another read, on a widening
+   * backoff and a handful of times. A refusal the deployment has settled —
+   * a missing secret, a Bot that is not signed in — is not: it is shown once,
+   * with a button, and nothing retries it on the User's behalf.
+   */
+  let appletRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let appletRetryAttempt = 0;
+  function stopAppletRetry(): void {
+    if (appletRetryTimer !== undefined) clearTimeout(appletRetryTimer);
+    appletRetryTimer = undefined;
+    appletRetryAttempt = 0;
+  }
+  /**
+   * One failed Applet read, turned into one state the panel can draw: the
+   * sentence, and the retry it is owed. `web` is initialized below and this
+   * only ever runs after that.
+   */
+  function failAppletCanvas(error: unknown): void {
+    const failure = appletCanvasFailureV1(error);
+    web.value.appletCanvas = "failed";
+    web.value.appletCanvasFailure = failure;
+    if (appletRetryTimer !== undefined) clearTimeout(appletRetryTimer);
+    appletRetryTimer = undefined;
+    if (
+      failure.retry !== "auto" ||
+      appletRetryAttempt >= APPLET_CANVAS_MAX_AUTO_RETRIES_V1
+    ) {
+      return;
+    }
+    appletRetryAttempt += 1;
+    appletRetryTimer = setTimeout(() => {
+      appletRetryTimer = undefined;
+      void web.value.refreshAppletCanvas();
+    }, appletCanvasRetryDelayMsV1(appletRetryAttempt));
+  }
+  /*
    * Which conversation the transcript is showing.
    *
    * A read that was already in flight when the User starts a new conversation
@@ -1549,7 +1594,8 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       web.value.appletSource = undefined;
       web.value.appletBuild = undefined;
       web.value.appletCanvas = "idle";
-      web.value.appletCanvasError = undefined;
+      web.value.appletCanvasFailure = undefined;
+      stopAppletRetry();
       const url = URL.parse(window.location.href);
       if (url) {
         url.searchParams.set("bot", botId);
@@ -1756,7 +1802,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         web.value.appletViewer = undefined;
         web.value.appletSource = undefined;
         web.value.appletBuild = undefined;
-        web.value.appletCanvasError = undefined;
+        web.value.appletCanvasFailure = undefined;
+        // The User picking an Applet is a fresh start for the retry policy:
+        // whatever the last one failed with says nothing about this one.
+        stopAppletRetry();
         // Focusing is also when the list is re-read: a publish that landed
         // between selections is why the canvas has an Applet to show at all,
         // and a stale list would leave it in the building state forever.
@@ -1767,11 +1816,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.activeBotId !== botId
         )
           return;
-        web.value.appletCanvas = "failed";
-        web.value.appletCanvasError =
-          error instanceof Error
-            ? error.message
-            : "Could not focus that Applet";
+        failAppletCanvas(error);
         return;
       }
       await web.value.refreshAppletCanvas();
@@ -1796,10 +1841,21 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       const stale = () =>
         generation !== selectionGeneration ||
         web.value.focusedAppletId !== appletId;
-      if (web.value.appletViewer?.appletId !== appletId) {
+      // A skeleton is for the first read of an Applet, not for every Turn.
+      if (
+        appletCanvasIsFirstReadV1({
+          appletId,
+          ...(web.value.appletViewer
+            ? { viewerAppletId: web.value.appletViewer.appletId }
+            : {}),
+          ...(web.value.appletSource
+            ? { sourceAppletId: web.value.appletSource.appletId }
+            : {}),
+        })
+      ) {
         web.value.appletCanvas = "loading";
       }
-      web.value.appletCanvasError = undefined;
+      web.value.appletCanvasFailure = undefined;
       try {
         const [source, build] = await Promise.all([
           readAppletSource(read, botId, appletId),
@@ -1812,9 +1868,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         web.value.appletBuild = build;
       } catch (error) {
         if (stale()) return;
-        web.value.appletCanvas = "failed";
-        web.value.appletCanvasError =
-          error instanceof Error ? error.message : "Could not read this Applet";
+        failAppletCanvas(error);
         return;
       }
       const applet = web.value.applets.find(
@@ -1826,6 +1880,22 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           web.value.appletViewer = undefined;
           web.value.appletCanvas = "ready";
         }
+        return;
+      }
+      /*
+       * The published generation is what the open Applet is. While it is
+       * unchanged and the viewer credential has life left in it, the frame
+       * keeps running: re-minting a token on every Turn changed the props the
+       * iframe host reads and reloaded a working Applet for no reason.
+       */
+      if (
+        appletViewerStillCurrentV1({
+          ...(web.value.appletViewer ? { held: web.value.appletViewer } : {}),
+          appletId,
+          generationId: applet.currentGenerationId,
+        })
+      ) {
+        web.value.appletCanvas = "ready";
         return;
       }
       try {
@@ -1843,14 +1913,13 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           generationId: ui.generationId ?? applet.currentGenerationId,
         };
         web.value.appletCanvas = "ready";
+        appletRetryAttempt = 0;
       } catch (error) {
         if (stale()) return;
         // A published Applet whose viewer cannot be opened keeps the code view
         // up and says so; it never shows an empty frame pretending to work.
         web.value.appletViewer = undefined;
-        web.value.appletCanvas = "failed";
-        web.value.appletCanvasError =
-          error instanceof Error ? error.message : "Could not open this Applet";
+        failAppletCanvas(error);
       }
     },
     async callPackageUiTool(
@@ -3097,6 +3166,10 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
             stopSourceFollow();
             return;
           }
+          // A failure the User has to act on is not re-tried by the cadence:
+          // polling a permanently refused read rewrote the same panel with a
+          // slightly different sentence every two seconds.
+          if (web.value.appletCanvasFailure?.retry === "manual") return;
           void web.value.refreshAppletCanvas();
         }, APPLET_SOURCE_FOLLOW_MS);
         return;
@@ -3268,6 +3341,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       stopRunChannel?.();
       stopRunObservation();
       stopSourceFollow();
+      stopAppletRetry();
       for (const dispose of entryDisposers.splice(0).toReversed()) dispose();
       activeRequest?.abort();
       admissionObserver?.abort();

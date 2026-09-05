@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  appletSourceArtefactPathV1,
   decodeAppletDirectoryEntryV1,
   decodeAppletGenerationSummaryV1,
   decodeAppletGenerationV1,
@@ -302,5 +303,35 @@ describe("Applet canvas projections", () => {
     expect(() =>
       decodeAppletUiViewV1({ ...ui, uiUrl: "ftp://example.com/x" }),
     ).toThrow("uiUrl is invalid");
+  });
+});
+
+describe("what counts as an Applet's source", () => {
+  test("machine output is not source, at any depth", () => {
+    for (const path of [
+      "dist/manifest.json",
+      ".wrangler/cache/cf.json",
+      "node_modules/left-pad/index.js",
+      ".frockbot-generations/server.ts.json",
+      "packages/web/node_modules/x/index.js",
+      "coverage/lcov.info",
+    ]) {
+      expect(appletSourceArtefactPathV1(path)).toBe(true);
+    }
+  });
+
+  test("what the Bot wrote is", () => {
+    for (const path of [
+      "applet.json",
+      "server.ts",
+      "ui.tsx",
+      "README.md",
+      "src/todos.ts",
+      // A file named after a build directory is still a file.
+      "dist",
+      "src/dist.ts",
+    ]) {
+      expect(appletSourceArtefactPathV1(path)).toBe(false);
+    }
   });
 });

@@ -35,7 +35,10 @@ import {
   type ClientTurnRefusalV1,
 } from "@frockbot/plugin-shell/run-protocol";
 import { decodeApprovalDecisionCommandV1 } from "@frockbot/plugin-shell/approvals";
-import { botTurnRefusalCodeV1 } from "@frockbot/kernel-do";
+import {
+  APPLETS_UNAVAILABLE_MESSAGE_V1,
+  botTurnRefusalCodeV1,
+} from "@frockbot/kernel-do";
 import type { UserApplicationEnv } from "./contracts.js";
 import {
   VOICE_CAPTURE_WORKLET_PATH_V1,
@@ -167,8 +170,18 @@ function withSecurityHeaders(
   return secured;
 }
 
-function jsonError(status: number, message: string): Response {
-  return Response.json({ error: message }, { status });
+function jsonError(
+  status: number,
+  message: string,
+  options?: { definitive?: boolean },
+): Response {
+  return Response.json(
+    {
+      error: message,
+      ...(options?.definitive ? { definitive: true } : {}),
+    },
+    { status },
+  );
 }
 
 /**
@@ -531,6 +544,16 @@ function createUserApplicationRoute() {
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Applet is unavailable";
+        /*
+         * A deployment that cannot sign viewer tokens is not a missing Applet
+         * and not a blip: it is settled until somebody changes the
+         * deployment. It answers 503 with the sentence the shell shows and
+         * `definitive`, so the panel stops retrying something that will never
+         * start working on its own.
+         */
+        if (message === APPLETS_UNAVAILABLE_MESSAGE_V1) {
+          return jsonError(503, message, { definitive: true });
+        }
         return jsonError(
           message.includes("unavailable") || message.includes("no active")
             ? 404
