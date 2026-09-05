@@ -1,9 +1,14 @@
 import {
+  isApplicationDeploymentHash,
   isBotIdV1,
   isConnectionIdentifier,
   isPublicIdentifier,
   isRpcIdentifier,
 } from "@frockbot/configuration-core";
+import {
+  DEPLOYMENT_HEADER_V1,
+  type DesktopApiResponseV1,
+} from "@frockbot/protocol";
 
 export { decodeExternalAuthorizationUrl } from "@frockbot/protocol";
 
@@ -17,11 +22,36 @@ export interface DesktopApiRequest {
   body?: string;
 }
 
-export interface DesktopApiResponse {
-  schemaVersion: 1;
-  status: number;
-  contentType: string | null;
-  body: string;
+/**
+ * The answer the renderer is handed. Its shape is the shared contract in
+ * `@frockbot/protocol`, because the main process writes it and the renderer
+ * rebuilds a `Response` from it, and neither end owns the other.
+ */
+export type DesktopApiResponse = DesktopApiResponseV1;
+
+/**
+ * The main process's side of that contract: what a hosted answer is allowed
+ * to carry across IPC.
+ *
+ * Only the fields the renderer reads travel — status, content type, body, and
+ * the name of the application that answered. That last one is what makes the
+ * desktop able to notice a release at all: it used to stop here, so a window
+ * left open across a deploy kept running its old client against the new
+ * backend and never offered the reload. It is validated rather than
+ * forwarded, and no other backend header crosses this seam.
+ */
+export function desktopApiResponseV1(
+  response: Response,
+  body: string,
+): DesktopApiResponse {
+  const deployment = response.headers.get(DEPLOYMENT_HEADER_V1);
+  return {
+    schemaVersion: 1,
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    body,
+    ...(isApplicationDeploymentHash(deployment) ? { deployment } : {}),
+  };
 }
 
 export interface DesktopExternalAuthorizationRequest {
@@ -250,19 +280,20 @@ export function decodeDesktopApiResponse(value: unknown): DesktopApiResponse {
   const response = record(value);
   if (
     !response ||
-    !hasExactKeys(response, [
-      "schemaVersion",
-      "status",
-      "contentType",
-      "body",
-    ]) ||
+    !hasExactKeys(
+      response,
+      ["schemaVersion", "status", "contentType", "body"],
+      ["deployment"],
+    ) ||
     response.schemaVersion !== 1 ||
     !Number.isInteger(response.status) ||
     (response.status as number) < 100 ||
     (response.status as number) > 599 ||
     (response.contentType !== null &&
       typeof response.contentType !== "string") ||
-    typeof response.body !== "string"
+    typeof response.body !== "string" ||
+    (response.deployment !== undefined &&
+      !isApplicationDeploymentHash(response.deployment))
   ) {
     throw new Error("invalid API response");
   }
@@ -271,6 +302,9 @@ export function decodeDesktopApiResponse(value: unknown): DesktopApiResponse {
     status: response.status as number,
     contentType: response.contentType as string | null,
     body: response.body,
+    ...(response.deployment === undefined
+      ? {}
+      : { deployment: response.deployment as string }),
   };
 }
 

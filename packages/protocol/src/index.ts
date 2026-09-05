@@ -15,6 +15,49 @@ export interface PromptRequest {
 export const DEPLOYMENT_HEADER_V1 = "x-frockbot-application-v1";
 
 /**
+ * What the Electron main process hands back for one hosted API call.
+ *
+ * The desktop shell does not fetch from the renderer: the main process holds
+ * the session cookie and makes the request, and the renderer gets this DTO
+ * across IPC instead of the answer itself. The DTO is therefore the whole of
+ * what the renderer can know about an answer, and anything left out of it is
+ * lost — which is how a desktop window came to run a released-over client
+ * against a newer backend forever: the deployment header stopped at the main
+ * process and the shell's release watcher never saw a second application.
+ *
+ * `deployment` closes that, and it is one named field rather than a header
+ * map on purpose. This is a trust seam; the renderer is handed the single
+ * identifier it reads and nothing else the backend happened to say.
+ */
+export interface DesktopApiResponseV1 {
+  schemaVersion: 1;
+  status: number;
+  contentType: string | null;
+  body: string;
+  /**
+   * The application that answered, as `DEPLOYMENT_HEADER_V1` named it.
+   * Absent where the answer carried no such name, which is every answer a
+   * development document serves.
+   */
+  deployment?: string;
+}
+
+/**
+ * The renderer's side of that DTO: the answer, as a `Response` the ordinary
+ * client code can read, carrying back the deployment name the main process
+ * preserved so the shared release watcher sees it on the one path every
+ * request already takes.
+ */
+export function responseFromDesktopApiV1(
+  result: DesktopApiResponseV1,
+): Response {
+  const headers = new Headers();
+  if (result.contentType) headers.set("content-type", result.contentType);
+  if (result.deployment) headers.set(DEPLOYMENT_HEADER_V1, result.deployment);
+  return new Response(result.body, { status: result.status, headers });
+}
+
+/**
  * Version 1 of the Bot-state observer protocol. Frames are invalidations, not
  * authority: a client that receives one re-reads the owning HTTP projection.
  */
