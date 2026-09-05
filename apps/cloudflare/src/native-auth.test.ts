@@ -334,6 +334,29 @@ test("gateway serves public associations and exact returns without loading Vue; 
       )
     ).status,
   ).toBe(403);
+  // Google's verifier fetches the fully qualified host, and some fetchers
+  // probe with HEAD first; both must see the same public statement.
+  const qualified = await enabled.fetch(
+    new Request("https://bot.frockbot.com./.well-known/assetlinks.json"),
+  );
+  expect(qualified.status).toBe(200);
+  expect(await qualified.text()).toContain("com.frockbot.mobile");
+  const head = await enabled.fetch(
+    new Request("https://bot.frockbot.com/.well-known/assetlinks.json", {
+      method: "HEAD",
+    }),
+  );
+  expect(head.status).toBe(200);
+  expect(await head.text()).toBe("");
+  expect(
+    (
+      await enabled.fetch(
+        new Request("https://evil.test./.well-known/assetlinks.json", {
+          method: "HEAD",
+        }),
+      )
+    ).status,
+  ).toBe(403);
 });
 
 test("gateway concurrent exchange replay issues exactly one session", async () => {
