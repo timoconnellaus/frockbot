@@ -93,15 +93,12 @@ export async function provisionBot(
     userId: identity.userId,
     command: {
       schemaVersion: 1,
-      type: "user/set-package-settings",
+      type: "user/set-account-model",
       commandId: `model-${suffix}`,
       expectedRevision: await revision(),
-      packageId: "custom-models",
-      values: {
-        "account-model": {
-          connectionId: connection.connectionId,
-          providerModelId: "glm-5.3-flash:cloud",
-        },
+      model: {
+        connectionId: connection.connectionId,
+        providerModelId: "glm-5.3-flash:cloud",
       },
     },
   });
