@@ -52,6 +52,7 @@ import {
   supersedeDrainLabelV1,
   supersedeDrainStateV1,
 } from "./supersede-drain.js";
+import { topbarModelLabelV1 } from "./model-presentation.js";
 import { orderTranscriptV1 } from "./transcript-order.js";
 import {
   TURN_TEXT_MAX_CHARACTERS_V1,
@@ -373,6 +374,10 @@ const threadHint = computed(() => {
   }
   return state.value.modelLabel;
 });
+/** The model line under the Bot's name, cut to what a phone's topbar holds. */
+const topbarModelLabel = computed(() =>
+  topbarModelLabelV1(state.value.modelLabel, phoneLayout.value),
+);
 /** A Turn is executing. The composer stays open; only Stop depends on this. */
 const isRunning = computed(() => Boolean(state.value.runningRunId));
 const isConnecting = computed(() => state.value.connection !== "ready");
@@ -1103,12 +1108,36 @@ watch(
     void scrollToLatest(count === previousCount ? "auto" : "smooth");
   },
 );
+/*
+ * A Bot was chosen.
+ *
+ * Choosing a Bot is what the phone's drawer is for, so it closes behind the
+ * choice rather than covering the conversation it just opened. This listens to
+ * the choice and not to `activeBotId`, because choosing the Bot that is
+ * already open changes no state and is still a choice: with one Bot in the
+ * list — the account most Users have on their first day — every tap left the
+ * drawer over the conversation, and only Escape or the strip of thread beside
+ * it gave the window back.
+ *
+ * Focus follows the choice to the composer at desktop widths, where typing is
+ * the next thing a person does. A phone is left alone: raising the keyboard
+ * over a conversation somebody has just opened hides the thing they opened it
+ * to read.
+ */
+watch(
+  () => state.value.botChoices,
+  () => {
+    closeNav();
+    if (phoneLayout.value) return;
+    void nextTick(() => {
+      const input = composerInput.value;
+      if (input && !input.disabled) input.focus();
+    });
+  },
+);
 watch(
   () => state.value.activeBotId,
   (botId, previousBotId) => {
-    // Choosing a Bot is what the drawer is for, so it closes behind the choice
-    // rather than covering the conversation it just opened.
-    closeNav();
     // Pre-flush: the thread on screen is still the Bot being left, so this is
     // the scroll position to come back to.
     if (previousBotId) {
@@ -1433,7 +1462,7 @@ function handleComposerKeydown(event: KeyboardEvent): void {
           /></span>
           <div v-if="hasBot" class="workspace-title">
             <strong>{{ botName }}</strong>
-            <small>{{ state.modelLabel }}</small>
+            <small>{{ topbarModelLabel }}</small>
           </div>
           <k-slot name="frockbot.header-actions" />
           <!--

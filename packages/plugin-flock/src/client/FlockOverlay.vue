@@ -86,10 +86,10 @@ onBeforeUnmount(() => restoreFocus?.focus());
     >
       <div v-if="flock.overlay === 'archive'" class="flock-form">
         <span class="flock-eyebrow">Archive Bot</span>
-        <h1 id="flock-title">Archive this Bot?</h1>
+        <h1 id="flock-title">Archive {{ pendingName }}?</h1>
         <p>
-          Archiving stops new work and hides the Bot from your active flock.
-          History and settings are preserved for restoration.
+          Archiving stops new work and takes the Bot out of your flock. You can
+          restore it later.
         </p>
         <p
           v-if="flock.error"

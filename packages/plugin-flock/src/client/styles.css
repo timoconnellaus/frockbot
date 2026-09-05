@@ -266,8 +266,26 @@
   cursor: pointer;
 }
 
-.flock-bot-row.archived {
-  opacity: 0.72;
+/*
+ * An archived Bot is not one more Bot with a different button beside it: it
+ * cannot be opened at all. The avatar and the copy fade to say so, while the
+ * "Archived" tag and its actions stay at full strength — the row has to be
+ * readable to be restored.
+ */
+.flock-bot-row.archived .flock-bot-select > :not(.flock-bot-indicators) {
+  opacity: 0.5;
+}
+
+.flock-bot-row.archived .flock-bot-copy strong {
+  font-weight: 500;
+}
+
+.flock-bot-row.archived .flock-bot-select {
+  cursor: default;
+}
+
+.flock-bot-row.archived:hover {
+  background: var(--frock-surface-subtle);
 }
 
 .flock-bot-row:hover {
@@ -361,13 +379,21 @@
   gap: 8px;
 }
 
-.flock-bot-dot {
-  width: 8px;
-  height: 8px;
-  margin-right: 2px;
+/*
+ * An archived Bot cannot be opened, so its row says so in words and reads as
+ * unavailable rather than as one more Bot with a different action beside it.
+ */
+.flock-bot-tag {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--frock-border);
   border-radius: 999px;
-  background: var(--frock-success-bright);
-  box-shadow: 0 0 0 3px var(--frock-success-surface);
+  color: var(--frock-text-subtle);
+  font-size: var(--frock-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .flock-row-enter-active,
