@@ -622,6 +622,7 @@ export class ComposioConnectionCoordinator {
         connectedAccountId: link.connectedAccountId,
         redirectUrl: link.redirectUrl,
         toolkitSlug: type.toolkitSlug,
+        toolkitName: type.displayName,
         expiresAt: link.expiresAt,
         authorizationStateId: input.authorizationStateId,
         authorizationStateExpiresAt,

@@ -93,10 +93,7 @@ describe("the live application manifest decodes with the client's decoder", () =
         setting.scopes,
         setting.role,
       ]),
-    ).toEqual([
-      ["account-model", ["user"], "model"],
-      ["model", ["bot"], "model"],
-    ]);
+    ).toEqual([["model", ["bot"], "model"]]);
 
     // The application's own shell is mounted unconditionally: it is projected
     // so model resolution sees every manifest, but marked platform-owned so no

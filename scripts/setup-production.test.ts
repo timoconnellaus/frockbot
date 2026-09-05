@@ -299,6 +299,9 @@ exit 0
     expect(validation?.env?.COMPOSIO_API_KEY).toBe(
       "${{ secrets.COMPOSIO_API_KEY }}",
     );
+    expect(validation?.env?.COMPOSIO_WEBHOOK_SECRET).toBe(
+      "${{ secrets.COMPOSIO_WEBHOOK_SECRET }}",
+    );
     expect(validation?.env).not.toHaveProperty("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
     expect(validation?.env?.FROCKBOT_AUTHORIZATION_STATE_SECRET).toBe(
       "${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}",
@@ -361,6 +364,7 @@ exit 0
 
     const productionEnvironment = {
       COMPOSIO_API_KEY: "composio-production",
+      COMPOSIO_WEBHOOK_SECRET: "provider-signing-secret",
       FROCKBOT_AUTHORIZATION_STATE_SECRET:
         "6f0d6ae3ec5c4c448ef2ccdd08b0d4d834422c873244420f8879b6a2e99504fa",
       ...process.env,
@@ -533,6 +537,9 @@ exit 1
     );
     expect(forwarded.COMPOSIO_API_KEY).toBe(
       productionEnvironment.COMPOSIO_API_KEY,
+    );
+    expect(forwarded.COMPOSIO_WEBHOOK_SECRET).toBe(
+      productionEnvironment.COMPOSIO_WEBHOOK_SECRET,
     );
     expect(forwarded).not.toHaveProperty("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
     expect(forwarded.FROCKBOT_AUTHORIZATION_STATE_SECRET).toBe(

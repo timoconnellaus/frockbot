@@ -330,28 +330,22 @@ export async function enableCustomModels(page: Page): Promise<void> {
   await closeOverlay(page);
 }
 
-/**
- * Enable the Ollama Cloud Package if it is not already, then connect an API
- * key to an endpoint on Models.
- *
- * Three steps, three surfaces on purpose: Custom models decides whether a User
- * chooses models at all, Plugins decides whether this provider is on, and
- * Models sets it up. Ollama Cloud declares a dependency on Custom models, so
- * enabling it first is the shipped path, not test scaffolding. `API base URL`
- * is the Package's own Connection setting, so pointing the Connection at the
- * harness's fake server is also the shipped path a User takes to reach a local
- * Ollama. It leaves the form submitted; the caller decides whether it expects
- * success or a failure.
- */
+/** Choose the provider on Models, then connect its account on that same surface.
+ * The API base URL is the declared provider field pointing at the test server. */
 export async function connectOllama(
   page: Page,
   options: { apiKey: string; apiBaseUrl: string; label?: string },
 ): Promise<void> {
-  await enableCustomModels(page);
-  await openPlugins(page);
-  await enablePluginRow(ollamaPluginRow(page));
-  await closeOverlay(page);
   await openModels(page);
+  const provider = page.locator("form.frame-section", {
+    has: page.getByRole("heading", { name: "Ollama Cloud", exact: true }),
+  });
+  await provider
+    .getByRole("button", { name: "Choose provider", exact: true })
+    .click();
+  await provider
+    .getByRole("button", { name: "Manage account", exact: true })
+    .click();
   const card = ollamaCard(page);
   await card.getByRole("button", { name: "Connect", exact: true }).click();
   await page
@@ -381,12 +375,23 @@ export async function chooseDefaultModel(
   optionLabel: string,
 ): Promise<void> {
   await openModels(page);
-  const models = page.getByLabel(/^Account model/);
+  const section = page.locator("form.frame-section", {
+    has: page.getByRole("heading", { name: "Default model", exact: true }),
+  });
+  await section.getByRole("button", { name: /Auto|Choose a model/u }).click();
+  await page
+    .getByRole("dialog", { name: "Choose a model" })
+    .getByRole("button", {
+      name: optionLabel.replace(" — ", " · "),
+      exact: true,
+    })
+    .click();
+  await section
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
   await expect(
-    models.getByRole("option", { name: optionLabel }),
-  ).toBeAttached();
-  await models.selectOption({ label: optionLabel });
-  await page.getByRole("button", { name: "Save account model" }).click();
+    page.getByRole("status").filter({ hasText: "Saved." }),
+  ).toBeVisible();
   await closeOverlay(page);
   await expect(page.getByRole("heading", { name: "Models" })).toBeHidden();
 }

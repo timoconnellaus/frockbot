@@ -37,7 +37,7 @@ async function disablePackage(
   packageId: string,
 ): Promise<void> {
   const settings = (await expectOkJson(
-    await asUser(userId, "/api/settings"),
+    await asUser(userId, "/api/settings?view=2"),
   )) as { revision: number };
   await expectOkJson(
     await postAsUser(userId, "/api/settings", {
@@ -63,7 +63,7 @@ async function platformModel(
   userId: string,
 ): Promise<{ providerModelId?: string } | undefined> {
   const settings = (await expectOkJson(
-    await asUser(userId, "/api/settings"),
+    await asUser(userId, "/api/settings?view=2"),
   )) as { platformModel?: { providerModelId?: string } };
   return settings.platformModel;
 }
@@ -72,7 +72,7 @@ async function packageStates(
   userId: string,
 ): Promise<Record<string, string | undefined>> {
   const settings = (await expectOkJson(
-    await asUser(userId, "/api/settings"),
+    await asUser(userId, "/api/settings?view=2"),
   )) as { packages: Array<{ packageId: string; state: string }> };
   return Object.fromEntries(
     settings.packages.map((pkg) => [pkg.packageId, pkg.state]),
@@ -104,18 +104,16 @@ describe("a Bot whose model's provider is switched off", () => {
     expect((await platformModel(userId))?.providerModelId).toBe("@frock/auto");
   });
 
-  it("cascades a dependency's disable to the provider and still answers", async () => {
+  it("keeps the account provider and model active with the Bot override Package disabled", async () => {
     const userId = freshUserId("provider-cascade");
     const botId = "cascaded-bot";
     await provisionThroughGateway({ userId, botId });
 
-    // `provider-ollama-cloud` declares a dependency on `custom-models`, so
-    // switching Custom models off carries the provider with it rather than
-    // leaving the account in the state the enable path refuses to create.
+    // The optional Bot override no longer owns the permanent account choice.
     await disablePackage(userId, "custom-models");
     const states = await packageStates(userId);
     expect(states["custom-models"]).toBe("disabled");
-    expect(states["provider-ollama-cloud"]).toBe("disabled");
+    expect(states["provider-ollama-cloud"]).toBe("installed");
 
     const before = (await frockModelCalls()).length;
     const turn = await postAsUser(userId, `/api/bots/${botId}/turns`, {
@@ -124,10 +122,10 @@ describe("a Bot whose model's provider is switched off", () => {
       text: "hello",
     });
     expect(turn.status).toBe(200);
-    expect(JSON.stringify(await turn.json())).toContain("Frock AI reply");
+    expect(JSON.stringify(await turn.json())).toContain("Ollama reply");
     expect(
       (await frockModelCalls()).slice(before).map((call) => call.model),
-    ).toContain(FROCK_AUTO_GATEWAY_MODEL);
+    ).not.toContain(FROCK_AUTO_GATEWAY_MODEL);
     expect((await platformModel(userId))?.providerModelId).toBe("@frock/auto");
   });
 });

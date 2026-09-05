@@ -21,7 +21,7 @@ import {
   type CustomModelsClientState,
 } from "./index.js";
 
-function fixture(accountModel?: ModelBindingV1): {
+function fixture(botModel?: ModelBindingV1): {
   slots: ClientSlotRegistration[];
   commands: ConfigurationCommandV1[];
   state: CustomModelsClientState;
@@ -40,12 +40,12 @@ function fixture(accountModel?: ModelBindingV1): {
         packageId: "custom-models",
         version: "0.0.1",
         state: "installed",
-        ...(accountModel ? { values: { "account-model": accountModel } } : {}),
       },
     ],
     connections: [],
   };
   const bot = initializeBotSettingsV1("scout");
+  if (botModel) bot.packageValues["custom-models"] = { model: botModel };
   let userLoadCount = 0;
   let botLoadCount = 0;
   const web = ref({
@@ -111,38 +111,25 @@ function fixture(accountModel?: ModelBindingV1): {
 }
 
 describe("Custom models client Contribution", () => {
-  test("mounts the account and Bot model sections", () => {
+  test("mounts only the Bot model override section", () => {
     const mounted = fixture();
     expect(mounted.slots.map((slot) => slot.slot)).toEqual([
-      "frockbot.models-sections",
       "frockbot.bot-settings-sections",
     ]);
     mounted.dispose();
   });
 
-  test("round-trips selections and clears through User and Bot Package-setting commands", async () => {
+  test("round-trips Bot overrides through Bot Package-setting commands", async () => {
     const mounted = fixture();
     const model: ModelBindingV1 = {
       connectionId: "flock-ai",
       providerModelId: "@frock/manual",
     };
 
-    await mounted.state.setAccountModel(model);
-    await mounted.state.setAccountModel(undefined);
     await mounted.state.setBotModel(model);
     await mounted.state.setBotModel(undefined);
 
     expect(mounted.commands).toMatchObject([
-      {
-        type: "user/set-package-settings",
-        packageId: "custom-models",
-        values: { "account-model": model },
-      },
-      {
-        type: "user/set-package-settings",
-        packageId: "custom-models",
-        unset: ["account-model"],
-      },
       {
         type: "bot/set-package-settings",
         botId: "scout",
@@ -156,27 +143,27 @@ describe("Custom models client Contribution", () => {
         unset: ["model"],
       },
     ]);
-    expect(mounted.userLoads()).toBe(2);
+    expect(mounted.userLoads()).toBe(0);
     expect(mounted.botLoads()).toBe(2);
     mounted.dispose();
   });
 
-  test("clears an account model whose Connection no longer resolves", async () => {
+  test("clears a Bot override whose Connection no longer resolves", async () => {
     const mounted = fixture({
       connectionId: "ollama-legacy",
       providerModelId: "glm-5.3-flash:cloud",
     });
 
-    await mounted.state.setAccountModel(undefined);
+    await mounted.state.setBotModel(undefined);
 
     expect(mounted.commands).toMatchObject([
       {
-        type: "user/set-package-settings",
+        type: "bot/set-package-settings",
         packageId: "custom-models",
-        unset: ["account-model"],
+        unset: ["model"],
       },
     ]);
-    expect(mounted.userLoads()).toBe(1);
+    expect(mounted.botLoads()).toBe(1);
     mounted.dispose();
   });
 });

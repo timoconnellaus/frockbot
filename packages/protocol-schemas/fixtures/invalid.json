@@ -1092,6 +1092,55 @@
     }
   },
   {
+    "name": "SettingsChangeCommand invalid",
+    "schema": "SettingsChangeCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "settings-command-1",
+      "expectedRevision": -1,
+      "sectionId": "profile",
+      "values": {},
+      "ownerId": "tim"
+    }
+  },
+  {
+    "name": "settings choices do not load remote widgets",
+    "schema": "SettingField",
+    "value": {
+      "id": "count",
+      "label": "Count",
+      "kind": "select",
+      "value": 2,
+      "editable": true,
+      "choices": [
+        {
+          "label": "Two",
+          "value": 2,
+          "script": "https://evil.test/widget.js"
+        }
+      ]
+    }
+  },
+  {
+    "name": "settings-receipt-invalid",
+    "schema": "SettingsReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "save-1",
+      "revision": 2,
+      "status": "rejected"
+    }
+  },
+  {
+    "name": "settings-handoff-invalid",
+    "schema": "SettingsHandoffCommand",
+    "value": {
+      "schemaVersion": 1,
+      "home": "models",
+      "returnUri": "https://evil.example"
+    }
+  },
+  {
     "name": "GenerationId rejects path separators",
     "schema": "GenerationId",
     "value": "../generation"
@@ -1105,5 +1154,254 @@
     "name": "GenerationId rejects control characters",
     "schema": "GenerationId",
     "value": "generation\nnext"
+  },
+  {
+    "name": "SettingChoice extra authority",
+    "schema": "SettingChoice",
+    "value": {
+      "label": "Bad",
+      "value": null,
+      "secret": "forbidden"
+    }
+  },
+  {
+    "name": "SettingsOptionsQuery rejects negative cursor",
+    "schema": "SettingsOptionsQuery",
+    "value": {
+      "schemaVersion": 1,
+      "source": "account-models",
+      "revision": 1,
+      "query": "",
+      "cursor": -1
+    }
+  },
+  {
+    "name": "SettingsOptionsPage rejects unbounded page",
+    "schema": "SettingsOptionsPage",
+    "value": {
+      "schemaVersion": 1,
+      "source": "account-models",
+      "ownerId": "user-1",
+      "revision": 1,
+      "items": [
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        },
+        {
+          "label": "Model",
+          "value": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "SettingsChangeCommand requires the observed owner",
+    "schema": "SettingsChangeCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "settings-command-1",
+      "expectedRevision": 1,
+      "sectionId": "profile",
+      "values": {
+        "name": "Tim"
+      }
+    }
   }
 ]

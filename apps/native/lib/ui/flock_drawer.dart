@@ -23,6 +23,7 @@ class FlockDrawer extends StatelessWidget {
     required this.selectedId,
     required this.onSelect,
     required this.onRefresh,
+    required this.onSettings,
     required this.onSignOut,
     this.stateOf,
   });
@@ -30,6 +31,7 @@ class FlockDrawer extends StatelessWidget {
   final String? selectedId;
   final ValueChanged<wire.BotRegistration> onSelect;
   final VoidCallback onRefresh;
+  final VoidCallback onSettings;
   final VoidCallback onSignOut;
 
   /// What the ring around each sheep says. Unknown Bots get no ring.
@@ -97,6 +99,12 @@ class FlockDrawer extends StatelessWidget {
                   leading: const FrockIconTile(Icons.refresh_rounded),
                   title: 'Refresh',
                   onTap: onRefresh,
+                ),
+                FrockRow(
+                  leading: const FrockIconTile(Icons.tune_rounded),
+                  title: 'Settings',
+                  chevron: true,
+                  onTap: onSettings,
                 ),
                 FrockRow(
                   leading: const FrockIconTile(Icons.logout_rounded),

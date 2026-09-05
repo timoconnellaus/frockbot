@@ -887,6 +887,59 @@
     }
   },
   {
+    "name": "SettingsChangeCommand valid",
+    "schema": "SettingsChangeCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "settings-command-1",
+      "expectedRevision": 1,
+      "sectionId": "profile",
+      "values": {
+        "name": "Tim"
+      },
+      "ownerId": "tim"
+    }
+  },
+  {
+    "name": "typed settings choices and constraints",
+    "schema": "SettingField",
+    "value": {
+      "id": "count",
+      "label": "Count",
+      "kind": "select",
+      "value": 2,
+      "editable": true,
+      "choices": [
+        {
+          "label": "Two",
+          "value": 2
+        }
+      ],
+      "minimum": 1,
+      "maximum": 5,
+      "required": true,
+      "hint": "A declared setting"
+    }
+  },
+  {
+    "name": "settings-receipt-valid",
+    "schema": "SettingsReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "save-1",
+      "revision": 2,
+      "status": "applied"
+    }
+  },
+  {
+    "name": "settings-handoff-valid",
+    "schema": "SettingsHandoffCommand",
+    "value": {
+      "schemaVersion": 1,
+      "home": "models"
+    }
+  },
+  {
     "name": "GenerationId published timestamp and digest",
     "schema": "GenerationId",
     "value": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca"
@@ -974,6 +1027,40 @@
       "currentGenerationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
       "tools": ["increment"],
       "createdAt": "2026-09-05T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "SettingChoice typed value",
+    "schema": "SettingChoice",
+    "value": {
+      "label": "Example model",
+      "value": {
+        "connectionId": "model-connection",
+        "providerModelId": "model"
+      }
+    }
+  },
+  {
+    "name": "SettingsOptionsQuery valid",
+    "schema": "SettingsOptionsQuery",
+    "value": {
+      "schemaVersion": 1,
+      "source": "account-models",
+      "revision": 1,
+      "query": "model",
+      "cursor": 50
+    }
+  },
+  {
+    "name": "SettingsOptionsPage valid",
+    "schema": "SettingsOptionsPage",
+    "value": {
+      "schemaVersion": 1,
+      "source": "account-models",
+      "ownerId": "user-1",
+      "revision": 1,
+      "items": [],
+      "nextCursor": 50
     }
   }
 ]

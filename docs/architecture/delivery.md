@@ -35,3 +35,11 @@ The anonymous `https://bot.frockbot.com/.well-known/assetlinks.json` names `com.
 `android,macos` additionally admits `/native/return/macos`, only after the existing team `Q444L76529` has supplied a matching signed application and verified-return qualification. The Apple association is published in preparation; publishing it alone does not qualify an ad-hoc Mac build. iOS remains deferred. An absent/unrecognized switch or absent Better Auth secret constructs no native auth handler: reserved native auth/return routes return a plain unavailable response, never fall through to application loading. Removing the switch fences native access without deleting its durable session records; normal expiry/revocation still applies when enabled again.
 
 The switch opens qualification transport, not supported-native distribution or catalog promotion. The [acceptance ledger](../plans/native-acceptance-2026-09-05.md) retains the unproven isolation, eviction and performance gates. Qualification UI/telemetry requires `NATIVE_ACCEPTANCE=true` at build time and has no sign-in entry point. Production releases and Android development APKs remain separate; the orchestrator owns release tags.
+
+Native Models account setup uses `POST /api/auth/native/settings` and an exact
+`/native/settings` return carrying a five-minute signed navigation intent. The
+backend requires the browser session to identify the same User as the native
+session; a native bearer never creates a browser session. Only the Models and
+Connections destinations are declared. Credentials and OAuth grants remain in
+the owning backend surface. Settings commands carry their observed User id, and
+a session switch is refused before a command reaches another User owner.

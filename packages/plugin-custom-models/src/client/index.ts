@@ -2,7 +2,6 @@
 
 import type { ClientPlugin } from "@frockbot/client-core";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
-import AccountModelsSection from "./AccountModelsSection.vue";
 import BotModelSection from "./BotModelSection.vue";
 import {
   createCustomModelsClientState,
@@ -15,11 +14,6 @@ export const customModelsClientPlugin: ClientPlugin = (ctx) => {
   const state = createCustomModelsClientState(ctx.transport, web);
   return [
     ctx.provide(customModelsClientStateKey, state),
-    ctx.slot({
-      slot: "frockbot.models-sections",
-      order: 0,
-      component: AccountModelsSection,
-    }),
     ctx.slot({
       slot: "frockbot.bot-settings-sections",
       order: 0,

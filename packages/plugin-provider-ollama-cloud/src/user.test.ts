@@ -42,11 +42,15 @@ class MemoryStorage implements UserSettingsStorage, CredentialStorage {
     keyOrEntries: string | Record<string, unknown>,
     value?: T,
   ): Promise<void> {
+    const keys =
+      typeof keyOrEntries === "string"
+        ? [keyOrEntries]
+        : Object.keys(keyOrEntries);
+    if (this.failNextKey && keys.includes(this.failNextKey)) {
+      this.failNextKey = undefined;
+      return Promise.reject(new Error("injected storage failure"));
+    }
     if (typeof keyOrEntries === "string") {
-      if (this.failNextKey === keyOrEntries) {
-        this.failNextKey = undefined;
-        return Promise.reject(new Error("injected storage failure"));
-      }
       this.values.set(keyOrEntries, value);
       if (this.armEntriesFailureAfterKey?.key === keyOrEntries) {
         this.failNextEntriesContaining = this.armEntriesFailureAfterKey.entry;
@@ -69,6 +73,13 @@ class MemoryStorage implements UserSettingsStorage, CredentialStorage {
         this.armGetFailureAfterEntriesContaining = undefined;
         this.failNextGetKey = "user-configuration";
       }
+    }
+    if (
+      this.armEntriesFailureAfterKey &&
+      keys.includes(this.armEntriesFailureAfterKey.key)
+    ) {
+      this.failNextEntriesContaining = this.armEntriesFailureAfterKey.entry;
+      this.armEntriesFailureAfterKey = undefined;
     }
     return Promise.resolve();
   }

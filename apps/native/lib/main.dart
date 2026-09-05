@@ -6,6 +6,7 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/scheduler.dart';
 
 import 'client/auth.dart';
+import 'settings/page.dart';
 import 'auth/sign_in_page.dart';
 import 'ui/chat_pane.dart';
 import 'ui/chat_screen.dart';
@@ -274,6 +275,15 @@ class _FrockBotAppState extends State<FrockBotApp> {
               builder: (_) => AppletDirectoryPage(api: api, userId: userId!),
             ),
           ),
+          onSettings: () {
+            scaffoldKey.currentState?.closeDrawer();
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) =>
+                    SettingsPage(api: api, store: store, userId: userId!),
+              ),
+            );
+          },
           extraActions: [
             if (const bool.fromEnvironment('NATIVE_ACCEPTANCE'))
               FrockIconButton(

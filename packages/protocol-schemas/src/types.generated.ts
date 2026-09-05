@@ -432,6 +432,15 @@ export type SettingField = {
   value: Json;
   options?: Array<string>;
   editable: boolean;
+  hint?: string;
+  minimum?: number;
+  maximum?: number;
+  maxLength?: number;
+  required?: boolean;
+  choices?: Array<SettingChoice>;
+  choiceSource?: "account-models";
+  isSet?: boolean;
+  canReset?: boolean;
 };
 export type SettingsFrame = {
   schemaVersion: 1;
@@ -440,12 +449,17 @@ export type SettingsFrame = {
   ownerId: Identifier;
   title: string;
   sections: Array<{
-    id: Identifier;
+    id: string;
     packageId?: Identifier;
     label: string;
     fields: Array<SettingField>;
     credentialStatus?: "not-required" | "missing" | "connected" | "revoked";
     failure?: string;
+    actions?: Array<{
+      kind: "choose-provider" | "manage-provider";
+      label: string;
+      packageId: Identifier;
+    }>;
   }>;
 };
 export type AppletViewerToken = {
@@ -583,7 +597,52 @@ export type AppletDirectory = {
   schemaVersion: 1;
   applets: Array<AppletSummary>;
 };
+export type SettingsChangeCommand = {
+  schemaVersion: 1;
+  commandId: Identifier;
+  expectedRevision: number;
+  sectionId: string;
+  values: {
+    [key: string]: Json;
+  };
+  unset?: Array<Identifier>;
+  ownerId: Identifier;
+};
+export type SettingsReceipt =
+  | {
+      schemaVersion: 1;
+      commandId: Identifier;
+      revision: number;
+      status: "pending" | "applied";
+    }
+  | {
+      schemaVersion: 1;
+      commandId: Identifier;
+      revision: number;
+      status: "rejected";
+      failure: string;
+    };
+export type SettingsHandoffCommand = {
+  schemaVersion: 1;
+  home: "models" | "connections";
+};
 export type GenerationId = string;
+export type SettingChoice = { label: string; value: Json };
+export type SettingsOptionsQuery = {
+  schemaVersion: 1;
+  source: "account-models";
+  revision: number;
+  query: string;
+  cursor?: number;
+};
+export type SettingsOptionsPage = {
+  schemaVersion: 1;
+  source: "account-models";
+  ownerId: Identifier;
+  revision: number;
+  items: Array<SettingChoice>;
+  nextCursor?: number;
+};
 export interface ProtocolTypes {
   Identifier: Identifier;
   BotId: BotId;
@@ -656,5 +715,11 @@ export interface ProtocolTypes {
   TurnResponse: TurnResponse;
   AppletSummary: AppletSummary;
   AppletDirectory: AppletDirectory;
+  SettingsChangeCommand: SettingsChangeCommand;
+  SettingsReceipt: SettingsReceipt;
+  SettingsHandoffCommand: SettingsHandoffCommand;
   GenerationId: GenerationId;
+  SettingChoice: SettingChoice;
+  SettingsOptionsQuery: SettingsOptionsQuery;
+  SettingsOptionsPage: SettingsOptionsPage;
 }

@@ -38,6 +38,13 @@
       "releaseBuild": "passed",
       "verifiedSignIn": "blocked-matching-provisioning-profile"
     },
-    "fullBudgets": "unqualified"
+    "fullBudgets": "unqualified",
+    "settingsModels": {
+      "backendAndRenderers": "passed-paired-owner-and-recovery-scenarios",
+      "flutterTests": 247,
+      "macosReleaseBuild": "passed-local-production-worker",
+      "releaseScreenshots": "macos-settings-and-offline-captured; models-interaction-blocked-accessibility; pixel-awaits-deployment",
+      "supportedDistribution": "not-promoted"
+    }
   }
 }

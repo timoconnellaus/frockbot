@@ -3,7 +3,6 @@ import {
   type ModelBindingV1,
 } from "@frockbot/configuration-core";
 
-export const ACCOUNT_MODEL_SETTING_ID_V1 = "account-model";
 export const BOT_MODEL_SETTING_ID_V1 = "model";
 
 /** A model-role value has already crossed a decoded settings seam; be defensive when reading an absent or stale value. */

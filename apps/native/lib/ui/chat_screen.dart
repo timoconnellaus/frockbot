@@ -22,6 +22,7 @@ class ChatScreen extends StatelessWidget {
     required this.onRefresh,
     required this.onSignOut,
     required this.onApplets,
+    required this.onSettings,
     required this.body,
     this.extraActions = const [],
     this.scaffoldKey,
@@ -34,6 +35,7 @@ class ChatScreen extends StatelessWidget {
   final VoidCallback onRefresh;
   final VoidCallback onSignOut;
   final VoidCallback onApplets;
+  final VoidCallback onSettings;
   final Widget body;
   final List<Widget> extraActions;
 
@@ -51,6 +53,7 @@ class ChatScreen extends StatelessWidget {
           id == selected?.botId.value ? selectedState : BotState.none,
       onSelect: onSelect,
       onRefresh: onRefresh,
+      onSettings: onSettings,
       onSignOut: onSignOut,
     );
     final room = Padding(

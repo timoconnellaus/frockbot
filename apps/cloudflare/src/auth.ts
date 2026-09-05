@@ -98,6 +98,12 @@ export function gatewayAuth(
 
   const auth = createAuth(configured, dependencies);
   return {
+    profile: async (userId) => {
+      const user = await (
+        await auth.$context
+      ).internalAdapter.findUserById(userId);
+      return user ? { name: user.name, email: user.email } : null;
+    },
     handler: (request) => auth.handler(request),
     getSession: async (headers) => {
       const session = await auth.api.getSession({ headers });

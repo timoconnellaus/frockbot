@@ -11,14 +11,15 @@ import { join, resolve } from "node:path";
 // `tsc --lsp --stdio`. Point your editor's TypeScript LSP command at this file.
 //
 // The binary is per-platform (@typescript/typescript-<platform>-<arch>) and is
-// only installed under packages that are already on TypeScript 7, so resolve it
-// from one of those rather than from the repo root, whose `typescript` is still
-// 5.9.3 for the compiler-API scripts.
+// only installed under packages that declare `typescript` at ^7.0.2, so resolve
+// it from one of those rather than from the repo root, whose `typescript` is
+// the tsgo bridge — the same 7.0.2 checker, but reached through a NAPI addon
+// rather than the standalone binary an editor needs to spawn.
 
 const repoRoot = resolve(import.meta.dirname, "..");
 
 // Any package on ^7.0.2 will do; protocol is the smallest and has no siblings
-// that would drag it back to 5.9.3.
+// that would drag it back to the bridge.
 const anchor = join(repoRoot, "packages/protocol/package.json");
 
 const platformPackage = `@typescript/typescript-${process.platform}-${process.arch}`;

@@ -870,7 +870,6 @@ describe("Bot selection", () => {
             packageId: "custom-models",
             version: "0.0.1",
             state: "installed",
-            ...(accountValues ? { values: accountValues } : {}),
           },
           {
             packageId: "model-provider",
@@ -907,6 +906,7 @@ describe("Bot selection", () => {
           },
         ],
         ...(platformModel ? { platformModel } : {}),
+        ...(accountValues?.model ? { accountModel: accountValues.model } : {}),
       };
       await shellClientPlugin({
         transport: {

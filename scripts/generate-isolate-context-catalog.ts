@@ -1,4 +1,6 @@
-// This generator uses the TypeScript 5 compiler API, so the root pins TypeScript 5.9.3 for it.
+// The root `typescript` is the tsgo 7.0.2 bridge: `tsc` is the TypeScript 7 Go
+// compiler, while the JavaScript API this generator needs (parser, printer)
+// still resolves. TypeScript 7's own package exposes neither.
 import ts from "typescript";
 import { format } from "prettier";
 

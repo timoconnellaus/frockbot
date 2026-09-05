@@ -1,3 +1,4 @@
+import { decodeProtocol } from "@frockbot/protocol-schemas";
 import { saveNativeQualificationForm } from "./native-form.js";
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -16,6 +17,7 @@ import {
 } from "@frockbot/connection-core";
 import {
   decodeBotSettingsViewV1,
+  type UserSettingsViewV1,
   decodeUserConfigurationExecuteRpcV1,
   decodeUserConfigurationReadRpcV1,
 } from "@frockbot/configuration-core";
@@ -172,6 +174,7 @@ const USER_IDENTITY_KEY = "user:identity";
 
 interface UserConfigurationEnv {
   COMPOSIO_API_KEY?: string;
+  COMPOSIO_WEBHOOK_SECRET?: string;
   COMPOSIO_TEST_URL?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   BETTER_AUTH_URL?: string;
@@ -264,11 +267,31 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
                 ? this.env.ALLOW_DEVELOPMENT_AUTH === "true"
                   ? this.env.COMPOSIO_TEST_URL
                   : undefined
-                : name === "COMPOSIO_API_KEY"
-                  ? this.env.COMPOSIO_API_KEY
-                  : name === "BETTER_AUTH_URL"
-                    ? this.env.BETTER_AUTH_URL
-                    : this.env.CREDENTIAL_KEYRING,
+                : name === "COMPOSIO_WEBHOOK_SECRET"
+                  ? this.env.COMPOSIO_WEBHOOK_SECRET
+                  : name === "COMPOSIO_API_KEY"
+                    ? this.env.COMPOSIO_API_KEY
+                    : name === "BETTER_AUTH_URL"
+                      ? this.env.BETTER_AUTH_URL
+                      : this.env.CREDENTIAL_KEYRING,
+          deliverConnectionEvent: async (userId, botId, delivery) => {
+            await this.assertUserIdentity(userId);
+            await (await this.contributions()).flock.registration(botId);
+            // SAFETY: this namespace is bound to BotState; the DTO is decoded at its RPC seam.
+            const rpc = this.env.BOT_STATES.getByName(
+              `${userId}:${botId}`,
+            ) as unknown as {
+              deliverConnectionEvent(input: unknown): Promise<unknown>;
+            };
+            return rpcJsonSnapshotV1(
+              await rpc.deliverConnectionEvent({
+                schemaVersion: 1,
+                userId,
+                botId,
+                delivery,
+              }),
+            );
+          },
           packagePublisher: createPackagePublicationHost(
             this.env,
             this.ctx.storage,
@@ -644,10 +667,68 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return pinned === userId;
   }
 
-  async readConfiguration(input: unknown) {
+  async readConfiguration(input: unknown): Promise<UserSettingsViewV1> {
     const request = decodeUserConfigurationReadRpcV1(input);
     await this.assertUserIdentity(request.userId);
-    return (await this.settingsContribution()).readConfiguration(request);
+    const settings = await (
+      await this.settingsContribution()
+    ).readConfiguration(request);
+    if (request.view === 2) return settings;
+    return (await this.settingsContribution()).previousSettingsView(settings);
+  }
+
+  async readSettingsFrame(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        home: rpcEnum(["application", "models"]),
+      },
+      { identityName: rpcString(100), identityEmail: rpcString(320) },
+    );
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.settingsContribution()).readSettingsFrame(
+      request.userId as string,
+      request.home as "application" | "models",
+      {
+        ...(request.identityName
+          ? { name: request.identityName as string }
+          : {}),
+        ...(request.identityEmail
+          ? { email: request.identityEmail as string }
+          : {}),
+      },
+    );
+  }
+
+  async readSettingsOptions(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      query: rpcDecoded((value) =>
+        decodeProtocol("SettingsOptionsQuery", value),
+      ),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.settingsContribution()).readSettingsOptions(
+      request.userId as string,
+      request.query,
+    );
+  }
+
+  async changeSettings(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      home: rpcEnum(["application", "models"]),
+      command: rpcDecoded((value) =>
+        decodeProtocol("SettingsChangeCommand", value),
+      ),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.settingsContribution()).changeSettings(
+      request.userId as string,
+      request.home as "application" | "models",
+      request.command,
+    );
   }
 
   async executeConfiguration(input: unknown) {
@@ -743,7 +824,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     if (
       operation === "list-tools" ||
       operation === "execute-tool" ||
-      operation === "tool-availability"
+      operation === "tool-availability" ||
+      operation === "validate-trigger" ||
+      operation === "sync-subscription" ||
+      operation === "subscription-status"
     ) {
       if (typeof request.botId !== "string")
         throw new Error("Bot identity is required for tools");
@@ -751,7 +835,11 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     }
     const contribution = contributions.composio;
     if (!contribution) throw new Error("Connected apps are unavailable");
-    return contribution.request(userId, request.command);
+    return contribution.request(
+      userId,
+      request.command,
+      typeof request.botId === "string" ? request.botId : undefined,
+    );
   }
 
   async readMcpServers(input: unknown) {
@@ -1677,6 +1765,12 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     contributions.search.purge(botId);
     contributions.audit.purgeAuditForBot(botId);
     await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}`);
+    const userId = await this.provenIdentity();
+    if (userId)
+      await contributions.composio?.triggerSubscriptions.removeBot(
+        userId,
+        botId,
+      );
     await contributions.flock.forgetDeletedBot(botId);
   }
 
@@ -2086,7 +2180,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             : { schedule: routine.schedule }),
           ...(routine.trigger === undefined
             ? {}
-            : { trigger: { kind: "webhook" as const } }),
+            : { trigger: { kind: routine.trigger.kind } }),
           timezone: routine.timezone,
         })),
     };

@@ -1,3 +1,4 @@
+import { decodeConnectionTriggerCatalogV1 } from "@frockbot/connection-core";
 /// <reference path="../env.d.ts" />
 
 // The Routines hosted client Contribution.
@@ -88,6 +89,23 @@ export const routinesClientPlugin: ClientPlugin = (ctx) => {
         state.value.routines = view.routines;
         state.value.loaded = true;
         state.value.error = undefined;
+        try {
+          const catalog = decodeConnectionTriggerCatalogV1(
+            await request(
+              `/api/bots/${encodeURIComponent(botId)}/routines/triggers`,
+            ),
+          );
+          if (state.value.botId === botId) {
+            state.value.triggers = catalog.items;
+            state.value.triggerError = undefined;
+          }
+        } catch {
+          if (state.value.botId === botId) {
+            state.value.triggers = [];
+            state.value.triggerError =
+              "Events are temporarily unavailable. Try again shortly.";
+          }
+        }
       } catch (error) {
         state.value.error = message(error, "Could not load Routines");
       }
