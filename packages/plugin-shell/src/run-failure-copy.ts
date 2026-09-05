@@ -126,3 +126,34 @@ export function knownFailureCopyV1(failure: string | undefined): string {
     ? failure
     : RUN_FAILURE_FALLBACK_COPY_V1;
 }
+
+/**
+ * The half of a failure sentence that asks the person to send it again.
+ *
+ * These sentences were written for a thread that had nothing to press: they
+ * ended by telling the person to try again, and trying again meant typing
+ * their message a second time. The words stay on the wire — a client that
+ * cannot offer the action still needs to say what to do — and a client that
+ * can offer it drops them and shows the action instead.
+ */
+export const FAILURE_RETRY_INVITATION_V1 = " Try again.";
+
+/**
+ * A failure sentence split into what it reports and whether sending the same
+ * message again is the way out of it.
+ *
+ * Only a sentence that asks for a retry gets one: "You stopped this." and
+ * "This Bot wouldn't do that." are endings the person chose or the Bot meant,
+ * and neither is repaired by sending the message a second time.
+ */
+export function failureNoticeV1(copy: string): {
+  notice: string;
+  retry: boolean;
+} {
+  return copy.endsWith(FAILURE_RETRY_INVITATION_V1)
+    ? {
+        notice: copy.slice(0, -FAILURE_RETRY_INVITATION_V1.length),
+        retry: true,
+      }
+    : { notice: copy, retry: false };
+}
