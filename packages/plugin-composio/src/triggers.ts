@@ -311,15 +311,18 @@ export class ComposioTriggerSubscriptions {
         };
         await this.host.storage.put(key, cached);
       }
+      const connectorName = String(
+        connection.safeMetadata.toolkitName ?? account.toolkitSlug,
+      );
       for (const type of cached.types.filter((type) => !type.needsSetup))
         items.push({
           connectionId: row.connectionId,
-          connectorName: String(
-            connection.safeMetadata.toolkitName ?? account.toolkitSlug,
-          ),
+          connectorName,
           accountName: connection.displayName,
           triggerType: type.slug,
-          name: type.name,
+          name: type.name.toLowerCase().includes(connectorName.toLowerCase())
+            ? type.name
+            : `${type.name} in ${connectorName}`,
           description: type.description,
           configSchema: type.configSchema,
           version: type.version,

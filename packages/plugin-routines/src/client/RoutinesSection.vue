@@ -86,12 +86,10 @@ const eventFields = computed(() => {
       ? [
           {
             key,
-            label:
-              typeof value.title === "string"
-                ? value.title
-                : key
-                    .replaceAll("_", " ")
-                    .replace(/^./, (letter) => letter.toUpperCase()),
+            label: (typeof value.title === "string" ? value.title : key)
+              .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+              .replaceAll("_", " ")
+              .replace(/^./, (letter) => letter.toUpperCase()),
             hint:
               typeof value.description === "string"
                 ? value.description
