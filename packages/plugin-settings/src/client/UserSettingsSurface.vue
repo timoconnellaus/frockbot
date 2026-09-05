@@ -79,6 +79,19 @@ async function save(): Promise<void> {
       <UiField label="Email" hint="optional">
         <input v-model="email" maxlength="320" type="email" />
       </UiField>
+      <!--
+        The Save belongs to the two fields above it and to nothing else.
+
+        It used to sit at the foot of the whole surface, under the plugin
+        blocks that save themselves and under Usage, which saves nothing: a
+        third button reading "Save settings", the last thing on the page, and
+        the one thing on it that would not save what it was sitting beneath.
+      -->
+      <div class="settings-actions">
+        <UiButton type="submit" variant="primary" :disabled="saving">
+          {{ saving ? "Saving…" : "Save profile" }}
+        </UiButton>
+      </div>
     </UiAnchor>
     <UiAnchor
       anchor="user-package-settings"
@@ -95,16 +108,15 @@ async function save(): Promise<void> {
         Open Plugins
       </UiButton>
     </UiAnchor>
-    <div class="primary-contributions">
-      <k-slot name="frockbot.user-settings-primary-sections" />
-    </div>
     <p v-if="web.settingsError" class="settings-error" role="alert">
       {{ web.settingsError }}
     </p>
-    <div class="settings-actions">
-      <UiButton type="submit" variant="primary" :disabled="saving">
-        {{ saving ? "Saving…" : "Save settings" }}
-      </UiButton>
+    <!--
+      Usage is a reading, not a setting, so it sits after the settings rather
+      than between two of them.
+    -->
+    <div class="primary-contributions">
+      <k-slot name="frockbot.user-settings-primary-sections" />
     </div>
     <details class="advanced">
       <summary>

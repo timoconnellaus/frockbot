@@ -1,13 +1,6 @@
-/** Return the wrapped focus target, or undefined when Tab stays within the dialog. */
-export function dialogFocusWrapTarget<T>(
-  controls: readonly T[],
-  active: T | null,
-  reverse: boolean,
-): T | undefined {
-  const first = controls[0];
-  const last = controls.at(-1);
-  if (!first || !last) return undefined;
-  if (reverse && active === first) return last;
-  if (!reverse && active === last) return first;
-  return undefined;
-}
+/**
+ * The Tab wrap every modal in the product uses. It lives in `client-ui` now,
+ * beside the confirmation dialog that also needs it; this module stays as the
+ * name Flock's own dialog imports.
+ */
+export { dialogFocusWrapTarget } from "@frockbot/client-ui";

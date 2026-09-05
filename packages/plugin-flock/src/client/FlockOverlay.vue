@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { UiConfirmDialog } from "@frockbot/client-ui";
 import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { sheepCatalog } from "../shared.js";
 import { flockWebDataKey } from "./state.js";
@@ -24,13 +25,22 @@ const pendingName = computed(() => {
   );
 });
 
+/**
+ * The wardrobe dialog — the only overlay that still uses the two-column frame.
+ * Archiving and deleting are questions, and a question is a compact
+ * confirmation the shell owns, not a form frame with its art panel removed.
+ */
+const editorOpen = computed(
+  () => flock.value.overlay === "create" || flock.value.overlay === "edit",
+);
+
 const dialog = ref<HTMLElement>();
 let restoreFocus: HTMLElement | undefined;
 const focusable =
   'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 watch(
-  () => flock.value.overlay,
+  editorOpen,
   async (overlay, previous) => {
     if (overlay && !previous) {
       restoreFocus =
@@ -71,8 +81,37 @@ function onDialogKeydown(event: KeyboardEvent): void {
 onBeforeUnmount(() => restoreFocus?.focus());
 </script>
 <template>
+  <UiConfirmDialog
+    :open="flock.overlay === 'archive'"
+    eyebrow="Archive Bot"
+    title="Archive this Bot?"
+    confirm-label="Archive Bot"
+    :error="flock.error"
+    @cancel="flock.closeOverlay"
+    @confirm="flock.archive"
+  >
+    <p>
+      Archiving stops new work and hides the Bot from your active flock. Its
+      history and settings are kept, and you can restore it at any time.
+    </p>
+  </UiConfirmDialog>
+  <UiConfirmDialog
+    :open="flock.overlay === 'delete'"
+    eyebrow="Delete Bot"
+    :title="`Delete ${pendingName}?`"
+    confirm-label="Delete"
+    tone="danger"
+    :error="flock.error"
+    @cancel="flock.closeOverlay"
+    @confirm="flock.deleteBot"
+  >
+    <p>
+      This removes its conversation and Applets, and cannot be undone. To stop
+      the Bot working while keeping its history, archive it instead.
+    </p>
+  </UiConfirmDialog>
   <div
-    v-if="flock.overlay"
+    v-if="editorOpen"
     class="flock-backdrop"
     @click.self="flock.closeOverlay"
   >
@@ -84,157 +123,109 @@ onBeforeUnmount(() => restoreFocus?.focus());
       aria-labelledby="flock-title"
       @keydown="onDialogKeydown"
     >
-      <div v-if="flock.overlay === 'archive'" class="flock-form">
-        <span class="flock-eyebrow">Archive Bot</span>
-        <h1 id="flock-title">Archive this Bot?</h1>
-        <p>
-          Archiving stops new work and hides the Bot from your active flock.
-          History and settings are preserved for restoration.
-        </p>
-        <p
-          v-if="flock.error"
-          class="flock-error"
-          role="alert"
-          aria-live="assertive"
-        >
-          {{ flock.error }}
-        </p>
-        <div class="flock-actions">
-          <button type="button" @click="flock.closeOverlay">Cancel</button>
-          <button class="primary" type="button" @click="flock.archive">
-            Archive Bot
-          </button>
-        </div>
-      </div>
-      <div v-else-if="flock.overlay === 'delete'" class="flock-form">
-        <span class="flock-eyebrow">Delete Bot</span>
-        <h1 id="flock-title">Delete {{ pendingName }}?</h1>
-        <p>
-          This removes its conversation and Applets. It cannot be undone — to
-          stop the Bot working while keeping its history, archive it instead.
-        </p>
-        <p
-          v-if="flock.error"
-          class="flock-error"
-          role="alert"
-          aria-live="assertive"
-        >
-          {{ flock.error }}
-        </p>
-        <div class="flock-actions">
-          <button type="button" @click="flock.closeOverlay">Cancel</button>
-          <button class="danger" type="button" @click="flock.deleteBot">
-            Delete
-          </button>
-        </div>
-      </div>
-      <template v-else>
-        <div class="flock-preview">
-          <SheepAvatar
-            :sheep="flock.draftSheep"
-            :label="
-              flock.draftName
-                ? `${flock.draftName} sheep preview`
-                : 'Sheep preview'
-            "
-            size="large"
-          />
-          <h2>Meet your sheep</h2>
-          <p>Randomly tailored. Entirely yours.</p>
-          <button type="button" class="flock-reroll" @click="flock.reroll">
-            ↻ Surprise me
-          </button>
-        </div>
-        <form
-          class="flock-form"
-          @submit.prevent="
-            flock.overlay === 'create' ? flock.create() : flock.saveSheep()
+      <div class="flock-preview">
+        <SheepAvatar
+          :sheep="flock.draftSheep"
+          :label="
+            flock.draftName
+              ? `${flock.draftName} sheep preview`
+              : 'Sheep preview'
           "
-        >
-          <span class="flock-eyebrow">{{
-            flock.overlay === "create" ? "Create a Bot" : "Tailor your Bot"
-          }}</span>
-          <h1 id="flock-title">
-            {{
-              flock.overlay === "create"
-                ? "Add to your flock"
-                : "Change the look"
-            }}
-          </h1>
-          <p>Keep this look, or change any layer.</p>
-          <label v-if="flock.overlay === 'create'" class="flock-name"
-            >Bot name<input
-              v-model.trim="flock.draftName"
-              autofocus
-              maxlength="100"
-              required
-              autocomplete="off"
-          /></label>
-          <fieldset>
-            <legend>Sheep wardrobe</legend>
-            <div class="flock-select-grid">
-              <label
-                >Background<select v-model="flock.draftSheep.background">
-                  <option
-                    v-for="item in sheepCatalog.backgrounds"
-                    :key="item.id"
-                    :value="item.id"
-                  >
-                    {{ item.label }}
-                  </option>
-                </select></label
-              >
-              <label
-                >Headwear<select v-model="flock.draftSheep.upper">
-                  <option
-                    v-for="item in sheepCatalog.trees.upper"
-                    :key="item.id"
-                    :value="item.id"
-                  >
-                    {{ item.label }}
-                  </option>
-                </select></label
-              >
-              <label
-                >Face<select v-model="flock.draftSheep.middle">
-                  <option
-                    v-for="item in sheepCatalog.trees.middle"
-                    :key="item.id"
-                    :value="item.id"
-                  >
-                    {{ item.label }}
-                  </option>
-                </select></label
-              >
-              <label
-                >Neckwear<select v-model="flock.draftSheep.lower">
-                  <option
-                    v-for="item in sheepCatalog.trees.lower"
-                    :key="item.id"
-                    :value="item.id"
-                  >
-                    {{ item.label }}
-                  </option>
-                </select></label
-              >
-            </div>
-          </fieldset>
-          <p
-            v-if="flock.error"
-            class="flock-error"
-            role="alert"
-            aria-live="assertive"
-          >
-            {{ flock.error }}
-          </p>
-          <div class="flock-actions">
-            <button type="button" @click="flock.closeOverlay">Cancel</button
-            ><button class="primary" type="submit">
-              {{ flock.overlay === "create" ? "Create Bot" : "Save look" }}
-            </button>
+          size="large"
+        />
+        <h2>Meet your sheep</h2>
+        <p>Randomly tailored. Entirely yours.</p>
+        <button type="button" class="flock-reroll" @click="flock.reroll">
+          ↻ Surprise me
+        </button>
+      </div>
+      <form
+        class="flock-form"
+        @submit.prevent="
+          flock.overlay === 'create' ? flock.create() : flock.saveSheep()
+        "
+      >
+        <span class="flock-eyebrow">{{
+          flock.overlay === "create" ? "Create a Bot" : "Tailor your Bot"
+        }}</span>
+        <h1 id="flock-title">
+          {{
+            flock.overlay === "create" ? "Add to your flock" : "Change the look"
+          }}
+        </h1>
+        <p>Keep this look, or change any layer.</p>
+        <label v-if="flock.overlay === 'create'" class="flock-name"
+          >Bot name<input
+            v-model.trim="flock.draftName"
+            autofocus
+            maxlength="100"
+            required
+            autocomplete="off"
+        /></label>
+        <fieldset>
+          <legend>Sheep wardrobe</legend>
+          <div class="flock-select-grid">
+            <label
+              >Background<select v-model="flock.draftSheep.background">
+                <option
+                  v-for="item in sheepCatalog.backgrounds"
+                  :key="item.id"
+                  :value="item.id"
+                >
+                  {{ item.label }}
+                </option>
+              </select></label
+            >
+            <label
+              >Headwear<select v-model="flock.draftSheep.upper">
+                <option
+                  v-for="item in sheepCatalog.trees.upper"
+                  :key="item.id"
+                  :value="item.id"
+                >
+                  {{ item.label }}
+                </option>
+              </select></label
+            >
+            <label
+              >Face<select v-model="flock.draftSheep.middle">
+                <option
+                  v-for="item in sheepCatalog.trees.middle"
+                  :key="item.id"
+                  :value="item.id"
+                >
+                  {{ item.label }}
+                </option>
+              </select></label
+            >
+            <label
+              >Neckwear<select v-model="flock.draftSheep.lower">
+                <option
+                  v-for="item in sheepCatalog.trees.lower"
+                  :key="item.id"
+                  :value="item.id"
+                >
+                  {{ item.label }}
+                </option>
+              </select></label
+            >
           </div>
-        </form>
-      </template>
+        </fieldset>
+        <p
+          v-if="flock.error"
+          class="flock-error"
+          role="alert"
+          aria-live="assertive"
+        >
+          {{ flock.error }}
+        </p>
+        <div class="flock-actions">
+          <button type="button" @click="flock.closeOverlay">Cancel</button
+          ><button class="primary" type="submit">
+            {{ flock.overlay === "create" ? "Create Bot" : "Save look" }}
+          </button>
+        </div>
+      </form>
     </section>
   </div>
 </template>
