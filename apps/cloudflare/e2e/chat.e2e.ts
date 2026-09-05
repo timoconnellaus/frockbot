@@ -34,7 +34,10 @@ import {
 } from "../src/request-body.ts";
 // Same rule for the failure copy: the sentence lives in one place, and the
 // spec reads it from there rather than restating it.
-import { RUN_FAILURE_COPY_V1 } from "@frockbot/plugin-shell/run-failure-copy";
+import {
+  failureNoticeV1,
+  RUN_FAILURE_COPY_V1,
+} from "@frockbot/plugin-shell/run-failure-copy";
 
 /*
  * The fake provider is one server shared by every spec in the shard, so a mode
@@ -449,8 +452,12 @@ test("a message sent mid-Turn lands above the working sheep, unlabelled", async 
   // The drain is a window, not a resting state, so what it said is recorded as
   // it happens rather than sampled afterwards.
   await page.evaluate(() => {
-    const scope = window as unknown as { supersedeSaidStopping: boolean };
+    const scope = window as unknown as {
+      supersedeSaidStopping: boolean;
+      supersedeLabelBox: { inset: number; height: number } | null;
+    };
     scope.supersedeSaidStopping = false;
+    scope.supersedeLabelBox = null;
     const read = () => {
       const row = document.querySelector(".bot-working");
       if (
@@ -459,6 +466,16 @@ test("a message sent mid-Turn lands above the working sheep, unlabelled", async 
       ) {
         scope.supersedeSaidStopping = true;
       }
+      // Where the words sit relative to the row they narrate, recorded while
+      // they are on screen: the drain is a window, not a resting state.
+      const label = row?.querySelector(".bot-working-label");
+      if (!row || !label) return;
+      const rowBox = row.getBoundingClientRect();
+      const labelBox = label.getBoundingClientRect();
+      scope.supersedeLabelBox = {
+        inset: Math.round(labelBox.left - rowBox.left),
+        height: Math.round(labelBox.height),
+      };
     };
     read();
     new MutationObserver(read).observe(document.body, {
@@ -486,6 +503,21 @@ test("a message sent mid-Turn lands above the working sheep, unlabelled", async 
       { timeout: 60_000 },
     )
     .toBe(true);
+
+  // The words belong to the row they describe. They used to be laid out at the
+  // far edge of the transcript, a screen's width from the dots they narrate,
+  // and squeezed onto two lines.
+  const labelBox = await page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          supersedeLabelBox: { inset: number; height: number } | null;
+        }
+      ).supersedeLabelBox,
+  );
+  expect(labelBox).not.toBeNull();
+  expect(labelBox!.inset).toBeLessThan(160);
+  expect(labelBox!.height).toBeLessThan(30);
 
   // The order the reader sees: their new message, then the sheep, with nothing
   // of the thread after it.
@@ -528,6 +560,26 @@ test("a message sent mid-Turn lands above the working sheep, unlabelled", async 
   await expect(page.locator(".thread")).not.toContainText(
     "Stopping the previous reply",
   );
+
+  // The reply to the second message sits under it, not above it. A Turn this
+  // tab sent is drawn from the browser's clock and the durable projection
+  // stamps it from the backend's, and ordering every line by its own timestamp
+  // painted the answer above the message it was answering.
+  const placement = await page.evaluate(() => {
+    const children = [...(document.querySelector(".thread")?.children ?? [])];
+    const at = (className: string, text: string) =>
+      children.findLastIndex(
+        (child) =>
+          child.classList.contains(className) &&
+          (child.textContent ?? "").includes(text),
+      );
+    return {
+      userIndex: at("message-user", "second"),
+      replyIndex: at("message-assistant", "Reply from the local Ollama stub."),
+    };
+  });
+  expect(placement.userIndex).toBeGreaterThanOrEqual(0);
+  expect(placement.replyIndex).toBeGreaterThan(placement.userIndex);
 });
 
 // Tim's report, as the thread: a Bot that says three things in one Turn leaves
@@ -682,8 +734,11 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
     // the Turn `model-error`, and that outcome has its own sentence — naming the
     // model rather than the Bot, because the Bot did nothing wrong.
     await expect(page.locator(".message-notice").last()).toHaveText(
-      RUN_FAILURE_COPY_V1["model-error"],
+      failureNoticeV1(RUN_FAILURE_COPY_V1["model-error"]).notice,
     );
+    // The sentence used to end by telling the person to try again with nothing
+    // to press; the retry is beside it now, and it sends the same message.
+    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
     await expect(page.locator(".thread")).not.toContainText("model-error");
     await expect(page.locator(".thread")).not.toContainText("outcome");
     await expect(page.locator(".thread")).not.toContainText("401");

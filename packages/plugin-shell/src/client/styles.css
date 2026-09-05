@@ -403,13 +403,33 @@
 }
 
 /*
+ * The trail spreads across the whole row by default, which is right when it is
+ * the only thing in it. With words beside it that pushed them to the far edge
+ * of the transcript, a screen's width away from the dots they belong to, and
+ * squeezed them onto two lines. So when the row is narrating, the trail takes
+ * only the space the particles use and the words follow immediately after it.
+ */
+.bot-working[data-supersede="stopping"],
+.bot-working[data-supersede="slow"] {
+  gap: 8px;
+}
+
+.bot-working[data-supersede="stopping"] .bot-working-indicator,
+.bot-working[data-supersede="slow"] .bot-working-indicator {
+  flex: 0 0 56px;
+}
+
+/*
  * The only words the working row ever carries, and it carries them only while
  * a message the person just sent is displacing the Turn above it. Muted and
  * small: it is the app narrating itself, not the Bot speaking.
  */
 .bot-working-label {
+  overflow: hidden;
   color: var(--frock-text-muted);
   font-size: var(--frock-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bot-avatar {

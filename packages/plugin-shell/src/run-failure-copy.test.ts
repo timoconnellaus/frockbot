@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/kernel-contracts";
 import { MODEL_FIRST_BYTE_DEADLINE_REASON_V1 } from "@frockbot/kernel-contracts";
 import {
+  failureNoticeV1,
   knownFailureCopyV1,
   MODEL_PROVIDER_FAILURE_COPY_V1,
   RUN_FAILURE_COPY_V1,
@@ -167,4 +168,31 @@ test("a reply that ran out of steps says so in plain words", () => {
     }),
   ).toBe(STEP_LIMIT_REASON_V1);
   expect(knownFailureCopyV1(STEP_LIMIT_REASON_V1)).toBe(STEP_LIMIT_REASON_V1);
+});
+
+describe("the retry a failure offers", () => {
+  test("takes the invitation off the sentence a retry can repair", () => {
+    expect(failureNoticeV1(RUN_FAILURE_COPY_V1.interrupted)).toEqual({
+      notice: "This reply stopped before it finished.",
+      retry: true,
+    });
+    expect(failureNoticeV1(RUN_FAILURE_FALLBACK_COPY_V1)).toEqual({
+      notice: "This Bot couldn't finish its reply.",
+      retry: true,
+    });
+  });
+
+  // Sending the same message again does not un-stop a Turn the person stopped,
+  // and it does not talk a Bot out of declining. Both keep their whole sentence
+  // and offer nothing to press.
+  test("offers nothing where trying again is not the way out", () => {
+    expect(failureNoticeV1(RUN_FAILURE_COPY_V1.cancelled)).toEqual({
+      notice: "You stopped this.",
+      retry: false,
+    });
+    expect(failureNoticeV1(RUN_FAILURE_COPY_V1.blocked)).toEqual({
+      notice: RUN_FAILURE_COPY_V1.blocked,
+      retry: false,
+    });
+  });
 });
