@@ -29,6 +29,11 @@ import {
   createFrockAiFakeWorker,
   FROCK_AI_FAKE_SERVICE,
 } from "./test/frock-ai-fake.ts";
+import {
+  createVoiceUpstreamFakeWorker,
+  VOICE_ASSISTANT_FAKE_UPSTREAM_URL,
+  VOICE_UPSTREAM_FAKE_NAME,
+} from "./test/voice-upstream-fake.ts";
 
 // The bytes `test:integration` just built, read here rather than imported with
 // Vite's `?raw` from a test file: `tsc` resolves a relative specifier on disk
@@ -72,7 +77,10 @@ export default defineConfig({
     cloudflareTest({
       main: "./src/index.ts",
       miniflare: {
-        outboundService: createOutboundService(),
+        // Not the Node-side stub directly: `test/voice-upstream-fake.ts`
+        // explains why the outbound has to be a Worker here, and hands
+        // everything but the voice provider back to it unchanged.
+        outboundService: VOICE_UPSTREAM_FAKE_NAME,
         compatibilityDate: "2026-08-27",
         compatibilityFlags: ["nodejs_compat"],
         workerLoaders: {
@@ -90,7 +98,10 @@ export default defineConfig({
           AI: FROCK_AI_FAKE_SERVICE,
           AI_PROBE: FROCK_AI_FAKE_SERVICE,
         },
-        workers: [createFrockAiFakeWorker("2026-08-27")],
+        workers: [
+          createFrockAiFakeWorker("2026-08-27"),
+          createVoiceUpstreamFakeWorker("2026-08-27", createOutboundService()),
+        ],
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
         d1Databases: ["AUTH_DB"],
         durableObjects: {
@@ -151,6 +162,10 @@ export default defineConfig({
           // mint the token a machine presents and forge one that must be
           // refused.
           MACHINE_TOKEN_SECRET: "workerd-machine-token-secret-0123456789ab",
+          // A Gemini Live stand-in, so the voice transport's own failure
+          // handling — a refused resumption handle, a provider that never
+          // answers — is reachable at the Durable Object boundary.
+          VOICE_ASSISTANT_UPSTREAM_URL: VOICE_ASSISTANT_FAKE_UPSTREAM_URL,
         },
         // Deliberately absent, and why:
         //

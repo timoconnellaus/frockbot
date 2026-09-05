@@ -55,6 +55,9 @@ import {
   voiceAssistantSetupV1,
   voiceAssistantToolResponseV1,
   voiceAssistantUpstreamTargetV1,
+  VOICE_ASSISTANT_MAX_SETUP_ATTEMPTS_V1,
+  VOICE_ASSISTANT_READY_TIMEOUT_ERROR_V1,
+  VOICE_ASSISTANT_READY_TIMEOUT_MS_V1,
   VOICE_ASSISTANT_UPSTREAM_ERROR_V1,
   type VoiceAssistantUpstreamTargetV1,
 } from "./voice-assistant-upstream.js";
@@ -125,6 +128,12 @@ interface LiveAssistant {
   remainingSeconds: number;
   settled: boolean;
   reconnecting: boolean;
+  /** A setup has been sent on the live upstream and not yet answered. */
+  setupPending: boolean;
+  /** Setups sent since the last `setupComplete`, this assistant session. */
+  setupAttempts: number;
+  /** The stored resumption handle has been dropped as unusable. */
+  handleCleared: boolean;
   kickoffPending: boolean;
   inputTranscript: string;
   outputTranscript: string;
@@ -133,6 +142,7 @@ interface LiveAssistant {
   briefingSpeechObserved: boolean;
   idleGuard?: ReturnType<typeof setTimeout>;
   quotaGuard?: ReturnType<typeof setTimeout>;
+  readyGuard?: ReturnType<typeof setTimeout>;
 }
 
 interface VoiceAssistantStartReceiptV1 {
@@ -389,6 +399,9 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
       ),
       settled: false,
       reconnecting: false,
+      setupPending: false,
+      setupAttempts: 0,
+      handleCleared: false,
       kickoffPending:
         !start.state?.resumptionHandle ||
         (start.pendingAnswers?.length ?? 0) > 0,
@@ -410,8 +423,11 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
       startedAt: assistant.startedAt,
     } satisfies AssistantSocketAttachmentV1);
     this.#attachAssistantUpstream(assistant, upstream);
-    upstream.send(
-      JSON.stringify(voiceAssistantSetupV1(start.state?.resumptionHandle)),
+    this.#sendAssistantSetup(
+      assistant,
+      upstream,
+      start.state?.resumptionHandle,
+      target,
     );
     this.#resetAssistantIdle(assistant, target);
     assistant.quotaGuard = setTimeout(
@@ -538,6 +554,9 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
       remainingSeconds: Math.max(0, view.quota?.remainingSeconds ?? 0),
       settled: false,
       reconnecting: false,
+      setupPending: false,
+      setupAttempts: 0,
+      handleCleared: false,
       kickoffPending: (view.ledger.pendingAnswers?.length ?? 0) > 0,
       inputTranscript: "",
       outputTranscript: "",
@@ -549,8 +568,11 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     };
     this.#assistant = assistant;
     this.#attachAssistantUpstream(assistant, upstream);
-    upstream.send(
-      JSON.stringify(voiceAssistantSetupV1(view.ledger.state.resumptionHandle)),
+    this.#sendAssistantSetup(
+      assistant,
+      upstream,
+      view.ledger.state.resumptionHandle,
+      target,
     );
     this.#resetAssistantIdle(assistant, target);
     assistant.quotaGuard = setTimeout(
@@ -607,6 +629,14 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
       return;
     }
     if (frame.setupComplete) {
+      // The provider answered, so neither the ready deadline nor the setup
+      // budget applies to whatever this session does next.
+      assistant.setupPending = false;
+      assistant.setupAttempts = 0;
+      if (assistant.readyGuard) {
+        clearTimeout(assistant.readyGuard);
+        assistant.readyGuard = undefined;
+      }
       if (assistant.kickoffPending) {
         assistant.kickoffPending = false;
         assistant.briefingAnswerIds.push(
@@ -779,10 +809,71 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     this.#sendAssistant(assistant, entry);
   }
 
+  /**
+   * Opens one upstream and asks it to start, under a deadline.
+   *
+   * Every setup this object sends goes through here, because a setup that is
+   * never answered is the one failure a person cannot see: the provider holds
+   * the socket open, nothing arrives, and the client would otherwise sit on
+   * "Connecting" forever.
+   */
+  #sendAssistantSetup(
+    assistant: LiveAssistant,
+    upstream: WebSocket,
+    resumptionHandle: string | undefined,
+    target: VoiceAssistantUpstreamTargetV1,
+  ): void {
+    assistant.setupPending = true;
+    assistant.setupAttempts += 1;
+    upstream.send(JSON.stringify(voiceAssistantSetupV1(resumptionHandle)));
+    if (assistant.readyGuard) clearTimeout(assistant.readyGuard);
+    assistant.readyGuard = setTimeout(() => {
+      void loggedEntryV1("voice assistant ready deadline", () =>
+        this.#settleAssistant(
+          assistant,
+          "error",
+          VOICE_ASSISTANT_READY_TIMEOUT_ERROR_V1,
+        ),
+      );
+    }, this.#assistantReadyTimeout(target));
+  }
+
+  /** The e2e and integration fakes shorten the deadline the same way idle is shortened. */
+  #assistantReadyTimeout(target: VoiceAssistantUpstreamTargetV1): number {
+    if (target.path !== "override") return VOICE_ASSISTANT_READY_TIMEOUT_MS_V1;
+    const configured = Number(
+      new URL(target.url).searchParams.get("frock_ready_ms"),
+    );
+    return Number.isFinite(configured) && configured >= 250
+      ? Math.min(VOICE_ASSISTANT_READY_TIMEOUT_MS_V1, configured)
+      : VOICE_ASSISTANT_READY_TIMEOUT_MS_V1;
+  }
+
   async #reconnectAssistant(assistant: LiveAssistant): Promise<void> {
     if (assistant.reconnecting || assistant.settled) return;
     assistant.reconnecting = true;
     try {
+      // A socket that dies before answering this session's setup is what a
+      // rejected resumption handle looks like on the wire: Gemini closes
+      // instead of sending an `error` frame. Replaying the same handle would
+      // earn the same close forever, so the handle goes, durably, and the
+      // retry starts a fresh conversation.
+      if (assistant.setupPending && !assistant.handleCleared) {
+        assistant.handleCleared = true;
+        try {
+          await this.#user(assistant.userId).clearVoiceResumptionHandle({
+            schemaVersion: 1,
+            userId: assistant.userId,
+            sessionId: assistant.sessionId,
+            at: new Date().toISOString(),
+          });
+        } catch (error) {
+          console.error("Voice resumption handle was not cleared", error);
+        }
+      }
+      if (assistant.setupAttempts >= VOICE_ASSISTANT_MAX_SETUP_ATTEMPTS_V1) {
+        throw new Error("the speech service closed before it accepted a setup");
+      }
       const view = rpcSnapshotV1(
         await this.#user(assistant.userId).readVoiceAssistant({
           schemaVersion: 1,
@@ -795,10 +886,13 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
       const previous = assistant.upstream;
       assistant.upstream = replacement;
       this.#attachAssistantUpstream(assistant, replacement);
-      replacement.send(
-        JSON.stringify(
-          voiceAssistantSetupV1(view.ledger?.state?.resumptionHandle),
-        ),
+      this.#sendAssistantSetup(
+        assistant,
+        replacement,
+        assistant.handleCleared
+          ? undefined
+          : view.ledger?.state?.resumptionHandle,
+        target,
       );
       this.#close(previous, "Gemini Live reconnected");
     } catch (error) {
@@ -886,6 +980,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
     assistant.settled = true;
     if (assistant.idleGuard) clearTimeout(assistant.idleGuard);
     if (assistant.quotaGuard) clearTimeout(assistant.quotaGuard);
+    if (assistant.readyGuard) clearTimeout(assistant.readyGuard);
     await this.#flushTranscript(assistant, "user").catch(() => undefined);
     await this.#flushTranscript(assistant, "assistant").catch(() => undefined);
     const seconds = Math.max(
@@ -1288,6 +1383,7 @@ export class VoiceSession extends DurableObject<VoiceSessionBindings> {
       endVoiceAssistant(input: unknown): Promise<unknown>;
       readVoiceAssistant(input: unknown): Promise<unknown>;
       saveVoiceResumptionHandle(input: unknown): Promise<void>;
+      clearVoiceResumptionHandle(input: unknown): Promise<void>;
       appendVoiceTranscript(input: unknown): Promise<void>;
       executeVoiceTool(input: unknown): Promise<unknown>;
       markVoiceAnswersBriefed(input: unknown): Promise<number>;

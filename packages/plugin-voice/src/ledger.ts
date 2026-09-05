@@ -214,6 +214,34 @@ export class VoiceLedgerV1 {
     });
   }
 
+  /**
+   * Drops a resumption handle the provider will not take.
+   *
+   * A handle only ever goes stale at the provider, and the provider says so by
+   * closing the socket rather than by answering. The transport clears it here
+   * so the very next attempt — this session's retry, or a session opened days
+   * later — starts a fresh conversation instead of replaying the same refusal.
+   */
+  async clearResumptionHandle(input: {
+    sessionId: string;
+    at: string;
+  }): Promise<void> {
+    const at = timestamp(input.at, "voice session time");
+    await this.storage.transaction(async (transaction) => {
+      const current = stateOrDefault(
+        await transaction.get<VoiceStateV1>(VOICE_STATE_KEY_V1),
+        at,
+      );
+      if (current.activeSessionId !== input.sessionId) return;
+      if (current.resumptionHandle === undefined) return;
+      const { resumptionHandle: _dropped, ...rest } = current;
+      await transaction.put(VOICE_STATE_KEY_V1, {
+        ...rest,
+        updatedAt: at,
+      } satisfies VoiceStateV1);
+    });
+  }
+
   async appendTranscript(
     sessionId: string,
     entry: VoiceTranscriptEntryV1,
