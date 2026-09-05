@@ -5,7 +5,7 @@
 // Second, the Applet half. An Applet member contributes no module and nothing
 // to health-check, so the only thing this seam does with it is register its
 // tools. What matters is *which* generation those tools reach: the description
-// handed to the model names the pinned generation, and ADR 0038 requires the
+// handed to the model names the pinned generation, and ADR 0041 requires the
 // call to name it too, so the Applet Durable Object executes that generation or
 // refuses. A DTO that carried only the Applet id let a publish landing mid-Turn
 // run new code behind the schema and provenance the model was shown.
