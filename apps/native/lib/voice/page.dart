@@ -115,9 +115,6 @@ class _Stage extends StatelessWidget {
     final t = FrockTokens.of(context);
     final c = controller;
     final quiet = c.phase == VoicePhase.paused || c.phase == VoicePhase.ended;
-    // The glow is a pulse; a person who asked for less motion gets the same
-    // colour holding still.
-    final still = MediaQuery.disableAnimationsOf(context);
     final sheep = FrockSheep(
       look: look ?? SheepLook.plain,
       size: 112,
@@ -148,7 +145,9 @@ class _Stage extends StatelessWidget {
     return Stack(
       alignment: Alignment.center,
       children: [
-        if (!quiet && !still)
+        // The glow is a static wash, not a pulse, so it stays under reduced
+        // motion; the sheep's ring does its own reducing.
+        if (!quiet)
           const Positioned(top: 0, child: IgnorePointer(child: FrockGlow())),
         Column(
           mainAxisAlignment: MainAxisAlignment.center,
