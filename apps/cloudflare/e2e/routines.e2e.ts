@@ -195,14 +195,14 @@ test("an account event Routine uses named accounts, event fields and listening s
     .getByLabel("Prompt")
     .fill("Summarize the email that just arrived.");
   await form.getByLabel("An event in a connected account").check();
-  await expect(form.getByLabel("Account", { exact: true })).toContainText(
-    "Gmail · Work inbox",
-  );
+  await expect(
+    form.getByRole("combobox", { name: "Account", exact: true }),
+  ).toContainText("Gmail · Work inbox");
   await form
-    .getByLabel("Account", { exact: true })
+    .getByRole("combobox", { name: "Account", exact: true })
     .selectOption({ label: "Gmail · Work inbox" });
   await form
-    .getByLabel("When", { exact: true })
+    .getByRole("combobox", { name: /^When/ })
     .selectOption({ label: "When a new email arrives in Gmail" });
   await form.getByLabel("Mailbox label").fill("Important");
   await expect(form).not.toContainText("Composio");

@@ -18,7 +18,7 @@ import {
 } from "@frockbot/client-core";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
-import { computed, inject, reactive, ref, watch } from "vue";
+import { computed, inject, reactive, ref, toRaw, watch } from "vue";
 import { triggerObject } from "@frockbot/connection-core";
 import type { RoutineViewV1 } from "../shared.js";
 import { routinesStateKey } from "./state.js";
@@ -115,7 +115,7 @@ function selectEvent(): void {
   if (triggerObject(properties))
     for (const [key, value] of Object.entries(properties)) {
       if (triggerObject(value) && value.default !== undefined)
-        form.config[key] = structuredClone(value.default);
+        form.config[key] = structuredClone(toRaw(value.default));
     }
 }
 function selectAccount(): void {
@@ -211,6 +211,7 @@ function moment(routine: RoutineViewV1, iso: string): string {
 }
 
 function startCreate(): void {
+  if (botId.value) void routines.value.load(botId.value);
   form.routineId = undefined;
   form.name = "";
   form.prompt = "";
@@ -238,7 +239,7 @@ function startEdit(routine: RoutineViewV1): void {
   if (routine.trigger?.kind === "connection") {
     form.connectionId = routine.trigger.connectionId;
     form.triggerType = routine.trigger.triggerType;
-    form.config = structuredClone(routine.trigger.config);
+    form.config = structuredClone(toRaw(routine.trigger.config));
   }
   form.schedule = routine.schedule ?? "";
   form.timezone = routine.timezone;
@@ -980,7 +981,8 @@ async function toggleLog(routineId: string): Promise<void> {
 
 .routine-form__timing {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  gap: 8px;
   border: 0;
   margin: 0;
   padding: 0;

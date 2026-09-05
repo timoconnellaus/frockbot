@@ -236,6 +236,7 @@ test("durable first-use Connect Link survives eviction; replay consumes no secon
   const connection = await f.settings.getConnection("owner", "connection-one");
   if (!connection) throw new Error("expected connection");
   const projected = service.projectConnection(connection);
+  expect(projected.safeMetadata.connectorName).toBe("Gmail");
   expect(JSON.stringify(projected)).not.toMatch(
     /private-link|private-api-key|never-retain|authorizationState|connectedAccountId/,
   );

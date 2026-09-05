@@ -447,7 +447,10 @@ export class ComposioTriggerSubscriptions {
         botId,
         intent,
         groupId: nextGroup?.id ?? old?.groupId ?? "",
-        ...(live?.revoked ? { revoked: true } : {}),
+        // A newer explicit Routine edit may bind a reconnected account after active authorization above.
+        ...(live?.revoked && (!nextGroup || !intent.enabled)
+          ? { revoked: true }
+          : {}),
       } satisfies Subscription);
       await tx.setAlarm(
         Math.min((await tx.getAlarm?.()) ?? Infinity, Date.now() + RETRY_MS),
@@ -551,23 +554,7 @@ export class ComposioTriggerSubscriptions {
       await this.wake();
       return;
     }
-    const epoch = (await this.host.storage.get<number>(EPOCH)) ?? 0;
-    const allGroups = await this.groups();
-    const shared = new Set(
-      allGroups
-        .filter(
-          (item) =>
-            item.id === id ||
-            (held.providerId &&
-              item.providerId === held.providerId &&
-              item.accountId === held.accountId),
-        )
-        .map((item) => item.id),
-    );
-    const refs = (await this.subscriptions()).filter(
-      (sub) => shared.has(sub.groupId) && !sub.intent.deleted && !sub.revoked,
-    );
-    const ownRefs = refs.filter((sub) => sub.groupId === id);
+    let epoch = (await this.host.storage.get<number>(EPOCH)) ?? 0;
     const connection = (await this.host.connections()).find(
       (row) => row.connectionId === held.connectionId,
     );
@@ -575,56 +562,14 @@ export class ComposioTriggerSubscriptions {
       !connection ||
       connection.state === "revoked" ||
       connection.safeMetadata.connectedAccountId !== held.accountId;
-    const desired =
-      !refs.length || revoked
-        ? "deleted"
-        : refs.some((sub) => sub.intent.enabled) &&
-            connection?.state === "ready" &&
-            this.host.webhookConfigured
-          ? "active"
-          : "paused";
-    const ownDesired =
-      !ownRefs.length || revoked
-        ? "deleted"
-        : ownRefs.some((sub) => sub.intent.enabled) &&
-            connection?.state === "ready" &&
-            this.host.webhookConfigured
-          ? "active"
-          : "paused";
-    if (
-      held.status === "failed" &&
-      !held.repair &&
-      held.failedDesired === desired
-    )
-      return;
-    // A different submitted config can normalize to this same provider ID.
-    // Finish unknown creations before deciding to disable or retire an instance.
-    if (
-      desired !== "active" &&
-      allGroups.some(
-        (item) =>
-          item.id !== id &&
-          item.accountId === held.accountId &&
-          item.triggerType === held.triggerType &&
-          !item.providerId &&
-          (item.effectId !== undefined || item.status === "starting"),
-      )
-    ) {
-      await this.wake();
-      return;
-    }
     let instances: Awaited<ReturnType<ComposioClient["listTriggerInstances"]>>;
     try {
       instances = await client.listTriggerInstances(held.accountId);
     } catch (error) {
-      if (
-        desired === "deleted" &&
-        error instanceof ComposioRequestError &&
-        error.status === 404
-      )
+      if (error instanceof ComposioRequestError && error.status === 404)
         instances = [];
       else {
-        await this.mark(id, { status: "unavailable" }, held);
+        await this.mark(id, { status: "unavailable" }, held, epoch);
         throw error;
       }
     }
@@ -634,23 +579,96 @@ export class ComposioTriggerSubscriptions {
         : item.triggerType === held.triggerType &&
           canonical(item.config) === canonical(held.config),
     );
-    const current = group(await this.host.storage.get(groupKey(id)));
     const currentConnection = (await this.host.connections()).find(
       (row) => row.connectionId === held.connectionId,
     );
-    if (
-      ((await this.host.storage.get<number>(EPOCH)) ?? 0) !== epoch ||
-      current.revision !== held.revision ||
-      current.effectId !== held.effectId ||
-      currentConnection?.generation !== connection?.generation
-    ) {
+    if (currentConnection?.generation !== connection?.generation) {
       await this.wake(0);
       return;
     }
-    if (instance) {
-      await this.mark(id, { providerId: instance.id }, held);
-      held = { ...held, providerId: instance.id };
+    // Bind an observed provider ID and snapshot all its references atomically.
+    // Even a paused local config may normalize to an existing enabled instance.
+    const snapshot = await this.host.storage.transaction(async (tx) => {
+      let live = group(await tx.get(groupKey(id)));
+      if (
+        ((await tx.get<number>(EPOCH)) ?? 0) !== epoch ||
+        live.revision !== held.revision ||
+        live.effectId !== held.effectId
+      )
+        return undefined;
+      const groups = await Promise.all(
+        ((await tx.get<string[]>(GROUPS)) ?? []).map(async (key) =>
+          group(await tx.get(groupKey(key))),
+        ),
+      );
+      if (
+        groups.some(
+          (item) =>
+            item.id !== id &&
+            item.accountId === held.accountId &&
+            item.triggerType === held.triggerType &&
+            item.effectId &&
+            (item.leaseUntil ?? 0) > Date.now(),
+        )
+      )
+        return undefined;
+      let nextEpoch = epoch;
+      if (instance && live.providerId !== instance.id) {
+        live = { ...live, providerId: instance.id };
+        await tx.put(groupKey(id), live);
+        await tx.put(EPOCH, ++nextEpoch);
+      }
+      const subscriptions = await Promise.all(
+        ((await tx.get<string[]>(SUBS)) ?? []).map(async (key) =>
+          subscription(await tx.get(subKey(key))),
+        ),
+      );
+      return {
+        held: live,
+        epoch: nextEpoch,
+        groups: groups.map((item) => (item.id === id ? live : item)),
+        subscriptions,
+      };
+    });
+    if (!snapshot) {
+      await this.wake();
+      return;
     }
+    held = snapshot.held;
+    epoch = snapshot.epoch;
+    const shared = new Set(
+      snapshot.groups
+        .filter(
+          (item) =>
+            item.id === id ||
+            (held.providerId &&
+              item.providerId === held.providerId &&
+              item.accountId === held.accountId),
+        )
+        .map((item) => item.id),
+    );
+    const refs = snapshot.subscriptions.filter(
+      (sub) => shared.has(sub.groupId) && !sub.intent.deleted && !sub.revoked,
+    );
+    const ownRefs = refs.filter((sub) => sub.groupId === id);
+    const wanted = (
+      subscriptions: Subscription[],
+    ): "active" | "paused" | "deleted" =>
+      !subscriptions.length || revoked
+        ? "deleted"
+        : subscriptions.some((sub) => sub.intent.enabled) &&
+            connection?.state === "ready" &&
+            this.host.webhookConfigured
+          ? "active"
+          : "paused";
+    const desired = wanted(refs),
+      ownDesired = wanted(ownRefs);
+    if (
+      held.status === "failed" &&
+      !held.repair &&
+      held.failedDesired === desired
+    )
+      return;
     if (desired === "deleted" && !instance) {
       await this.mark(
         id,
@@ -661,6 +679,7 @@ export class ComposioTriggerSubscriptions {
           repair: false,
         },
         held,
+        epoch,
       );
       return;
     }
@@ -673,6 +692,7 @@ export class ComposioTriggerSubscriptions {
           leaseUntil: undefined,
         },
         held,
+        epoch,
       );
       return;
     }
@@ -685,6 +705,7 @@ export class ComposioTriggerSubscriptions {
           leaseUntil: undefined,
         },
         held,
+        epoch,
       );
       return;
     }
@@ -702,7 +723,23 @@ export class ComposioTriggerSubscriptions {
           leaseUntil: undefined,
         },
         held,
+        epoch,
       );
+      return;
+    }
+    if (
+      instance &&
+      desired !== "active" &&
+      snapshot.groups.some(
+        (item) =>
+          item.id !== id &&
+          item.accountId === held.accountId &&
+          item.triggerType === held.triggerType &&
+          !item.providerId &&
+          (item.effectId !== undefined || item.status === "starting"),
+      )
+    ) {
+      await this.wake();
       return;
     }
     // An external read may have overlapped another Routine write. Claim only
@@ -716,7 +753,7 @@ export class ComposioTriggerSubscriptions {
             : "disable"
           : "create";
     const effectId = crypto.randomUUID();
-    const claimed = await this.host.storage.transaction(async (tx) => {
+    const claimedEpoch = await this.host.storage.transaction(async (tx) => {
       const live = group(await tx.get(groupKey(id)));
       if (
         ((await tx.get<number>(EPOCH)) ?? 0) !== epoch ||
@@ -767,15 +804,26 @@ export class ComposioTriggerSubscriptions {
       await tx.setAlarm(
         Math.min((await tx.getAlarm?.()) ?? Infinity, Date.now() + RETRY_MS),
       );
-      return true;
+      const nextEpoch = epoch + 1;
+      await tx.put(EPOCH, nextEpoch);
+      return nextEpoch;
     });
-    if (!claimed) return;
+    if (claimedEpoch === false) return;
+    epoch = claimedEpoch;
     let providerId = instance?.id;
+    let dispatched = false;
     try {
-      if (action === "create" || action === "enable")
-        await this.active(userId, held.connectionId);
+      if (action === "create" || action === "enable") {
+        const authorization = await this.active(userId, held.connectionId);
+        if (authorization.account.id !== held.accountId)
+          throw new Error("This listener belongs to a previous connection");
+      }
       const dispatch = group(await this.host.storage.get(groupKey(id)));
+      const liveConnection = (await this.host.connections()).find(
+        (row) => row.connectionId === held.connectionId,
+      );
       if (
+        liveConnection?.generation !== connection?.generation ||
         ((await this.host.storage.get<number>(EPOCH)) ?? 0) !== epoch ||
         dispatch.revision !== held.revision ||
         dispatch.effectId !== effectId
@@ -799,6 +847,7 @@ export class ComposioTriggerSubscriptions {
         await this.wake(0);
         return;
       }
+      dispatched = true;
       if (action === "create")
         providerId = await client.upsertTrigger({
           accountId: held.accountId,
@@ -819,6 +868,9 @@ export class ComposioTriggerSubscriptions {
           ...(providerId ? { providerId } : {}),
         });
         const live = group(await tx.get(groupKey(id)));
+        // Reads begun before or during this mutation cannot settle its old
+        // provider state, even when DELETE/PATCH leaves the ID unchanged.
+        await tx.put(EPOCH, ((await tx.get<number>(EPOCH)) ?? 0) + 1);
         if (live.effectId === effectId)
           await tx.put(groupKey(id), {
             ...live,
@@ -831,8 +883,9 @@ export class ComposioTriggerSubscriptions {
       });
     } catch (error) {
       const refused =
-        error instanceof ComposioRequestError &&
-        [400, 401, 403, 404, 422].includes(error.status);
+        !dispatched ||
+        (error instanceof ComposioRequestError &&
+          [400, 401, 403, 404, 422].includes(error.status));
       await this.host.storage.transaction(async (tx) => {
         await tx.put(`composio:trigger-effect:${effectId}`, {
           ...(await tx.get<Record<string, unknown>>(
@@ -841,6 +894,8 @@ export class ComposioTriggerSubscriptions {
           status: refused ? "refused" : "unknown",
           resultAt: Date.now(),
         });
+        if (dispatched)
+          await tx.put(EPOCH, ((await tx.get<number>(EPOCH)) ?? 0) + 1);
       });
       await this.mark(
         id,
@@ -856,10 +911,17 @@ export class ComposioTriggerSubscriptions {
       await this.wake();
     }
   }
-  private async mark(id: string, patch: Partial<Group>, observed: Group) {
+  private async mark(
+    id: string,
+    patch: Partial<Group>,
+    observed: Group,
+    observedEpoch?: number,
+  ) {
     await this.host.storage.transaction(async (tx) => {
       const live = group(await tx.get(groupKey(id)));
       if (
+        (observedEpoch !== undefined &&
+          ((await tx.get<number>(EPOCH)) ?? 0) !== observedEpoch) ||
         live.revision !== observed.revision ||
         live.effectId !== observed.effectId
       )
@@ -888,7 +950,9 @@ export class ComposioTriggerSubscriptions {
     const account = await this.host.client.getConnectedAccount(event.accountId);
     if (account.userId !== userId || !account.alias)
       throw new Error("Event account is unavailable");
-    await this.active(userId, account.alias);
+    const authorization = await this.active(userId, account.alias);
+    if (authorization.account.id !== event.accountId)
+      throw new Error("This event belongs to a previous connection");
     const key = `composio:event:${await hash(event.eventId)}`;
     const previous = delivery(await this.host.storage.get<unknown>(key));
     if (previous?.status === "complete") return;
@@ -990,10 +1054,16 @@ export class ComposioTriggerSubscriptions {
       const connection = (await this.host.connections()).find(
         (row) => row.connectionId === live.intent.trigger?.connectionId,
       );
+      const currentGroup = live.groupId
+        ? group(await this.host.storage.get(groupKey(live.groupId)))
+        : undefined;
       if (
         !live.intent.deleted &&
         !live.revoked &&
         live.intent.enabled &&
+        currentGroup?.accountId === record.event.accountId &&
+        connection?.safeMetadata.connectedAccountId ===
+          record.event.accountId &&
         connection?.state === "ready"
       ) {
         await this.active(userId, live.intent.trigger!.connectionId);

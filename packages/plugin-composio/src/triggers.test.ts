@@ -21,12 +21,17 @@ function fixture() {
     transaction: async (fn) => fn(storage),
   };
   let state: ConnectionView["state"] = "ready";
+  let currentAccountId = "ca_one";
   let normalizedConfig: Record<string, unknown> = {};
   let refuseCreate = false;
-  let instance: { id: string; disabled_at: string | null } | undefined;
+  let instance:
+    | { id: string; connected_account_id: string; disabled_at: string | null }
+    | undefined;
   const mutations: string[] = [],
     deliveries: unknown[] = [];
   let beforeRead: (() => Promise<void>) | undefined;
+  let beforeReadResponse: (() => Promise<void>) | undefined;
+  let beforeDelete: (() => Promise<void>) | undefined;
   let beforeCreateResponse: (() => Promise<void>) | undefined;
   let beforeAccount: (() => Promise<void>) | undefined;
   let loseCreateResponse = false,
@@ -40,10 +45,10 @@ function fixture() {
         beforeAccount = undefined;
         await wait?.();
         return Response.json({
-          id: "ca_one",
+          id: path.split("/").at(-1)!,
           user_id: "owner",
           alias: "connection-one",
-          status: "ACTIVE",
+          status: path.endsWith(currentAccountId) ? "ACTIVE" : "REVOKED",
           toolkit: { slug: "gmail" },
         });
       }
@@ -64,18 +69,24 @@ function fixture() {
         const wait = beforeRead;
         beforeRead = undefined;
         await wait?.();
-        return Response.json({
-          items: instance
-            ? [
-                {
-                  ...instance,
-                  connected_account_id: "ca_one",
-                  trigger_name: "GMAIL_NEW_GMAIL_MESSAGE",
-                  trigger_config: normalizedConfig,
-                },
-              ]
-            : [],
+        const response = Response.json({
+          items:
+            instance &&
+            instance.connected_account_id ===
+              new URL(String(url)).searchParams.get("connected_account_ids")
+              ? [
+                  {
+                    ...instance,
+                    trigger_name: "GMAIL_NEW_GMAIL_MESSAGE",
+                    trigger_config: normalizedConfig,
+                  },
+                ]
+              : [],
         });
+        const respond = beforeReadResponse;
+        beforeReadResponse = undefined;
+        await respond?.();
+        return response;
       }
       mutations.push(init?.method ?? "GET");
       expect(
@@ -87,20 +98,28 @@ function fixture() {
       ).toBe(true);
       if (init?.method === "POST") {
         expect(JSON.parse(String(init.body))).toMatchObject({
-          connected_account_id: "ca_one",
+          connected_account_id: currentAccountId,
           trigger_config: expect.any(Object),
           toolkit_versions: { gmail: "20260905_00" },
         });
         if (refuseCreate) return Response.json({}, { status: 422 });
-        instance = { id: "ti_one", disabled_at: null };
+        instance = {
+          id: currentAccountId === "ca_one" ? "ti_one" : "ti_two",
+          connected_account_id: currentAccountId,
+          disabled_at: null,
+        };
         const wait = beforeCreateResponse;
         beforeCreateResponse = undefined;
         await wait?.();
         if (loseCreateResponse) throw new Error("response lost");
         return Response.json({ trigger_id: instance.id });
       }
-      if (init?.method === "DELETE") instance = undefined;
-      else if (instance)
+      if (init?.method === "DELETE") {
+        const wait = beforeDelete;
+        beforeDelete = undefined;
+        await wait?.();
+        instance = undefined;
+      } else if (instance)
         instance.disabled_at =
           JSON.parse(String(init?.body)).status === "disable"
             ? "2026-09-05T00:00:00Z"
@@ -122,7 +141,7 @@ function fixture() {
           state,
           generation: state,
           safeMetadata: {
-            connectedAccountId: "ca_one",
+            connectedAccountId: currentAccountId,
             toolkitSlug: "gmail",
             toolkitName: "Gmail",
           },
@@ -139,6 +158,16 @@ function fixture() {
     });
   return {
     make,
+    beforeReadResponse: (wait: () => Promise<void>) => {
+      beforeReadResponse = wait;
+    },
+    beforeDelete: (wait: () => Promise<void>) => {
+      beforeDelete = wait;
+    },
+    reconnect: () => {
+      state = "ready";
+      currentAccountId = "ca_two";
+    },
     beforeCreateResponse: (wait: () => Promise<void>) => {
       beforeCreateResponse = wait;
     },
@@ -392,15 +421,13 @@ test("a delivery waits for an unresolved shared creation before fixing its desti
     entered();
     await gate;
   });
-  const create = f
-    .make()
-    .sync("owner", "bot-two", {
-      ...intent("two"),
-      trigger: {
-        ...intent("two").trigger!,
-        config: { label: "INBOX", default_flag: true },
-      },
-    });
+  const create = f.make().sync("owner", "bot-two", {
+    ...intent("two"),
+    trigger: {
+      ...intent("two").trigger!,
+      config: { label: "INBOX", default_flag: true },
+    },
+  });
   await reading;
   await expect(f.make().receive("owner", event)).rejects.toThrow(
     "creation result",
@@ -416,15 +443,178 @@ test("the Bot's current binding selects status even if an old deletion tombstone
   await f
     .make()
     .sync("owner", "bot", { ...intent("new"), routineId: "same-routine" });
-  await f
-    .make()
-    .sync("owner", "bot", {
-      ...intent("old", 2, false, true),
-      routineId: "same-routine",
-    });
+  await f.make().sync("owner", "bot", {
+    ...intent("old", 2, false, true),
+    routineId: "same-routine",
+  });
   expect(
     (await f.make().statuses("owner", "bot", { "same-routine": "new" }))[
       "same-routine"
+    ]?.status,
+  ).toBe("active");
+});
+
+test("an explicit Routine repair can use a reconnected account while old queued input remains fenced", async () => {
+  const f = fixture();
+  await f.make().sync("owner", "bot", intent("one"));
+  f.loseDelivery();
+  await expect(f.make().receive("owner", event)).rejects.toThrow();
+  f.revoke();
+  await f.make().removeConnection("owner", "connection-one");
+  f.reconnect();
+  await f.make().sync("owner", "bot", intent("one", 2));
+  await f.make().alarm("owner");
+  expect(f.deliveries).toHaveLength(1);
+  expect(
+    (await f.make().statuses("owner", "bot", { "routine-one": "one" }))[
+      "routine-one"
+    ]?.status,
+  ).toBe("active");
+  await expect(f.make().receive("owner", event)).rejects.toThrow(
+    "previous connection",
+  );
+  await f.make().receive("owner", {
+    ...event,
+    eventId: "msg_reconnected",
+    accountId: "ca_two",
+    triggerId: "ti_two",
+  });
+  expect(f.deliveries).toHaveLength(2);
+});
+
+test("simultaneous starts that are both paused resolve their own unknown state without a circular wait", async () => {
+  const f = fixture();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const waiting: (() => void)[] = [];
+  let reads = 0;
+  const wait = async () => {
+    f.beforeRead(wait);
+    reads++;
+    waiting.splice(0).forEach((resolve) => resolve());
+    await gate;
+  };
+  const untilReads = async (n: number) => {
+    while (reads < n)
+      await new Promise<void>((resolve) => waiting.push(resolve));
+  };
+  f.beforeRead(wait);
+  const one = f.make().sync("owner", "bot-one", intent("one"));
+  await untilReads(1);
+  const other = {
+    ...intent("two"),
+    trigger: { ...intent("two").trigger!, config: { label: "other" } },
+  };
+  const two = f.make().sync("owner", "bot-two", other);
+  await untilReads(2);
+  const pauseOne = f.make().sync("owner", "bot-one", intent("one", 2, false));
+  await untilReads(3);
+  const pauseTwo = f
+    .make()
+    .sync("owner", "bot-two", { ...other, revision: 2, enabled: false });
+  await untilReads(4);
+  f.beforeRead(async () => {});
+  release();
+  await Promise.all([one, two, pauseOne, pauseTwo]);
+  await f.make().alarm("owner");
+  expect(f.mutations).toEqual([]);
+  expect(
+    (await f.make().statuses("owner", "bot-one", { "routine-one": "one" }))[
+      "routine-one"
+    ]?.status,
+  ).toBe("paused");
+  expect(
+    (await f.make().statuses("owner", "bot-two", { "routine-two": "two" }))[
+      "routine-two"
+    ]?.status,
+  ).toBe("paused");
+});
+test("a newly bound paused config cannot disable another Routine's normalized instance", async () => {
+  const f = fixture();
+  f.normalize({ label: "INBOX" });
+  await f.make().sync("owner", "bot-one", intent("one"));
+  await f.make().sync("owner", "bot-two", {
+    ...intent("two", 1, false),
+    trigger: { ...intent("two").trigger!, config: { label: "INBOX" } },
+  });
+  expect(f.mutations).toEqual(["POST"]);
+  expect(
+    (await f.make().statuses("owner", "bot-one", { "routine-one": "one" }))[
+      "routine-one"
+    ]?.status,
+  ).toBe("active");
+});
+
+test("a new binding cannot settle against an instance whose deletion is already dispatched", async () => {
+  const f = fixture();
+  f.normalize({ label: "INBOX" });
+  await f.make().sync("owner", "bot-one", intent("one"));
+  let release!: () => void, entered!: () => void;
+  const enteredDelete = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  f.beforeDelete(async () => {
+    entered();
+    await gate;
+  });
+  const deleting = f
+    .make()
+    .sync("owner", "bot-one", intent("one", 2, false, true));
+  await enteredDelete;
+  await f.make().sync("owner", "bot-two", {
+    ...intent("two"),
+    trigger: { ...intent("two").trigger!, config: { label: "INBOX" } },
+  });
+  release();
+  await deleting;
+  await f.make().alarm("owner");
+  expect(f.mutations).toEqual(["POST", "DELETE", "POST"]);
+  expect(
+    (await f.make().statuses("owner", "bot-two", { "routine-two": "two" }))[
+      "routine-two"
+    ]?.status,
+  ).toBe("active");
+});
+
+test("a delayed provider read cannot bind an instance deleted before its response arrives", async () => {
+  const f = fixture();
+  f.normalize({ label: "INBOX" });
+  await f.make().sync("owner", "bot-one", intent("one"));
+  const deletingGate = Promise.withResolvers<void>();
+  const deletingEntered = Promise.withResolvers<void>();
+  f.beforeDelete(async () => {
+    deletingEntered.resolve();
+    await deletingGate.promise;
+  });
+  const deleting = f
+    .make()
+    .sync("owner", "bot-one", intent("one", 2, false, true));
+  await deletingEntered.promise;
+  const readingGate = Promise.withResolvers<void>();
+  const readingEntered = Promise.withResolvers<void>();
+  f.beforeReadResponse(async () => {
+    readingEntered.resolve();
+    await readingGate.promise;
+  });
+  const creating = f.make().sync("owner", "bot-two", {
+    ...intent("two"),
+    trigger: { ...intent("two").trigger!, config: { label: "INBOX" } },
+  });
+  await readingEntered.promise;
+  deletingGate.resolve();
+  await deleting;
+  readingGate.resolve();
+  await creating;
+  await f.make().alarm("owner");
+  expect(f.mutations).toEqual(["POST", "DELETE", "POST"]);
+  expect(
+    (await f.make().statuses("owner", "bot-two", { "routine-two": "two" }))[
+      "routine-two"
     ]?.status,
   ).toBe("active");
 });
