@@ -397,19 +397,27 @@ export class AppletState extends DurableObject<AppletStateEnv> {
       ? await this.#generation(current.generationId)
       : undefined;
     const identity = this.#residentMountInput();
-    if (generation && identity) {
+    if (generation) {
       this.ctx.facets.clone(
         APPLET_ROLLBACK_FACET_NAME_V1,
         APPLET_FACET_NAME_V1,
       );
-      this.ctx.storage.kv.put(
-        APPLET_MOUNT_INPUT_KEY,
-        await this.#mountInputFor(
-          generation,
-          identity.userId,
-          identity.appletId,
-        ),
-      );
+      // The restored storage is the User's product state, so it is kept even in
+      // the corner where the mount input is gone too and the identity it names
+      // cannot be reconstructed: the Applet then reports no active generation
+      // until it is published again, over the data it had.
+      if (identity) {
+        this.ctx.storage.kv.put(
+          APPLET_MOUNT_INPUT_KEY,
+          await this.#mountInputFor(
+            generation,
+            identity.userId,
+            identity.appletId,
+          ),
+        );
+      } else {
+        this.ctx.storage.kv.delete(APPLET_MOUNT_INPUT_KEY);
+      }
     } else {
       // Nothing was current, so nothing is owed: the candidate's storage goes
       // with the trial, exactly as a failed first activation's does.
