@@ -35,6 +35,15 @@ extension VoicePhaseLive on VoicePhase {
 /// User stepped away, so this is the only way the count can grow.
 const Duration voicePendingPollInterval = Duration(seconds: 10);
 
+/// How long the screen waits for `ready` before it stops saying "Connecting".
+///
+/// The server is meant to answer with `ready` or `offline` either way, so this
+/// is the screen's own floor: whatever happens between the phone and the
+/// Durable Object — a socket held open by a proxy, a server that never gets to
+/// a decision — the User is told something they can act on instead of watching
+/// "Connecting" forever.
+const Duration voiceConnectDeadline = Duration(seconds: 20);
+
 /// The whole Voice screen's state.
 ///
 /// Pause is not a mute: it sends `stop`, which ends the provider session.
@@ -77,6 +86,7 @@ class VoiceController extends ChangeNotifier {
   StreamSubscription<VoiceServerFrame>? _frames;
   StreamSubscription<Uint8List>? _audio;
   Timer? _poll;
+  Timer? _connectGuard;
   bool _disposed = false;
 
   /// Invalidates a permission prompt or socket callback from an older attempt,
@@ -100,6 +110,7 @@ class VoiceController extends ChangeNotifier {
     _poll = null;
     phase = resuming ? VoicePhase.resuming : VoicePhase.connecting;
     message = null;
+    _armConnectDeadline(attempt);
     _notify();
     VoiceSession? opened;
     try {
@@ -126,6 +137,7 @@ class VoiceController extends ChangeNotifier {
       });
     } catch (error) {
       if (attempt != _attempt) return;
+      _cancelConnectDeadline();
       await opened?.close();
       await audio.silence();
       _session = null;
@@ -143,6 +155,7 @@ class VoiceController extends ChangeNotifier {
       case VoiceReady():
         // A live session speaks what was waiting, so the rows clear here
         // rather than lingering behind a live conversation.
+        _cancelConnectDeadline();
         waiting = const [];
         phase = VoicePhase.listening;
         message = null;
@@ -170,18 +183,46 @@ class VoiceController extends ChangeNotifier {
   }
 
   void _onClosed(int attempt) {
-    if (attempt != _attempt || _disposed || !phase.live) return;
+    if (attempt != _attempt || _disposed) return;
+    // A socket that closes before `ready` is a session that never started, and
+    // it must not leave "Connecting" on screen: the server has stopped talking,
+    // so nothing else is coming.
+    final connecting =
+        phase == VoicePhase.connecting || phase == VoicePhase.resuming;
+    if (!phase.live && !connecting) return;
     _attempt += 1;
     unawaited(_release());
     phase = VoicePhase.ended;
-    message = 'Voice lost its connection. Leave and open Voice again.';
+    message = connecting
+        ? 'Voice couldn’t connect. Try again.'
+        : 'Voice lost its connection. Leave and open Voice again.';
     _notify();
+  }
+
+  /// Arms the screen's own answer to a session that never becomes live.
+  void _armConnectDeadline(int attempt) {
+    _connectGuard?.cancel();
+    _connectGuard = Timer(voiceConnectDeadline, () {
+      if (attempt != _attempt || _disposed) return;
+      _attempt += 1;
+      _connectGuard = null;
+      unawaited(_release());
+      phase = VoicePhase.ended;
+      message = 'Voice took too long to connect. Try again.';
+      _notify();
+    });
+  }
+
+  void _cancelConnectDeadline() {
+    _connectGuard?.cancel();
+    _connectGuard = null;
   }
 
   /// Stops the provider session outright. Bots are told nothing.
   Future<void> pause() async {
     if (!phase.live && phase != VoicePhase.resuming) return;
     _attempt += 1;
+    _cancelConnectDeadline();
     final stopping = _session;
     _session = null;
     phase = VoicePhase.paused;
@@ -215,6 +256,7 @@ class VoiceController extends ChangeNotifier {
   Future<void> _release() async {
     _poll?.cancel();
     _poll = null;
+    _cancelConnectDeadline();
     final closing = _session;
     _session = null;
     await _frames?.cancel();
@@ -228,6 +270,7 @@ class VoiceController extends ChangeNotifier {
   /// Leaves Voice entirely.
   Future<void> leave() async {
     _attempt += 1;
+    _cancelConnectDeadline();
     final stopping = _session;
     _session = null;
     _poll?.cancel();
@@ -244,6 +287,7 @@ class VoiceController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _poll?.cancel();
+    _connectGuard?.cancel();
     unawaited(_frames?.cancel());
     unawaited(_audio?.cancel());
     unawaited(_session?.stop());
