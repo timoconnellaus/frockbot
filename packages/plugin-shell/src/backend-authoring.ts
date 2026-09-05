@@ -32,8 +32,10 @@ import {
   compositionArtifactSetHashV1,
   compositionGenerationIdV1,
   decodeCompositionGenerationV1,
+  pinCompositionWithRetryV1,
   type CompositionGenerationV1,
   type CompositionMemberV1,
+  type CompositionOriginV1,
 } from "@frockbot/kernel-composition/generation";
 import { decodeFrockBotManifest } from "@frockbot/kernel-composition";
 import {
@@ -87,7 +89,7 @@ export interface AuthoringCompositionStore {
   read(generationId: string): Promise<CompositionGenerationV1 | undefined>;
   propose(
     generation: CompositionGenerationV1,
-    options?: { pin?: boolean },
+    options?: { pin?: boolean; expectedCurrentGenerationId?: string },
   ): Promise<void>;
   retainedCount(): Promise<number>;
   revert(
@@ -105,6 +107,88 @@ export interface AuthoringCompositionStore {
     limit: number;
     cursor?: string;
   }): Promise<{ generations: CompositionGenerationV1[]; cursor?: string }>;
+}
+
+/**
+ * Records the generation an authored Package activates in, pinned for the next
+ * admitted Turn.
+ *
+ * New authoring branches from last-known-good, replacing only the Package
+ * being authored. That deliberately drops every pending, failed, or
+ * quarantined proposal: a broken member can be repaired by re-authoring its
+ * packageId, but it can never poison a later, unrelated generation.
+ *
+ * Last-known-good is the wrong source for two kinds of member, though, and
+ * taking it whole is how a Turn lost them. First-party members belong to the
+ * deployment, not to the Bot, so they are read from the generation the pointer
+ * names — otherwise authoring quietly reinstates the built-in artifacts of an
+ * older release over the ones a deploy just followed to, and every later Turn
+ * fails to mount them. Applet members belong to the User's directory and are
+ * carried over the same way. The pin is then a compare-and-swap: bundling
+ * yields, and a deployment-follow that won the pointer meanwhile is merged in
+ * by re-deriving rather than overwritten.
+ */
+export async function proposeAuthoredGenerationV1(input: {
+  composition: Pick<
+    AuthoringCompositionStore,
+    "current" | "lastKnownGood" | "read" | "propose"
+  >;
+  member: CompositionMemberV1;
+  createdAt: string;
+  origin: CompositionOriginV1;
+}): Promise<{
+  generation: CompositionGenerationV1;
+  supersededVersion?: string;
+}> {
+  return pinCompositionWithRetryV1(async () => {
+    const parent = await input.composition.lastKnownGood();
+    const current = await input.composition.current();
+    const superseded = parent.members.find(
+      (member) => member.packageId === input.member.packageId,
+    );
+    const deployed = current.members.filter(
+      (member) =>
+        member.provenance.kind === "first-party" &&
+        member.packageId !== input.member.packageId,
+    );
+    const deployedIds = new Set(deployed.map((member) => member.packageId));
+    const members = [
+      ...parent.members.filter(
+        (member) =>
+          member.packageId !== input.member.packageId &&
+          member.provenance.kind !== "first-party" &&
+          !deployedIds.has(member.packageId),
+      ),
+      ...deployed,
+      input.member,
+    ].sort((left, right) => left.packageId.localeCompare(right.packageId));
+    const applets = current.applets ?? [];
+    const artifactSetHash = await compositionArtifactSetHashV1(
+      members,
+      applets,
+    );
+    const generation = decodeCompositionGenerationV1({
+      schemaVersion: 1,
+      generationId: compositionGenerationIdV1(input.createdAt, artifactSetHash),
+      artifactSetHash,
+      parentGenerationId: parent.generationId,
+      createdAt: input.createdAt,
+      origin: input.origin,
+      members,
+      ...(applets.length === 0 ? {} : { applets }),
+      status: "pending",
+    });
+    if (!(await input.composition.read(generation.generationId))) {
+      await input.composition.propose(generation, {
+        pin: true,
+        expectedCurrentGenerationId: current.generationId,
+      });
+    }
+    return {
+      generation,
+      ...(superseded ? { supersededVersion: superseded.version } : {}),
+    };
+  });
 }
 
 /** Immutable content, written once and addressed by hash. */
@@ -347,52 +431,6 @@ export function createPackageAuthoringHost(
     return declaredNames.find((name) => registered.has(name));
   }
 
-  /**
-   * New authoring always branches from last-known-good, replacing only the
-   * Package being authored. This deliberately drops every pending, failed, or
-   * quarantined proposal: a broken member can be repaired by re-authoring its
-   * packageId, but it can never poison a later, unrelated generation.
-   */
-  async function nextGeneration(input: {
-    member: CompositionMemberV1;
-    createdAt: string;
-    sessionId: string;
-  }): Promise<{
-    generation: CompositionGenerationV1;
-    supersededVersion?: string;
-  }> {
-    const parent = await options.composition.lastKnownGood();
-    const superseded = parent.members.find(
-      (member) => member.packageId === input.member.packageId,
-    );
-    const members = [
-      ...parent.members.filter(
-        (member) => member.packageId !== input.member.packageId,
-      ),
-      input.member,
-    ].sort((left, right) => left.packageId.localeCompare(right.packageId));
-    const artifactSetHash = await compositionArtifactSetHashV1(members);
-    const generation = decodeCompositionGenerationV1({
-      schemaVersion: 1,
-      generationId: compositionGenerationIdV1(input.createdAt, artifactSetHash),
-      artifactSetHash,
-      parentGenerationId: parent.generationId,
-      createdAt: input.createdAt,
-      origin: {
-        kind: "bot-authored",
-        runId: options.runId,
-        sessionId: input.sessionId,
-        turnId: options.turnId,
-      },
-      members,
-      status: "pending",
-    });
-    return {
-      generation,
-      ...(superseded ? { supersededVersion: superseded.version } : {}),
-    };
-  }
-
   async function compose(input: {
     request: AuthorPackageRequestV1;
     intent: AuthorshipIntentV1;
@@ -453,14 +491,19 @@ export function createPackageAuthoringHost(
         bundlerVersion: artifact.bundlerVersion,
       },
     };
-    const { generation, supersededVersion } = await nextGeneration({
-      member,
-      createdAt: artifact.provenance.authoredAt,
-      sessionId: request.sessionId,
-    });
-    if (!(await options.composition.read(generation.generationId))) {
-      await options.composition.propose(generation, { pin: true });
-    }
+    const { generation, supersededVersion } = await proposeAuthoredGenerationV1(
+      {
+        composition: options.composition,
+        member,
+        createdAt: artifact.provenance.authoredAt,
+        origin: {
+          kind: "bot-authored",
+          runId: options.runId,
+          sessionId: request.sessionId,
+          turnId: options.turnId,
+        },
+      },
+    );
     await options.storage.put({
       [authorshipArtifactKey(request.effectId)]: {
         ...outcome,

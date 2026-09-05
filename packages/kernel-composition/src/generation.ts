@@ -155,6 +155,58 @@ export interface CompositionGenerationV1 {
   status: CompositionGenerationStatusV1;
 }
 
+/**
+ * A pinning proposal lost the race for `composition:current`.
+ *
+ * Two writers derive a generation from the pointer and then yield — a release
+ * compiling the deployment's artifacts, a Turn bundling the Package it just
+ * authored. Whichever writes second would otherwise replace the pointer with a
+ * generation derived from a set that no longer exists, dropping every member
+ * the other one added. Compare-and-swap turns that into this error, and the
+ * caller re-reads and re-derives instead of overwriting.
+ */
+export class CompositionPinConflictError extends Error {
+  readonly expectedGenerationId: string;
+  readonly currentGenerationId: string | undefined;
+  constructor(expected: string, current: string | undefined) {
+    super(
+      `composition pointer moved to "${current ?? "nothing"}" while a generation derived from "${expected}" was being proposed`,
+    );
+    this.name = "CompositionPinConflictError";
+    this.expectedGenerationId = expected;
+    this.currentGenerationId = current;
+  }
+}
+
+/** How many times a losing pin re-reads and re-derives before it gives up. */
+export const COMPOSITION_PIN_ATTEMPTS_V1 = 4;
+
+/**
+ * Runs a derive-and-pin attempt until it wins the compare-and-swap.
+ *
+ * Every attempt re-reads the pointer, so the merge is the derivation itself:
+ * deployment-follow carries over whatever non-first-party members the winner
+ * added, and authoring carries over the winner's first-party members. Bounded,
+ * because a Bot that cannot pin is better off leaving the generation it has
+ * resident than spinning inside an admission path.
+ */
+export async function pinCompositionWithRetryV1<T>(
+  attempt: () => Promise<T>,
+  options: { attempts?: number } = {},
+): Promise<T> {
+  const attempts = options.attempts ?? COMPOSITION_PIN_ATTEMPTS_V1;
+  let conflict: CompositionPinConflictError | undefined;
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!(error instanceof CompositionPinConflictError)) throw error;
+      conflict = error;
+    }
+  }
+  throw conflict ?? new Error("composition pin was never attempted");
+}
+
 /** The Durable Object implements this; the kernel only declares it. */
 export interface CompositionStore {
   current(): Promise<CompositionGenerationV1>;
@@ -163,10 +215,14 @@ export interface CompositionStore {
    * Records a new generation. `pin` advances `composition:current` to it, so
    * the next admitted Turn pins the proposal; the generation stays `pending`
    * until it mounts and is committed.
+   *
+   * `expectedCurrentGenerationId` makes the pin a compare-and-swap against the
+   * generation this one was derived from: a pointer that moved meanwhile
+   * refuses with `CompositionPinConflictError` and writes nothing.
    */
   propose(
     generation: CompositionGenerationV1,
-    options?: { pin?: boolean },
+    options?: { pin?: boolean; expectedCurrentGenerationId?: string },
   ): Promise<void>;
   commit(generationId: string): Promise<void>;
   /** Records a revert as a new pending generation; never mutates the target. */

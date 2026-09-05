@@ -23,6 +23,7 @@
     "./backend-skills": "./src/backend-skills.ts",
     "./backend-subagents": "./src/backend-subagents.ts",
     "./client": "./src/client/index.ts",
+    "./client/deployment": "./src/client/deployment.ts",
     "./debug-protocol": "./src/debug-protocol.ts",
     "./client/FrockBotApp.vue": "./src/client/FrockBotApp.vue",
     "./client/notify": "./src/client/notify.ts",
@@ -41,6 +42,7 @@
     "./settings-links": "./src/settings-links.ts",
     "./shared": "./src/shared.ts",
     "./skill-protocol": "./src/skill-protocol.ts",
+    "./tool-catalog-pin": "./src/tool-catalog-pin.ts",
     "./unread": "./src/unread.ts"
   },
   "frockbot": {
