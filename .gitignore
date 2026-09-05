@@ -21,3 +21,4 @@ wrangler-logs/
 .claude/worktrees/
 .dogfood/
 .native-build/
+.lavish/

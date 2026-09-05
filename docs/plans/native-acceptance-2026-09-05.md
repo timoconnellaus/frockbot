@@ -54,11 +54,11 @@ The fallback uses `webview_flutter`, an anonymous reviewed bootstrap, an exact s
 - `bun install --force`: passed before implementation.
 - Root `bun run typecheck`: all **82 packages** passed, including protocol freshness and architecture checks.
 - Touched TypeScript unit suites: **391 passed**, covering gateway compatibility, PKCE/redirect/replay, deterministic saves, fallback frame/epoch policy, Applet token transport and shared fixtures.
-- `bun run --filter @frockbot/cloudflare test:integration`: **125 passed across 50 files**. Additional targeted production User-authority suite: **2 passed**, including persistent issuance/revocation, cross-User refusal and repeated save receipts. A fresh stub is persistence evidence, not forced eviction evidence.
+- `bun run --filter @frockbot/cloudflare test:integration`: **127 passed across 51 files** on the merged head, including the two new production User-authority cases for persistent issuance/revocation, cross-User refusal and repeated save receipts. A fresh stub is persistence evidence, not forced eviction evidence.
 - Flutter unit/widget tests: **207 passed**. Shared fixtures, real GenUI rendering, hostile trees, composer/Stop/reconnect behavior, lost send recovery, ordered refreshes, protected-write failures, cold PKCE callback and scoped fallback binding are covered.
 - `flutter analyze`, `bun run format:check`, and the SDK-independent native pin/digest check passed.
 - `scripts/native-acceptance.sh` / `.py`: shell/Python syntax checked. It waits for the paired Pixel, inventories the installed APK, enforces same-signer/higher-code replacement, and provides supervised flow and raw-measurement commands. Its install and marker-continuity path passed on the Pixel, but its UI selectors have **not** been validated; it does not fabricate missing physical or backend evidence.
-- `.github/workflows/native.yml` is advisory, outside required branch-protection checks. It runs analyze/test only if the exact SDK is already on the runner, and emits an explicit skip notice otherwise. It installs or upgrades no SDK. The regular Linux runner is expected to skip it; local checks are therefore essential.
+- `.github/workflows/native.yml` is advisory, outside required branch-protection checks. It runs analyze/test only if the exact SDK is already on the runner, and emits an explicit skip notice otherwise. It installs or upgrades no SDK. On PR #262, the job verified the committed pins and explicitly skipped Flutter analysis/tests because Flutter was absent on the Linux runner; local checks are therefore essential.
 
 ## Budget ledger
 
