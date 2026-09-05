@@ -197,6 +197,8 @@ export interface ConnectionView {
 }
 
 export interface StartConnectionCommandV1 {
+  /** A variant selected from the Connection Type's backend catalog. */
+  connectorId?: string;
   schemaVersion: 1;
   type: "connection/start";
   commandId: string;
@@ -926,7 +928,7 @@ export function decodeStartConnectionCommandV1(
     input,
     "Connection start command",
     ["schemaVersion", "type", "commandId", "connectionTypeId"],
-    ["alias", "nativeReturnNonce"],
+    ["alias", "nativeReturnNonce", "connectorId"],
   );
   if (value.schemaVersion !== 1 || value.type !== "connection/start") {
     throw new ConfigurationDecodeError("unsupported Connection start command");
@@ -940,6 +942,11 @@ export function decodeStartConnectionCommandV1(
   return {
     schemaVersion: 1,
     type: "connection/start",
+    ...(value.connectorId === undefined
+      ? {}
+      : {
+          connectorId: connectionIdentifier(value.connectorId, "connectorId"),
+        }),
     commandId: connectionIdentifier(value.commandId, "commandId"),
     connectionTypeId: connectionIdentifier(
       value.connectionTypeId,

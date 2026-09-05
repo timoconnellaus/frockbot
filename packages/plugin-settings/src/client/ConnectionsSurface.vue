@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Connectors: the surface for accounts and services a User authorizes for all
- * of their Bots — Composio, Gmail, a remote MCP server.
+ * of their Bots — Gmail, Calendar, or a remote server.
  *
  * It holds Connection authorization and state only. Whether the Package
  * providing a connector is enabled at all is Plugins' question.
@@ -50,10 +50,12 @@ const connectionReturnMessage = computed(() => {
 
 /** The Package's display name when the catalog knows it, its id otherwise. */
 function connectorDisplayName(packageId: string): string {
-  return (
-    web.value.pluginCatalog.find((item) => item.packageId === packageId)
-      ?.displayName ?? packageId
+  const item = web.value.pluginCatalog.find(
+    (item) => item.packageId === packageId,
   );
+  return !item || item.connectionTypes.some((type) => type.catalogPath)
+    ? "Your account"
+    : item.displayName;
 }
 
 function dismissConnectionReturn(): void {
@@ -75,18 +77,82 @@ function connectorStatus(item: PluginCatalogItem): string {
       ? "On for every Bot you own"
       : "Off";
   }
-  const count = connectionCount(item.packageId);
+  const count = connectionCount(item);
   if (count === 0) return "No account connected";
   return count === 1 ? "1 account connected" : `${count} accounts connected`;
 }
 
-const connectors = computed(() =>
-  configurablePackages({
+const search = ref("");
+const connectors = computed(() => {
+  const rows = configurablePackages({
     catalog: web.value.pluginCatalog,
     packages: web.value.userSettings?.packages ?? [],
     home: "connections",
-  }),
-);
+  }).flatMap((item): PluginCatalogItem[] => {
+    const dynamic = item.connectionTypes.filter((type) => type.catalogPath);
+    if (dynamic.length)
+      return dynamic.flatMap((type) => {
+        const entries = [
+          ...(web.value.connectorCatalog?.[`${item.packageId}/${type.id}`] ??
+            []),
+        ];
+        for (const connection of web.value.userSettings?.connections ?? []) {
+          const id = connection.safeMetadata.connectorId;
+          if (
+            connection.packageId !== item.packageId ||
+            connection.state === "revoked" ||
+            typeof id !== "string" ||
+            entries.some((entry) => entry.id === id)
+          )
+            continue;
+          entries.push({
+            id,
+            name: String(
+              connection.safeMetadata.connectorName ?? connection.displayName,
+            ),
+            description: "Your connected account",
+          });
+        }
+        return entries.map((entry) => ({
+          ...item,
+          displayName: entry.name,
+          connectorId: entry.id,
+          connectorDescription: entry.description,
+          connectorIcon: entry.icon,
+          connectionTypes: [type],
+        }));
+      });
+    if (item.packageId === MCP_PACKAGE_ID)
+      return [
+        ...mcpServers.value.map((server) => ({
+          ...item,
+          connectionId: server.serverId,
+          displayName: server.label,
+          connectorDescription: "Tools from your connected server",
+        })),
+        {
+          ...item,
+          connectionId: "new-server",
+          displayName: "Custom server",
+          connectorDescription:
+            "Connect a service using its MCP server address",
+        },
+      ];
+    return [item];
+  });
+  const query = search.value.trim().toLowerCase();
+  return rows
+    .filter((item) =>
+      `${item.displayName} ${item.connectorDescription ?? ""}`
+        .toLowerCase()
+        .includes(query),
+    )
+    .sort(
+      (a, b) =>
+        Number(connectionCount(b) > 0) - Number(connectionCount(a) > 0) ||
+        a.displayName.localeCompare(b.displayName),
+    );
+});
 
 /**
  * The connect cards. Drawn from the Connection projection — which carries no
@@ -202,10 +268,14 @@ async function reconnect(connectionId: string): Promise<void> {
   }
 }
 
-function connectionCount(packageId: string): number {
+function connectionCount(item: PluginCatalogItem): number {
   return (web.value.userSettings?.connections ?? []).filter(
     (connection) =>
-      connection.packageId === packageId && connection.state !== "revoked",
+      connection.packageId === item.packageId &&
+      connection.state !== "revoked" &&
+      (!item.connectorId ||
+        connection.safeMetadata.connectorId === item.connectorId) &&
+      (!item.connectionId || connection.connectionId === item.connectionId),
   ).length;
 }
 
@@ -311,6 +381,9 @@ async function addMcpServer(): Promise<void> {
 }
 
 /** Start whichever authorization the card's Connection Type declares. */
+const labelingConnector = ref<string>();
+const accountAlias = ref("");
+
 function beginConnect(item: PluginCatalogItem): void {
   if (item.packageId === MCP_PACKAGE_ID) {
     beginMcpConnection();
@@ -325,7 +398,12 @@ function beginConnect(item: PluginCatalogItem): void {
     apiKey.value = "";
     return;
   }
-  void connect(item.packageId, connectionType.id);
+  if (item.connectorId) {
+    labelingConnector.value = item.connectorId;
+    accountAlias.value = "";
+    return;
+  }
+  void connect(item.packageId, connectionType.id, item.connectorId);
 }
 
 function cancelApiKeyConnection(): void {
@@ -354,11 +432,15 @@ async function connectApiKey(): Promise<void> {
 async function connect(
   packageId: string,
   connectionTypeId: string,
+  connectorId?: string,
+  alias?: string,
 ): Promise<void> {
   try {
     const redirectUrl = await web.value.startConnection(
       packageId,
       connectionTypeId,
+      connectorId,
+      alias,
     );
     if (redirectUrl) {
       await web.value.openConnectionAuthorization(redirectUrl);
@@ -395,47 +477,44 @@ async function connect(
         <UiButton @click="dismissConnectionReturn">Dismiss</UiButton>
       </p>
 
-      <section
-        v-if="pendingAuthorizations.length"
-        class="connect-cards"
-        aria-label="Connections that need your authorization"
+      <p
+        v-if="Object.keys(web.connectorCatalogErrors ?? {}).length"
+        role="status"
+        class="field-hint"
       >
-        <article
-          v-for="connection in pendingAuthorizations"
-          :key="connection.connectionId"
-          class="connect-card"
-        >
-          <div class="connect-card-copy">
-            <strong>{{ connection.pendingAuthorization?.label }}</strong>
-            <span> Needs you to sign in again. </span>
-          </div>
-          <UiButton
-            variant="primary"
-            :disabled="reconnectingConnectionId === connection.connectionId"
-            @click="reconnect(connection.connectionId)"
-          >
-            {{
-              reconnectingConnectionId === connection.connectionId
-                ? "Opening…"
-                : "Reconnect"
-            }}
-          </UiButton>
-        </article>
-      </section>
-
+        Some connectors could not be refreshed.
+        <UiButton @click="web.loadPluginCatalog()">Try again</UiButton>
+      </p>
+      <label class="connector-search"
+        ><span>Find a connector</span
+        ><input
+          v-model="search"
+          type="search"
+          placeholder="Search Gmail, Calendar, or a service…"
+      /></label>
       <div class="connector-grid">
         <article
           v-for="item in connectors"
-          :key="item.packageId"
+          :key="`${item.packageId}/${item.connectorId ?? item.connectionId ?? ''}`"
           class="connector-card"
         >
           <div class="connector-summary">
-            <span class="connector-logo" aria-hidden="true">
+            <img
+              v-if="item.connectorIcon"
+              class="connector-logo"
+              :src="item.connectorIcon"
+              alt=""
+              loading="lazy"
+              referrerpolicy="no-referrer"
+            />
+            <span v-else class="connector-logo" aria-hidden="true">
               {{ item.displayName.slice(0, 1) }}
             </span>
             <span class="connector-copy">
               <strong>{{ item.displayName }}</strong>
-              <small>{{ connectorStatus(item) }}</small>
+              <small>{{
+                item.connectorDescription ?? connectorStatus(item)
+              }}</small>
             </span>
             <UiButton
               v-if="item.connectionTypes[0]?.authorizationKind === 'none'"
@@ -452,19 +531,48 @@ async function connect(
             </UiButton>
             <UiButton
               v-else-if="
-                connectionCount(item.packageId) === 0 ||
-                item.connectionTypes[0]?.allowMultiple
+                (!item.connectionId || item.connectionId === 'new-server') &&
+                (connectionCount(item) === 0 ||
+                  item.connectionTypes[0]?.allowMultiple)
               "
               @click="beginConnect(item)"
             >
               {{
-                connectionCount(item.packageId) === 0
-                  ? "Connect"
-                  : "Add another account"
+                connectionCount(item) === 0 ? "Connect" : "Add another account"
               }}
             </UiButton>
           </div>
 
+          <form
+            v-if="item.connectorId && labelingConnector === item.connectorId"
+            class="api-key-form"
+            @submit.prevent="
+              connect(
+                item.packageId,
+                item.connectionTypes[0]!.id,
+                item.connectorId,
+                accountAlias.trim(),
+              )
+            "
+          >
+            <label
+              ><span>Account label</span
+              ><input
+                v-model="accountAlias"
+                placeholder="Work email or personal account"
+                maxlength="120"
+                required
+            /></label>
+            <p class="field-hint">
+              Choose a name so you can recognize this account later.
+            </p>
+            <div class="api-key-actions">
+              <UiButton @click="labelingConnector = undefined">Cancel</UiButton
+              ><UiButton type="submit" variant="primary"
+                >Continue to sign in</UiButton
+              >
+            </div>
+          </form>
           <PackageAccounts :item="item" />
 
           <div
@@ -475,7 +583,9 @@ async function connect(
             class="mcp-status"
           >
             <div
-              v-for="server in mcpServers"
+              v-for="server in mcpServers.filter(
+                (server) => server.serverId === item.connectionId,
+              )"
               :key="server.serverId"
               class="mcp-server"
             >
@@ -486,16 +596,22 @@ async function connect(
                 </span>
               </div>
               <p class="mcp-meta">
-                {{ server.toolCount }} tools · epoch {{ server.serverEpoch }} ·
-                last handshake {{ handshakeLabel(server.lastHandshakeAt) }}
+                {{ server.toolCount }} tools · Last checked
+                {{ handshakeLabel(server.lastHandshakeAt) }}
               </p>
               <p v-if="server.failure" class="connection-failure">
-                {{ server.failure.code }}: {{ server.failure.message }}
+                {{ server.failure.message }}
               </p>
               <p v-if="server.instructions" class="mcp-instructions">
                 {{ server.instructions }}
               </p>
               <div class="connector-actions">
+                <UiButton
+                  v-if="server.state === 'needs-auth'"
+                  :disabled="reconnectingConnectionId === server.serverId"
+                  @click="reconnect(server.serverId)"
+                  >Reconnect</UiButton
+                >
                 <UiButton
                   @click="
                     beginInstructions(
@@ -541,12 +657,12 @@ async function connect(
               :key="refusal.refusalId"
               class="connection-failure"
             >
-              {{ refusal.code }}: {{ refusal.message }}
+              {{ refusal.message }}
             </p>
           </div>
 
           <form
-            v-if="mcpFormOpen && item.packageId === MCP_PACKAGE_ID"
+            v-if="mcpFormOpen && item.connectionId === 'new-server'"
             class="api-key-form"
             @submit.prevent="addMcpServer"
           >
@@ -648,10 +764,17 @@ async function connect(
 
       <div v-if="connectors.length === 0" class="connections-empty">
         <p>
-          No connectors are enabled yet. Enable one in Plugins — Composio,
-          Gmail, or a remote MCP server — and it will appear here to connect.
+          {{
+            search.trim()
+              ? "No connectors match your search."
+              : "Your connectors will appear here when they are available."
+          }}
         </p>
-        <UiButton type="button" @click="surfaces.open('plugins')">
+        <UiButton
+          v-if="!search.trim()"
+          type="button"
+          @click="surfaces.open('plugins')"
+        >
           Open Plugins
         </UiButton>
       </div>
@@ -664,6 +787,27 @@ async function connect(
 </template>
 
 <style scoped>
+.connector-search {
+  display: grid;
+  gap: 0.4rem;
+  margin: 1rem 0;
+  color: var(--frock-text-muted);
+  font-size: var(--frock-text-sm);
+}
+.connector-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.75rem;
+  border: 1px solid var(--frock-border);
+  border-radius: 0.65rem;
+  background: var(--frock-surface);
+  color: var(--frock-text);
+}
+img.connector-logo {
+  object-fit: contain;
+  padding: 0.3rem;
+}
+
 .connections-surface {
   display: flex;
   flex-direction: column;

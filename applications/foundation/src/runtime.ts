@@ -82,6 +82,7 @@ export type { FlockSelfRuntimeHostV1 } from "@frockbot/plugin-flock/agent";
 import echoManifest from "@frockbot/plugin-echo/manifest";
 import identityRuntimePlugin from "@frockbot/plugin-identity/agent";
 import identityManifest from "@frockbot/plugin-identity/manifest";
+import composioManifest from "@frockbot/plugin-composio/manifest";
 import mcpManifest from "@frockbot/plugin-mcp/manifest";
 import {
   createConfiguredMcpRuntimeContribution,
@@ -188,6 +189,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
   ["@frockbot/plugin-flock", flockManifest],
+  ["@frockbot/plugin-composio", composioManifest],
   ["@frockbot/plugin-mcp", mcpManifest],
   ["@frockbot/plugin-memory", memoryManifest],
   ["@frockbot/plugin-image", imageManifest],

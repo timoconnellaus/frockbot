@@ -152,6 +152,11 @@ export interface SendPromptResult {
 }
 
 export interface PluginCatalogItem {
+  /** A catalog variant; only the Connectors projection creates these rows. */
+  connectorId?: string;
+  connectorDescription?: string;
+  connectorIcon?: string;
+  connectionId?: string;
   packageId: string;
   displayName: string;
   version: string;
@@ -163,6 +168,7 @@ export interface PluginCatalogItem {
     connectionTypes: string[];
   }>;
   connectionTypes: Array<{
+    catalogPath?: string;
     id: string;
     displayName: string;
     allowMultiple: boolean;
@@ -317,6 +323,11 @@ export interface FrockBotWebData {
   botSettings?: BotSettingsViewV1;
   userSettings?: UserSettingsViewV1;
   pluginCatalog: PluginCatalogItem[];
+  connectorCatalogErrors?: Record<string, string>;
+  connectorCatalog?: Record<
+    string,
+    import("@frockbot/connection-core").ConnectorCatalogEntryV1[]
+  >;
   /**
    * The remote Catalog index, read through `/catalog/v1/index`. Separate from
    * `pluginCatalog`, which projects the compiled-in application manifest: the
@@ -524,6 +535,8 @@ export interface FrockBotWebData {
   startConnection(
     packageId: string,
     connectionTypeId: string,
+    connectorId?: string,
+    alias?: string,
   ): Promise<string | undefined>;
   openConnectionAuthorization(url: string): Promise<void>;
   revokeConnection(packageId: string, connectionId: string): Promise<void>;

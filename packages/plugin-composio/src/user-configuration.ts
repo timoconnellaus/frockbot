@@ -1,11 +1,13 @@
 import {
   USER_PROFILE_PLACEHOLDER_NAME_V1,
+  MAX_USER_CONNECTIONS_V1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import {
   createUserSettingsBackendContribution,
   type UserSettingsBackendContribution,
   type UserSettingsTransaction,
+  type UserSettingsStorage,
   // pi-lens-ignore: ts:2307
 } from "@frockbot/plugin-settings/user";
 import type { Plugin } from "cordis";
@@ -50,13 +52,31 @@ function readyAuthorizationMetadata(
   };
 }
 
+export interface ComposioStorage extends UserSettingsStorage {
+  getAlarm?(): Promise<number | null>;
+  setAlarm(time: number | Date): Promise<void>;
+  transaction<T>(
+    callback: (
+      storage: UserSettingsTransaction & {
+        getAlarm?(): Promise<number | null>;
+        setAlarm(time: number | Date): Promise<void>;
+      },
+    ) => Promise<T>,
+  ): Promise<T>;
+}
+
 export interface ComposioUserBackendHost {
-  state: DurableObjectState;
+  state: { storage: ComposioStorage };
+  settings?: UserSettingsBackendContribution;
   availablePackages: readonly { packageId: string; version: string }[];
   reconcileProviderConnection(
     request: ComposioProviderReconciliationRequest,
   ): Promise<ComposioProviderReconciliationResult>;
-  revokeConnectedAccount(connectedAccountId: string): Promise<unknown>;
+  revokeConnectedAccount(
+    connectedAccountId: string,
+    userId: string,
+    connectionId: string,
+  ): Promise<unknown>;
 }
 
 export interface StartConnectionInput {
@@ -68,39 +88,41 @@ export interface StartConnectionInput {
 }
 
 function nextConnectionAlarm(settings: UserSettingsViewV1): number | undefined {
-  const deadlines = settings.connections.flatMap((connection) => {
-    const values: number[] = [];
-    const metadata = connection.safeMetadata;
-    if (
-      ((connection.state === "authorizing" &&
-        typeof metadata.connectedAccountId !== "string") ||
-        connection.state === "revoking") &&
-      typeof metadata.effectDeadlineAt === "number"
-    ) {
-      values.push(metadata.effectDeadlineAt);
-    }
-    if (
-      metadata.revocationRequested !== true &&
-      connection.state === "authorizing"
-    ) {
-      if (typeof metadata.authorizationStateExpiresAt === "number") {
-        values.push(metadata.authorizationStateExpiresAt);
+  const deadlines = settings.connections
+    .filter((connection) => connection.packageId === "composio")
+    .flatMap((connection) => {
+      const values: number[] = [];
+      const metadata = connection.safeMetadata;
+      if (
+        ((connection.state === "authorizing" &&
+          typeof metadata.connectedAccountId !== "string") ||
+          connection.state === "revoking") &&
+        typeof metadata.effectDeadlineAt === "number"
+      ) {
+        values.push(metadata.effectDeadlineAt);
       }
-      if (typeof metadata.expiresAt === "string") {
-        const expiresAt = Date.parse(metadata.expiresAt);
-        values.push(Number.isFinite(expiresAt) ? expiresAt : 0);
+      if (
+        metadata.revocationRequested !== true &&
+        connection.state === "authorizing"
+      ) {
+        if (typeof metadata.authorizationStateExpiresAt === "number") {
+          values.push(metadata.authorizationStateExpiresAt);
+        }
+        if (typeof metadata.expiresAt === "string") {
+          const expiresAt = Date.parse(metadata.expiresAt);
+          values.push(Number.isFinite(expiresAt) ? expiresAt : 0);
+        }
       }
-    }
-    if (
-      connection.state === "reconciliation-required" &&
-      (metadata.reconciliationOperation === "link" ||
-        metadata.reconciliationOperation === "revoke") &&
-      typeof metadata.reconciliationRetryAt === "number"
-    ) {
-      values.push(metadata.reconciliationRetryAt);
-    }
-    return values;
-  });
+      if (
+        connection.state === "reconciliation-required" &&
+        (metadata.reconciliationOperation === "link" ||
+          metadata.reconciliationOperation === "revoke") &&
+        typeof metadata.reconciliationRetryAt === "number"
+      ) {
+        values.push(metadata.reconciliationRetryAt);
+      }
+      return values;
+    });
   return deadlines.length > 0 ? Math.min(...deadlines) : undefined;
 }
 
@@ -165,7 +187,7 @@ const initialState = (): UserSettingsViewV1 => ({
 });
 
 export class ComposioUserBackendContribution {
-  readonly ctx: DurableObjectState;
+  readonly ctx: { storage: ComposioStorage };
   private readonly settings: UserSettingsBackendContribution;
   private readonly availablePackages: ReadonlySet<string>;
   private readonly reconcileProviderConnection: ComposioUserBackendHost["reconcileProviderConnection"];
@@ -173,10 +195,12 @@ export class ComposioUserBackendContribution {
 
   constructor(host: ComposioUserBackendHost) {
     this.ctx = host.state;
-    this.settings = createUserSettingsBackendContribution({
-      storage: host.state.storage,
-      availablePackages: host.availablePackages,
-    });
+    this.settings =
+      host.settings ??
+      createUserSettingsBackendContribution({
+        storage: host.state.storage,
+        availablePackages: host.availablePackages,
+      });
     this.availablePackages = new Set(
       host.availablePackages.map(
         ({ packageId, version }) => `${packageId}\u0000${version}`,
@@ -214,7 +238,9 @@ export class ComposioUserBackendContribution {
   ): Promise<UserSettingsViewV1["connections"][number] | undefined> {
     const settings = await this.read(userId);
     return settings.connections.find(
-      (connection) => connection.connectionId === connectionId,
+      (connection) =>
+        connection.packageId === "composio" &&
+        connection.connectionId === connectionId,
     );
   }
 
@@ -222,11 +248,11 @@ export class ComposioUserBackendContribution {
     userId: string,
     input: StartConnectionInput,
   ): Promise<boolean> {
+    if (input.packageId !== "composio")
+      throw new Error("Connection owner is invalid");
     await this.assertIdentity(userId);
     return this.ctx.storage.transaction(async (transaction) => {
-      const current =
-        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
-        initialState();
+      const current = await this.settings.readSnapshot(transaction);
       const installed = current.packages.find(
         (installedPackage) =>
           installedPackage.packageId === input.packageId &&
@@ -250,6 +276,8 @@ export class ComposioUserBackendContribution {
         (connection) =>
           connection.packageId === input.packageId &&
           connection.connectionTypeId === input.connectionTypeId &&
+          connection.safeMetadata.toolkitSlug ===
+            input.safeMetadata?.toolkitSlug &&
           hasUnresolvedLinkEffect(connection),
       );
       if (unresolved) {
@@ -257,6 +285,8 @@ export class ComposioUserBackendContribution {
           "Previous Connection authorization requires reconciliation",
         );
       }
+      if (current.connections.length >= MAX_USER_CONNECTIONS_V1)
+        throw new Error("Connection limit reached");
       const effectDeadlineAt = Date.now() + CONNECTION_EFFECT_ALARM_MS;
       const next = {
         ...current,
@@ -273,8 +303,11 @@ export class ComposioUserBackendContribution {
           },
         ],
       } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
-      await transaction.setAlarm(nextConnectionAlarm(next) ?? effectDeadlineAt);
+      await this.writeState(transaction, current, next);
+      await this.scheduleAlarm(
+        transaction,
+        nextConnectionAlarm(next) ?? effectDeadlineAt,
+      );
       return true;
     });
   }
@@ -371,11 +404,10 @@ export class ComposioUserBackendContribution {
   }> {
     await this.assertIdentity(userId);
     return this.ctx.storage.transaction(async (transaction) => {
-      const current =
-        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
-        initialState();
+      const current = await this.settings.readSnapshot(transaction);
       const connection = current.connections.find(
-        (item) => item.connectionId === connectionId,
+        (item) =>
+          item.packageId === "composio" && item.connectionId === connectionId,
       );
       if (!connection) {
         throw new Error(`Connection "${connectionId}" was not admitted`);
@@ -425,8 +457,11 @@ export class ComposioUserBackendContribution {
           item.connectionId === connectionId ? claimed : item,
         ),
       } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
-      await transaction.setAlarm(nextConnectionAlarm(next) ?? effectDeadlineAt);
+      await this.writeState(transaction, current, next);
+      await this.scheduleAlarm(
+        transaction,
+        nextConnectionAlarm(next) ?? effectDeadlineAt,
+      );
       return { phase: "provider" as const, connection: claimed };
     });
   }
@@ -444,11 +479,10 @@ export class ComposioUserBackendContribution {
     if (update.authorizationStateId !== undefined) {
       await this.assertIdentity(userId);
       return this.ctx.storage.transaction(async (transaction) => {
-        const current =
-          (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
-          initialState();
+        const current = await this.settings.readSnapshot(transaction);
         const connection = current.connections.find(
-          (item) => item.connectionId === connectionId,
+          (item) =>
+            item.packageId === "composio" && item.connectionId === connectionId,
         );
         if (
           !connection ||
@@ -506,10 +540,10 @@ export class ComposioUserBackendContribution {
             item.connectionId === connectionId ? nextConnection : item,
           ),
         } satisfies UserSettingsViewV1;
-        await transaction.put(STATE_KEY, next);
+        await this.writeState(transaction, current, next);
         const alarmAt = nextConnectionAlarm(next);
-        if (alarmAt === undefined) await transaction.deleteAlarm();
-        else await transaction.setAlarm(alarmAt);
+        if (alarmAt !== undefined)
+          await this.scheduleAlarm(transaction, alarmAt);
         return true;
       });
     }
@@ -595,11 +629,10 @@ export class ComposioUserBackendContribution {
   }> {
     await this.assertIdentity(userId);
     return this.ctx.storage.transaction(async (transaction) => {
-      const current =
-        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
-        initialState();
+      const current = await this.settings.readSnapshot(transaction);
       let connection = current.connections.find(
-        (item) => item.connectionId === connectionId,
+        (item) =>
+          item.packageId === "composio" && item.connectionId === connectionId,
       );
       if (!connection) {
         throw new Error(`Connection "${connectionId}" was not admitted`);
@@ -666,8 +699,9 @@ export class ComposioUserBackendContribution {
             item.connectionId === connectionId ? pending : item,
           ),
         } satisfies UserSettingsViewV1;
-        await transaction.put(STATE_KEY, next);
-        await transaction.setAlarm(
+        await this.writeState(transaction, current, next);
+        await this.scheduleAlarm(
+          transaction,
           Math.max(
             Date.now(),
             nextConnectionAlarm(next) ?? reconciliationRetryAt,
@@ -694,9 +728,32 @@ export class ComposioUserBackendContribution {
           item.connectionId === connectionId ? claimed : item,
         ),
       } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
-      await transaction.setAlarm(nextConnectionAlarm(next) ?? effectDeadlineAt);
+      await this.writeState(transaction, current, next);
+      await this.scheduleAlarm(
+        transaction,
+        nextConnectionAlarm(next) ?? effectDeadlineAt,
+      );
       return { phase: "provider" as const, connection: claimed };
+    });
+  }
+
+  async claimProviderAccountDeletion(
+    userId: string,
+    connectionId: string,
+  ): Promise<boolean> {
+    return this.transitionConnection(userId, connectionId, (connection) => {
+      if (
+        connection.state !== "revoking" ||
+        connection.safeMetadata.providerAccountDeletionRequested === true
+      )
+        return undefined;
+      return {
+        ...connection,
+        safeMetadata: {
+          ...connection.safeMetadata,
+          providerAccountDeletionRequested: true,
+        },
+      };
     });
   }
 
@@ -752,9 +809,7 @@ export class ComposioUserBackendContribution {
     const userId = await this.ctx.storage.get<string>(IDENTITY_KEY);
     if (!userId) return;
     const pending = await this.ctx.storage.transaction(async (transaction) => {
-      const current =
-        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
-        initialState();
+      const current = await this.settings.readSnapshot(transaction);
       const now = Date.now();
       let changed = false;
       const reconciliations: Array<{
@@ -762,6 +817,7 @@ export class ComposioUserBackendContribution {
         operation: "link" | "revoke";
       }> = [];
       const connections = current.connections.map((connection) => {
+        if (connection.packageId !== "composio") return connection;
         let next = connection;
         if (connectionAuthorizationExpired(next, now)) {
           const providerAlias = next.safeMetadata.providerAlias;
@@ -852,12 +908,13 @@ export class ComposioUserBackendContribution {
         revision: changed ? current.revision + 1 : current.revision,
         connections,
       } satisfies UserSettingsViewV1;
-      if (changed) await transaction.put(STATE_KEY, next);
+      if (changed) await this.writeState(transaction, current, next);
       const alarmAt = nextConnectionAlarm(next);
       if (alarmAt === undefined) {
-        await transaction.deleteAlarm();
+        // The shared User alarm may also serve another Contribution.
+        // An already scheduled wake is harmless; never cancel another owner's wake.
       } else {
-        await transaction.setAlarm(Math.max(Date.now(), alarmAt));
+        await this.scheduleAlarm(transaction, Math.max(Date.now(), alarmAt));
       }
       return reconciliations;
     });
@@ -925,7 +982,11 @@ export class ComposioUserBackendContribution {
             if (result.status !== "revoked") {
               if (claim.phase !== "provider") continue;
               try {
-                await this.revokeConnectedAccount(account.id);
+                await this.revokeConnectedAccount(
+                  account.id,
+                  userId,
+                  connection.connectionId,
+                );
               } catch (error) {
                 await this.requireConnectionReconciliation(
                   userId,
@@ -980,7 +1041,11 @@ export class ComposioUserBackendContribution {
                 const connectedAccountId = safeMetadata.connectedAccountId;
                 if (typeof connectedAccountId !== "string") continue;
                 try {
-                  await this.revokeConnectedAccount(connectedAccountId);
+                  await this.revokeConnectedAccount(
+                    connectedAccountId,
+                    userId,
+                    connection.connectionId,
+                  );
                 } finally {
                   await this.requireConnectionReconciliation(
                     userId,
@@ -1041,11 +1106,10 @@ export class ComposioUserBackendContribution {
   ): Promise<boolean> {
     await this.assertIdentity(userId);
     return this.ctx.storage.transaction(async (transaction) => {
-      const current =
-        (await transaction.get<UserSettingsViewV1>(STATE_KEY)) ??
-        initialState();
+      const current = await this.settings.readSnapshot(transaction);
       const connection = current.connections.find(
-        (item) => item.connectionId === connectionId,
+        (item) =>
+          item.packageId === "composio" && item.connectionId === connectionId,
       );
       if (!connection) {
         throw new Error(`Connection "${connectionId}" was not admitted`);
@@ -1059,15 +1123,57 @@ export class ComposioUserBackendContribution {
           item.connectionId === connectionId ? nextConnection : item,
         ),
       } satisfies UserSettingsViewV1;
-      await transaction.put(STATE_KEY, next);
+      await this.writeState(transaction, current, next);
       const alarmAt = nextConnectionAlarm(next);
       if (alarmAt === undefined) {
-        await transaction.deleteAlarm();
+        // The shared User alarm may also serve another Contribution.
+        // An already scheduled wake is harmless; never cancel another owner's wake.
       } else {
-        await transaction.setAlarm(Math.max(Date.now(), alarmAt));
+        await this.scheduleAlarm(transaction, Math.max(Date.now(), alarmAt));
       }
       return true;
     });
+  }
+
+  private async writeState(
+    transaction: UserSettingsTransaction,
+    current: UserSettingsViewV1,
+    next: UserSettingsViewV1,
+  ): Promise<void> {
+    const previous = new Map(
+      current.connections.map((connection) => [
+        connection.connectionId,
+        connection,
+      ]),
+    );
+    await transaction.put(STATE_KEY, {
+      ...next,
+      connections: next.connections.map((connection) => {
+        if (
+          connection.packageId !== "composio" ||
+          connection === previous.get(connection.connectionId)
+        )
+          return connection;
+        return {
+          ...connection,
+          generation: crypto.randomUUID(),
+          safeMetadata: { ...connection.safeMetadata, recordVersion: 1 },
+        };
+      }),
+    });
+  }
+
+  private async scheduleAlarm(
+    storage: {
+      getAlarm?(): Promise<number | null>;
+      setAlarm(time: number | Date): Promise<void>;
+    },
+    deadline: number,
+  ): Promise<void> {
+    const current = await storage.getAlarm?.();
+    await storage.setAlarm(
+      current == null ? deadline : Math.min(current, deadline),
+    );
   }
 
   private async assertIdentity(userId: string): Promise<void> {

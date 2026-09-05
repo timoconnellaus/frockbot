@@ -69,6 +69,7 @@ export interface UserSettingsStorage extends UserSettingsTransaction {
  * naming any provider.
  */
 export interface ConnectionCommandOwner {
+  projectConnection?(connection: ConnectionView): ConnectionView;
   readonly packageId: string;
   lookupConnectionCommand(
     accountId: string,
@@ -792,7 +793,16 @@ export class UserSettingsBackendContribution {
     // install is validated against one immutable, content-addressed set of
     // artifacts rather than whatever the pointer happens to name that second.
     const pin = await this.pinCatalogGeneration(request.userId);
-    return withCatalogPin(await this.read(request.userId), pin);
+    const view = withCatalogPin(await this.read(request.userId), pin);
+    return {
+      ...view,
+      connections: view.connections.map(
+        (connection) =>
+          this.connectionOwners
+            .get(connection.packageId)
+            ?.projectConnection?.(connection) ?? connection,
+      ),
+    };
   }
 
   /**

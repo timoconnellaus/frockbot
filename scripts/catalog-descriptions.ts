@@ -43,6 +43,7 @@ export const CATALOG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   image: "Generate pictures from a written description.",
   "machine-messages":
     "Read and send messages on your Mac, so the Bot can follow and answer your texts.",
+  composio: "Connect Gmail, Calendar, and other services for all your Bots.",
   mcp: "Connect outside MCP servers, so the tools they offer show up for the Bot to use.",
   memory:
     "Remember things across conversations, so you do not have to repeat yourself.",
