@@ -106,6 +106,15 @@ may name exact required paths, so the three `dist` artifacts are scanned first
 and remain subject to the same byte/row bound without a Package-id branch in
 the Computer provider. Every other build output remains excluded.
 
+The emitted Bash is the contract, not the TypeScript that stands in for it in
+unit tests. That interpreter agreed with the shell about everything except one
+thing — the required-path list is newline-separated, so a plain `while read`
+dropped its last entry, which is always `dist/manifest.json` — and two
+production publishes failed on a file the tests all said had been carried.
+`packages/plugin-fly-sprite/src/sync-script.test.ts` now runs the exact emitted
+document under a real bash against a real directory, so a claim about what the
+scan emits is checked against the shell that will run it.
+
 **Writer attribution and effects.** A file with no valid sidecar is pushed as
 `{ kind: "unattributed" }`, and so is a removal the Computer recorded. This is
 the constitution's own sentence — "A file that reaches a durable root without
