@@ -202,7 +202,7 @@ test("the shell is usable on a phone", async ({
     apiBaseUrl: ollamaBaseUrl,
   });
   await expect(
-    ollamaCard(page).getByText("ready · models fresh"),
+    ollamaCard(page).getByText("Ready · model list up to date"),
   ).toBeVisible();
   await shot(page, "03-models-surface");
   await expectNoHorizontalOverflow(page);
@@ -314,15 +314,15 @@ test("the shell is usable on a phone", async ({
     .first()
     .click();
   await expect(page.getByRole("region", { name: "Search" })).toBeVisible();
-  // The scrim dims what the surface covers and takes no clicks of its own, so
-  // the workspace behind it stays live while it is open.
-  await expect(page.locator(".ui-sidebar-overlay__scrim")).toHaveCSS(
-    "pointer-events",
-    "none",
-  );
+  // The workspace under the surface is inert while it is over it, so nothing
+  // behind the scrim takes a click or a Tab.
+  await expect(page.locator(".app-shell")).toHaveAttribute("inert", "");
+  // Escape closes the surface from wherever the focus is, and the scrim goes
+  // with it.
   await page.keyboard.press("Escape");
   await expect(page.getByRole("region", { name: "Search" })).toBeHidden();
   await expect(page.locator(".ui-sidebar-overlay__scrim")).toHaveCount(0);
+  await expect(page.locator(".app-shell")).not.toHaveAttribute("inert", "");
 
   // The proof is that the click lands at all: a surviving scrim swallows it
   // and the row simply never answers.

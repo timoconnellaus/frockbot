@@ -109,7 +109,10 @@ onBeforeUnmount(() => restoreFocus?.focus());
       <div v-else-if="flock.overlay === 'delete'" class="flock-form">
         <span class="flock-eyebrow">Delete Bot</span>
         <h1 id="flock-title">Delete {{ pendingName }}?</h1>
-        <p>This Bot and its chat history will be permanently deleted.</p>
+        <p>
+          This removes its conversation and Applets. It cannot be undone — to
+          stop the Bot working while keeping its history, archive it instead.
+        </p>
         <p
           v-if="flock.error"
           class="flock-error"

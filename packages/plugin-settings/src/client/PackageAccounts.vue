@@ -44,7 +44,7 @@ const connections = computed<ConnectionView[]>(() =>
 );
 
 function accountStatus(connection: ConnectionView): string {
-  if (!props.item.connectorId) return connection.state;
+  if (!props.item.connectorId) return connectionStateLabel(connection.state);
   if (connection.state === "ready")
     return connection.displayName === props.item.displayName
       ? "Connected"
@@ -72,6 +72,32 @@ async function reconnectAccount(connection: ConnectionView): Promise<void> {
   } catch {
     web.value.settingsError = `Could not reconnect ${props.item.displayName}. Try again shortly.`;
   }
+}
+
+/**
+ * A Connection's state, in words rather than in the field name.
+ *
+ * The raw state used to be printed with a CSS `text-transform: capitalize`
+ * over it, which turned "ready" into "Ready" and, next to it, "· models fresh"
+ * into "· Models Fresh" — Title Case on a phrase that is not a title, and a
+ * word ("fresh") that says nothing about what it is fresh about. Both lines
+ * are written here, as they should read.
+ */
+function connectionStateLabel(state: ConnectionView["state"]): string {
+  if (state === "ready") return "Ready";
+  if (state === "disabled") return "Turned off";
+  if (state === "failed") return "Not working";
+  if (state === "revoking") return "Disconnecting…";
+  if (state === "reconciliation-required") return "Needs attention";
+  return "Connecting…";
+}
+
+/** Whether this account's model list is current, in the same plain register. */
+function modelCatalogLabel(state: string): string {
+  if (state === "fresh") return "model list up to date";
+  if (state === "stale") return "model list out of date";
+  if (state === "refreshing") return "refreshing its model list";
+  return `model list ${state}`;
 }
 
 type StatusTone = "ready" | "muted" | "attention";
@@ -167,7 +193,7 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
         <strong>{{ connection.displayName }}</strong>
         <small>{{ accountStatus(connection) }}</small>
         <small v-if="connection.modelCatalog">
-          · models {{ connection.modelCatalog.state }}
+          · {{ modelCatalogLabel(connection.modelCatalog.state) }}
         </small>
       </div>
       <div class="account-actions">
@@ -287,7 +313,6 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
 .account-identity small {
   color: var(--frock-text-muted);
   font-size: var(--frock-text-sm);
-  text-transform: capitalize;
 }
 
 .account-dot {

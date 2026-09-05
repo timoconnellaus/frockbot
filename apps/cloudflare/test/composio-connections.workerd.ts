@@ -28,15 +28,16 @@ test("Gmail connects through the public callback into a reconstructed User DO an
           : undefined,
     composioRequest: async (owner, command) => {
       expect(owner).toBe(userId);
-      return JSON.parse(
-        JSON.stringify(
-          await rpc.composioRequest({
-            schemaVersion: 1,
-            userId: owner,
-            command,
-          }),
-        ),
-      );
+      const result = await rpc.composioRequest({
+        schemaVersion: 1,
+        userId: owner,
+        command,
+      });
+      try {
+        return JSON.parse(JSON.stringify(result));
+      } finally {
+        (result as { [Symbol.dispose]?: () => void })?.[Symbol.dispose]?.();
+      }
     },
   });
   const startUrl = new URL(
@@ -71,11 +72,16 @@ test("Gmail connects through the public callback into a reconstructed User DO an
     )?.status,
   ).toBe(303);
   await evictDurableObject(stub);
-  const read = () =>
-    rpc.readConfiguration({
-      schemaVersion: 1,
-      userId,
-    });
+  const read = async () => {
+    const result = await rpc.readConfiguration({ schemaVersion: 1, userId });
+    try {
+      return JSON.parse(JSON.stringify(result)) as Awaited<
+        ReturnType<UserRpc["readConfiguration"]>
+      >;
+    } finally {
+      (result as { [Symbol.dispose]?: () => void })[Symbol.dispose]?.();
+    }
+  };
   const connected = await read();
   expect(
     connected.connections.find(
@@ -105,6 +111,7 @@ test("Gmail connects through the public callback into a reconstructed User DO an
     },
   });
   expect(revoke).toMatchObject({ status: "revoked" });
+  (revoke as { [Symbol.dispose]?: () => void })[Symbol.dispose]?.();
   await evictDurableObject(stub);
   expect(
     (await read()).connections.find(

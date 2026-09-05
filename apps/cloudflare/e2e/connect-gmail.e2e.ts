@@ -4,10 +4,18 @@ test("Gmail is a direct searchable connector with durable connected and disconne
   page,
   userId,
 }) => {
+  await page.route("https://connect.example.test/**", async (route) => {
+    const callback = new URL(route.request().url()).searchParams.get(
+      "callback",
+    );
+    if (!callback) throw new Error("Fake authorization needs its callback");
+    await route.fulfill({ status: 302, headers: { location: callback } });
+  });
   await openApplication(page, userId);
   await firstRunDialog(page).getByRole("button", { name: "Cancel" }).click();
   // Follow the same single-surface navigation as a User.
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await page.locator("button.profile-trigger").click();
+  await page.getByRole("menuitem", { name: "Connectors", exact: true }).click();
   await page.getByRole("searchbox").fill("gmail");
   const card = page
     .locator(".connector-card")
@@ -21,10 +29,11 @@ test("Gmail is a direct searchable connector with durable connected and disconne
     .getByRole("textbox", { name: "Account label" })
     .fill("tim@example.com");
   await card.getByRole("button", { name: "Continue to sign in" }).click();
-  await page.waitForURL(/connection=composio-ready/);
+  await page.waitForURL(/connection=composio-ready/, { timeout: 30_000 });
   if (await firstRunDialog(page).isVisible())
     await firstRunDialog(page).getByRole("button", { name: "Cancel" }).click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await page.locator("button.profile-trigger").click();
+  await page.getByRole("menuitem", { name: "Connectors", exact: true }).click();
   await page.getByRole("searchbox").fill("gmail");
   await expect(
     card.getByText("Connected as tim@example.com", { exact: true }),

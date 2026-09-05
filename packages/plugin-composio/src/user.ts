@@ -482,7 +482,15 @@ export class ComposioUserService {
           ...live.filter((slug) => !pending.includes(slug)),
           ...remaining,
         ]);
-        if (remaining.length) await tx.setAlarm(Date.now() + AUTH_RETRY_MS);
+        if (remaining.length) {
+          const alarm = await tx.getAlarm?.();
+          await tx.setAlarm(
+            Math.min(
+              alarm && alarm > Date.now() ? alarm : Infinity,
+              Date.now() + AUTH_RETRY_MS,
+            ),
+          );
+        }
       });
     } catch {
       const alarm = await this.host.storage.getAlarm?.();

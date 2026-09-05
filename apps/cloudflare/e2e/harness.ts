@@ -171,7 +171,7 @@ export function startFakeOllama(port: number): Promise<{
   close(): Promise<void>;
 }> {
   let chatMode: FakeOllamaChatMode = "ok";
-  const composio = createComposioFake();
+  const composio = createComposioFake("https://connect.example.test");
 
   const server: Server = createHttpServer((request, response) => {
     const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);

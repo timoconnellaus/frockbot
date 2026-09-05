@@ -24,7 +24,10 @@ import {
   type BotTurnCompletion,
   type StoredRun,
 } from "./backend-contracts.js";
-import { runFailureCopyV1 } from "./run-failure-copy.js";
+import {
+  CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+  runFailureCopyV1,
+} from "./run-failure-copy.js";
 
 const MAX_RUN_ID_LENGTH = 128;
 const MAX_TIMESTAMP_LENGTH = 64;
@@ -1228,7 +1231,7 @@ function status(value: unknown): ClientRunStatusV1 {
   return value;
 }
 
-function decodeEvent(value: unknown): ClientRunEventV1 {
+function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
   const event = record(value, "run event");
   if (event.type === "run/events-truncated") {
     exactKeys(event, ["type", "omittedInteractions"], "run event");
@@ -1366,7 +1369,24 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
       background: event.background,
     };
   }
-  throw new Error("run event.type is invalid");
+  // An event type this client has never heard of is a newer Bot talking, not a
+  // bad message.
+  //
+  // The Bot Durable Object projects a Turn from the Composition generation it
+  // is pinned to, and the browser decodes it with whatever bundle it loaded;
+  // the two are versioned separately by design, so "the Bot emits an event the
+  // client does not know" is an ordinary Tuesday and not a wire fault. It used
+  // to throw, which failed the decode of the whole page: one `computer/sync`
+  // in one Turn and the person's entire transcript was the empty state, over a
+  // request the server had answered 200. `sendsFrom` already states the rule
+  // for payloads — "a run has to render on a client older than the Bot that
+  // produced it, so an unknown shape is a line in the conversation and never
+  // an exception" — and this is that rule for the events themselves.
+  //
+  // A *known* type that is malformed still throws into the per-run boundary:
+  // that is a real wire fault, so this Turn degrades rather than silently
+  // accepting a body the client misunderstands.
+  return undefined;
 }
 
 /**
@@ -1375,7 +1395,11 @@ function decodeEvent(value: unknown): ClientRunEventV1 {
  * has already degraded, not a message to refuse.
  */
 function decodeEvents(values: unknown[]): ClientTurnEvent[] {
-  const events = values.map(decodeEvent);
+  // Events this client does not recognise are dropped here, so the rest of the
+  // Turn — what it said, what it called, what it sent — still renders.
+  const events = values
+    .map(decodeEvent)
+    .filter((event): event is ClientRunEventV1 => event !== undefined);
   let index = 0;
   if (events[0]?.type === "run/events-truncated") index = 1;
   if (
@@ -1624,6 +1648,47 @@ function decodeRun(value: unknown): ClientRun {
     ...(recovery ? { failure: recovery.message, recovery } : {}),
     ...(via ? { via } : {}),
   };
+}
+
+/**
+ * Keeps one unreadable run from taking its healthy neighbours off the page.
+ *
+ * The strict decoder above still identifies every real wire fault inside a
+ * known shape. This boundary changes only the blast radius: the run becomes a
+ * visible compatibility line, while the list envelope and its page metadata
+ * remain strict.
+ */
+function decodeRunOrDegraded(value: unknown, index: number): ClientRun {
+  try {
+    return decodeRun(value);
+  } catch {
+    const run =
+      value !== null && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : undefined;
+    const candidateRunId =
+      typeof run?.runId === "string"
+        ? truncate(run.runId, MAX_RUN_ID_LENGTH)
+        : "";
+    const candidateAdmittedAt =
+      typeof run?.admittedAt === "string" &&
+      run.admittedAt.length <= MAX_TIMESTAMP_LENGTH &&
+      Number.isFinite(Date.parse(run.admittedAt))
+        ? run.admittedAt
+        : undefined;
+    const input =
+      typeof run?.input === "string"
+        ? truncateWireString(run.input, MAX_INPUT_BYTES)
+        : "";
+    return {
+      runId: candidateRunId || `unreadable-run-${index + 1}`,
+      ...(candidateAdmittedAt ? { admittedAt: candidateAdmittedAt } : {}),
+      input,
+      status: "failed",
+      events: [],
+      failure: CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+    };
+  }
 }
 
 function decodePage(value: unknown): ClientRunPageV1 {
@@ -2132,7 +2197,7 @@ export function decodeClientRunPageV1(input: unknown): {
     throw new Error("run list.announcements must be a bounded array");
   }
   const decoded = {
-    runs: list.runs.map(decodeRun),
+    runs: list.runs.map(decodeRunOrDegraded),
     page: decodePage(list.page),
     announcements: (list.announcements ?? []).map(decodeAnnouncement),
   };

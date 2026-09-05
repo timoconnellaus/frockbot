@@ -315,13 +315,11 @@ test("expired accounts can disconnect through a separately admitted account dele
   await f.make().request("owner", start());
   await f.make().request("owner", completion);
   f.setRevokeFailure(409);
-  await f
-    .make()
-    .request("owner", {
-      schemaVersion: 1,
-      operation: "revoke",
-      connectionId: "connection-one",
-    });
+  await f.make().request("owner", {
+    schemaVersion: 1,
+    operation: "revoke",
+    connectionId: "connection-one",
+  });
   expect(
     (await f.settings.getConnection("owner", "connection-one"))?.state,
   ).toBe("revoked");
@@ -344,13 +342,11 @@ test("a delayed provider observation cannot restore a disconnected account", asy
   });
   const reconciliation = f.make().reconcile("owner");
   await reading;
-  await f
-    .make()
-    .request("owner", {
-      schemaVersion: 1,
-      operation: "revoke",
-      connectionId: "connection-one",
-    });
+  await f.make().request("owner", {
+    schemaVersion: 1,
+    operation: "revoke",
+    connectionId: "connection-one",
+  });
   release();
   await reconciliation;
   expect(
@@ -383,16 +379,31 @@ test("revoke and alarm never change another Package connection", async () => {
   );
   const before = await f.settings.readSnapshot();
   await expect(
-    f
-      .make()
-      .request("owner", {
-        schemaVersion: 1,
-        operation: "revoke",
-        connectionId: own.connectionId,
-      }),
+    f.make().request("owner", {
+      schemaVersion: 1,
+      operation: "revoke",
+      connectionId: own.connectionId,
+    }),
   ).rejects.toThrow("not admitted");
   await f.make().alarm();
   expect((await f.settings.readSnapshot()).connections).toEqual(
     before.connections,
   );
+});
+
+test("an early shared alarm preserves another contribution deadline", async () => {
+  const f = fixture();
+  const deadline = Date.now() + 10_000;
+  await f.storage.put("composio:auth-config:gmail", {
+    schemaVersion: 1,
+    status: "creating",
+    startedAt: Date.now(),
+  });
+  await f.storage.put("composio:auth-config-pending:v1", ["gmail"]);
+  await f.storage.setAlarm(deadline);
+  await f.make().alarm();
+  expect(f.storage.alarm).toBe(deadline);
+  expect(
+    await f.storage.get<string[]>("composio:auth-config-pending:v1"),
+  ).toEqual(["gmail"]);
 });

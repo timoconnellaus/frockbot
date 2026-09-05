@@ -100,7 +100,7 @@ function connectedAccountSummary(
 
 export class ComposioRequestError extends Error {
   constructor(readonly status: number) {
-    super(`Composio request failed (${status})`);
+    super(`The service could not complete this request (${status})`);
     this.name = "ComposioRequestError";
   }
 }
@@ -333,16 +333,23 @@ export class ComposioClient {
       headers.set("content-type", "application/json");
     }
     headers.set("x-api-key", this.apiKey);
-    const response = await this.fetcher(`${this.baseUrl}${path}`, {
-      ...init,
-      headers,
-      redirect: "manual",
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) {
-      throw new ComposioRequestError(response.status);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const response = await this.fetcher(`${this.baseUrl}${path}`, {
+        ...init,
+        headers,
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new ComposioRequestError(response.status);
+      }
+      if (response.status === 204) return {};
+      return await response.json();
+    } finally {
+      clearTimeout(timeout);
     }
-    if (response.status === 204) return {};
-    return response.json();
   }
 }

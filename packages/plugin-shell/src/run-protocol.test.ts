@@ -3,7 +3,10 @@ import { type SessionEvent } from "@frockbot/kernel-contracts";
 import { initializeBotSettingsV1 } from "@frockbot/configuration-core";
 import type { StoredRun } from "./backend-contracts.js";
 import { planBotRunRecovery } from "./backend-recovery.js";
-import { RUN_FAILURE_COPY_V1 } from "./run-failure-copy.js";
+import {
+  CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+  RUN_FAILURE_COPY_V1,
+} from "./run-failure-copy.js";
 import {
   createClientRunStopReceiptV1,
   decodeClientNotificationAcknowledgementCommandV1,
@@ -816,7 +819,7 @@ describe("client run protocol v1", () => {
     }
   });
 
-  test("rejects unversioned, extended, and inconsistent wire values", () => {
+  test("rejects bad envelopes and degrades unreadable runs", () => {
     const completed = {
       schemaVersion: 1,
       runId: "run-1",
@@ -830,37 +833,26 @@ describe("client run protocol v1", () => {
     expect(() => decodeClientRunListV1({ runs: [] })).toThrow(
       "run list.schemaVersion is invalid",
     );
-    expect(() =>
-      decodeClientRunListV1({
-        schemaVersion: 1,
-        runs: [{ ...completed, commandFingerprint: "secret" }],
-        page: { truncated: false },
-      }),
-    ).toThrow("run.commandFingerprint is not allowed");
-    expect(() =>
-      decodeClientRunListV1({
-        schemaVersion: 1,
-        runs: [
-          {
-            ...completed,
-            status: "failed",
-          },
-        ],
-        page: { truncated: false },
-      }),
-    ).toThrow("run.outcome does not match run.status");
-    expect(() =>
-      decodeClientRunListV1({
-        schemaVersion: 1,
-        runs: [
-          {
-            ...completed,
-            events: [{ type: "model/request" }],
-          },
-        ],
-        page: { truncated: false },
-      }),
-    ).toThrow("run event.type is invalid");
+    for (const unreadable of [
+      { ...completed, commandFingerprint: "secret" },
+      { ...completed, status: "failed" },
+      { ...completed, events: [{ type: "tool/result" }] },
+    ]) {
+      expect(
+        decodeClientRunListV1({
+          schemaVersion: 1,
+          runs: [unreadable],
+          page: { truncated: false },
+        }),
+      ).toMatchObject([
+        {
+          runId: "run-1",
+          status: "failed",
+          events: [],
+          failure: CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+        },
+      ]);
+    }
     expect(() =>
       decodeClientRunPageV1({
         schemaVersion: 1,
@@ -1073,8 +1065,8 @@ describe("client run protocol v1", () => {
     ).toHaveLength(512);
   });
 
-  test("refuses a projected send whose payload it cannot decode", () => {
-    expect(() =>
+  test("degrades a projected send whose payload it cannot decode", () => {
+    expect(
       decodeClientRunListV1({
         schemaVersion: 1,
         runs: [
@@ -1085,7 +1077,14 @@ describe("client run protocol v1", () => {
         ],
         page: { truncated: false },
       }),
-    ).toThrow("run event.payload.type is invalid");
+    ).toMatchObject([
+      {
+        runId: "run-events",
+        status: "failed",
+        events: [],
+        failure: CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+      },
+    ]);
   });
 
   test("rejects orphaned tool history at projection", () => {
@@ -1466,7 +1465,7 @@ describe("dispatched subagents in the run projection", () => {
     expect(JSON.stringify(projected)).not.toContain("summarise");
   });
 
-  test("refuses a chip that carries a field it does not have", () => {
+  test("degrades a chip that carries a field it does not have", () => {
     const page = createClientRunListV1(
       [projectClientRunV1(storedRun([dispatched]))],
       { truncated: false },
@@ -1475,7 +1474,14 @@ describe("dispatched subagents in the run projection", () => {
       runs: Array<{ events: Array<Record<string, unknown>> }>;
     };
     tampered.runs[0]!.events[0]!.prompt = "the child's brief";
-    expect(() => decodeClientRunPageV1(tampered)).toThrow();
+    expect(decodeClientRunPageV1(tampered).runs).toMatchObject([
+      {
+        runId: "run-events",
+        status: "failed",
+        events: [],
+        failure: CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+      },
+    ]);
   });
 
   test("a run whose record cannot be read degrades instead of failing the list", () => {
@@ -1626,12 +1632,17 @@ describe("dispatched subagents in the run projection", () => {
       runs: Array<Record<string, unknown>>;
     };
     tampered.runs[0]!.partialText = "words";
-    expect(() => decodeClientRunPageV1(tampered)).toThrow(
-      "only a running run may carry partial text",
-    );
+    expect(decodeClientRunPageV1(tampered).runs).toMatchObject([
+      {
+        runId: "run-events",
+        status: "failed",
+        events: [],
+        failure: CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+      },
+    ]);
   });
 
-  test("refuses a chip whose background flag is not a boolean", () => {
+  test("degrades a chip whose background flag is not a boolean", () => {
     const page = createClientRunListV1(
       [projectClientRunV1(storedRun([dispatched]))],
       { truncated: false },
@@ -1640,9 +1651,14 @@ describe("dispatched subagents in the run projection", () => {
       runs: Array<{ events: Array<Record<string, unknown>> }>;
     };
     tampered.runs[0]!.events[0]!.background = "yes";
-    expect(() => decodeClientRunPageV1(tampered)).toThrow(
-      "run event.background must be a boolean",
-    );
+    expect(decodeClientRunPageV1(tampered).runs).toMatchObject([
+      {
+        runId: "run-events",
+        status: "failed",
+        events: [],
+        failure: CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+      },
+    ]);
   });
 });
 
@@ -1681,5 +1697,178 @@ describe("Computer sync degradation in the run projection", () => {
     expect(
       decodeClientRunPageV1(structuredClone(page)).runs[0]?.events,
     ).toEqual(projected.events);
+  });
+});
+
+/*
+ * Production, 2026-09-05: a Bot's transcript was the empty state — "Bob is
+ * ready. Say anything to get started." — while the sidebar row beside it
+ * showed the reply from that same conversation, and the Worker tail showed
+ * `GET /api/bots/<bot>/turns` answering 200 every time. The page was fine. The
+ * *client* refused it: one Turn on the page carried a run event this bundle
+ * had never heard of, `decodeEvent` threw "run event.type is invalid", and the
+ * throw travelled all the way out of `decodeClientRunPageV1`, so `listRuns`
+ * rejected and the transcript was never handed a single Turn.
+ *
+ * The skew is structural, not a mistake: a Bot Durable Object projects a Turn
+ * from the Composition generation it is pinned to, and the browser decodes it
+ * with whatever bundle it loaded. Neither half can assume it is the newer one.
+ */
+describe("a transcript page a client cannot fully read", () => {
+  const run = {
+    schemaVersion: 1,
+    runId: "run-1",
+    admittedAt: timestamp,
+    input: "hi",
+    status: "completed",
+    events: [] as unknown[],
+    outcome: { type: "completed", text: "Hi! What can I do for you?" },
+  };
+  const page = (runs: unknown[]) => ({
+    schemaVersion: 1,
+    runs,
+    page: { truncated: false },
+  });
+
+  test("keeps the Turn when it carries an event type this client lacks", () => {
+    const decoded = decodeClientRunListV1(
+      page([
+        {
+          ...run,
+          events: [
+            { type: "tool/call", call: { id: "tool-1", name: "read" } },
+            { type: "shell/telepathy", intensity: 11 },
+            {
+              type: "tool/result",
+              callId: "tool-1",
+              content: "ok",
+              isError: false,
+            },
+          ],
+        },
+      ]),
+    );
+    expect(decoded).toHaveLength(1);
+    expect(decoded[0]?.responseText).toBe("Hi! What can I do for you?");
+    // The unknown event is dropped, and everything around it still renders.
+    expect(decoded[0]?.events).toEqual([
+      { type: "tool/call", call: { id: "tool-1", name: "read" } },
+      { type: "tool/result", callId: "tool-1", content: "ok", isError: false },
+    ]);
+  });
+
+  test("a malformed known field degrades only that run", () => {
+    expect(
+      decodeClientRunListV1(
+        page([
+          {
+            ...run,
+            events: [
+              { type: "computer/sync", status: "sideways", message: "" },
+            ],
+          },
+        ]),
+      ),
+    ).toMatchObject([
+      {
+        runId: "run-1",
+        status: "failed",
+        events: [],
+        failure: CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+      },
+    ]);
+  });
+
+  test("an unknown top-level run field degrades its line and keeps the page readable", () => {
+    expect(
+      decodeClientRunPageV1(
+        page([
+          {
+            ...run,
+            futureProjection: { answer: 42 },
+          },
+        ]),
+      ).runs,
+    ).toMatchObject([
+      {
+        runId: "run-1",
+        input: "hi",
+        status: "failed",
+        events: [],
+        failure: CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+      },
+    ]);
+  });
+
+  test("mixed unreadable and healthy runs keep their page order", () => {
+    const healthy = (runId: string, input: string) => ({
+      ...run,
+      runId,
+      input,
+      outcome: { type: "completed", text: `${input} answered` },
+    });
+    const decoded = decodeClientRunPageV1(
+      page([
+        healthy("run-healthy-1", "first"),
+        { ...healthy("run-future", "second"), futureProjection: true },
+        {
+          ...healthy("run-malformed", "third"),
+          events: [{ type: "computer/sync", status: "sideways", message: "" }],
+        },
+        healthy("run-healthy-2", "fourth"),
+      ]),
+    ).runs;
+
+    expect(decoded.map(({ runId }) => runId)).toEqual([
+      "run-healthy-1",
+      "run-future",
+      "run-malformed",
+      "run-healthy-2",
+    ]);
+    expect(decoded.map(({ status }) => status)).toEqual([
+      "completed",
+      "failed",
+      "failed",
+      "completed",
+    ]);
+    expect(decoded[1]?.failure).toBe(CLIENT_VERSION_DEGRADED_MESSAGE_V1);
+    expect(decoded[2]?.failure).toBe(CLIENT_VERSION_DEGRADED_MESSAGE_V1);
+  });
+
+  test("drops an unknown event that sits between a tool call and its result", () => {
+    // The journal interleaves by construction — a Computer sync notice is
+    // written while a tool call is outstanding — so the call/result walk must
+    // still pair after the unknown event in the middle is dropped.
+    const decoded = decodeClientRunListV1(
+      page([
+        {
+          ...run,
+          events: [
+            { type: "tool/call", call: { id: "tool-1", name: "read" } },
+            { type: "workspace/telepathy", intensity: 11 },
+            {
+              type: "tool/result",
+              callId: "tool-1",
+              content: "ok",
+              isError: false,
+            },
+            { type: "tool/call", call: { id: "tool-2", name: "write" } },
+          ],
+        },
+      ]),
+    );
+    expect(decoded[0]?.events.map((event) => event.type)).toEqual([
+      "tool/call",
+      "tool/result",
+      "tool/call",
+    ]);
+  });
+
+  test("the page itself is still refused when the envelope is wrong", () => {
+    // Tolerating an unknown event is not tolerating anything else: a list
+    // shape this client cannot trust is a wire fault and stays one.
+    expect(() => decodeClientRunListV1({ schemaVersion: 2, runs: [] })).toThrow(
+      "run list.schemaVersion is invalid",
+    );
   });
 });

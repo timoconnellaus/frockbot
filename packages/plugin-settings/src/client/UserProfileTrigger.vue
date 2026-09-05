@@ -117,8 +117,9 @@ onBeforeUnmount(() => {
         Settings
       </button>
       <!-- The three Package surfaces are reachable where the User already is,
-           and gated exactly as the sidebar's Connectors trigger is: a shell
-           without the Connection protocol shows none of them. -->
+           and this is the only place any of them is reachable from. They are
+           gated together: a shell without the Connection protocol shows none
+           of them. -->
       <template v-if="web.connectionsAvailable">
         <button type="button" role="menuitem" @click="openSurface('models')">
           Models

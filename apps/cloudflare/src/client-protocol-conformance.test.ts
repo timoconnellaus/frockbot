@@ -31,6 +31,7 @@ import {
   decodeClientTurnRefusalV1,
   decodeRunCursorV1,
 } from "@frockbot/plugin-shell/run-protocol";
+import { CLIENT_VERSION_DEGRADED_MESSAGE_V1 } from "@frockbot/plugin-shell/run-failure-copy";
 import {
   decodeBotUnreadCommandV1,
   decodeBotUnreadDirectoryViewV1,
@@ -97,7 +98,20 @@ for (const [accepted, fixtures] of [
     if (!decoder) continue; // New seams have no existing production decoder.
     test(`existing decoder: ${fixture.name}`, () => {
       if (accepted) expect(() => decoder(fixture.value)).not.toThrow();
-      else expect(() => decoder(fixture.value)).toThrow();
+      else if (fixture.schema === "Run") {
+        // Invalid run bodies remain invalid by the language-neutral schema,
+        // but the transcript decoder contains their failure to that one row.
+        // Its envelope stays readable so neighbouring runs do not disappear.
+        expect(decoder(fixture.value)).toMatchObject({
+          runs: [
+            {
+              status: "failed",
+              events: [],
+              failure: CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+            },
+          ],
+        });
+      } else expect(() => decoder(fixture.value)).toThrow();
     });
   }
 }

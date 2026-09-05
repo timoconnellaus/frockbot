@@ -1,5 +1,5 @@
 /** A provider stand-in at the HTTP boundary; the production User DO owns all product state. */
-export function createComposioFake() {
+export function createComposioFake(authorizationOrigin?: string) {
   const accounts = new Map<
     string,
     {
@@ -60,9 +60,14 @@ export function createComposioFake() {
       const redirect = new URL(input.callback_url);
       redirect.searchParams.set("connected_account_id", id);
       redirect.searchParams.set("status", "success");
+      const authorization = authorizationOrigin
+        ? new URL(authorizationOrigin)
+        : redirect;
+      if (authorizationOrigin)
+        authorization.searchParams.set("callback", redirect.toString());
       return Response.json({
         connected_account_id: id,
-        redirect_url: redirect.toString(),
+        redirect_url: authorization.toString(),
         expires_at: new Date(Date.now() + 600_000).toISOString(),
       });
     }
