@@ -1115,5 +1115,83 @@
         "manuallyUnread": false
       }
     }
+  },
+  {
+    "name": "BotLifecycleDirectory valid",
+    "schema": "BotLifecycleDirectory",
+    "value": {
+      "schemaVersion": 1,
+      "lifecycles": [
+        {
+          "schemaVersion": 1,
+          "botId": "alpha",
+          "status": "archived",
+          "revision": 1
+        }
+      ]
+    }
+  },
+  {
+    "name": "AuditPage valid",
+    "schema": "AuditPage",
+    "value": {
+      "schemaVersion": 1,
+      "entries": [
+        {
+          "schemaVersion": 1,
+          "botId": "alpha",
+          "runId": "run-1",
+          "occurrenceId": "tool:1:1:0",
+          "turn": 1,
+          "step": 1,
+          "ordinal": 0,
+          "effectId": "effect-1",
+          "at": "2026-09-05T10:00:00.000Z",
+          "kind": "file",
+          "target": "workspace",
+          "toolName": "write_file",
+          "argumentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "preview": "Write notes.md",
+          "outcome": "ok"
+        }
+      ],
+      "page": {
+        "truncated": false
+      },
+      "total": 1,
+      "indexState": "ready"
+    }
+  },
+  {
+    "name": "SetupHistory valid",
+    "schema": "SetupHistory",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "alpha",
+      "currentGenerationId": "generation-1",
+      "generations": [
+        {
+          "schemaVersion": 1,
+          "botId": "alpha",
+          "generationId": "generation-1",
+          "createdAt": "2026-09-05T10:00:00.000Z",
+          "status": "active",
+          "origin": {
+            "kind": "bootstrap"
+          },
+          "isCurrent": true,
+          "members": [
+            {
+              "packageId": "example",
+              "version": "1.0.0",
+              "provenance": {
+                "kind": "first-party"
+              }
+            }
+          ],
+          "failures": []
+        }
+      ]
+    }
   }
 ]
