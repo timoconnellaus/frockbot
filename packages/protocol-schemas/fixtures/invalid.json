@@ -691,7 +691,9 @@
       "schemaVersion": 1,
       "commandId": "command-1",
       "text": "1.1.0",
-      "grant": ["*"]
+      "grant": [
+        "*"
+      ]
     }
   },
   {
@@ -1079,7 +1081,9 @@
       "displayName": "Counter",
       "status": "unknown",
       "currentGenerationId": "generation-1",
-      "tools": ["increment"],
+      "tools": [
+        "increment"
+      ],
       "createdAt": "2026-09-05T00:00:00.000Z"
     }
   },
@@ -1402,6 +1406,26 @@
       "values": {
         "name": "Tim"
       }
+    }
+  },
+  {
+    "name": "NotificationDirectory rejects credential metadata",
+    "schema": "NotificationDirectory",
+    "value": {
+      "schemaVersion": 1,
+      "notifications": [
+        {
+          "schemaVersion": 1,
+          "botId": "alpha",
+          "notificationId": "notice-1",
+          "runId": "run-1",
+          "createdAt": "2026-09-05T10:00:00.000Z",
+          "title": "Alpha replied",
+          "body": "Ready",
+          "urgency": "critical",
+          "credential": "not-a-secret"
+        }
+      ]
     }
   }
 ]

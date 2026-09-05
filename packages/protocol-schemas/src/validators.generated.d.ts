@@ -127,5 +127,8 @@ declare const validators: {
   isSettingsOptionsPage(
     value: unknown,
   ): value is ProtocolTypes["SettingsOptionsPage"];
+  isNotificationDirectory(
+    value: unknown,
+  ): value is ProtocolTypes["NotificationDirectory"];
 };
 export default validators;

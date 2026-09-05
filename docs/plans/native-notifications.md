@@ -1,0 +1,9 @@
+# Native unread and inbox
+
+The Bot Durable Object remains the owner of unread cursors, notification intents and acknowledgements. Native reads the existing bounded fan-out and sends the same explicit mark-read, mark-unread and notification acknowledgement commands as Vue. Polling never marks a Bot read. A User can open a Bot from its inbox notice or acknowledge the notice; repeated acknowledgements are idempotent, including after owner eviction. Browser and native converge on the same pending-intent set without a second local inbox authority. The Computer is not involved.
+
+This milestone adds native inbox, unread badges and exact hosted `?bot=` navigation. Notification taps select only a Bot present in the authenticated User's live directory. A link received before sign-in is retained only as navigation intent, never as authentication. Unsupported hosts, duplicate Bot parameters, invalid identifiers and unexpected paths are refused. Existing verified auth return handling remains separate.
+
+No native background OS notification adapter is enabled here. Therefore native does not emit a second OS alert alongside Vue. Browser-local OS deduplication is not a cross-device delivery guarantee; durable delivery claims, push registration/channels and locked-device delivery qualification remain explicit follow-up work. The owner requested independently working parts with gaps stated; inbox and unread controls exercise complete existing backend behavior.
+
+Tests cover paired browser/native unread and acknowledgement replay over one owner, owner eviction, cross-User refusal, strict shared DTOs, native offline/retry and large-text states, and deep-link validation. No new durable DTO or protocol window, provider credential, Agent loop or Package lifecycle is introduced. This implements unread/notification projection parity; release evidence and device gates are recorded in the dated acceptance ledger.

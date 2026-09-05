@@ -77,7 +77,10 @@
           "$ref": "#/$defs/Digest"
         }
       },
-      "required": ["id", "digest"],
+      "required": [
+        "id",
+        "digest"
+      ],
       "additionalProperties": false
     },
     "ClientHello": {
@@ -166,7 +169,11 @@
           "const": "Update the app to continue using FrockBot."
         }
       },
-      "required": ["schemaVersion", "status", "message"],
+      "required": [
+        "schemaVersion",
+        "status",
+        "message"
+      ],
       "additionalProperties": false
     },
     "AuthIdentity": {
@@ -182,7 +189,11 @@
           "type": "boolean"
         }
       },
-      "required": ["schemaVersion", "userId", "isAdmin"],
+      "required": [
+        "schemaVersion",
+        "userId",
+        "isAdmin"
+      ],
       "additionalProperties": false
     },
     "AuthStartCommand": {
@@ -236,7 +247,11 @@
           "$ref": "#/$defs/Instant"
         }
       },
-      "required": ["schemaVersion", "authorizationUrl", "expiresAt"],
+      "required": [
+        "schemaVersion",
+        "authorizationUrl",
+        "expiresAt"
+      ],
       "additionalProperties": false
     },
     "AuthExchangeCommand": {
@@ -325,7 +340,12 @@
           "$ref": "#/$defs/Identifier"
         }
       },
-      "required": ["schemaVersion", "commandId", "action", "sessionId"],
+      "required": [
+        "schemaVersion",
+        "commandId",
+        "action",
+        "sessionId"
+      ],
       "additionalProperties": false
     },
     "SheepRecipe": {
@@ -355,7 +375,13 @@
           "maxLength": 128
         }
       },
-      "required": ["schemaVersion", "background", "upper", "middle", "lower"],
+      "required": [
+        "schemaVersion",
+        "background",
+        "upper",
+        "middle",
+        "lower"
+      ],
       "additionalProperties": false
     },
     "BotRegistration": {
@@ -416,7 +442,11 @@
           "maxItems": 100
         }
       },
-      "required": ["schemaVersion", "revision", "bots"],
+      "required": [
+        "schemaVersion",
+        "revision",
+        "bots"
+      ],
       "additionalProperties": false
     },
     "BotLifecycle": {
@@ -429,7 +459,11 @@
           "$ref": "#/$defs/BotId"
         },
         "status": {
-          "enum": ["active", "archived", "deleted"]
+          "enum": [
+            "active",
+            "archived",
+            "deleted"
+          ]
         },
         "revision": {
           "type": "integer",
@@ -437,7 +471,12 @@
           "maximum": 9007199254740991
         }
       },
-      "required": ["schemaVersion", "botId", "status", "revision"],
+      "required": [
+        "schemaVersion",
+        "botId",
+        "status",
+        "revision"
+      ],
       "additionalProperties": false
     },
     "BotLifecycleCommand": {
@@ -447,7 +486,11 @@
           "const": 1
         },
         "type": {
-          "enum": ["bot/archive", "bot/restore", "bot/delete"]
+          "enum": [
+            "bot/archive",
+            "bot/restore",
+            "bot/delete"
+          ]
         },
         "commandId": {
           "$ref": "#/$defs/Identifier"
@@ -456,7 +499,12 @@
           "$ref": "#/$defs/BotId"
         }
       },
-      "required": ["schemaVersion", "type", "commandId", "botId"],
+      "required": [
+        "schemaVersion",
+        "type",
+        "commandId",
+        "botId"
+      ],
       "additionalProperties": false
     },
     "BotCreateCommand": {
@@ -516,7 +564,11 @@
           "$ref": "#/$defs/BotId"
         },
         "status": {
-          "enum": ["pending", "applied", "rejected"]
+          "enum": [
+            "pending",
+            "applied",
+            "rejected"
+          ]
         },
         "lifecycle": {
           "$ref": "#/$defs/BotLifecycle"
@@ -545,7 +597,11 @@
               "const": 1
             },
             "source": {
-              "enum": ["bot", "user", "managed"]
+              "enum": [
+                "bot",
+                "user",
+                "managed"
+              ]
             },
             "slug": {
               "type": "string",
@@ -554,7 +610,11 @@
               "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
             }
           },
-          "required": ["schemaVersion", "source", "slug"],
+          "required": [
+            "schemaVersion",
+            "source",
+            "slug"
+          ],
           "additionalProperties": false
         },
         {
@@ -579,7 +639,12 @@
               "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
             }
           },
-          "required": ["schemaVersion", "source", "slug", "packageId"],
+          "required": [
+            "schemaVersion",
+            "source",
+            "slug",
+            "packageId"
+          ],
           "additionalProperties": false
         }
       ]
@@ -619,7 +684,11 @@
           "additionalProperties": false
         }
       },
-      "required": ["schemaVersion", "commandId", "text"],
+      "required": [
+        "schemaVersion",
+        "commandId",
+        "text"
+      ],
       "additionalProperties": false
     },
     "StopCommand": {
@@ -638,7 +707,12 @@
           "$ref": "#/$defs/Identifier"
         }
       },
-      "required": ["schemaVersion", "action", "commandId", "runId"],
+      "required": [
+        "schemaVersion",
+        "action",
+        "commandId",
+        "runId"
+      ],
       "additionalProperties": false
     },
     "RunFenceCommand": {
@@ -651,7 +725,10 @@
           "const": "fence-admission"
         }
       },
-      "required": ["schemaVersion", "action"],
+      "required": [
+        "schemaVersion",
+        "action"
+      ],
       "additionalProperties": false
     },
     "ReconcileCommand": {
@@ -664,7 +741,10 @@
           "const": "resume"
         }
       },
-      "required": ["schemaVersion", "action"],
+      "required": [
+        "schemaVersion",
+        "action"
+      ],
       "additionalProperties": false
     },
     "DurableReceipt": {
@@ -680,17 +760,28 @@
           "type": "object",
           "properties": {
             "kind": {
-              "enum": ["user", "bot", "applet"]
+              "enum": [
+                "user",
+                "bot",
+                "applet"
+              ]
             },
             "id": {
               "$ref": "#/$defs/Identifier"
             }
           },
-          "required": ["kind", "id"],
+          "required": [
+            "kind",
+            "id"
+          ],
           "additionalProperties": false
         },
         "status": {
-          "enum": ["accepted", "applied", "refused"]
+          "enum": [
+            "accepted",
+            "applied",
+            "refused"
+          ]
         },
         "recordedAt": {
           "$ref": "#/$defs/Instant"
@@ -723,7 +814,12 @@
           "const": "refused"
         },
         "reason": {
-          "enum": ["busy", "reconciliation-required", "fenced", "duplicate"]
+          "enum": [
+            "busy",
+            "reconciliation-required",
+            "fenced",
+            "duplicate"
+          ]
         },
         "error": {
           "type": "string",
@@ -731,7 +827,12 @@
           "maxLength": 8000
         }
       },
-      "required": ["schemaVersion", "status", "reason", "error"],
+      "required": [
+        "schemaVersion",
+        "status",
+        "reason",
+        "error"
+      ],
       "additionalProperties": false
     },
     "RunCursor": {
@@ -749,7 +850,9 @@
               "const": false
             }
           },
-          "required": ["truncated"],
+          "required": [
+            "truncated"
+          ],
           "additionalProperties": false
         },
         {
@@ -762,7 +865,10 @@
               "$ref": "#/$defs/RunCursor"
             }
           },
-          "required": ["truncated", "nextCursor"],
+          "required": [
+            "truncated",
+            "nextCursor"
+          ],
           "additionalProperties": false
         }
       ]
@@ -790,7 +896,12 @@
           "$ref": "#/$defs/Instant"
         }
       },
-      "required": ["schemaVersion", "conversationId", "ordinal", "startedAt"],
+      "required": [
+        "schemaVersion",
+        "conversationId",
+        "ordinal",
+        "startedAt"
+      ],
       "additionalProperties": false
     },
     "ConversationList": {
@@ -808,7 +919,10 @@
           "maxItems": 100
         }
       },
-      "required": ["schemaVersion", "conversations"],
+      "required": [
+        "schemaVersion",
+        "conversations"
+      ],
       "additionalProperties": false
     },
     "ConversationStartCommand": {
@@ -821,7 +935,10 @@
           "$ref": "#/$defs/Identifier"
         }
       },
-      "required": ["schemaVersion", "commandId"],
+      "required": [
+        "schemaVersion",
+        "commandId"
+      ],
       "additionalProperties": false
     },
     "ConversationQuery": {
@@ -839,7 +956,9 @@
           "maxLength": 320
         }
       },
-      "required": ["schemaVersion"],
+      "required": [
+        "schemaVersion"
+      ],
       "additionalProperties": false
     },
     "SendPayload": {
@@ -856,7 +975,10 @@
               "maxLength": 32000
             }
           },
-          "required": ["type", "text"],
+          "required": [
+            "type",
+            "text"
+          ],
           "additionalProperties": false
         },
         {
@@ -881,7 +1003,10 @@
               "maxLength": 128
             }
           },
-          "required": ["type", "url"],
+          "required": [
+            "type",
+            "url"
+          ],
           "additionalProperties": false
         },
         {
@@ -920,11 +1045,17 @@
                   "type": "boolean"
                 }
               },
-              "required": ["prompt", "options"],
+              "required": [
+                "prompt",
+                "options"
+              ],
               "additionalProperties": false
             }
           },
-          "required": ["type", "widget"],
+          "required": [
+            "type",
+            "widget"
+          ],
           "additionalProperties": false
         },
         {
@@ -944,7 +1075,11 @@
               "maxLength": 128
             }
           },
-          "required": ["type", "prompt", "secretName"],
+          "required": [
+            "type",
+            "prompt",
+            "secretName"
+          ],
           "additionalProperties": false
         },
         {
@@ -969,7 +1104,11 @@
               "maxLength": 8000
             }
           },
-          "required": ["type", "agentId", "title"],
+          "required": [
+            "type",
+            "agentId",
+            "title"
+          ],
           "additionalProperties": false
         },
         {
@@ -992,7 +1131,11 @@
               "maxLength": 8000
             },
             "risk": {
-              "enum": ["low", "medium", "high"]
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
             },
             "expiresInSeconds": {
               "type": "integer",
@@ -1000,7 +1143,12 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["type", "approvalId", "action", "risk"],
+          "required": [
+            "type",
+            "approvalId",
+            "action",
+            "risk"
+          ],
           "additionalProperties": false
         }
       ]
@@ -1017,7 +1165,10 @@
               "$ref": "#/$defs/SendPayload"
             }
           },
-          "required": ["type", "payload"],
+          "required": [
+            "type",
+            "payload"
+          ],
           "additionalProperties": false
         },
         {
@@ -1058,15 +1209,24 @@
                       "maxLength": 32000
                     }
                   },
-                  "required": ["namespace", "toolName"],
+                  "required": [
+                    "namespace",
+                    "toolName"
+                  ],
                   "additionalProperties": false
                 }
               },
-              "required": ["id", "name"],
+              "required": [
+                "id",
+                "name"
+              ],
               "additionalProperties": false
             }
           },
-          "required": ["type", "call"],
+          "required": [
+            "type",
+            "call"
+          ],
           "additionalProperties": false
         },
         {
@@ -1097,7 +1257,11 @@
                     "const": "image"
                   },
                   "mediaType": {
-                    "enum": ["image/png", "image/jpeg", "image/webp"]
+                    "enum": [
+                      "image/png",
+                      "image/jpeg",
+                      "image/webp"
+                    ]
                   },
                   "contentHash": {
                     "$ref": "#/$defs/Digest"
@@ -1126,7 +1290,12 @@
               "maxItems": 8
             }
           },
-          "required": ["type", "callId", "content", "isError"],
+          "required": [
+            "type",
+            "callId",
+            "content",
+            "isError"
+          ],
           "additionalProperties": false
         },
         {
@@ -1141,7 +1310,10 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["type", "omittedInteractions"],
+          "required": [
+            "type",
+            "omittedInteractions"
+          ],
           "additionalProperties": false
         },
         {
@@ -1156,7 +1328,10 @@
               "maxLength": 32000
             }
           },
-          "required": ["type", "message"],
+          "required": [
+            "type",
+            "message"
+          ],
           "additionalProperties": false
         },
         {
@@ -1166,7 +1341,12 @@
               "const": "computer/sync"
             },
             "status": {
-              "enum": ["degraded", "unavailable", "refused", "skipped"]
+              "enum": [
+                "degraded",
+                "unavailable",
+                "refused",
+                "skipped"
+              ]
             },
             "message": {
               "type": "string",
@@ -1174,7 +1354,11 @@
               "maxLength": 32000
             }
           },
-          "required": ["type", "status", "message"],
+          "required": [
+            "type",
+            "status",
+            "message"
+          ],
           "additionalProperties": false
         },
         {
@@ -1233,14 +1417,21 @@
               "maxLength": 64000
             }
           },
-          "required": ["type", "text"],
+          "required": [
+            "type",
+            "text"
+          ],
           "additionalProperties": false
         },
         {
           "type": "object",
           "properties": {
             "type": {
-              "enum": ["failed", "cancelled", "superseded"]
+              "enum": [
+                "failed",
+                "cancelled",
+                "superseded"
+              ]
             },
             "message": {
               "type": "string",
@@ -1253,7 +1444,10 @@
               "maxLength": 64000
             }
           },
-          "required": ["type", "message"],
+          "required": [
+            "type",
+            "message"
+          ],
           "additionalProperties": false
         }
       ]
@@ -1264,7 +1458,11 @@
           "type": "object",
           "properties": {
             "schemaVersion": {
-              "enum": [1, 2, 3]
+              "enum": [
+                1,
+                2,
+                3
+              ]
             },
             "runId": {
               "$ref": "#/$defs/Identifier"
@@ -1316,7 +1514,11 @@
                       "$ref": "#/$defs/BotId"
                     }
                   },
-                  "required": ["kind", "name", "botId"],
+                  "required": [
+                    "kind",
+                    "name",
+                    "botId"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -1329,7 +1531,10 @@
                       "const": "Voice"
                     }
                   },
-                  "required": ["kind", "name"],
+                  "required": [
+                    "kind",
+                    "name"
+                  ],
                   "additionalProperties": false
                 }
               ]
@@ -1348,7 +1553,9 @@
             {
               "if": {
                 "type": "object",
-                "required": ["via"],
+                "required": [
+                  "via"
+                ],
                 "properties": {
                   "via": {}
                 }
@@ -1368,7 +1575,11 @@
           "type": "object",
           "properties": {
             "schemaVersion": {
-              "enum": [1, 2, 3]
+              "enum": [
+                1,
+                2,
+                3
+              ]
             },
             "runId": {
               "$ref": "#/$defs/Identifier"
@@ -1407,7 +1618,10 @@
                   "maxLength": 64000
                 }
               },
-              "required": ["type", "text"],
+              "required": [
+                "type",
+                "text"
+              ],
               "additionalProperties": false
             },
             "via": {
@@ -1427,7 +1641,11 @@
                       "$ref": "#/$defs/BotId"
                     }
                   },
-                  "required": ["kind", "name", "botId"],
+                  "required": [
+                    "kind",
+                    "name",
+                    "botId"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -1440,7 +1658,10 @@
                       "const": "Voice"
                     }
                   },
-                  "required": ["kind", "name"],
+                  "required": [
+                    "kind",
+                    "name"
+                  ],
                   "additionalProperties": false
                 }
               ]
@@ -1460,7 +1681,9 @@
             {
               "if": {
                 "type": "object",
-                "required": ["via"],
+                "required": [
+                  "via"
+                ],
                 "properties": {
                   "via": {}
                 }
@@ -1480,7 +1703,11 @@
           "type": "object",
           "properties": {
             "schemaVersion": {
-              "enum": [1, 2, 3]
+              "enum": [
+                1,
+                2,
+                3
+              ]
             },
             "runId": {
               "$ref": "#/$defs/Identifier"
@@ -1524,7 +1751,10 @@
                   "maxLength": 64000
                 }
               },
-              "required": ["type", "message"],
+              "required": [
+                "type",
+                "message"
+              ],
               "additionalProperties": false
             },
             "via": {
@@ -1544,7 +1774,11 @@
                       "$ref": "#/$defs/BotId"
                     }
                   },
-                  "required": ["kind", "name", "botId"],
+                  "required": [
+                    "kind",
+                    "name",
+                    "botId"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -1557,7 +1791,10 @@
                       "const": "Voice"
                     }
                   },
-                  "required": ["kind", "name"],
+                  "required": [
+                    "kind",
+                    "name"
+                  ],
                   "additionalProperties": false
                 }
               ]
@@ -1577,7 +1814,9 @@
             {
               "if": {
                 "type": "object",
-                "required": ["via"],
+                "required": [
+                  "via"
+                ],
                 "properties": {
                   "via": {}
                 }
@@ -1597,7 +1836,11 @@
           "type": "object",
           "properties": {
             "schemaVersion": {
-              "enum": [1, 2, 3]
+              "enum": [
+                1,
+                2,
+                3
+              ]
             },
             "runId": {
               "$ref": "#/$defs/Identifier"
@@ -1641,7 +1884,10 @@
                   "maxLength": 64000
                 }
               },
-              "required": ["type", "message"],
+              "required": [
+                "type",
+                "message"
+              ],
               "additionalProperties": false
             },
             "via": {
@@ -1661,7 +1907,11 @@
                       "$ref": "#/$defs/BotId"
                     }
                   },
-                  "required": ["kind", "name", "botId"],
+                  "required": [
+                    "kind",
+                    "name",
+                    "botId"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -1674,7 +1924,10 @@
                       "const": "Voice"
                     }
                   },
-                  "required": ["kind", "name"],
+                  "required": [
+                    "kind",
+                    "name"
+                  ],
                   "additionalProperties": false
                 }
               ]
@@ -1695,7 +1948,9 @@
             {
               "if": {
                 "type": "object",
-                "required": ["via"],
+                "required": [
+                  "via"
+                ],
                 "properties": {
                   "via": {}
                 }
@@ -1715,7 +1970,11 @@
           "type": "object",
           "properties": {
             "schemaVersion": {
-              "enum": [1, 2, 3]
+              "enum": [
+                1,
+                2,
+                3
+              ]
             },
             "runId": {
               "$ref": "#/$defs/Identifier"
@@ -1759,7 +2018,10 @@
                   "maxLength": 64000
                 }
               },
-              "required": ["type", "message"],
+              "required": [
+                "type",
+                "message"
+              ],
               "additionalProperties": false
             },
             "via": {
@@ -1779,7 +2041,11 @@
                       "$ref": "#/$defs/BotId"
                     }
                   },
-                  "required": ["kind", "name", "botId"],
+                  "required": [
+                    "kind",
+                    "name",
+                    "botId"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -1792,7 +2058,10 @@
                       "const": "Voice"
                     }
                   },
-                  "required": ["kind", "name"],
+                  "required": [
+                    "kind",
+                    "name"
+                  ],
                   "additionalProperties": false
                 }
               ]
@@ -1812,7 +2081,9 @@
             {
               "if": {
                 "type": "object",
-                "required": ["via"],
+                "required": [
+                  "via"
+                ],
                 "properties": {
                   "via": {}
                 }
@@ -1832,7 +2103,11 @@
           "type": "object",
           "properties": {
             "schemaVersion": {
-              "enum": [1, 2, 3]
+              "enum": [
+                1,
+                2,
+                3
+              ]
             },
             "runId": {
               "$ref": "#/$defs/Identifier"
@@ -1871,7 +2146,10 @@
                   "maxLength": 8000
                 }
               },
-              "required": ["action", "message"],
+              "required": [
+                "action",
+                "message"
+              ],
               "additionalProperties": false
             },
             "via": {
@@ -1891,7 +2169,11 @@
                       "$ref": "#/$defs/BotId"
                     }
                   },
-                  "required": ["kind", "name", "botId"],
+                  "required": [
+                    "kind",
+                    "name",
+                    "botId"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -1904,7 +2186,10 @@
                       "const": "Voice"
                     }
                   },
-                  "required": ["kind", "name"],
+                  "required": [
+                    "kind",
+                    "name"
+                  ],
                   "additionalProperties": false
                 }
               ]
@@ -1923,7 +2208,9 @@
             {
               "if": {
                 "type": "object",
-                "required": ["via"],
+                "required": [
+                  "via"
+                ],
                 "properties": {
                   "via": {}
                 }
@@ -1968,10 +2255,20 @@
               "maxLength": 512
             },
             "namedBy": {
-              "enum": ["user", "bot"]
+              "enum": [
+                "user",
+                "bot"
+              ]
             }
           },
-          "required": ["type", "announcementId", "at", "from", "to", "namedBy"],
+          "required": [
+            "type",
+            "announcementId",
+            "at",
+            "from",
+            "to",
+            "namedBy"
+          ],
           "additionalProperties": false
         },
         {
@@ -1994,7 +2291,12 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["type", "announcementId", "at", "throughTurn"],
+          "required": [
+            "type",
+            "announcementId",
+            "at",
+            "throughTurn"
+          ],
           "additionalProperties": false
         }
       ]
@@ -2025,7 +2327,11 @@
           "maxItems": 100
         }
       },
-      "required": ["schemaVersion", "runs", "page"],
+      "required": [
+        "schemaVersion",
+        "runs",
+        "page"
+      ],
       "additionalProperties": false
     },
     "StopReceipt": {
@@ -2047,7 +2353,13 @@
           "$ref": "#/$defs/Run"
         }
       },
-      "required": ["schemaVersion", "status", "commandId", "runId", "run"],
+      "required": [
+        "schemaVersion",
+        "status",
+        "commandId",
+        "runId",
+        "run"
+      ],
       "additionalProperties": false
     },
     "ObserverCursor": {
@@ -2071,10 +2383,18 @@
               "$ref": "#/$defs/ObserverCursor"
             },
             "topic": {
-              "enum": ["computer", "runs"]
+              "enum": [
+                "computer",
+                "runs"
+              ]
             }
           },
-          "required": ["schemaVersion", "type", "cursor", "topic"],
+          "required": [
+            "schemaVersion",
+            "type",
+            "cursor",
+            "topic"
+          ],
           "additionalProperties": false
         },
         {
@@ -2090,10 +2410,19 @@
               "$ref": "#/$defs/ObserverCursor"
             },
             "reason": {
-              "enum": ["initial", "gap", "cursor-ahead"]
+              "enum": [
+                "initial",
+                "gap",
+                "cursor-ahead"
+              ]
             }
           },
-          "required": ["schemaVersion", "type", "cursor", "reason"],
+          "required": [
+            "schemaVersion",
+            "type",
+            "cursor",
+            "reason"
+          ],
           "additionalProperties": false
         },
         {
@@ -2109,7 +2438,11 @@
               "$ref": "#/$defs/ObserverCursor"
             }
           },
-          "required": ["schemaVersion", "type", "cursor"],
+          "required": [
+            "schemaVersion",
+            "type",
+            "cursor"
+          ],
           "additionalProperties": false
         }
       ]
@@ -2127,10 +2460,20 @@
           "$ref": "#/$defs/ObserverCursor"
         },
         "status": {
-          "enum": ["connecting", "open", "fallback", "hidden"]
+          "enum": [
+            "connecting",
+            "open",
+            "fallback",
+            "hidden"
+          ]
         }
       },
-      "required": ["schemaVersion", "botId", "cursor", "status"],
+      "required": [
+        "schemaVersion",
+        "botId",
+        "cursor",
+        "status"
+      ],
       "additionalProperties": false
     },
     "Notification": {
@@ -2158,10 +2501,19 @@
           "maxLength": 2000
         },
         "urgency": {
-          "enum": ["normal", "critical"]
+          "enum": [
+            "normal",
+            "critical"
+          ]
         }
       },
-      "required": ["notificationId", "runId", "createdAt", "title", "body"],
+      "required": [
+        "notificationId",
+        "runId",
+        "createdAt",
+        "title",
+        "body"
+      ],
       "additionalProperties": false
     },
     "NotificationList": {
@@ -2179,7 +2531,10 @@
           "maxItems": 100
         }
       },
-      "required": ["schemaVersion", "notifications"],
+      "required": [
+        "schemaVersion",
+        "notifications"
+      ],
       "additionalProperties": false
     },
     "NotificationAck": {
@@ -2198,7 +2553,11 @@
           "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:@-]{0,127}$"
         }
       },
-      "required": ["schemaVersion", "action", "notificationId"],
+      "required": [
+        "schemaVersion",
+        "action",
+        "notificationId"
+      ],
       "additionalProperties": false
     },
     "Acknowledgement": {
@@ -2211,7 +2570,10 @@
           "const": "acknowledged"
         }
       },
-      "required": ["schemaVersion", "status"],
+      "required": [
+        "schemaVersion",
+        "status"
+      ],
       "additionalProperties": false
     },
     "UnreadView": {
@@ -2260,10 +2622,18 @@
               "$ref": "#/$defs/Instant"
             },
             "role": {
-              "enum": ["assistant", "user"]
+              "enum": [
+                "assistant",
+                "user"
+              ]
             }
           },
-          "required": ["schemaVersion", "text", "at", "role"],
+          "required": [
+            "schemaVersion",
+            "text",
+            "at",
+            "role"
+          ],
           "additionalProperties": false
         },
         "working": {
@@ -2326,7 +2696,12 @@
               "$ref": "#/$defs/BotId"
             }
           },
-          "required": ["schemaVersion", "type", "commandId", "botId"],
+          "required": [
+            "schemaVersion",
+            "type",
+            "commandId",
+            "botId"
+          ],
           "additionalProperties": false
         }
       ]
@@ -2343,7 +2718,12 @@
           "maxLength": 200
         },
         "kind": {
-          "enum": ["text", "boolean", "number", "select"]
+          "enum": [
+            "text",
+            "boolean",
+            "number",
+            "select"
+          ]
         },
         "value": {
           "$ref": "#/$defs/Json"
@@ -2398,7 +2778,13 @@
           "type": "boolean"
         }
       },
-      "required": ["id", "label", "kind", "value", "editable"],
+      "required": [
+        "id",
+        "label",
+        "kind",
+        "value",
+        "editable"
+      ],
       "additionalProperties": false
     },
     "SettingsFrame": {
@@ -2408,7 +2794,12 @@
           "const": 1
         },
         "home": {
-          "enum": ["models", "connections", "application", "bot"]
+          "enum": [
+            "models",
+            "connections",
+            "application",
+            "bot"
+          ]
         },
         "revision": {
           "type": "integer",
@@ -2451,7 +2842,12 @@
                 "maxItems": 64
               },
               "credentialStatus": {
-                "enum": ["not-required", "missing", "connected", "revoked"]
+                "enum": [
+                  "not-required",
+                  "missing",
+                  "connected",
+                  "revoked"
+                ]
               },
               "failure": {
                 "type": "string",
@@ -2465,7 +2861,10 @@
                   "type": "object",
                   "properties": {
                     "kind": {
-                      "enum": ["choose-provider", "manage-provider"]
+                      "enum": [
+                        "choose-provider",
+                        "manage-provider"
+                      ]
                     },
                     "label": {
                       "type": "string",
@@ -2476,12 +2875,20 @@
                       "$ref": "#/$defs/Identifier"
                     }
                   },
-                  "required": ["kind", "label", "packageId"],
+                  "required": [
+                    "kind",
+                    "label",
+                    "packageId"
+                  ],
                   "additionalProperties": false
                 }
               }
             },
-            "required": ["id", "label", "fields"],
+            "required": [
+              "id",
+              "label",
+              "fields"
+            ],
             "additionalProperties": false
           },
           "minItems": 0,
@@ -2516,7 +2923,11 @@
           "pattern": "^wss://[^\\s/@?#]+/[^\\s#]*$"
         }
       },
-      "required": ["token", "expiresAt", "socketUrl"],
+      "required": [
+        "token",
+        "expiresAt",
+        "socketUrl"
+      ],
       "additionalProperties": false
     },
     "ImmutableArtifact": {
@@ -2534,7 +2945,11 @@
           "const": "application/json"
         }
       },
-      "required": ["contentHash", "size", "mediaType"],
+      "required": [
+        "contentHash",
+        "size",
+        "mediaType"
+      ],
       "additionalProperties": false
     },
     "WebArtifact": {
@@ -2557,7 +2972,12 @@
           "maxLength": 128
         }
       },
-      "required": ["contentHash", "size", "mediaType", "bundlerVersion"],
+      "required": [
+        "contentHash",
+        "size",
+        "mediaType",
+        "bundlerVersion"
+      ],
       "additionalProperties": false
     },
     "FallbackBootstrap": {
@@ -2621,7 +3041,10 @@
               "maximum": 8000
             }
           },
-          "required": ["type", "maxLength"],
+          "required": [
+            "type",
+            "maxLength"
+          ],
           "additionalProperties": false
         },
         {
@@ -2631,7 +3054,9 @@
               "const": "boolean"
             }
           },
-          "required": ["type"],
+          "required": [
+            "type"
+          ],
           "additionalProperties": false
         },
         {
@@ -2647,7 +3072,11 @@
               "type": "number"
             }
           },
-          "required": ["type", "minimum", "maximum"],
+          "required": [
+            "type",
+            "minimum",
+            "maximum"
+          ],
           "additionalProperties": false
         },
         {
@@ -2667,7 +3096,10 @@
               "maxItems": 64
             }
           },
-          "required": ["type", "enum"],
+          "required": [
+            "type",
+            "enum"
+          ],
           "additionalProperties": false
         }
       ]
@@ -2701,7 +3133,12 @@
           "const": false
         }
       },
-      "required": ["type", "properties", "required", "additionalProperties"],
+      "required": [
+        "type",
+        "properties",
+        "required",
+        "additionalProperties"
+      ],
       "additionalProperties": false
     },
     "A2uiContribution": {
@@ -2743,7 +3180,10 @@
                 "$ref": "#/$defs/ActionSchema"
               }
             },
-            "required": ["id", "schema"],
+            "required": [
+              "id",
+              "schema"
+            ],
             "additionalProperties": false
           },
           "minItems": 0,
@@ -2886,7 +3326,12 @@
           "maxLength": 500
         }
       },
-      "required": ["schemaVersion", "surfaceId", "reason", "message"],
+      "required": [
+        "schemaVersion",
+        "surfaceId",
+        "reason",
+        "message"
+      ],
       "additionalProperties": false
     },
     "UnreadDirectory": {
@@ -2903,7 +3348,10 @@
           "maxItems": 100
         }
       },
-      "required": ["schemaVersion", "unread"],
+      "required": [
+        "schemaVersion",
+        "unread"
+      ],
       "additionalProperties": false
     },
     "RunLookup": {
@@ -2918,7 +3366,10 @@
               "const": "not-admitted"
             }
           },
-          "required": ["schemaVersion", "state"],
+          "required": [
+            "schemaVersion",
+            "state"
+          ],
           "additionalProperties": false
         },
         {
@@ -2928,13 +3379,21 @@
               "const": 1
             },
             "state": {
-              "enum": ["running", "reconciliation-required", "terminal"]
+              "enum": [
+                "running",
+                "reconciliation-required",
+                "terminal"
+              ]
             },
             "run": {
               "$ref": "#/$defs/Run"
             }
           },
-          "required": ["schemaVersion", "state", "run"],
+          "required": [
+            "schemaVersion",
+            "state",
+            "run"
+          ],
           "additionalProperties": false
         }
       ]
@@ -2954,7 +3413,10 @@
           "maxLength": 100
         },
         "namedBy": {
-          "enum": ["user", "bot"]
+          "enum": [
+            "user",
+            "bot"
+          ]
         },
         "hiddenFromSidebar": {
           "type": "boolean"
@@ -2998,7 +3460,12 @@
           "$ref": "#/$defs/Identifier"
         }
       },
-      "required": ["kind", "botId", "sessionId", "turnId"],
+      "required": [
+        "kind",
+        "botId",
+        "sessionId",
+        "turnId"
+      ],
       "additionalProperties": false
     },
     "TurnResponse": {
@@ -3025,7 +3492,12 @@
           "$ref": "#/$defs/Notification"
         }
       },
-      "required": ["schemaVersion", "runId", "text", "events"],
+      "required": [
+        "schemaVersion",
+        "runId",
+        "text",
+        "events"
+      ],
       "additionalProperties": false
     },
     "AppletSummary": {
@@ -3043,7 +3515,11 @@
           "maxLength": 160
         },
         "status": {
-          "enum": ["draft", "published", "deleted"]
+          "enum": [
+            "draft",
+            "published",
+            "deleted"
+          ]
         },
         "currentGenerationId": {
           "$ref": "#/$defs/GenerationId"
@@ -3061,7 +3537,13 @@
           "$ref": "#/$defs/Instant"
         }
       },
-      "required": ["appletId", "displayName", "status", "tools", "createdAt"],
+      "required": [
+        "appletId",
+        "displayName",
+        "status",
+        "tools",
+        "createdAt"
+      ],
       "additionalProperties": false
     },
     "AppletDirectory": {
@@ -3078,7 +3560,10 @@
           }
         }
       },
-      "required": ["schemaVersion", "applets"],
+      "required": [
+        "schemaVersion",
+        "applets"
+      ],
       "additionalProperties": false
     },
     "SettingsChangeCommand": {
@@ -3148,10 +3633,18 @@
               "maximum": 9007199254740991
             },
             "status": {
-              "enum": ["pending", "applied"]
+              "enum": [
+                "pending",
+                "applied"
+              ]
             }
           },
-          "required": ["schemaVersion", "commandId", "revision", "status"],
+          "required": [
+            "schemaVersion",
+            "commandId",
+            "revision",
+            "status"
+          ],
           "additionalProperties": false
         },
         {
@@ -3195,10 +3688,16 @@
           "const": 1
         },
         "home": {
-          "enum": ["models", "connections"]
+          "enum": [
+            "models",
+            "connections"
+          ]
         }
       },
-      "required": ["schemaVersion", "home"],
+      "required": [
+        "schemaVersion",
+        "home"
+      ],
       "additionalProperties": false
     },
     "GenerationId": {
@@ -3219,7 +3718,10 @@
           "$ref": "#/$defs/Json"
         }
       },
-      "required": ["label", "value"],
+      "required": [
+        "label",
+        "value"
+      ],
       "additionalProperties": false
     },
     "SettingsOptionsQuery": {
@@ -3246,7 +3748,12 @@
           "maximum": 1000000
         }
       },
-      "required": ["schemaVersion", "source", "revision", "query"],
+      "required": [
+        "schemaVersion",
+        "source",
+        "revision",
+        "query"
+      ],
       "additionalProperties": false
     },
     "SettingsOptionsPage": {
@@ -3279,7 +3786,78 @@
           "maximum": 1000000
         }
       },
-      "required": ["schemaVersion", "source", "ownerId", "revision", "items"],
+      "required": [
+        "schemaVersion",
+        "source",
+        "ownerId",
+        "revision",
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "NotificationDirectory": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "notifications": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "properties": {
+              "notificationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "runId": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "createdAt": {
+                "$ref": "#/$defs/Instant"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 512
+              },
+              "body": {
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 2000
+              },
+              "urgency": {
+                "enum": [
+                  "normal",
+                  "critical"
+                ]
+              },
+              "schemaVersion": {
+                "const": 1
+              },
+              "botId": {
+                "$ref": "#/$defs/BotId"
+              }
+            },
+            "required": [
+              "notificationId",
+              "runId",
+              "createdAt",
+              "title",
+              "body",
+              "schemaVersion",
+              "botId"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "notifications"
+      ],
       "additionalProperties": false
     }
   },

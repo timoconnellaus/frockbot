@@ -643,6 +643,19 @@ export type SettingsOptionsPage = {
   items: Array<SettingChoice>;
   nextCursor?: number;
 };
+export type NotificationDirectory = {
+  schemaVersion: 1;
+  notifications: Array<{
+    notificationId: string;
+    runId: Identifier;
+    createdAt: Instant;
+    title: string;
+    body: string;
+    urgency?: "normal" | "critical";
+    schemaVersion: 1;
+    botId: BotId;
+  }>;
+};
 export interface ProtocolTypes {
   Identifier: Identifier;
   BotId: BotId;
@@ -722,4 +735,5 @@ export interface ProtocolTypes {
   SettingChoice: SettingChoice;
   SettingsOptionsQuery: SettingsOptionsQuery;
   SettingsOptionsPage: SettingsOptionsPage;
+  NotificationDirectory: NotificationDirectory;
 }
