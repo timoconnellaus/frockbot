@@ -517,7 +517,7 @@ class FrockIconButton extends StatelessWidget {
   }
 }
 
-/// The 44px pill composer with buttons inside it.
+/// The 52px pill composer with 40px buttons inside it.
 class FrockComposer extends StatelessWidget {
   const FrockComposer({
     super.key,
@@ -550,7 +550,7 @@ class FrockComposer extends StatelessWidget {
     final t = FrockTokens.of(context);
     return Container(
       constraints: const BoxConstraints(minHeight: FrockTokens.composer),
-      padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
+      padding: const EdgeInsets.fromLTRB(18, 6, 6, 6),
       decoration: BoxDecoration(
         color: t.sheet,
         borderRadius: BorderRadius.circular(FrockTokens.composer / 2),
@@ -579,7 +579,7 @@ class FrockComposer extends StatelessWidget {
                 alignment: Alignment.centerLeft,
                 child:
                     field ??
-                    Text(hint, style: t.message.copyWith(color: t.ink3)),
+                    Text(hint, style: t.composerText.copyWith(color: t.ink3)),
               ),
             ),
           ),

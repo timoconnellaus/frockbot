@@ -157,6 +157,16 @@ class FrockTokens extends ThemeExtension<FrockTokens> {
     letterSpacing: -0.16,
     color: ink,
   );
+
+  /// What you type: a step above message text so the field reads as the
+  /// place to write, and Android never has to scale it.
+  TextStyle get composerText => TextStyle(
+    fontFamily: sans,
+    fontSize: 16,
+    height: 22 / 16,
+    letterSpacing: -0.08,
+    color: ink,
+  );
   TextStyle get message => TextStyle(
     fontFamily: sans,
     fontSize: 15,
@@ -220,8 +230,8 @@ class FrockTokens extends ThemeExtension<FrockTokens> {
   static const controlSm = 30.0;
   static const controlMd = 36.0;
   static const controlLg = 46.0;
-  static const composer = 44.0;
-  static const composerButton = 34.0;
+  static const composer = 52.0;
+  static const composerButton = 40.0;
   static const tileSize = 32.0;
   static const receiptTile = 24.0;
   static const avatarSm = 24.0;

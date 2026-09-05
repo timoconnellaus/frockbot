@@ -307,13 +307,13 @@ class _ChatPaneState extends State<ChatPane> {
               focusNode: focus,
               minLines: 1,
               maxLines: 6,
-              style: t.message,
+              style: t.composerText,
               cursorColor: t.accent,
               keyboardType: TextInputType.multiline,
               textInputAction: TextInputAction.newline,
               decoration: InputDecoration.collapsed(
                 hintText: 'Message ${widget.botName}',
-                hintStyle: t.message.copyWith(color: t.ink3),
+                hintStyle: t.composerText.copyWith(color: t.ink3),
               ),
               onChanged: (value) {
                 AcceptanceMetrics.instance.inputChanged();
