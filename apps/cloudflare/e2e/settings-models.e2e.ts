@@ -40,12 +40,10 @@ test("Models chooses the account default with the Bot override Package disabled"
   ).toBe("disabled");
   await openModels(page);
   await expect(
-    page
-      .locator("form.frame-section")
-      .getByRole("button", {
-        name: `Model: ${E2E_MODEL_LABEL} · ${E2E_CONNECTION_LABEL}`,
-        exact: true,
-      }),
+    page.locator("form.frame-section").getByRole("button", {
+      name: `Model: ${E2E_MODEL_LABEL} · ${E2E_CONNECTION_LABEL}`,
+      exact: true,
+    }),
   ).toHaveText(`${E2E_MODEL_LABEL} · ${E2E_CONNECTION_LABEL}`);
 });
 

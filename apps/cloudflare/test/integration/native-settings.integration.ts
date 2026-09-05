@@ -47,8 +47,17 @@ test("browser and native Settings share one owner, revision, pending identity an
     values: { name: "Tim", email: "tim@example.test" },
   };
   // A retained save from a previous login cannot write under the next session.
-  expect((await native("/api/settings/application", { ...command, ownerId: "another-user" })).status).toBe(403);
-  expect(await read(await native("/api/settings/application"))).toEqual(browser);
+  expect(
+    (
+      await native("/api/settings/application", {
+        ...command,
+        ownerId: "another-user",
+      })
+    ).status,
+  ).toBe(403);
+  expect(await read(await native("/api/settings/application"))).toEqual(
+    browser,
+  );
   const receipt = decodeProtocol(
     "SettingsReceipt",
     await (await native("/api/settings/application", command)).json(),

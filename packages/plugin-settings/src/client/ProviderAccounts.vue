@@ -450,7 +450,6 @@ async function revoke(packageId: string, connectionId: string): Promise<void> {
           </UiButton>
         </div>
       </form>
-
     </article>
 
     <div v-if="providers.length === 0" class="provider-empty">

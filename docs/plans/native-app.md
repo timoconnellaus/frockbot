@@ -183,7 +183,8 @@ search races and explicit default intent. The previous released settings DTO and
 model resolver exercise the bounded compatibility projection. See the
 [settings seam plan](native-settings.md) and [acceptance ledger](native-acceptance-2026-09-05-slice3.md).
 
-Pixel captures for these new screens are **awaiting an unlocked phone**. Local
+The Pixel was unlocked again after the orchestrator restart; captures of these
+new screens await C1 deployment so the device can use its production session. Local
 macOS release captures use a test account through the production Worker harness;
 they do not qualify production macOS sign-in or the remaining device budgets.
 Connections, unread/deep links and Bot recovery remain subsequent milestones.
