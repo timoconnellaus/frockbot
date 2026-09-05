@@ -298,6 +298,7 @@ export interface AgentTransport {
   readApplicationManifest?(): Promise<unknown>;
   readAuthenticatedUserId?(): Promise<string>;
   startConnection?(input: {
+    connectorId?: string;
     commandId: string;
     packageId: string;
     connectionTypeId: string;

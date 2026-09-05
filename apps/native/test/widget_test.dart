@@ -79,7 +79,79 @@ class FakeTransport implements ChatTransport {
   }
 }
 
+class PagedTransport extends FakeTransport {
+  PagedTransport(super.store);
+  Map<String, dynamic> row(int number) => {
+    'runId': 'row-$number',
+    'admittedAt': DateTime.utc(
+      2026,
+      9,
+      5,
+    ).add(Duration(minutes: number)).toIso8601String(),
+    'input': 'Message $number',
+    'status': 'completed',
+    'events': <Object>[],
+  };
+  @override
+  Future<Map<String, dynamic>> page(
+    String botId, {
+    String? before,
+    String? conversationId,
+  }) async => {
+    'runs': List.generate(
+      20,
+      (index) => row(index + (before == null ? 20 : 0)),
+    ),
+    'page': before == null
+        ? {'nextCursor': 'older', 'truncated': true}
+        : {'truncated': false},
+  };
+}
+
 void main() {
+  testWidgets(
+    'chat opens on the latest row and earlier pages preserve the reading position',
+    (tester) async {
+      final store = MemoryStore();
+      final controller = ChatController(
+        transport: PagedTransport(store),
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+      );
+      await controller.initialize();
+      controller.connection = ConnectionState.connected;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: ChatPane(controller: controller, onReconnect: () async {}),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Message 39'), findsOneWidget);
+      expect(find.text('Message 20'), findsNothing);
+      await tester.scrollUntilVisible(
+        find.text('Earlier messages'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      final before = tester.getTopLeft(find.text('Message 20'));
+      await tester.tap(find.text('Earlier messages'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.text('Message 20')).dy,
+        closeTo(before.dy, 1),
+      );
+      expect(controller.runs.length, 40);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
+
   testWidgets(
     'chat states preserve controls at 200% text with reduced motion',
     (tester) async {

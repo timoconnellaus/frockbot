@@ -68,7 +68,8 @@
     "@frockbot/plugin-user-machine": "workspace:*",
     "@frockbot/plugin-web": "workspace:*",
     "@frockbot/template-core": "workspace:*",
-    "cordis": "4.0.0-rc.8"
+    "cordis": "4.0.0-rc.8",
+    "@frockbot/plugin-composio": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

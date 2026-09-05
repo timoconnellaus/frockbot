@@ -31,28 +31,17 @@
   outline: var(--frock-focus-ring);
 }
 
+/*
+ * The word stays at every width. It used to be hidden on a phone, which was
+ * written for a topbar this control no longer sits in: the sidebar is a
+ * full-height drawer there, and the rule left a search field three quarters of
+ * the screen wide holding a magnifier and nothing else (2026-09-05).
+ */
 .search-box-label {
   overflow: hidden;
   flex: 1 1 auto;
   font-size: var(--frock-text-sm);
   white-space: nowrap;
-}
-
-/*
- * On a phone the control is the magnifier and nothing else. The word and the
- * shortcut cost about a third of the topbar, which is the room the Bot's name
- * needs — and a keyboard shortcut is a promise a touch device cannot keep. The
- * button keeps its accessible name either way.
- */
-@media (max-width: 640px) {
-  .search-box {
-    padding: 6px;
-  }
-
-  .search-box-label,
-  .search-box-shortcut {
-    display: none;
-  }
 }
 
 /*

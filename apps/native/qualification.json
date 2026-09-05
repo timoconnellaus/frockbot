@@ -22,9 +22,11 @@
     "date": "2026-09-05",
     "ledger": "docs/plans/native-acceptance-2026-09-05-slice3.md",
     "android": {
-      "versionCode": 6,
+      "versionCode": 9,
       "signerPreserved": true,
-      "authenticatedFlow": "awaiting-verifier-fix-and-exclusive-device-access"
+      "authenticatedFlow": "chat-stop-form-observed; applet-awaiting-bootstrap-fix",
+      "automaticVerifiedLink": "unqualified-domain-externally-approved",
+      "measurements": "docs/plans/native-evidence-2026-09-05-slice3/pixel-release8-measurements.json"
     },
     "macos": {
       "releaseBuild": "passed",

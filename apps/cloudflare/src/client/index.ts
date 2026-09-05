@@ -334,6 +334,7 @@ const application = new ClientApplication({
     return decodeAuthenticatedIdentity(await apiRequest("/api/identity"));
   },
   startConnection(input: {
+    connectorId?: string;
     commandId: string;
     packageId: string;
     connectionTypeId: string;
@@ -348,6 +349,7 @@ const application = new ClientApplication({
         type: "connection/start",
         commandId: input.commandId,
         connectionTypeId: input.connectionTypeId,
+        ...(input.connectorId ? { connectorId: input.connectorId } : {}),
         alias: input.alias,
         nativeReturnNonce: input.nativeReturnNonce,
       } satisfies StartConnectionCommandV1),

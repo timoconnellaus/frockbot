@@ -43,8 +43,9 @@ describe("settings client contribution", () => {
     const result = settingsClientPlugin(context);
     if (!Array.isArray(result)) throw new Error("expected owned registrations");
 
+    // Connectors is reached from the User menu with Models and Plugins, and
+    // from nowhere else: no second sidebar entry for the same panel.
     expect(slots.map((slot) => slot.slot)).toEqual([
-      "frockbot.sidebar-actions",
       "frockbot.user-profile",
       "frockbot.right-panel",
       "frockbot.bot-actions",

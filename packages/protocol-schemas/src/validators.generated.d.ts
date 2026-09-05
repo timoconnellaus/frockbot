@@ -119,5 +119,6 @@ declare const validators: {
   isSettingsHandoffCommand(
     value: unknown,
   ): value is ProtocolTypes["SettingsHandoffCommand"];
+  isGenerationId(value: unknown): value is ProtocolTypes["GenerationId"];
 };
 export default validators;

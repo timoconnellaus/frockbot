@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { modelRuntimeLabel } from "./model-presentation.js";
+import { modelRuntimeLabel, topbarModelLabelV1 } from "./model-presentation.js";
 
 describe("model runtime presentation", () => {
   test("names platform models plainly", () => {
@@ -28,7 +28,7 @@ describe("model runtime presentation", () => {
       packageDisplayName: "Ollama Cloud",
     };
     expect(modelRuntimeLabel({ ...label, source: "account" })).toBe(
-      "Llama 3 · Ollama Cloud · Account model",
+      "Llama 3 · Ollama Cloud · your choice for every Bot",
     );
     expect(modelRuntimeLabel({ ...label, source: "bot" })).toBe(
       "Llama 3 · Ollama Cloud · this Bot only",
@@ -69,5 +69,29 @@ describe("model runtime presentation", () => {
         failure: disabledProvider,
       }),
     ).toBe(disabledProvider);
+  });
+});
+
+describe("the topbar's model line", () => {
+  test("keeps the whole line where there is room for it", () => {
+    expect(topbarModelLabelV1("Auto (recommended) · Frock AI", false)).toBe(
+      "Auto (recommended) · Frock AI",
+    );
+  });
+
+  test("keeps the model and drops its qualifiers on a phone", () => {
+    expect(topbarModelLabelV1("Auto (recommended) · Frock AI", true)).toBe(
+      "Auto (recommended)",
+    );
+    expect(
+      topbarModelLabelV1("Llama 3 · Ollama Cloud · this Bot only", true),
+    ).toBe("Llama 3");
+  });
+
+  test("leaves a line that has no qualifiers alone", () => {
+    expect(topbarModelLabelV1("Llama 3", true)).toBe("Llama 3");
+    expect(
+      topbarModelLabelV1("No model available — set one up in Models", true),
+    ).toBe("No model available — set one up in Models");
   });
 });

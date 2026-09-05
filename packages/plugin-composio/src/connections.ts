@@ -11,6 +11,7 @@ import type {
   RevokeConnectionResult,
   StartConnectionResult,
 } from "./backend-contracts.js";
+import { ComposioRequestError } from "./composio-client.js";
 import {
   linkReconciliationDisposition,
   reconcileComposioProviderConnection,
@@ -28,6 +29,7 @@ export interface ComposioConnectionStore {
       connectionId: string;
       packageId: string;
       connectionTypeId: string;
+      connectorId?: string;
       displayName: string;
       safeMetadata?: ConnectionView["safeMetadata"];
     },
@@ -74,6 +76,10 @@ export interface ComposioConnectionStore {
     phase: "provider" | "finalize" | "pending" | "done";
     connection: ConnectionView;
   }>;
+  claimProviderAccountDeletion(
+    userId: string,
+    connectionId: string,
+  ): Promise<boolean>;
   recordRevocationProviderCompleted(
     userId: string,
     connectionId: string,
@@ -82,6 +88,28 @@ export interface ComposioConnectionStore {
     userId: string,
     connectionId: string,
   ): Promise<boolean>;
+}
+
+/** A definite unsupported revoke can fall back to removal, under a separate durable intent. */
+export async function retireProviderAccount(
+  client: ComposioClient,
+  store: ComposioConnectionStore,
+  userId: string,
+  connectionId: string,
+  accountId: string,
+): Promise<void> {
+  try {
+    await client.revokeConnectedAccount(accountId);
+  } catch (error) {
+    if (
+      !(error instanceof ComposioRequestError) ||
+      (error.status !== 400 && error.status !== 409)
+    )
+      throw error;
+    if (!(await store.claimProviderAccountDeletion(userId, connectionId)))
+      throw new Error("Account removal requires reconciliation");
+    await client.deleteConnectedAccount(accountId);
+  }
 }
 
 export interface ComposioConnectionTypeConfig {
@@ -127,6 +155,7 @@ function connectionStartCommandFingerprintV1(
   userId: string,
   input: {
     connectionTypeId: string;
+    connectorId?: string;
     alias?: string;
     returnTarget: "browser" | "desktop";
     nativeReturnNonce?: string;
@@ -136,6 +165,7 @@ function connectionStartCommandFingerprintV1(
     userId,
     packageId: "composio",
     connectionTypeId: input.connectionTypeId,
+    ...(input.connectorId ? { connectorId: input.connectorId } : {}),
     alias: input.alias ?? null,
     safeMetadata: {
       returnTarget: input.returnTarget,
@@ -199,7 +229,13 @@ export class ComposioConnectionCoordinator {
       }
       let providerError: unknown;
       try {
-        await this.config.client.revokeConnectedAccount(connectedAccountId);
+        await retireProviderAccount(
+          this.config.client,
+          this.config.store,
+          userId,
+          connectionId,
+          connectedAccountId,
+        );
       } catch (error) {
         providerError = error;
       }
@@ -219,6 +255,7 @@ export class ComposioConnectionCoordinator {
     input: {
       commandId: string;
       connectionTypeId: string;
+      connectorId?: string;
       alias?: string;
       returnTarget?: "browser" | "desktop";
       nativeReturnNonce?: string;
@@ -229,6 +266,7 @@ export class ComposioConnectionCoordinator {
     }
     const commandFingerprint = connectionStartCommandFingerprintV1(userId, {
       connectionTypeId: input.connectionTypeId,
+      ...(input.connectorId ? { connectorId: input.connectorId } : {}),
       alias: input.alias?.trim() || undefined,
       returnTarget: input.returnTarget ?? "browser",
       nativeReturnNonce: input.nativeReturnNonce,
@@ -256,6 +294,7 @@ export class ComposioConnectionCoordinator {
     input: {
       commandId: string;
       connectionTypeId: string;
+      connectorId?: string;
       alias?: string;
       returnTarget?: "browser" | "desktop";
       callbackState: string;
@@ -282,6 +321,7 @@ export class ComposioConnectionCoordinator {
     const returnTarget = input.returnTarget ?? "browser";
     const commandFingerprint = connectionStartCommandFingerprintV1(userId, {
       connectionTypeId: input.connectionTypeId,
+      ...(input.connectorId ? { connectorId: input.connectorId } : {}),
       alias,
       returnTarget,
       nativeReturnNonce: input.nativeReturnNonce,
@@ -294,7 +334,10 @@ export class ComposioConnectionCoordinator {
       if (!(await this.config.store.isPackageInstalled(userId, "composio"))) {
         throw new Error("Composio Package is not installed");
       }
-      type = this.config.connectionTypes[input.connectionTypeId];
+      type =
+        this.config.connectionTypes[
+          input.connectorId ?? input.connectionTypeId
+        ];
       if (!type) throw new Error("Unknown Composio Connection Type");
       claimed = await this.config.store.startConnection(userId, {
         connectionId,
@@ -303,6 +346,7 @@ export class ComposioConnectionCoordinator {
         displayName: alias ?? type.displayName,
         safeMetadata: {
           toolkitSlug: type.toolkitSlug,
+          toolkitName: type.displayName,
           providerAlias: connectionId,
           returnTarget,
           startCommandFingerprint: commandFingerprint,
@@ -685,7 +729,13 @@ export class ComposioConnectionCoordinator {
     }
     if (shouldInvokeProvider) {
       try {
-        await this.config.client.revokeConnectedAccount(connectedAccountId);
+        await retireProviderAccount(
+          this.config.client,
+          this.config.store,
+          userId,
+          connectionId,
+          connectedAccountId,
+        );
         await this.config.store.recordRevocationProviderCompleted(
           userId,
           connectionId,
@@ -695,7 +745,7 @@ export class ComposioConnectionCoordinator {
           userId,
           connectionId,
           "revoke",
-          "Revocation outcome requires reconciliation",
+          "Account removal requires reconciliation",
         );
         throw error;
       }
@@ -770,7 +820,11 @@ export class ComposioConnectionCoordinator {
       const account = await this.config.client.getConnectedAccount(
         input.connectedAccountId,
       );
-      if (account.userId !== userId || account.status !== "ACTIVE") {
+      if (
+        account.userId !== userId ||
+        account.status !== "ACTIVE" ||
+        account.disabled
+      ) {
         throw new Error("Composio connected account is not active");
       }
       if (account.toolkitSlug !== connection.safeMetadata.toolkitSlug) {

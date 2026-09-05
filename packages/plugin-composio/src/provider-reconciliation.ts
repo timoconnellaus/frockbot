@@ -41,11 +41,13 @@ export async function reconcileComposioProviderConnection(
   if (request.operation === "link") {
     const account = (await client.listConnectedAccounts(request.userId)).find(
       (candidate) =>
+        candidate.userId === request.userId &&
         candidate.alias === request.providerAlias &&
         candidate.toolkitSlug === request.toolkitSlug,
     );
     if (!account) return { status: "absent" };
-    if (account.status === "ACTIVE") return { status: "active", account };
+    if (account.status === "ACTIVE" && !account.disabled)
+      return { status: "active", account };
     if (account.status === "REVOKED") return { status: "revoked", account };
     if (account.status === "FAILED" || account.status === "EXPIRED") {
       return { status: "failed", account };

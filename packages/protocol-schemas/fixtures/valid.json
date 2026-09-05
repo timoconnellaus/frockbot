@@ -937,5 +937,95 @@
       "schemaVersion": 1,
       "home": "models"
     }
+  },
+  {
+    "name": "GenerationId published timestamp and digest",
+    "schema": "GenerationId",
+    "value": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca"
+  },
+  {
+    "name": "FallbackBootstrap accepts published generation",
+    "schema": "FallbackBootstrap",
+    "value": {
+      "schemaVersion": 1,
+      "appletId": "user.applet",
+      "userId": "command-1",
+      "generationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
+      "navigationEpoch": "command-1",
+      "bootstrapUrl": "https://bot.frockbot.com/return",
+      "artifactOrigin": "https://bot.frockbot.com/return",
+      "artifact": {
+        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 1,
+        "mediaType": "text/html",
+        "bundlerVersion": "1.1.0"
+      },
+      "viewer": {
+        "token": "1.1.0",
+        "expiresAt": "2026-09-05T00:00:00.000Z",
+        "socketUrl": "wss://bot.frockbot.com/view"
+      }
+    }
+  },
+  {
+    "name": "A2uiSurface accepts published generation",
+    "schema": "A2uiSurface",
+    "value": {
+      "schemaVersion": 1,
+      "surfaceId": "command-1",
+      "userId": "command-1",
+      "botId": "default",
+      "packageId": "command-1",
+      "generationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
+      "revision": 0,
+      "cursor": "0",
+      "contribution": {
+        "schemaVersion": 1,
+        "kind": "a2ui",
+        "slot": "frockbot.application-settings-sections",
+        "artifact": {
+          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1,
+          "mediaType": "application/json"
+        },
+        "protocolVersion": "0.9.1",
+        "catalog": {
+          "id": "command-1",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "actions": []
+      },
+      "snapshot": {
+        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 1,
+        "mediaType": "application/json"
+      }
+    }
+  },
+  {
+    "name": "A2uiActionCommand accepts published generation",
+    "schema": "A2uiActionCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "surfaceId": "command-1",
+      "packageId": "command-1",
+      "generationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
+      "revision": 0,
+      "actionId": "command-1",
+      "input": {}
+    }
+  },
+  {
+    "name": "AppletSummary accepts published generation",
+    "schema": "AppletSummary",
+    "value": {
+      "appletId": "tim.counter",
+      "displayName": "Counter",
+      "status": "published",
+      "currentGenerationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
+      "tools": ["increment"],
+      "createdAt": "2026-09-05T00:00:00.000Z"
+    }
   }
 ]

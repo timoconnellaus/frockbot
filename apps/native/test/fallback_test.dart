@@ -7,7 +7,7 @@ Map<String, Object?> fixture() {
     'schemaVersion': 1,
     'appletId': 'user.counter',
     'userId': 'user-1',
-    'generationId': 'generation-1',
+    'generationId': '2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca',
     'navigationEpoch': 'navigation_epoch_1234',
     'bootstrapUrl':
         'https://ui.bot.frockbot.com/native-fallback?artifact=$hash&epoch=navigation_epoch_1234',

@@ -178,6 +178,8 @@ export interface PackageSettingDefinition {
 }
 
 export interface ConnectionTypeDefinition {
+  /** A same-origin backend catalog of named variants of this Connection Type. */
+  catalogPath?: string;
   id: string;
   displayName: string;
   allowMultiple: boolean;
@@ -1614,7 +1616,7 @@ function decodeConfiguration(
           "allowMultiple",
           "authorization",
           "capabilities",
-          ...(allowV4 ? ["settings"] : []),
+          ...(allowV4 ? ["settings", "catalogPath"] : []),
         ],
         "manifest connection definition",
       );
@@ -1660,7 +1662,19 @@ function decodeConfiguration(
       if (typeof connection.allowMultiple !== "boolean") {
         throw new Error("manifest connection allowMultiple must be boolean");
       }
+      if (
+        connection.catalogPath !== undefined &&
+        (typeof connection.catalogPath !== "string" ||
+          !/^\/api\/[a-zA-Z0-9/_-]{1,200}$/.test(connection.catalogPath))
+      ) {
+        throw new Error(
+          "manifest Connection catalogPath must be a same-origin API path",
+        );
+      }
       return {
+        ...(typeof connection.catalogPath === "string"
+          ? { catalogPath: connection.catalogPath }
+          : {}),
         id: definitionId(connection),
         displayName: requiredString(connection, "displayName"),
         allowMultiple: connection.allowMultiple,

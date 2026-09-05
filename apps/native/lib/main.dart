@@ -607,6 +607,10 @@ class _ChatPaneState extends State<ChatPane> {
             child: RefreshIndicator(
               onRefresh: refreshHistory,
               child: ListView(
+                // Chat starts at the latest row. Earlier pages extend the far
+                // end, preserving the viewport as history is prepended.
+                reverse: true,
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 physics: const AlwaysScrollableScrollPhysics(),
                 keyboardDismissBehavior:
                     ScrollViewKeyboardDismissBehavior.onDrag,
@@ -660,7 +664,7 @@ class _ChatPaneState extends State<ChatPane> {
                               ],
                             ),
                     ),
-                ],
+                ].reversed.toList(),
               ),
             ),
           ),

@@ -298,6 +298,8 @@ interface Env {
    * routes answer 503 rather than trusting a forgeable identity.
    */
   FROCKBOT_AUTHORIZATION_STATE_SECRET?: string;
+  COMPOSIO_API_KEY?: string;
+  COMPOSIO_TEST_URL?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   FROCKBOT_ADMIN_EMAILS?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
@@ -601,6 +603,7 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
     lookupConnectionCommand: (request) => rpc.lookupConnectionCommand(request),
+    composioRequest: (request) => rpc.composioRequest(request),
     readMcpServers: (request) => rpc.readMcpServers(request),
     executeMcpCommand: (request) => rpc.executeMcpCommand(request),
     recordMcpMountOutcome: (request) => rpc.recordMcpMountOutcome(request),
@@ -1822,6 +1825,14 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           userId,
           command,
         }),
+      composioRequest: async (userId, command) =>
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).composioRequest({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        ),
       readMcpServers: async (userId) =>
         decodeMcpServerStatusViewV1(
           rpcJsonSnapshot(
@@ -1853,11 +1864,13 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
       // when this deployment has none, so a Worker without the secret has no
       // callback door rather than an unsigned one.
       readSecret: (name: string) =>
-        name === "FROCKBOT_AUTHORIZATION_STATE_SECRET"
-          ? env.FROCKBOT_AUTHORIZATION_STATE_SECRET
-          : name === "BETTER_AUTH_SECRET"
-            ? env.BETTER_AUTH_SECRET
-            : undefined,
+        name === "COMPOSIO_API_KEY"
+          ? env.COMPOSIO_API_KEY
+          : name === "FROCKBOT_AUTHORIZATION_STATE_SECRET"
+            ? env.FROCKBOT_AUTHORIZATION_STATE_SECRET
+            : name === "BETTER_AUTH_SECRET"
+              ? env.BETTER_AUTH_SECRET
+              : undefined,
       ...(env.BETTER_AUTH_URL ? { callbackBaseUrl: env.BETTER_AUTH_URL } : {}),
       startMcpAuthorization: async (userId, start) =>
         decodeStartConnectionResultV1(
@@ -2166,7 +2179,7 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
  * language one: a runtime that does not offer it must not fail to boot.
  */
 try {
-  addEventListener("unhandledrejection", (event: unknown) => {
+  addEventListener("unhandledrejection", (event: Event) => {
     const reason = (event as { reason?: unknown }).reason;
     console.error(
       `Unhandled rejection escaped an entry point: ${
@@ -2287,7 +2300,6 @@ export default {
             .UserBotState({ props: { userId } })
             .nativeAppletBootstrap({
               schemaVersion: 1,
-              userId,
               appletId,
               navigationEpoch,
             }),

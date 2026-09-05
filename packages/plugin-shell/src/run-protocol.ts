@@ -24,7 +24,10 @@ import {
   type BotTurnCompletion,
   type StoredRun,
 } from "./backend-contracts.js";
-import { runFailureCopyV1 } from "./run-failure-copy.js";
+import {
+  CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+  runFailureCopyV1,
+} from "./run-failure-copy.js";
 
 const MAX_RUN_ID_LENGTH = 128;
 const MAX_TIMESTAMP_LENGTH = 64;
@@ -1380,8 +1383,9 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
   // produced it, so an unknown shape is a line in the conversation and never
   // an exception" — and this is that rule for the events themselves.
   //
-  // A *known* type that is malformed still throws: that is a real wire fault
-  // and forgiving it would hide bugs.
+  // A *known* type that is malformed still throws into the per-run boundary:
+  // that is a real wire fault, so this Turn degrades rather than silently
+  // accepting a body the client misunderstands.
   return undefined;
 }
 
@@ -1644,6 +1648,47 @@ function decodeRun(value: unknown): ClientRun {
     ...(recovery ? { failure: recovery.message, recovery } : {}),
     ...(via ? { via } : {}),
   };
+}
+
+/**
+ * Keeps one unreadable run from taking its healthy neighbours off the page.
+ *
+ * The strict decoder above still identifies every real wire fault inside a
+ * known shape. This boundary changes only the blast radius: the run becomes a
+ * visible compatibility line, while the list envelope and its page metadata
+ * remain strict.
+ */
+function decodeRunOrDegraded(value: unknown, index: number): ClientRun {
+  try {
+    return decodeRun(value);
+  } catch {
+    const run =
+      value !== null && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : undefined;
+    const candidateRunId =
+      typeof run?.runId === "string"
+        ? truncate(run.runId, MAX_RUN_ID_LENGTH)
+        : "";
+    const candidateAdmittedAt =
+      typeof run?.admittedAt === "string" &&
+      run.admittedAt.length <= MAX_TIMESTAMP_LENGTH &&
+      Number.isFinite(Date.parse(run.admittedAt))
+        ? run.admittedAt
+        : undefined;
+    const input =
+      typeof run?.input === "string"
+        ? truncateWireString(run.input, MAX_INPUT_BYTES)
+        : "";
+    return {
+      runId: candidateRunId || `unreadable-run-${index + 1}`,
+      ...(candidateAdmittedAt ? { admittedAt: candidateAdmittedAt } : {}),
+      input,
+      status: "failed",
+      events: [],
+      failure: CLIENT_VERSION_DEGRADED_MESSAGE_V1,
+    };
+  }
 }
 
 function decodePage(value: unknown): ClientRunPageV1 {
@@ -2152,7 +2197,7 @@ export function decodeClientRunPageV1(input: unknown): {
     throw new Error("run list.announcements must be a bounded array");
   }
   const decoded = {
-    runs: list.runs.map(decodeRun),
+    runs: list.runs.map(decodeRunOrDegraded),
     page: decodePage(list.page),
     announcements: (list.announcements ?? []).map(decodeAnnouncement),
   };
