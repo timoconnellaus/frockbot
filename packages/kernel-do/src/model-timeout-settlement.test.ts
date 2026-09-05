@@ -77,7 +77,11 @@ function command(runId: string, text: string): OwnedBotTurnCommand {
 function createAuthority(
   storage: MemoryStorage,
   provider: string,
-  options: { providerReconciles?: boolean; refuseWith?: string } = {},
+  options: {
+    providerReconciles?: boolean;
+    refuseWith?: string;
+    toolEffect?: boolean;
+  } = {},
 ): BotDurableAuthority<undefined> {
   const hooks: BotDurableAuthorityHooks<undefined> = {
     resolveAdmissionSnapshot: () => Promise.resolve(undefined),
@@ -161,6 +165,30 @@ function createAuthority(
         );
         throw new BotTurnExecutionError(
           `Bot turn ended with outcome model-error: ${options.refuseWith}`,
+          appended,
+        );
+      }
+      if (options.toolEffect) {
+        await persist(
+          {
+            type: "assistant/message",
+            turn: 1,
+            step: 1,
+            requestId: "request-1",
+            text: "",
+            toolCalls: [{ id: "call-one", name: "external_action", input: {} }],
+          } as never,
+          {
+            type: "tool/call",
+            turn: 1,
+            step: 1,
+            occurrenceId: "tool:1:1:0",
+            name: "external_action",
+            input: {},
+          } as never,
+        );
+        throw new BotTurnReconciliationRequiredError(
+          "Tool effect outcome is unknown",
           appended,
         );
       }
@@ -262,4 +290,27 @@ describe("a model request that ran out of time", () => {
     expect(run.failure).toContain("401");
     expect(storage.values.get("active-run")).toBeUndefined();
   });
+});
+
+test("a non-retrieving model never terminalizes an unresolved tool effect", async () => {
+  const storage = new MemoryStorage();
+  const authority = createAuthority(storage, "flock-ai", { toolEffect: true });
+  await expect(
+    authority.run(command("run-tool", "perform an action")),
+  ).rejects.toThrow();
+  const run = await storedRun(authority, "run-tool");
+  expect(run.status).toBe("reconciliation-required");
+  expect(
+    run.events.some(
+      (event) => event.type === "tool/result" || event.type === "turn/end",
+    ),
+  ).toBe(false);
+  expect(storage.values.get("active-run")).toBe("run-tool");
+  const reconstructed = createAuthority(storage, "flock-ai", {
+    toolEffect: true,
+  });
+  await reconstructed.recoverActiveRun();
+  expect((await storedRun(reconstructed, "run-tool")).status).toBe(
+    "reconciliation-required",
+  );
 });

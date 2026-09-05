@@ -25,7 +25,11 @@ function useDefault(id: string) {
   if (!reset.value.includes(id)) reset.value.push(id);
 }
 function isDefault(id: string) {
-  return reset.value.includes(id) || (!dirty.value.includes(id) && props.section.fields.find((f) => f.id === id)?.isSet === false);
+  return (
+    reset.value.includes(id) ||
+    (!dirty.value.includes(id) &&
+      props.section.fields.find((f) => f.id === id)?.isSet === false)
+  );
 }
 function change(id: string, value: Json) {
   values.value[id] = value;
@@ -65,15 +69,40 @@ function save() {
         v-if="field.choiceSource === 'account-models'"
         :revision="revision"
         :value="values[field.id]!"
-        :label="labels[field.id] ?? field.choices?.find((c) => JSON.stringify(c.value) === JSON.stringify(values[field.id]))?.label ?? 'Choose a model'"
+        :label="
+          labels[field.id] ??
+          field.choices?.find(
+            (c) => JSON.stringify(c.value) === JSON.stringify(values[field.id]),
+          )?.label ??
+          'Choose a model'
+        "
         :disabled="busy || !field.editable"
-        @choose="(choice) => { change(field.id, choice.value); labels[field.id] = choice.label; }"
+        @choose="
+          (choice) => {
+            change(field.id, choice.value);
+            labels[field.id] = choice.label;
+          }
+        "
       />
-      <select v-else-if="field.kind === 'boolean' && field.canReset"
-        :value="isDefault(field.id) ? 'default' : values[field.id] === true ? 'on' : 'off'"
+      <select
+        v-else-if="field.kind === 'boolean' && field.canReset"
+        :value="
+          isDefault(field.id)
+            ? 'default'
+            : values[field.id] === true
+              ? 'on'
+              : 'off'
+        "
         :disabled="busy || !field.editable"
-        @change="input($event) === 'default' ? useDefault(field.id) : change(field.id, input($event) === 'on')">
-        <option value="default">Use default</option><option value="on">On</option><option value="off">Off</option>
+        @change="
+          input($event) === 'default'
+            ? useDefault(field.id)
+            : change(field.id, input($event) === 'on')
+        "
+      >
+        <option value="default">Use default</option>
+        <option value="on">On</option>
+        <option value="off">Off</option>
       </select>
       <input
         v-else-if="field.kind === 'boolean'"
@@ -84,9 +113,15 @@ function save() {
       />
       <select
         v-else-if="field.kind === 'select'"
-        :value="isDefault(field.id) ? '__default__' : JSON.stringify(values[field.id])"
+        :value="
+          isDefault(field.id) ? '__default__' : JSON.stringify(values[field.id])
+        "
         :disabled="busy || !field.editable"
-        @change="input($event) === '__default__' ? useDefault(field.id) : change(field.id, JSON.parse(input($event)))"
+        @change="
+          input($event) === '__default__'
+            ? useDefault(field.id)
+            : change(field.id, JSON.parse(input($event)))
+        "
       >
         <option v-if="field.canReset" value="__default__">Use default</option>
         <option
@@ -106,7 +141,7 @@ function save() {
               ? 'email'
               : 'text'
         "
-        :value="isDefault(field.id) ? '' : values[field.id] ?? ''"
+        :value="isDefault(field.id) ? '' : (values[field.id] ?? '')"
         :disabled="busy || !field.editable"
         :min="field.minimum"
         :max="field.maximum"
@@ -123,9 +158,20 @@ function save() {
           )
         "
       />
-      <div v-if="field.canReset && field.kind !== 'select' && field.kind !== 'boolean'" class="field-default">
+      <div
+        v-if="
+          field.canReset && field.kind !== 'select' && field.kind !== 'boolean'
+        "
+        class="field-default"
+      >
         <span v-if="isDefault(field.id)">Using default</span>
-        <UiButton v-else type="button" :disabled="busy || !field.editable" @click="useDefault(field.id)">Use default</UiButton>
+        <UiButton
+          v-else
+          type="button"
+          :disabled="busy || !field.editable"
+          @click="useDefault(field.id)"
+          >Use default</UiButton
+        >
       </div>
     </UiField>
     <div
@@ -136,7 +182,9 @@ function save() {
         variant="primary"
         type="submit"
         :disabled="busy || dirty.length === 0"
-        >Save changes</UiButton
+        >{{
+          section.id === "profile" ? "Save profile" : "Save changes"
+        }}</UiButton
       >
     </div>
     <UiButton

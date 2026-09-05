@@ -1,286 +1,96 @@
-import { type ToolDefinition } from "@frockbot/kernel-contracts";
 import type { Context, Plugin } from "cordis";
-import { ComposioClient } from "./composio-client.js";
+import { decodeConnectedToolsV1, object } from "./tool-contracts.js";
 
-export interface ComposioToolDeclaration {
-  slug: string;
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  version?: string;
-}
-
-export interface ComposioPluginConfig {
-  client: ComposioClient;
-  userId: string;
-  connectedAccountId: string;
-  toolkitSlug: string;
-  tools: ComposioToolDeclaration[];
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function slugSegment(value: string): string {
-  return value
-    .trim()
-    .replace(/[^A-Za-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-/** The stable, account-specific namespace exposed to the model. */
-export function composioNamespaceV1(
-  toolkitSlug: string,
-  connectedAccountId: string,
-): string {
-  const toolkit = slugSegment(toolkitSlug);
-  const account = slugSegment(connectedAccountId);
-  if (!toolkit || !account) {
-    throw new Error("Composio toolkit and connected account must be slug-like");
-  }
-  const displayToolkit =
-    toolkit.charAt(0).toUpperCase() + toolkit.slice(1).toLowerCase();
-  return `user-${displayToolkit}--${account}`;
-}
-
-export interface ComposioRouterPluginConfig {
-  client: ComposioClient;
-  userId: string;
-  toolkitSlug: string;
-  authorizeEffect(): Promise<{
-    connectedAccountId: string;
-    toolkitSlug: string;
-  }>;
-}
-
-export function createConfiguredComposioRuntimeContribution(config: {
+/** One Connection grants this namespace to every Bot of its User. No secret enters the runtime. */
+export async function createConfiguredComposioRuntimeContribution(config: {
   capability: {
     packageId: string;
     capabilityId: string;
     connectionId?: string;
   };
-  userId: string;
-  readSecret(name: string): string | undefined;
-  authorizeConnection(): Promise<{ safeMetadata: Record<string, unknown> }>;
-}): Plugin.Function | undefined {
+  composioRequest?(input: unknown): Promise<unknown>;
+  pinToolCatalog?(
+    connectionId: string,
+    read: () => Promise<unknown>,
+  ): Promise<unknown>;
+}): Promise<Plugin.Function | undefined> {
   if (
     config.capability.packageId !== "composio" ||
-    config.capability.capabilityId !== "gmail-tools" ||
+    config.capability.capabilityId !== "app-tools" ||
     !config.capability.connectionId
-  ) {
+  )
     return undefined;
-  }
-  const apiKey = config.readSecret("COMPOSIO_API_KEY");
-  if (!apiKey) throw new Error("Enabled Composio Connection is misconfigured");
-  const authorizeEffect = async () => {
-    const connection = await config.authorizeConnection();
-    const connectedAccountId = connection.safeMetadata.connectedAccountId;
-    const toolkitSlug = connection.safeMetadata.toolkitSlug;
-    if (
-      typeof connectedAccountId !== "string" ||
-      typeof toolkitSlug !== "string"
-    ) {
-      throw new Error("Composio effect is no longer authorized");
-    }
-    return { connectedAccountId, toolkitSlug };
-  };
-  return createComposioRouterPlugin({
-    client: new ComposioClient({ apiKey }),
-    userId: config.userId,
-    toolkitSlug: "gmail",
-    authorizeEffect,
+  if (!config.composioRequest)
+    throw new Error("Connected account tools are unavailable");
+  const request = config.composioRequest;
+  const connectionId = config.capability.connectionId;
+  const availability = await request({
+    schemaVersion: 1,
+    operation: "tool-availability",
   });
-}
-
-export function createComposioRouterPlugin(
-  config: ComposioRouterPluginConfig,
-): Plugin.Function {
-  const allowedToolSlugs = new Set<string>();
-  let runtimeContext: Context | undefined;
-  let runtimeNamespace: string | undefined;
-  const search: ToolDefinition = {
-    name: "composio_search_tools",
-    // A general work tool: the full toolset an `executor` subagent gets, and
-    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
-    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
-    admission: { subagentRoles: ["executor"] },
-    description:
-      "Search the connected toolkit for exact Composio tool slugs before executing one.",
-    inputSchema: {
-      type: "object",
-      properties: { query: { type: "string" } },
-    },
-    validate: isObject,
-    execute: async (input: unknown) => {
-      const query =
-        isObject(input) && typeof input.query === "string"
-          ? input.query
-          : undefined;
-      const grant = await config.authorizeEffect();
-      if (grant.toolkitSlug !== config.toolkitSlug) {
-        throw new Error("Composio effect grant changed toolkit");
-      }
-      const result = await config.client.searchTools(grant.toolkitSlug, query);
-      for (const tool of result) allowedToolSlugs.add(tool.slug);
-      return { content: JSON.stringify(result), isError: false };
-    },
-  };
-  const execute: ToolDefinition = {
-    name: "composio_execute_tool",
-    // A general work tool: the full toolset an `executor` subagent gets, and
-    // not part of the narrow reach of `browserUse`, `computerUse`, or the two
-    // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
-    admission: { subagentRoles: ["executor"] },
-    description:
-      "Execute an exact Composio tool slug returned by composio_search_tools.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        toolSlug: { type: "string" },
-        arguments: { type: "object" },
-      },
-      required: ["toolSlug", "arguments"],
-    },
-    validate: (input: unknown) =>
-      isObject(input) &&
-      typeof input.toolSlug === "string" &&
-      isObject(input.arguments),
-    execute: async (input: unknown, context) => {
-      if (
-        !isObject(input) ||
-        typeof input.toolSlug !== "string" ||
-        !isObject(input.arguments)
-      ) {
-        return { content: "Invalid Composio tool input", isError: true };
-      }
-      const events = runtimeContext?.sessions.get(context.sessionId)?.events;
-      const wasDurablySearched = events?.some((event) => {
-        if (event.type !== "tool/result" || event.isError) {
-          return false;
-        }
-        const isSearchResult =
-          event.name === "composio_search_tools" ||
-          (event.name === "call_dynamic_tool" &&
-            events?.some(
-              (candidate) =>
-                candidate.type === "tool/call" &&
-                candidate.occurrenceId === event.occurrenceId &&
-                candidate.name === "call_dynamic_tool" &&
-                isObject(candidate.input) &&
-                candidate.input.namespace === runtimeNamespace &&
-                candidate.input.toolName === "composio_search_tools",
-            ));
-        if (!isSearchResult) return false;
-        try {
-          const result: unknown = JSON.parse(event.content);
-          return (
-            Array.isArray(result) &&
-            result.some(
-              (candidate) =>
-                isObject(candidate) && candidate.slug === input.toolSlug,
-            )
-          );
-        } catch {
-          return false;
-        }
-      });
-      if (!allowedToolSlugs.has(input.toolSlug) && !wasDurablySearched) {
-        return {
-          content:
-            "Tool slug was not returned by composio_search_tools in this runtime.",
-          isError: true,
-        };
-      }
-      const grant = await config.authorizeEffect();
-      if (grant.toolkitSlug !== config.toolkitSlug) {
-        return {
-          content: "Composio effect grant changed toolkit",
-          isError: true,
-        };
-      }
-      const result = await config.client.executeTool({
-        toolSlug: input.toolSlug,
-        userId: config.userId,
-        connectedAccountId: grant.connectedAccountId,
-        arguments: input.arguments,
-      });
-      return { content: JSON.stringify(result), isError: false };
-    },
-  };
-  const plugin: Plugin.Function = async (ctx: Context) => {
-    const grant = await config.authorizeEffect();
-    if (grant.toolkitSlug !== config.toolkitSlug) {
-      throw new Error("Composio effect grant changed toolkit");
-    }
-    runtimeNamespace = composioNamespaceV1(
-      grant.toolkitSlug,
-      grant.connectedAccountId,
-    );
-    runtimeContext = ctx;
-    const removeNamespace = ctx.tools.registerNamespace({
-      name: runtimeNamespace,
-      external: true,
-      status: "ready",
-    });
-    const removeSearch = ctx.tools.register({
-      ...search,
-      namespace: runtimeNamespace,
-    });
-    const removeExecute = ctx.tools.register({
-      ...execute,
-      namespace: runtimeNamespace,
-    });
-    return () => {
-      runtimeContext = undefined;
-      runtimeNamespace = undefined;
-      removeExecute();
-      removeSearch();
-      removeNamespace();
-    };
-  };
-  plugin.inject = ["tools", "sessions"];
-  return plugin;
-}
-
-export function createComposioPlugin(
-  config: ComposioPluginConfig,
-): Plugin.Function {
+  if (
+    !object(availability) ||
+    availability.schemaVersion !== 1 ||
+    typeof availability.available !== "boolean"
+  )
+    throw new Error("Connected account availability is invalid");
+  if (!availability.available || !config.pinToolCatalog) return undefined;
+  const catalog = decodeConnectedToolsV1(
+    await config.pinToolCatalog(connectionId, () =>
+      request({ schemaVersion: 1, operation: "list-tools", connectionId }),
+    ),
+  );
   const plugin: Plugin.Function = (ctx: Context) => {
-    const namespace = composioNamespaceV1(
-      config.toolkitSlug,
-      config.connectedAccountId,
-    );
     const removeNamespace = ctx.tools.registerNamespace({
-      name: namespace,
+      name: catalog.namespace,
+      description: catalog.label,
       external: true,
       status: "ready",
     });
-    const disposers = config.tools.map((declaration) => {
-      const tool: ToolDefinition = {
-        name: declaration.name,
-        namespace,
-        description: declaration.description,
-        inputSchema: declaration.inputSchema,
-        validate: isObject,
-        execute: async (input: unknown) => {
-          const result = await config.client.executeTool({
-            toolSlug: declaration.slug,
-            userId: config.userId,
-            connectedAccountId: config.connectedAccountId,
-            version: declaration.version,
-            arguments: input as Record<string, unknown>,
-          });
-          return {
-            content: JSON.stringify(result),
-            isError: false,
-          };
+    const removers = catalog.tools.map((tool) =>
+      ctx.tools.register({
+        name: tool.name,
+        namespace: catalog.namespace,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        admission: {
+          turnTypes: ["chat", "automation", "subagent"],
+          subagentRoles: ["executor"],
         },
-      };
-      return ctx.tools.register(tool);
-    });
+        // The provider does not offer execution idempotency. The Bot's outer
+        // call_dynamic_tool intent therefore recovers as unknown, never repeats.
+        idempotent: false,
+        validate: object,
+        execute: async (input, context) => {
+          if (context.signal.aborted)
+            return {
+              content: "Action cancelled before dispatch",
+              isError: true,
+            };
+          const result = await request({
+            schemaVersion: 1,
+            operation: "execute-tool",
+            connectionId,
+            toolName: tool.name,
+            version: tool.version,
+            arguments: input,
+            effectId: context.effectId,
+            sessionId: context.sessionId,
+          });
+          if (
+            !object(result) ||
+            typeof result.content !== "string" ||
+            typeof result.isError !== "boolean"
+          )
+            throw new Error("Connected account returned an invalid result");
+          if (result.outcome === "unknown")
+            throw new Error("The action outcome requires reconciliation");
+          return { content: result.content, isError: result.isError };
+        },
+      }),
+    );
     return () => {
-      for (const dispose of disposers.toReversed()) dispose();
+      for (const remove of removers.toReversed()) remove();
       removeNamespace();
     };
   };

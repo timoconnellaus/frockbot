@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { UiButton } from "@frockbot/client-ui";
+import { UiAnchor, UiButton } from "@frockbot/client-ui";
 import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
 import { presentClientFailureV1 } from "@frockbot/client-core";
 import type {
@@ -8,6 +8,7 @@ import type {
   SettingsChangeCommand,
 } from "@frockbot/protocol-schemas";
 import { inject, onMounted, ref } from "vue";
+import { settingsLinkV1 } from "@frockbot/plugin-shell/settings-links";
 import {
   settingsFrameClientKey,
   type SettingsHome,
@@ -100,15 +101,30 @@ onMounted(load);
       <span v-for="i in 3" :key="i" />
     </div>
     <UiButton v-if="!busy && !frame" @click="load">Try again</UiButton>
-    <SettingsFrameSection
-      v-for="section in frame?.sections"
+    <template
+      v-for="(section, index) in frame?.sections"
       :key="`${section.id}.${frame?.revision}`"
-      :section="section"
-      :revision="frame!.revision"
-      :busy="busy || !!pending"
-      @save="save"
-      @manage="emit('manage')"
-    />
+    >
+      <UiAnchor
+        v-if="section.id === 'profile'"
+        anchor="user-profile"
+        label="Your profile"
+        :href="settingsLinkV1({ anchor: 'user-profile' })"
+      />
+      <UiAnchor
+        v-if="home === 'application' && index === 1"
+        anchor="user-package-settings"
+        label="Plugin settings"
+        :href="settingsLinkV1({ anchor: 'user-package-settings' })"
+      />
+      <SettingsFrameSection
+        :section="section"
+        :revision="frame!.revision"
+        :busy="busy || !!pending"
+        @save="save"
+        @manage="emit('manage')"
+      />
+    </template>
   </div>
 </template>
 <style scoped>

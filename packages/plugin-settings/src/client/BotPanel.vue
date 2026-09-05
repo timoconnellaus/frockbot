@@ -7,9 +7,6 @@ import { computed, inject, onMounted } from "vue";
 const providedWeb = inject(frockBotWebDataKey);
 if (!providedWeb) throw new Error("settings client services were not provided");
 const web = providedWeb;
-const botName = computed(
-  () => web.value.botSettings?.profile.name ?? "This Bot",
-);
 const computerLink = computed(() =>
   settingsLinkV1({
     anchor: "bot-info-computer",
@@ -28,8 +25,14 @@ onMounted(() => void web.value.loadBotSettings());
       :href="computerLink"
       class="bot-panel__computer"
     >
+      <!--
+        No caption. The card below this slot says what it is in every state it
+        has — "No computer" with the sentence explaining it, "Computer" with
+        its screen status — and a line reading "Alpha's screen" under a card
+        that has just said the Bot has no computer contradicts the card while
+        repeating it. The panel belongs to one Bot and its header names it.
+      -->
       <k-slot name="frockbot.computer" />
-      <p>{{ botName }}'s screen</p>
     </UiAnchor>
     <k-slot name="frockbot.bot-panel-sections" />
   </section>
@@ -46,12 +49,5 @@ onMounted(() => void web.value.loadBotSettings());
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.bot-panel__computer p {
-  margin: 0;
-  color: var(--frock-text-muted);
-  font-size: var(--frock-text-sm);
-  text-align: center;
 }
 </style>

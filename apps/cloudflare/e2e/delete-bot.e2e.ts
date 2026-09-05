@@ -45,12 +45,12 @@ test("deleting a Bot from its settings removes it for good", async ({
   // The confirmation names the Bot and says exactly what will happen. The
   // copy is the promise the User is being asked to accept, so it is asserted
   // rather than approximated.
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("alertdialog");
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator("#flock-title")).toHaveText("Delete Beta?");
+  await expect(dialog.locator("#ui-confirm-title")).toHaveText("Delete Beta?");
   await expect(
     dialog.getByText(
-      "This removes its conversation and Applets. It cannot be undone",
+      "This removes its conversation and Applets, and cannot be undone",
     ),
   ).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Cancel" })).toBeVisible();
@@ -62,7 +62,7 @@ test("deleting a Bot from its settings removes it for good", async ({
 
   await panel.getByRole("button", { name: "Delete Bot" }).click();
   await page
-    .getByRole("dialog")
+    .getByRole("alertdialog")
     .getByRole("button", { name: "Delete", exact: true })
     .click();
 
@@ -135,8 +135,10 @@ test("manage mode offers Archive and Delete, and Delete confirms first", async (
 
   // Delete is irreversible, so it asks — naming the Bot and saying what goes.
   await doomed.getByRole("button", { name: "Delete" }).click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.locator("#flock-title")).toHaveText("Delete Doomed?");
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog.locator("#ui-confirm-title")).toHaveText(
+    "Delete Doomed?",
+  );
   await expect(
     dialog.getByText("This removes its conversation and Applets"),
   ).toBeVisible();
@@ -147,7 +149,7 @@ test("manage mode offers Archive and Delete, and Delete confirms first", async (
 
   await doomed.getByRole("button", { name: "Delete" }).click();
   await page
-    .getByRole("dialog")
+    .getByRole("alertdialog")
     .getByRole("button", { name: "Delete", exact: true })
     .click();
   await expect(doomed).toHaveCount(0);
@@ -160,8 +162,8 @@ test("manage mode offers Archive and Delete, and Delete confirms first", async (
    * later" answers the question the dialog is asked (2026-09-05).
    */
   await keeper.getByRole("button", { name: "Archive" }).click();
-  const archiveDialog = page.getByRole("dialog");
-  await expect(archiveDialog.locator("#flock-title")).toHaveText(
+  const archiveDialog = page.getByRole("alertdialog");
+  await expect(archiveDialog.locator("#ui-confirm-title")).toHaveText(
     "Archive Keeper?",
   );
   await expect(

@@ -83,6 +83,17 @@ describe("billing client contribution", () => {
     expect(mounted.state.value.report?.bots[0]?.id).toBe("bot-a");
   });
 
+  test("says a real sub-cent amount rather than rounding it to nothing", () => {
+    // Two short platform-model Turns: real spend, well under a cent.
+    expect(formatCostV1(21_226)).toBe("$0.02");
+    expect(formatCostV1(10_613)).toBe("$0.01");
+    expect(formatCostV1(300)).toBe("<$0.01");
+    expect(formatCostV1(9_999)).toBe("<$0.01");
+    // Nothing spent is a different fact from a little spent.
+    expect(formatCostV1(0)).toBe("$0.00");
+    expect(formatCostV1(10_000)).toBe("$0.01");
+  });
+
   test("formats dollars and compact model names for the rendered view", () => {
     expect(formatCostV1(1_250_000)).toBe("$1.25");
     expect(shortModelNameV1("ollama-cloud/glm-5.3-flash:cloud")).toBe(

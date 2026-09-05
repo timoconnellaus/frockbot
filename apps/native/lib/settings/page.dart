@@ -451,7 +451,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
               alignment: Alignment.centerRight,
               child: FilledButton(
                 onPressed: widget.disabled || dirty.isEmpty ? null : save,
-                child: const Text('Save changes'),
+                child: Text(widget.section['id'] == 'profile' ? 'Save profile' : 'Save changes'),
               ),
             ),
           for (final action in (widget.section['actions'] as List?) ?? [])
