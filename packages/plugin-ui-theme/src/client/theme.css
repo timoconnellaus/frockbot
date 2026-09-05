@@ -144,7 +144,7 @@
   --frock-icon-sm: var(--frock-ui-size-icon-sm);
   --frock-icon-md: var(--frock-ui-size-icon);
   --frock-icon-lg: 18px;
-  --frock-radius-control: var(--frock-ui-radius-control);
+  --frock-radius-control: var(--frock-ui-radius-field);
   --frock-radius-card: var(--frock-ui-radius-group);
   --frock-radius-panel: var(--frock-ui-radius-sheet);
   --frock-settings-width: 520px;
