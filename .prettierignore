@@ -30,3 +30,5 @@ apps/native/android/build/
 apps/native/spec/a2ui-0.9.1/*.json
 apps/native/android/local.properties
 apps/native/android/.kotlin/
+packages/plugin-ui-theme/src/client/tokens.generated.css
+docs/design/*.html

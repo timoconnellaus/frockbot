@@ -21,6 +21,9 @@ dependencies:
   path_provider: 2.1.6
   url_launcher: 6.3.2
   crypto: 3.0.7
+  record: ^7.1.1
+  audio_session: ^0.2.4
+  flutter_pcm_sound: ^3.3.3
 
 dev_dependencies:
   flutter_test:
@@ -33,6 +36,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/sheep.png
+    - assets/sheep/
   fonts:
     - family: Manrope
       fonts:
@@ -40,6 +44,10 @@ flutter:
     - family: Archivo Black
       fonts:
         - asset: assets/fonts/archivo-black-latin.ttf
+    - family: JetBrains Mono
+      fonts:
+        - asset: assets/fonts/jetbrains-mono-latin.ttf
+          weight: 500
 
 dependency_overrides:
   webview_flutter_wkwebview:

@@ -5,7 +5,7 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/main.dart';
+import 'package:frockbot_native/ui/chat_pane.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 class MemoryStore implements LocalStore {
@@ -109,6 +109,8 @@ class PagedTransport extends FakeTransport {
 }
 
 void main() {
+  replyTests();
+  sendTests();
   testWidgets(
     'chat opens on the latest row and earlier pages preserve the reading position',
     (tester) async {
@@ -293,7 +295,10 @@ void main() {
       ),
     );
     await tester.tap(find.byKey(const ValueKey('reconnect')));
-    await tester.pumpAndSettle();
+    // The offline line pulses, so the tree never settles; two frames are
+    // enough for the reconnect to run.
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
     expect(reconnects, 1);
     await tester.pumpWidget(const SizedBox());
     c.dispose();
@@ -358,4 +363,136 @@ void main() {
       restored.dispose();
     },
   );
+}
+
+class ReplyTransport extends FakeTransport {
+  ReplyTransport(super.store);
+  @override
+  Future<Map<String, dynamic>> page(
+    String botId, {
+    String? before,
+    String? conversationId,
+  }) async => {
+    'runs': [
+      {
+        'runId': 'settled',
+        'admittedAt': '2026-09-05T01:00:00Z',
+        'input': 'Reply with one word.',
+        'status': 'completed',
+        'events': <Object>[],
+        'outcome': {'type': 'completed', 'text': 'Baa.'},
+      },
+      {
+        'runId': 'sent',
+        'admittedAt': '2026-09-05T01:01:00Z',
+        'input': 'Ping the tool.',
+        'status': 'completed',
+        'events': [
+          {
+            'type': 'send/to-user',
+            'payload': {'type': 'text', 'text': 'pong'},
+          },
+        ],
+        'outcome': {'type': 'completed', 'text': 'I sent pong.'},
+      },
+      {
+        'runId': 'live',
+        'admittedAt': '2026-09-05T01:02:00Z',
+        'input': 'Tell me a story.',
+        'status': 'running',
+        'events': <Object>[],
+        'partialText': 'Once upon',
+      },
+    ],
+    'page': {'truncated': false},
+  };
+}
+
+void replyTests() {
+  testWidgets(
+    'a Turn draws its sends, else its answer text, else the words so far',
+    (tester) async {
+      final store = MemoryStore();
+      final controller = ChatController(
+        transport: ReplyTransport(store),
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+      );
+      await controller.initialize();
+      controller.connection = ConnectionState.connected;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: child!,
+          ),
+          home: Scaffold(
+            body: ChatPane(controller: controller, onReconnect: () async {}),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Baa.'), findsOneWidget);
+      expect(find.text('pong'), findsOneWidget);
+      expect(find.text('I sent pong.'), findsNothing);
+      expect(find.textContaining('Once upon'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
+}
+
+void sendTests() {
+  testWidgets('an observed run is drawn once and the box empties after send', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final t = FakeTransport(store);
+    final c = ChatController(
+      transport: t,
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+      nextId: () => 'send-1',
+    );
+    await c.initialize();
+    c.connection = ConnectionState.connected;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(disableAnimations: true),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: ChatPane(controller: c, onReconnect: () async {}),
+        ),
+      ),
+    );
+    await tester.enterText(find.byKey(const ValueKey('composer')), 'Hello');
+    await tester.tap(find.byKey(const ValueKey('send')));
+    await tester.pump();
+    // The observed run and the pending bubble carry the same message; the
+    // thread draws it once, with its status under it.
+    t.observed = running();
+    c.changed();
+    await tester.pump();
+    final inThread = find.descendant(
+      of: find.byType(ListView),
+      matching: find.text('Hello'),
+    );
+    expect(inThread, findsOneWidget);
+    t.completion.complete();
+    await tester.pumpAndSettle();
+    expect(inThread, findsOneWidget);
+    expect(find.text('Working…'), findsOneWidget);
+    final field = tester.widget<TextField>(
+      find.byKey(const ValueKey('composer')),
+    );
+    expect(field.controller!.text, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
 }

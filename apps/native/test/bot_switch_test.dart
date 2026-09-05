@@ -10,6 +10,7 @@ import 'package:frockbot_native/client/page_cache.dart';
 import 'package:frockbot_native/client/plain_store.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/main.dart';
+import 'package:frockbot_native/ui/frock_widgets.dart';
 
 /// A store whose values are resident, and whose writes only complete when the
 /// test says so — the platform keystore is slow and the UI cannot wait for it.
@@ -139,13 +140,25 @@ void main() {
     await tester.pumpWidget(FrockBotApp(store: store));
     await tester.pump();
     await tester.pump();
-    expect(find.widgetWithText(AppBar, 'Rosemary'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(FrockBar),
+        matching: find.text('Rosemary'),
+      ),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(const ValueKey('bot-bot-two')));
     await tester.pump();
     // The keystore write has not completed and must not be holding the pane.
     expect(latch.isCompleted, isFalse);
     expect(store.values['selection.user-1'], 'bot-one');
-    expect(find.widgetWithText(AppBar, 'Clementine'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(FrockBar),
+        matching: find.text('Clementine'),
+      ),
+      findsOneWidget,
+    );
     latch.complete();
     await tester.pump();
     expect(store.values['selection.user-1'], 'bot-two');

@@ -32,7 +32,7 @@
     "dev": "bun run build:webui && bun run --filter @frockbot/desktop dev",
     "build": "bun run build:webui && bun run --filter @frockbot/desktop build && bun run build:cloudflare && bun run build:marketing",
     "proof:cordis": "bun run --filter @frockbot/cordis-poc typecheck && bun run --filter @frockbot/cordis-poc test && bun run --filter @frockbot/agent-runtime build && bun run --filter @frockbot/cordis-poc smoke",
-    "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/check-kernel-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/build-applets-package.ts --check && bun scripts/typecheck.ts",
+    "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/check-kernel-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/generate-frock-theme.ts --check && bun scripts/generate-dart-sheep-layers.ts --check && bun scripts/build-applets-package.ts --check && bun scripts/typecheck.ts",
     "lint:ui-styles": "bun scripts/check-ui-styles.ts",
     "lint:kernel-imports": "bun scripts/check-kernel-imports.ts",
     "lint:computer-host-imports": "bun scripts/check-computer-host-imports.ts",
@@ -41,6 +41,8 @@
     "format:check": "prettier --check .",
     "lint-staged": "lint-staged",
     "prepare": "husky",
+    "generate:sheep": "bun scripts/generate-dart-sheep-layers.ts",
+    "generate:theme": "bun scripts/generate-frock-theme.ts",
     "generate:protocol": "bun scripts/generate-typescript-protocol.ts && bun scripts/generate-dart-protocol.ts"
   },
   "devDependencies": {

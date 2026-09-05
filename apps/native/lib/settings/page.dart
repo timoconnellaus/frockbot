@@ -10,6 +10,9 @@ import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/states.dart';
 import 'controller.dart';
 import 'model_picker.dart';
+import '../ui/frock_page.dart';
+import '../ui/frock_tokens.dart';
+import '../ui/frock_widgets.dart';
 
 class SettingsPage extends StatefulWidget {
   final NativeApi api;
@@ -93,18 +96,15 @@ class _SettingsPageState extends State<SettingsPage>
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: state,
-    builder: (context, _) => Scaffold(
-      appBar: AppBar(
-        title: Text(widget.home == 'models' ? 'Models' : 'Settings'),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh settings',
-            onPressed: state.busy ? null : state.load,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
+    builder: (context, _) => FrockPage(
+      title: widget.home == 'models' ? 'Models' : 'Settings',
+      padded: false,
+      trailing: FrockIconButton(
+        Icons.refresh_rounded,
+        semanticLabel: 'Refresh settings',
+        onTap: state.busy ? null : state.load,
       ),
-      body: SafeArea(
+      child: SafeArea(
         top: false,
         child: state.frame == null
             ? state.busy
@@ -130,69 +130,79 @@ class _SettingsPageState extends State<SettingsPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            if (widget.home == 'application')
-                              Card(
-                                child: ListTile(
-                                  leading: const Icon(
-                                    Icons.auto_awesome_rounded,
-                                  ),
-                                  title: const Text('Models'),
-                                  subtitle: const Text(
-                                    'Your default model and provider accounts',
-                                  ),
-                                  trailing: const Icon(
-                                    Icons.chevron_right_rounded,
-                                  ),
-                                  onTap: () => Navigator.of(context).push(
-                                    MaterialPageRoute<void>(
-                                      builder: (_) => SettingsPage(
-                                        api: widget.api,
-                                        store: widget.store,
-                                        userId: widget.userId,
-                                        home: 'models',
+                            if (widget.home == 'application') ...[
+                              FrockGroup(
+                                children: [
+                                  FrockRow(
+                                    key: const ValueKey('settings-models'),
+                                    leading: const FrockIconTile(
+                                      Icons.auto_awesome_rounded,
+                                    ),
+                                    title: 'Models',
+                                    caption: 'Your default model and provider accounts',
+                                    chevron: true,
+                                    onTap: () => Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => SettingsPage(
+                                          api: widget.api,
+                                          store: widget.store,
+                                          userId: widget.userId,
+                                          home: 'models',
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ),
-                            if (widget.home == 'application')
-                              Card(
-                                child: ListTile(
-                                  leading: const Icon(Icons.hub_outlined),
-                                  title: const Text('Connectors'),
-                                  subtitle: const Text(
-                                    'Accounts and services for every Bot',
-                                  ),
-                                  trailing: const Icon(
-                                    Icons.chevron_right_rounded,
-                                  ),
-                                  onTap: () => Navigator.of(context).push(
-                                    MaterialPageRoute<void>(
-                                      builder: (_) => ConnectionsPage(
-                                        api: widget.api,
-                                        userId: widget.userId,
+                                  FrockRow(
+                                    key: const ValueKey('settings-connectors'),
+                                    leading: const FrockIconTile(
+                                      Icons.hub_outlined,
+                                    ),
+                                    title: 'Connect',
+                                    caption:
+                                        'Accounts and services for every Bot',
+                                    chevron: true,
+                                    onTap: () => Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => ConnectionsPage(
+                                          api: widget.api,
+                                          userId: widget.userId,
+                                          store: widget.store,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
+                                ],
                               ),
-                            if (state.message != null)
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
-                                ),
-                                child: Semantics(
-                                  liveRegion: true,
-                                  child: Text(state.message!),
-                                ),
+                            ],
+                            if (state.message != null ||
+                                state.pending != null) ...[
+                              const SizedBox(height: FrockTokens.groupGap),
+                              FrockGroup(
+                                needsYou: state.pending != null,
+                                children: [
+                                  FrockNotice(
+                                    title: state.pending != null
+                                        ? 'Waiting to confirm a save'
+                                        : 'Settings',
+                                    body:
+                                        state.message ??
+                                        'A save is waiting to be confirmed.',
+                                    actions: [
+                                      if (state.pending != null)
+                                        FrockPill(
+                                          state.busy
+                                              ? 'Checking save…'
+                                              : 'Check save',
+                                          size: PillSize.sm,
+                                          onTap: state.busy
+                                              ? null
+                                              : state.checkSave,
+                                        ),
+                                    ],
+                                  ),
+                                ],
                               ),
-                            if (state.pending != null)
-                              FilledButton.tonal(
-                                onPressed: state.busy ? null : state.checkSave,
-                                child: Text(
-                                  state.busy ? 'Checking save…' : 'Check save',
-                                ),
-                              ),
+                            ],
                             for (final section in state.frame!.sections)
                               _SettingsSection(
                                 key: ValueKey(
@@ -299,29 +309,28 @@ class _SettingsSectionState extends State<_SettingsSection> {
       final label =
           selectedLabels[id] ??
           (selected.isEmpty ? 'Choose a model' : selected.first.label);
-      return Card(
-        child: ListTile(
-          title: Text(label),
-          subtitle: Text(field.hint ?? ''),
-          leading: const Icon(Icons.auto_awesome_rounded),
-          trailing: const Icon(Icons.expand_more_rounded),
-          onTap: enabled
-              ? () async {
-                  final choice = await Navigator.of(context)
-                      .push<wire.SettingChoice>(
-                        MaterialPageRoute(
-                          builder: (_) => ModelPicker(
-                            load: widget.loadOptions,
-                            selected: values[id],
-                          ),
+      return FrockRow(
+        key: ValueKey('field-$id'),
+        leading: const FrockIconTile(Icons.auto_awesome_rounded),
+        title: label,
+        caption: field.hint,
+        chevron: enabled,
+        onTap: enabled
+            ? () async {
+                final choice = await Navigator.of(context)
+                    .push<wire.SettingChoice>(
+                      MaterialPageRoute(
+                        builder: (_) => ModelPicker(
+                          load: widget.loadOptions,
+                          selected: values[id],
                         ),
-                      );
-                  if (!mounted || choice == null) return;
-                  change(id, choice.value.value);
-                  setState(() => selectedLabels[id] = choice.label);
-                }
-              : null,
-        ),
+                      ),
+                    );
+                if (!mounted || choice == null) return;
+                change(id, choice.value.value);
+                setState(() => selectedLabels[id] = choice.label);
+              }
+            : null,
       );
     }
     if (field.kind == 'boolean' && field.canReset == true) {
@@ -446,77 +455,95 @@ class _SettingsSectionState extends State<_SettingsSection> {
   }
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 24),
-    child: Form(
-      key: form,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Semantics(
-            header: true,
-            child: Text(
-              widget.section['label'] as String,
-              style: Theme.of(context).textTheme.titleMedium,
+  Widget build(BuildContext context) {
+    final t = FrockTokens.of(context);
+    final status = switch (widget.section['credentialStatus']) {
+      'connected' => 'Account connected',
+      'revoked' => 'Account revoked',
+      'missing' => 'Connect an account to use this provider',
+      String() => 'Ready to use',
+      _ => null,
+    };
+    return Padding(
+      padding: const EdgeInsets.only(top: FrockTokens.groupGap),
+      child: Form(
+        key: form,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Semantics(
+              header: true,
+              child: FrockEyebrow(widget.section['label'] as String),
             ),
-          ),
-          const SizedBox(height: 16),
-          if (widget.section['credentialStatus'] case final String status)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                status == 'connected'
-                    ? 'Account connected'
-                    : status == 'revoked'
-                    ? 'Account revoked'
-                    : status == 'missing'
-                    ? 'Connect an account to use this provider'
-                    : 'Ready to use',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+            if (status != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(status, style: t.caption),
               ),
+            const SizedBox(height: FrockTokens.eyebrowToGroup),
+            FrockGroup(
+              needsYou: widget.section['failure'] is String,
+              children: [
+                if (widget.section['failure'] case final String failure)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(2, 12, 2, 4),
+                    child: Text(
+                      failure,
+                      style: t.body.copyWith(color: t.danger),
+                    ),
+                  ),
+                for (final item in fields)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: field(item),
+                  ),
+                if (fields.any((f) => f.editable) ||
+                    ((widget.section['actions'] as List?) ?? []).isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 10, 0, 10),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.end,
+                      children: [
+                        for (final action
+                            in (widget.section['actions'] as List?) ?? [])
+                          FrockPill(
+                            action['label'] as String,
+                            kind: PillKind.ghost,
+                            size: PillSize.sm,
+                            color: t.accent,
+                            icon: action['kind'] == 'manage-provider'
+                                ? Icons.open_in_browser_rounded
+                                : Icons.add_rounded,
+                            onTap: widget.disabled
+                                ? null
+                                : action['kind'] == 'manage-provider'
+                                ? widget.onManage
+                                : () => widget.onSave(
+                                    widget.section['id'] as String,
+                                    {},
+                                  ),
+                          ),
+                        if (fields.any((f) => f.editable))
+                          FrockPill(
+                            widget.section['id'] == 'profile'
+                                ? 'Save profile'
+                                : 'Save changes',
+                            kind: PillKind.primary,
+                            size: PillSize.sm,
+                            onTap: widget.disabled || dirty.isEmpty
+                                ? null
+                                : save,
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
             ),
-          if (widget.section['failure'] case final String failure)
-            Text(failure),
-          for (final item in fields)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: field(item),
-            ),
-          if (fields.any((f) => f.editable))
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton(
-                onPressed: widget.disabled || dirty.isEmpty ? null : save,
-                child: Text(
-                  widget.section['id'] == 'profile'
-                      ? 'Save profile'
-                      : 'Save changes',
-                ),
-              ),
-            ),
-          for (final action in (widget.section['actions'] as List?) ?? [])
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: OutlinedButton.icon(
-                onPressed: widget.disabled
-                    ? null
-                    : action['kind'] == 'manage-provider'
-                    ? widget.onManage
-                    : () => widget.onSave(widget.section['id'] as String, {}),
-                icon: Icon(
-                  action['kind'] == 'manage-provider'
-                      ? Icons.open_in_browser_rounded
-                      : Icons.add_rounded,
-                ),
-                label: Text(action['label'] as String),
-              ),
-            ),
-          const SizedBox(height: 20),
-          const Divider(height: 1),
-        ],
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }

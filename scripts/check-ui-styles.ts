@@ -174,9 +174,18 @@ function checkCss(path: string, ast: CssNode, lineOffset = 0): void {
   });
 }
 
-const themePath = `${themePackage}src/client/theme.css`;
-const themeAst = parseStylesheet(themePath, readFileSync(themePath, "utf8"), 0);
-if (themeAst) collectCustomProperties(themeAst);
+// The generated token sheet first: theme.css's aliases resolve through it.
+for (const themePath of [
+  `${themePackage}src/client/tokens.generated.css`,
+  `${themePackage}src/client/theme.css`,
+]) {
+  const themeAst = parseStylesheet(
+    themePath,
+    readFileSync(themePath, "utf8"),
+    0,
+  );
+  if (themeAst) collectCustomProperties(themeAst);
+}
 
 for (const path of featureStyles) {
   if (path.startsWith(themePackage)) continue;

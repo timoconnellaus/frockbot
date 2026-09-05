@@ -4,9 +4,9 @@
 
 :root {
   color-scheme: dark;
-  color: #f4f2f6;
-  background: #1f1e24;
-  accent-color: #ec386b;
+  color: var(--frock-ui-ink);
+  background: var(--frock-ui-window);
+  accent-color: var(--frock-ui-accent);
   font-family:
     Manrope,
     ui-sans-serif,
@@ -16,37 +16,55 @@
     sans-serif;
   font-synthesis: none;
 
-  /* Semantic color aliases. Feature plugins consume these names only. */
-  --frock-text: #f4f2f6;
-  --frock-text-muted: #aaa6b1;
-  --frock-text-subtle: #8d8896;
-  --frock-on-accent: #fff;
-  --frock-surface-window: #1f1e24;
-  --frock-surface: #211f26;
-  --frock-surface-sidebar: #1a191e;
-  --frock-surface-raised: #2c2a33;
-  --frock-surface-subtle: #26242c;
-  --frock-surface-accent: #432330;
-  --frock-surface-accent-soft: #2f2027;
-  --frock-border: #3a3742;
-  --frock-border-strong: #6c6874;
-  --frock-border-focus: #ec386b;
-  --frock-action-primary: #ec386b;
-  --frock-action-primary-hover: #d92d5f;
-  --frock-action-primary-pressed: #c62656;
-  --frock-action-secondary: #432330;
-  --frock-action-secondary-text: #f2a6bd;
-  --frock-success: #73d6aa;
-  --frock-success-surface: #203329;
-  --frock-success-border: #355f4a;
-  --frock-warning: #f0c36a;
-  --frock-warning-surface: #3a301e;
-  --frock-warning-border: #6d5a2e;
-  --frock-danger-text: #ff9aa8;
-  --frock-danger-surface: #3a2025;
-  --frock-danger-border: #70404a;
-  --frock-focus-ring: rgb(236 56 107 / 32%);
-  --frock-scrollbar: #514d5b;
+  /*
+   * Semantic aliases. Feature plugins consume these names only; the values
+   * are the Frock UI tokens from docs/design/tokens.json (see
+   * tokens.generated.css, written by scripts/generate-frock-theme.ts), so the
+   * web shell, the Applet kit, A2UI and the Flutter app share one palette,
+   * one type scale and one set of sizes.
+   */
+  --frock-text: var(--frock-ui-ink);
+  --frock-text-muted: var(--frock-ui-ink2);
+  --frock-text-subtle: var(--frock-ui-ink3);
+  --frock-on-accent: var(--frock-ui-on-accent);
+  --frock-surface-window: var(--frock-ui-window);
+  --frock-surface: var(--frock-ui-window);
+  --frock-surface-sidebar: var(--frock-ui-ground);
+  --frock-surface-raised: var(--frock-ui-tile);
+  --frock-surface-subtle: var(--frock-ui-sheet);
+  --frock-surface-accent: var(--frock-ui-accent-tint);
+  --frock-surface-accent-soft: var(--frock-ui-accent-tint);
+  --frock-border: var(--frock-ui-line);
+  --frock-border-strong: var(--frock-ui-line2);
+  --frock-border-focus: var(--frock-ui-accent);
+  --frock-action-primary: var(--frock-ui-accent);
+  --frock-action-primary-hover: var(--frock-ui-accent-hover);
+  --frock-action-primary-pressed: var(--frock-ui-accent-pressed);
+  --frock-action-secondary: var(--frock-ui-accent-tint);
+  --frock-action-secondary-text: var(--frock-ui-accent-ink);
+  --frock-success: var(--frock-ui-good);
+  --frock-success-surface: var(--frock-ui-good-tint);
+  --frock-success-border: color-mix(
+    in srgb,
+    var(--frock-ui-good) 35%,
+    transparent
+  );
+  --frock-warning: var(--frock-ui-warn);
+  --frock-warning-surface: var(--frock-ui-warn-tint);
+  --frock-warning-border: color-mix(
+    in srgb,
+    var(--frock-ui-warn) 35%,
+    transparent
+  );
+  --frock-danger-text: var(--frock-ui-danger);
+  --frock-danger-surface: var(--frock-ui-danger-tint);
+  --frock-danger-border: color-mix(
+    in srgb,
+    var(--frock-ui-danger) 35%,
+    transparent
+  );
+  --frock-focus-ring: var(--frock-ui-accent-glow);
+  --frock-scrollbar: var(--frock-ui-scrollbar);
   --frock-overlay-tint: rgb(10 9 12 / 76%);
 
   /* Shared typography, geometry, elevation, and motion aliases. */
@@ -55,7 +73,7 @@
     Manrope, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   --frock-font-display: "Archivo Black", Manrope, sans-serif;
-  --frock-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --frock-font-mono: var(--frock-ui-font-mono);
 
   /*
    * Type scale. Feature styles must size text with these aliases only;
@@ -63,19 +81,19 @@
    * the desktop chat apps FrockBot sits beside: 13px is the working size,
    * 15px carries titles and primary rows, 11px is reserved for eyebrows.
    */
-  --frock-text-xs: 11px;
-  --frock-text-sm: 12px;
-  --frock-text-base: 13px;
-  --frock-text-md: 14px;
-  --frock-text-lg: 15px;
-  --frock-text-xl: 17px;
-  --frock-text-2xl: 20px;
-  --frock-text-display: 24px;
+  --frock-text-xs: var(--frock-ui-type-eyebrow-size);
+  --frock-text-sm: var(--frock-ui-type-caption-size);
+  --frock-text-base: var(--frock-ui-type-body-size);
+  --frock-text-md: var(--frock-ui-type-message-size);
+  --frock-text-lg: var(--frock-ui-type-bar-title-size);
+  --frock-text-xl: var(--frock-ui-type-name-size);
+  --frock-text-2xl: var(--frock-ui-type-number-size);
+  --frock-text-display: var(--frock-ui-type-display-size);
   --frock-leading-tight: 1.2;
   --frock-leading-snug: 1.35;
   --frock-leading-normal: 1.5;
-  --frock-tracking-eyebrow: 0.08em;
-  --frock-tracking-display: -0.02em;
+  --frock-tracking-eyebrow: var(--frock-ui-type-eyebrow-tracking);
+  --frock-tracking-display: var(--frock-ui-type-display-tracking);
 
   /* Legacy aliases kept for older styles; prefer the scale above. */
   --frock-font-body: var(--frock-text-md);
@@ -116,33 +134,34 @@
    */
   --frock-text-input: var(--frock-text-md);
   --frock-titlebar-height: 52px;
-  --frock-control-sm: 28px;
-  --frock-control-md: 32px;
-  --frock-control-lg: 36px;
-  --frock-avatar-sm: 28px;
-  --frock-avatar-md: 38px;
+  --frock-control-sm: var(--frock-ui-size-control-sm);
+  --frock-control-md: var(--frock-ui-size-control-md);
+  --frock-control-lg: var(--frock-ui-size-control-lg);
+  --frock-avatar-sm: var(--frock-ui-size-avatar-sm);
+  --frock-avatar-md: var(--frock-ui-size-avatar-md);
   /* The pinned sidebar tile: a Bot addressed as a destination, not a row. */
-  --frock-avatar-lg: 56px;
-  --frock-icon-sm: 14px;
-  --frock-icon-md: 16px;
+  --frock-avatar-lg: var(--frock-ui-size-avatar-lg);
+  --frock-icon-sm: var(--frock-ui-size-icon-sm);
+  --frock-icon-md: var(--frock-ui-size-icon);
   --frock-icon-lg: 18px;
-  --frock-radius-control: 10px;
-  --frock-radius-card: 14px;
-  --frock-radius-panel: 20px;
+  --frock-radius-control: var(--frock-ui-radius-field);
+  --frock-radius-card: var(--frock-ui-radius-group);
+  --frock-radius-panel: var(--frock-ui-radius-sheet);
   --frock-settings-width: 520px;
   --frock-shadow-card: 0 8px 22px rgb(0 0 0 / 24%);
   --frock-shadow-panel: 18px 0 55px rgb(0 0 0 / 42%);
-  --frock-shadow-floating: 0 18px 45px rgb(0 0 0 / 44%);
-  --frock-shadow-icon: 0 8px 18px rgb(236 56 107 / 28%);
+  --frock-shadow-floating: var(--frock-ui-elevation-floating);
+  --frock-shadow-icon: 0 8px 18px var(--frock-ui-accent-glow);
   --frock-shadow-control: 0 8px 28px rgb(0 0 0 / 34%);
   --frock-shadow-composer: 0 12px 32px rgb(0 0 0 / 38%);
   --frock-shadow-right-panel: -16px 0 36px rgb(0 0 0 / 38%);
-  --frock-motion-fast: 140ms cubic-bezier(0.2, 0, 0, 1);
+  --frock-motion-fast: var(--frock-ui-motion-fast) var(--frock-ui-motion-curve);
   --frock-motion-panel: 220ms cubic-bezier(0.2, 0, 0, 1);
-  --frock-motion-enter: 260ms cubic-bezier(0.16, 1, 0.3, 1);
-  --frock-fill-hover: rgb(244 242 246 / 7%);
+  --frock-motion-enter: var(--frock-ui-motion-enter)
+    var(--frock-ui-motion-curve);
+  --frock-fill-hover: var(--frock-ui-highlight);
   --frock-fill-pressed: rgb(244 242 246 / 12%);
-  --frock-skeleton: rgb(244 242 246 / 8%);
+  --frock-skeleton: var(--frock-ui-line);
   --frock-skeleton-shine: rgb(255 255 255 / 12%);
   --frock-layer-menu: 30;
   --frock-layer-panel: 40;
@@ -159,11 +178,11 @@
   --frock-surface-disabled: #35323b;
   --frock-danger-strong: #ff788c;
   --frock-accent-border: #704052;
-  --frock-accent-text: #f2a6bd;
-  --frock-accent-surface: #321f28;
-  --frock-success-bright: #73d6aa;
+  --frock-accent-text: var(--frock-ui-accent-ink);
+  --frock-accent-surface: var(--frock-ui-accent-tint);
+  --frock-success-bright: var(--frock-ui-good);
   --frock-overlay-border: rgb(255 255 255 / 25%);
-  --frock-shadow-accent: 0 10px 24px rgb(236 56 107 / 28%);
+  --frock-shadow-accent: 0 10px 24px var(--frock-ui-accent-glow);
   --frock-shadow-auth: 0 24px 70px rgb(0 0 0 / 42%);
   --frock-shadow-avatar: 0 15px 35px rgb(0 0 0 / 34%);
   --frock-shadow-dialog: 0 30px 90px rgb(0 0 0 / 62%);
@@ -340,20 +359,14 @@ summary:focus-visible {
     --frock-text-input: 16px;
 
     /*
-     * Touch, not a cursor. Apple and Google both put the smallest comfortable
-     * target at around 44px, and every control in the product is sized through
-     * these three aliases.
+     * Touch, not a cursor: control sizes follow the token file's phone
+     * density through the aliases above.
      */
-    --frock-control-sm: 34px;
-    --frock-control-md: 40px;
-    --frock-control-lg: 44px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --frock-motion-fast: 0ms linear;
     --frock-motion-panel: 0ms linear;
-    --frock-motion-enter: 0ms linear;
   }
 }
