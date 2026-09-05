@@ -252,34 +252,50 @@ class FrockRow extends StatelessWidget {
         constraints: const BoxConstraints(minHeight: FrockTokens.rowHeight),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Row(
-            children: [
-              if (leading != null) ...[leading!, const SizedBox(width: 12)],
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: t.row,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (caption != null)
+          child: LayoutBuilder(
+            builder: (context, constraints) => Row(
+              children: [
+                if (leading != null) ...[leading!, const SizedBox(width: 12)],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                       Text(
-                        caption!,
-                        style: t.caption,
+                        title,
+                        style: t.row,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                  ],
+                      if (caption != null)
+                        Text(
+                          caption!,
+                          style: t.caption,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-              if (trailing != null) ...[const SizedBox(width: 12), trailing!],
-              if (chevron)
-                Icon(Icons.chevron_right_rounded, size: 18, color: t.ink3),
-            ],
+                if (trailing != null) ...[
+                  const SizedBox(width: 12),
+                  // The title keeps most of the row; a wide trailing (a chip
+                  // at 200% text) shrinks to fit rather than overflowing.
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: constraints.maxWidth * 0.4,
+                    ),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: trailing!,
+                    ),
+                  ),
+                ],
+                if (chevron)
+                  Icon(Icons.chevron_right_rounded, size: 18, color: t.ink3),
+              ],
+            ),
           ),
         ),
       ),

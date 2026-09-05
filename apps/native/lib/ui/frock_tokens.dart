@@ -319,6 +319,139 @@ class FrockTokens extends ThemeExtension<FrockTokens> {
         selectionColor: t.accent.withValues(alpha: 0.26),
         selectionHandleColor: t.accent,
       ),
+      // Stock Material that still appears (form fields, switches, menus)
+      // takes the tokens too, so no screen falls back to the seed palette.
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: t.tile,
+        labelStyle: t.caption.copyWith(color: t.ink2),
+        floatingLabelStyle: t.caption.copyWith(color: t.accentInk),
+        helperStyle: t.caption,
+        helperMaxLines: 4,
+        errorStyle: t.caption.copyWith(color: t.danger),
+        counterStyle: t.caption,
+        prefixIconColor: t.ink2,
+        suffixIconColor: t.ink2,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radiusField),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radiusField),
+          borderSide: BorderSide(color: t.line),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radiusField),
+          borderSide: BorderSide(color: t.accent, width: strokeControl),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radiusField),
+          borderSide: BorderSide(color: t.danger),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radiusField),
+          borderSide: BorderSide(color: t.danger, width: strokeControl),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radiusField),
+          borderSide: BorderSide(color: t.line.withValues(alpha: 0.5)),
+        ),
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? t.onAccent : t.ink2,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? t.accent : t.tile2,
+        ),
+        trackOutlineColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? t.accent : t.line2,
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: t.accent,
+          foregroundColor: t.onAccent,
+          disabledBackgroundColor: t.tile2,
+          disabledForegroundColor: t.ink3,
+          minimumSize: const Size(0, controlMd),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          textStyle: t.pillLabel,
+          shape: const StadiumBorder(),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: t.ink,
+          disabledForegroundColor: t.ink3,
+          minimumSize: const Size(0, controlMd),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          textStyle: t.pillLabel,
+          side: BorderSide(color: t.line2),
+          shape: const StadiumBorder(),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: t.accentInk,
+          disabledForegroundColor: t.ink3,
+          minimumSize: const Size(0, controlMd),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          textStyle: t.pillLabel,
+          shape: const StadiumBorder(),
+        ),
+      ),
+      cardTheme: CardThemeData(
+        color: t.sheet,
+        elevation: 0,
+        margin: const EdgeInsets.only(bottom: rowGap),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusGroup),
+        ),
+      ),
+      listTileTheme: ListTileThemeData(
+        iconColor: t.ink2,
+        textColor: t.ink,
+        titleTextStyle: t.row,
+        subtitleTextStyle: t.caption,
+        selectedColor: t.accentInk,
+        selectedTileColor: t.accentTint,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusField),
+        ),
+      ),
+      dividerTheme: DividerThemeData(color: t.line, space: 1, thickness: 1),
+      dropdownMenuTheme: DropdownMenuThemeData(
+        textStyle: t.body,
+        menuStyle: MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(t.tile),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(radiusField),
+            ),
+          ),
+        ),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: t.tile,
+        textStyle: t.body,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusField),
+        ),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: t.tile2,
+        contentTextStyle: t.body,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusField),
+        ),
+      ),
+      progressIndicatorTheme: ProgressIndicatorThemeData(color: t.accent),
       extensions: [t],
     );
   }
