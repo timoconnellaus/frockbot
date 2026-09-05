@@ -661,6 +661,8 @@ export function createGateway(dependencies: GatewayDependencies) {
   const route = async (request: Request, url: URL): Promise<Response> => {
     const incompatible = clientCompatibilityResponse(request, url);
     if (incompatible) return incompatible;
+    const nativeResponse = await dependencies.nativeAuth?.route(request);
+    if (nativeResponse) return nativeResponse;
     if (url.pathname.startsWith("/api/auth/")) {
       return dependencies.auth.handler(request);
     }
@@ -692,9 +694,13 @@ export function createGateway(dependencies: GatewayDependencies) {
     const development = dependencies.allowDevelopmentIdentity
       ? developmentIdentity(request)
       : { persist: false };
-    const session = development.userId
-      ? null
-      : await dependencies.auth.getSession(request.headers);
+    const nativeIdentity = await dependencies.nativeAuth?.authenticate(request);
+    if (nativeIdentity?.refusal) return nativeIdentity.refusal;
+    const session = nativeIdentity
+      ? nativeIdentity.session
+      : development.userId
+        ? null
+        : await dependencies.auth.getSession(request.headers);
     let userId = development.userId ?? session?.user.id;
     const authMode = development.userId
       ? "development"

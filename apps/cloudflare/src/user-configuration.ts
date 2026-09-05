@@ -1,5 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 import {
+  decodeNativeSessionOperation,
+  nativeSessionOperation,
+} from "./native-sessions.js";
+import {
   createFoundationUserBackendContributions,
   type FoundationConnectionUserBackendContribution,
   type MountedFoundationUserBackend,
@@ -207,6 +211,14 @@ interface UserConfigurationEnv {
 const SEARCH_REBUILD_BOT_LIMIT = 200;
 
 export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
+  async nativeSession(input: unknown) {
+    const operation = decodeNativeSessionOperation(input);
+    await this.assertUserIdentity(operation.userId);
+    return this.ctx.storage.transactionSync(() =>
+      nativeSessionOperation(this.ctx.storage.kv, operation, Date.now()),
+    );
+  }
+
   private mounted: Promise<MountedFoundationUserBackend> | undefined;
 
   private contributions(): Promise<MountedFoundationUserBackend> {

@@ -134,6 +134,7 @@ import {
   type SetSignupsCommandV1,
 } from "@frockbot/plugin-admin/shared";
 import { gatewayAuth } from "./auth.js";
+import { createNativeAuth, NATIVE_RETURN_ANDROID } from "./native-auth.js";
 import { isDeploymentAdminV1 } from "./admin-identities.js";
 import type { DebugGatewaySurface } from "./debug.js";
 import type { BotDebugQueryV1 } from "@frockbot/plugin-shell/debug-protocol";
@@ -198,6 +199,8 @@ export { VoiceSession } from "./voice-session.js";
 export { BotState, DeploymentPolicy, UserConfiguration };
 
 interface Env {
+  /** Explicit qualification gate; not enabled by the production configuration. */
+  NATIVE_SLICE_2_AUTH?: string;
   USER_APPLICATIONS: WorkerLoader;
   // Bot-authored Package isolates, driven from the Bot Durable Object with
   // `globalOutbound` disabled (plan Step 4). A separate loader namespace from
@@ -2129,6 +2132,26 @@ export default {
           .map((host) => host.trim())
           .filter(Boolean),
         auth: gatewayAuth(env),
+        ...(env.NATIVE_SLICE_2_AUTH === "android" && env.BETTER_AUTH_SECRET
+          ? {
+              nativeAuth: createNativeAuth({
+                secret: env.BETTER_AUTH_SECRET,
+                auth: gatewayAuth(env),
+                returnUris: [NATIVE_RETURN_ANDROID],
+                session: (userId, operation) => {
+                  const stub = env.USER_CONFIGURATIONS.get(
+                    env.USER_CONFIGURATIONS.idFromName(userId),
+                  );
+                  // SAFETY: this binding names UserConfiguration; this is its reviewed RPC.
+                  const rpc = stub as unknown as Pick<
+                    UserConfiguration,
+                    "nativeSession"
+                  >;
+                  return rpc.nativeSession(operation);
+                },
+              }),
+            }
+          : {}),
         userExists: (userId) =>
           userConfigurationStub(env, userId).isProvisioned({
             schemaVersion: 1,

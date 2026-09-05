@@ -763,7 +763,7 @@
     "value": {
       "schemaVersion": 1,
       "commandId": "command-1",
-      "text": "Hello 🐑 こんにちは"
+      "text": "Hello \ud83d\udc11 \u3053\u3093\u306b\u3061\u306f"
     }
   },
   {
@@ -845,6 +845,16 @@
       "botId": "author",
       "sessionId": "user:author",
       "turnId": "turn-1"
+    }
+  },
+  {
+    "name": "turn response valid",
+    "schema": "TurnResponse",
+    "value": {
+      "schemaVersion": 1,
+      "runId": "turn-1",
+      "text": "Done",
+      "events": []
     }
   }
 ]

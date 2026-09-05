@@ -791,6 +791,8 @@ export interface BotConfigurationBinding {
 }
 
 export interface GatewayDependencies {
+  /** Explicit Slice 2 prototype; absent until signed-target qualification. */
+  nativeAuth?: import("./native-auth.js").NativeAuth;
   loader: WorkerLoader;
   artifacts: ApplicationArtifactStore;
   /** Dedicated anonymous hostnames that serve only immutable iframe pages. */

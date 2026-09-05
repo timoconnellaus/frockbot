@@ -1059,5 +1059,16 @@
       "nativeVersion": "1.1.0\n",
       "catalogs": []
     }
+  },
+  {
+    "name": "turn response invalid",
+    "schema": "TurnResponse",
+    "value": {
+      "schemaVersion": 1,
+      "runId": "turn-1",
+      "text": "Done",
+      "events": [],
+      "sessionToken": "forbidden"
+    }
   }
 ]

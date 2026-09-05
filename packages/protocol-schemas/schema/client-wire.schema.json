@@ -2939,6 +2939,33 @@
       },
       "required": ["kind", "botId", "sessionId", "turnId"],
       "additionalProperties": false
+    },
+    "TurnResponse": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "runId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 64000
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunEvent"
+          },
+          "maxItems": 512
+        },
+        "notification": {
+          "$ref": "#/$defs/Notification"
+        }
+      },
+      "required": ["schemaVersion", "runId", "text", "events"],
+      "additionalProperties": false
     }
   },
   "x-frockbot-compatibility": {
