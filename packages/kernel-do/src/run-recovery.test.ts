@@ -3,8 +3,6 @@ import type { SessionEvent } from "@frockbot/kernel-contracts";
 import {
   latestModelRequestJournalState,
   planBotRunRecovery,
-  UNRECONCILABLE_RUN_FAILURE_V1,
-  unresolvedModelRequestFailure,
 } from "./run-recovery.js";
 import { createStoredRunCodecV1, type StoredRunV1 } from "./run-records.js";
 
@@ -42,65 +40,63 @@ const request: UnstampedEvent = {
   },
 };
 
-function reconciliationRequired(
-  requestId: string,
-  reason: string,
-): UnstampedEvent {
-  return {
-    type: "model/reconciliation-required",
-    turn: 1,
-    step: 1,
-    requestId,
-    reason,
-  };
-}
+describe("latestModelRequestJournalState", () => {
+  test("reports a journaled request with no answer as unresolved", () => {
+    const state = latestModelRequestJournalState(journal(request));
 
-function unresolved(...events: UnstampedEvent[]): string {
-  const stamped = journal(...events);
-  const state = latestModelRequestJournalState(stamped);
-  if (state.status !== "unresolved") {
-    throw new Error(`expected an unresolved request, got ${state.status}`);
-  }
-  return unresolvedModelRequestFailure(stamped, state.request);
-}
-
-describe("unresolvedModelRequestFailure", () => {
-  test("carries the Agent's journaled reason", () => {
+    expect(state.status).toBe("unresolved");
+    // The whole request travels with the state: it is the idempotency key the
+    // loop re-issues the call under.
     expect(
-      unresolved(
-        request,
-        reconciliationRequired(
-          "request-1",
-          "Model response outcome is uncertain: Model response stream ended before a terminal marker",
-        ),
-      ),
-    ).toBe(
-      'Model request "request-1" has no durable provider outcome: Model response outcome is uncertain: Model response stream ended before a terminal marker',
-    );
+      state.status === "none" ? undefined : state.request.request.requestId,
+    ).toBe("request-1");
   });
 
-  test("ignores a reason journaled against another request", () => {
+  test("reports a request its own answer closed as completed", () => {
     expect(
-      unresolved(
-        request,
-        reconciliationRequired("request-0", "an earlier call"),
-      ),
-    ).toBe('Model request "request-1" has no durable provider outcome');
+      latestModelRequestJournalState(
+        journal(request, {
+          type: "assistant/message",
+          turn: 1,
+          step: 1,
+          requestId: "request-1",
+          text: "hi",
+          toolCalls: [],
+        }),
+      ).status,
+    ).toBe("completed");
   });
 
-  // A run wedged by isolate eviction never got as far as journaling a reason.
-  test("summarizes when the Agent journaled no reason", () => {
-    expect(unresolved(request)).toBe(
-      'Model request "request-1" has no durable provider outcome',
-    );
+  test("a dispatch re-issued under the same key is still one request", () => {
+    const state = latestModelRequestJournalState(journal(request, request));
+
+    expect(state.status).toBe("unresolved");
+    expect(
+      state.status === "none" ? undefined : state.request.request.requestId,
+    ).toBe("request-1");
+  });
+
+  test("ignores an answer journaled against another request", () => {
+    expect(
+      latestModelRequestJournalState(
+        journal(request, {
+          type: "model/response-failed",
+          turn: 1,
+          step: 1,
+          requestId: "request-0",
+          failure: { code: "invalid-json", message: "an earlier call" },
+        }),
+      ).status,
+    ).toBe("unresolved");
   });
 });
 
-// A restart mid-Turn used to park every in-flight run on a
-// reconciliation nobody could perform: the providers this deployment actually
-// uses expose no response retrieval, so the banner's Resolve action had one
-// possible outcome and the Bot stayed wedged until somebody clicked it.
-describe("a restart with no retrievable provider outcome", () => {
+// A restart mid-Turn used to park every in-flight run on a reconciliation
+// nobody could perform: the providers this deployment uses expose no response
+// retrieval, so the banner's Resolve action had one possible outcome and the
+// Bot stayed wedged until somebody clicked it. A model request is keyed by its
+// own `requestId`, so the run resumes and re-issues the same request instead.
+describe("a restart with an unanswered model request", () => {
   const codec = createStoredRunCodecV1<null>({
     decodeRunId: (value) => String(value),
     decodeConfigurationSnapshot: () => null,
@@ -152,37 +148,46 @@ describe("a restart with no retrievable provider outcome", () => {
     },
   ];
 
-  test("settles the run as failed rather than parking it", () => {
-    const events = durableJournal(...openTurn, request);
-    const plan = planBotRunRecovery(
-      runWith(events),
-      events,
-      codec,
-      (provider) => provider === "foundation",
-    );
-
-    expect(plan.kind).toBe("fail");
-    expect(plan.kind === "fail" ? plan.failure : "").toBe(
-      UNRECONCILABLE_RUN_FAILURE_V1,
-    );
-    // Whatever repairs the resume would have written travel with the
-    // settlement, so an unresolved tool occurrence is closed rather than left
-    // open in a record nothing will ever revisit. This journal needs none.
-    expect(plan.kind === "fail" ? plan.repairs : undefined).toEqual([]);
-  });
-
-  test("keeps parking a run whose provider can be asked", () => {
-    const events = durableJournal(...openTurn, request);
-    const plan = planBotRunRecovery(runWith(events), events, codec, () => true);
-
-    expect(plan.kind).toBe("reconcile");
-  });
-
-  test("parks by default, so a host that names no policy is unaffected", () => {
+  test("resumes rather than parking the run for a person to resolve", () => {
     const events = durableJournal(...openTurn, request);
 
     expect(planBotRunRecovery(runWith(events), events, codec).kind).toBe(
-      "reconcile",
+      "resume",
+    );
+  });
+
+  test("resumes a request already re-issued under its key", () => {
+    const events = durableJournal(...openTurn, request, request);
+
+    expect(planBotRunRecovery(runWith(events), events, codec).kind).toBe(
+      "resume",
+    );
+  });
+
+  test("resumes an open tool occurrence, to run again under its effect id", () => {
+    const events = durableJournal(
+      ...openTurn,
+      request,
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: "",
+        toolCalls: [{ id: "call-1", name: "echo", input: { text: "hi" } }],
+      },
+      {
+        type: "tool/call",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "echo",
+        input: { text: "hi" },
+      },
+    );
+
+    expect(planBotRunRecovery(runWith(events), events, codec).kind).toBe(
+      "resume",
     );
   });
 
@@ -194,16 +199,11 @@ describe("a restart with no retrievable provider outcome", () => {
       requestId: "request-1",
       text: "Half a thought",
     });
-    const plan = planBotRunRecovery(
-      runWith(events),
-      events,
-      codec,
-      () => false,
-    );
+    const plan = planBotRunRecovery(runWith(events), events, codec);
 
-    expect(plan.kind).toBe("fail");
-    // Nothing in the plan discards the journal: the settled record carries the
-    // run's own events, and the projection reads the partial answer back out.
+    expect(plan.kind).toBe("resume");
+    // Nothing in the plan discards the journal: the resumed run carries its
+    // own events, and the projection reads the partial answer back out.
     expect(
       events.some(
         (event) =>

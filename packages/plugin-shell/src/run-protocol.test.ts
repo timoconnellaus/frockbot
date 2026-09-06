@@ -12,9 +12,7 @@ import {
   decodeClientNotificationAcknowledgementCommandV1,
   decodeClientRunAdmissionFenceCommandV1,
   decodeClientRunLookupQueryV1,
-  decodeClientRunReconciliationCommandV1,
   decodeClientRunStopCommandV1,
-  RESUMABLE_RUN_MESSAGE_V1,
   decodeClientRunStopReceiptV1,
   decodeClientTurnCommandV1,
   decodeClientRunLookupV1,
@@ -79,7 +77,7 @@ function storedRun(
     events,
     effectAdmissions: [],
     status,
-    phase: status === "reconciliation-required" ? status : "executing",
+    phase: "executing",
     compositionGenerationId: "test-composition-generation",
     configurationSnapshot: initializeBotSettingsV1("primary"),
     previousEventCount: 0,
@@ -431,7 +429,7 @@ describe("client run protocol v1", () => {
     }
   });
 
-  test("strictly decodes hosted Turn, notification, and reconciliation commands", () => {
+  test("strictly decodes hosted Turn and notification commands", () => {
     expect(
       decodeClientTurnCommandV1({
         schemaVersion: 1,
@@ -514,19 +512,6 @@ describe("client run protocol v1", () => {
         extra: true,
       }),
     ).toThrow("notification acknowledgement command.extra is not allowed");
-
-    expect(
-      decodeClientRunReconciliationCommandV1({
-        schemaVersion: 1,
-        action: "resume",
-      }),
-    ).toEqual({ schemaVersion: 1, action: "resume" });
-    expect(() =>
-      decodeClientRunReconciliationCommandV1({
-        schemaVersion: 2,
-        action: "resume",
-      }),
-    ).toThrow("run reconciliation command is invalid");
   });
 
   test("strictly decodes authoritative admission fence commands", () => {
@@ -749,9 +734,8 @@ describe("client run protocol v1", () => {
         }),
       ],
       effectAdmissions: [],
-      status: "reconciliation-required",
-      failure: "Provider confirmation required",
-      phase: "reconciliation-required",
+      status: "running",
+      phase: "executing",
       compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 17,
@@ -767,7 +751,7 @@ describe("client run protocol v1", () => {
           runId: "run-1",
           admittedAt: timestamp,
           input: "continue",
-          status: "reconciliation-required",
+          status: "running",
           events: [
             {
               type: "tool/call",
@@ -780,10 +764,6 @@ describe("client run protocol v1", () => {
               isError: false,
             },
           ],
-          recovery: {
-            action: "resume",
-            message: RESUMABLE_RUN_MESSAGE_V1,
-          },
         },
       ],
       page: { truncated: false },
@@ -793,13 +773,8 @@ describe("client run protocol v1", () => {
         runId: "run-1",
         admittedAt: timestamp,
         input: "continue",
-        status: "reconciliation-required",
+        status: "running",
         events: projected.runs[0]?.events,
-        failure: RESUMABLE_RUN_MESSAGE_V1,
-        recovery: {
-          action: "resume",
-          message: RESUMABLE_RUN_MESSAGE_V1,
-        },
       },
     ]);
     const wire = JSON.stringify(projected);
@@ -1485,11 +1460,11 @@ describe("dispatched subagents in the run projection", () => {
   });
 
   test("a run whose record cannot be read degrades instead of failing the list", () => {
-    // One badly written record — a resolve that wrote a shape the record does
-    // not allow — used to answer 500 for the whole transcript, for good.
+    // One badly written record — a write that put a shape the record does not
+    // allow — used to answer 500 for the whole transcript, for good.
     const broken = {
       ...storedRun([], "running"),
-      status: "reconciliation-required",
+      status: "parked",
       phase: "executing",
     } as unknown as StoredRun;
     expect(() => projectClientRunV1(broken)).toThrow();
@@ -1596,6 +1571,57 @@ describe("dispatched subagents in the run projection", () => {
     );
   });
 
+  test("a re-issue of the same request restarts the partial answer", () => {
+    const request = {
+      requestId: "request-1",
+      provider: "openai-compatible",
+      model: "model-1",
+      system: "",
+      messages: [],
+      tools: [],
+    };
+    const streamed: SessionEvent[] = [
+      event({
+        type: "model/request",
+        seq: 0,
+        timestamp,
+        turn: 1,
+        step: 1,
+        request,
+      }),
+      event({
+        type: "assistant/chunk",
+        seq: 1,
+        timestamp,
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: "scratch",
+      }),
+      // The retry re-issues the very same key, so the words start again.
+      event({
+        type: "model/request",
+        seq: 2,
+        timestamp,
+        turn: 1,
+        step: 1,
+        request,
+      }),
+      event({
+        type: "assistant/chunk",
+        seq: 3,
+        timestamp,
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: "the answer",
+      }),
+    ];
+    expect(projectClientRunV1(storedRun(streamed, "running")).partialText).toBe(
+      "the answer",
+    );
+  });
+
   test("a later request restarts the partial answer", () => {
     const streamed: SessionEvent[] = [
       event({
@@ -1608,8 +1634,23 @@ describe("dispatched subagents in the run projection", () => {
         text: "scratch",
       }),
       event({
-        type: "assistant/chunk",
+        type: "model/request",
         seq: 1,
+        timestamp,
+        turn: 1,
+        step: 2,
+        request: {
+          requestId: "request-2",
+          provider: "openai-compatible",
+          model: "model-1",
+          system: "",
+          messages: [],
+          tools: [],
+        },
+      }),
+      event({
+        type: "assistant/chunk",
+        seq: 2,
         timestamp,
         turn: 1,
         step: 2,

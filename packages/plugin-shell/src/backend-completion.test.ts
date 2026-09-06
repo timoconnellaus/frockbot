@@ -8,9 +8,9 @@ import {
   type StoredRun,
 } from "./backend-contracts.js";
 import {
+  cancelStoredRun,
   completeStoredRun,
   failStoredRun,
-  requireStoredRunReconciliation,
   type RunTerminalKeys,
   type RunTerminalStorage,
 } from "./backend-completion.js";
@@ -29,6 +29,22 @@ const ended = {
   turn: 1,
   outcome: "completed" as const,
 };
+
+const unansweredRequest = {
+  type: "model/request" as const,
+  seq: 0,
+  timestamp: "2026-08-28T00:00:00.000Z",
+  turn: 1,
+  step: 1,
+  request: {
+    requestId: "request-1",
+    provider: "openai-compatible",
+    model: "model-1",
+    system: "",
+    messages: [],
+    tools: [],
+  },
+} satisfies SessionEvent;
 
 function storedRun(): StoredRun {
   return {
@@ -215,13 +231,11 @@ describe("Bot run terminal persistence", () => {
     expect(storage.values.has(keys.activeRun)).toBe(false);
   });
 
-  test("terminalizes an explicitly abandoned reconciliation", async () => {
+  test("terminalizes a run abandoned mid-request", async () => {
     const storage = new MemoryRunStorage();
     storage.values.set(keys.run, {
       ...storedRun(),
-      status: "reconciliation-required",
-      phase: "reconciliation-required",
-      failure: "provider outcome is uncertain",
+      events: [unansweredRequest],
     } satisfies StoredRun);
 
     await failStoredRun(
@@ -229,14 +243,14 @@ describe("Bot run terminal persistence", () => {
       keys,
       "run-1",
       [],
-      [ended],
-      "reconciliation abandoned",
+      [unansweredRequest],
+      "model retries exhausted",
     );
 
     expect(storage.values.get(keys.run)).toMatchObject({
       status: "failed",
       phase: "executing",
-      failure: "reconciliation abandoned",
+      failure: "model retries exhausted",
     });
     expect(storage.values.has(keys.activeRun)).toBe(false);
   });
@@ -265,42 +279,26 @@ describe("Bot run terminal persistence", () => {
     expect(storage.values.has("notification:run-1")).toBe(true);
   });
 
-  test("keeps an unretrievable effect active and reconciliation-required", async () => {
+  // The request is keyed by its own requestId, so a stopped run that never
+  // heard back settles cancelled rather than waiting on the provider.
+  test("cancels a stopped run whose model request went unanswered", async () => {
     const storage = new MemoryRunStorage();
-    const request = {
-      type: "model/request" as const,
-      seq: 0,
-      timestamp: "2026-08-28T00:00:00.000Z",
-      turn: 1,
-      step: 1,
-      request: {
-        requestId: "effect-1",
-        provider: "openai-compatible",
-        model: "model-1",
-        system: "",
-        messages: [],
-        tools: [],
-      },
-    } satisfies SessionEvent;
-    storage.values.set(keys.run, { ...storedRun(), events: [request] });
+    storage.values.set(keys.run, {
+      ...storedRun(),
+      events: [unansweredRequest],
+      stopRequestedAt: "2026-08-30T00:00:00.000Z",
+    } satisfies StoredRun);
 
-    await requireStoredRunReconciliation(
-      storage,
-      keys,
-      "run-1",
-      [],
-      [request],
-      "provider-bound retrieval unavailable",
-    );
+    await expect(
+      cancelStoredRun(storage, keys, "run-1", [], [unansweredRequest]),
+    ).resolves.toBe("cancelled");
 
     expect(storage.values.get(keys.run)).toMatchObject({
-      status: "reconciliation-required",
-      phase: "reconciliation-required",
-      failure: "provider-bound retrieval unavailable",
+      status: "cancelled",
     });
-    expect(storage.values.get(keys.activeRun)).toBe("run-1");
-    expect(await new SessionEventLog(storage).read("user:primary")).toEqual([
-      request,
-    ]);
+    expect(storage.values.has(keys.activeRun)).toBe(false);
+    expect(
+      await new SessionEventLog(storage).read("user:primary"),
+    ).toMatchObject([{ type: "model/request" }]);
   });
 });

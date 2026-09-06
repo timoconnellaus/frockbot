@@ -108,72 +108,77 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts:196-
 
 ---
 
-## 4. Agent loop — `packages/kernel-agent-loop/src/index.ts`
+## 4. Agent loop — `packages/kernel-agent-loop/`
 
-### Turn lifecycle — `#runTurn` (`:832`)
+The Turn's state machine lives in `src/index.ts`; the external work it dispatches lives beside it, reached through the `LoopRuntime` seam in `src/runtime.ts`. `src/model-request.ts` owns provider dispatch and stream consumption, `src/tool-execution.ts` tool calls, `src/resume.ts` the replay of a durable log, `src/errors.ts` the classified failures.
 
-Appends `turn/start`, `composition/pinned`, `turn/admission` and `input/admitted` as one batch, shifts the inbox before the flush, arms the deadline, then iterates `step = 1..maxSteps`:
+### At-most-once by idempotency key
+
+Every external effect that matters carries a key, and is retried **by that key** rather than investigated afterwards.
+
+- A model call's key is its `NormalizedModelRequest.requestId`. A retry, and a re-issue after the object was evicted, send the same request object under the same id.
+- A tool call's key is its `occurrenceId`, derived from the Turn, the step and the call's position, and handed to the tool as `ToolExecutionContext.effectId`.
+
+The loop never asks a provider what became of a call it lost. It sends the call again. A provider that honours the key answers once; one that does not may run it twice, and that is the accepted trade — reconstructing the history of a lost dispatch is what used to wedge a Bot behind a question nobody could answer.
+
+`admitEffect({kind, effectId})` still runs immediately before every dispatch, including a re-issue. Admissions are recorded per effect id, so re-admitting an effect returns its earlier outcome and a Stop or a supersede still fences a call the evicted Turn had already started.
+
+### Turn lifecycle — `#runTurn`
+
+Appends `turn/start`, `composition/pinned`, `turn/admission` and `input/admitted` as one batch, shifts the inbox before the flush, then runs through `#driveTurn`, which owns the deadline, the failure classification and the settlement. The body iterates `step = 1..maxSteps`:
 
 - `agent/pre-step` waterfall; a `reject` decision ends the Turn as `blocked`.
 - `step/start`, then a `user/message` per admitted input.
-- `#requestModel` (`:1033`).
-- `assistant/message`, flush, `#notifyModelOutcome(requestId, "completed")`, `#announceAssistantText`.
-- No tool calls: `agent/step-continuation` waterfall, `step/end`, and on `stop` the Turn completes.
-- Tool calls: `#executeTools`, then the same continuation waterfall and `step/end`.
+- `#callModel` — `requestModelV1`, then `assistant/message`, flush, `notifyModelOutcome`, `#announceAssistantText`.
+- `#completeStep` — the step's tool calls through `executeToolsV1`, then the `agent/step-continuation` waterfall and `step/end`.
 
-Exhausting the loop throws `StepLimitReachedError` (`:144`), which settles the Turn as `interrupted` with `STEP_LIMIT_REASON_V1` (`:160`).
+Exhausting the loop throws `StepLimitReachedError`, which settles the Turn as `interrupted` with `STEP_LIMIT_REASON_V1`.
 
 ### Deadlines and limits
 
-- `TURN_DEADLINE_MS_V1` — 15 minutes, defined in `@frockbot/kernel-contracts` and re-exported at `:171`, because the Durable Object also reads it to decide whether a run still marked `running` can be running.
-- The deadline aborts the same `AbortController` that Stop uses; `#turnDeadlineReached` distinguishes them. Its branch is evaluated ahead of both cancellation and reconciliation (`:947-950`, `#deadlineTurnReason` at `:1655`), so a Turn the clock ended is settled rather than parked.
-- `MODEL_REQUEST_ATTEMPTS_V1 = 2` (`:174`) — first attempt plus one retry.
+- `TURN_DEADLINE_MS_V1` — 15 minutes, defined in `@frockbot/kernel-contracts` and re-exported here, because the Durable Object also reads it to decide whether a run still marked `running` can be running.
+- The deadline aborts the same `AbortController` that Stop uses; `#turnDeadlineReached` distinguishes them, and its branch is evaluated first so a Turn the clock ended is reported as timed out rather than as one the person stopped.
+- `MODEL_REQUEST_ATTEMPTS_V1 = 2` — first attempt plus one retry, for an unknown failure.
 
 ### Event log
 
-Types written: `input/queued`, `turn/start`, `composition/pinned`, `turn/admission`, `input/admitted`, `step/start`, `user/message`, `model/request`, `assistant/chunk`, `assistant/message`, `model/effect-not-started`, `model/response-failed`, `model/reconciliation-required`, `model/retry`, `tool/call`, `tool/result`, `step/end`, `turn/end`.
+Types written: `input/queued`, `turn/start`, `composition/pinned`, `turn/admission`, `input/admitted`, `step/start`, `user/message`, `model/request`, `model/usage`, `assistant/chunk`, `assistant/message`, `model/response-failed`, `model/response-format-note`, `model/retry`, `tool/call`, `tool/result`, `step/end`, `turn/end`.
 
-Persistence is `SessionEventLog` (`packages/kernel-do/src/session-event-log.ts:293`) into Durable Object key-value storage: 256 KB pages (`:15`), 16 KB inline threshold (`:17`), 8 KB excerpts (`:19`), payloads chunked at 128 KB (`:21`).
+One `model/request` is written per _dispatch_, all carrying the same request. The count of them under one `requestId` is the number of times that call was sent, and each one marks the point where the answer so far starts again — which is how a partial reply is projected after a re-issue.
 
-### Resumption after eviction — `#resumeTurn` (`:432`)
+Persistence is `SessionEventLog` (`packages/kernel-do/src/session-event-log.ts`) into Durable Object key-value storage: 256 KB pages, 16 KB inline threshold, 8 KB excerpts, payloads chunked at 128 KB.
 
-Replays the event log forward to find the open turn, the latest step and its status, and any unresolved `model/request`. Then:
+### Resumption after eviction — `#resumeTurn`
 
-- A `model/response-failed` for that request settles the Turn as `model-error`.
-- A `model/effect-not-started` settles it the same way.
-- Otherwise `#reconcileModel` (`:1298`) calls `ctx.llm.reconcile`.
+`planResumptionV1` replays the log forward — pure, reading nothing else — for the open Turn, the latest step and its status, the latest `assistant/message`, and any `model/request` the log carries no answer to. Then:
 
-Recovery is verified, not trusted. The durable `assistant/chunk` prefix must match the retrieved `text-delta` sequence exactly, and the retrieved events must contain exactly one `finish` as the last element; otherwise the outcome is downgraded to `unavailable` (`:1310-1345`). Three outcomes are defined at `:106`: `recovered`, `unavailable` (park and retry later), `not-retrievable` (settle as failure, keeping journaled partial text).
+- A durable `model/response-failed` for that request settles the Turn as `model-error`: the call answered, and what it said was unusable, so sending it again would only reproduce the failure.
+- Otherwise the pending request is dispatched again under its own key.
+- An open step whose assistant message is already durable resumes at its tool calls; an open tool occurrence is executed again under its occurrence id.
 
-A Turn owing a reconciliation writes no `turn/end` (`:975-980`): the model request has no durable outcome, so the Turn is closed later by `kernel-do`'s `settledEventsV1`.
+A Turn writes a `turn/end` on every path but one: a `ModelOutcomeSettlementRequiredError` — a listener on `agent/model-outcome-committed` that could not durably commit — leaves the Turn open, because that commitment is the Turn's own durable write and a resume re-announces the same request id.
 
-### Model request — `#requestModel` (`:1033`)
+### Model request — `requestModelV1`
 
-Validates the settled tool-occurrence journal, assembles the system prompt through `ctx.systemPrompt.assemble` (passing session, provider, model, turn type, step budget and deadline), then per attempt:
+Validates the settled tool-occurrence journal, assembles the system prompt through `ctx.systemPrompt.assemble` (session, provider, model, turn type, step budget, deadline), then builds one request: `session.deriveMessages()` through `agent/message-window`, `ctx.tools.schemas({turnType, subagentRole})` through `agent/tool-exposure`, and the assembled `NormalizedModelRequest` through `agent/request`. Per dispatch it journals `model/request`, flushes, calls `admitEffect` — a `false` throws `EffectAdmissionFencedError` — and consumes the stream.
 
-- `session.deriveMessages()` through the `agent/message-window` waterfall.
-- `ctx.tools.schemas({turnType, subagentRole})` through the `agent/tool-exposure` waterfall.
-- Builds a `NormalizedModelRequest` (`packages/kernel-contracts/src/types.ts:137-146`) and passes it through the `agent/request` waterfall.
-- Journals `model/request`, flushes, then calls `admitEffect({kind: "model", effectId: requestId})`. A `false` writes `model/effect-not-started` and throws `EffectAdmissionFencedError` (`:180`).
-- `#consumeStream` (`:1212`).
+On failure it flushes, releases the request id through `notifyModelOutcome`, and classifies: a `StructuredOutputValidationError` is terminal; a cancellation rethrows and lets the Turn settle; anything else is a retry candidate under `nextModelRetryV1`, classified `unknown` when the provider offered no classification of its own. The `agent/request-error` waterfall may refuse a planned retry or substitute a provider-owned fallback — a fallback is a different call and takes a new key.
 
-Failure handling is classified. A `StructuredOutputValidationError` settles the outcome as completed and rethrows. Cancellation, or any error that is not a `ModelProviderFailureError`, writes `model/reconciliation-required` and throws `ModelEffectReconciliationRequiredError`. Only a provider-classified `ModelProviderFailureError` — the request never started — writes `model/effect-not-started` and is eligible for retry via `nextModelRetryV1`. The `agent/request-error` waterfall may refuse a planned retry or substitute a provider-owned fallback; it cannot convert a permanent failure into another attempt against the same model.
+### Stream consumption — `consumeStreamV1`
 
-### Stream consumption — `#consumeStream` (`:1212`)
+Iterates `ctx.llm.stream(request, signal)`, accumulating text, tool calls and usage, journaling `assistant/chunk` per text delta. Usage is recorded per dispatch, on every path except a `ModelProviderFailureError` with no partial data, because the provider says no billable call occurred.
 
-Iterates `ctx.llm.stream(request, signal)`, accumulating text, tool calls and usage. If a `ModelProviderFailureError` arrives after any provider event has been seen, the no-effect claim is rejected and converted to a plain error (`:1249-1263`). Usage is recorded on every path except a definitive no-effect result.
+### Tool execution — `executeToolsV1`
 
-### Tool execution — `#executeTools` (`:1470`)
+Sequential, not parallel. Per occurrence: validate the journal, skip if a result already exists, `ctx.tools.prepare`, journal `tool/call` if there is no intent yet, `admitEffect({kind: "tool"})`, `ctx.tools.executePrepared`, journal `tool/result`, flush.
 
-Sequential, not parallel. Per occurrence: validate the journal, skip if a result already exists, `ctx.tools.prepare`, journal `tool/call`, flush, `admitEffect({kind: "tool"})`, `ctx.tools.executePrepared`, journal `tool/result`, flush.
-
-- An occurrence with an intent but no result is reconciled through `ctx.tools.reconcilePrepared`; an `unavailable` reconciliation throws `ToolEffectReconciliationRequiredError`.
-- A throw from a non-idempotent tool, or any throw after cancellation, raises `ToolEffectReconciliationRequiredError` rather than degrading to an error result.
+- An occurrence with an intent and no result is dispatched again under the same effect id.
+- A throw that is not a cancellation becomes an error result. For a tool not declared `idempotent` the content says the outcome is uncertain, because the loop does not know whether the work happened and does not try to find out.
 - A result carrying `endsTurn: true` closes the Turn unless the `agent/step-continuation` waterfall overrides it.
 
 ### Usage accounting
 
-Provider-reported token counts are used when present. Otherwise `estimateModelUsageV1` (`:97`) estimates at 4 bytes per token over the exact journaled request and assembled response, and the event marks the figure as estimated.
+Provider-reported token counts are used when present. Otherwise `estimateModelUsageV1` estimates at 4 bytes per token over the exact journaled request and assembled response, and the event marks the figure as estimated.
 
 ---
 

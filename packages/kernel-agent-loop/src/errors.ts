@@ -41,26 +41,6 @@ export class EffectAdmissionFencedError extends Error {
   }
 }
 
-export class ModelEffectReconciliationRequiredError extends Error {
-  constructor(
-    readonly requestId: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "ModelEffectReconciliationRequiredError";
-  }
-}
-
-export class ToolEffectReconciliationRequiredError extends Error {
-  constructor(
-    readonly occurrenceId: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "ToolEffectReconciliationRequiredError";
-  }
-}
-
 export class ModelOutcomeSettlementRequiredError extends Error {
   constructor(readonly cause: unknown) {
     super("Durable model outcome settlement is pending");

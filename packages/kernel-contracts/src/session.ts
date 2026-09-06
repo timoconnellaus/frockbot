@@ -396,9 +396,6 @@ export class Session {
       if (event.type === "model/request") {
         unresolvedModelRequests.add(event.request.requestId);
       }
-      if (event.type === "model/effect-not-started") {
-        unresolvedModelRequests.delete(event.requestId);
-      }
       if (event.type === "model/response-failed") {
         unresolvedModelRequests.delete(event.requestId);
       }

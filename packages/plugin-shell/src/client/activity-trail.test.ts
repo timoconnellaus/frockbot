@@ -160,7 +160,7 @@ describe("the comet trail's emission plan", () => {
       "aborted",
       "error",
       "interrupted",
-      "reconciliation-required",
+      "cancelled",
       "a status this file has never heard of",
     ]) {
       const { plan } = activityTrailStepV1(

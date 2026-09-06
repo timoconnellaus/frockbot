@@ -25,7 +25,6 @@ import {
   decodeClientRunAdmissionFenceCommandV1,
   decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
-  decodeClientRunReconciliationCommandV1,
   decodeClientRunStopCommandV1,
   decodeClientTurnCommandV1,
   type ClientRunLookupQueryV1,
@@ -230,10 +229,6 @@ const TURN_ADMISSION_REFUSALS_V1: readonly {
   reason: ClientTurnRefusalReasonV1;
 }[] = [
   { match: /bot already has an active run/i, reason: "busy" },
-  {
-    match: /requires reconciliation before/i,
-    reason: "reconciliation-required",
-  },
   { match: /admission was fenced/i, reason: "fenced" },
   { match: /already (exists|completed)/i, reason: "duplicate" },
 ];
@@ -776,9 +771,6 @@ function createUserApplicationRoute() {
     const lookupMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)$/,
     );
-    const reconcileMatch = url.pathname.match(
-      /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/reconcile$/,
-    );
     const fenceMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/fence$/,
     );
@@ -798,7 +790,6 @@ function createUserApplicationRoute() {
       !workspaceFileMatch &&
       !turnMatch &&
       !lookupMatch &&
-      !reconcileMatch &&
       !fenceMatch &&
       !stopMatch
     ) {
@@ -816,7 +807,6 @@ function createUserApplicationRoute() {
         workspaceFileMatch ??
         turnMatch ??
         lookupMatch ??
-        reconcileMatch ??
         fenceMatch ??
         stopMatch;
       botId = decodeURIComponent(matched![1]);
@@ -962,42 +952,6 @@ function createUserApplicationRoute() {
         return jsonError(
           400,
           error instanceof Error ? error.message : "workspace read failed",
-        );
-      }
-    }
-
-    if (reconcileMatch) {
-      if (request.method !== "POST")
-        return jsonError(405, "method not allowed");
-      let runId: string;
-      try {
-        runId = decodeURIComponent(reconcileMatch[2]);
-      } catch {
-        return jsonError(400, "invalid run id");
-      }
-      if (!isRpcIdentifier(runId)) return jsonError(400, "invalid run id");
-      try {
-        decodeClientRunReconciliationCommandV1(await request.json());
-      } catch (error) {
-        return jsonError(
-          400,
-          error instanceof Error
-            ? error.message
-            : "reconciliation action is invalid",
-        );
-      }
-      try {
-        return Response.json(
-          await env.BOT_STATE.reconcileRun({
-            schemaVersion: 1,
-            botId,
-            runId,
-          }),
-        );
-      } catch (error) {
-        return jsonError(
-          409,
-          error instanceof Error ? error.message : "Reconciliation failed",
         );
       }
     }

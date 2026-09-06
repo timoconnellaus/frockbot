@@ -239,22 +239,6 @@ class MemoryBotState implements BotStateBinding {
       ),
     );
   }
-
-  reconcileRun(botId: string, runId: string): Promise<BotTurnResult> {
-    const run = (this.runs.get(botId) ?? []).find(
-      (candidate) => candidate.runId === runId,
-    );
-    if (!run || run.status !== "completed") {
-      return Promise.reject(new Error("run does not require reconciliation"));
-    }
-    return Promise.resolve(
-      projectClientTurnV1({
-        runId,
-        text: run.responseText ?? "",
-        events: structuredClone(run.events),
-      }),
-    );
-  }
 }
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
@@ -321,7 +305,6 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
       state.decideApproval(botId, approvalId, command),
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
-    reconcileRun: ({ botId, runId }) => state.reconcileRun(botId, runId),
     stopRun: ({ botId, command }) => state.stopRun(botId, command),
   };
 }

@@ -13,10 +13,10 @@
 //     appended *and flushed* before the model is called, and `image/generated`
 //     after the Workspace write settles. This is the `skill/write-intent` /
 //     `skill/written` pattern, verbatim.
-//  2. "Recovery never silently duplicates ... tool calls". The tool is
-//     `idempotent: false`, so the registry will never re-run it to settle an
-//     open effect; it must answer through `reconcile`, which reads the
-//     effect-keyed object out of the Workspace and never calls the model.
+//  2. "Recovery never silently duplicates ... tool calls". The Workspace path
+//     is keyed by the call's effect id, and `execute` reads that object before
+//     it generates anything, so a call re-issued after an interruption answers
+//     from what is stored and never calls the model twice.
 //  3. "Failures are observable through durable state". Every refusal is an
 //     `isError: true` result with a stable reason, never a throw.
 //
@@ -35,7 +35,6 @@ import type {
   Session,
   SessionEvent,
   ToolDefinition,
-  ToolEffectReconciliation,
   ToolExecutionContext,
   ToolExecutionResult,
   TurnTypeV1,
@@ -244,9 +243,9 @@ export function openImageTurnPositionV1(session: Session): {
 }
 
 /**
- * The turn and step a *reconciliation* records against: the ones its own
- * intent event named. Reconciliation runs while resuming, when the step that
- * opened the effect may already be closed, so the open-step rule of
+ * The turn and step a re-issued call records against: the ones its own intent
+ * event named. A re-issue runs while resuming, when the step that opened the
+ * effect may already be closed, so the open-step rule of
  * {@link openImageTurnPositionV1} would refuse a position that plainly exists
  * in the log.
  */
@@ -331,9 +330,9 @@ export function createGenerateImageTool(
       string,
       unknown
     >,
-    // Billed and durable. The registry never retries a non-idempotent effect;
-    // it settles this one through `reconcile` below.
-    idempotent: false,
+    // Billed and durable, and safe to re-issue anyway: `execute` reads the
+    // object stored under the effect id before it generates anything.
+    idempotent: true,
     validate: (input: unknown) => {
       try {
         decodeGenerateImageInputV1(input);
@@ -374,14 +373,41 @@ export function createGenerateImageTool(
           `session "${context.sessionId}" is unavailable, so the intent cannot be recorded`,
         );
       }
+      const effectId = context.effectId;
+      // The effect id is this call's idempotency key, and the object stored
+      // under it is the whole answer: present means this exact call already
+      // generated and stored its image, and generating another would bill
+      // twice for one request. Read before generate, ahead of anything that
+      // could refuse, so a re-issued call always answers from what it has.
+      const stored = host.files
+        ? await readRecordedImage(host, effectId)
+        : undefined;
+      if (stored) {
+        const recorded = recordedIntentPositionV1(session, effectId);
+        if (recorded && !alreadyRecorded(session, effectId)) {
+          return await recordGenerated(
+            session,
+            recorded,
+            effectId,
+            modelId,
+            stored,
+          );
+        }
+        return success(
+          resultFor(
+            stored.path,
+            stored.generationId,
+            stored.contentHash,
+            stored.dimensions,
+          ),
+        );
+      }
       let position: { turn: number; step: number };
       try {
         position = openImageTurnPositionV1(session);
       } catch (error) {
         return refusal(error instanceof Error ? error.message : String(error));
       }
-
-      const effectId = context.effectId;
       const promptHash = await sha256HexOfTextV1(decoded.prompt);
       // Intent before effect, durable before the call.
       session.append({
@@ -450,8 +476,8 @@ export function createGenerateImageTool(
           runId: host.writer.runId,
         },
         // The path is keyed by this effect, so nothing may already hold it. A
-        // conflict means a previous attempt at *this* effect already wrote the
-        // object, which reconciliation — not a second write — settles.
+        // conflict means a previous attempt at *this* effect wrote the object
+        // between the read above and here; that object is the answer.
         expectedGenerationId: null,
         mediaType: dimensions.mimeType,
       };
@@ -479,65 +505,6 @@ export function createGenerateImageTool(
         contentHash,
         dimensions,
       });
-    },
-    /**
-     * Settles an effect an interrupted Turn left open, without generating —
-     * and therefore without billing — a second image. The effect-keyed object
-     * is the whole answer: present means the generation happened and reached
-     * durable storage; absent means it did not, and the Turn is told so rather
-     * than being handed a silent retry.
-     */
-    reconcile: async (
-      _input: unknown,
-      context: ToolExecutionContext,
-    ): Promise<ToolEffectReconciliation> => {
-      if (!host.files) {
-        return {
-          status: "unavailable",
-          reason:
-            "the Workspace file surface is unavailable, so a generated image cannot be recovered",
-        };
-      }
-      const effectId = context.effectId;
-      const recovered = await readRecordedImage(host, effectId);
-      if (!recovered) {
-        return {
-          status: "unavailable",
-          reason: `no generated image is stored for effect "${effectId}"`,
-        };
-      }
-      let modelId = host.modelId ?? "";
-      try {
-        modelId = resolveImageModelV1(host.modelId);
-      } catch {
-        // The setting drifted since the effect opened. The recovered object is
-        // still the effect's outcome; the model name is only a label here.
-      }
-      const session = sessions.get(context.sessionId);
-      const position = session
-        ? recordedIntentPositionV1(session, effectId)
-        : undefined;
-      if (session && position && !alreadyRecorded(session, effectId)) {
-        const result = await recordGenerated(
-          session,
-          position,
-          effectId,
-          modelId,
-          recovered,
-        );
-        return { status: "recovered", result };
-      }
-      return {
-        status: "recovered",
-        result: success(
-          resultFor(
-            recovered.path,
-            recovered.generationId,
-            recovered.contentHash,
-            recovered.dimensions,
-          ),
-        ),
-      };
     },
   };
 }

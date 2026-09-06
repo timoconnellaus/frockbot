@@ -39,7 +39,6 @@ declare module "cordis" {
     "agent/model-outcome-committed": (
       agent: Agent,
       requestId: string,
-      outcome: "completed" | "not-started",
     ) => Promise<void>;
   }
 }

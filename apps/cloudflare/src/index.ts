@@ -401,10 +401,6 @@ interface BotStateRpc extends BotConfigurationBinding {
   executeUnreadCommand(
     command: BotUnreadCommandV1,
   ): Promise<BotUnreadReceiptV1>;
-  reconcileRun(
-    identity: { userId: string; botId: string },
-    runId: string,
-  ): Promise<BotTurnResult>;
   stopRun(command: ClientRunStopCommandV1): Promise<ClientRunStopReceiptV1>;
 }
 
@@ -538,8 +534,6 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
         botId,
         notificationId,
       }),
-    reconcileRun: (identity, runId) =>
-      rpc.reconcileRun({ schemaVersion: 1, ...identity, runId }),
     stopRun: (command) =>
       rpc.stopRun({ schemaVersion: 1, userId, botId, command }),
     readFocusedApplet: (input) => rpc.readFocusedApplet(input),
@@ -1208,21 +1202,6 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       this.ctx.props.userId,
       request.botId as string,
     ).stopRun(request.command as ClientRunStopCommandV1);
-  }
-
-  async reconcileRun(input: unknown): Promise<BotTurnResult> {
-    const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcBotId,
-      runId: rpcIdentifier,
-    });
-    return botStateStub(
-      this.env,
-      this.ctx.props.userId,
-      request.botId as string,
-    ).reconcileRun(
-      { userId: this.ctx.props.userId, botId: request.botId as string },
-      request.runId as string,
-    );
   }
 }
 

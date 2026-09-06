@@ -346,12 +346,6 @@ export interface SessionEventMap {
     latencyMs: number;
     estimated: boolean;
   };
-  "model/effect-not-started": {
-    turn: number;
-    step: number;
-    requestId: string;
-    reason: string;
-  };
   /** One small durable explanation for why the next model attempt waited. */
   "model/retry": {
     turn: number;
@@ -359,12 +353,6 @@ export interface SessionEventMap {
     attempt: number;
     classification: "transient" | "permanent" | "unknown";
     delayMs: number;
-  };
-  "model/reconciliation-required": {
-    turn: number;
-    step: number;
-    requestId: string;
-    reason: string;
   };
   "model/response-format-note": {
     turn: number;
@@ -1455,18 +1443,6 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       }
       break;
     }
-    case "model/effect-not-started":
-    case "model/reconciliation-required":
-      requireEventKeys(
-        event,
-        keys("turn", "step", "requestId", "reason"),
-        "session event",
-      );
-      turn();
-      step();
-      requestId();
-      eventString(event.reason, "session event.reason");
-      break;
     case "model/response-format-note": {
       requireEventKeys(
         event,

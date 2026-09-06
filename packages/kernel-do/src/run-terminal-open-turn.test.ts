@@ -37,10 +37,9 @@ const KEYS = {
 };
 
 /**
- * A Turn stopped after its model request went uncertain: `turn/start`,
- * `step/start`, a `user/message`, a `model/request`, and a
- * `model/reconciliation-required` — and then nothing. This is what the Agent
- * loop leaves behind when it unwinds on an abort.
+ * A Turn stopped after its model request went unanswered: `turn/start`,
+ * `step/start`, a `user/message`, a `model/request` — and then nothing. This is
+ * what the Agent loop leaves behind when it unwinds on an abort.
  */
 function interruptedJournal(): SessionEvent[] {
   const events: SessionEvent[] = [];
@@ -69,13 +68,6 @@ function interruptedJournal(): SessionEvent[] {
         messages: [],
         tools: [],
       },
-    },
-    {
-      type: "model/reconciliation-required",
-      turn: 1,
-      step: 1,
-      requestId: "request-1",
-      reason: "Model response outcome is uncertain after cancellation",
     },
   ]);
   return events;

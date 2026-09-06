@@ -119,14 +119,11 @@ import {
   cancelStoredRun,
   completeStoredRun,
   failStoredRun,
-  requireStoredRunReconciliation,
 } from "./backend-completion.js";
-import { BotTurnReconciliationRequiredError } from "./backend-runner.js";
 import {
   eventsForFailedRun,
   latestModelRequestJournalState,
   planBotRunRecovery,
-  planInterruptedRunRecoveryV1,
 } from "./backend-recovery.js";
 import { COMPOSITION_CURRENT_KEY } from "@frockbot/kernel-do";
 import {
@@ -471,25 +468,6 @@ import {
 } from "./unread.js";
 import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
-/**
- * The providers that can be asked what happened to a model request they never
- * answered — that is, the ones whose Package registers an
- * `LlmReconciliationCapability`.
- *
- * It is a list rather than a lookup because recovery consults it inside the
- * durable transaction that settles the run, where nothing may be mounted or
- * awaited. The cost is that a provider Package which gains retrieval has to
- * name itself here, and the failure mode of forgetting is a Turn settled as
- * failed rather than one wedged forever, which is the direction this deployment
- * wants to be wrong in.
- *
- * Today: the in-process foundation provider, and nothing else. Ollama Cloud
- * exposes no provider-bound retrieval and neither does Frock AI.
- */
-const RECONCILING_PROVIDER_IDS_V1: ReadonlySet<string> = new Set([
-  "foundation",
-]);
-
 export const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
 const STOP_RECEIPT_PREFIX = "stop-receipt:";
@@ -733,10 +711,6 @@ export class ShellBotBackendContribution {
   private readonly compileApplication: typeof compileFoundationApplication;
   private readonly bundledPackageArtifacts?: ReadonlyMap<string, string>;
   private readonly lifecycleAdmission?: ShellBotBackendHost["assertLifecycleActive"];
-  private readonly reconciliationActivities = new Map<
-    string,
-    Promise<ClientTurnV1>
-  >();
   private readonly outboundFetch?: typeof fetch;
   private readonly configurationActivities = new Map<
     string,
@@ -854,8 +828,6 @@ export class ShellBotBackendContribution {
         deferScheduledWork: (transaction) =>
           this.deferScheduledWork(transaction),
         settleScheduledWork: () => this.settleScheduledWork(),
-        providerReconciles: (providerId) =>
-          RECONCILING_PROVIDER_IDS_V1.has(providerId),
       },
     });
   }
@@ -1646,36 +1618,6 @@ export class ShellBotBackendContribution {
     return createClientRunStopReceiptV1(command, projectClientRunV1(current));
   }
 
-  async reconcileRun(
-    identity: BotIdentity,
-    runId: string,
-  ): Promise<ClientTurnV1> {
-    const active = this.reconciliationActivities.get(runId);
-    if (active) return active;
-    const operation = this.executeRunReconciliation(identity, runId).finally(
-      () => {
-        if (this.reconciliationActivities.get(runId) === operation) {
-          this.reconciliationActivities.delete(runId);
-        }
-      },
-    );
-    this.reconciliationActivities.set(runId, operation);
-    return operation;
-  }
-
-  /**
-   * Retrieval is itself reconciliation: the kernel authority resumes the run
-   * on the Composition it was admitted under, so an uncertain effect is
-   * settled or stays explicitly unresolved rather than being started again.
-   */
-  private async executeRunReconciliation(
-    identity: BotIdentity,
-    runId: string,
-  ): Promise<ClientTurnV1> {
-    return projectClientTurnV1(
-      await this.authority.reconcileRun(identity, runId),
-    );
-  }
   private async executeTurn(
     input: BotTurnExecutionInput<BotSettingsViewV1>,
   ): Promise<BotTurnCompletion> {
@@ -2339,17 +2281,9 @@ export class ShellBotBackendContribution {
           content: "The tool effect was stopped before it started.",
           isError: true,
         };
-      } else if (priorCall) {
-        const recovered =
-          await active.mounted.runtime.root.tools.reconcilePrepared(
-            preparation,
-            context,
-          );
-        result =
-          recovered.status === "recovered"
-            ? recovered.result
-            : { content: recovered.reason, isError: true };
       } else {
+        // A call the object had already started is dispatched again under the
+        // same effect id rather than investigated.
         result = await active.mounted.runtime.root.tools.executePrepared(
           preparation,
           context,
@@ -5886,10 +5820,9 @@ export class ShellBotBackendContribution {
 
   async alarm(): Promise<void> {
     // One alarm: the kernel defers while work is in flight, settles Package
-    // scheduled work, and recovers the active run. A run left
-    // durably `reconciliation-required` stays scheduled and visible; only an
-    // explicit resume retrieves the original effect, so the alarm never
-    // terminalizes an uncertain outcome on its own.
+    // scheduled work, and recovers the active run. Recovery re-issues whatever
+    // the interrupted Turn had dispatched, under the keys the log already
+    // carries.
     await this.authority.alarm();
   }
   async listRuns(
@@ -6622,11 +6555,7 @@ export class ShellBotBackendContribution {
         run.sessionId !== sessionId ||
         durableIdentity?.userId !== identity.userId ||
         durableIdentity.botId !== identity.botId ||
-        !(
-          (run.status === "running" && run.phase === "executing") ||
-          (run.status === "reconciliation-required" &&
-            run.phase === "reconciliation-required")
-        )
+        !(run.status === "running" && run.phase === "executing")
       ) {
         return false;
       }

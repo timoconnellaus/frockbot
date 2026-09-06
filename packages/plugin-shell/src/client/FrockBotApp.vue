@@ -1771,13 +1771,6 @@ function handleComposerKeydown(event: KeyboardEvent): void {
             :role="state.error && !state.activeRun ? 'alert' : 'status'"
           >
             <span>{{ state.activeRun?.message ?? state.error }}</span>
-            <button
-              v-if="state.activeRun?.canResume"
-              type="button"
-              @click="web.resumeRun(state.activeRun.runId)"
-            >
-              Try again
-            </button>
           </div>
         </Transition>
 

@@ -207,7 +207,6 @@ describe("Ollama Cloud runtime Contribution", () => {
         "agent/model-outcome-committed",
         {} as Agent,
         request.requestId,
-        "completed",
       ),
     ).rejects.toThrow("settlement unavailable");
     expect(settled).toEqual(["effect-1"]);
@@ -418,7 +417,6 @@ describe("Ollama Cloud runtime Contribution", () => {
       "agent/model-outcome-committed",
       {} as Agent,
       "durable-effect",
-      "completed",
     );
 
     expect(settled).toEqual(["durable-effect"]);
@@ -426,7 +424,7 @@ describe("Ollama Cloud runtime Contribution", () => {
   });
 
   test.each([401, 403, 404])(
-    "settles definitive HTTP %i rejections after durable no-effect outcome",
+    "settles definitive HTTP %i rejections when the loop releases the request",
     async (status) => {
       const keyringText = serializedKeyring();
       const envelope = await sealCredentialV1({
@@ -488,7 +486,6 @@ describe("Ollama Cloud runtime Contribution", () => {
         "agent/model-outcome-committed",
         {} as Agent,
         request.requestId,
-        "not-started",
       );
       expect(settled).toEqual(["effect-1"]);
       await root.fiber.dispose();
@@ -496,7 +493,7 @@ describe("Ollama Cloud runtime Contribution", () => {
   );
 
   test.each([408, 429, 500, 502])(
-    "settles pre-stream HTTP %i as not started rather than parking the Turn",
+    "holds the lease over a transient pre-stream HTTP %i, for the retry",
     async (status) => {
       const keyringText = serializedKeyring();
       const envelope = await sealCredentialV1({

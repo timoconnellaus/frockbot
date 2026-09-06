@@ -39,16 +39,12 @@ import {
   type SupersededPackageRecords,
   type FailedRunNotification,
   failStoredRun,
-  requireStoredRunReconciliation,
 } from "./run-terminal.js";
 import {
   eventsForFailedRun,
   latestModelRequestJournalState,
-  latestModelRequestProviderV1,
   planBotRunRecovery,
-  type ProviderReconcilesV1,
   repairedSessionLogV1,
-  unresolvedModelRequestFailure,
 } from "./run-recovery.js";
 import { runLivenessV1, STALE_RUNNING_RUN_FAILURE_V1 } from "./run-liveness.js";
 import {
@@ -56,7 +52,6 @@ import {
   type SessionEventLogStorage,
 } from "./session-event-log.js";
 import {
-  BotTurnReconciliationRequiredError,
   BotTurnRecoveryRequiredError,
   BotTurnRefusedError,
 } from "./turn-errors.js";
@@ -197,16 +192,6 @@ export interface BotDurableAuthorityHooks<Snapshot> {
     run: StoredRunV1<Snapshot>;
     read<T>(key: string): Promise<T | undefined>;
   }): Promise<Record<string, unknown>>;
-  /**
-   * Whether the named provider can be asked what happened to a model request
-   * it never answered.
-   *
-   * Synchronous and pure, because it is consulted inside the recovery
-   * transaction: it answers from what the deployment knows about a provider
-   * Package, never by reaching one. Absent means every provider reconciles,
-   * which is the older behaviour.
-   */
-  providerReconciles?: ProviderReconcilesV1;
 }
 
 /** What a `turn/end` records when a later user message took a Turn's place. */
@@ -228,12 +213,9 @@ const DISCARDED_RUN_RECOVERY_FAILURE_V1 =
 /**
  * True when this object has already durably decided to throw the Turn away.
  *
- * Reconciliation exists to retrieve an external outcome the Turn still needs.
- * A Turn a Stop or a supersede has already discarded needs nothing: its
- * provider outcome cannot change what it settles as, and parking it would keep
- * the active-run marker — and so refuse every later message — over an answer
- * nobody is waiting for. The intent the User expressed wins, and the run
- * settles `cancelled` or `superseded` with everything it had already said.
+ * The intent the User expressed wins over anything recovery would otherwise do
+ * with the run: it settles `cancelled` or `superseded` with everything it had
+ * already said.
  */
 function runWasDiscardedV1(
   run: { stopRequestedAt?: string; supersededAt?: string } | undefined,
@@ -351,22 +333,6 @@ export class BotDurableAuthority<Snapshot> {
           // including when that recovery fails, which is the other Turn's
           // problem and not this one's.
           await this.recoverActiveRun().catch(() => undefined);
-          // Unless what holds the object is an uncertain effect. That is
-          // settled by an explicit reconciliation the User asks for, on their
-          // own clock, and retrying against it would only burn this caller's
-          // attempts and end by failing a Turn the User is owed. The queued
-          // run is durable: it stays queued, and the reconciliation's own
-          // settlement — or the recovery alarm — starts it.
-          if (await this.activeRunAwaitsReconciliation()) {
-            // A Turn that has not run is not a completed Turn. Answering with
-            // an empty completion made the browser render the person's new
-            // message as answered with silence; the durable queue entry stays,
-            // and the refusal says why nothing has happened yet.
-            throw new BotTurnRefusedError(
-              "reconciliation-required",
-              `run "${command.runId}" is queued: the active run requires reconciliation before another Turn can be admitted`,
-            );
-          }
           continue;
         }
         if (promoted === "not-queued") {
@@ -390,14 +356,6 @@ export class BotDurableAuthority<Snapshot> {
     } finally {
       this.queuedWaiters.delete(command.runId);
     }
-  }
-
-  /** True while the active run is holding an effect only a User can settle. */
-  private async activeRunAwaitsReconciliation(): Promise<boolean> {
-    const activeRunId = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
-    if (!activeRunId) return false;
-    const run = await this.readRun(activeRunId);
-    return run?.status === "reconciliation-required";
   }
 
   /** Waits out whatever this object is currently running, failures included. */
@@ -505,78 +463,10 @@ export class BotDurableAuthority<Snapshot> {
     });
   }
 
-  async reconcileRun(
-    identity: BotIdentity,
-    runId: string,
-  ): Promise<BotTurnCompletion> {
-    await this.assertIdentity(identity);
-    const key = `${RUN_PREFIX}${runId}`;
-    const recovery = await this.ctx.storage.transaction(async (transaction) => {
-      const run = await this.readRunFrom(transaction, runId);
-      const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
-      if (
-        !run ||
-        run.status !== "reconciliation-required" ||
-        activeRunId !== runId
-      ) {
-        throw new Error(`run "${runId}" does not require reconciliation`);
-      }
-      const latest = await new SessionEventLog(transaction).read(run.sessionId);
-      const settings = run.configurationSnapshot;
-      // The failure is *removed*, not set to `undefined`: a running run that
-      // carries a `failure` key is a shape the run record does not allow, and
-      // writing one turned "resolve this Turn" into a record nothing could
-      // read afterwards. `require` checks it here, where the write is, rather
-      // than leaving the projector to fail on every later read.
-      const { failure: _failure, ...resumed } = run;
-      const resumedRun = this.codec.require({
-        ...resumed,
-        status: "running",
-        phase: "executing",
-      } satisfies StoredRunV1<Snapshot>);
-      await transaction.put(
-        key,
-        structuredClone(storedRunRecordV2(resumedRun)),
-      );
-      await this.refreshRecoveryAlarm(transaction);
-      return { run, latest, settings };
-    });
-    try {
-      return await this.executeResumedRun(
-        identity,
-        recovery.run,
-        recovery.latest,
-        recovery.settings,
-      );
-    } catch (error) {
-      const current = await this.readRun(runId);
-      if (current?.status === "reconciliation-required") {
-        const previous = recovery.latest.slice(0, current.previousEventCount);
-        const failure =
-          error instanceof Error ? error.message : "Reconciliation failed";
-        await this.failRun(
-          runId,
-          previous,
-          current.events,
-          `Reconciliation was explicitly abandoned: ${failure}`,
-        );
-      }
-      // "Try again" that ends in a settled run is a *successful* abandon, not a
-      // failed request. Rethrowing here made the button answer 409 and left the
-      // browser reading a run it thought had not moved — and the read that
-      // followed 500'd on the half-repaired record. The run is durable and
-      // terminal by this point, and its own record says why it ended, so the
-      // caller is handed that record and reads the reason from the transcript.
-      const settled = await this.settledTerminalRunResult(runId);
-      if (settled) return settled;
-      throw error;
-    }
-  }
-
   /**
-   * The completion an abandoned reconciliation reports once the run it was
-   * resolving has reached a terminal state — whatever that state turned out to
-   * be. Anything still open is not this method's to answer for.
+   * The completion a settled run reports once it has reached a terminal state
+   * — whatever that state turned out to be. Anything still open is not this
+   * method's to answer for.
    */
   private async settledTerminalRunResult(
     runId: string,
@@ -669,23 +559,6 @@ export class BotDurableAuthority<Snapshot> {
         error instanceof Error ? error.message : "Bot turn failed";
       if (error instanceof BotTurnRecoveryRequiredError) {
         await this.deferRunRecovery(command.runId);
-        throw new Error(message);
-      }
-      const modelState = latestModelRequestJournalState(events);
-      if (
-        (error instanceof BotTurnReconciliationRequiredError ||
-          modelState.status === "unresolved") &&
-        !runWasDiscardedV1(durableRun)
-      ) {
-        const settled = await this.parkOrSettleUnresolvedRun(
-          command.runId,
-          previous,
-          events,
-          modelState.status === "unresolved"
-            ? unresolvedModelRequestFailure(events, modelState.request)
-            : message,
-        );
-        if (settled) return settled;
         throw new Error(message);
       }
       await this.failRun(command.runId, previous, events, message);
@@ -812,23 +685,6 @@ export class BotDurableAuthority<Snapshot> {
         error instanceof Error ? error.message : "Bot turn failed";
       if (error instanceof BotTurnRecoveryRequiredError) {
         await this.deferRunRecovery(run.runId);
-        throw new Error(message);
-      }
-      const modelState = latestModelRequestJournalState(events);
-      if (
-        (error instanceof BotTurnReconciliationRequiredError ||
-          modelState.status === "unresolved") &&
-        !runWasDiscardedV1(durableRun)
-      ) {
-        const parked = await this.parkOrSettleUnresolvedRun(
-          run.runId,
-          previous,
-          events,
-          modelState.status === "unresolved"
-            ? unresolvedModelRequestFailure(events, modelState.request)
-            : message,
-        );
-        if (parked) return parked;
         throw new Error(message);
       }
       await this.failRun(run.runId, previous, events, message);
@@ -1019,17 +875,6 @@ export class BotDurableAuthority<Snapshot> {
         this.ctx.storage.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
         this.ctx.storage.get<BotIdentity>(IDENTITY_KEY),
       ]);
-      const run = this.codec.optional(storedRun);
-      if (run?.status === "reconciliation-required" && identity) {
-        // A parked run is not this alarm's to settle — only an explicit
-        // reconciliation settles it — but returning without rescheduling
-        // dropped the object's *other* deadlines with it: a Routine due while
-        // a Bot sat parked never fired, and nothing set the alarm again.
-        await this.ctx.storage.transaction((transaction) =>
-          this.refreshRecoveryAlarm(transaction),
-        );
-        return;
-      }
     }
     // An alarm has no caller. A rejection here is an uncaught exception in the
     // object, and in the dev Worker it took the whole process down: a Stop left
@@ -1543,10 +1388,7 @@ export class BotDurableAuthority<Snapshot> {
         )
       : undefined;
     const deadlines = [...scheduled];
-    if (
-      activeRunId &&
-      (!activeRun || activeRun.status !== "reconciliation-required")
-    ) {
+    if (activeRunId) {
       deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
     } else if (
       !activeRunId &&
@@ -1650,15 +1492,6 @@ export class BotDurableAuthority<Snapshot> {
       const hasPendingAgent = pendingAgents.size > 0;
       let supersede: ((supersededBy: string) => Promise<boolean>) | undefined;
       if (activeRunId) {
-        if (
-          lane === "agent" &&
-          activeRun?.status === "reconciliation-required"
-        ) {
-          throw new BotTurnRefusedError(
-            "reconciliation-required",
-            "bot cannot admit agent work while its active run requires reconciliation",
-          );
-        }
         if (lane === "user") {
           supersede = await this.planSupersede(
             transaction,
@@ -1707,12 +1540,8 @@ export class BotDurableAuthority<Snapshot> {
       // pointer clear did not, a supersede whose Turn ended between the two
       // writes — and gating the repair on the pointer left exactly those Bots
       // wedged. What matters is whether anything is still entitled to write
-      // that Turn's end: a `running` record is, and so is a
-      // `reconciliation-required` one, whose Turn is held open on purpose
-      // until its outcome is retrieved. Nothing else is.
-      const stillOwned =
-        activeRun?.status === "running" ||
-        activeRun?.status === "reconciliation-required";
+      // that Turn's end: a `running` record is. Nothing else is.
+      const stillOwned = activeRun?.status === "running";
       //
       // The repair rewrites the whole log rather than appending to it: by the
       // time anyone notices, the abandoned Turn is usually no longer the last
@@ -1824,14 +1653,6 @@ export class BotDurableAuthority<Snapshot> {
     const active = await this.readRunFrom(transaction, activeRunId);
     if (!active)
       throw new BotTurnRefusedError("busy", "bot already has an active run");
-    if (active.status === "reconciliation-required") {
-      // An uncertain external effect is never abandoned to admit something
-      // else: the outcome has to be retrieved before this object runs again.
-      throw new BotTurnRefusedError(
-        "reconciliation-required",
-        `run "${activeRunId}" requires reconciliation before another Turn can be admitted`,
-      );
-    }
     if (active.status !== "running") {
       throw new BotTurnRefusedError("busy", "bot already has an active run");
     }
@@ -2027,75 +1848,6 @@ export class BotDurableAuthority<Snapshot> {
     });
   }
 
-  /** Parks a run on a reason the authority composed, bounded as `failRun`'s is. */
-  private async requireRunReconciliation(
-    runId: string,
-    previous: SessionEvent[],
-    events: SessionEvent[],
-    failure: string,
-  ): Promise<void> {
-    await this.ctx.storage.transaction(async (transaction) => {
-      await requireStoredRunReconciliation(
-        this.codec,
-        transaction,
-        this.terminalKeys(runId),
-        runId,
-        previous,
-        events,
-        boundedRunFailureV1(failure),
-      );
-      await this.refreshRecoveryAlarm(transaction);
-    });
-  }
-
-  /**
-   * Settles a Turn whose model outcome is unknown, or parks it when somebody
-   * can still be asked — and never lets the uncertainty escape as a throw.
-   *
-   * Recovery already refuses to park a run whose provider offers no retrieval,
-   * because parking there is not caution but a dead end; the executing path did
-   * not, and the asymmetry is what produced the blocker. A model request that
-   * ran past its budget threw out of the Agent as an uncertain outcome, this
-   * method's predecessor parked the run and rethrew, and the `POST /turns` the
-   * composer was holding open answered 500 — so the person read "Couldn't reach
-   * the Bot. Check your connection", which blamed their network for a model
-   * that took too long, and the Bot stayed wedged behind a banner whose only
-   * possible resolution was the settlement we could have written here.
-   *
-   * When the provider does reconcile, nothing changes: the run parks, the
-   * caller still rethrows, and a later attempt can genuinely retrieve the
-   * effect. Uncertainty is never assumed away in either branch — the request is
-   * not re-sent, and every streamed word stays in the journal.
-   *
-   * Returns the settled completion when it settled, `undefined` when it parked.
-   */
-  private async parkOrSettleUnresolvedRun(
-    runId: string,
-    previous: SessionEvent[],
-    events: SessionEvent[],
-    reason: string,
-  ): Promise<BotTurnCompletion | undefined> {
-    const provider = latestModelRequestProviderV1(events);
-    const reconciles = this.hooks.providerReconciles ?? (() => true);
-    // A model's retrieval policy says nothing about an unresolved tool effect.
-    // Preserve its intent for the tool reconciliation path.
-    const unresolvedTool =
-      events.some((event) => event.type === "tool/call") &&
-      [...validateToolOccurrenceJournal(events).values()].some(
-        (entry) => entry.intent && !entry.result,
-      );
-    if (unresolvedTool || provider === undefined || reconciles(provider)) {
-      await this.requireRunReconciliation(runId, previous, events, reason);
-      return undefined;
-    }
-    // `failRun` runs the ordinary terminal settlement: the open Turn is closed
-    // with a `turn/end`, the partial text is kept, and the record carries the
-    // reason. The reason is a diagnostic for the debug surface — what the
-    // person reads is the client's own copy for the outcome.
-    await this.failRun(runId, previous, events, reason);
-    return this.settledTerminalRunResult(runId);
-  }
-
   /**
    * Starts the Turn that was waiting when the object last stopped.
    *
@@ -2167,10 +1919,6 @@ export class BotDurableAuthority<Snapshot> {
       const current = await transaction.get<string>(ACTIVE_RUN_KEY);
       if (!current || current === this.executingRunId) return undefined;
       const run = await this.readRunFrom(transaction, activeRunId);
-      if (run?.status === "reconciliation-required") {
-        await this.refreshRecoveryAlarm(transaction);
-        return undefined;
-      }
       if (!run || run.status !== "running") {
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
@@ -2201,12 +1949,7 @@ export class BotDurableAuthority<Snapshot> {
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
       }
-      const plan = planBotRunRecovery(
-        run,
-        latest,
-        this.codec,
-        this.hooks.providerReconciles ?? (() => true),
-      );
+      const plan = planBotRunRecovery(run, latest, this.codec);
       if (plan.kind === "complete") {
         const result = {
           runId: run.runId,
@@ -2231,19 +1974,13 @@ export class BotDurableAuthority<Snapshot> {
         return undefined;
       }
       if (plan.kind === "fail") {
-        // The repairs matter on an unreconcilable failure: they close the
-        // tool occurrences the restart left open, so the settled run's journal
-        // is a complete account rather than one that stops mid-sentence twice.
-        const events = plan.repairs
-          ? [...run.events, ...plan.repairs]
-          : run.events;
         await failStoredRun(
           this.codec,
           transaction,
           this.terminalKeys(run.runId),
           run.runId,
           latest.slice(0, run.previousEventCount),
-          events,
+          run.events,
           plan.failure,
           this.supersededPackageRecords(),
           this.failedRunNotification(),
@@ -2275,35 +2012,16 @@ export class BotDurableAuthority<Snapshot> {
           settings,
         };
       }
-      if (plan.kind === "resume") {
-        const settings = run.configurationSnapshot;
-        await transaction.put(
-          key,
-          storedRunRecordV2({
-            ...run,
-            phase: "executing",
-          } satisfies StoredRunV1<Snapshot>),
-        );
-        await this.refreshRecoveryAlarm(transaction);
-        return { kind: "resume" as const, run, latest, settings };
-      }
-      await eventLog.append(run.sessionId, plan.repairs);
+      const settings = run.configurationSnapshot;
       await transaction.put(
         key,
         storedRunRecordV2({
           ...run,
-          ...storedRunEventFieldsV2(run.previousEventCount, [
-            ...run.events,
-            ...plan.repairs,
-          ]),
-          status: "reconciliation-required",
-          phase: "reconciliation-required",
-          failure:
-            "Execution outcome requires reconciliation before it can resume",
+          phase: "executing",
         } satisfies StoredRunV1<Snapshot>),
       );
       await this.refreshRecoveryAlarm(transaction);
-      return undefined;
+      return { kind: "resume" as const, run, latest, settings };
     });
     if (!recovery) return;
     if (!durableIdentity) throw new Error("Bot identity is unavailable");

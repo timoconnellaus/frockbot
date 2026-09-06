@@ -9,9 +9,10 @@
 // connection and try again", blaming a network that was fine, over a Bot that
 // stayed wedged behind a banner nothing could ever resolve.
 //
-// Recovery already answers this: park only when somebody can be asked, and
-// Flock AI keeps no addressable copy of a completion, so nobody can. This is
-// that rule on the live path.
+// Nobody can be asked: Flock AI keeps no addressable copy of a completion. So
+// a model request is keyed by its own `requestId` and a Turn that ran out of
+// time settles, leaving the key for a resumed dispatch. This is that rule on
+// the live path.
 import { describe, expect, test } from "bun:test";
 import {
   bootstrapGeneration,
@@ -27,10 +28,7 @@ import {
   type OwnedBotTurnCommand,
 } from "./authority.ts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
-import {
-  BotTurnExecutionError,
-  BotTurnReconciliationRequiredError,
-} from "./turn-errors.ts";
+import { BotTurnExecutionError } from "./turn-errors.ts";
 import { createStoredRunCodecV1 } from "./run-records.ts";
 
 const codec = createStoredRunCodecV1<undefined>({
@@ -40,9 +38,6 @@ const codec = createStoredRunCodecV1<undefined>({
 
 const identity = { userId: "user-1", botId: "primary" };
 const SESSION_ID = "user-1:primary";
-
-/** Providers that keep an addressable copy of a completion. Neither does. */
-const RECONCILING_PROVIDERS = new Set(["foundation"]);
 
 function bootstrap(): Promise<CompositionGenerationV1> {
   return bootstrapGeneration(
@@ -71,14 +66,13 @@ function command(runId: string, text: string): OwnedBotTurnCommand {
 /**
  * An authority whose Package stalls its model request past the budget: it
  * journals the request, streams a first line, then unwinds exactly as the
- * Agent loop does on a deadline — a `model/reconciliation-required` carrying
- * the deadline's own sentence, and no `turn/end`.
+ * Agent loop does on a deadline — throwing the deadline's own sentence with no
+ * `turn/end`, leaving the request's id as the key a resumed dispatch reuses.
  */
 function createAuthority(
   storage: MemoryStorage,
   provider: string,
   options: {
-    providerReconciles?: boolean;
     refuseWith?: string;
     toolEffect?: boolean;
   } = {},
@@ -87,9 +81,6 @@ function createAuthority(
     resolveAdmissionSnapshot: () => Promise.resolve(undefined),
     bootstrapComposition: () => bootstrap(),
     admittedSnapshot: () => Promise.resolve(undefined),
-    ...(options.providerReconciles === undefined
-      ? { providerReconciles: (id: string) => RECONCILING_PROVIDERS.has(id) }
-      : { providerReconciles: () => options.providerReconciles as boolean }),
     executeTurn: async (input) => {
       let seq = input.previousEvents.length;
       const appended: SessionEvent[] = [];
@@ -139,17 +130,10 @@ function createAuthority(
         } as never,
       );
       // A provider that refused definitively — a revoked key answering 401 —
-      // reaches a real `turn/end`, the way the Agent loop settles a model
-      // error it never has to reconcile.
+      // reaches a real `turn/end`, the way the Agent loop settles a model error
+      // it will not re-issue.
       if (options.refuseWith) {
         await persist(
-          {
-            type: "model/effect-not-started",
-            turn: 1,
-            step: 1,
-            requestId: "request-1",
-            reason: options.refuseWith,
-          } as never,
           {
             type: "step/end",
             turn: 1,
@@ -187,20 +171,10 @@ function createAuthority(
             input: {},
           } as never,
         );
-        throw new BotTurnReconciliationRequiredError(
-          "Tool effect outcome is unknown",
-          appended,
-        );
+        throw new Error("Tool effect outcome is unknown");
       }
       const reason = `Model response outcome is uncertain: ${MODEL_FIRST_BYTE_DEADLINE_REASON_V1}`;
-      await persist({
-        type: "model/reconciliation-required",
-        turn: 1,
-        step: 1,
-        requestId: "request-1",
-        reason,
-      } as never);
-      throw new BotTurnReconciliationRequiredError(reason, appended);
+      throw new Error(reason);
     },
     notification: () => undefined,
     scheduledDeadlines: () => Promise.resolve([]),
@@ -250,20 +224,22 @@ describe("a model request that ran out of time", () => {
     expect(storage.values.get("active-run")).toBeUndefined();
   });
 
-  test("still parks when the provider can actually be asked", async () => {
+  test("settles the same way whatever provider the request named", async () => {
     const storage = new MemoryStorage();
     const authority = createAuthority(storage, "foundation");
 
-    // A provider that keeps a durable copy loses nothing by waiting, so the
-    // uncertainty is preserved exactly as before and the caller still learns
-    // the Turn did not settle.
-    await expect(
-      authority.run(command("run-1", "build me one")),
-    ).rejects.toThrow();
+    // No provider is asked what happened, so none of them is a special case: a
+    // request that timed out against a provider keeping durable copies settles
+    // exactly as one against Flock AI does.
+    const completion = await authority.run(command("run-1", "build me one"));
 
+    expect(completion.runId).toBe("run-1");
     const run = await storedRun(authority, "run-1");
-    expect(run.status).toBe("reconciliation-required");
-    expect(run.events.some((event) => event.type === "turn/end")).toBe(false);
+    expect(run.status).toBe("failed");
+    expect(
+      run.events.findLast((event) => event.type === "turn/end"),
+    ).toMatchObject({ turn: 1, outcome: "interrupted" });
+    expect(storage.values.get("active-run")).toBeUndefined();
   });
 
   // The same leak, one layer over: a Turn that reached a real `turn/end` and a
@@ -292,25 +268,25 @@ describe("a model request that ran out of time", () => {
   });
 });
 
-test("a non-retrieving model never terminalizes an unresolved tool effect", async () => {
+// A tool occurrence is keyed by its own `occurrenceId`, so a run that died
+// between the intent and the result owes nobody an investigation: the
+// settlement closes the occurrence as interrupted and releases the Bot.
+test("an unresolved tool effect is closed as interrupted, not left open", async () => {
   const storage = new MemoryStorage();
   const authority = createAuthority(storage, "flock-ai", { toolEffect: true });
-  await expect(
-    authority.run(command("run-tool", "perform an action")),
-  ).rejects.toThrow();
-  const run = await storedRun(authority, "run-tool");
-  expect(run.status).toBe("reconciliation-required");
-  expect(
-    run.events.some(
-      (event) => event.type === "tool/result" || event.type === "turn/end",
-    ),
-  ).toBe(false);
-  expect(storage.values.get("active-run")).toBe("run-tool");
-  const reconstructed = createAuthority(storage, "flock-ai", {
-    toolEffect: true,
-  });
-  await reconstructed.recoverActiveRun();
-  expect((await storedRun(reconstructed, "run-tool")).status).toBe(
-    "reconciliation-required",
+
+  const completion = await authority.run(
+    command("run-tool", "perform an action"),
   );
+
+  expect(completion.runId).toBe("run-tool");
+  const run = await storedRun(authority, "run-tool");
+  expect(run.status).toBe("failed");
+  expect(
+    run.events.findLast((event) => event.type === "tool/result"),
+  ).toMatchObject({ occurrenceId: "tool:1:1:0", status: "interrupted" });
+  expect(
+    run.events.findLast((event) => event.type === "turn/end"),
+  ).toMatchObject({ turn: 1, outcome: "interrupted" });
+  expect(storage.values.get("active-run")).toBeUndefined();
 });
