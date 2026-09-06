@@ -18,7 +18,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 7. ~~**Signups-closed does not prevent account creation.**~~ **Fixed.** `/api/auth/*` is served at `gateway.ts:753` ahead of the admission check, so any Google account could write `user`, `account` and `session` rows while signups were closed. `signupDatabaseHooksV1` (`apps/cloudflare/src/auth.ts`) now refuses the create unless signups are open or the email is a configured admin.
 
-8. **Admin is unreachable from the native app.** The native session projects `{user: {id}}` with no email, and admin derives solely from `session.user.email`, so `/api/identity` returns `isAdmin: false` on native even for a listed admin — while `canIssueSession` does look the email up in D1 for the same user.
+8. **Admin is unreachable from the native app.** _Verified._ `gateway.ts:798-806` derives `isAdmin` from `session?.user.email`, and a bearer-token native session carries no better-auth session, so the email is absent and `isDeploymentAdminV1` answers false for a listed admin. `canIssueSession` already looks the same user's email up in D1, so the fix is to do that here too. No visible effect yet: the Flutter app ships no admin surface.
 
 9. **The Electron desktop shell is not in the repository**, yet `electron()` is an enabled better-auth plugin and `com.frockbot.desktop:/` is a trusted origin. `packages/plugin-auth/src/desktop.ts` is an abstract capability with no implementation, and `apps/cloudflare/src/client/index.ts` retains a `window.frockbotDesktop` branch that cannot be reached.
 
@@ -48,7 +48,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 22. **Applet capabilities are unreachable from authored code.** The SDK's `Applet extends DurableObject<unknown>` and never surfaces `env.CAPABILITIES` or `env.IDENTITY`. The alarm mechanism (`scheduleAlarm`, `AppletFacetStub.onAlarm`) has no SDK API.
 
-23. **Applet `canWrite` is inert.** The gateway never forwards `x-applet-viewer` or `x-applet-can-write`, so every viewer resolves to `{id: "viewer", canWrite: true}`.
+23. **Applet `canWrite` is inert.** _Verified._ `applet-sdk/src/server/applet.ts:287-293` reads `x-applet-viewer` and `x-applet-can-write`, defaulting to `canWrite: true`; neither the gateway nor `AppletState` ever sets them. Not an active hole — Applets are account-wide with no cross-User sharing, so every viewer is the owner and `true` is the right answer today. The defect is that an Applet author can write `if (!peer.viewer.canWrite)` and that guard can never fire. Either derive it from the viewer token or drop the concept until sharing exists; shipping a knob nothing populates is the thing to avoid.
 
 24. **`apps/cloudflare/src/native-fallback.ts:1` hardcodes `ARTIFACT_ORIGIN = "https://ui.bot.frockbot.com"`**, so staging cannot serve the native Applet page.
 
