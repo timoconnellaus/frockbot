@@ -7,8 +7,8 @@
 // with the global `fetch`, so the only way to put a fake provider in front of
 // a Durable Object without editing the Durable Object is to make the outbound
 // itself a Worker. Everything that is not the voice upstream is handed
-// straight back to the Node-side stub through a service binding, so the MCP,
-// Composio and Ollama fakes behave exactly as they did before.
+// straight back to the Node-side stub through a service binding, so the Ollama
+// fake behaves exactly as it did before.
 import type { AuxiliaryWorkerOptionsV1 } from "./frock-ai-fake.ts";
 
 /** The service name `outboundService` points at. */

@@ -115,9 +115,9 @@ function memoryIndex() {
  *
  * This suite runs under `bun test`, where there is no `BOT_PACKAGES` binding
  * and no `BotCapabilities` loopback, so an artifact-backed member — the
- * Applets Package, ADR 0022 decision 8 — has nowhere to load from and the
- * Composition fails verification closed, which is correct and is not what
- * this test is about. workerd's suites mount the real thing.
+ * Applets Package — has nowhere to load from and the Composition fails
+ * verification closed, which is correct and is not what this test is about.
+ * workerd's suites mount the real thing.
  */
 async function compileWithoutIsolateMembers(): ReturnType<
   typeof compileFoundationApplication

@@ -96,12 +96,12 @@ class MemoryStorage {
  * The application as a host with no Worker Loader can mount it.
  *
  * This suite runs under `bun test`, where there is no `BOT_PACKAGES` binding
- * and no `BotCapabilities` loopback, so an artifact-backed member — the
- * Applets Package, ADR 0022 decision 8 — has nowhere to load from and the
- * Composition fails verification closed, which is correct and is not what
- * these tests are about. Dropping those members is the honest way to say
- * "this host cannot run isolate code"; it is not a switch over any Package's
- * identity, and workerd's suites mount the real thing.
+ * and no `BotCapabilities` loopback, so an artifact-backed member — the Applets
+ * Package — has nowhere to load from and the Composition fails verification
+ * closed, which is correct and is not what these tests are about. Dropping
+ * those members is the honest way to say "this host cannot run isolate code";
+ * it is not a switch over any Package's identity, and workerd's suites mount
+ * the real thing.
  */
 async function compileWithoutIsolateMembers(): ReturnType<
   typeof compileFoundationApplication
@@ -115,8 +115,8 @@ async function compileWithoutIsolateMembers(): ReturnType<
 
 /**
  * A Turn caught mid-model-request by a restart: the request is journalled, no
- * outcome ever arrived, and `provider-1` cannot be asked what happened. ADR
- * 0028 settles it `failed` on the sentence written for the person.
+ * outcome ever arrived, and `provider-1` cannot be asked what happened.
+ * Reconciliation settles it `failed` on the sentence written for the person.
  */
 function interruptedModelRequestEvents(): SessionEvent[] {
   return [
@@ -704,10 +704,10 @@ describe("Bot recovery", () => {
     expect(await recoveredAgain.listNotifications()).toEqual(notifications);
   });
 
-  // ADR 0028. This used to park the run and hand the person a Resolve button.
-  // `provider-1` has no retrieval — none of the providers this deployment
-  // ships does — so there was never an answer to resolve it with, and the Bot
-  // stayed wedged behind it.
+  // This used to park the run and hand the person a Resolve button.
+  // `provider-1` has no retrieval — none of the providers this deployment ships
+  // does — so there was never an answer to resolve it with, and the Bot stayed
+  // wedged behind it.
   test("settles an unresolved request no provider can be asked about", async () => {
     const storage = new MemoryStorage();
     const settings = initializeBotSettingsV1("primary");

@@ -379,12 +379,12 @@ export async function executeBotTurn(
       ...runtime.agent.agent.session.events,
     ]);
   } finally {
-    // ADR 0030: a compaction outlives the Turn that triggered it, and it runs
-    // on this Composition's model binding — so the Composition outlives the
-    // Turn too, and only by as long as the compaction does. Awaiting the
-    // disposal here would put the summariser back in the latency path, which
-    // is the whole defect. The next admission aborts anything still running,
-    // so this can never stack up.
+    // A compaction outlives the Turn that triggered it, and it runs on this
+    // Composition's model binding — so the Composition outlives the Turn too,
+    // and only by as long as the compaction does. Awaiting the disposal here
+    // would put the summariser back in the latency path, which is the whole
+    // defect. The next admission aborts anything still running, so this can
+    // never stack up.
     if (compactionInFlightV1(command.sessionId)) {
       void whenCompactionSettledV1(command.sessionId).then(
         () => composition.dispose(),

@@ -19,7 +19,7 @@ The Ollama model provider Package. It contributes:
 `docs/research/ollama-cloud-auth.md` — and a credential is openable only by the
 Package that owns its Connection. So the search transport lives here, beside the
 model provider, rather than in a Package that would have to be handed a key it
-does not own. `plugin-composio` is the precedent for a Connection-backed tool
+does not own. This is the pattern for a Connection-backed tool
 Capability.
 
 The _contract_ is not provider-specific. `@frockbot/plugin-web/contract` owns the

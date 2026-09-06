@@ -1,7 +1,7 @@
 // The injected Memory block: GrokBot's shape, order, labels and caps.
 //
-// Parity target, `docs/research/grokbot-computer.md` §4.1a–b. Three scopes,
-// injected **user → project → own**, as *labelled paragraphs* rather than
+// GrokBot is the parity target. Three scopes, injected
+// **user → project → own**, as *labelled paragraphs* rather than
 // headings, blank-line separated. Precedence runs the other way — own >
 // project > user, "the most specific wins" — so a fact a Bot holds itself is
 // not repeated in a shared block below it.

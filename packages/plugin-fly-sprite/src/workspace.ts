@@ -22,11 +22,11 @@
 //    every write to a Memory root through the kernel-consumed surface, because
 //    "The Memory Package is the single writer of Memory roots", and every
 //    write to the User-global instruction root on any surface, because the
-//    Skills Package is its single writer and the Computer sees it read-only
-//    (ADR 0016). The writer a
-//    request names is a claim, and the handle's tenant decides it: a `bot`
-//    writer must be the Bot the handle was opened for, and a `user` writer is
-//    admitted only from a handle opened under User authority.
+//    Skills Package is its single writer and the Computer sees it read-only.
+//    The writer a request names is a claim, and the handle's tenant decides
+//    it: a `bot` writer must be the Bot the handle was opened for, and a
+//    `user` writer is admitted only from a handle opened under User
+//    authority.
 //
 // Failures are declared variants, never exceptions: the Computer host is
 // non-authoritative and its connections drop on every pause, so `unavailable`
@@ -303,7 +303,7 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
     }
     // The User-global instruction root is written through object storage
     // only, whatever surface asks here: the Computer presents it read-only,
-    // so this implementation has no write path to it at all (ADR 0016). It is
+    // so this implementation has no write path to it at all. It is
     // refused on every surface rather than on the kernel one, because the
     // point of a single writer is that the Computer is never the writer.
     if (root.kind === "user-instructions") {

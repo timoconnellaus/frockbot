@@ -2,7 +2,7 @@
 // writes are preserved.
 //
 // One scheme, in one place, because three things must agree on it: this
-// package, the Computer-side sync agent of ADR 0013, and anything that reads
+// package, the Computer-side sync agent, and anything that reads
 // the bucket to rebuild an index.
 //
 //   file      workspace/<workspaceRootKeyV1(root)>/<relative>

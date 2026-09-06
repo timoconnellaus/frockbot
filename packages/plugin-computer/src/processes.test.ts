@@ -376,8 +376,7 @@ describe("the Computer tools' subagent roles", () => {
         .schemas({ turnType: "subagent", subagentRole })
         .map((tool) => tool.name);
 
-    // `browserUse` is "page-level Chrome" (`docs/research/
-    // grokbot-computer.md` l.351–356): the browser, and not the shell, the
+    // `browserUse` is page-level Chrome: the browser, and not the shell, the
     // screen, or the processes a shell left behind.
     expect(named("browserUse")).toEqual([
       "computer_browser",

@@ -18,7 +18,7 @@ function user(name: string) {
 describe("Fly provider Workerd compatibility", () => {
   // The live probe that used to sit beside this one asserted the workerd
   // chunk-framing failure. That path no longer exists: the Sprites SDK is on
-  // the Computer host now (ADR 0004), and the provider reaches a Computer only
+  // the Computer host now, and the provider reaches a Computer only
   // through the `COMPUTER_HOST` binding. It is retired with the path it
   // probed; `apps/computer-host/live-test.ts` drives the real Sprite.
   test("mounts through the provider-neutral Computer interface", async () => {

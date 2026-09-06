@@ -50,15 +50,6 @@ import {
   type CatalogIndexEntryV1,
 } from "@frockbot/catalog-core";
 import type { SkillRefV1 } from "@frockbot/kernel-contracts";
-import {
-  decodeMcpLifecycleReceiptV1,
-  decodeMcpServerStatusViewV1,
-} from "@frockbot/plugin-mcp/records";
-import {
-  MCP_CONNECTIONS_ROUTE,
-  MCP_SERVERS_ROUTE,
-} from "@frockbot/plugin-mcp/backend";
-import { MCP_OAUTH_CONNECTION_TYPE_ID } from "@frockbot/plugin-mcp/agent";
 import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
 import { failureNoticeV1, knownFailureCopyV1 } from "../run-failure-copy.js";
@@ -422,7 +413,7 @@ function assistantMessage(
     // Quieter than a stopped Turn: it keeps everything it already sent and
     // carries no notice at all. The message that superseded it is sitting
     // right underneath, in the person's own words, and it explains the ending
-    // better than a line of ours would (ADR 0024).
+    // better than a line of ours would.
     return {
       id: `${run.runId}:assistant`,
       runId: run.runId,
@@ -470,7 +461,7 @@ function assistantMessage(
   }
   // A Turn that broke after it had started talking keeps what it said, with
   // the reason underneath it — the treatment a stopped Turn already gets, for
-  // the same reason: the words arrived and the person read them (ADR 0028).
+  // the same reason: the words arrived and the person read them.
   // A Turn that broke before saying anything is still just the reason.
   if (run.status === "failed" && run.responseText) {
     return {
@@ -1074,7 +1065,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
    * redrawn from memory and read back behind the paint. `transcriptEpochs`
    * names the conversation each entry belongs to: the backend does not tell a
    * client its Session id, but the client is the one that ends a conversation,
-   * so counting that action locally is the same boundary (ADR 0027).
+   * so counting that action locally is the same boundary.
    */
   const transcripts = new TranscriptCache();
   const transcriptEpochs = new Map<string, number>();
@@ -1438,37 +1429,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       failure: effective.binding?.failure,
       fallback: Boolean(effective.fallback),
     });
-  }
-
-  /**
-   * One MCP lifecycle command, followed by a fresh status read. A refusal —
-   * a stdio server, a quota breach — comes back as a receipt, not an
-   * exception, and the surface shows it beside the servers rather than as an
-   * error that loses the reason.
-   */
-  async function executeMcpCommand(command: unknown): Promise<void> {
-    if (!ctx.transport.hostedRequest) {
-      throw new Error("MCP lifecycle is unavailable");
-    }
-    try {
-      const receipt = decodeMcpLifecycleReceiptV1(
-        await ctx.transport.hostedRequest(
-          MCP_SERVERS_ROUTE,
-          "POST",
-          JSON.stringify(command),
-        ),
-      );
-      if (receipt.status !== "applied") {
-        web.value.settingsError =
-          receipt.failure ?? "The MCP command was refused";
-      } else {
-        web.value.settingsError = undefined;
-      }
-    } catch (error) {
-      web.value.settingsError =
-        error instanceof Error ? error.message : "The MCP command failed";
-    }
-    await web.value.loadMcpServers();
   }
 
   type ShellWebData = FrockBotWebData & {
@@ -2309,91 +2269,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           clientFailureDetailV1(error),
         );
       }
-    },
-    /**
-     * The MCP status projection. A separate read from the settings view: a
-     * restart changes a server's state without touching the User settings
-     * revision a client is holding an `expectedRevision` against.
-     */
-    async loadMcpServers(): Promise<void> {
-      if (!ctx.transport.hostedRequest) return;
-      try {
-        web.value.mcpServers = decodeMcpServerStatusViewV1(
-          await ctx.transport.hostedRequest(MCP_SERVERS_ROUTE),
-        );
-      } catch (error) {
-        web.value.settingsError =
-          error instanceof Error
-            ? error.message
-            : "Could not load the MCP servers";
-      }
-    },
-    async setMcpInstructions(
-      serverId: string,
-      instructions: string,
-    ): Promise<void> {
-      await executeMcpCommand({
-        schemaVersion: 1,
-        type: "mcp/set-instructions",
-        commandId: crypto.randomUUID(),
-        serverId,
-        instructions,
-      });
-    },
-    /**
-     * Connect, or reconnect, an OAuth MCP server.
-     *
-     * The redirect is minted by the host on this authenticated request and
-     * returned to exactly one client, once: it is never read out of a
-     * projection, and nothing stores it. `connectionId` reconnects an existing
-     * Connection — which is what the connect card's *Reconnect* does — and its
-     * absence creates one from the settings given.
-     */
-    async startMcpAuthorization(input: {
-      connectionId?: string;
-      label?: string;
-      settings?: Record<string, unknown>;
-    }): Promise<string | undefined> {
-      if (!ctx.transport.hostedRequest) {
-        throw new Error("MCP authorization is unavailable");
-      }
-      const nativeReturnNonce =
-        "frockbotDesktop" in (globalThis.window ?? {})
-          ? crypto.randomUUID()
-          : undefined;
-      const started = decodeStartConnectionResultV1(
-        await ctx.transport.hostedRequest(
-          MCP_CONNECTIONS_ROUTE,
-          "POST",
-          JSON.stringify({
-            schemaVersion: 1,
-            type: "connection/start",
-            commandId: crypto.randomUUID(),
-            connectionTypeId: MCP_OAUTH_CONNECTION_TYPE_ID,
-            ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-            ...(input.label ? { label: input.label } : {}),
-            ...(input.settings ? { settings: input.settings } : {}),
-            ...(nativeReturnNonce ? { nativeReturnNonce } : {}),
-          }),
-        ),
-      );
-      await web.value.loadUserSettings();
-      await web.value.loadMcpServers();
-      if (started.status === "ready") return undefined;
-      authorizationOperations.set(started.redirectUrl, {
-        ...(started.nativeReturnNonce
-          ? { nativeReturnNonce: started.nativeReturnNonce }
-          : {}),
-      });
-      return started.redirectUrl;
-    },
-    async restartMcpServer(serverId: string): Promise<void> {
-      await executeMcpCommand({
-        schemaVersion: 1,
-        type: "mcp/restart",
-        commandId: crypto.randomUUID(),
-        serverId,
-      });
     },
     /**
      * The remote Catalog index. Read through the gateway route, never from

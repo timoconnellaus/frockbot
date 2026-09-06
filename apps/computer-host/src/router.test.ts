@@ -78,7 +78,7 @@ describe("shard function", () => {
   });
 
   test("every Bot of one User reaches one container", () => {
-    // ADR 0012: the Computer, its slot registry, and its takeover lease are
+    // The Computer, its slot registry, and its takeover lease are
     // all per-User, so the Bot must not appear in the key at all.
     const shard = computerHostShardV1("user-1", 8);
     expect(computerHostShardV1("user-1", 8)).toBe(shard);

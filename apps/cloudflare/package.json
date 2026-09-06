@@ -9,7 +9,6 @@
     "artifact:build": "bun run client:build && bun run build-artifact.ts",
     "build": "bun run artifact:build && wrangler deploy --dry-run --env=\"\" --outdir dist/gateway",
     "dev": "bun run dev.ts",
-    "dev:electron": "bun run dev-electron.ts",
     "test": "bun test src && bun run test:workerd",
     "test:workerd": "vitest run --config vitest.config.ts",
     "test:integration": "bun run artifact:build && vitest run --config vitest.integration.config.ts",
@@ -29,7 +28,6 @@
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/kernel-do": "workspace:*",
     "@frockbot/machine-protocol": "workspace:*",
-    "@frockbot/mobile": "workspace:*",
     "@frockbot/plugin-admin": "workspace:*",
     "@frockbot/plugin-applets": "workspace:*",
     "@frockbot/plugin-audit": "workspace:*",
@@ -40,7 +38,6 @@
     "@frockbot/plugin-credentials": "workspace:*",
     "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-image": "workspace:*",
-    "@frockbot/plugin-mcp": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/plugin-package-catalog": "workspace:*",
     "@frockbot/plugin-package-publisher": "workspace:*",
@@ -61,8 +58,7 @@
     "better-auth": "1.7.2",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.41",
-    "@frockbot/protocol-schemas": "workspace:*",
-    "@frockbot/plugin-composio": "workspace:*"
+    "@frockbot/protocol-schemas": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.1.1",

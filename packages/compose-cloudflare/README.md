@@ -1,9 +1,5 @@
 # `@frockbot/compose-cloudflare`
 
-> Vendored from `tanstack-compose` commit `69163be` on 2026-09-05. FrockBot
-> keeps this copy intentionally close to upstream so it can be reviewed and
-> migrated independently.
-
 A **host** for [`@frockbot/compose-core`](../compose-core) that runs **plugin source** in a
 Cloudflare Dynamic Worker. The client sees an ordinary **plugin instance**; the
 written code sees its **stubs** and nothing else — no network, no bindings, no

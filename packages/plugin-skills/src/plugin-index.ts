@@ -2,9 +2,8 @@
 //
 // PARITY. GrokBot's `plugin-skills/cache.json` "is only an *index* of skills
 // that arrived with installed plugins, mapping pluginId → name → filePath into
-// `plugins/cache/…` — no `SKILL.md` lives there"
-// (`docs/research/grokbot-computer.md` lines 74, 285-286). This module is that
-// index. A Skill contributed by an installed Package is read from the Catalog
+// `plugins/cache/…` — no `SKILL.md` lives there". This module is that index.
+// A Skill contributed by an installed Package is read from the Catalog
 // entry at the generation the User is pinned to, and is never written into any
 // instruction root: nothing is copied, so nothing can go stale, and an
 // uninstall removes the Skill by removing the installation it was indexed

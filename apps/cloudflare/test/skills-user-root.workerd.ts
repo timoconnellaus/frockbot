@@ -1,8 +1,8 @@
 // The User-global instruction root, written by two Bot Durable Objects over
 // real R2 and real Durable Object storage.
 //
-// ADR 0016 gives one User one `user-instructions` root at `users/<id>/skills/`,
-// shared by every Bot that User owns and written only through object storage.
+// One User has one `user-instructions` root at `users/<id>/skills/`, shared by
+// every Bot that User owns and written only through object storage.
 // Three claims a Bun double cannot make, because all three are about the
 // deployed pieces:
 //

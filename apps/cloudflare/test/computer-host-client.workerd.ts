@@ -97,8 +97,8 @@ describe("the Durable Object's Computer host client", () => {
       botId: "bot-two",
     });
     const routed = await calls();
-    // ADR 0012: a Computer is keyed by User. Two Bots of one User landing on
-    // two containers would race on one Sprite's slot registry and lease.
+    // A Computer is keyed by User. Two Bots of one User landing on two
+    // containers would race on one Sprite's slot registry and lease.
     expect(routed[0]?.shard).toBe(routed[1]?.shard ?? "");
   });
 

@@ -1,12 +1,12 @@
 /**
  * The shared Computer host, as it runs inside the Cloudflare Container.
  *
- * ADR 0004: "The container resolves credentials server-side, holds no
- * canonical Bot state, and treats process loss or restart as normal." That is
- * the whole design of this module. It owns exactly two pieces of in-memory
- * state — the effects currently in flight, so a cancel can reach them, and a
- * cache of what it has already learned about a Computer — and both are
- * derivable again from the Sprite. Nothing here is authority.
+ * The container resolves credentials server-side, holds no canonical Bot
+ * state, and treats process loss or restart as normal. That is the whole
+ * design of this module. It owns exactly two pieces of in-memory state — the
+ * effects currently in flight, so a cancel can reach them, and a cache of what
+ * it has already learned about a Computer — and both are derivable again from
+ * the Sprite. Nothing here is authority.
  *
  * Two rules are load-bearing and are why this file exists at all:
  *
@@ -14,7 +14,7 @@
  *    SDK puts both the argv and the env of a `spawn` into the WebSocket URL's
  *    query string (`@fly/sprites@0.1.0` `dist/exec.js`, `buildWebSocketURL`),
  *    and Fly answers a ~2.5 KB query with HTTP 431 — the failure measured
- *    against a real Sprite and recorded in ADR 0004. So every command is
+ *    against a real Sprite. So every command is
  *    `bash -s` with a two-element argv, the script arrives on **stdin**, and a
  *    requested `cwd` and `env` are compiled into that script as `cd` and
  *    `export` lines rather than handed to the SDK.
@@ -723,7 +723,7 @@ export class ComputerHost {
   private readonly updates = new Map<string, ActiveUpdate>();
   /**
    * Sprites whose superseded per-slot desktop services this container has
-   * already retired (ADR 0031). The migration is idempotent, so this is a cost
+   * already retired. The migration is idempotent, so this is a cost
    * saving rather than a correctness one: one `listServices` per Sprite per
    * container instead of one per open.
    */
@@ -761,7 +761,7 @@ export class ComputerHost {
     }
   }
 
-  /** The Sprite backing this User's Computer. One per User (ADR 0012). */
+  /** The Sprite backing this User's Computer. One per User. */
   spriteNameFor(userId: string): string {
     return computerSpriteNameV1(
       userId,
@@ -1013,7 +1013,7 @@ export class ComputerHost {
         `if [ -n "$SLOT" ] && (exec 3<>/dev/tcp/127.0.0.1/$((${VNC_PORT_BASE} + SLOT))) 2>/dev/null; then`,
         `  echo ${DESKTOP_LIVE_MARKER}`,
         `fi`,
-        // One browser on the Computer, so one port to probe (ADR 0031). Its
+        // One browser on the Computer, so one port to probe. Its
         // liveness is a different fact from the tenant's viewer being up:
         // either can be missing on its own, and declaring a running service
         // again would restart it.
@@ -1079,15 +1079,16 @@ export class ComputerHost {
 
   /**
    * Brings up the Computer's shared screen, its one browser, and this tenant's
-   * window and viewer, and answers with the display they are on (ADR 0031).
+   * window and viewer, and answers with the display they are on.
    *
    * The gateway is not the desktop. `start-gateway.sh` serves noVNC and routes
    * a viewer token to a loopback VNC port, but the process that *owns* that
    * port is per tenant, so it can only be started once a tenant has a slot.
    *
-   * What is per tenant, and what is not, is the whole of ADR 0031. There is one
-   * Xvfb and one Chromium for the Computer, because the browser profile is the
-   * User's and Chromium's singleton lock is per profile: the previous layout
+   * What is per tenant, and what is not, is the whole of this layout. There is
+   * one Xvfb and one Chromium for the Computer, because the browser profile is
+   * the User's and Chromium's singleton lock is per profile: the previous
+   * layout
    * gave every slot its own Xvfb and its own browser launch, and every launch
    * after the first lost that lock, printed "Opening in existing browser
    * session", and left its Bot a black screen with a dead CDP port. Per tenant
@@ -1167,7 +1168,7 @@ export class ComputerHost {
   }
 
   /**
-   * Stops and forgets the superseded per-slot desktop services (ADR 0031).
+   * Stops and forgets the superseded per-slot desktop services.
    *
    * An existing Computer carries one `frockbot-desktop-<botKey>` per tenant
    * that ever opened a screen. Each is an Xvfb, a window manager, an `x11vnc`,
@@ -1460,10 +1461,10 @@ export class ComputerHost {
    *
    * That is not a hypothetical. A Computer went on serving noVNC's stock page
    * out of `/usr/share/novnc` for days after the runtime had been rewritten to
-   * serve FrockBot's own viewer from `${VIEWER_ROOT}` — the viewer 404 ADR 0031
-   * records — because every reconciliation re-declared a definition the
-   * platform correctly recognised as unchanged. Picking up a rewritten launcher
-   * takes a restart, so this asks for one.
+   * serve FrockBot's own viewer from `${VIEWER_ROOT}`, because every
+   * reconciliation re-declared a definition the platform correctly recognised
+   * as unchanged. Picking up a rewritten launcher takes a restart, so this
+   * asks for one.
    *
    * A restart is refused softly: a gateway that would not come back is a
    * Computer with no viewer, which is worth reporting through box-doctor and is
@@ -1610,7 +1611,7 @@ export class ComputerHost {
    * (15,000 ms) timer only measures that gap — it sends nothing, and the code
    * says why: "The server-side handles keepalive; we just track activity."
    * `apt-get` installing a desktop stack is quiet for minutes, so the single
-   * long exec this replaces could not survive its own success (ADR 0004).
+   * long exec this replaces could not survive its own success.
    *
    * So no exec here is long. One launches the provisioner detached under
    * `setsid nohup` and returns at once; the rest are polls a few seconds
@@ -2361,7 +2362,7 @@ export class ComputerHost {
       );
     }
     // A human has just taken this Computer over. Every Bot's window is on one
-    // screen now (ADR 0031), so the screen they are handed shows whichever
+    // screen now, so the screen they are handed shows whichever
     // window Chromium last focused unless this raises theirs. Best effort: a
     // window that would not come to the front is a takeover of the wrong
     // rectangle, and is not worth refusing a lease the Sprite already granted.

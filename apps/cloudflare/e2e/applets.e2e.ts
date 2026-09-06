@@ -46,8 +46,8 @@ async function runTool(
   input: unknown = {},
 ): Promise<void> {
   // The Applets member is isolate-loaded, so its tools are disclosed under
-  // the `applets` namespace (ADR 0023) and a model reaches them only
-  // through `call_dynamic_tool`; the scripted model does exactly that.
+  // the `applets` namespace and a model reaches them only through
+  // `call_dynamic_tool`; the scripted model does exactly that.
   await sendMessage(
     page,
     `${text}\n${e2eToolCallPrompt("call_dynamic_tool", {

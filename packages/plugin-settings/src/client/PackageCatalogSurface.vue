@@ -49,23 +49,11 @@ function setupFieldsOf(entry: CatalogEntryV1 | undefined): Array<{
   }));
 }
 
-function entryUsesOAuth(entry: CatalogEntryV1 | undefined): boolean {
-  return (entry?.servers ?? []).some((server) => server.auth === "oauth");
-}
-
 function beginSetup(entry: CatalogEntryV1): void {
   setupValuesFor.value = entry.catalogId;
   setupValues.value = Object.fromEntries(
     setupFieldsOf(entry).map((field) => [field.key, ""]),
   );
-}
-
-async function connectCatalogServer(label: string, url: string): Promise<void> {
-  const redirect = await web.value.startMcpAuthorization({
-    label,
-    settings: { url, transport: "streamable-http" },
-  });
-  if (redirect) await web.value.openConnectionAuthorization(redirect);
 }
 
 async function installWithSetupValues(
@@ -82,10 +70,6 @@ async function installWithSetupValues(
     await web.value.installCatalogPackage(index, values);
     setupValuesFor.value = undefined;
     setupValues.value = {};
-    const server = (entry.servers ?? []).find(
-      (candidate) => candidate.auth === "oauth",
-    );
-    if (server) await connectCatalogServer(entry.displayName, server.url);
   } catch (error) {
     web.value.settingsError =
       error instanceof Error ? error.message : "Could not install the Package";
@@ -274,10 +258,6 @@ function isPackageInstalled(packageId: string): boolean {
                     {{ field.description }}
                   </span>
                 </label>
-                <p v-if="entryUsesOAuth(openCatalogEntry)" class="catalog-hint">
-                  After installing, you will be sent to the connector to sign
-                  in. FrockBot records the request; only you can complete it.
-                </p>
                 <div class="catalog-actions">
                   <UiButton @click="setupValuesFor = undefined"
                     >Cancel</UiButton
@@ -306,8 +286,7 @@ function isPackageInstalled(packageId: string): boolean {
                 <UiButton
                   v-else-if="
                     openCatalogEntry &&
-                    (setupFieldsOf(openCatalogEntry).length > 0 ||
-                      entryUsesOAuth(openCatalogEntry))
+                    setupFieldsOf(openCatalogEntry).length > 0
                   "
                   variant="primary"
                   @click="beginSetup(openCatalogEntry)"

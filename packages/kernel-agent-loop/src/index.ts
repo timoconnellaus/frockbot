@@ -389,7 +389,7 @@ class LoopAgent implements Agent, LoopRuntime {
       // ended. That is right for as long as the run might still resume — and
       // the moment it will not, the Turn is closed by whoever settles it, in
       // `kernel-do`'s `settledEventsV1`. Closing it here instead would either
-      // lie about an outcome or make the run unresumable (ADR 0028).
+      // lie about an outcome or make the run unresumable.
       if (!reconciliationRequired) {
         // A deadline settles the same way a Stop does: an open tool
         // occurrence gets an `interrupted` result before the step closes,

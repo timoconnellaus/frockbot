@@ -1,10 +1,9 @@
-// The Computer-side half of ADR 0013: the durable roots on the Workspace and
-// the durable roots in object storage are one set of files.
+// The Computer-side half of the durable-root sync: the durable roots on the
+// Workspace and the durable roots in object storage are one set of files.
 //
-// **Mechanism, and why it is not a FUSE mount.** The ADR's prior art
-// (`docs/research/zerobsai-memory-sandbox.md`) mounts an R2 bucket into the
-// sandbox with tigrisfs. That cannot be what FrockBot does, for three reasons
-// that are constitutional rather than aesthetic:
+// **Mechanism, and why it is not a FUSE mount.** The prior art mounts an R2
+// bucket into the sandbox with tigrisfs. That cannot be what FrockBot does,
+// for three reasons that are constitutional rather than aesthetic:
 //
 //  1. "No secret lives on the Workspace except the User's browser profile." A
 //     FUSE mount needs object-storage credentials *inside* the Computer. There
@@ -13,7 +12,7 @@
 //     preserved as a conflicting generation and surfaced, never merged or
 //     dropped; last-writer-wins is prohibited." A filesystem write has no
 //     `If-Match` and no losing-writer branch: tigrisfs is last-writer-wins by
-//     construction, which is the one rule the ADR names as prohibited.
+//     construction, which is exactly what that rule prohibits.
 //  3. "every write to a durable root records its writer." A `write(2)` carries
 //     no writer, so a mount cannot record one.
 //
@@ -499,8 +498,7 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
     const held = new Set<string>();
     // Memory roots and the User-global instruction root are presented
     // read-only on the Computer: object storage is their single writer, so
-    // this sync materializes them and never pushes out of them (ADR 0013,
-    // ADR 0016).
+    // this sync materializes them and never pushes out of them.
     const readOnlyOnComputer = isWorkspaceComputerReadOnlyRootV1(root);
 
     if (!readOnlyOnComputer) {
@@ -585,8 +583,8 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
       // silent overwrite — *if* the store actually recorded a removal. When
       // the ledger is reachable and holds no tombstone for the path, this is
       // sidecar/store drift rather than a delete, and re-pushing the bytes the
-      // Computer still holds is the repair. See ADR 0013: a removal is a
-      // recorded generation, so an absence with no record is not one.
+      // Computer still holds is the repair: a removal is a recorded
+      // generation, so an absence with no record is not one.
       const tombstone = await this.storeTombstone(root, entry);
       if (tombstone === "no-removal-recorded") {
         if (readOnlyOnComputer) continue;
@@ -981,7 +979,7 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
    *
    * `"no-removal-recorded"` is the third answer, and the one that keeps the
    * removal rule honest: the ledger answered, and it holds no tombstone for
-   * this path. ADR 0013 makes a delete a recorded generation, so an absence
+   * this path. A delete is a recorded generation, so an absence
    * with no record is drift between the sidecar and the store rather than a
    * delete, and the caller re-pushes instead of destroying the file. An
    * unreachable ledger says nothing either way, so the removal stands.
@@ -1011,7 +1009,7 @@ class WorkspaceRootSync implements WorkspaceRootSyncV1 {
   }
 }
 
-/** The durable-root sync of ADR 0013, Computer side. */
+/** The durable-root sync, Computer side. */
 export function createWorkspaceRootSyncV1(
   options: WorkspaceRootSyncOptionsV1,
 ): WorkspaceRootSyncV1 {

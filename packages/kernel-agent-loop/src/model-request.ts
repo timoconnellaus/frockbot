@@ -68,8 +68,8 @@ export async function requestModelV1(
   // unresolvable binding, a connection refused before any byte was sent.
   // Those are exactly the failures where retrying cannot duplicate anything,
   // and the ones a person watching a blank screen would retry by hand. Every
-  // other failure is uncertain and is never retried, which is the whole of
-  // ADR 0024's durability contract.
+  // other failure is uncertain and is never retried, which is the whole
+  // durability contract.
   let attempts = 0;
   while (true) {
     attempts += 1;

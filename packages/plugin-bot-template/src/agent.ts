@@ -134,8 +134,8 @@ export function createBotExportTemplateTool(
 ): ToolDefinition {
   return {
     name: BOT_EXPORT_TEMPLATE_TOOL_V1,
-    // The `frockbot` namespace, so progressive disclosure (ADR 0023) can find
-    // it: it is listed in `<dynamic_tool_catalog>`, returned by
+    // The `frockbot` namespace, so progressive disclosure can find it: it is
+    // listed in `<dynamic_tool_catalog>`, returned by
     // `get_dynamic_tools({namespace:"frockbot"})`, and matched by a pattern
     // search for "template" or "export". Registered outside a namespace it was
     // invisible to every one of those, and a Bot asked to share itself

@@ -375,8 +375,8 @@ async function openWorkspace(
 
 describe("Fly Workspace layout", () => {
   // Constitution — Computer and Workspace: "durable roots, declared by the
-  // Computer Package's Workspace layout"; ADR 0013: the Workspace presents
-  // Memory roots read-only.
+  // Computer Package's Workspace layout". The Workspace presents Memory roots
+  // read-only.
   test("declares instruction, Memory, and Package roots, with Memory and the User-global instruction root read-only", () => {
     expect(FLY_WORKSPACE_LAYOUT.home).toBe("/home/box");
     expect(
@@ -393,7 +393,7 @@ describe("Fly Workspace layout", () => {
         "bot",
       ],
       // GrokBot's `agent-data/workflows`, read-only on the Computer because
-      // the Skills Package writes it through object storage (ADR 0016).
+      // the Skills Package writes it through object storage.
       "user-instructions": [
         "/home/box/agent-data/workflows",
         "read-only",
@@ -413,11 +413,11 @@ describe("Fly Workspace layout", () => {
     });
   });
 
-  // ADR 0022 decision 7: Applet source lives at `applets/<appletId>/` under a
-  // `package-declared` root of the Applets Package. The ids are
-  // `APPLETS_PACKAGE_ID_V1` and `APPLETS_SOURCE_ROOT_ID_V1` in
-  // `@frockbot/plugin-applets/root`, written out here rather than imported so
-  // this provider Package keeps knowing nothing about Applets.
+  // Applet source lives at `applets/<appletId>/` under a `package-declared`
+  // root of the Applets Package. The ids are `APPLETS_PACKAGE_ID_V1` and
+  // `APPLETS_SOURCE_ROOT_ID_V1` in `@frockbot/plugin-applets/root`, written
+  // out here rather than imported so this provider Package keeps knowing
+  // nothing about Applets.
   test("mounts the Applets source root with no layout change of its own", () => {
     expect(
       workspaceMountPathV1(FLY_WORKSPACE_LAYOUT, {
@@ -616,8 +616,8 @@ describe("Fly Workspace files", () => {
     ).toMatchObject({ status: "refused" });
   });
 
-  // ADR 0012: "Bots of one User may read each other's Workspace files" —
-  // separation between tenants is organizational, not a security boundary.
+  // Bots of one User may read each other's Workspace files: separation
+  // between tenants is organizational, not a security boundary.
   test("a Bot reads another Bot of the same User's Workspace file", async () => {
     const disk = new FakeWorkspaceDisk();
     const owner = await openWorkspace(OTHER_BOT, disk);
@@ -649,8 +649,8 @@ describe("Fly Workspace files", () => {
     ).toMatchObject({ status: "refused" });
   });
 
-  // ADR 0013: a write that would overwrite a generation its writer has not
-  // seen is never silently merged.
+  // A write that would overwrite a generation its writer has not seen is
+  // never silently merged.
   test("answers conflict when the expected generation is not the current one", async () => {
     const { workspace } = await openWorkspace();
     const first = await workspace.write({

@@ -1,8 +1,9 @@
 // `WorkspaceFilesV1` over object storage, with every generation recorded in
 // the owning Durable Object.
 //
-// This is the object-storage half of ADR 0013. The Computer-side half —
-// `FlyWorkspaceFiles` in `@frockbot/plugin-fly-sprite` — implements the same
+// This is the object-storage half of the durable-root sync. The Computer-side
+// half — `FlyWorkspaceFiles` in `@frockbot/plugin-fly-sprite` — implements the
+// same
 // interface over a Sprite's filesystem, and the two must answer the same way,
 // because the same durable root is reachable through both: a refusal here is a
 // refusal there, `unavailable` is an ordinary answer on both, and a losing
@@ -29,8 +30,8 @@
 //    decided by `writerOwnsMemoryPathV1` and nowhere else.
 //  - "a Bot's instruction root and Bot Memory root are writable only by that
 //    Bot or its User" — a first-party Package is neither, exactly as the Fly
-//    implementation has it. The User-global instruction root (ADR 0016) is
-//    writable by that User or any of their Bots, and by nothing else; this is
+//    implementation has it. The User-global instruction root is writable by
+//    that User or any of their Bots, and by nothing else; this is
 //    its only writer, because the Computer presents it read-only.
 //
 // A delete leaves a durable tombstone. Object storage forgets a deleted key
@@ -130,9 +131,9 @@ function isTombstoneMarkerV1(head: ObjectHeadV1): boolean {
  * roots and nothing else. Nothing accepts both — the same split the Fly
  * Workspace makes.
  *
- * `"sync"` is the Computer-side durable-root sync of ADR 0013, and it is a
- * mirror rather than an author. It reads every root — a Memory root has to be
- * readable for the sync to present it read-only on the Computer — and writes
+ * `"sync"` is the Computer-side durable-root sync, and it is a mirror rather
+ * than an author. It reads every root — a Memory root has to be readable for
+ * the sync to present it read-only on the Computer — and writes
  * every root except a Memory one, because pushing a Memory root would give
  * that root a second writer. It is also the one surface that accepts an
  * `unattributed` writer, and only on a non-Memory root: the file it is
@@ -233,7 +234,7 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
     }
     if (root.kind === "user-instructions") {
       // The User-global instruction root is shared by every Bot this User
-      // owns (ADR 0016), so any `bot` writer is admitted — `this.admit` above
+      // owns, so any `bot` writer is admitted — `this.admit` above
       // has already confined the store to one User's roots, and a Bot writes
       // through the Durable Object that holds its own identity, so a recorded
       // `bot` generation here is a Bot of this User. A `first-party` writer is
@@ -641,8 +642,8 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
   }
 
   /**
-   * Preserves a losing write. ADR 0013: the loser is stored under its own
-   * conflict key and recorded as a conflicting generation, so both sides
+   * Preserves a losing write. The loser is stored under its own conflict key
+   * and recorded as a conflicting generation, so both sides
    * survive and the caller is handed both — never merged, never dropped.
    */
   private async preserve(
@@ -704,8 +705,8 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
    * Deletes a file, fenced by a conditional overwrite.
    *
    * Object storage has no conditional delete, so `head` then `delete` would
-   * destroy a write that landed in between — last-writer-wins, which ADR 0013
-   * names as the one outcome that is prohibited. The delete therefore *writes*
+   * destroy a write that landed in between — last-writer-wins, the one
+   * outcome that is prohibited. The delete therefore *writes*
    * first: an empty object carrying `frockbot-tombstone` and the tombstone
    * generation replaces the file under `If-Match` on the ETag the deleter saw.
    * That put is the fence. A racing write either won before it — in which case

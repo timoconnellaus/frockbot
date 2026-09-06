@@ -1,4 +1,4 @@
-// Where the compaction marker sits in the transcript (ADR 0030).
+// Where the compaction marker sits in the transcript.
 //
 // The marker is one system line, and the only thing it has to get right is
 // *where*: it says the Turns above it are what the model now carries a summary

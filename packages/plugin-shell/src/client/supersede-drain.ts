@@ -2,7 +2,7 @@
  * What the working row says while a message the person just sent is displacing
  * the Turn the Bot is still finishing.
  *
- * Sending mid-Turn supersedes the running Turn (ADR 0024): the new message is
+ * Sending mid-Turn supersedes the running Turn: the new message is
  * admitted, the Turn it replaced is asked to stop, and the new one starts only
  * once that one has settled. For the seconds in between, the thread showed the
  * old Turn's working sheep — the same animation as always — over a greyed

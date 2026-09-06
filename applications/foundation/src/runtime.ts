@@ -1,4 +1,3 @@
-import { createConfiguredComposioRuntimeContribution } from "@frockbot/plugin-composio/agent";
 import {
   compileApplicationDeclarations,
   compileApplicationPlan,
@@ -59,11 +58,7 @@ import {
 import credentialsManifest from "@frockbot/plugin-credentials/manifest";
 import { createCredentialRuntimePlugin } from "@frockbot/plugin-credentials/user";
 import customModelsManifest from "@frockbot/plugin-custom-models/manifest";
-// Desktop and mobile Package manifests remain part of the immutable plan.
-import clipboardManifest from "@frockbot/plugin-desktop-clipboard/manifest";
-import directoryPickerManifest from "@frockbot/plugin-desktop-directory-picker/manifest";
 // pi-lens-ignore: ts:2307
-import notificationsManifest from "@frockbot/plugin-desktop-notifications/manifest";
 // Runtime implementations are statically bound by the immutable application.
 import echoRuntimePlugin from "@frockbot/plugin-echo/agent";
 import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
@@ -83,20 +78,7 @@ export type { FlockSelfRuntimeHostV1 } from "@frockbot/plugin-flock/agent";
 import echoManifest from "@frockbot/plugin-echo/manifest";
 import identityRuntimePlugin from "@frockbot/plugin-identity/agent";
 import identityManifest from "@frockbot/plugin-identity/manifest";
-import composioManifest from "@frockbot/plugin-composio/manifest";
-import mcpManifest from "@frockbot/plugin-mcp/manifest";
-import {
-  createConfiguredMcpRuntimeContribution,
-  type McpMountOutcomeV1,
-} from "@frockbot/plugin-mcp/agent";
-import {
-  createMcpLifecycleRuntimePlugin,
-  type McpLifecycleToolHostV1,
-} from "@frockbot/plugin-mcp/lifecycle-tools";
-export type { McpLifecycleToolHostV1 } from "@frockbot/plugin-mcp/lifecycle-tools";
 import memoryManifest from "@frockbot/plugin-memory/manifest";
-import mobileClipboardManifest from "@frockbot/plugin-mobile-clipboard/manifest";
-import mobileNotificationsManifest from "@frockbot/plugin-mobile-notifications/manifest";
 import packagePublisherManifest from "@frockbot/plugin-package-publisher/manifest";
 import {
   createPackagePublisherAgentPlugin,
@@ -166,10 +148,10 @@ import {
 import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
 import appletsManifest from "@frockbot/plugin-applets/manifest";
 import applicationJson from "../frockbot.application.json" with { type: "json" };
-// The Applets Package has no runtime plugin to import: it is artifact-backed
-// (ADR 0022 decision 8), so the application declares only its manifest here and
-// its artifact in `frockbot.application.json`, and the isolate host mounts it
-// like a Bot-authored Package.
+// The Applets Package has no runtime plugin to import: it is artifact-backed,
+// so the application declares only its manifest here and its artifact in
+// `frockbot.application.json`, and the isolate host mounts it like a
+// Bot-authored Package.
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 
@@ -190,18 +172,11 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
   ["@frockbot/plugin-flock", flockManifest],
-  ["@frockbot/plugin-composio", composioManifest],
-  ["@frockbot/plugin-mcp", mcpManifest],
   ["@frockbot/plugin-memory", memoryManifest],
   ["@frockbot/plugin-image", imageManifest],
-  ["@frockbot/plugin-mobile-clipboard", mobileClipboardManifest],
-  ["@frockbot/plugin-mobile-notifications", mobileNotificationsManifest],
   ["@frockbot/plugin-package-publisher", packagePublisherManifest],
   ["@frockbot/plugin-clock", clockManifest],
   ["@frockbot/plugin-computer", computerManifest],
-  ["@frockbot/plugin-desktop-clipboard", clipboardManifest],
-  ["@frockbot/plugin-desktop-directory-picker", directoryPickerManifest],
-  ["@frockbot/plugin-desktop-notifications", notificationsManifest],
   ["@frockbot/plugin-shell", shellManifest],
   ["@frockbot/plugin-skills", skillsManifest],
   ["@frockbot/plugin-search", searchManifest],
@@ -249,7 +224,6 @@ type EnabledRuntimeContributionFactory = (config: {
   packageSettings: Readonly<Record<string, PackageSettingValueV1>>;
   readSecret(name: string): string | undefined;
   authorizeConnection(): Promise<ConnectionView>;
-  composioRequest?(input: unknown): Promise<unknown>;
   pinToolCatalog?(
     connectionId: string,
     read: () => Promise<unknown>,
@@ -272,31 +246,12 @@ type EnabledRuntimeContributionFactory = (config: {
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
   settleCredential?(effectId: string): Promise<void>;
-  /**
-   * Where a mount outcome goes durably, when the host carries the User's
-   * authority. A Contribution whose failure has no durable home simply omits
-   * it — and then an unreachable server is invisible, which is what this
-   * seam exists to prevent.
-   */
-  recordOutcome?(outcome: McpMountOutcomeV1): Promise<void>;
 }) => Plugin | undefined | Promise<Plugin | undefined>;
 
 const enabledRuntimeContributionFactories = new Map<
   string,
   EnabledRuntimeContributionFactory
 >([
-  [
-    "@frockbot/plugin-composio/agent",
-    createConfiguredComposioRuntimeContribution,
-  ],
-  [
-    "@frockbot/plugin-mcp/agent",
-    (config) =>
-      createConfiguredMcpRuntimeContribution({
-        ...config,
-        ...(config.recordOutcome ? { onOutcome: config.recordOutcome } : {}),
-      }),
-  ],
   [
     "@frockbot/plugin-web/agent",
     ({ capability, fetch: outbound }) =>
@@ -596,7 +551,7 @@ function runtimePackage(
 /**
  * The Computer providers this application registers. The in-worker Fly Sprites
  * provider is the default: it is the one that carries a Computer's per-User
- * identity, its Workspace file surface, and the durable-root sync (ADR 0013).
+ * identity, its Workspace file surface, and the durable-root sync.
  * When the host also supplies the shared Computer host, its effect-journaling
  * proxy is registered beside it so an identified effect can be replayed rather
  * than repeated across Durable Object eviction.
@@ -688,7 +643,7 @@ export function createFoundationHostedRuntimePackages(
      */
     computerHost?: SharedComputerHostClient;
     /**
-     * The shared Computer host of ADR 0004: the service binding the Bot
+     * The shared Computer host: the service binding the Bot
      * Durable Object reaches a Computer through, and the secret it presents.
      * Absent, and the Fly provider registers unconfigured — this Worker holds
      * no Sprites SDK and no way to reach a Computer without it.
@@ -733,7 +688,7 @@ export function createFoundationHostedRuntimePackages(
      */
     routines?: RoutinesRuntimeHostV1;
     /**
-     * The Subagents seam (ADR 0017), supplied by the parent Bot Durable Object
+     * The Subagents seam, supplied by the parent Bot Durable Object
      * for one admitted Turn. Absent outside a Turn, and outside a deployment
      * that can address a Subagent Durable Object, and the Package is then not
      * mounted at all: a Bot dispatches a subagent only inside a Turn whose run
@@ -741,7 +696,7 @@ export function createFoundationHostedRuntimePackages(
      */
     subagents?: SubagentsRuntimeHostV1;
     /**
-     * The Computer sync seam (ADR 0013), supplied by the Bot Durable Object
+     * The Computer sync seam, supplied by the Bot Durable Object
      * for one admitted Turn. Absent outside a Turn, and outside one whose
      * durable roots are reachable in object storage — the Computer provider
      * then offers no sync at all, and a Computer's durable roots live on the
@@ -783,13 +738,6 @@ export function createFoundationHostedRuntimePackages(
      */
     botSelfManagement?: FlockSelfRuntimeHostV1;
     /**
-     * The MCP lifecycle seam, supplied by the Bot Durable Object for one
-     * admitted Turn. It carries the User's own MCP records, so the lifecycle
-     * tools run with exactly the authority the User already holds. Absent
-     * outside a Turn, and the tools are then not offered at all.
-     */
-    mcp?: McpLifecycleToolHostV1;
-    /**
      * The Bot Template seam, supplied by the Bot Durable Object for one
      * admitted Turn. Absent outside a Turn, and the export tool is then not
      * registered at all: staging a template runs through the User's own
@@ -815,9 +763,6 @@ export function createFoundationHostedRuntimePackages(
   },
 ): FoundationRuntimePackage[] {
   return [
-    ...(host.mcp
-      ? [runtimePackage(plan, "mcp", createMcpLifecycleRuntimePlugin(host.mcp))]
-      : []),
     ...(host.botSelfManagement
       ? [
           runtimePackage(
@@ -947,11 +892,9 @@ export function createFoundationHostedRuntimePackages(
  * The runtime resolves a Package's declared runtime entry to exactly one
  * Plugin — `resolveContribution` takes the first match and `packages.install`
  * dedupes by specifier — so two entries naming the same Contribution silently
- * lose one. `plugin-mcp` produces several on purpose: one lifecycle
- * Contribution for the Turn, and one per enabled server, up to the per-User
- * ceiling. Merging them into a single Plugin that mounts each in order is how
- * all of them reach the Bot; the order is preserved, so the lifecycle tools
- * mount before the servers whose state they report.
+ * lose one. A Package that produces several on purpose, one per enabled
+ * Capability, reaches the Bot with all of them by merging them into a single
+ * Plugin that mounts each in order; the order is preserved.
  */
 export function mergeFoundationRuntimePackages(
   packages: readonly FoundationRuntimePackage[],
@@ -983,7 +926,6 @@ export async function createFoundationEnabledRuntimePackages(
   host: {
     userId: string;
     readSecret(name: string): string | undefined;
-    composioRequest?(input: unknown): Promise<unknown>;
     pinToolCatalog?(
       connectionId: string,
       read: () => Promise<unknown>,
@@ -1011,8 +953,6 @@ export async function createFoundationEnabledRuntimePackages(
       capability: EnabledCapabilityV1,
       effectId: string,
     ): Promise<void>;
-    /** The durable home of a mount outcome, when the host has one. */
-    recordOutcome?(outcome: McpMountOutcomeV1): Promise<void>;
   },
 ): Promise<FoundationRuntimePackage[]> {
   const result: FoundationRuntimePackage[] = [];
@@ -1039,9 +979,6 @@ export async function createFoundationEnabledRuntimePackages(
       userId: host.userId,
       packageSettings: host.packageSettings?.(pkg.id) ?? {},
       readSecret: host.readSecret,
-      ...(host.composioRequest
-        ? { composioRequest: host.composioRequest }
-        : {}),
       ...(host.pinToolCatalog ? { pinToolCatalog: host.pinToolCatalog } : {}),
       authorizeConnection: () => host.authorizeConnection(capability),
       ...(connection ? { connection } : {}),
@@ -1058,7 +995,6 @@ export async function createFoundationEnabledRuntimePackages(
               host.settleCredential!(capability, effectId),
           }
         : {}),
-      ...(host.recordOutcome ? { recordOutcome: host.recordOutcome } : {}),
     });
     if (!plugin) continue;
     result.push({
@@ -1202,11 +1138,6 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   runtimeIds.delete("fly-sprite");
   // Package publication is mounted with the current User's durable host.
   runtimeIds.delete("package-publisher");
-  // Enabled provider Packages mount only after durable Connections resolve.
-  runtimeIds.delete("composio");
-  // Remote MCP servers mount per enabled Capability, after the Connection and
-  // its handshake resolve.
-  runtimeIds.delete("mcp");
   runtimeIds.delete("provider-ollama-cloud");
   runtimeIds.delete("provider-flock-ai");
   // The Web Package's `web_fetch` mounts only while its User keeps the
@@ -1217,9 +1148,9 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
     packages: plan.packages
       // An artifact-backed member is not in this table and never should be: its
       // runtime Contribution is immutable bytes the isolate host loads, not a
-      // plugin compiled into this bundle (ADR 0022 decision 8). The test is the
-      // artifact, so a first-party Package that ships as one needs no entry
-      // here and no name anywhere in this function.
+      // plugin compiled into this bundle. The test is the artifact, so a
+      // first-party Package that ships as one needs no entry here and no name
+      // anywhere in this function.
       .filter((pkg) => pkg.artifact === undefined && runtimeIds.has(pkg.id))
       .map((pkg) => ({
         specifier: pkg.specifier,

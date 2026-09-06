@@ -4,8 +4,8 @@
 // imports no Package and holds no product policy; the Durable Object hands this
 // Package a storage seam and this module decides what it writes under.
 //
-// Every key below is *parent* state. ADR 0017: the parent Bot Durable Object is
-// the authority for a task — admission, bounds, leases, lifecycle, terminal
+// Every key below is *parent* state: the parent Bot Durable Object is the
+// authority for a task — admission, bounds, leases, lifecycle, terminal
 // outcome — and the Subagent Durable Object holds only its own Session.
 
 import { TASK_ID_MAX_V1 } from "./records.js";

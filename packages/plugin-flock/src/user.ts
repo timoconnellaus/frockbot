@@ -178,7 +178,7 @@ export class FlockUserBackendContribution {
       } else {
         // A new Bot carries neither a model nor a grant. Both resolve from the
         // User's enabled Packages and Connections at its next admitted Turn
-        // (AGENTS.md Configuration shape; ADR 0019).
+        // (AGENTS.md Configuration shape).
         const registration: BotRegistrationV1 = {
           schemaVersion: 1,
           botId: command.botId,

@@ -1,10 +1,10 @@
 // The transcript index: one deep module over one narrow SQL seam.
 //
-// WHERE IT LIVES. One index per User, in the User Durable Object —
-// `AGENTS.md` § Authorities, "The User's Durable Object is the authority for
-// everything User-scoped". GrokBot keeps one `search-index.db` holding the
-// transcripts of all fourteen agents (`docs/research/grokbot-computer.md:78`),
-// and this is the same shape: one table, one query, no fan-out at read time.
+// WHERE IT LIVES. One index per User, in the User Durable Object — `AGENTS.md`
+// § Authorities, "The User's Durable Object is the authority for everything
+// User-scoped". GrokBot keeps one `search-index.db` holding the transcripts of
+// all fourteen agents, and this is the same shape: one table, one query, no
+// fan-out at read time.
 //
 // WHAT IT IS NOT. It is not authority. Every row is a projection of a settled
 // `StoredRunV1` that the owning Bot Durable Object holds, and `rebuild()`

@@ -1,11 +1,10 @@
 // The Package Authoring DTOs.
 //
-// Modelled on the DeepSeek Harness `cordis_define` / `cordis_run` split
-// (`docs/research/deepseek-harness-extension.md` §2): authoring *defines* a
-// Package — it mints its identity, records its source, and produces an
-// immutable artifact and a pending Composition generation. Activation is a
-// separate event, at the next admitted Turn. A model never overwrites a
-// version; re-authoring the same `packageId` appends the next one.
+// Modelled on the DeepSeek Harness `cordis_define` / `cordis_run` split:
+// authoring *defines* a Package — it mints its identity, records its source,
+// and produces an immutable artifact and a pending Composition generation.
+// Activation is a separate event, at the next admitted Turn. A model never
+// overwrites a version; re-authoring the same `packageId` appends the next one.
 import {
   BOT_ISOLATE_HOOK_EVENTS_V1,
   isBotIsolateHookEventNameV1,

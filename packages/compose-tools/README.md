@@ -1,9 +1,5 @@
 # `@frockbot/compose-tools`
 
-> Vendored from `tanstack-compose` commit `69163be` on 2026-09-05. FrockBot
-> keeps this copy intentionally close to upstream so it can be reviewed and
-> migrated independently.
-
 Plain composer tool definitions over a [`@frockbot/compose-core`](../compose-core)
 **client**. This package does not contain an agent loop, session, prompt or
 model integration; adapt the returned definitions to whichever agent runtime

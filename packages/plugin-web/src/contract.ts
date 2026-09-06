@@ -1,11 +1,11 @@
 // The provider-neutral web-search contract.
 //
-// The register (`docs/research/grokbot-computer.md:564`, row 47) names web
-// search as a first-class tool but records no schema, no bound, and no error
-// shape for it: none was ever measured. Everything here is FrockBot's own
-// contract, defined from first principles, and it is deliberately narrower
-// than any one provider's API so a second provider can satisfy it unchanged —
-// the two-provider check the constitution applies to the model interface.
+// The parity register names web search as a first-class tool but records no
+// schema, no bound, and no error shape for it: none was ever measured.
+// Everything here is FrockBot's own contract, defined from first principles,
+// and it is deliberately narrower than any one provider's API so a second
+// provider can satisfy it unchanged — the two-provider check the constitution
+// applies to the model interface.
 //
 // This module holds no transport. `plugin-provider-ollama-cloud` implements
 // {@link WebSearchV1} over `POST {apiBaseUrl}/api/web_search`; this Package

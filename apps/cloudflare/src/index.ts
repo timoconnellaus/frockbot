@@ -1,4 +1,3 @@
-import { decodeConnectionTriggerCatalogV1 } from "@frockbot/connection-core";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { BOT_STATE_CHANNEL_INTERNAL_PATH } from "./bot-state-channel.js";
 import {
@@ -111,10 +110,6 @@ import {
   type UsageReportV1,
 } from "@frockbot/plugin-billing";
 import {
-  decodeMcpLifecycleReceiptV1,
-  decodeMcpServerStatusViewV1,
-} from "@frockbot/plugin-mcp/records";
-import {
   decodeTemplateImportListViewV1,
   decodeTemplateImportRecordV1,
   decodeTemplateShareListViewV1,
@@ -125,10 +120,6 @@ import {
   parseTemplateShareIdV1,
   type TemplateVisibilityV1,
 } from "@frockbot/template-core";
-import {
-  decodeRevokeConnectionResultV1,
-  decodeStartConnectionResultV1,
-} from "@frockbot/connection-core";
 import {
   decodeDeploymentPolicyV1,
   type DeploymentPolicyV1,
@@ -194,8 +185,8 @@ import {
   VOICE_DICTATION_INTERNAL_PATH,
 } from "./voice-session.js";
 export { BotCapabilities } from "./bot-capabilities.js";
-// The Applet authority (ADR 0022): the Durable Object that owns one Applet
-// instance, and the loopback `CAPABILITIES` entrypoint its facet is handed.
+// The Applet authority: the Durable Object that owns one Applet instance,
+// and the loopback `CAPABILITIES` entrypoint its facet is handed.
 export { AppletCapabilities, AppletState } from "./applet-state.js";
 // The composer's dictation transport (voice plan D2): one object per User,
 // holding the browser leg and the provider leg and no authority at all.
@@ -212,9 +203,8 @@ interface Env {
   BOT_PACKAGES: BotPackageLoader;
   /**
    * Applet server artifacts, loaded from the Applet Durable Object and mounted
-   * as a facet (ADR 0022). Its own loader namespace: a loader id keeps the
-   * `env` it was first loaded with, and an Applet's `env` is not a Bot
-   * Package's.
+   * as a facet. Its own loader namespace: a loader id keeps the `env` it was
+   * first loaded with, and an Applet's `env` is not a Bot Package's.
    */
   APPLETS: WorkerLoader;
   /** One Durable Object per Applet instance, `idFromName("<userId>:<appletId>")`. */
@@ -261,7 +251,7 @@ interface Env {
    * The direct OpenAI realtime key. Present, dictation takes the direct path;
    * absent, it takes the AI Gateway's BYOK key. A Worker secret, so the
    * release workflow's `--secrets-file` list carries the name or no release
-   * ever updates it (ADR 0025).
+   * ever updates it.
    */
   OPENAI_API_KEY?: string;
   /**
@@ -295,13 +285,9 @@ interface Env {
   MACHINE_TOKEN_SECRET?: string;
   /**
    * Signs the callback `state` of every redirect-based Connection. Absent — or
-   * weak, or equal to `BETTER_AUTH_SECRET` — closes the `mcp-oauth` door: the
-   * routes answer 503 rather than trusting a forgeable identity.
+   * weak, or equal to `BETTER_AUTH_SECRET` — closes that door: the routes
+   * answer 503 rather than trusting a forgeable identity.
    */
-  FROCKBOT_AUTHORIZATION_STATE_SECRET?: string;
-  COMPOSIO_API_KEY?: string;
-  COMPOSIO_WEBHOOK_SECRET?: string;
-  COMPOSIO_TEST_URL?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   FROCKBOT_ADMIN_EMAILS?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
@@ -376,7 +362,6 @@ interface UserScopedProps {
 }
 
 interface BotStateRpc extends BotConfigurationBinding {
-  listRoutineTriggers(input: unknown): Promise<unknown>;
   writeUserWorkspaceFileV1(input: {
     schemaVersion: 1;
     userId: string;
@@ -448,9 +433,9 @@ type RpcBoundary<T> = {
 function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   // The one place a Bot Durable Object is named, and therefore the one place
   // the name has to be beyond doubt. A Subagent Durable Object is the same
-  // class in this namespace under `<userId>:<botId>#task:<taskId>` (ADR 0017),
-  // so a `#` reaching here from a path segment would let a caller name an
-  // object the directory never minted. `decodeBotIdV1` rejects it — this
+  // class in this namespace under `<userId>:<botId>#task:<taskId>`, so a `#`
+  // reaching here from a path segment would let a caller name an object the
+  // directory never minted. `decodeBotIdV1` rejects it — this
   // restates the check where the id becomes an object rather than trusting
   // that every route above remembered to.
   const id = env.BOT_STATES.idFromName(
@@ -474,7 +459,6 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     listRoutines: (request) => rpc.listRoutines(request),
-    listRoutineTriggers: (request) => rpc.listRoutineTriggers(request),
     listTasks: (request) => rpc.listTasks(request),
     readTask: (request) => rpc.readTask(request),
     stopTask: (request) => rpc.stopTask(request),
@@ -609,14 +593,6 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
     lookupConnectionCommand: (request) => rpc.lookupConnectionCommand(request),
-    composioRequest: (request) => rpc.composioRequest(request),
-    readMcpServers: (request) => rpc.readMcpServers(request),
-    executeMcpCommand: (request) => rpc.executeMcpCommand(request),
-    recordMcpMountOutcome: (request) => rpc.recordMcpMountOutcome(request),
-    startMcpAuthorization: (request) => rpc.startMcpAuthorization(request),
-    completeMcpAuthorization: (request) =>
-      rpc.completeMcpAuthorization(request),
-    revokeMcpAuthorization: (request) => rpc.revokeMcpAuthorization(request),
     getConnection: (request) => rpc.getConnection(request),
     leaseModelCredential: (request) => rpc.leaseModelCredential(request),
     settleModelCredential: (request) => rpc.settleModelCredential(request),
@@ -642,6 +618,28 @@ function deploymentPolicyStub(env: Env): DeploymentPolicyRpc {
   return env.DEPLOYMENT_POLICY.getByName(
     DEPLOYMENT_POLICY_SINGLETON_NAME,
   ) as unknown as DeploymentPolicyRpc;
+}
+
+/**
+ * Refuses account creation while signups are closed, so a closed deployment
+ * writes no `user` row. An existing account still signs in: better-auth only
+ * consults this when it is about to create one.
+ */
+async function mayCreateAccount(env: Env, email: string): Promise<boolean> {
+  if (
+    isDeploymentAdminV1(
+      { id: email, email, mode: "better-auth" },
+      env.FROCKBOT_ADMIN_EMAILS,
+    )
+  ) {
+    return true;
+  }
+  const policy = decodeDeploymentPolicyV1(
+    rpcJsonSnapshot(
+      await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
+    ),
+  );
+  return policy.signups.open;
 }
 
 /**
@@ -929,7 +927,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     ).readWorkspaceFileV1(request.path);
   }
 
-  // --- Applets (ADR 0022) --------------------------------------------------
+  // --- Applets -------------------------------------------------------------
   //
   // A deployment with no `APPLET_VIEWER_SECRET` can sign nothing, so it says
   // so once, honestly, in two places at once: a final sentence for the person
@@ -1270,10 +1268,10 @@ class R2ApplicationArtifacts
   /**
    * A Package's page, from object storage or from this bundle.
    *
-   * A first-party artifact-backed member (ADR 0022 decision 8) is built at
-   * build time and its pages travel here, so the anonymous serving origin can
-   * answer for them with nothing seeded into the bucket. The digest decides in
-   * both cases; object storage wins when it holds the object.
+   * A first-party artifact-backed member is built at build time and its pages
+   * travel here, so the anonymous serving origin can answer for them with
+   * nothing seeded into the bucket. The digest decides in both cases; object
+   * storage wins when it holds the object.
    */
   async loadPackageUiArtifact(
     contentHash: string,
@@ -1339,7 +1337,7 @@ class R2ApplicationArtifacts
 /**
  * Projects one Bot's durable settings onto the Flock identity DTO. The Bot
  * Durable Object stays the authority: this is a read-through view, so the
- * immutable registration seed (ADR 0006) never has to carry mutable identity.
+ * immutable registration seed never has to carry mutable identity.
  */
 function botIdentityView(
   botId: string,
@@ -1831,33 +1829,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           userId,
           command,
         }),
-      composioRequest: async (userId, command) =>
-        rpcJsonSnapshot(
-          await userConfigurationStub(env, userId).composioRequest({
-            schemaVersion: 1,
-            userId,
-            command,
-          }),
-        ),
-      readMcpServers: async (userId) =>
-        decodeMcpServerStatusViewV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).readMcpServers({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      executeMcpCommand: async (userId, command) =>
-        decodeMcpLifecycleReceiptV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).executeMcpCommand({
-              schemaVersion: 1,
-              userId,
-              command,
-            }),
-          ),
-        ),
       readVoiceAssistant: (userId) =>
         userConfigurationStub(env, userId).readVoiceAssistant({
           schemaVersion: 1,
@@ -1865,53 +1836,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
         }),
       openVoiceAssistant: (userId, request) =>
         openVoiceAssistant(env, userId, request),
-      // The `mcp-oauth` gateway seams. The Contribution reads the signing
-      // secret through `readSecret` and refuses to serve its routes at all
-      // when this deployment has none, so a Worker without the secret has no
-      // callback door rather than an unsigned one.
-      readSecret: (name: string) =>
-        name === "COMPOSIO_WEBHOOK_SECRET"
-          ? env.COMPOSIO_WEBHOOK_SECRET
-          : name === "COMPOSIO_TEST_URL"
-            ? env.ALLOW_DEVELOPMENT_AUTH === "true"
-              ? env.COMPOSIO_TEST_URL
-              : undefined
-            : name === "COMPOSIO_API_KEY"
-              ? env.COMPOSIO_API_KEY
-              : name === "FROCKBOT_AUTHORIZATION_STATE_SECRET"
-                ? env.FROCKBOT_AUTHORIZATION_STATE_SECRET
-                : name === "BETTER_AUTH_SECRET"
-                  ? env.BETTER_AUTH_SECRET
-                  : undefined,
-      ...(env.BETTER_AUTH_URL ? { callbackBaseUrl: env.BETTER_AUTH_URL } : {}),
-      startMcpAuthorization: async (userId, start) =>
-        decodeStartConnectionResultV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).startMcpAuthorization({
-              schemaVersion: 1,
-              userId,
-              start,
-            }),
-          ),
-        ),
-      completeMcpAuthorization: async (userId, completion) =>
-        rpcJsonSnapshot(
-          await userConfigurationStub(env, userId).completeMcpAuthorization({
-            schemaVersion: 1,
-            userId,
-            completion,
-          }),
-        ),
-      revokeMcpAuthorization: async (userId, connectionId) =>
-        decodeRevokeConnectionResultV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).revokeMcpAuthorization({
-              schemaVersion: 1,
-              userId,
-              connectionId,
-            }),
-          ),
-        ),
       lookupConnectionCommand: (userId, packageId, commandId) =>
         userConfigurationStub(env, userId).lookupConnectionCommand({
           schemaVersion: 1,
@@ -1975,16 +1899,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
               userId,
               botId,
               taskId,
-            }),
-          ),
-        ),
-      listTriggers: async (userId, botId) =>
-        decodeConnectionTriggerCatalogV1(
-          rpcJsonSnapshot(
-            await botStateStub(env, userId, botId).listRoutineTriggers({
-              schemaVersion: 1,
-              userId,
-              botId,
             }),
           ),
         ),
@@ -2232,7 +2146,9 @@ export default {
           .split(",")
           .map((host) => host.trim())
           .filter(Boolean),
-        auth: gatewayAuth(env),
+        auth: gatewayAuth(env, {
+          mayCreateAccount: (email) => mayCreateAccount(env, email),
+        }),
         saveNativeForm: (userId, command) => {
           const stub = env.USER_CONFIGURATIONS.get(
             env.USER_CONFIGURATIONS.idFromName(userId),
@@ -2249,7 +2165,9 @@ export default {
           ? {
               nativeAuth: createNativeAuth({
                 secret: env.BETTER_AUTH_SECRET,
-                auth: gatewayAuth(env),
+                auth: gatewayAuth(env, {
+                  mayCreateAccount: (email) => mayCreateAccount(env, email),
+                }),
                 returnUris: nativeReturnUris(env.NATIVE_SLICE_2_AUTH),
                 canIssueSession: async (userId) => {
                   const identity = await env.AUTH_DB.prepare(

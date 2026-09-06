@@ -33,7 +33,7 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     const stub = probe(`external-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_PACKAGE_SOURCE);
 
-    // `external` is external-*service* status (ADR 0023): it forces a
+    // `external` is external-*service* status: it forces a
     // human-readable reason onto a call that leaves for a third party. An
     // isolate runs this deployment's own reviewed code with `globalOutbound:
     // null`, so it is not that — and calling it external had a cost. The

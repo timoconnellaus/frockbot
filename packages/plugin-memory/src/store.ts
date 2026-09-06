@@ -13,8 +13,8 @@
 // HIBERNATION SEAM. "The Agent loop, Memory, Skills, Package composition, and
 // Routines function correctly while the Computer is hibernated and do not wake
 // it." Whoever supplies `WorkspaceFilesV1` owns that promise; in production it
-// is the object-storage store of ADR 0013, so a read here is an object-storage
-// read whether or not a Computer host is running.
+// is the object-storage store behind the durable roots, so a read here is an
+// object-storage read whether or not a Computer host is running.
 import {
   writerOwnsMemoryPathV1,
   type WorkspaceEntryV1,

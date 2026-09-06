@@ -1,4 +1,4 @@
-// A compaction that outlives the Turn, and yields to the next one (ADR 0030).
+// A compaction that outlives the Turn, and yields to the next one.
 import { describe, expect, test } from "bun:test";
 import {
   compactionInFlightV1,

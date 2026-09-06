@@ -44,18 +44,17 @@ import {
 const encoder = new TextEncoder();
 
 /**
- * The durable roots this provider guarantees, laid out to match GrokBot's box
- * (`docs/research/grokbot-computer.md`): `HOME=/home/box`, durable application
- * data under `agent-data`, per-Bot state under `agents/<key>`, and User-shared
- * memory beside it.
+ * The durable roots this provider guarantees, laid out to match GrokBot's
+ * box: `HOME=/home/box`, durable application data under `agent-data`, per-Bot
+ * state under `agents/<key>`, and User-shared memory beside it.
  *
  * Memory roots are `read-only` from the Computer's point of view. "The Memory
  * Package is the single writer of Memory roots ... the Workspace presents
- * Memory roots read-only through the durable-root sync" (ADR 0013). That sync
+ * Memory roots read-only through the durable-root sync". That sync
  * is `./sync.ts`: it materializes Memory roots at these mount paths from
  * object storage and never pushes a change back out of them. The User-global
- * instruction root is read-only for the same reason and by the same mechanism
- * (ADR 0016): the Skills Package is its single writer, so a shared root needs
+ * instruction root is read-only for the same reason and by the same
+ * mechanism: the Skills Package is its single writer, so a shared root needs
  * no conflict machinery and no Turn has to wake a Computer to read a Skill.
  *
  * `package-declared` roots are User-scoped, because Package availability is
@@ -75,8 +74,7 @@ export const FLY_WORKSPACE_LAYOUT: WorkspaceLayoutV1 = {
       // GrokBot's `agent-data/workflows/<slug>/SKILL.md`: the User's own
       // Skills, global across all of their assistants. Read-only on the
       // Computer — the Skills Package writes it through object storage and
-      // the sync only materializes it (ADR 0016, extending ADR 0013's Memory
-      // exception).
+      // the sync only materializes it, as it does the Memory roots.
       kind: "user-instructions",
       scope: "user",
       mountPath: "/home/box/agent-data/workflows",
@@ -177,8 +175,7 @@ function commandFor(
 }
 
 /**
- * The durable-root sync of ADR 0013, behind the provider-neutral
- * `ComputerSyncV1`.
+ * The durable-root sync, behind the provider-neutral `ComputerSyncV1`.
  *
  * Everything Fly-specific stops here: the reconciliation itself is
  * `./sync.ts`, the object-storage side and the Durable Object records come
@@ -365,7 +362,7 @@ function summarize(report: WorkspaceSyncReportV1): ComputerSyncSummaryV1 {
  * `cwd` and `env` become `cd` and `export` lines rather than transport
  * options, and `stdin` is fed to the command from a heredoc, because the whole
  * request travels as a script on the command's own stdin. Nothing reaches an
- * argv, which is what the 431 recorded in ADR 0004 cost to learn.
+ * argv, which is what the 431 cost to learn.
  */
 function composed(request: ComputerExecRequest): string {
   const command = commandFor(request.executable, request.args);
@@ -529,7 +526,7 @@ function handle(
     },
     // A viewer and a human-control lease are reachable from the Durable
     // Object now. They were not before: both need the Sprite's URL and its
-    // `flock`, and neither was reachable from workerd (ADR 0004).
+    // `flock`, and neither was reachable from workerd.
     viewer: {
       open: async (options) => {
         const result = await computer.viewer(options);
@@ -585,7 +582,7 @@ function handle(
 }
 
 /**
- * One Sprite per User (ADR 0012). The Sprite name is derived from the User and
+ * One Sprite per User. The Sprite name is derived from the User and
  * from nothing else, so every Bot the User owns lands on the same Computer,
  * sharing its browser profile, installed tooling, and Workspace.
  */
@@ -602,7 +599,7 @@ export class FlySpriteComputerProvider implements ComputerProvider {
   constructor(
     private readonly fixedComputer?: FlySpriteComputer,
     /**
-     * The shared Computer host (ADR 0004). Absent, and every Computer this
+     * The shared Computer host. Absent, and every Computer this
      * provider opens is unconfigured: the provider Package holds no Sprites
      * SDK and no token, so without a host there is no compute to reach.
      */
@@ -619,8 +616,8 @@ export class FlySpriteComputerProvider implements ComputerProvider {
   ) {}
 
   /**
-   * The one Sprite backing a User's Computer. One Computer per User (ADR
-   * 0012): every Bot the User owns is a tenant on the instance this returns.
+   * The one Sprite backing a User's Computer. One Computer per User: every
+   * Bot the User owns is a tenant on the instance this returns.
    */
   computerFor(identity: ComputerIdentityV1): FlySpriteComputer {
     if (this.fixedComputer) return this.fixedComputer;

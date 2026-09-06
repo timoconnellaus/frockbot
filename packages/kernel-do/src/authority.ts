@@ -199,12 +199,12 @@ export interface BotDurableAuthorityHooks<Snapshot> {
   }): Promise<Record<string, unknown>>;
   /**
    * Whether the named provider can be asked what happened to a model request
-   * it never answered (ADR 0028).
+   * it never answered.
    *
    * Synchronous and pure, because it is consulted inside the recovery
    * transaction: it answers from what the deployment knows about a provider
    * Package, never by reaching one. Absent means every provider reconciles,
-   * which is the behaviour that predates the ADR.
+   * which is the older behaviour.
    */
   providerReconciles?: ProviderReconcilesV1;
 }
@@ -1360,7 +1360,7 @@ export class BotDurableAuthority<Snapshot> {
    * path: recovery, compaction and audit use `readStoredRun` and therefore
    * receive exact events, the transcript uses `readStoredRunForDisplay`, and a
    * debug snapshot never hydrates a multi-megabyte prompt merely to cut it
-   * again (ADR 0038).
+   * again.
    */
   async readRunEventProjections(runId: string): Promise<
     | {
@@ -2052,16 +2052,15 @@ export class BotDurableAuthority<Snapshot> {
    * Settles a Turn whose model outcome is unknown, or parks it when somebody
    * can still be asked — and never lets the uncertainty escape as a throw.
    *
-   * This is ADR 0028 applied to the live path. Recovery already refuses to park
-   * a run whose provider offers no retrieval, because parking there is not
-   * caution but a dead end; the executing path did not, and the asymmetry is
-   * what produced the blocker. A model request that ran past its budget threw
-   * out of the Agent as an uncertain outcome, this method's predecessor parked
-   * the run and rethrew, and the `POST /turns` the composer was holding open
-   * answered 500 — so the person read "Couldn't reach the Bot. Check your
-   * connection", which blamed their network for a model that took too long,
-   * and the Bot stayed wedged behind a banner whose only possible resolution
-   * was the settlement we could have written here.
+   * Recovery already refuses to park a run whose provider offers no retrieval,
+   * because parking there is not caution but a dead end; the executing path did
+   * not, and the asymmetry is what produced the blocker. A model request that
+   * ran past its budget threw out of the Agent as an uncertain outcome, this
+   * method's predecessor parked the run and rethrew, and the `POST /turns` the
+   * composer was holding open answered 500 — so the person read "Couldn't reach
+   * the Bot. Check your connection", which blamed their network for a model
+   * that took too long, and the Bot stayed wedged behind a banner whose only
+   * possible resolution was the settlement we could have written here.
    *
    * When the provider does reconcile, nothing changes: the run parks, the
    * caller still rethrows, and a later attempt can genuinely retrieve the
@@ -2079,7 +2078,7 @@ export class BotDurableAuthority<Snapshot> {
     const provider = latestModelRequestProviderV1(events);
     const reconciles = this.hooks.providerReconciles ?? (() => true);
     // A model's retrieval policy says nothing about an unresolved tool effect.
-    // Preserve its intent for the tool reconciliation path (ADR 0028).
+    // Preserve its intent for the tool reconciliation path.
     const unresolvedTool =
       events.some((event) => event.type === "tool/call") &&
       [...validateToolOccurrenceJournal(events).values()].some(
@@ -2232,7 +2231,7 @@ export class BotDurableAuthority<Snapshot> {
         return undefined;
       }
       if (plan.kind === "fail") {
-        // The repairs matter when the failure is ADR 0028's: they close the
+        // The repairs matter on an unreconcilable failure: they close the
         // tool occurrences the restart left open, so the settled run's journal
         // is a complete account rather than one that stops mid-sentence twice.
         const events = plan.repairs

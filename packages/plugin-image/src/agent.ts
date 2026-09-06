@@ -69,8 +69,7 @@ import {
 /**
  * The turn types the manifest's `image-generation` Capability admits, and
  * therefore the durable ceiling this Contribution registers under. Image
- * generation is a work tool on every turn type (`docs/research/
- * grokbot-computer.md` row 47, `buildTurnTools`), and the two must agree: the
+ * generation is a work tool on every turn type, and the two must agree: the
  * ceiling here is the manifest's `admission.turnTypes` restated as code the
  * registry can read at mount time.
  */
@@ -604,11 +603,11 @@ async function recordGenerated(
 }
 
 /**
- * The runtime Contribution. Registers `generate_image` on every turn type —
- * it is a work tool, and the parity register puts image generation on
- * automation turns as well as chat ones (`docs/research/grokbot-computer.md`
- * row 47). The manifest's `admission` ceiling is what bounds it durably; the
- * definition declares none, which the kernel reads as "all of them".
+ * The runtime Contribution. Registers `generate_image` on every turn type — it
+ * is a work tool, and the parity register puts image generation on automation
+ * turns as well as chat ones. The manifest's `admission` ceiling is what bounds
+ * it durably; the definition declares none, which the kernel reads as "all of
+ * them".
  */
 export function createImageRuntimePlugin(
   host: ImageRuntimeHostV1,

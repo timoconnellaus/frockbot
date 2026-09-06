@@ -59,10 +59,6 @@ export interface NonSecretWorkerSettingV1 extends ProductionSecretV1 {
  */
 export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   {
-    name: "FROCKBOT_AUTHORIZATION_STATE_SECRET",
-    why: "Signs and binds public Connection callbacks to their durable User and pending authorization; independent of the session secret.",
-  },
-  {
     name: "BETTER_AUTH_URL",
     why: "The deployment's own origin; every sign-in redirect is built from it.",
   },
@@ -113,18 +109,6 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
 export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1[] =
   [
     {
-      name: "COMPOSIO_WEBHOOK_SECRET",
-      why: "Verifies service event deliveries against the project webhook subscription.",
-      degraded:
-        "service-event Routines are unavailable; existing Connections and tools keep working",
-    },
-    {
-      name: "COMPOSIO_API_KEY",
-      why: "Connect Link and toolkit API for external services.",
-      degraded:
-        "Composio Connections are unavailable; the Package advertises nothing",
-    },
-    {
       name: "FROCKBOT_ADMIN_EMAILS",
       why: "The identities allowed to open Admin.",
       degraded:
@@ -137,7 +121,7 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
     },
     {
       name: "FROCK_AI_GATEWAY_TOKEN",
-      why: "The `cf-aig-authorization` bearer for the AI Gateway (ADR 0025).",
+      why: "The `cf-aig-authorization` bearer for the AI Gateway.",
       degraded:
         "Frock AI falls back to the `AI` binding and the Auto model fails",
     },
@@ -161,12 +145,6 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
  */
 export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] =
   [
-    {
-      name: "COMPOSIO_TEST_URL",
-      why: "Provider HTTP stand-in used only with development authentication; never deployed.",
-      forbiddenLive:
-        "it points Composio's provider calls at a stand-in host instead of Composio",
-    },
     {
       name: "NATIVE_SLICE_2_AUTH",
       why: "Qualification gate; not enabled by the production configuration.",

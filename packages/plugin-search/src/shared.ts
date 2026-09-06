@@ -43,9 +43,9 @@ export class SearchDecodeError extends Error {
  * What produced one indexed row.
  *
  * `media` exists because the parity register's `search-index.db` carries a
- * `media` table beside `messages` (`docs/research/grokbot-computer.md:169`).
- * FrockBot has no attachment concept yet, so the kind is declared and never
- * written: the schema does not change when attachments arrive.
+ * `media` table beside `messages`. FrockBot has no attachment concept yet, so
+ * the kind is declared and never written: the schema does not change when
+ * attachments arrive.
  */
 export type SearchRowKindV1 = "user" | "assistant" | "tool" | "media";
 

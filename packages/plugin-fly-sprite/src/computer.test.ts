@@ -24,7 +24,7 @@ import {
 // The Computer's own shell scripts — the provisioning document, `control.sh`'s
 // `flock` lease, and `ensure-agent.sh`'s slot reclaim — are run for real in
 // `@frockbot/computer-host-runtime`'s suite. They moved there with the scripts
-// themselves (ADR 0004): a Bot Durable Object no longer installs them, so a
+// themselves: a Bot Durable Object no longer installs them, so a
 // test that stood up a provider to read one out of a provisioning command was
 // testing the wrong module. What is left here is this Package's own subject:
 // what a Bot tenant means on a Computer, and what the provider-neutral
@@ -141,8 +141,8 @@ describe("Fly Sprite computer", () => {
     expect(
       flySpriteNameForBot("general", `f${"x".repeat(62)}`).length,
     ).toBeLessThanOrEqual(63);
-    // ADR 0012: the Sprite name is derived from the User and nothing else, so
-    // every Bot the User owns lands on the same Computer.
+    // The Sprite name is derived from the User and nothing else, so every Bot
+    // the User owns lands on the same Computer.
     expect(flySpriteNameForComputer({ userId: "owner" })).toBe(
       flySpriteNameForComputer({ userId: " owner " }),
     );
@@ -342,7 +342,7 @@ describe("Fly Sprite computer", () => {
     expect(script).toContain("export FROCKBOT_BOT_ID='General'");
     expect(script).toContain(`cd '/workspaces/${computerBotKey("General")}'`);
     // The script is the request body, not an argv. That is the whole point of
-    // the host seam: a ~2 KB argv is what answered HTTP 431 (ADR 0004).
+    // the host seam: a ~2 KB argv is what answered HTTP 431.
     expect(host.commands.at(-1)?.script).toBe(script);
   });
 
@@ -482,7 +482,7 @@ describe("Fly Sprite computer", () => {
     expect(host.viewerSessions).toEqual([]);
   });
 
-  // ADR 0012: one Sprite per User, every Bot a tenant on it. Two Bots resolve
+  // One Sprite per User, every Bot a tenant on it. Two Bots resolve
   // to one provider Computer, one Sprite name, and one browser profile; only
   // their directories and desktops differ.
   test("puts two Bots of one User on one Sprite", async () => {
@@ -629,7 +629,7 @@ describe("Fly Sprite computer", () => {
     );
 
     // Neither was reachable before: both need the Sprite's URL and its
-    // `flock`, and neither was reachable from workerd (ADR 0004).
+    // `flock`, and neither was reachable from workerd.
     const session = await computer.viewer?.open({ signal: signal() });
     expect(session?.url).toContain("/vnc.html#");
 

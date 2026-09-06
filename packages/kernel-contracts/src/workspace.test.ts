@@ -136,8 +136,8 @@ describe("durable roots", () => {
   });
 
   test("the User-global instruction root round-trips through its key and its decoder", () => {
-    // ADR 0016 names the root `users/<id>/skills/`, and the object store keys
-    // every file under `workspace/<root key>/`, so the key is that location.
+    // The root is named `users/<id>/skills/`, and the object store keys every
+    // file under `workspace/<root key>/`, so the key is that location.
     expect(workspaceRootKeyV1(userInstructionRoot())).toBe(
       "users/user-1/skills",
     );
@@ -171,9 +171,9 @@ describe("durable roots", () => {
         userId: "user-1",
       }),
     ).toBe(false);
-    // ADR 0013 for Memory, ADR 0016 for the User-global instruction root: both
-    // have a single writer over object storage, so the Computer presents them
-    // read-only and the sync never pushes out of them.
+    // Memory and the User-global instruction root both have a single writer
+    // over object storage, so the Computer presents them read-only and the
+    // sync never pushes out of them.
     expect(isWorkspaceComputerReadOnlyRootV1(userInstructionRoot())).toBe(true);
     expect(
       isWorkspaceComputerReadOnlyRootV1({
@@ -563,9 +563,9 @@ describe("Skill sources", () => {
   });
 
   test("a Skill in the User-global root written by any of the User's Bots is loadable", () => {
-    // The whole point of the shared tier: Bot A authors, Bot B follows. ADR
-    // 0016 — authority does not widen, because a Bot writing there writes
-    // under authority it already holds.
+    // The whole point of the shared tier: Bot A authors, Bot B follows.
+    // Authority does not widen, because a Bot writing there writes under
+    // authority it already holds.
     expect(
       isLoadableSkillSourceV1(
         skillSource(userInstructionRoot(), { ...bot, botId: "bot-2" }),

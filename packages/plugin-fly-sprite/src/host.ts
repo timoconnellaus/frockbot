@@ -321,7 +321,7 @@ export const flySpriteHostPlugin: Plugin.Function =
     ? createFlySpriteHostPlugin(
         new FlySpriteComputer({
           respectHumanControl: true,
-          // One Sprite per User (ADR 0012): the Bot is a tenant on it.
+          // One Sprite per User: the Bot is a tenant on it.
           spriteName: flySpriteNameForComputer({ userId: defaultUserId }),
         }),
         {

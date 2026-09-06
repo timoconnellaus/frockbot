@@ -2,9 +2,7 @@
 // Object and a Dynamic Worker loaded for a non-first-party Package, plus the
 // narrow interfaces the kernel declares for the host that mounts it.
 //
-// The shape follows `docs/plans/kernel-and-isolate.md` Step 4 with the three
-// contract changes the Worker Loader spike forced
-// (`docs/research/spike-worker-loader-from-do.md`):
+// Three contract changes the Worker Loader forced:
 //
 //  1. `CAPABILITIES` cannot be an `RpcTarget` placed in `env` — workerd rejects
 //     it with `DataCloneError`. It is a loopback service binding minted with
@@ -232,7 +230,7 @@ export type IsolateNotificationOutcomeV1 =
   { status: "recorded" } | IsolateCapabilityFailureV1;
 
 /**
- * The Applet capability a Bot isolate calls (ADR 0022, plan §3).
+ * The Applet capability a Bot isolate calls.
  *
  * One tagged request rather than seven methods on the stub: the operations
  * share a scope, an authority, and an outcome shape, and the wrapper narrows
@@ -385,11 +383,11 @@ export interface BotPackageContextV1 {
     ): Promise<IsolateWorkspaceOutcomeV1>;
   };
   /**
-   * The User's Applets (ADR 0022). Account-wide: every Bot of this User sees
-   * every Applet. `publish` is a durable effect — it reads the built Applet
-   * from the Applets Package's durable root, verifies its manifest against the
-   * bytes, writes immutable artifacts, records the generation, mounts it, and
-   * proposes a new Composition generation for this Bot.
+   * The User's Applets. Account-wide: every Bot of this User sees every
+   * Applet. `publish` is a durable effect — it reads the built Applet from the
+   * Applets Package's durable root, verifies its manifest against the bytes,
+   * writes immutable artifacts, records the generation, mounts it, and proposes
+   * a new Composition generation for this Bot.
    */
   readonly applets: {
     list(): Promise<IsolateAppletsOutcomeV1>;

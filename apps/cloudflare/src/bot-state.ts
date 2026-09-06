@@ -507,10 +507,9 @@ export class BotState extends DurableObject<BotStateEnv> {
               // plan, or a member could be in one and not the other.
               compileApplication: this.compileApplication,
               // The immutable bytes of every first-party artifact-backed
-              // member the application ships (ADR 0022 decision 8). The store
-              // reads object storage first and falls back to these, so a
-              // deploy needs no seeding step for a Package that is already in
-              // this bundle.
+              // member the application ships. The store reads object storage
+              // first and falls back to these, so a deploy needs no seeding
+              // step for a Package that is already in this bundle.
               bundledPackageArtifacts: FIRST_PARTY_PACKAGE_ARTIFACTS_V1,
               // The Durable Object owns the kernel authority; the Shell
               // Package supplies only its configuration and Composition
@@ -1776,8 +1775,8 @@ export class BotState extends DurableObject<BotStateEnv> {
    * same way the other Bot RPCs do: a Bot that is not this User's is not found.
    *
    * This is the *parent* object's answer. A Subagent Durable Object has no
-   * route of its own and holds no task list: it holds one Session, and ADR 0017
-   * leaves every authority here.
+   * route of its own and holds no task list: it holds one Session, and every
+   * authority stays here.
    */
   async listTasks(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
@@ -1821,7 +1820,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     return shell.stopTaskForUser(identity, request.taskId as string);
   }
 
-  /** The Subagent Durable Object's cancellation door (ADR 0017). */
+  /** The Subagent Durable Object's cancellation door. */
   async stopSubagentTask(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
@@ -1837,7 +1836,7 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   /**
-   * The Subagent Durable Object's door (ADR 0017).
+   * The Subagent Durable Object's door.
    *
    * It records the task and arms its own alarm; the Turn runs on that alarm.
    * The parent is still inside the Turn that dispatched when this returns, so
@@ -1877,7 +1876,7 @@ export class BotState extends DurableObject<BotStateEnv> {
 
   /**
    * The messages a parent has queued for one of its tasks, claimed by the
-   * child that is running it (ADR 0017).
+   * child that is running it.
    *
    * The claim marks what it hands over in the parent's own transaction, so a
    * child that retries a step reads the marks back rather than the message.
@@ -1934,18 +1933,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     return shell.listRoutines(identity);
   }
 
-  async listRoutineTriggers(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    return shell.listRoutineTriggers(identity);
-  }
   async deliverConnectionEvent(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

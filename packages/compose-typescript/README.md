@@ -1,9 +1,5 @@
 # `@frockbot/compose-typescript`
 
-> Vendored from `tanstack-compose` commit `69163be` on 2026-09-05. FrockBot
-> keeps this copy intentionally close to upstream so it can be reviewed and
-> migrated independently.
-
 The **source checker** for written plugins. A plugin entry can carry **plugin
 source** — TypeScript in a string, typically written by an agent — instead of a
 plugin reference. This package type-checks that source against the declarations

@@ -3,10 +3,9 @@
 // PARITY. GrokBot ships four read-only skills under
 // `managed-skills/skills/<slug>/SKILL.md` — `add-connector`,
 // `export-bot-template`, `import-bot-template`, `learn-from-demonstration` —
-// which `update_state` cannot edit (`docs/research/grokbot-computer.md` lines
-// 73-74, 284-285). The four slugs and the shape of what each one is for are
-// mirrored here; every body is written for FrockBot's own tools, because a
-// recipe that names another product's tools is not a recipe.
+// which `update_state` cannot edit. The four slugs and the shape of what each
+// one is for are mirrored here; every body is written for FrockBot's own
+// tools, because a recipe that names another product's tools is not a recipe.
 //
 // WHERE THEY LIVE, AND WHY IT IS NOT A ROOT. These are string constants in
 // this module, so they are bytes of the `plugin-skills` artifact and nothing
@@ -171,7 +170,7 @@ export const MANAGED_SKILL_DOCUMENTS_V1: readonly ManagedSkillDocumentV1[] = [
   { slug: "export-bot-template", text: EXPORT_BOT_TEMPLATE },
   { slug: "import-bot-template", text: IMPORT_BOT_TEMPLATE },
   { slug: "learn-from-demonstration", text: LEARN_FROM_DEMONSTRATION },
-  // The Applets SDK reference (ADR 0022). It is authored in
+  // The Applets SDK reference. It is authored in
   // `packages/plugin-applets/skills/applets.md`, beside the Package it
   // documents, and copied here by `scripts/build-applets-package.ts`: the
   // Applets Package has no in-process code to carry it, and the managed set is

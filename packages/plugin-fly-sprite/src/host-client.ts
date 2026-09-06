@@ -1,5 +1,5 @@
 /**
- * The Bot Durable Object's side of the shared Computer host (ADR 0004).
+ * The Bot Durable Object's side of the shared Computer host.
  *
  * This is a transport and nothing else. It speaks the v1 protocol of
  * `@frockbot/computer-host-protocol` over the `COMPUTER_HOST` service binding,
@@ -114,15 +114,15 @@ export interface ComputerHostClientOptions {
    * container reached by any other path still refuses.
    */
   hostToken: string;
-  /** Whose Computer this is. One Computer per User (ADR 0012). */
+  /** Whose Computer this is. One Computer per User. */
   identity: { userId: string };
   /** The Bot making the call, a tenant on that Computer. */
   tenant: { botId: string };
   /**
    * The opaque reference the host resolves to a credential. It carries no
    * credential material and is `sprites:user:<userId>` unless a caller names
-   * another; shipping it from day one is what lets the ADR 0004 credential
-   * broker land without a protocol version bump.
+   * another; shipping it from day one is what lets the credential broker land
+   * without a protocol version bump.
    */
   credentialRef?: string;
   origin?: string;
@@ -409,8 +409,8 @@ export class ComputerHostClient {
    *
    * The script travels in the request body and reaches the command on its
    * stdin. It is never argv: the Sprites SDK appends every argv element to the
-   * request URL, and a provisioning script answered HTTP 431 — the measurement
-   * recorded in ADR 0004 and the reason this seam exists.
+   * request URL, and a provisioning script answered HTTP 431 — the
+   * measurement that is the reason this seam exists.
    */
   async exec(
     command: ComputerHostExecCommandV1,

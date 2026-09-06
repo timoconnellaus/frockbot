@@ -7,11 +7,11 @@
 // test supplies them over a Map. The two behave the same because this file,
 // not R2, is the contract.
 //
-// Conditional semantics are the whole point of the interface. ADR 0013 names
-// "object storage conditional writes (`If-Match` on the object's ETag)" as the
-// mechanism by which a write that has not seen the current generation loses
-// rather than overwrites, so `put` must be able to fail a precondition and say
-// so as a value.
+// Conditional semantics are the whole point of the interface. Object storage
+// conditional writes (`If-Match` on the object's ETag) are the mechanism by
+// which a write that has not seen the current generation loses rather than
+// overwrites, so `put` must be able to fail a precondition and say so as a
+// value.
 
 /** An object's metadata, without its bytes. */
 export interface ObjectHeadV1 {

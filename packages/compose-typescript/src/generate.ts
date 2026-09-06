@@ -451,7 +451,7 @@ export function composeDeclarations(
   let entry = options.entry;
   let tsconfig = options.tsconfig;
   return {
-    name: `tanstack-compose-declarations:${publicId}`,
+    name: `frock-compose-declarations:${publicId}`,
     enforce: "pre",
     configResolved(resolved) {
       entry = resolve(resolved.root, options.entry);

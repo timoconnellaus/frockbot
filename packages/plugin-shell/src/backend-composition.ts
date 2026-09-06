@@ -187,7 +187,7 @@ export interface ShellIsolateMountOptions {
    * Content address of the User-enabled bindings this isolate is granted — the
    * enabled set *and* the Composition generation whose `CAPABILITIES` stub is
    * baked into its `env`. Required: it is what keeps a cached isolate from
-   * answering under stale authority (ADR 0019).
+   * answering under stale authority.
    */
   bindingDigest: string;
   compatibilityDate: string;
@@ -199,14 +199,14 @@ export interface ShellIsolateMountOptions {
  * How an Applet member's tools reach their instance.
  *
  * The Applet Durable Object forwards to the facet; a facet stub is not
- * serializable and never leaves that object, so this is a call, never a stub
- * (`docs/research/spike-applet-facets.md` §8). Absent when the Bot Durable
- * Object has no Applet binding: an Applet member's tools are then simply not
- * registered, exactly as an isolate member fails without a loader.
+ * serializable and never leaves that object, so this is a call, never a stub.
+ * Absent when the Bot Durable Object has no Applet binding: an Applet member's
+ * tools are then simply not registered, exactly as an isolate member fails
+ * without a loader.
  *
  * `generationId` is the Applet generation this Turn's Composition pinned, and
  * it is not decoration: the Applet Durable Object runs that generation or
- * refuses the call (ADR 0041). Without it a publish landing mid-Turn would
+ * refuses the call. Without it a publish landing mid-Turn would
  * execute new code behind the schema and provenance the model was shown.
  */
 export interface ShellAppletMountOptions {
@@ -381,12 +381,12 @@ export function createShellCompositionHost(
         }
       }
 
-      // Applet members. Their tools are ordinary tools in this Bot's catalog
-      // (ADR 0022 decision 4), pinned to this generation like every other
-      // member, and routed to the Applet Durable Object. An Applet contributes
-      // no module and no manifest, so there is nothing here to mount, load, or
-      // health-check: the instance's own health check ran when its generation
-      // was published, and its failure is recorded there.
+      // Applet members. Their tools are ordinary tools in this Bot's catalog,
+      // pinned to this generation like every other member, and routed to the
+      // Applet Durable Object. An Applet contributes no module and no manifest,
+      // so there is nothing here to mount, load, or health-check: the
+      // instance's own health check ran when its generation was published, and
+      // its failure is recorded there.
       const unregisterApplets: (() => void)[] = [];
       for (const applet of generation.applets ?? []) {
         if (!options.applets) {

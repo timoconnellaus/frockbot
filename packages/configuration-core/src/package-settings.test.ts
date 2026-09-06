@@ -276,8 +276,8 @@ describe("the Package setting values codec", () => {
 
 describe("resolving stored values for a running Package", () => {
   test("keeps what the Package declares and drops the rest", () => {
-    // `catalog-setup-field` is what a Catalog install wrote (ADR 0014): it is
-    // in the same bag and is not one of this Package's declared settings.
+    // `catalog-setup-field` is what a Catalog install wrote: it is in the same
+    // bag and is not one of this Package's declared settings.
     expect(
       resolvePackageSettingValuesV1(declared, {
         verbose: true,

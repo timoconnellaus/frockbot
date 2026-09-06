@@ -68,13 +68,33 @@ describe("screenshotForAgent", () => {
       script!.indexOf("scrot"),
     );
     expect(script).toContain("export DISPLAY=':100'");
-    expect(script).toContain(`scrot --overwrite '${PATH}'`);
+    expect(script).toContain(`,720 '${PATH}'`);
     // Read back rather than left on disk. That is the whole reason the
     // Workspace can record the Bot as the writer of these bytes.
     expect(host.reads).toEqual([{ botId: "health", path: PATH }]);
     expect(captured.display).toBe(":100");
     expect(captured.bytes.byteLength).toBe(64);
     expect(Date.parse(captured.capturedAt)).toBeGreaterThan(0);
+  });
+
+  test("clips the capture to the Bot's own slot of the shared screen", async () => {
+    const host = hostWith(64);
+    const computer = computerOn(host);
+    const bot = computer.bot("health");
+    await bot.ensure(signal());
+
+    await bot.screenshot(signal());
+
+    const script = host.scripts.find((candidate) =>
+      candidate.includes("scrot"),
+    )!;
+    // The screen carries every slot at once, so an unclipped capture would
+    // hand this Bot its siblings' windows.
+    expect(script).toContain(`SLOT=$(cat '${BOTS_ROOT}/${KEY}/slot')`);
+    expect(script).toContain(
+      `scrot --overwrite -a $((SLOT * 1280)),0,1280,720 '${PATH}'`,
+    );
+    expect(script).not.toContain(`scrot --overwrite '${PATH}'`);
   });
 
   test("refuses a capture while a human holds the takeover lease", async () => {

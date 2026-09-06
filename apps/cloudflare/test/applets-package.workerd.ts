@@ -1,4 +1,4 @@
-// The pressure test ADR 0022 decision 8 asks for, in workerd.
+// The Applets Package pressure test, in workerd.
 //
 // "The Applets Package itself must be buildable inside a Bot with identical
 // functionality" (plan D6). This suite takes the exact bytes the foundation
@@ -186,8 +186,8 @@ describe("the same Package authored through package_author", () => {
     // manifest claims: the isolate host refuses a mount whose health report
     // disagrees with the manifest, so this list is the module's own answer.
     const registered = await stub.mountedToolNames();
-    // An isolate-loaded member's tools are disclosed under its Package id
-    // (ADR 0023), so the registry names them `applets/<tool>`.
+    // An isolate-loaded member's tools are disclosed under its Package id, so
+    // the registry names them `applets/<tool>`.
     for (const tool of shipped.tools ?? []) {
       expect(registered).toContain(`applets/${tool.name}`);
     }

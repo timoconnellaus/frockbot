@@ -128,10 +128,10 @@ export interface StoredFlockReceiptV1 {
 /**
  * One Bot's live identity, as the Flock directory surfaces it.
  *
- * The registration seed in the User Durable Object is immutable (ADR 0006), so
- * the mutable half of a Bot's identity — the current name, its provenance, a
- * title and whether the sidebar hides it — is read through
- * from the Bot Durable Object that owns it rather than copied into the seed.
+ * The registration seed in the User Durable Object is immutable, so the mutable
+ * half of a Bot's identity — the current name, its provenance, a title and
+ * whether the sidebar hides it — is read through from the Bot Durable Object
+ * that owns it rather than copied into the seed.
  */
 export interface BotIdentityViewV1 {
   schemaVersion: 1;
@@ -392,7 +392,7 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
  * read of it — which takes out the sidebar and Bot creation together, because
  * both start by decoding the stored directory. Migration drops the fields
  * without interpreting them: a Bot's model and tools now resolve from the
- * User's enabled Packages and Connections at its next admitted Turn (ADR 0019).
+ * User's enabled Packages and Connections at its next admitted Turn.
  */
 const PRE_ACCOUNT_WIDE_REGISTRATION_FIELDS_V1 = [
   "initialModel",

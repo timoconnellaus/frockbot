@@ -361,13 +361,12 @@ export class OllamaCloudClient {
   /**
    * Prove an API key is authorized for inference.
    *
-   * Measured against https://ollama.com on 2026-08-31 and recorded in
-   * `docs/research/ollama-cloud-auth.md`: `GET /api/tags`, `GET /v1/models`,
-   * and `POST /api/show` answer 200 for a valid key, a garbage key, and no key
-   * at all, so no catalog read can validate a key. `POST /api/chat` does
-   * authenticate: 401 `{"error":"Unauthorized"}` for a bad or absent key, 200
-   * for a valid one. A one-token completion is the cheapest authenticated call
-   * (~70 tokens of usage, `done_reason: "length"`).
+   * Measured against https://ollama.com on 2026-08-31: `GET /api/tags`, `GET
+   * /v1/models`, and `POST /api/show` answer 200 for a valid key, a garbage
+   * key, and no key at all, so no catalog read can validate a key. `POST
+   * /api/chat` does authenticate: 401 `{"error":"Unauthorized"}` for a bad or
+   * absent key, 200 for a valid one. A one-token completion is the cheapest
+   * authenticated call (~70 tokens of usage, `done_reason: "length"`).
    *
    * The assistant content is never parsed or retained; only the shape of the
    * response is confirmed.

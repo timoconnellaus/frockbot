@@ -9,18 +9,17 @@
 // Routines function correctly while the Computer is hibernated and do not wake
 // it." Nothing here reaches the Computer registry, a Computer provider, or a
 // Sprite. The Workspace surface handed to the Skills Package is a binding on
-// the Durable Object's environment, and the durable-root sync of ADR 0013
-// backs it from object storage; whether a Computer host happens to be running
-// changes nothing above this line.
+// the Durable Object's environment, and the durable-root sync backs it from
+// object storage; whether a Computer host happens to be running changes nothing
+// above this line.
 //
 // SEAM. `WORKSPACE_FILES` is bound in production by
 // `apps/cloudflare/src/workspace.ts`: `WorkspaceFilesV1` over object storage,
-// with every generation recorded in this Bot's Durable Object (Step 3a of
-// `docs/plans/slice-2.md`). A host that binds nothing — a test, a shell with no
-// bucket — still gets `undefined` here, and the Skills Package is then not
-// mounted at all: a Turn with no readable instruction root loads no
-// instructions, visibly, rather than inventing a second store to read them
-// from.
+// with every generation recorded in this Bot's Durable Object. A host that
+// binds nothing — a test, a shell with no bucket — still gets `undefined` here,
+// and the Skills Package is then not mounted at all: a Turn with no readable
+// instruction root loads no instructions, visibly, rather than inventing a
+// second store to read them from.
 import type {
   WorkspaceFilesV1,
   WorkspaceReadsV1,

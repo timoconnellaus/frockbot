@@ -27,7 +27,7 @@ describe("Package UI artifact route", () => {
     );
     expect(response.status).toBe(200);
     // The restrictive base, plus the one hole an Applet page needs: a socket
-    // back to its own account's gateway and nowhere else (ADR 0022 §4).
+    // back to its own account's gateway and nowhere else.
     const csp = response.headers.get("content-security-policy") ?? "";
     expect(csp.startsWith(PACKAGE_UI_CSP)).toBe(true);
     expect(csp).toBe(packageUiCspV1(new URL(request.url)));
