@@ -713,8 +713,6 @@ export async function startHarness(
         "--var",
         `BETTER_AUTH_URL:http://127.0.0.1:${options.port}`,
         "--var",
-
-        "--var",
         `CREDENTIAL_KEYRING:${E2E_CREDENTIAL_KEYRING}`,
         // No Computer: the Sprite is unreachable from workerd and no spec
         // touches it. An empty token is what production hands a Worker with
