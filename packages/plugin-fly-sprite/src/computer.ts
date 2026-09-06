@@ -33,7 +33,9 @@ import {
   SCRATCH_ROOT,
   shellQuote,
   SHIMS_ROOT,
+  SLOT_HEIGHT,
   SLOT_IDLE_SECONDS,
+  SLOT_WIDTH,
   WORKSPACE_SYNC_SERVICE,
   WORKSPACES_ROOT,
 } from "@frockbot/computer-host-runtime";
@@ -46,7 +48,7 @@ import type {
 
 // The Computer's on-Sprite layout, its provisioning script, and its declared
 // services live in `@frockbot/computer-host-runtime`, so the shared Computer
-// host of ADR 0004 and this provider ship one runtime rather than two. Both
+// host and this provider ship one runtime rather than two. Both
 // names below are re-exported because they are part of this module's public
 // surface: the sync Package names the watcher service, and the slot-reclaim
 // threshold is policy a caller may need to reason about.
@@ -85,7 +87,7 @@ const TIMEOUTS = {
 } as const;
 
 /**
- * The shared Computer host as this provider uses it (ADR 0004).
+ * The shared Computer host as this provider uses it.
  *
  * `ComputerHostClient` satisfies it, and so does a test double. It is declared
  * here rather than imported as a class so this module depends on the *shape*
@@ -119,8 +121,8 @@ export interface ComputerHostSurfaceV1 {
  * Makes the host surface for one Bot on one User's Computer.
  *
  * The identity and the tenant are both arguments because they mean different
- * things (ADR 0012): the User names the Computer, the Bot names the tenant on
- * it, and the host has to be told both on every call.
+ * things: the User names the Computer, the Bot names the tenant on it, and
+ * the host has to be told both on every call.
  */
 export type ComputerHostFactoryV1 = (
   identity: { userId: string },
@@ -172,7 +174,7 @@ export interface SpriteAgentExecResult {
 }
 
 export interface FlySpriteComputerOptions {
-  /** Whose Computer this is. One Computer per User (ADR 0012). */
+  /** Whose Computer this is. One Computer per User. */
   identity?: { userId: string };
   /**
    * The shared Computer host. Absent, and this Computer is unconfigured: the
@@ -517,11 +519,11 @@ export class FlySpriteAgentComputer {
  *
  * Everything Fly-specific that used to live here — the Sprites SDK, the
  * provisioning script, the declared services, the viewer token files — is on
- * the host now (ADR 0004). What remains is what a Bot *tenant* means on a
- * Computer: its directory key, its human-control guard, and the shape of the
- * commands it runs. That is why `FlySpriteAgentComputer`'s method surface is
- * unchanged: `workspace.ts` and `sync.ts` generate bash against it and neither
- * knows, or needs to know, that the bash now travels on a command's stdin.
+ * the host now. What remains is what a Bot *tenant* means on a Computer: its
+ * directory key, its human-control guard, and the shape of the commands it
+ * runs. That is why `FlySpriteAgentComputer`'s method surface is unchanged:
+ * `workspace.ts` and `sync.ts` generate bash against it and neither knows, or
+ * needs to know, that the bash now travels on a command's stdin.
  */
 export class FlySpriteComputer {
   readonly configured: boolean;
@@ -751,7 +753,11 @@ export class FlySpriteComputer {
       // exists to point at, so it is allowed through here and nowhere else.
       `export ${SANCTIONED_SURFACE_ENV}=1`,
       `rm -f ${shellQuote(path)}`,
-      `scrot --overwrite ${shellQuote(path)}`,
+      // The screen is one Xvfb wide enough for every slot, so an unclipped
+      // capture would hand this Bot its siblings' windows. Clip to the same
+      // rectangle the Bot's viewer is bound to, read from the same file.
+      `SLOT=$(cat ${shellQuote(`${bot}/slot`)})`,
+      `scrot --overwrite -a $((SLOT * ${SLOT_WIDTH})),0,${SLOT_WIDTH},${SLOT_HEIGHT} ${shellQuote(path)}`,
       `stat -c %s ${shellQuote(path)}`,
     ].join("\n");
     const outcome = await this.execute(
@@ -1071,7 +1077,7 @@ export class FlySpriteComputer {
       this.agentControlGuard(layout),
       `PORT=$(cat ${layout.runtimeDir}/cdp-port)`,
       // The Bot key, because one browser now serves every Bot of the User and
-      // the helper has to know whose window to act in (ADR 0031).
+      // the helper has to know whose window to act in.
       `node ${RUNTIME_ROOT}/browser.mjs "$PORT" ${shellQuote(encoded)} ${shellQuote(layout.key)}`,
     ].join("\n");
     const outcome = await this.execute(

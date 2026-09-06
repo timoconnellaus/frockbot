@@ -1,6 +1,6 @@
 /**
  * The versioned wire protocol between a Bot Durable Object and the shared
- * Computer host of ADR 0004.
+ * Computer host.
  *
  * "Cross-runtime communication uses narrow, versioned DTOs, and every inbound
  * value is decoded at its seam." Both sides of the seam import this module and
@@ -10,7 +10,7 @@
  *
  * Every request carries the same envelope — `version`, the `effectId` the Bot
  * Durable Object recorded before it called, the `identity` whose Computer this
- * is (ADR 0012: a Computer is keyed by User and by nothing else), the `tenant`
+ * is (a Computer is keyed by User and by nothing else), the `tenant`
  * Bot making the call, and an opaque `credentialRef`. The reference is
  * resolved on the host and never carries credential material: "Secrets remain
  * server-side and cross interfaces only as opaque references when necessary."
@@ -163,8 +163,8 @@ export type ComputerHostControlActionV1 = "acquire" | "renew" | "release";
  * tenant's own desktop slot. `desktop-gui` is User-wide — one Computer serves
  * all of a User's Bots and there is one screen on it, so a lease that
  * serializes GUI work has to be held against the box, not against a tenant
- * directory (ADR 0017, `computerUse`: "only one may run at a time because the
- * screen is shared").
+ * directory: for `computerUse`, only one may run at a time because the screen
+ * is shared.
  */
 export type ComputerHostControlScopeV1 = "bot" | "desktop-gui";
 
@@ -250,10 +250,10 @@ export function computerHostOperationKindV1(
 /**
  * How far provisioning a cold Computer got, and how it ended.
  *
- * Provisioning a Computer installs a desktop stack and is quiet for minutes
- * (ADR 0004), so the phase is on the wire: a client that would otherwise show
- * nothing at all can say "installing the desktop packages (2/5)", and a
- * failure names the phase it failed in rather than the whole install.
+ * Provisioning a Computer installs a desktop stack and is quiet for minutes,
+ * so the phase is on the wire: a client that would otherwise show nothing at
+ * all can say "installing the desktop packages (2/5)", and a failure names the
+ * phase it failed in rather than the whole install.
  */
 export interface ComputerHostProvisioningV1 {
   /** Whether this run creates a Computer or updates its runtime in place. */
@@ -1341,9 +1341,9 @@ export function decodeComputerHostExecFrameV1(
 
 /**
  * Reassembles NDJSON frames from a byte stream whose chunk boundaries mean
- * nothing. This is the lesson of the framing incident recorded in ADR 0004: a
- * transport may split or coalesce anywhere, so a frame boundary is the newline
- * this decoder finds and never the chunk the transport delivered.
+ * nothing. This is the lesson of the framing incident: a transport may split
+ * or coalesce anywhere, so a frame boundary is the newline this decoder finds
+ * and never the chunk the transport delivered.
  */
 class ComputerHostFrameReaderV1<Frame> {
   private buffer = "";

@@ -389,13 +389,6 @@ import type {
   CompositionMemberV1,
 } from "@frockbot/kernel-composition/generation";
 import {
-  decodeMcpLifecycleReceiptV1,
-  decodeMcpServerStatusViewV1,
-  type McpLifecycleReceiptV1,
-  type McpMountOutcomeReportV1,
-  type McpServerStatusViewV1,
-} from "@frockbot/plugin-mcp/records";
-import {
   projectCompositionGenerationV1,
   projectPackageIframeCompositionV1,
 } from "./composition-views.js";
@@ -481,17 +474,17 @@ import { defineBotBackendContribution } from "@frockbot/kernel-contracts/contrib
 /**
  * The providers that can be asked what happened to a model request they never
  * answered — that is, the ones whose Package registers an
- * `LlmReconciliationCapability` (ADR 0028).
+ * `LlmReconciliationCapability`.
  *
  * It is a list rather than a lookup because recovery consults it inside the
  * durable transaction that settles the run, where nothing may be mounted or
  * awaited. The cost is that a provider Package which gains retrieval has to
- * name itself here; the ADR carries that obligation, and the failure mode of
- * forgetting is a Turn settled as failed rather than one wedged forever, which
- * is the direction this deployment wants to be wrong in.
+ * name itself here, and the failure mode of forgetting is a Turn settled as
+ * failed rather than one wedged forever, which is the direction this deployment
+ * wants to be wrong in.
  *
  * Today: the in-process foundation provider, and nothing else. Ollama Cloud
- * exposes no provider-bound retrieval (ADR 0010) and neither does Frock AI.
+ * exposes no provider-bound retrieval and neither does Frock AI.
  */
 const RECONCILING_PROVIDER_IDS_V1: ReadonlySet<string> = new Set([
   "foundation",
@@ -583,10 +576,10 @@ export interface BotStateEnv {
   /** Immutable, content-addressed Package artifacts, read hash-verified. */
   APPLICATION_ARTIFACTS?: R2Bucket;
   /**
-   * One Applet Durable Object per Applet instance (ADR 0022). Optional so a
-   * host without Applets still compiles; a Composition generation carrying an
-   * Applet member then fails verification, exactly as an isolate member does
-   * without a loader.
+   * One Applet Durable Object per Applet instance. Optional so a host without
+   * Applets still compiles; a Composition generation carrying an Applet member
+   * then fails verification, exactly as an isolate member does without a
+   * loader.
    */
   APPLET_STATES?: AppletInstanceNamespaceV1;
   /**
@@ -615,10 +608,10 @@ export interface BotStateEnv {
   };
   USER_CONFIGURATIONS: DurableObjectNamespace;
   /**
-   * The Bot Durable Object namespace, as the Subagent Durable Object namespace
-   * (ADR 0017): the same class, named `<userId>:<botId>#task:<taskId>`.
-   * Optional so a host without it still compiles — `Task` is then not offered
-   * at all, rather than offered and unable to dispatch.
+   * The Bot Durable Object namespace, as the Subagent Durable Object namespace:
+   * the same class, named `<userId>:<botId>#task:<taskId>`. Optional so a host
+   * without it still compiles — `Task` is then not offered at all, rather than
+   * offered and unable to dispatch.
    */
   BOT_STATES?: DurableObjectNamespace;
   COMPUTER_HOST?: Fetcher;
@@ -656,9 +649,9 @@ export interface ShellBotBackendHost {
   /** Supplied by the Durable Object; defaults to the kernel implementation. */
   createAuthority?: CreateBotDurableAuthority;
   /**
-   * Durable Object addressing for subagent dispatch (ADR 0017). Absent, and
-   * `Task` is not offered at all: a Package that cannot reach a Subagent
-   * Durable Object has no honest way to dispatch one.
+   * Durable Object addressing for subagent dispatch. Absent, and `Task` is not
+   * offered at all: a Package that cannot reach a Subagent Durable Object has
+   * no honest way to dispatch one.
    */
   subagents?: SubagentDurableBindingV1;
   /**
@@ -788,9 +781,9 @@ export class ShellBotBackendContribution {
    */
   private readonly routineInbox: RoutineInboxStore;
   /**
-   * The subagent task authority (ADR 0017). In a parent Bot Durable Object it
-   * holds the Bot's tasks; in a Subagent Durable Object it holds nothing,
-   * because a child never dispatches one.
+   * The subagent task authority. In a parent Bot Durable Object it holds the
+   * Bot's tasks; in a Subagent Durable Object it holds nothing, because a child
+   * never dispatches one.
    */
   private readonly tasks: TaskStore;
   private readonly subagentBinding: SubagentDurableBindingV1 | undefined;
@@ -1182,11 +1175,11 @@ export class ShellBotBackendContribution {
    *
    * Two sources, and deliberately so. A rename or a settled task has no live
    * Session to be appended to, so it lives in this object's own bounded
-   * announcement log. A compaction (ADR 0030) is already a durable event on
-   * the conversation's session log — appending a second copy of it here would
-   * be two records of one fact — so it is read back from there instead.
+   * announcement log. A compaction is already a durable event on the
+   * conversation's session log — appending a second copy of it here would be
+   * two records of one fact — so it is read back from there instead.
    * The transcript injects that log after reading it once, because marker
-   * collection and marker placement consume the same events (ADR 0038).
+   * collection and marker placement consume the same events.
    */
   private async announcementsFromSession(
     conversationEvents: readonly SessionEvent[],
@@ -1242,7 +1235,7 @@ export class ShellBotBackendContribution {
 
   async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
     // Before the authority reads the session log, so a compaction detached
-    // from the previous Turn has already handed the log back (ADR 0030).
+    // from the previous Turn has already handed the log back.
     await yieldCompactionWorkV1(command.sessionId);
     // Before admission, so the pin this Turn takes already carries whatever the
     // deployment ships and whatever the User's Applet directory says now.
@@ -1375,12 +1368,11 @@ export class ShellBotBackendContribution {
    *
    * `authorship:manifest:<hash>` is written by the authoring path and by a
    * Catalog install, so it exists for every member a Bot or its User put into
-   * the Composition. A first-party artifact-backed member (ADR 0022 decision
-   * 8) came from neither: it is in the compiled application, whose manifests
-   * are already in this bundle. The `manifestHash` is still what decides —
-   * the plan's manifest is accepted only when it hashes to exactly what the
-   * generation recorded — so this is a second *place* to look, never a second
-   * answer.
+   * the Composition. A first-party artifact-backed member came from neither: it
+   * is in the compiled application, whose manifests are already in this bundle.
+   * The `manifestHash` is still what decides — the plan's manifest is accepted
+   * only when it hashes to exactly what the generation recorded — so this is a
+   * second *place* to look, never a second answer.
    */
   private async readApplicationMemberManifest(
     member: CompositionMemberV1,
@@ -1687,9 +1679,9 @@ export class ShellBotBackendContribution {
   private async executeTurn(
     input: BotTurnExecutionInput<BotSettingsViewV1>,
   ): Promise<BotTurnCompletion> {
-    // ADR 0030: a compaction detached from the previous Turn yields to this
-    // one rather than holding it. Free when none is running, and an abort when
-    // one is, so this Turn is the only writer of the session log.
+    // A compaction detached from the previous Turn yields to this one rather
+    // than holding it. Free when none is running, and an abort when one is, so
+    // this Turn is the only writer of the session log.
     await yieldCompactionWorkV1(input.command.sessionId);
     const settings = input.configurationSnapshot;
     const turn = {
@@ -1896,8 +1888,8 @@ export class ShellBotBackendContribution {
         }
         // Artifact-backed, not "not first-party": what makes a Package's page
         // able to name one of its tools is that the Package is loaded from an
-        // immutable artifact with a manifest, which is exactly what ADR 0022
-        // decision 8 gives a first-party Package too.
+        // immutable artifact with a manifest, which a first-party Package gets
+        // too.
         const member = activation.mounted.generation.members.find(
           (candidate) =>
             candidate.packageId === directTool.packageId &&
@@ -2464,7 +2456,7 @@ export class ShellBotBackendContribution {
     };
   }
 
-  // --- Applets (ADR 0022) --------------------------------------------------
+  // --- Applets -------------------------------------------------------------
 
   /**
    * `ctx.applets` for one Bot, or `undefined` when this host cannot reach
@@ -2790,9 +2782,9 @@ export class ShellBotBackendContribution {
    * Outside the admission transaction on purpose: the pin is taken in one
    * storage transaction, which cannot make a cross-object call. A publish or a
    * delete therefore activates at the *next* admitted Turn, and an in-flight
-   * Turn keeps the set it pinned — which is exactly what ADR 0022 promises.
-   * A directory that cannot be read leaves the Bot on the generation it has;
-   * an Applet change is never a reason a Turn cannot start.
+   * Turn keeps the set it pinned. A directory that cannot be read leaves the
+   * Bot on the generation it has; an Applet change is never a reason a Turn
+   * cannot start.
    */
   private async resolveAppletComposition(
     identity: BotIdentity,
@@ -3207,9 +3199,9 @@ export class ShellBotBackendContribution {
       ...(await this.routineScheduler.deadlines(transaction)),
       ...expiries.filter((at) => Number.isFinite(at)),
       // A dispatched task's 30-minute lifetime, and a child's own owed Turn,
-      // both ride the one alarm this object already has (ADR 0017): the parent
-      // reconciles a child that never reported, and the child runs the Turn it
-      // was handed on its next alarm rather than on a floating promise.
+      // both ride the one alarm this object already has: the parent reconciles
+      // a child that never reported, and the child runs the Turn it was handed
+      // on its next alarm rather than on a floating promise.
       ...(await this.subagentDeadlines(transaction)),
       ...(this.hostScheduledDeadlines
         ? await this.hostScheduledDeadlines(transaction)
@@ -3220,11 +3212,11 @@ export class ShellBotBackendContribution {
   /**
    * The deadlines subagent work contributes to this object's one alarm.
    *
-   * Two kinds, and which one an object has says which side of ADR 0017 it is
-   * on. A *parent* has task records whose `deadlineAt` is when it must go and
-   * ask what became of a child. A *child* has one task context, and while that
-   * context is `queued` its deadline is *now*: accepting a task arms the alarm,
-   * and the alarm is what runs the Turn.
+   * Two kinds, and which one an object has says which side of the dispatch it
+   * is on. A *parent* has task records whose `deadlineAt` is when it must go
+   * and ask what became of a child. A *child* has one task context, and while
+   * that context is `queued` its deadline is *now*: accepting a task arms the
+   * alarm, and the alarm is what runs the Turn.
    */
   private async subagentDeadlines(
     transaction: DurableObjectTransaction,
@@ -3369,8 +3361,8 @@ export class ShellBotBackendContribution {
     });
   }
   // -------------------------------------------------------------------------
-  // Subagents (ADR 0017). The parent Bot Durable Object is the authority; the
-  // Subagent Durable Object is an execution host with no authority of its own.
+  // Subagents. The parent Bot Durable Object is the authority; the Subagent
+  // Durable Object is an execution host with no authority of its own.
   // -------------------------------------------------------------------------
 
   /** The narrow User Durable Object RPC that bounds concurrent subagents per User. */
@@ -4716,19 +4708,6 @@ export class ShellBotBackendContribution {
               }),
             }
           : {}),
-        // The MCP lifecycle is offered only inside a Turn, and only with the
-        // User's own authority: the tools read and write the records this
-        // Bot's User owns, through the seam that already carries them.
-        ...(turn
-          ? {
-              mcp: {
-                readStatus: () =>
-                  userConfiguration.readMcpServers(identity.userId),
-                execute: (command: unknown) =>
-                  userConfiguration.executeMcpCommand(identity.userId, command),
-              },
-            }
-          : {}),
         // A Bot packs itself into a template only inside an admitted Turn, and
         // only through its User's own staging command: the seam it is handed
         // has no way to publish, so the Bot cannot.
@@ -4766,7 +4745,7 @@ export class ShellBotBackendContribution {
           : {}),
         // A Bot dispatches a subagent only inside an admitted Turn, whose run
         // the task record names, and only where a Subagent Durable Object can
-        // actually be addressed (ADR 0017).
+        // actually be addressed.
         ...(turn && turn.compositionGenerationId && this.subagentBinding
           ? {
               subagents: this.subagentsRuntimeHost(
@@ -4897,12 +4876,6 @@ export class ShellBotBackendContribution {
               pinToolCatalog: turnToolCatalogPin(this.ctx.storage, turn.turnId),
             }
           : {}),
-        composioRequest: (command) =>
-          userConfiguration.composioRequest(
-            identity.userId,
-            identity.botId,
-            command,
-          ),
         packageSettings,
         // Enabled Contributions reach the network through the same
         // outbound seam the model provider uses, so a deployment that stubs
@@ -4934,18 +4907,13 @@ export class ShellBotBackendContribution {
             effectId,
           );
         },
-        // A mount that could not reach its server writes that down where
-        // the User can read it. The Bot holds no MCP record; the User
-        // Durable Object that owns the Connection does.
-        recordOutcome: (outcome: McpMountOutcomeReportV1) =>
-          userConfiguration.recordMcpMountOutcome(identity.userId, outcome),
       })),
     ];
     const agentPackages: FoundationAgentPackage[] =
       mergeFoundationRuntimePackages(resolvedAgentPackages);
     // One generic resolver owns precedence: enabled Bot-scoped Package value,
     // enabled User-scoped Package value, then the platform model. The kernel
-    // names no Package (AGENTS.md Configuration shape; ADR 0019).
+    // names no Package (AGENTS.md Configuration shape).
     const effective = resolveEffectiveBotModelV1({
       bot: settings,
       user,
@@ -6348,11 +6316,6 @@ export class ShellBotBackendContribution {
   }
 
   private userConfiguration(identity: BotIdentity): {
-    composioRequest(
-      userId: string,
-      botId: string,
-      command: unknown,
-    ): Promise<unknown>;
     readConfiguration(input: {
       schemaVersion: 1;
       userId: string;
@@ -6384,15 +6347,6 @@ export class ShellBotBackendContribution {
       effectId: string,
       connectionGeneration: string,
     ): Promise<CredentialLeaseV1>;
-    readMcpServers(userId: string): Promise<McpServerStatusViewV1>;
-    executeMcpCommand(
-      userId: string,
-      command: unknown,
-    ): Promise<McpLifecycleReceiptV1>;
-    recordMcpMountOutcome(
-      userId: string,
-      outcome: McpMountOutcomeReportV1,
-    ): Promise<void>;
     settleToolCredential(
       userId: string,
       connectionId: string,
@@ -6430,7 +6384,6 @@ export class ShellBotBackendContribution {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
     const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
-      composioRequest(input: unknown): Promise<unknown>;
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
       executeConfiguration(input: unknown): Promise<unknown>;
       readPackageRevisions(
@@ -6446,9 +6399,6 @@ export class ShellBotBackendContribution {
       settleModelCredential(input: unknown): Promise<void>;
       leaseToolCredential(input: unknown): Promise<unknown>;
       settleToolCredential(input: unknown): Promise<void>;
-      readMcpServers(input: unknown): Promise<unknown>;
-      executeMcpCommand(input: unknown): Promise<unknown>;
-      recordMcpMountOutcome(input: unknown): Promise<void>;
       listBots(input: unknown): Promise<unknown>;
       createBot(input: unknown): Promise<unknown>;
       executeTemplateCommand(input: unknown): Promise<TemplateShareReceiptV1>;
@@ -6458,8 +6408,6 @@ export class ShellBotBackendContribution {
       readMachineResult(input: unknown): Promise<unknown>;
     };
     return {
-      composioRequest: (userId, botId, command) =>
-        rpc.composioRequest({ schemaVersion: 1, userId, botId, command }),
       readConfiguration: (input) =>
         rpc.readConfiguration({ ...input, view: 2 }),
       executeConfiguration: async (command) =>
@@ -6556,18 +6504,6 @@ export class ShellBotBackendContribution {
             connectionGeneration,
           }),
         ),
-      // The MCP lifecycle crosses this seam like every other value: decoded
-      // on arrival rather than trusted in the shape RPC happened to return.
-      readMcpServers: async (userId) =>
-        decodeMcpServerStatusViewV1(
-          await rpc.readMcpServers({ schemaVersion: 1, userId }),
-        ),
-      executeMcpCommand: async (userId, command) =>
-        decodeMcpLifecycleReceiptV1(
-          await rpc.executeMcpCommand({ schemaVersion: 1, userId, command }),
-        ),
-      recordMcpMountOutcome: (userId, outcome) =>
-        rpc.recordMcpMountOutcome({ schemaVersion: 1, userId, outcome }),
       settleToolCredential: (userId, connectionId, effectId) =>
         rpc.settleToolCredential({
           schemaVersion: 1,

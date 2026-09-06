@@ -1,10 +1,10 @@
 /**
- * Versioned DTOs for the Package bundler seam (plan `docs/plans/kernel-and-isolate.md`
- * Step 3). The Bot Durable Object calls `bundle` over the `PACKAGE_BUNDLER`
- * service binding; every inbound value is decoded here before the bundler runs.
+ * Versioned DTOs for the Package bundler seam. The Bot Durable Object calls
+ * `bundle` over the `PACKAGE_BUNDLER` service binding; every inbound value is
+ * decoded here before the bundler runs.
  *
  * `ArtifactRefV1` is defined locally until `@frockbot/kernel-composition`
- * (Step 2) exists; the shape is verbatim from the plan.
+ * exists.
  */
 
 export const BUNDLER_ENTRY = "package.ts";

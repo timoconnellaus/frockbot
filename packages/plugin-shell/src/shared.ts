@@ -26,7 +26,6 @@ import type {
   VoiceDictationObserverV1,
   VoiceDictationSessionV1,
 } from "@frockbot/client-core";
-import type { McpServerStatusViewV1 } from "@frockbot/plugin-mcp/records";
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import type { ClientSkillCatalogEntryV1 } from "./skill-protocol.js";
 import type { ApprovalCardViewV1 } from "./approvals.js";
@@ -112,7 +111,7 @@ export interface WebChatMessage {
   /**
    * A line under the bubble saying why the Turn ends where it does — it was
    * stopped, or a later message took its place. The text above it is what the
-   * Bot had already said, which it keeps (ADR 0024).
+   * Bot had already said, which it keeps.
    */
   notice?: string;
   /**
@@ -190,7 +189,7 @@ export interface PluginCatalogItem {
 
 /** What an external authorization redirect told the app on the way back. */
 export interface ConnectionReturnV1 {
-  /** The Package that owns the Connection, e.g. `composio`. */
+  /** The Package that owns the Connection. */
   packageId: string;
   status: "ready" | "pending" | "failed";
   /** A provider- or callback-supplied explanation, when there is one. */
@@ -394,13 +393,6 @@ export interface FrockBotWebData {
    * whether retrying it can help. Absent when nothing has failed.
    */
   appletCanvasFailure?: AppletCanvasFailureV1;
-  /**
-   * The User's MCP servers: state, tool count, last handshake, instructions,
-   * failure, and the durable refusal ledger. Absent until it is loaded, and
-   * absent for a deployment with no MCP route — the Plugins surface then
-   * shows the servers as Connections and nothing more.
-   */
-  mcpServers?: McpServerStatusViewV1;
   settingsError?: string;
   /**
    * What the browser came back from an external authorization with. Read once
@@ -435,30 +427,6 @@ export interface FrockBotWebData {
   loadUserSettings(): Promise<void>;
   saveUserProfile(profile: { name: string; email?: string }): Promise<void>;
   loadPluginCatalog(): Promise<void>;
-  /** Refreshes {@link FrockBotWebData.mcpServers}. */
-  loadMcpServers(): Promise<void>;
-  /**
-   * The instructions attached to one MCP server, which become the description
-   * its tools carry in the next Turn's model request. An empty string clears
-   * them.
-   */
-  setMcpInstructions(serverId: string, instructions: string): Promise<void>;
-  /**
-   * Restarts one MCP server: its epoch is bumped, so the next admitted Turn
-   * re-handshakes and re-lists its tools.
-   */
-  restartMcpServer(serverId: string): Promise<void>;
-  /**
-   * Connect or reconnect an OAuth MCP server, returning the host-authored
-   * redirect the User is about to follow. `connectionId` reconnects an
-   * existing Connection — the connect card's *Reconnect* — and its absence
-   * creates one from `settings`.
-   */
-  startMcpAuthorization(input: {
-    connectionId?: string;
-    label?: string;
-    settings?: Record<string, unknown>;
-  }): Promise<string | undefined>;
   loadPackageCatalog(): Promise<void>;
   /** One entry detail, for the panel a User opens before installing. */
   loadCatalogEntry(catalogId: string): Promise<CatalogEntryV1 | undefined>;
@@ -529,7 +497,7 @@ export interface FrockBotWebData {
   uninstallPackage(packageId: string): Promise<void>;
   /**
    * Puts this conversation down and starts the next one. Memory is kept; only
-   * the history the next Turn carries is new (ADR 0027).
+   * the history the next Turn carries is new.
    */
   startConversation(): Promise<void>;
   startConnection(

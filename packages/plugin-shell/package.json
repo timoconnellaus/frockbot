@@ -75,7 +75,6 @@
     "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-image": "workspace:*",
     "@frockbot/plugin-machine-messages": "workspace:*",
-    "@frockbot/plugin-mcp": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/plugin-package-catalog": "workspace:*",
     "@frockbot/plugin-routines": "workspace:*",

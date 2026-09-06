@@ -411,7 +411,7 @@ describe("ToolRegistry turn admission", () => {
     });
   });
   // -------------------------------------------------------------------------
-  // The second ceiling dimension: the subagent role (ADR 0017, slice G3).
+  // The second ceiling dimension: the subagent role.
   //
   // The registry treats a role exactly as it treats a turn type — an opaque
   // string a registration may narrow itself by. It reads no meaning into

@@ -1,9 +1,9 @@
 // The DTOs the task surface crosses seams with, and their exact codecs.
 //
 // A view is projected from a `TaskRecordV1` and carries strictly less: no
-// prompt, no binding secrets, no child transcript. A child Session never enters
-// the visible transcript at all (ADR 0017 — the child is an execution host, and
-// its Session is its own durable state), so this list is the only door onto a
+// prompt, no binding secrets, no child transcript. A child Session never
+// enters the visible transcript at all — the child is an execution host, and
+// its Session is its own durable state — so this list is the only door onto a
 // task and it is deliberately a narrow one.
 
 import {

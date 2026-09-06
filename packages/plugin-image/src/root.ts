@@ -4,10 +4,10 @@
 // `{kind: "package-declared", userId, packageId: "image", rootId: "generated"}`
 // (`kernel-contracts/src/workspace.ts`). Object storage backs it, every write
 // records its writer and produces a generation, and the durable-root sync
-// (ADR 0013) presents it on the Computer as a real file the Bot can open with
-// ordinary file tools — none of which is true of a data URL in the event log,
-// the Durable Object's own storage, or a Memory root (single-writer,
-// Markdown-only, and never written through the kernel file surface).
+// presents it on the Computer as a real file the Bot can open with ordinary
+// file tools — none of which is true of a data URL in the event log, the
+// Durable Object's own storage, or a Memory root (single-writer, Markdown-only,
+// and never written through the kernel file surface).
 //
 // `package-declared` roots are User-scoped, so one User's Bots share the root
 // and each Bot's images sit under its own directory. That is the constitution's

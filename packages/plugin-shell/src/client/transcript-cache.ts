@@ -8,9 +8,9 @@
  *
  * Two rules keep the cache from lying:
  *
- * - **It is keyed by conversation, not by Bot.** ADR 0027 makes "new
- *   conversation" change the Session a Bot's Turns record, so the transcript
- *   that belonged to the previous one must not come back under the same key.
+ * - **It is keyed by conversation, not by Bot.** "New conversation" changes
+ *   the Session a Bot's Turns record, so the transcript that belonged to the
+ *   previous one must not come back under the same key.
  * - **A cached transcript is still revalidated.** The entry carries when it
  *   was written; past {@link TRANSCRIPT_FRESH_MS}, or once something has told
  *   the client the Bot's runs moved, the restore is followed by a read. Inside

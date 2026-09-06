@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 // The Shell's half of subagent dispatch: the seams between the parent Bot
 // Durable Object, which is the authority, and the Subagent Durable Object,
-// which is only an execution host (ADR 0017).
+// which is only an execution host.
 //
 // Nothing here decides policy. The bounds and the records are the Subagents
 // Package's; the Composition, the model binding and the admitted Turn are the
@@ -379,10 +379,10 @@ export function subagentOutcomeForRunV1(
  * The `BOT_STATES` namespace, as this Package's subagent binding.
  *
  * The Subagent Durable Object is the *same class* in the *same namespace* as
- * the Bot's own object, named `<userId>:<botId>#task:<taskId>` (ADR 0017) —
- * so there is no migration, no second identity, and no way for a caller to
- * reach one: `#` is outside `PUBLIC_IDENTIFIER_PATTERN`, so no Bot id can
- * contain it and the suffix can only ever be minted here.
+ * the Bot's own object, named `<userId>:<botId>#task:<taskId>` — so there is no
+ * migration, no second identity, and no way for a caller to reach one: `#` is
+ * outside `PUBLIC_IDENTIFIER_PATTERN`, so no Bot id can contain it and the
+ * suffix can only ever be minted here.
  */
 export function createBotSubagentDurableBindingV1(
   namespace: DurableObjectNamespace,

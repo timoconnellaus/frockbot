@@ -4,7 +4,7 @@
 // it back through the gateway route a browser uses, installs an entry from the
 // pinned generation, and then uninstalls it — checking on the way that an
 // install off the pinned generation is refused with a visible failure and that
-// uninstalling leaves the User's Connection untouched (ADR 0019).
+// uninstalling leaves the User's Connection untouched.
 //
 // Nothing here reaches R2 on the product's behalf except the seed: every read
 // crosses the gateway, exactly as the browser and the Bot Durable Object do.

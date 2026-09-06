@@ -185,12 +185,12 @@ export type ClientRunEventV1 =
       message: string;
     }
   /**
-   * A subagent this Turn dispatched (ADR 0017). The child's Session never
-   * enters the visible transcript, so this chip is the whole of what the
-   * conversation says about it: what it is, what it was asked to do, and which
-   * model it runs on. Its *live* status and its summary come from the Bot's
-   * task list, not from here — this event is the durable fact that the dispatch
-   * happened, and it never changes after it is written.
+   * A subagent this Turn dispatched. The child's Session never enters the
+   * visible transcript, so this chip is the whole of what the conversation says
+   * about it: what it is, what it was asked to do, and which model it runs on.
+   * Its *live* status and its summary come from the Bot's task list, not from
+   * here — this event is the durable fact that the dispatch happened, and it
+   * never changes after it is written.
    */
   | {
       type: "task/dispatched";
@@ -214,13 +214,13 @@ export type ClientRunOutcomeV1 =
   /**
    * A Turn that broke keeps what it had already said, for the same reason a
    * stopped one does: the words arrived, the person read them, and replacing
-   * them with a notice would rewrite what they watched happen (ADR 0028).
+   * them with a notice would rewrite what they watched happen.
    */
   | { type: "failed"; message: string; text?: string }
   /**
    * A Turn a Stop or a later message ended keeps what it had already said:
    * `text` is that partial answer, and `message` is the line saying why it
-   * ends where it does (ADR 0024).
+   * ends where it does.
    */
   | { type: "cancelled"; message: string; text?: string }
   | { type: "superseded"; message: string; text?: string };
@@ -278,11 +278,11 @@ export interface ClientRunPageV1 {
 /**
  * A session-level line in the transcript that belongs to neither party.
  *
- * `conversation/compacted` is ADR 0030's one user-visible surface: the earlier
- * Turns are still there and still readable, and this says plainly that the
- * model now carries a summary of them instead of the Turns themselves. ADR
- * 0027's "not summarised" notice still stands where Turns were genuinely
- * evicted, so the two never claim each other's ground.
+ * `conversation/compacted` is compaction's one user-visible surface: the
+ * earlier Turns are still there and still readable, and this says plainly that
+ * the model now carries a summary of them instead of the Turns themselves. The
+ * "not summarised" notice still stands where Turns were genuinely evicted, so
+ * the two never claim each other's ground.
  */
 export type ClientAnnouncementV1 =
   | {

@@ -1,6 +1,6 @@
 // The durable Subagent records, and their strict codecs.
 //
-// ADR 0017 splits the powers: the parent Bot Durable Object is the *authority*
+// The powers are split: the parent Bot Durable Object is the *authority*
 // for a task — it mints the record, admits the dispatch, pins the Composition
 // generation and the model binding, holds the bounds, and records the terminal
 // outcome — and the Subagent Durable Object is only an *execution host* for the
@@ -11,7 +11,7 @@
 // A previous stored shape crosses its explicit forward migration first; an
 // unknown shape remains a visible failure.
 
-/** The five subagent roles GrokBot declares (`docs/research/grokbot-computer.md` l.351–356). */
+/** The five subagent roles GrokBot declares. */
 export const TASK_TYPES_V1 = [
   "executor",
   "browserUse",

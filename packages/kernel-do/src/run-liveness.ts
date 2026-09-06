@@ -17,8 +17,8 @@ import type { StoredRunV1 } from "./run-records.js";
 export const STALE_RUNNING_RUN_GRACE_MS_V1 = 60_000;
 
 /**
- * What a run settled by this rule records, in the register ADR 0028 settles an
- * unretrievable Turn in: what happened, and what to do about it.
+ * What a run settled by this rule records, in the same register as an
+ * unretrievable Turn's settlement: what happened, and what to do about it.
  */
 export const STALE_RUNNING_RUN_FAILURE_V1 =
   "This Turn stopped without finishing and was settled when nothing was left to finish it. Try sending it again.";

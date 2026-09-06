@@ -166,8 +166,8 @@ export interface PackageIframeContributionViewV1 {
   packageId: string;
   displayName: string;
   /** How the shell attributes the page. `FrockBot` is a first-party
-   * artifact-backed member (ADR 0022 decision 8): shipped by FrockBot, loaded
-   * through the same path as a Bot-authored Package. */
+   * artifact-backed member: shipped by FrockBot, loaded through the same path
+   * as a Bot-authored Package. */
   provenance: PackageIframeProvenanceV1;
   /** Manifest v5: 1..8 pages. A v3/v4 single-page record migrates to one. */
   pages: PackageIframePageViewV1[];

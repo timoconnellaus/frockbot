@@ -12,20 +12,9 @@ import {
   isUserInstallablePackageV1,
 } from "./runtime.js";
 import { Context, type Plugin } from "cordis";
-import { resolveFoundationTrustedDesktopContribution } from "./desktop.js";
 import { foundationDefaultPackageIds } from "./user.js";
 
 describe("foundation application", () => {
-  test("resolves trusted desktop declarations without asynchronous startup work", () => {
-    const declarations = compileFoundationApplicationDeclarations();
-    expect(
-      resolveFoundationTrustedDesktopContribution(declarations, "auth"),
-    ).toMatchObject({
-      packageId: "auth",
-      contributionSpecifier: "@frockbot/plugin-auth/desktop",
-    });
-  });
-
   test("compiles one deterministic package graph for every contribution kind", async () => {
     const first = await compileFoundationApplication();
     const second = await compileFoundationApplication();
@@ -44,23 +33,16 @@ describe("foundation application", () => {
       "billing",
       "bot-template",
       "clock",
-      "composio",
       "computer",
       "credentials",
       "custom-models",
-      "desktop-clipboard",
-      "desktop-directory-picker",
-      "desktop-notifications",
       "echo",
       "fly-sprite",
       "identity",
       "image",
       "user-machine",
       "machine-messages",
-      "mcp",
       "memory",
-      "mobile-clipboard",
-      "mobile-notifications",
       "package-catalog",
       "package-publisher",
       "provider-flock-ai",
@@ -82,11 +64,9 @@ describe("foundation application", () => {
         "settings",
         "billing",
         "bot-template",
-        "composio",
         "computer",
         "credentials",
         "user-machine",
-        "mcp",
         "package-publisher",
         "provider-flock-ai",
         "provider-ollama-cloud",
@@ -102,7 +82,6 @@ describe("foundation application", () => {
         "authoring",
         "bot-template",
         "clock",
-        "composio",
         "computer",
         "credentials",
         "echo",
@@ -111,7 +90,6 @@ describe("foundation application", () => {
         "image",
         "user-machine",
         "machine-messages",
-        "mcp",
         "memory",
         "package-catalog",
         "package-publisher",
@@ -142,15 +120,8 @@ describe("foundation application", () => {
         "search",
         "voice",
       ],
-      desktop: [
-        "auth",
-        "desktop-clipboard",
-        "desktop-directory-picker",
-        "desktop-notifications",
-        "fly-sprite",
-        "user-machine",
-      ],
-      mobile: ["mobile-clipboard", "mobile-notifications"],
+      desktop: ["auth", "fly-sprite", "user-machine"],
+      mobile: [],
     });
     expect(
       first.packages.find((pkg) => pkg.id === "shell")?.manifest.contributions
@@ -163,7 +134,6 @@ describe("foundation application", () => {
       { entry: "./backend", host: "gateway" },
       { entry: "./user", host: "user" },
     ]);
-    expect(first.packages.some((pkg) => pkg.id === "composio")).toBe(true);
   });
 
   test("seeds a default-disabled Package and its dependencies", async () => {
@@ -309,12 +279,10 @@ describe("foundation application", () => {
     expect(listed).toEqual([
       "flock",
       "bot-template",
-      "composio",
       "custom-models",
       "image",
       "user-machine",
       "machine-messages",
-      "mcp",
       "web",
       "provider-ollama-cloud",
       "routines",
@@ -345,29 +313,6 @@ describe("foundation application", () => {
     // Audit has no User control, but it is not a default installation. It is
     // statically mounted rather than repaired into User enablement state.
     expect(platformOwned("audit")).toBe(false);
-  });
-
-  test("resolves trusted desktop code only from the compiled declaration", async () => {
-    const plan = await compileFoundationApplication();
-    expect(
-      resolveFoundationTrustedDesktopContribution(plan, "auth"),
-    ).toMatchObject({
-      packageId: "auth",
-      contributionSpecifier: "@frockbot/plugin-auth/desktop",
-    });
-
-    expect(() =>
-      resolveFoundationTrustedDesktopContribution(
-        {
-          ...plan,
-          contributions: {
-            ...plan.contributions,
-            desktop: plan.contributions.desktop.filter((id) => id !== "auth"),
-          },
-        },
-        "auth",
-      ),
-    ).toThrow('foundation desktop package "auth" is not declared');
   });
 
   test("resolves declared backend and enabled runtime Contributions through host seams", async () => {
@@ -405,19 +350,6 @@ describe("foundation application", () => {
       listBotLifecycles: () =>
         Promise.resolve({ schemaVersion: 1, lifecycles: [] }),
       executeBotLifecycle: () =>
-        Promise.reject(new Error("not used while composing")),
-      readMcpServers: () =>
-        Promise.resolve({
-          schemaVersion: 1 as const,
-          servers: [],
-          refusals: [],
-          quotas: {
-            maxServers: 16,
-            maxToolsPerServer: 64,
-            maxResponseBytes: 262_144,
-          },
-        }),
-      executeMcpCommand: () =>
         Promise.reject(new Error("not used while composing")),
       readSheep: () => Promise.reject(new Error("not used while composing")),
       updateSheep: () => Promise.reject(new Error("not used while composing")),
@@ -509,10 +441,8 @@ describe("foundation application", () => {
       "audit",
       "billing",
       "bot-template",
-      "composio",
       "computer",
       "flock",
-      "mcp",
       "package-publisher",
       "routines",
       "search",
@@ -539,7 +469,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(3);
-    expect(userBackend.contributions).toHaveLength(14);
+    expect(userBackend.contributions).toHaveLength(12);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );
@@ -627,49 +557,6 @@ describe("foundation application", () => {
       "@frockbot/plugin-computer",
     ]);
 
-    const capability = {
-      packageId: "composio",
-      capabilityId: "app-tools",
-      kind: "tool" as const,
-      connectionId: "connection-1",
-    };
-    const runtime = await createFoundationEnabledRuntimePackages(
-      plan,
-      {
-        schemaVersion: 1,
-        botId: "primary",
-        revision: 1,
-        capabilities: [capability],
-      },
-      {
-        userId: "user-1",
-        readSecret: () => undefined,
-        authorizeConnection: () =>
-          Promise.resolve({
-            connectionId: "connection-1",
-            packageId: "composio",
-            connectionTypeId: "app",
-            displayName: "Gmail",
-            generation: "generation-one",
-            state: "ready",
-            safeMetadata: { connectorId: "gmail" },
-          }),
-        pinToolCatalog: (_id, read) => read(),
-        composioRequest: async (value) =>
-          (value as { operation: string }).operation === "tool-availability"
-            ? { schemaVersion: 1, available: true }
-            : {
-                schemaVersion: 1,
-                namespace: "gmail--account-one",
-                label: "Gmail",
-                tools: [],
-              },
-      },
-    );
-    expect(runtime.map((pkg) => pkg.specifier)).toEqual([
-      "@frockbot/plugin-composio",
-    ]);
-
     const webCapability = {
       packageId: "web",
       capabilityId: "web-fetch",
@@ -702,8 +589,8 @@ describe("merging runtime Contributions that share a specifier", () => {
   test("mounts every one of them, in order, under one Contribution", async () => {
     const mounted: string[] = [];
     const pkg = (name: string) => ({
-      specifier: "@frockbot/plugin-mcp",
-      contributionSpecifier: "@frockbot/plugin-mcp/agent",
+      specifier: "@frockbot/plugin-web",
+      contributionSpecifier: "@frockbot/plugin-web/agent",
       manifest: {},
       plugin: (() => {
         mounted.push(name);

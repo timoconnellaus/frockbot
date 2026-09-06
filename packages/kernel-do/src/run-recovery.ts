@@ -18,7 +18,7 @@ export type BotRunRecoveryPlan =
 
 /**
  * What a Turn says when a restart caught it mid-answer and nobody can be asked
- * how it ended (ADR 0028).
+ * how it ended.
  *
  * It is written for the person watching, not for an operator: they saw the Bot
  * start talking and then stop, and the only useful thing to tell them is that
@@ -213,11 +213,11 @@ export function planBotRunRecovery<Snapshot>(
   }
   const session = new Session(run.sessionId, () => {}, latest);
   const repairs = session.reconcileForResume();
-  // ADR 0028. A Turn whose model outcome is unknown is parked only when
-  // somebody can actually be asked. When the provider offers no retrieval,
-  // parking is not caution — it is a dead end: nothing will ever arrive to
-  // resolve it, the Bot stays wedged behind it, and the person is handed a
-  // Resolve button whose only possible answer is "give up". So the run is
+  // A Turn whose model outcome is unknown is parked only when somebody can
+  // actually be asked. When the provider offers no retrieval, parking is not
+  // caution — it is a dead end: nothing will ever arrive to resolve it, the Bot
+  // stays wedged behind it, and the person is handed a Resolve button whose
+  // only possible answer is "give up". So the run is
   // settled `failed` here, with its repairs and every streamed word it had
   // already sent kept in the journal.
   const provider = latestModelRequestProviderV1(run.events);

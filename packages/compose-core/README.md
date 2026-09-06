@@ -1,9 +1,5 @@
 # `@frockbot/compose-core`
 
-> Vendored from `tanstack-compose` commit `69163be` on 2026-09-05. FrockBot
-> keeps this copy intentionally close to upstream so it can be reviewed and
-> migrated independently.
-
 The framework-agnostic kernel of FrockBot Compose: the **client**, **plugins**,
 **context** and **deps**, **cleanup**, **status**, **options**, **middleware**
 and **events**, **plugin list** reconciliation, and the **host** contract with

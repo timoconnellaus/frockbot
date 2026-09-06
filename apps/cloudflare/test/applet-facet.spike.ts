@@ -1,7 +1,5 @@
-// SPIKE (lane S1): does the `AppletState` design of `docs/plans/applets.md` §2
-// actually work under the workerd this repo pins?
-//
-// Findings land in `docs/research/spike-applet-facets.md`.
+// SPIKE (lane S1): does the `AppletState` design actually work under the
+// workerd this repo pins?
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
 import type { AppletStateSpike } from "./spike-applet-facet-worker.ts";

@@ -514,12 +514,12 @@ export const shellAgentPlugin: Plugin.Function = (ctx) => {
     ctx.on("agent/assistant-text", async (agent, text, position) => {
       await promoteAssistantTextToSendV1(agent.session, text, position);
     }),
-    // ADR 0030. `ctx.inject` rather than a declared dependency: a host that
-    // mounts the Shell without a model still gets its tools and its transcript
+    // `ctx.inject` rather than a declared dependency: a host that mounts the
+    // Shell without a model still gets its tools and its transcript
     // seam, and simply never compacts. The hook is evaluated after `turn/end`
     // is on the log and flushed — but `agent/turn-stopping` is a hook the loop
     // *awaits* inside its `finally`, so running the summariser here is exactly
-    // the latency ADR 0030 says a compaction never costs. It is handed to the
+    // the latency a compaction must never cost. It is handed to the
     // detached scheduler instead and this returns at once: the Turn ends, the
     // run settles, the response goes out, and the summariser carries on behind
     // it. Nothing here may throw, and nothing here may wait.

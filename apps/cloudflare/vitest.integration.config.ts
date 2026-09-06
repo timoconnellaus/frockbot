@@ -124,7 +124,6 @@ export default defineConfig({
           },
         },
         bindings: {
-          COMPOSIO_API_KEY: "test-composio-backend-key",
           BETTER_AUTH_URL: "https://bot.frockbot.com",
           TEST_MIGRATIONS: authMigrations,
           FOUNDATION_ARTIFACT: foundationArtifact,
@@ -145,11 +144,9 @@ export default defineConfig({
           // state the gateway accepts and forge one it must refuse; strong
           // enough to pass the same check production makes, because the
           // Contribution refuses to serve its routes at all otherwise.
-          FROCKBOT_AUTHORIZATION_STATE_SECRET:
-            "workerd-mcp-oauth-state-secret-0123456789abcdef",
           // Not a credential: no Sprite token reaches this Worker in
-          // production either, because the Computer host holds the only copy
-          // (ADR 0004). `SPRITES_TOKEN` is only the "is a Computer configured"
+          // production either, because the Computer host holds the only
+          // copy. `SPRITES_TOKEN` is only the "is a Computer configured"
           // gate, so a placeholder is exactly what a deployment with a
           // Computer looks like from here.
           SPRITES_TOKEN: "configured",

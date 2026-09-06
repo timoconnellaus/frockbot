@@ -13,8 +13,6 @@
 // registry intersects the two. This module is where the first-party Packages'
 // answers are written down together so they can be read as one catalog and
 // tested as one table.
-//
-// Reference: `docs/research/grokbot-computer.md` l.351–356.
 
 import { TASK_TYPES_V1, type TaskTypeV1 } from "./records.js";
 

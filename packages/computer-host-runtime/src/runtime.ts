@@ -6,10 +6,10 @@
  * These constants used to live inside `@frockbot/plugin-fly-sprite`, where the
  * only way to reach the Sprite was `execFileHTTP` and every script travelled
  * base64-encoded on the command's argv. Fly answers a ~2.5 KB argv with HTTP
- * 431 (ADR 0004), so the provisioning script could never run from any runtime
- * as written. The scripts move here so the shared Computer host of ADR 0004
- * can deliver them the way they must be delivered — on a command's **stdin** —
- * while the provider Package keeps generating exactly the same text.
+ * 431, so the provisioning script could never run from any runtime as written.
+ * The scripts move here so the shared Computer host can deliver them the way
+ * they must be delivered — on a command's **stdin** — while the provider
+ * Package keeps generating exactly the same text.
  *
  * There is one copy. `plugin-fly-sprite` imports this module rather than
  * holding its own, so a change to the Computer's layout cannot mean two
@@ -17,7 +17,7 @@
  */
 export const DESKTOP_SERVICE = "frockbot-viewer-gateway";
 /**
- * The durable-root sync's on-Sprite half (ADR 0013), declared as a service so
+ * The durable-root sync's on-Sprite half, declared as a service so
  * the Sprite runtime brings it back after a cold pause: "Only
  * Computer-provider-declared services may be reattached; other processes are
  * assumed dead after a cold pause." It holds no credential and makes no
@@ -95,7 +95,7 @@ export const BROWSERS_ROOT = `${RUNTIME_ROOT}/browsers`;
  * The one path that runs the Computer's browser.
  *
  * It is a symlink rather than a package because Ubuntu's `chromium` is a snap
- * transitional package (ADR 0004): installing it drags in `snapd` and
+ * transitional package: installing it drags in `snapd` and
  * `systemd` and never finished inside the ten-minute bound. The browser is
  * Playwright's own Chromium build instead — a self-contained tarball from
  * Playwright's CDN, no package manager involved — and this symlink is what
@@ -117,7 +117,7 @@ export const PLAYWRIGHT_VERSION = "1.55.0";
 export const PLAYWRIGHT_PLATFORM = "ubuntu24.04-x64";
 
 /**
- * Where the Applets SDK and its runtime are installed (ADR 0022 decision 7).
+ * Where the Applets SDK and its runtime are installed.
  *
  * A prefix of its own rather than the runtime root's `node_modules`, because
  * the browser's `playwright-core` and the SDK's `miniflare` are two unrelated
@@ -211,7 +211,7 @@ export const LEASE_MAX_AGE_SECONDS = 90;
  * How long a tenant's slot is held after the provider last opened or ran
  * anything for it.
  *
- * A slot is a *region of the one screen* (ADR 0031): an x offset on the
+ * A slot is a *region of the one screen*: an x offset on the
  * Computer's single Xvfb, one browser window pinned over it, and one VNC port
  * clipped to it. There are `DESKTOP_SLOTS` of them, so they are allocated on
  * demand and reclaimed rather than owned for ever. What makes a tenant live is
@@ -231,7 +231,7 @@ export const NO_SLOTS_MARKER = "__FROCKBOT_NO_SLOTS__";
 export const VNC_PORT_BASE = 5900;
 
 /**
- * How many Bots of one User can hold a screen region at once (ADR 0031).
+ * How many Bots of one User can hold a screen region at once.
  *
  * The Computer runs **one** Xvfb whose width is this many slots, so the number
  * is a real resource bound rather than a policy: a 1280×720 slot costs about
@@ -257,8 +257,8 @@ export const COMPUTER_DISPLAY = `:${COMPUTER_DISPLAY_NUMBER}`;
  * singleton lock is per `--user-data-dir`, so a second launch against
  * `${HOME_ROOT}/chrome-profile` never becomes a second browser — it prints
  * "Opening in existing browser session" and exits, leaving its CDP port dead
- * and its Bot's screen black. That is the defect ADR 0031 records; the model
- * that replaces it is one browser, one port, one window per Bot.
+ * and its Bot's screen black. That defect is why the model is one browser,
+ * one port, one window per Bot.
  */
 export const COMPUTER_CDP_PORT = 9222;
 
@@ -286,7 +286,7 @@ export function viewServiceNameV1(botKey: string): string {
 }
 
 /**
- * The prefix of the **superseded** per-slot desktop service (ADR 0031).
+ * The prefix of the **superseded** per-slot desktop service.
  *
  * Each of these was an Xvfb, a window manager, a browser launch, and an
  * `x11vnc` for one tenant. Only the first ever got a browser — the rest lost
@@ -412,7 +412,7 @@ export function shellCommandPositionsV1(command: string): string {
   return out;
 }
 
-/** The one browser profile every Bot of one User shares (ADR 0012). */
+/** The one browser profile every Bot of one User shares. */
 export const CHROME_PROFILE = `${HOME_ROOT}/chrome-profile`;
 
 /** Maximum Chromium renderer processes on one shared 8 GiB Computer. */
@@ -456,8 +456,8 @@ export const CHROME_LAUNCHER = `${BIN_ROOT}/frockbot-chrome`;
 /**
  * The single place the Computer's chromium flags live (parity row 33).
  *
- * It takes no Bot key any more (ADR 0031). There is one browser on a Computer
- * because there is one profile, so there is one display and one CDP port to
+ * It takes no Bot key any more. There is one browser on a Computer because
+ * there is one profile, so there is one display and one CDP port to
  * derive: the arithmetic that used to turn a slot into a port is gone, and a
  * slot now only says *where on the screen* a Bot's window sits. `start-browser.sh`
  * calls this, and so may a human debugging the box; nothing else needs to know
@@ -547,7 +547,7 @@ export const fluxboxOverlay = `background: none
 
 /**
  * The Computer's one screen: a single Xvfb `DESKTOP_SLOTS` slots wide, and a
- * window manager over it (ADR 0031).
+ * window manager over it.
  *
  * One Xvfb per Computer rather than one per slot, because there is one browser
  * per Computer — Chromium's singleton lock is per profile and the profile is
@@ -576,7 +576,7 @@ wait "$XVFB_PID"
 `;
 
 /**
- * The Computer's one browser, supervised (ADR 0031).
+ * The Computer's one browser, supervised.
  *
  * Its own service rather than a background job of the screen's, so a Chromium
  * that crashes is restarted by the platform without taking the screen — and
@@ -757,7 +757,7 @@ chmod 600 "$PROFILE_TMP"
 mv "$PROFILE_TMP" "$AGENT_DATA/profile.json"
 exec 9>"$ROOT/registry.lock"
 flock -x 9
-# Slots allocated under the superseded hundred-display layout (ADR 0031) cannot
+# Slots allocated under the superseded hundred-display layout cannot
 # be shown on the one screen: it has ${DESKTOP_SLOTS} rectangles on it, and a
 # window pinned past the last of them is a window nobody can see behind a clip
 # x11vnc refuses. Pruned under the same lock that allocates, so a migrated
@@ -994,7 +994,7 @@ esac
 `;
 
 /**
- * The one program that drives this Computer's browser (ADR 0031).
+ * The one program that drives this Computer's browser.
  *
  * There is one Chromium and one CDP port, and each Bot owns one *window* on
  * it. The window is recorded at `<bot>/target-id` and re-created when it is
@@ -1003,9 +1003,9 @@ esac
  * program never touches a target belonging to another Bot's window.
  *
  * Isolation between two Bots of one User is therefore weaker than it looks:
- * one profile, one CDP port, one process. That is the trade ADR 0031 records —
- * the requirement is that a login one Bot makes is a login all of them have —
- * and the sanctioned-surface shims remain the line of defence.
+ * one profile, one CDP port, one process. That is the deliberate trade — the
+ * requirement is that a login one Bot makes is a login all of them have — and
+ * the sanctioned-surface shims remain the line of defence.
  */
 export const browserHelper = `import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright-core";
@@ -1108,7 +1108,7 @@ async function done(value) {
   process.exit(0);
 }
 
-// box-doctor's whole-Computer view (ADR 0031): every tenant that holds a slot,
+// box-doctor's whole-Computer view: every tenant that holds a slot,
 // whether its window exists, and whether it sits over its own slot. One CDP
 // connection for the Computer rather than one probe per Bot.
 if (action.action === "survey") {
@@ -1710,7 +1710,7 @@ export function installFileAtomic(path: string, content: string): string {
  * Where the detached provisioner keeps everything about one provisioning run.
  *
  * A Computer is provisioned by a process that outlives the connection that
- * started it (ADR 0004): `@fly/sprites@0.1.0` declares a WebSocket dead after
+ * started it: `@fly/sprites@0.1.0` declares a WebSocket dead after
  * `WS_PONG_WAIT` (45 s) without an inbound message and never sends a ping of
  * its own, so no exec may be quiet for that long. `apt-get` is quiet for
  * minutes. The provisioner therefore runs under `setsid nohup` behind a
@@ -1792,7 +1792,7 @@ export const provisionPathPreamble = `if [ -r /etc/profile.d/languages_paths ]; 
 fi`;
 
 /**
- * `applet` on a tenant's PATH (ADR 0022 decision 7).
+ * `applet` on a tenant's PATH.
  *
  * A shim rather than a symlink, for the same reason every other node entry
  * point here is: `/.sprite/bin/node` is a bash re-exec shim whose last resort
@@ -1960,7 +1960,7 @@ TOP_MEMORY=$(ps -eo pid=,rss=,comm= --sort=-rss 2>/dev/null | head -n 5 | tr '\n
 record memory-top pass "top resident-memory consumers (pid rssKiB command): \${TOP_MEMORY:-unavailable}"
 SLOT=""
 if [ -n "$KEY" ] && [ -s ${BOTS_ROOT}/"$KEY"/slot ]; then SLOT=$(cat ${BOTS_ROOT}/"$KEY"/slot); fi
-# One browser, one CDP port (ADR 0031). A second main process would mean a
+# One browser, one CDP port. A second main process would mean a
 # second browser holding — or failing to hold — the one shared profile, which
 # is the defect this layout replaced: the loser prints "Opening in existing
 # browser session", exits, and leaves its Bot a black screen.
@@ -1982,7 +1982,7 @@ if xdpyinfo -display ${COMPUTER_DISPLAY} >/dev/null 2>&1; then
 else
   record screen fail "no X server on ${COMPUTER_DISPLAY}; the ${SCREEN_SERVICE} service is what starts one"
 fi
-# Every tenant, not just the one that asked (ADR 0031). One Bot's report used
+# Every tenant, not just the one that asked. One Bot's report used
 # to be the only evidence there was, which is exactly how three Bots sat on
 # black screens while the first one browsed.
 SURVEY=""
@@ -2235,8 +2235,8 @@ chown box:box ${SCRATCH_ROOT} 2>/dev/null || true`,
   # 2026-09-01 installing straight from it failed with 404s on superseded
   # libheif .debs that security.ubuntu.com no longer carries. The refresh is
   # not the expense it looked like — measured at 6 s once the Sprite is held
-  # awake, against the 262 s recorded in ADR 0004 for the same command on a
-  # Sprite the platform kept pausing underneath it.
+  # awake, against the 262 s measured for the same command on a Sprite the
+  # platform kept pausing underneath it.
   $SUDO apt-get update
   $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${DESKTOP_PACKAGES.join(" ")}
 fi`,
@@ -2289,10 +2289,10 @@ fi`,
     // fail its guarded step. Once both trees are present this phase is two
     // directory tests and a file install, so running it again costs nothing.
     always: true,
-    // ADR 0022 decision 7: an Applet is authored on the Computer and run in
-    // the loader, so this installs what authoring needs and nothing that runs
-    // an Applet for real. Everything is `npm install --prefix` into a prefix
-    // of this phase's own: no `apt`, no distribution package, no daemon, and
+    // An Applet is authored on the Computer and run in the loader, so this
+    // installs what authoring needs and nothing that runs an Applet for real.
+    // Everything is `npm install --prefix` into a prefix of this phase's own:
+    // no `apt`, no distribution package, no daemon, and
     // nothing that outlives the command.
     body: `mkdir -p ${APPLETS_ROOT}
 if [ ! -d ${APPLETS_ROOT}/node_modules/miniflare ]; then
@@ -2705,7 +2705,7 @@ export const COMPUTER_SPRITE_NAME = /^[a-z][a-z0-9-]{2,62}$/;
 /**
  * The Sprite backing one User's Computer.
  *
- * "One Computer per User, shared by all Bots" (ADR 0012), so the name is
+ * "One Computer per User, shared by all Bots", so the name is
  * derived from the User and from nothing else. The digest is taken over a
  * JSON-encoded `["user", userId]` rather than the bare id, so a future
  * `["project", …]` key cannot collide with a User id that happens to spell the

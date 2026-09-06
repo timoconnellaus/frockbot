@@ -5,9 +5,8 @@
  * Contribution is React that belongs in the browser bundle and a backend
  * Contribution is server code that belongs in the Worker bundle, and a module
  * that imported both would put each in the other's bundle. Together the two
- * modules are the one table `AGENTS.md` asks for, and
- * `packages/architecture-checks/src/contribution-resolution.test.ts` asserts
- * they cover every Contribution `frockbot.application.json` declares.
+ * modules are the one table `AGENTS.md` asks for, and together they cover
+ * every Contribution `frockbot.application.json` declares.
  *
  * Mount order is part of this table, not of the code that consumes it: a
  * client Contribution mounts into slots an earlier one declares.

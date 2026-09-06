@@ -264,9 +264,9 @@ export class BotCapabilities extends WorkerEntrypoint<
   }
 
   /**
-   * The Applet capability (ADR 0022). Account-wide, so it carries no narrower
-   * grant than the rest of `env`: an Applet is the User's, and every Bot of
-   * that User sees the same directory.
+   * The Applet capability. Account-wide, so it carries no narrower grant than
+   * the rest of `env`: an Applet is the User's, and every Bot of that User
+   * sees the same directory.
    */
   async applets(request: unknown): Promise<IsolateAppletsOutcomeV1> {
     try {

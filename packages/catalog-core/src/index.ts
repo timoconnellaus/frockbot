@@ -48,11 +48,11 @@ export const MAX_CATALOG_TAGS_V1 = 32;
 /**
  * Longest Skill body one Catalog entry may carry.
  *
- * A plugin-borne Skill is *indexed*, never copied into an instruction root
- * (`docs/research/grokbot-computer.md` line 285: `plugin-skills/cache.json` is
- * only an index). The entry document at the pinned generation is therefore the
- * one place the body lives, and it is bounded here so a hostile entry cannot
- * fill a system prompt or exhaust the document bound above.
+ * A plugin-borne Skill is *indexed*, never copied into an instruction root:
+ * `plugin-skills/cache.json` is only an index. The entry document at the
+ * pinned generation is therefore the one place the body lives, and it is
+ * bounded here so a hostile entry cannot fill a system prompt or exhaust the
+ * document bound above.
  */
 export const MAX_CATALOG_SKILL_BODY_BYTES_V1 = 16_384;
 export const MAX_CATALOG_DOCUMENT_BYTES_V1 = 1_048_576;

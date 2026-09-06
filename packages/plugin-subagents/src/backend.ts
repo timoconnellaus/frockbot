@@ -7,7 +7,7 @@
 //   POST /api/bots/:botId/tasks/:taskId/stop    explicit, authenticated cancel
 //
 // The gateway owns none of this state. It carries the request to the *parent*
-// Bot Durable Object — the authority, per ADR 0017 — which proves directory
+// Bot Durable Object — the authority — which proves directory
 // membership before it answers, so a Bot that is not this User's is a 404 here
 // for the same reason it is one on `/api/bots/:id/settings`, and never because
 // this module checked.
@@ -54,7 +54,7 @@ const TASK_STOP = /^\/api\/bots\/([^/]+)\/tasks\/([^/]+)\/stop$/;
  * A Bot id may not carry `#`, and this is one of the two doors that is why.
  *
  * The Subagent Durable Object is `<userId>:<botId>#task:<taskId>` in the same
- * namespace as the Bot's own object (ADR 0017), so a `#` smuggled through a
+ * namespace as the Bot's own object, so a `#` smuggled through a
  * path segment would let a caller name an object the directory never minted.
  * `PUBLIC_IDENTIFIER_PATTERN` excludes `#`; this route restates the check at
  * its own door rather than trusting the next one.
@@ -80,7 +80,7 @@ function pathSegment(value: string): string {
 
 /**
  * A task id from a path segment. Restated here for the same reason the Bot id
- * is: a task id becomes part of a Durable Object name (ADR 0017), so the door
+ * is: a task id becomes part of a Durable Object name, so the door
  * it arrives at is the door that checks it.
  */
 function taskSegment(value: string): string {

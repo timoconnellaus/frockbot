@@ -180,7 +180,7 @@ export type TurnOutcome = StepOutcome;
 export const TURN_END_REASON_MAX_LENGTH = 500;
 
 /**
- * Bounds on one `conversation/compacted` event (ADR 0030).
+ * Bounds on one `conversation/compacted` event.
  *
  * A summary is model output that is stored durably and replayed into every
  * later request of the conversation, so it is bounded here rather than trusted
@@ -705,7 +705,7 @@ export interface SessionEventMap {
   };
   /**
    * One run of the durable-root sync between the Computer's Workspace and
-   * object storage (ADR 0013), on a Turn that had the Computer open.
+   * object storage, on a Turn that had the Computer open.
    *
    * "Connections to the Computer are expected to drop on every pause; every
    * Computer client reconnects and resumes rather than treating a dropped
@@ -719,7 +719,7 @@ export interface SessionEventMap {
    * `turn-end` after a Turn that used the Computer, and `publish` for the one
    * sanctioned reconciliation outside that policy — a single declared root
    * pulled and pushed so an Applet publish can read the artifact `applet
-   * build` left on the Computer (ADR 0022 decision 7).
+   * build` left on the Computer.
    */
   /**
    * A background process on the Computer changed hands: it was launched,
@@ -789,10 +789,10 @@ export interface SessionEventMap {
     };
   };
   /**
-   * A subagent Task this Turn dispatched (ADR 0017). Recorded on the *parent*
-   * Session, because the child's Session is its own durable state and never
-   * enters the visible transcript: this event is the only thing the
-   * conversation says about a task, and the client draws it as a chip.
+   * A subagent Task this Turn dispatched. Recorded on the *parent* Session,
+   * because the child's Session is its own durable state and never enters the
+   * visible transcript: this event is the only thing the conversation says
+   * about a task, and the client draws it as a chip.
    *
    * `taskType` is an opaque string here for the same reason `turnType` is a
    * kernel value and a role catalog is not: which roles exist is Package
@@ -837,9 +837,9 @@ export interface SessionEventMap {
   };
   /**
    * The durable intent to compact this conversation, recorded before the
-   * summariser model call it fences (ADR 0030). It carries no `turn`: a
-   * compaction is evaluated *after* a Turn has ended, so it belongs to the
-   * conversation rather than to any step of it — the `bot/renamed` shape.
+   * summariser model call it fences. It carries no `turn`: a compaction is
+   * evaluated *after* a Turn has ended, so it belongs to the conversation
+   * rather than to any step of it — the `bot/renamed` shape.
    *
    * `throughTurn` is the last Turn the attempt covers. A compaction always
    * covers a prefix, so the range is that one number, and it is also the
@@ -875,7 +875,7 @@ export interface SessionEventMap {
   /**
    * A compaction intent that produced no summary — the summariser failed, ran
    * past its deadline, answered unusably, or a restart interrupted it. Never
-   * fatal: the conversation carries on under the whole-Turn eviction ADR 0027
+   * fatal: the conversation carries on under the whole-Turn eviction that
    * already applies, and the next attempt is spaced by backoff counted from
    * these events.
    */

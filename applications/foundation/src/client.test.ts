@@ -8,8 +8,8 @@ describe("foundation client composition", () => {
 
     // Artifact-backed members are excluded on purpose: their client
     // Contribution is an immutable iframe page the shell hosts, not a Plugin
-    // compiled into this bundle (ADR 0022 decision 8), so it has no entry in
-    // the client Contribution table and never should.
+    // compiled into this bundle, so it has no entry in the client
+    // Contribution table and never should.
     const compiledIntoTheBundle = plan.packages.filter(
       (pkg) =>
         pkg.artifact === undefined &&

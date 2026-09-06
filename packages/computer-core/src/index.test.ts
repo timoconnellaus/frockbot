@@ -135,8 +135,8 @@ describe("ComputerRegistry", () => {
     await root.fiber.dispose();
   });
 
-  // ADR 0012: "One Computer serves all of a User's Bots." Two Bots of one User
-  // must resolve to one assignment and one generation, not two.
+  // One Computer serves all of a User's Bots. Two Bots of one User must
+  // resolve to one assignment and one generation, not two.
   test("keys the Computer assignment per User, so a User's Bots share one Computer", async () => {
     const root = new Context();
     await root.plugin(ComputerRegistry);

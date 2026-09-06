@@ -1,4 +1,3 @@
-import { createComposioFake } from "../test/composio-fake.js";
 // The browser end-to-end harness.
 //
 // It boots the production serving path and nothing else: the real client
@@ -100,12 +99,11 @@ function unauthorized(): { status: number; body: string } {
  * A fake Ollama server.
  *
  * The authentication behaviour is the one measured against https://ollama.com
- * on 2026-08-31 and recorded in `docs/research/ollama-cloud-auth.md`, and the
- * same one `test/harness/miniflare.ts` reproduces for the workerd layers: the
- * catalog reads answer 200 for any key at all, and only `POST /api/chat` and
- * `POST /v1/chat/completions` authenticate. Reproducing that asymmetry is what
- * lets a spec prove a Connection is validated by an inference call and not by a
- * catalog read.
+ * on 2026-08-31, and the same one `test/harness/miniflare.ts` reproduces for
+ * the workerd layers: the catalog reads answer 200 for any key at all, and
+ * only `POST /api/chat` and `POST /v1/chat/completions` authenticate.
+ * Reproducing that asymmetry is what lets a spec prove a Connection is
+ * validated by an inference call and not by a catalog read.
  *
  * `POST /__e2e/chat-mode` is not an Ollama route: it lets a spec revoke the key
  * mid-run, so a Turn can fail at the provider after the Connection is ready.
@@ -171,40 +169,9 @@ export function startFakeOllama(port: number): Promise<{
   close(): Promise<void>;
 }> {
   let chatMode: FakeOllamaChatMode = "ok";
-  const composio = createComposioFake("https://connect.example.test");
 
   const server: Server = createHttpServer((request, response) => {
     const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
-    if (url.pathname.startsWith("/composio/")) {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk: Buffer) => chunks.push(chunk));
-      request.on("end", () => {
-        const providerUrl = new URL(url);
-        providerUrl.pathname = providerUrl.pathname.replace("/composio", "");
-        void composio(
-          new Request(providerUrl, {
-            method: request.method,
-            headers: {
-              "x-api-key": String(request.headers["x-api-key"] ?? ""),
-            },
-            ...(request.method !== "GET"
-              ? { body: Buffer.concat(chunks).toString("utf8") }
-              : {}),
-          }),
-        )
-          .then(async (result) => {
-            response.writeHead(result.status, {
-              "content-type": "application/json",
-            });
-            response.end(await result.text());
-          })
-          .catch(() => {
-            response.writeHead(500);
-            response.end("Provider stand-in failed");
-          });
-      });
-      return;
-    }
     const header = request.headers.authorization ?? "";
     const key = header.toLowerCase().startsWith("bearer ")
       ? header.slice(7)
@@ -744,20 +711,14 @@ export async function startHarness(
         "--var",
         "ALLOW_DEVELOPMENT_AUTH:true",
         "--var",
-        "COMPOSIO_API_KEY:test-composio-backend-key",
-        "--var",
-        "--var",
-        `COMPOSIO_TEST_URL:http://127.0.0.1:${options.ollamaPort}/composio/api/v3.1`,
-        "--var",
         `BETTER_AUTH_URL:http://127.0.0.1:${options.port}`,
         "--var",
-        "FROCKBOT_AUTHORIZATION_STATE_SECRET:e2e-composio-state-independent-secret-0123456789",
 
         "--var",
         `CREDENTIAL_KEYRING:${E2E_CREDENTIAL_KEYRING}`,
-        // No Computer: the Sprite is unreachable from workerd (ADR 0004) and
-        // no spec touches it. An empty token is what production hands a Worker
-        // with no Computer configured.
+        // No Computer: the Sprite is unreachable from workerd and no spec
+        // touches it. An empty token is what production hands a Worker with
+        // no Computer configured.
         "--var",
         "SPRITES_TOKEN:",
         // better-auth needs a secret to construct; no spec signs in with it.

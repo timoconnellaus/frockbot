@@ -126,11 +126,6 @@ import {
   decodePublishPackageCommandV1,
   decodeRollbackPackageCommandV1,
 } from "@frockbot/plugin-package-publisher/shared";
-import { decodeMcpMountOutcomeV1 } from "@frockbot/plugin-mcp/records";
-import type {
-  McpAuthorizationCompletionRequestV1,
-  McpAuthorizationStartRequestV1,
-} from "@frockbot/plugin-mcp/backend";
 import {
   readVoiceAssistantQuotaV1,
   recordVoiceAssistantUsageSyncV1,
@@ -206,8 +201,8 @@ interface UserConfigurationEnv {
    */
   PACKAGE_CATALOG?: R2Bucket;
   /**
-   * One Applet Durable Object per Applet instance (ADR 0022). The User object
-   * owns the directory and calls `delete()` on the instance; it never reads an
+   * One Applet Durable Object per Applet instance. The User object owns the
+   * directory and calls `delete()` on the instance; it never reads an
    * Applet's contents. Optional so a deployment without the binding still
    * serves every other User RPC, and an Applet deletion refuses visibly.
    */
@@ -791,181 +786,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   /**
-   * The User's MCP servers, as the status projection GrokBot calls
-   * `GetMcpServerStatus`. A read of durable records this object owns; it
-   * reaches no server and wakes nothing.
-   */
-  async composioRequest(input: unknown): Promise<unknown> {
-    const request = decodeRpcEnvelopeV1(
-      input,
-      {
-        userId: rpcIdentifier,
-        command: rpcDecodedValue,
-      },
-      { botId: rpcIdentifier },
-    );
-    const userId = request.userId as string;
-    await this.assertUserIdentity(userId);
-    const contributions = await this.contributions();
-    const operation = (request.command as { operation?: unknown })?.operation;
-    if (
-      operation === "list-tools" ||
-      operation === "execute-tool" ||
-      operation === "tool-availability"
-    ) {
-      if (typeof request.botId !== "string")
-        throw new Error("Bot identity is required for tools");
-      await contributions.flock.registration(request.botId);
-    }
-    const contribution = contributions.composio;
-    if (!contribution) throw new Error("Connected apps are unavailable");
-    return contribution.request(
-      userId,
-      request.command,
-      typeof request.botId === "string" ? request.botId : undefined,
-    );
-  }
-
-  async readMcpServers(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.contributions()).mcp.readServerStatus(
-      request.userId as string,
-    );
-  }
-
-  /**
-   * One MCP lifecycle command: add a server, set its instructions, restart
-   * it. Decoded inside the Contribution that owns the records, so the seam
-   * carries no shape of its own.
-   */
-  async executeMcpCommand(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      command: rpcDecodedValue,
-    });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.contributions()).mcp.executeLifecycle(
-      request.userId as string,
-      request.command,
-    );
-  }
-
-  /**
-   * What a Bot's mount of an MCP server found. The Bot Durable Object holds
-   * no MCP record — this object does — so a mount that could not reach the
-   * server reports it here and the failure becomes visible on the User's own
-   * surface rather than dying inside a Turn.
-   */
-  async recordMcpMountOutcome(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      outcome: rpcDecoded(decodeMcpMountOutcomeV1),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    await (
-      await this.contributions()
-    ).mcp.recordMountOutcome({
-      accountId: request.userId as string,
-      ...(request.outcome as ReturnType<typeof decodeMcpMountOutcomeV1>),
-    });
-  }
-
-  /**
-   * Start one `mcp-remote-oauth` authorization.
-   *
-   * The gateway signs the state and forwards; every outbound OAuth request —
-   * discovery, registration, the token exchange — happens on the far side of
-   * this seam, inside the object that holds the keyring. Nothing about the
-   * flow's secrets crosses back: the answer is a redirect URL and nothing
-   * else.
-   */
-  async startMcpAuthorization(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      start: rpcObject(
-        {
-          commandId: rpcIdentifier,
-          redirectUri: rpcString(2_048),
-          callbackState: rpcString(8_192),
-          authorizationStateId: rpcString(128),
-          authorizationStateExpiresAt: rpcInteger({
-            minimum: 0,
-            maximum: Number.MAX_SAFE_INTEGER,
-          }),
-          returnTarget: rpcString(16),
-        },
-        {
-          connectionId: rpcIdentifier,
-          label: rpcString(120),
-          settings: rpcJsonRecord,
-          nativeReturnNonce: rpcIdentifier,
-        },
-      ),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    const start = request.start as McpAuthorizationStartRequestV1;
-    if (start.returnTarget !== "browser" && start.returnTarget !== "desktop") {
-      throw new Error("MCP authorization returnTarget is invalid");
-    }
-    return (await this.contributions()).mcp.startAuthorization(
-      request.userId as string,
-      start,
-    );
-  }
-
-  /**
-   * Finish one authorization, once the gateway has verified its signed state.
-   *
-   * The `authorizationStateId` is consumed here, transactionally: a replayed
-   * callback is a no-op that reports the Connection's settled state rather
-   * than a second token exchange.
-   */
-  async completeMcpAuthorization(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      completion: rpcObject(
-        {
-          authorizationStateId: rpcString(128),
-          connectionId: rpcIdentifier,
-          returnTarget: rpcString(16),
-        },
-        {
-          nativeReturnNonce: rpcIdentifier,
-          code: rpcString(4_096),
-          error: rpcString(512),
-        },
-      ),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    const completion =
-      request.completion as McpAuthorizationCompletionRequestV1;
-    if (
-      completion.returnTarget !== "browser" &&
-      completion.returnTarget !== "desktop"
-    ) {
-      throw new Error("MCP authorization returnTarget is invalid");
-    }
-    return (await this.contributions()).mcp.completeAuthorization(
-      request.userId as string,
-      completion,
-    );
-  }
-
-  /** RFC 7009 revocation, then the local teardown. */
-  async revokeMcpAuthorization(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      connectionId: rpcIdentifier,
-    });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.contributions()).mcp.revokeAuthorization(
-      request.userId as string,
-      request.connectionId as string,
-    );
-  }
-
-  /**
    * An expiring lease over a Connection's credential for a tool
    * Contribution's mount. The Package that owns the Connection is resolved
    * from the durable projection, so a caller cannot name a Package the
@@ -1068,7 +888,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   /**
-   * The per-User concurrent-subagent bound (ADR 0017).
+   * The per-User concurrent-subagent bound.
    *
    * A Bot's own bound is countable in its Durable Object; a User's is not,
    * because a User's Bots are separate objects. So the slot is held here, and
@@ -1767,11 +1587,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     await contributions.flock.forgetDeletedBot(botId);
   }
 
-  // --- Applet directory (ADR 0022 decision 3) ------------------------------
+  // --- Applet directory ----------------------------------------------------
   //
-  // Account-wide by decision D2: every Bot of this User sees every Applet. The
-  // directory holds identity, the current generation, and the tool
-  // declarations; the instance itself lives in its own Durable Object and its
+  // Account-wide: every Bot of this User sees every Applet. The directory
+  // holds identity, the current generation, and the tool declarations; the instance itself lives in its own Durable Object and its
   // contents are never read here.
 
   private appletDirectory(): AppletDirectory {

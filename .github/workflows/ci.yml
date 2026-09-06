@@ -168,14 +168,6 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Run Cordis proof
-        # The smoke test launches a real Electron app; the hosted runner is
-        # headless and its Chromium SUID sandbox helper is not setuid-root, so
-        # run under a virtual display with the sandbox disabled.
-        env:
-          ELECTRON_DISABLE_SANDBOX: "1"
-        run: xvfb-run --auto-servernum bun run proof:cordis
-
   e2e:
     name: Browser end-to-end (${{ matrix.shard }}/${{ strategy.job-total }})
     # Deliberately not `needs: validate`. This job shares nothing with Validate
@@ -605,6 +597,9 @@ jobs:
           CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
           ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
           MACHINE_TOKEN_SECRET: ${{ secrets.MACHINE_TOKEN_SECRET }}
+          # Required by `production-secrets.ts`; without it staging answers
+          # 503 for every Applet.
+          APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
           # Voice. Optional on both counts: dictation falls back to the AI
           # Gateway's BYOK key without the OpenAI one, and slice B reads the
@@ -631,6 +626,7 @@ jobs:
             'CREDENTIAL_KEYRING',
             'ROUTINE_HOOK_SECRET',
             'MACHINE_TOKEN_SECRET',
+            'APPLET_VIEWER_SECRET',
           ];
           const optional = [
             'DEBUG_TOKEN',

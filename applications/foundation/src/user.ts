@@ -1,4 +1,3 @@
-import type { ComposioUserService } from "@frockbot/plugin-composio/user";
 import type { ApplicationPlan } from "@frockbot/kernel-composition/compiler";
 import {
   type AuditUserBackendContribution,
@@ -8,10 +7,6 @@ import {
   type BillingUserBackendContribution,
   type BillingUserBackendHostV1,
 } from "@frockbot/plugin-billing/user";
-import {
-  decodeMcpConnectionSettingsV1,
-  mcpServerSlugV1,
-} from "@frockbot/plugin-mcp/agent";
 import {
   type CredentialStorage,
   type CredentialUserBackendContribution,
@@ -36,7 +31,6 @@ import {
   type PackagePublisherUserHost,
 } from "@frockbot/plugin-package-publisher/user";
 export type { PackagePublisherUserHost } from "@frockbot/plugin-package-publisher/user";
-import { type McpUserBackendContribution } from "@frockbot/plugin-mcp/user";
 import { type MachineUserBackendContribution } from "@frockbot/plugin-user-machine/user";
 import type { MachineStorageV1 } from "@frockbot/plugin-user-machine/store";
 import {
@@ -65,8 +59,6 @@ import {
   frockAiUserContribution,
   flockUserContribution,
   machineUserContribution,
-  composioUserContribution,
-  mcpUserContribution,
   ollamaCloudUserContribution,
   packagePublisherUserContribution,
   searchUserContribution,
@@ -141,14 +133,6 @@ export interface MountedFoundationUserBackend {
   /** The Bot Template share ledger, and the staging command that writes it. */
   botTemplate: BotTemplateUserBackendContribution;
   publisher: PackagePublisherUserContribution;
-  /**
-   * The MCP Contribution, exposed by name as well as by Connection ownership:
-   * the durable server records, the lifecycle commands and the status
-   * projection are MCP's own surface, not part of the Connection command
-   * protocol every provider answers.
-   */
-  mcp: McpUserBackendContribution;
-  composio?: ComposioUserService;
   /**
    * The User's transcript index. It is User-scoped state like every other
    * Contribution here, and it is the only one that is a *projection*: the rows
@@ -365,26 +349,6 @@ export async function createFoundationUserBackendContributions(
       }
       return { storage: host.storage, settings };
     },
-    get composio() {
-      const settings = mountedContributions.get(settingsUserContribution);
-      if (!settings) throw new Error("Connected apps require Settings");
-      return {
-        storage: host.storage,
-        settings,
-        apiKey: host.readSecret("COMPOSIO_API_KEY"),
-        apiBaseUrl: host.readSecret("COMPOSIO_TEST_URL"),
-        callbackBaseUrl:
-          host.readSecret("BETTER_AUTH_URL") ?? "http://localhost:8787",
-      };
-    },
-    get mcp() {
-      const settings = mountedContributions.get(settingsUserContribution);
-      const credentials = mountedContributions.get(credentialsUserContribution);
-      if (!settings || !credentials) {
-        throw new Error("MCP requires Settings and Credential Contributions");
-      }
-      return { storage: host.storage, settings, credentials };
-    },
     get botTemplate() {
       const settings = mountedContributions.get(settingsUserContribution);
       if (!settings) {
@@ -449,31 +413,6 @@ export async function createFoundationUserBackendContributions(
           const directory = await flock.listBots();
           return { botIds: directory.bots.map((bot) => bot.botId) };
         },
-        // `mcp__<slug>__<tool>` names the Connection's slug; the host
-        // lives in that Connection's settings, which this object owns. The
-        // classifier stays pure and answers `remote:<slug>`; the one
-        // resolution to `remote:<host>` happens here, on the single path
-        // both projection and rebuild take, so the two cannot drift.
-        readMcpHosts: async () => {
-          const hosts = new Map<string, string>();
-          const settings = mountedContributions.get(settingsUserContribution);
-          if (!settings) return hosts;
-          const snapshot = await settings.readSnapshot(host.storage);
-          for (const connection of snapshot.connections) {
-            if (connection.packageId !== "mcp") continue;
-            try {
-              const url = new URL(
-                decodeMcpConnectionSettingsV1(connection.settings).url,
-              );
-              hosts.set(mcpServerSlugV1(connection), url.host);
-            } catch {
-              // A Connection whose settings this build cannot decode
-              // leaves its slug unresolved, which is a less specific row
-              // rather than a wrong one.
-            }
-          }
-          return hosts;
-        },
       };
     },
     get billing() {
@@ -496,8 +435,6 @@ export async function createFoundationUserBackendContributions(
     | CredentialUserBackendContribution
     | OllamaCloudUserBackendContribution
     | FrockAiUserBackendContribution
-    | ComposioUserService
-    | McpUserBackendContribution
     | FlockUserBackendContribution
     | BotTemplateUserBackendContribution
     | PackagePublisherUserContribution
@@ -512,8 +449,6 @@ export async function createFoundationUserBackendContributions(
   const credentials = mounted.get(credentialsUserContribution);
   const ollama = mounted.get(ollamaCloudUserContribution);
   const frockAi = mounted.get(frockAiUserContribution);
-  const composio = mounted.get(composioUserContribution);
-  const mcp = mounted.get(mcpUserContribution);
   const flock = mounted.get(flockUserContribution);
   const botTemplate = mounted.get(botTemplateUserContribution);
   const publisher = mounted.get(packagePublisherUserContribution);
@@ -527,7 +462,6 @@ export async function createFoundationUserBackendContributions(
     !credentials ||
     !ollama ||
     !frockAi ||
-    !mcp ||
     !flock ||
     !botTemplate ||
     !publisher ||
@@ -539,7 +473,7 @@ export async function createFoundationUserBackendContributions(
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Frock AI, MCP, Flock, Bot Templates, Search, Audit, Billing, Machines, Voice, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Bot Templates, Search, Audit, Billing, Machines, Voice, and Package Publisher User Contributions",
     );
   }
 
@@ -559,20 +493,10 @@ export async function createFoundationUserBackendContributions(
       };
     });
 
-  if (composio)
-    unregister.push(
-      settings.registerConfigurationReadBootstrap({
-        packageId: "composio",
-        bootstrap: (userId) => composio.reconcile(userId),
-      }),
-    );
-
   return {
     settings,
     credentials,
     connections,
-    mcp,
-    composio,
     flock,
     botTemplate,
     publisher,

@@ -171,7 +171,7 @@ A durable per-User bound on generation rate, artifact size, retained generations
 _Avoid_: Limit, rate limit
 
 **Parity register**:
-The checklist of GrokBot capabilities FrockBot must match, kept in `docs/research/grokbot-computer.md`.
+The checklist of GrokBot capabilities FrockBot must match, kept in `docs/grokbot-parity.md`.
 _Avoid_: Feature list, roadmap
 
 **Provenance**:

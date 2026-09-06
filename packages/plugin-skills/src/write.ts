@@ -88,10 +88,10 @@ export async function writeSkillDocumentV1(
   options: {
     /**
      * Which instruction root the Skill lands in: the Bot's own by default, or
-     * the User-global root every Bot of that User shares (ADR 0016). The
-     * writer is unchanged either way — a Bot writing the shared root still
-     * records itself, which is what lets a reading Bot be told whose Skill it
-     * is following.
+     * the User-global root every Bot of that User shares. The writer is
+     * unchanged either way — a Bot writing the shared root still records
+     * itself, which is what lets a reading Bot be told whose Skill it is
+     * following.
      */
     scope?: SkillQuotaScopeV1;
     quota?: SkillQuotaConfigV1;

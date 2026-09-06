@@ -53,11 +53,11 @@ function iframeProvenanceV1(
  *
  * The test is the artifact, not the provenance. "Every Contribution kind is
  * resolved from the manifest and an artifact, never from a switch over Package
- * identity" — a first-party Package that ships as an artifact-backed member
- * (ADR 0022 decision 8) has a manifest the Bot object holds and pages the
- * anonymous origin can serve, so there is nothing left for a provenance test
- * to decide. A first-party member with no artifact is in-process code whose
- * client Contribution is a compiled module, and it has no iframe page to show.
+ * identity" — a first-party Package that ships as an artifact-backed member has
+ * a manifest the Bot object holds and pages the anonymous origin can serve, so
+ * there is nothing left for a provenance test to decide. A first-party member
+ * with no artifact is in-process code whose client Contribution is a compiled
+ * module, and it has no iframe page to show.
  */
 export async function projectPackageIframeCompositionV1(input: {
   botId: string;

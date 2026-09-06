@@ -164,7 +164,7 @@ export interface AppletInstanceBindingV1 {
   >;
   /**
    * `generationId` is the Applet generation the calling Turn pinned. The
-   * instance runs that generation or refuses the call (ADR 0041).
+   * instance runs that generation or refuses the call.
    */
   invokeTool(input: {
     appletId: string;
@@ -554,9 +554,9 @@ export function appletMembersDifferV1(
  * Called before a Turn is admitted, never inside the admission transaction: it
  * reads the User Durable Object, and an admitted Turn's pin is taken in one
  * storage transaction that cannot make a cross-object call. The result is a
- * proposal the next admission pins — which is exactly ADR 0022's "a published
- * generation activates at the next admitted Turn", and why an in-flight Turn
- * keeps the set it pinned.
+ * proposal the next admission pins — a published generation activates at the
+ * next admitted Turn, which is why an in-flight Turn keeps the set it
+ * pinned.
  */
 export async function resolveAppletCompositionV1(options: {
   directory: Pick<AppletUserDirectoryV1, "compositionInput">;

@@ -4,9 +4,9 @@
 // the browser's, opened through the authenticated gateway route, and the
 // upstream provider's, opened from here. It holds **no authority**. Every
 // durable fact — the voice budget — belongs to the `UserConfiguration` object
-// and is reached over a narrow RPC, which is the rule ADR 0017 already sets
-// for Subagent Durable Objects and the reason this object may be evicted at
-// any moment without losing anything that matters.
+// and is reached over a narrow RPC, which is the same rule Subagent Durable
+// Objects follow and the reason this object may be evicted at any moment
+// without losing anything that matters.
 //
 // Why the object at all, when a browser could talk to a provider directly:
 // the credential. AI Gateway authenticates a realtime WebSocket with

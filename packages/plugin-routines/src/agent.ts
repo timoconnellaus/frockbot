@@ -1,10 +1,10 @@
 // The Routines runtime Contribution: one tool, `routine_manage`.
 //
 // GrokBot's `update_state target=routine {create,update,pause,resume,delete}`
-// (docs/research/grokbot-computer.md, row 19) reaches FrockBot as a single tool
-// that calls the same command path the hosted client calls. There is no second
-// way to write a Routine, so a Bot editing its own Routine and a User editing it
-// produce the same durable record with different recorded provenance.
+// reaches FrockBot as a single tool that calls the same command path the hosted
+// client calls. There is no second way to write a Routine, so a Bot editing its
+// own Routine and a User editing it produce the same durable record with
+// different recorded provenance.
 //
 // "Self-modification never widens authority": a Bot-authored Routine runs as the
 // Bot, with the User's enabled Packages and Connections. Nothing here grants

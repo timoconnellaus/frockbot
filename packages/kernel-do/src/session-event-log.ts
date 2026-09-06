@@ -360,10 +360,10 @@ export class SessionEventLog {
    * with each exact model request left on the audit path.
    *
    * The transcript projection reads tool calls, tool results, sends and
-   * assistant chunks; it has never rendered a normalized model request. ADR
-   * 0033 keeps a bounded projection of that request beside its chunked exact
-   * payload precisely so a reader that does not need the exact bytes need not
-   * pay for them, and this is that reader. Recovery, compaction, audit, and
+   * assistant chunks; it has never rendered a normalized model request. The log
+   * keeps a bounded projection of that request beside its chunked exact payload
+   * precisely so a reader that does not need the exact bytes need not pay for
+   * them, and this is that reader. Recovery, compaction, audit, and
    * model-history derivation stay on {@link readRange}.
    */
   async readDisplayRange(

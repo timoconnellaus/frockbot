@@ -162,8 +162,8 @@ function withSecurityHeaders(
   secured.headers.set(
     "content-security-policy",
     // Package pages use the anonymous artifact origin. The expanded Computer
-    // viewer frames the Sprite's own noVNC page (ADR 0004); both are optional
-    // projections and neither becomes an authority in the hosted client. An
+    // viewer frames the Sprite's own noVNC page; both are optional projections
+    // and neither becomes an authority in the hosted client. An
     // Applet's own UI is another page on the same artifact origin, nested by
     // the Applets canvas page, so the origin already named here covers it.
     //
@@ -481,7 +481,7 @@ function createUserApplicationRoute() {
       });
     }
 
-    // --- Applets (ADR 0022 §4) ---------------------------------------------
+    // --- Applets -----------------------------------------------------------
     //
     // Session-authenticated and User-scoped: the gateway has already proved who
     // is asking, and an Applet belongs to the User rather than to a Bot. The

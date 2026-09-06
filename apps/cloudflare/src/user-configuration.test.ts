@@ -455,7 +455,6 @@ describe("UserConfiguration Connection routing", () => {
       "bot-template",
       "user-machine",
       "machine-messages",
-      "mcp",
       "routines",
       "subagents",
     ]) {
