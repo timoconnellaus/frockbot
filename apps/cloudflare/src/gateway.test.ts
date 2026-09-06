@@ -2325,7 +2325,7 @@ describe("Cloudflare user application gateway", () => {
   });
 });
 
-const MOBILE_ORIGIN = "capacitor://localhost";
+const CLIENT_ORIGIN = "https://client.frockbot.test";
 
 const rejectingAuth: GatewayAuth = {
   handler: () => Promise.reject(new Error("auth handler was invoked")),
@@ -2393,7 +2393,7 @@ describe("Bot-state WebSocket gateway", () => {
       undefined,
       undefined,
       true,
-      ["capacitor://localhost"],
+      [CLIENT_ORIGIN],
       undefined,
       { adminEmails: "" },
       (userId, botId, _request, forwarded) => {
@@ -2419,7 +2419,7 @@ describe("Bot-state WebSocket gateway", () => {
       undefined,
       undefined,
       true,
-      ["capacitor://localhost"],
+      [CLIENT_ORIGIN],
       undefined,
       undefined,
       () => {
@@ -2439,8 +2439,8 @@ describe("Bot-state WebSocket gateway", () => {
     expect(opened).toBe(false);
   });
 
-  test("allows the configured Electron and mobile WebView origins", async () => {
-    const origins = ["frockbot://localhost", "capacitor://localhost"];
+  test("allows every configured client origin", async () => {
+    const origins = [CLIENT_ORIGIN, "https://kiosk.frockbot.test"];
     const opened: string[] = [];
     const { gateway } = createTestGateway(
       undefined,
@@ -2481,26 +2481,26 @@ const bearerAuth: GatewayAuth = {
     ),
 };
 
-function mobileRequest(path: string, init?: RequestInit): Request {
+function clientOriginRequest(path: string, init?: RequestInit): Request {
   const headers = new Headers(init?.headers);
-  headers.set("origin", MOBILE_ORIGIN);
+  headers.set("origin", CLIENT_ORIGIN);
   return new Request(`https://frockbot.test${path}`, { ...init, headers });
 }
 
-describe("Cross-origin access for mobile clients", () => {
+describe("Cross-origin access for configured clients", () => {
   test("answers preflight for allowed origins without touching auth", async () => {
     const { gateway, loader } = createTestGateway(
       undefined,
       rejectingAuth,
       false,
-      [MOBILE_ORIGIN],
+      [CLIENT_ORIGIN],
     );
     const response = await gateway(
-      mobileRequest("/api/bots/primary/turns", { method: "OPTIONS" }),
+      clientOriginRequest("/api/bots/primary/turns", { method: "OPTIONS" }),
     );
     expect(response.status).toBe(204);
     expect(response.headers.get("access-control-allow-origin")).toBe(
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     );
     expect(response.headers.get("access-control-allow-methods")).toBe(
       "GET, POST, OPTIONS",
@@ -2518,7 +2518,7 @@ describe("Cross-origin access for mobile clients", () => {
       undefined,
       unauthenticatedAuth,
       false,
-      [MOBILE_ORIGIN],
+      [CLIENT_ORIGIN],
     );
     const preflight = await gateway(
       new Request("https://frockbot.test/api/bots/primary/turns", {
@@ -2536,7 +2536,7 @@ describe("Cross-origin access for mobile clients", () => {
       undefined,
       unauthenticatedAuth,
       true,
-      [MOBILE_ORIGIN],
+      [CLIENT_ORIGIN],
     );
     const response = await gateway(
       new Request("https://frockbot.test/api/connections", {
@@ -2585,15 +2585,15 @@ describe("Cross-origin access for mobile clients", () => {
     expect(sameOrigin.status).toBe(200);
   });
 
-  test("shares authenticated bearer turns with the mobile origin", async () => {
+  test("shares authenticated bearer turns with a configured client origin", async () => {
     const { gateway, loader } = createTestGateway(
       undefined,
       bearerAuth,
       false,
-      [MOBILE_ORIGIN],
+      [CLIENT_ORIGIN],
     );
     const response = await gateway(
-      mobileRequest("/api/bots/primary/turns", {
+      clientOriginRequest("/api/bots/primary/turns", {
         method: "POST",
         headers: {
           authorization: "Bearer test-token",
@@ -2609,7 +2609,7 @@ describe("Cross-origin access for mobile clients", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ text: "Echo: hello mobile" });
     expect(response.headers.get("access-control-allow-origin")).toBe(
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     );
     expect(response.headers.get("access-control-expose-headers")).toBe(
       `set-auth-token, ${DEPLOYMENT_HEADER_V1}`,
@@ -2618,28 +2618,30 @@ describe("Cross-origin access for mobile clients", () => {
     expect(loader.ids).toEqual(["mobile-user:foundation-v1"]);
   });
 
-  test("shares rejections so the mobile client can read the status", async () => {
+  test("shares rejections so a cross-origin client can read the status", async () => {
     const { gateway } = createTestGateway(undefined, bearerAuth, false, [
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     ]);
-    const response = await gateway(mobileRequest("/api/bots/primary/turns"));
+    const response = await gateway(
+      clientOriginRequest("/api/bots/primary/turns"),
+    );
     expect(response.status).toBe(401);
     expect(response.headers.get("access-control-allow-origin")).toBe(
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     );
     expect(response.headers.get("vary")).toBe("origin");
   });
 
   test("exposes the sign-in token header from Better Auth routes", async () => {
     const { gateway } = createTestGateway(undefined, bearerAuth, false, [
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     ]);
     const response = await gateway(
-      mobileRequest("/api/auth/sign-in/social", { method: "POST" }),
+      clientOriginRequest("/api/auth/sign-in/social", { method: "POST" }),
     );
     expect(response.headers.get("set-auth-token")).toBe("test-token");
     expect(response.headers.get("access-control-allow-origin")).toBe(
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     );
     expect(response.headers.get("access-control-expose-headers")).toBe(
       `set-auth-token, ${DEPLOYMENT_HEADER_V1}`,
@@ -2648,14 +2650,14 @@ describe("Cross-origin access for mobile clients", () => {
 
   test("leaves same-origin and asset requests unchanged", async () => {
     const { gateway } = createTestGateway(undefined, bearerAuth, false, [
-      MOBILE_ORIGIN,
+      CLIENT_ORIGIN,
     ]);
     const page = await gateway(new Request("https://frockbot.test/"));
     expect(page.status).toBe(200);
     expect(page.headers.get("access-control-allow-origin")).toBeNull();
     expect(page.headers.get("vary")).toBeNull();
 
-    const asset = await gateway(mobileRequest("/app.js"));
+    const asset = await gateway(clientOriginRequest("/app.js"));
     expect(asset.status).toBe(200);
     expect(asset.headers.get("access-control-allow-origin")).toBeNull();
   });
@@ -2663,7 +2665,7 @@ describe("Cross-origin access for mobile clients", () => {
   test("carries no cross-origin headers when none are configured", async () => {
     const { gateway } = createTestGateway(undefined, bearerAuth, false);
     const response = await gateway(
-      mobileRequest("/api/bots/primary/turns", { method: "OPTIONS" }),
+      clientOriginRequest("/api/bots/primary/turns", { method: "OPTIONS" }),
     );
     expect(response.status).toBe(403);
     expect(response.headers.get("access-control-allow-origin")).toBeNull();

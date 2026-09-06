@@ -1,16 +1,8 @@
-import { electronProxyClient } from "@better-auth/electron/proxy";
 import { createAuthClient } from "better-auth/client";
 import { createHostedAuthAdapter } from "./hosted-session.js";
 import { createAuthSessionClient } from "./session.js";
 
-export const hostedAuthClient = createAuthClient({
-  plugins: [
-    electronProxyClient({
-      clientID: "frockbot-desktop",
-      protocol: { scheme: "com.frockbot.desktop" },
-    }),
-  ],
-});
+export const hostedAuthClient = createAuthClient();
 
 function errorProjection(error: { message?: string } | null | undefined) {
   return error ? { message: error.message } : null;
@@ -37,18 +29,11 @@ function embeddedIsAdmin(): boolean {
 }
 
 export function createBrowserAuthSessionClient() {
-  const desktop = window.frockbotDesktop
-    ? {
-        getUser: () => window.getUser(),
-        signOut: () => window.signOut(),
-      }
-    : undefined;
   const adapter = createHostedAuthAdapter({
     location: new URL(window.location.href),
     embeddedUserId: document.body.dataset.frockbotUserId,
     embeddedMode: embeddedAuthMode(),
     embeddedIsAdmin: embeddedIsAdmin(),
-    desktop,
     betterAuth: {
       getSession: async () => {
         const result = await hostedAuthClient.getSession();

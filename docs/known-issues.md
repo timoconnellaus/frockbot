@@ -20,9 +20,9 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 8. **Admin is unreachable from the native app.** _Verified._ `gateway.ts:798-806` derives `isAdmin` from `session?.user.email`, and a bearer-token native session carries no better-auth session, so the email is absent and `isDeploymentAdminV1` answers false for a listed admin. `canIssueSession` already looks the same user's email up in D1, so the fix is to do that here too. No visible effect yet: the Flutter app ships no admin surface.
 
-9. **The Electron desktop shell is not in the repository**, yet `electron()` is an enabled better-auth plugin and `com.frockbot.desktop:/` is a trusted origin. `packages/plugin-auth/src/desktop.ts` is an abstract capability with no implementation, and `apps/cloudflare/src/client/index.ts` retains a `window.frockbotDesktop` branch that cannot be reached.
+9. ~~**The Electron desktop shell is not in the repository**, yet `electron()` is an enabled better-auth plugin and `com.frockbot.desktop:/` is a trusted origin.~~ **Mostly fixed.** The better-auth plugin, the trusted origin, the `electronProxyClient`, the `window.frockbotDesktop` branches and the `frockbot://localhost` client origin are gone. Still there: `packages/plugin-auth/src/desktop.ts`, an abstract capability with no implementation, and the `"desktop"` client vocabulary the backends and Subagent roles still carry.
 
-10. **The Capacitor path is dead.** `FrockBotGoogleAuth` is registered in TypeScript with no native implementation and no `capacitor.config.*`, while `capacitor://localhost` remains in `ALLOWED_CLIENT_ORIGINS`. The server's `verifyIdToken` exists only for it.
+10. **The Capacitor path is dead.** `FrockBotGoogleAuth` is registered in TypeScript with no native implementation and no `capacitor.config.*`, and `@capacitor/core` is still a `plugin-auth` dependency. `capacitor://localhost` is no longer a configured client origin. The server's `verifyIdToken` exists only for this path.
 
 11. **`apple-app-site-association` is served unconditionally**, but `nativeReturnUris("android")` omits the macOS URI, so a macOS app following it reaches a 404.
 

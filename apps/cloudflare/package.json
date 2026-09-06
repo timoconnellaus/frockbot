@@ -16,7 +16,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json && vue-tsc --noEmit -p tsconfig.client.json"
   },
   "dependencies": {
-    "@better-auth/electron": "1.7.2",
     "@frockbot/agent-runtime": "workspace:*",
     "@frockbot/application-foundation": "workspace:*",
     "@frockbot/catalog-core": "workspace:*",

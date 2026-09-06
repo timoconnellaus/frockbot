@@ -144,7 +144,10 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
       why: "A `vars` entry the deploy writes.",
     },
     { name: "UI_ARTIFACT_HOSTS", why: "A `vars` entry." },
-    { name: "ALLOWED_CLIENT_ORIGINS", why: "A `vars` entry." },
+    {
+      name: "ALLOWED_CLIENT_ORIGINS",
+      why: "Admits a cross-origin client; no deployment configures one, since the web app is same-origin and the native app sends no `Origin`.",
+    },
     { name: "FROCK_AI_GATEWAY_ID", why: "A `vars` entry." },
     { name: "FROCK_AI_AUTO_ROUTE", why: "A `vars` entry." },
     { name: "FROCK_AI_ACCOUNT_ID", why: "A `vars` entry." },

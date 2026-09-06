@@ -1,4 +1,3 @@
-import { electron } from "@better-auth/electron";
 import { betterAuth } from "better-auth";
 import { bearer } from "better-auth/plugins";
 import {
@@ -14,8 +13,6 @@ export interface AuthEnvironment {
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
 }
-
-export const HOSTED_AUTH_TRUSTED_ORIGINS = ["com.frockbot.desktop:/"] as const;
 
 export type GoogleIdTokenVerifier = (
   options: VerifyGoogleIdTokenOptions,
@@ -68,7 +65,6 @@ export function createAuth(
     baseURL: environment.BETTER_AUTH_URL,
     secret: environment.BETTER_AUTH_SECRET,
     database: environment.AUTH_DB,
-    trustedOrigins: [...HOSTED_AUTH_TRUSTED_ORIGINS],
     socialProviders: {
       google: {
         clientId: environment.GOOGLE_CLIENT_ID,
@@ -86,7 +82,7 @@ export function createAuth(
     ...(dependencies.mayCreateAccount
       ? { databaseHooks: signupDatabaseHooksV1(dependencies.mayCreateAccount) }
       : {}),
-    plugins: [electron({ clientID: "frockbot-desktop" }), bearer()],
+    plugins: [bearer()],
   });
 }
 

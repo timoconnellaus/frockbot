@@ -1,9 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import {
-  createGoogleIdTokenVerifier,
-  HOSTED_AUTH_TRUSTED_ORIGINS,
-  signupDatabaseHooksV1,
-} from "./auth.ts";
+import { createGoogleIdTokenVerifier, signupDatabaseHooksV1 } from "./auth.ts";
 
 test("a closed deployment refuses the account better-auth is about to create", async () => {
   const asked: string[] = [];
@@ -21,12 +17,6 @@ test("a closed deployment refuses the account better-auth is about to create", a
   // A provider that returns no email must not be admitted by omission.
   expect(await hooks.user.create.before({})).toBe(false);
   expect(asked).toEqual(["admin@example.com", "stranger@example.com", ""]);
-});
-
-test("hosted auth trusts no legacy local mobile origin", () => {
-  expect(HOSTED_AUTH_TRUSTED_ORIGINS).toEqual(["com.frockbot.desktop:/"]);
-  expect(HOSTED_AUTH_TRUSTED_ORIGINS).not.toContain("capacitor://localhost");
-  expect(HOSTED_AUTH_TRUSTED_ORIGINS).not.toContain("frockbot://localhost");
 });
 
 function base64Url(input: string | ArrayBuffer): string {
