@@ -374,17 +374,12 @@ export interface DecodedBotAgentRunRpcV1 {
     sessionId: string;
     acceptedAt: string;
     text: string;
-    source:
-      | {
-          kind: "bot";
-          fromBotId: string;
-          fromBotName: string;
-          messageId: string;
-        }
-      | {
-          kind: "voice";
-          messageId: string;
-        };
+    source: {
+      kind: "bot";
+      fromBotId: string;
+      fromBotName: string;
+      messageId: string;
+    };
   };
 }
 
@@ -392,20 +387,12 @@ export interface DecodedBotAgentRunRpcV1 {
 export function decodeBotAgentRunRpcV1(
   input: unknown,
 ): DecodedBotAgentRunRpcV1 {
-  const botSource = rpcObject({
+  const source = rpcObject({
     kind: rpcPattern(/^bot$/, 3),
     fromBotId: rpcBotId,
     fromBotName: rpcString(100),
     messageId: rpcString(256),
   });
-  const voiceSource = rpcObject({
-    kind: rpcPattern(/^voice$/, 5),
-    messageId: rpcString(128),
-  });
-  const source: RpcValueDecoder = (value, label) =>
-    Reflect.get(record(value, label), "kind") === "voice"
-      ? voiceSource(value, label)
-      : botSource(value, label);
   const request = decodeRpcEnvelopeV1(input, {
     userId: rpcIdentifier,
     botId: rpcBotId,

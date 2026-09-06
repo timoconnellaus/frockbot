@@ -55,11 +55,6 @@ import type {
 import { executeResidentBotTurn } from "@frockbot/plugin-shell/backend-runner";
 import type { FlockBotBackendContribution } from "@frockbot/plugin-flock/bot";
 import type { ComputerBotBackendContribution } from "@frockbot/plugin-computer/bot";
-import {
-  VoiceAnswerOutboxV1,
-  voiceAnswerFromSettledTurnV1,
-  type VoiceAnswerSinkV1,
-} from "@frockbot/plugin-voice/bot";
 import { decodeComputerCommandV1 } from "@frockbot/plugin-computer/protocol";
 import {
   decodeBotLifecycleCommandV1,
@@ -182,10 +177,6 @@ import {
   searchMemoryV1,
   userMemoryRootV1,
 } from "@frockbot/plugin-memory";
-import type {
-  VoiceBotActivityV1,
-  VoiceMemoryHitV1,
-} from "@frockbot/plugin-voice/tools";
 import {
   searchRowsFromClientRunV1,
   type SearchSinkV1,
@@ -201,16 +192,10 @@ import {
   type AuditSinkV1,
 } from "@frockbot/plugin-audit";
 import {
-  UsageOutboxV1,
-  usageEntriesFromTurnV1,
-  type UsageSinkV1,
-} from "@frockbot/plugin-billing";
-import {
   createBotAuditEntryPageV1,
   createUserAuditSinkV1,
   type UserAuditRpc,
 } from "./audit.js";
-import { createUserUsageSinkV1, type UserUsageRpcV1 } from "./usage.js";
 import {
   createRoutedWorkspaceGenerationsV1,
   createUserMemoryProjectsV1,
@@ -386,8 +371,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     SEARCH_SINK?: SearchSinkV1;
     /** The User-scoped audit table this object's outbox drains into. */
     AUDIT_SINK?: AuditSinkV1;
-    /** The authoritative User spend ledger this object's outbox drains into. */
-    USAGE_SINK?: UsageSinkV1;
   };
   /** The identity the Workspace and Memory surfaces above were built for. */
   private surfacesFor: string | undefined;
@@ -547,9 +530,6 @@ export class BotState extends DurableObject<BotStateEnv> {
                 mountedContributions
                   .get(computerBotContribution)
                   ?.settleScheduledWork() ?? Promise.resolve(),
-              recordSettledUsage: (settled) => this.recordSettledUsage(settled),
-              recordSettledAgentOutcome: (settled) =>
-                this.recordSettledVoiceAnswer(settled),
               // An archived Bot admits no configuration command; the Flock
               // Contribution owns that durable lifecycle state.
               assertLifecycleActive: (storage, botId) => {
@@ -753,10 +733,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     // completeness is the parity item (register row 30b).
     this.backendEnv.AUDIT_SINK = createUserAuditSinkV1(
       rpc as unknown as UserAuditRpc,
-      identity,
-    );
-    this.backendEnv.USAGE_SINK = createUserUsageSinkV1(
-      rpc as unknown as UserUsageRpcV1,
       identity,
     );
     this.surfacesFor = key;
@@ -1192,86 +1168,6 @@ export class BotState extends DurableObject<BotStateEnv> {
   /** This object's bounded, durable audit outbox. */
   private auditOutbox(): AuditOutboxV1 {
     return new AuditOutboxV1(this.ctx.storage);
-  }
-
-  /** This object's bounded, durable usage delivery outbox. */
-  private usageOutbox(): UsageOutboxV1 {
-    return new UsageOutboxV1(this.ctx.storage);
-  }
-
-  /** This object's bounded, durable Voice-answer delivery outbox. */
-  private voiceAnswerOutbox(): VoiceAnswerOutboxV1 {
-    return new VoiceAnswerOutboxV1(this.ctx.storage);
-  }
-
-  private voiceAnswerSink(userId: string): VoiceAnswerSinkV1 {
-    const namespace = this.env.USER_CONFIGURATIONS;
-    const rpc = namespace.get(namespace.idFromName(userId)) as unknown as {
-      recordVoiceAnswer(input: unknown): Promise<void>;
-    };
-    return {
-      recordVoiceAnswer: (delivery) =>
-        rpc.recordVoiceAnswer({
-          schemaVersion: 1,
-          userId,
-          delivery,
-        }),
-    };
-  }
-
-  /** Queues a Voice-origin Turn's first text send after `turn/end` is durable. */
-  private async recordSettledVoiceAnswer(input: {
-    userId: string;
-    botId: string;
-    runId: string;
-    turn: number;
-    origin?: StoredRunOriginV1;
-    events: readonly SessionEvent[];
-  }): Promise<void> {
-    const delivery = voiceAnswerFromSettledTurnV1(input);
-    if (!delivery) return;
-    await this.voiceAnswerOutbox().append(delivery);
-    await this.drainVoiceAnswerOutbox(input.userId);
-  }
-
-  private async drainVoiceAnswerOutbox(userId?: string): Promise<void> {
-    const identity =
-      userId ?? (await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY))?.userId;
-    if (!identity) return;
-    try {
-      await this.voiceAnswerOutbox().drain(this.voiceAnswerSink(identity));
-    } catch {
-      // The delivery stays in the durable outbox for this object's next alarm.
-    }
-  }
-
-  /**
-   * Queues the exact `model/usage` events from one just-settled Turn.
-   *
-   * This callback runs for chat, Routine, recovery, Subagent, and agent-lane
-   * Turns at the Shell's common loop boundary. Queueing precedes the
-   * cross-object call; ledger ids make every retry idempotent.
-   */
-  private async recordSettledUsage(input: {
-    botId: string;
-    runId: string;
-    turn: number;
-    events: readonly SessionEvent[];
-  }): Promise<void> {
-    const sink = this.backendEnv.USAGE_SINK;
-    if (!sink) return;
-    await this.usageOutbox().append(usageEntriesFromTurnV1(input));
-    await this.drainUsageOutbox();
-  }
-
-  private async drainUsageOutbox(): Promise<void> {
-    const sink = this.backendEnv.USAGE_SINK;
-    if (!sink) return;
-    try {
-      await this.usageOutbox().drain(sink);
-    } catch {
-      // Still durable and retried by this object's next alarm.
-    }
   }
 
   /**
@@ -2171,93 +2067,6 @@ export class BotState extends DurableObject<BotStateEnv> {
   }
 
   /**
-   * Bounded Bot activity for Voice. Every source is this object's durable
-   * run/task/inbox state; no Computer interface is touched.
-   */
-  async readVoiceActivity(input: unknown): Promise<VoiceBotActivityV1> {
-    const request = decodeRpcEnvelopeV1(
-      input,
-      { userId: rpcIdentifier, botId: rpcBotId },
-      { since: rpcString(64) },
-    );
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    await shell.validateIdentity(identity);
-    const since = request.since as string | undefined;
-    if (since && !Number.isFinite(Date.parse(since))) {
-      throw new Error("Voice activity since must be an ISO timestamp");
-    }
-    const [runs, tasks, pendingInbox] = await Promise.all([
-      shell.listRuns({ schemaVersion: 1 }),
-      shell.listTasks(identity),
-      shell.pendingInputCount(identity),
-    ]);
-    return {
-      botId: identity.botId,
-      since: since ?? "all",
-      runs: runs.runs
-        .filter((run) => !since || run.admittedAt >= since)
-        .slice(0, 12)
-        .map((run) => ({
-          runId: run.runId,
-          status: run.status,
-          startedAt: run.admittedAt,
-          ...(run.partialText
-            ? { partialText: run.partialText.slice(0, 1_000) }
-            : {}),
-        })),
-      tasks: tasks.tasks
-        .filter((task) => task.status === "queued" || task.status === "running")
-        .slice(0, 12)
-        .map((task) => ({
-          taskId: task.taskId,
-          title: task.description.slice(0, 240),
-          status: task.status,
-        })),
-      pendingInbox: Math.min(pendingInbox, 128),
-    };
-  }
-
-  /** Search one Memory tier from durable Workspace files, never a Computer. */
-  async searchVoiceMemory(input: unknown): Promise<VoiceMemoryHitV1[]> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      query: rpcString(512),
-      scope: rpcEnum(["user", "bot"]),
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    await shell.validateIdentity(identity);
-    const files = this.backendEnv.MEMORY_WORKSPACE_FILES;
-    if (!files) return [];
-    const scope = request.scope as "user" | "bot";
-    const root =
-      scope === "user" ? userMemoryRootV1(identity) : botMemoryRootV1(identity);
-    const listing = await readAllMemoryDocumentsV1(files, [root]);
-    const index = await buildMemoryIndexV1(listing.documents);
-    const results = await searchMemoryV1({
-      index,
-      query: request.query as string,
-      maxResults: 12,
-      scope,
-    });
-    return results.map((result) => ({
-      scope,
-      ...(scope === "bot" ? { botId: identity.botId } : {}),
-      path: result.path.slice(0, 512),
-      snippet: result.snippet.slice(0, 700),
-      score: result.score ?? 0,
-    }));
-  }
-
-  /**
    * The operator snapshot behind `/api/debug`. Bot-scoped like every other
    * Bot RPC — the debug token authorizes the *caller*, it does not widen what
    * a Bot will answer about itself.
@@ -2348,12 +2157,6 @@ export class BotState extends DurableObject<BotStateEnv> {
         await Promise.all([
           loggedEntryV1("Bot audit outbox drain", () =>
             this.drainAuditOutbox(),
-          ),
-          loggedEntryV1("Bot usage outbox drain", () =>
-            this.drainUsageOutbox(),
-          ),
-          loggedEntryV1("Bot Voice answer outbox drain", () =>
-            this.drainVoiceAnswerOutbox(),
           ),
         ]);
       }

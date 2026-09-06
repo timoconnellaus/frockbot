@@ -106,8 +106,7 @@ export interface FlockSelfRuntimeHostV1 {
   /** Ask another Bot registered to this same User. */
   messageBot(request: BotMessageRequestV1): Promise<BotMessageOutcomeV1>;
   /** Sender cue for an inbound agent Turn, when this is one. */
-  inboundAgent?:
-    { kind: "bot"; fromBotId: string; fromBotName: string } | { kind: "voice" };
+  inboundAgent?: { kind: "bot"; fromBotId: string; fromBotName: string };
 }
 
 export interface BotMessageRequestV1 {
@@ -716,9 +715,6 @@ export function createInboundAgentPromptSectionV1(
     order: 93,
     render: (context) => {
       if (context.turnType !== "agent" || !host.inboundAgent) return "";
-      if (host.inboundAgent.kind === "voice") {
-        return "The User's Voice session asked you the current question. Answer it directly with send_to_user; that answer returns to Voice.";
-      }
       return `Bot ${promptText(host.inboundAgent.fromBotName)} (${promptText(host.inboundAgent.fromBotId)}) asked you the current question. Answer it directly with send_to_user; that answer returns to the asking Bot.`;
     },
   };

@@ -45,13 +45,13 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts:196-
 - Authoritative for all Bot-scoped state: identity, runs, admission fences, the pending and agent-lane queues, the session event log, notifications, conversations, Composition generations and pointers, Workspace file generations and conflicts, the memory vector purge journal. Keys are enumerated in `packages/kernel-do/src/storage-keys.ts:1-177`.
 - Storage is key-value only — `ctx.storage.get/put/list/delete/transaction`. The class contains no `sql.exec`.
 - Roughly 90 RPC methods (`bot-state.ts:920-2350`), each taking `input: unknown` and decoding through an envelope decoder. They include `run`/`runAgent`, the `isolate*` loopback surface, Composition reads and reverts, routines, tasks, approvals, notifications, `debugSnapshot` and `fenceRunAdmission`.
-- `alarm()` at `:2359` drains the memory purge journal, then the mounted contribution's alarm, then the audit, usage and voice outboxes.
+- `alarm()` drains the memory purge journal, then the mounted contribution's alarm, then the audit outbox.
 - `fetch()` at `:2420` serves one path: the state-channel WebSocket upgrade. Sockets use the hibernation API — `state.acceptWebSocket(server, [CHANNEL_TAG])` (`apps/cloudflare/src/bot-state-channel.ts:622`), with `webSocketMessage/Close/Error` forwarded from `bot-state.ts:2447-2466`.
 
 ### `UserConfiguration` — `apps/cloudflare/src/user-configuration.ts:221`
 
 - Binding `USER_CONFIGURATIONS`; id `idFromName(userId)`.
-- The only class that uses SQLite, and it does not own the tables. `ctx.storage.sql` is handed to three plugin stores: transcript search FTS5 (`packages/plugin-search/src/index-store.ts:143-177`), audit (`packages/plugin-audit/src/store.ts:166-175`), billing (`packages/plugin-billing/src/store.ts:91-114`). All other state is key-value.
+- The only class that uses SQLite, and it does not own the tables. `ctx.storage.sql` is handed to two plugin stores: transcript search FTS5 (`packages/plugin-search/src/index-store.ts:143-177`) and audit (`packages/plugin-audit/src/store.ts:166-175`). All other state is key-value.
 - One `alarm()` at `:1739` serving credential leases, publisher and template recovery, flock sagas and archived-Bot sweeps.
 - No `fetch()`, no WebSockets.
 
@@ -62,13 +62,6 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts:196-
 - The Applet's own code and data live in a facet mounted from an R2 artifact through the `APPLETS` Worker Loader (`:245-289`).
 - `fetch()` at `:872` forwards the Applet socket upgrade into the facet. `alarm()` at `:924` is scheduled only through `holdAlarmForFacet` (`:913`), because facets cannot set their own alarms.
 - `AppletCapabilities` (`:182`) is a `WorkerEntrypoint`, not a Durable Object.
-
-### `VoiceSession` — `apps/cloudflare/src/voice-session.ts:185`
-
-- Binding `VOICE_SESSIONS`; id `idFromName(userId)`.
-- Holds no durable state; the class contains no `ctx.storage` calls. Voice budget lives in `UserConfiguration`.
-- Mixed socket model: dictation uses `server.accept()` (`:256`, not hibernatable); the assistant uses `ctx.acceptWebSocket(server, ["assistant"])` (`:299`) with attachment-based restore (`:518`). Upstream provider sockets use `accept()` (`:1227`).
-- One RPC, `deliverVoiceAnswer` (`:911`). No alarm.
 
 ### `DeploymentPolicy` — `apps/cloudflare/src/deployment-policy.ts:23`
 
@@ -287,7 +280,7 @@ Auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over a
 
 WebView is used in one place, `AppletPage` (`lib/extensions/fallback.dart:157-465`), loading the anonymous bootstrap at `ui.bot.frockbot.com/native-fallback` (server side `apps/cloudflare/src/native-fallback.ts:34`). It never receives the native session.
 
-**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, the package catalog, in-app connector authorize and revoke, model configuration, admin, search, flock and avatar editing, routines, Bot templates, billing, the package publisher, registered machines, the Computer overlay, voice dictation and assistant, and package iframe entries. Native settings are a generic server-described form renderer rather than plugin surfaces.
+**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, the package catalog, in-app connector authorize and revoke, model configuration, admin, search, flock and avatar editing, routines, Bot templates, the package publisher, registered machines, the Computer overlay, and package iframe entries. Native settings are a generic server-described form renderer rather than plugin surfaces.
 
 Present in native, absent in web: a durable offline store of directory, transcripts and drafts; inbox as a first-class screen; Bot archive, restore and delete UI with composition-generation and audit detail; deep-link-to-Bot; PKCE system-browser sign-in.
 
@@ -322,7 +315,7 @@ Stream events (`packages/kernel-contracts/src/types.ts:158-166`): `text-delta`, 
 
 **`packages/plugin-custom-models`** — client-only, `defaultEnablement: "disabled"`. Contributes a Vue `BotModelSection` into slot `frockbot.bot-settings-sections` and declares the Bot-scoped `role: "model"` setting. It has no runtime and no provider; it is the model picker.
 
-Adjacent, outside the loop: image generation uses Workers AI ids directly (`packages/plugin-image/src/model.ts:40-52`, default `@cf/black-forest-labs/flux-1-schnell`); voice dictation opens a WebSocket to OpenAI Realtime or the Gateway's `/openai` path (`apps/cloudflare/src/voice-upstream.ts:60-92`).
+Adjacent, outside the loop: image generation uses Workers AI ids directly (`packages/plugin-image/src/model.ts:40-52`, default `@cf/black-forest-labs/flux-1-schnell`).
 
 ---
 
@@ -399,30 +392,30 @@ The container sets `sleepAfter: "10m"` with `max_instances: 3`. A renderer watch
 
 Bindings are declared in `apps/cloudflare/wrangler.jsonc`.
 
-| Binding                                                                                               | Kind               | Contents                                                                                                                                              |
-| ----------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `USER_APPLICATIONS` (:20)                                                                             | Worker Loader      | The per-user foundation application artifact (`apps/cloudflare/src/index.ts:2229`, `src/user-configuration.ts:201`, `src/package-publication.ts:120`) |
-| `BOT_PACKAGES` (:26)                                                                                  | Worker Loader      | Bot Package isolates, loaded with `globalOutbound` disabled (`packages/plugin-shell/src/backend.ts:2069`)                                             |
-| `APPLETS` (:33)                                                                                       | Worker Loader      | Applet server artifacts, mounted as facets (`apps/cloudflare/src/applet-state.ts:94`, `:249`)                                                         |
-| `PACKAGE_BUNDLER` (:42)                                                                               | Service            | `frockbot-cloudflare-bundler`                                                                                                                         |
-| `COMPUTER_HOST` (:47)                                                                                 | Service            | `frockbot-computer-host` (`apps/cloudflare/src/bot-state.ts:465-474`)                                                                                 |
-| `APPLICATION_ARTIFACTS` (:53)                                                                         | R2                 | Application, Package and Applet artifacts, content-addressed                                                                                          |
-| `MEMORY_FILES` (:57)                                                                                  | R2                 | Memory and workspace file bodies (`apps/cloudflare/src/workspace.ts:126`, `:157`)                                                                     |
-| `PACKAGE_CATALOG` (:64)                                                                               | R2                 | Immutable catalog generations plus a mutable `catalog/current` pointer, served at `/catalog/v1/*`                                                     |
-| `AUTH_DB` (:70)                                                                                       | D1 `frockbot-auth` | better-auth only                                                                                                                                      |
-| `MEMORY_INDEX` (:78)                                                                                  | Vectorize          | Memory embeddings; the app Worker uses the binding only for deletion (`bot-state.ts:820-825`)                                                         |
-| `AI` (:83)                                                                                            | Workers AI         | Frock AI gateway transport and image generation                                                                                                       |
-| `BOT_STATES`, `USER_CONFIGURATIONS`, `DEPLOYMENT_POLICY`, `APPLET_STATES`, `VOICE_SESSIONS` (:86-116) | Durable Objects    | §2                                                                                                                                                    |
+| Binding                                                                   | Kind               | Contents                                                                                                                                              |
+| ------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `USER_APPLICATIONS` (:20)                                                 | Worker Loader      | The per-user foundation application artifact (`apps/cloudflare/src/index.ts:2229`, `src/user-configuration.ts:201`, `src/package-publication.ts:120`) |
+| `BOT_PACKAGES` (:26)                                                      | Worker Loader      | Bot Package isolates, loaded with `globalOutbound` disabled (`packages/plugin-shell/src/backend.ts:2069`)                                             |
+| `APPLETS` (:33)                                                           | Worker Loader      | Applet server artifacts, mounted as facets (`apps/cloudflare/src/applet-state.ts:94`, `:249`)                                                         |
+| `PACKAGE_BUNDLER` (:42)                                                   | Service            | `frockbot-cloudflare-bundler`                                                                                                                         |
+| `COMPUTER_HOST` (:47)                                                     | Service            | `frockbot-computer-host` (`apps/cloudflare/src/bot-state.ts:465-474`)                                                                                 |
+| `APPLICATION_ARTIFACTS` (:53)                                             | R2                 | Application, Package and Applet artifacts, content-addressed                                                                                          |
+| `MEMORY_FILES` (:57)                                                      | R2                 | Memory and workspace file bodies (`apps/cloudflare/src/workspace.ts:126`, `:157`)                                                                     |
+| `PACKAGE_CATALOG` (:64)                                                   | R2                 | Immutable catalog generations plus a mutable `catalog/current` pointer, served at `/catalog/v1/*`                                                     |
+| `AUTH_DB` (:70)                                                           | D1 `frockbot-auth` | better-auth only                                                                                                                                      |
+| `MEMORY_INDEX` (:78)                                                      | Vectorize          | Memory embeddings; the app Worker uses the binding only for deletion (`bot-state.ts:820-825`)                                                         |
+| `AI` (:83)                                                                | Workers AI         | Frock AI gateway transport and image generation                                                                                                       |
+| `BOT_STATES`, `USER_CONFIGURATIONS`, `DEPLOYMENT_POLICY`, `APPLET_STATES` | Durable Objects    | §2                                                                                                                                                    |
 
 D1 schema: `apps/cloudflare/migrations/` holds one file, `0001_better_auth.sql`, defining `user`, `session`, `account` and `verification` with their indexes. All other product state lives in Durable Objects.
 
-Durable Object storage is key-value in every class. SQLite is used only inside `UserConfiguration`, and only by the search, audit and billing stores. All five classes are declared `new_sqlite_classes` in migrations v1–v5 (:117-138).
+Durable Object storage is key-value in every class. SQLite is used only inside `UserConfiguration`, and only by the search and audit stores. Each class is declared in a `new_sqlite_classes` migration; `VoiceSession`'s v5 entry is retired by the `deleted_classes` v6 entry that follows it.
 
 Not used anywhere in the repository: KV namespaces, Queues, Workflows, Hyperdrive, Browser Rendering, Analytics Engine, Pipelines. Containers appear only in `apps/computer-host`.
 
 Top-level vars (:139-157): `NATIVE_SLICE_2_AUTH`, `DEFAULT_APPLICATION_HASH`, `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, `ALLOWED_CLIENT_ORIGINS`, `UI_ARTIFACT_HOSTS`.
 
-Secrets are declared in `apps/cloudflare/src/production-secrets.ts`. Required (`:60-103`): `FROCKBOT_AUTHORIZATION_STATE_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPRITES_TOKEN`, `COMPUTER_HOST_TOKEN`, `CREDENTIAL_KEYRING`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `APPLET_VIEWER_SECRET`. Optional (`:116-151`): `FROCKBOT_ADMIN_EMAILS`, `DEBUG_TOKEN`, `FROCK_AI_GATEWAY_TOKEN`, `OPENAI_API_KEY`, `GEMINI_API_KEY`.
+Secrets are declared in `apps/cloudflare/src/production-secrets.ts`. Required (`:60-103`): `FROCKBOT_AUTHORIZATION_STATE_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPRITES_TOKEN`, `COMPUTER_HOST_TOKEN`, `CREDENTIAL_KEYRING`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `APPLET_VIEWER_SECRET`. Optional: `FROCKBOT_ADMIN_EMAILS`, `DEBUG_TOKEN`, `FROCK_AI_GATEWAY_TOKEN`.
 
 ---
 

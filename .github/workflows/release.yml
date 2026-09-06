@@ -347,8 +347,6 @@ jobs:
           APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
           FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         shell: bash
         run: |
           missing=()
@@ -531,15 +529,6 @@ jobs:
           # re-added as FROCK_AI_GATEWAY_TOKEN; `--secrets-file` replaces the
           # Worker's whole secret set, so an unresolved name would delete it.
           FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
-          # Optional: the direct OpenAI realtime key composer dictation
-          # prefers. Present, the `VoiceSession` Durable Object opens
-          # `wss://api.openai.com/v1/realtime` with it; absent, it falls back
-          # to the AI Gateway's BYOK key and `cf-aig-authorization`.
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          # Optional: read the same way by the voice assistant in slice B.
-          # Carried now so the secret survives the deploys before that lands —
-          # `--secrets-file` replaces the whole set every time.
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-production.env"

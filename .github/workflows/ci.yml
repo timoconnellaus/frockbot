@@ -601,12 +601,6 @@ jobs:
           # 503 for every Applet.
           APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
-          # Voice. Optional on both counts: dictation falls back to the AI
-          # Gateway's BYOK key without the OpenAI one, and slice B reads the
-          # Gemini one the same way. Carried here because `--secrets-file`
-          # replaces the Worker's whole secret set on every deploy.
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-staging.env"
@@ -628,11 +622,7 @@ jobs:
             'MACHINE_TOKEN_SECRET',
             'APPLET_VIEWER_SECRET',
           ];
-          const optional = [
-            'DEBUG_TOKEN',
-            'OPENAI_API_KEY',
-            'GEMINI_API_KEY',
-          ].filter((name) => process.env[name]);
+          const optional = ['DEBUG_TOKEN'].filter((name) => process.env[name]);
           console.log(
             JSON.stringify(
               Object.fromEntries(

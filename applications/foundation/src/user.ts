@@ -4,10 +4,6 @@ import {
   type AuditUserBackendHost,
 } from "@frockbot/plugin-audit/user";
 import {
-  type BillingUserBackendContribution,
-  type BillingUserBackendHostV1,
-} from "@frockbot/plugin-billing/user";
-import {
   type CredentialStorage,
   type CredentialUserBackendContribution,
 } from "@frockbot/plugin-credentials/user";
@@ -40,10 +36,6 @@ import {
 import { type OllamaCloudUserBackendContribution } from "@frockbot/plugin-provider-ollama-cloud/user";
 import { type FrockAiUserBackendContribution } from "@frockbot/plugin-provider-frock-ai/user";
 import {
-  type VoiceUserBackendContributionV1,
-  type VoiceUserBackendHostV1,
-} from "@frockbot/plugin-voice/user";
-import {
   type UserPackageCatalogHost,
   type UserSettingsBackendContribution,
   type UserSettingsStorage,
@@ -51,7 +43,6 @@ import {
 import { isPlatformOwnedPackageV1 } from "./runtime.js";
 import {
   auditUserContribution,
-  billingUserContribution,
   botTemplateUserContribution,
   createFoundationBackendContributions,
   createFoundationMountedContributionsV1,
@@ -63,7 +54,6 @@ import {
   packagePublisherUserContribution,
   searchUserContribution,
   settingsUserContribution,
-  voiceUserContribution,
   type FoundationUserBackendHostV1,
 } from "./contributions.js";
 
@@ -144,16 +134,12 @@ export interface MountedFoundationUserBackend {
    * is a projection: every row is rebuildable from the Bots' own stored runs.
    */
   audit: AuditUserBackendContribution;
-  /** Account-wide model and voice usage, priced when each entry is written. */
-  billing: BillingUserBackendContribution;
   /**
    * The User's registered machines (parity register rows 48, 49, 57g): the
    * registry, the pairing offers, the command queue and its results. A machine
    * is a User asset, so its authority is here rather than on any Bot.
    */
   machines: MachineUserBackendContribution;
-  /** Voice's User-scoped ledger and bounded read-only tool executor. */
-  voice: VoiceUserBackendContributionV1;
   dispose(): Promise<void>;
 }
 
@@ -264,9 +250,6 @@ export async function createFoundationUserBackendContributions(
       maxRows?: number;
       maxAgeMs?: number;
     };
-    /** Durable Voice ledger storage and reads over User-owned Bot state. */
-    voice: VoiceUserBackendHostV1;
-    billing: BillingUserBackendHostV1;
   },
 ): Promise<MountedFoundationUserBackend> {
   const defaultPackageIds = foundationDefaultPackageIds(plan);
@@ -410,18 +393,12 @@ export async function createFoundationUserBackendContributions(
         },
       };
     },
-    get billing() {
-      return host.billing;
-    },
     get flock() {
       return {
         storage: host.storage,
         commandBotLifecycle: host.commandBotLifecycle,
         readBotLifecycle: host.readBotLifecycle,
       };
-    },
-    get voice() {
-      return host.voice;
     },
   };
 
@@ -435,9 +412,7 @@ export async function createFoundationUserBackendContributions(
     | PackagePublisherUserContribution
     | SearchUserBackendContribution
     | AuditUserBackendContribution
-    | BillingUserBackendContribution
     | MachineUserBackendContribution
-    | VoiceUserBackendContributionV1
   >(plan, applicationHost);
 
   const settings = mounted.get(settingsUserContribution);
@@ -449,9 +424,7 @@ export async function createFoundationUserBackendContributions(
   const publisher = mounted.get(packagePublisherUserContribution);
   const search = mounted.get(searchUserContribution);
   const audit = mounted.get(auditUserContribution);
-  const billing = mounted.get(billingUserContribution);
   const machines = mounted.get(machineUserContribution);
-  const voice = mounted.get(voiceUserContribution);
   if (
     !settings ||
     !credentials ||
@@ -462,13 +435,11 @@ export async function createFoundationUserBackendContributions(
     !publisher ||
     !search ||
     !audit ||
-    !billing ||
-    !machines ||
-    !voice
+    !machines
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Bot Templates, Search, Audit, Billing, Machines, Voice, and Package Publisher User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Bot Templates, Search, Audit, Machines, and Package Publisher User Contributions",
     );
   }
 
@@ -497,9 +468,7 @@ export async function createFoundationUserBackendContributions(
     publisher,
     search,
     audit,
-    billing,
     machines,
-    voice,
     async dispose() {
       for (const undo of unregister) undo();
       await mounted.dispose();

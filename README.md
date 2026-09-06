@@ -285,7 +285,6 @@ packages/
   plugin-audit/     Audited-effect projection and the User's rebuildable audit table
   plugin-auth/      Authenticated identity contributions for the hosted gateway
   plugin-authoring/ Bot-authored Package authoring, undo, and self-inspection
-  plugin-billing/   Billing surfaces and entitlement state
   plugin-bot-template/ Bot template export, share records, and guarded import
   plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
   plugin-credentials/ Per-User Connection credential encryption and leases
@@ -313,7 +312,6 @@ packages/
   plugin-tools/     The trusted tool registry and its guards
   plugin-ui-theme/  Global semantic tokens for hosted client Contributions
   plugin-user-machine/ Registered-machine enrollment and pairing
-  plugin-voice/     Voice sessions, quota, and the upstream model seam
   plugin-web/       web_search and a bounded, SSRF-classified web_fetch
   provider-openai-compatible/  Shared model transport: request mapping, deadlines, AI SDK decoding
 docs/

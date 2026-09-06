@@ -339,6 +339,3 @@ export function decodeExternalAuthorizationUrl(value: unknown): string {
   }
   return value;
 }
-
-export * from "./voice-assistant.js";
-export * from "./voice-dictation.js";

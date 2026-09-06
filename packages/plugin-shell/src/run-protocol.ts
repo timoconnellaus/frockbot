@@ -215,8 +215,8 @@ export type ClientRunOutcomeV1 =
 
 /**
  * The run projection. Version 2 added structured `send/to-user` and
- * `wake/parent` events; version 3 adds the bounded `via` marker for agent and
- * Voice Turns without exposing the internal origin record.
+ * `wake/parent` events; version 3 adds the bounded `via` marker for agent
+ * Turns without exposing the internal origin record.
  */
 export interface ClientRunV1 {
   schemaVersion: 1 | 2 | 3;
@@ -243,9 +243,7 @@ export interface ClientRunV1 {
   partialText?: string;
   outcome?: ClientRunOutcomeV1;
   /** Where an agent-lane question entered this Bot's transcript. */
-  via?:
-    | { kind: "bot"; name: string; botId: string }
-    | { kind: "voice"; name: "Voice" };
+  via?: { kind: "bot"; name: string; botId: string };
 }
 
 export interface ClientRunPageV1 {
@@ -906,9 +904,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
           name: truncateWireString(origin.fromBotName, 100),
           botId: truncate(origin.fromBotId, 128),
         }
-      : origin?.kind === "voice"
-        ? { kind: "voice" as const, name: "Voice" as const }
-        : undefined;
+      : undefined;
   return {
     // Version 3 adds the origin marker for an agent-lane message.
     schemaVersion: 3,
@@ -1508,11 +1504,6 @@ function decodeRun(value: unknown): ClientRun {
         name: wireString(candidate, "name", 100, "run.via"),
         botId: string(candidate, "botId", 128, "run.via"),
       };
-    } else if (candidate.kind === "voice") {
-      exactKeys(candidate, ["kind", "name"], "run.via");
-      if (candidate.name !== "Voice")
-        throw new Error("run.via.name is invalid");
-      via = { kind: "voice", name: "Voice" };
     } else {
       throw new Error("run.via.kind is invalid");
     }
