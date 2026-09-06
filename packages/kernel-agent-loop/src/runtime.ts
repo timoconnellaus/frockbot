@@ -31,12 +31,12 @@ export interface TurnCursor {
 /**
  * How a Turn's body finished.
  *
- * `reconciliation-required` writes no `turn/end`: the Turn's model request has
- * no durable outcome, so whoever settles the run decides how it ended.
+ * `settlement-pending` writes no `turn/end`: the Turn's own durable commitment
+ * of a model outcome has not landed, and a resume re-announces it.
  */
 export type TurnSettlement =
   | { kind: "settled"; outcome: StepOutcome; reason?: string }
-  | { kind: "reconciliation-required" };
+  | { kind: "settlement-pending" };
 
 /**
  * What one Turn's external work is allowed to reach.
@@ -57,8 +57,5 @@ export interface LoopRuntime {
   readonly retry: ModelRetryPolicyRuntimeV1;
   /** Wall clock this Turn must finish by, rearmed for each Turn. */
   readonly turnDeadlineAt: number;
-  notifyModelOutcome(
-    requestId: string,
-    outcome: "completed" | "not-started",
-  ): Promise<void>;
+  notifyModelOutcome(requestId: string): Promise<void>;
 }

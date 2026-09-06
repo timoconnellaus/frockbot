@@ -86,16 +86,14 @@ describe("a Turn that runs out of wall clock", () => {
     handle.agent.send("Take your time.");
     await handle.agent.whenIdle();
 
-    // The model effect is unsettled, so the uncertainty is recorded — but the
-    // deadline *settles the Turn anyway*, because a run the clock stopped will
-    // never resume to make that outcome certain. Leaving
-    // `model/reconciliation-required` as the last event of an open Turn parked
-    // the run in `reconciliation-required` and refused every later Turn on
-    // that Bot with `409` for the life of the Bot.
+    // The model request is left in the log with no answer — it carries its
+    // own key, so it could be sent again — and the deadline settles the Turn
+    // regardless, because a run the clock stopped will never resume.
     const journal = handle.agent.session.events;
-    expect(
-      journal.some((event) => event.type === "model/reconciliation-required"),
-    ).toBe(true);
+    expect(journal.some((event) => event.type === "model/request")).toBe(true);
+    expect(journal.some((event) => event.type === "assistant/message")).toBe(
+      false,
+    );
     const step = journal.findLast((event) => event.type === "step/end");
     if (step?.type !== "step/end") throw new Error("the step never ended");
     expect(step.outcome).toBe("interrupted");
@@ -239,18 +237,13 @@ describe("a model request the provider says never started", () => {
       type: "turn/end",
       outcome: "completed",
     });
-    // The retry is not a hidden event type: the durable log already shows the
-    // attempt that did not start and the one that replaced it.
-    expect(
-      handle.agent.session.events.filter(
-        (event) => event.type === "model/request",
-      ),
-    ).toHaveLength(2);
-    expect(
-      handle.agent.session.events.filter(
-        (event) => event.type === "model/effect-not-started",
-      ),
-    ).toHaveLength(1);
+    // Two dispatches of one key, so the log shows both sends and the retry
+    // that connected them.
+    const sends = handle.agent.session.events.filter(
+      (event) => event.type === "model/request",
+    );
+    expect(sends).toHaveLength(2);
+    expect(new Set(sends.map((event) => event.request.requestId)).size).toBe(1);
     expect(
       handle.agent.session.events.filter(
         (event) => event.type === "model/retry",
@@ -287,14 +280,14 @@ describe("a model request the provider says never started", () => {
     });
   });
 
-  test("an uncertain failure is never retried", async () => {
-    let attempts = 0;
+  test("an uncertain failure is retried once, under the same key", async () => {
+    const dispatched: string[] = [];
     const provider: LlmProvider = {
       id: "uncertain",
-      async *stream() {
-        attempts += 1;
-        // Not classified as unstarted: the call may well have run, so trying
-        // again would be a silent duplicate.
+      async *stream(request) {
+        dispatched.push(request.requestId);
+        // The call may well have run. Retrying is safe anyway, because the
+        // retry carries the same idempotency key.
         throw new Error("connection reset mid-stream");
       },
     };
@@ -310,12 +303,12 @@ describe("a model request the provider says never started", () => {
     handle.agent.send("Say hello.");
     await handle.agent.whenIdle();
 
-    expect(attempts).toBe(1);
-    expect(
-      handle.agent.session.events.some(
-        (event) => event.type === "model/reconciliation-required",
-      ),
-    ).toBe(true);
+    expect(dispatched).toHaveLength(2);
+    expect(dispatched[0]).toBe(dispatched[1]);
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "model-error",
+    });
   });
 });
 

@@ -30,7 +30,6 @@ describe("foundation application", () => {
       "auth",
       "authoring",
       "settings",
-      "billing",
       "bot-template",
       "clock",
       "computer",
@@ -54,7 +53,6 @@ describe("foundation application", () => {
       "search",
       "skills",
       "subagents",
-      "voice",
     ]);
     expect(first.contributions).toEqual({
       backend: [
@@ -63,7 +61,6 @@ describe("foundation application", () => {
         "flock",
         "audit",
         "settings",
-        "billing",
         "bot-template",
         "computer",
         "credentials",
@@ -74,7 +71,6 @@ describe("foundation application", () => {
         "routines",
         "search",
         "subagents",
-        "voice",
       ],
       runtime: [
         "shell",
@@ -112,7 +108,6 @@ describe("foundation application", () => {
         "audit",
         "auth",
         "settings",
-        "billing",
         "bot-template",
         "computer",
         "custom-models",
@@ -120,7 +115,6 @@ describe("foundation application", () => {
         "package-publisher",
         "routines",
         "search",
-        "voice",
       ],
       desktop: ["auth", "fly-sprite", "user-machine"],
       mobile: [],
@@ -309,7 +303,6 @@ describe("foundation application", () => {
     expect(platformOwned("shell")).toBe(true);
     expect(platformOwned("settings")).toBe(true);
     expect(platformOwned("provider-flock-ai")).toBe(true);
-    expect(platformOwned("billing")).toBe(true);
     expect(platformOwned("custom-models")).toBe(false);
     expect(platformOwned("web")).toBe(false);
     expect(platformOwned("provider-ollama-cloud")).toBe(false);
@@ -374,7 +367,6 @@ describe("foundation application", () => {
       rebuildSearchIndex: () =>
         Promise.reject(new Error("not used while composing")),
       readAudit: () => Promise.reject(new Error("not used while composing")),
-      readUsage: () => Promise.reject(new Error("not used while composing")),
       rebuildAuditIndex: () =>
         Promise.reject(new Error("not used while composing")),
       listBotUnread: () =>
@@ -430,10 +422,6 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       readTask: () => Promise.reject(new Error("not used while composing")),
       stopTask: () => Promise.reject(new Error("not used while composing")),
-      readVoiceAssistant: () =>
-        Promise.reject(new Error("not used while composing")),
-      openVoiceAssistant: () =>
-        Promise.reject(new Error("not used while composing")),
     });
     expect(
       backend.contributions
@@ -442,7 +430,6 @@ describe("foundation application", () => {
     ).toEqual([
       "admin",
       "audit",
-      "billing",
       "bot-template",
       "computer",
       "flock",
@@ -452,7 +439,6 @@ describe("foundation application", () => {
       "settings",
       "subagents",
       "user-machine",
-      "voice",
     ]);
     interface TestContribution {
       specifier: string;
@@ -472,7 +458,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(3);
-    expect(userBackend.contributions).toHaveLength(12);
+    expect(userBackend.contributions).toHaveLength(10);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );

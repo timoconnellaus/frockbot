@@ -106,10 +106,6 @@ import {
   type AuditQueryV1,
 } from "@frockbot/plugin-audit";
 import {
-  decodeUsageReportV1,
-  type UsageReportV1,
-} from "@frockbot/plugin-billing";
-import {
   decodeTemplateImportListViewV1,
   decodeTemplateImportRecordV1,
   decodeTemplateShareListViewV1,
@@ -179,18 +175,10 @@ import {
   decodeAppletSummaryV1,
 } from "@frockbot/kernel-contracts";
 import type { AppletState } from "./applet-state.js";
-import type { VoiceSession } from "./voice-session.js";
-import {
-  VOICE_ASSISTANT_INTERNAL_PATH,
-  VOICE_DICTATION_INTERNAL_PATH,
-} from "./voice-session.js";
 export { BotCapabilities } from "./bot-capabilities.js";
 // The Applet authority: the Durable Object that owns one Applet instance,
 // and the loopback `CAPABILITIES` entrypoint its facet is handed.
 export { AppletCapabilities, AppletState } from "./applet-state.js";
-// The composer's dictation transport (voice plan D2): one object per User,
-// holding the browser leg and the provider leg and no authority at all.
-export { VoiceSession } from "./voice-session.js";
 export { BotState, DeploymentPolicy, UserConfiguration };
 
 interface Env {
@@ -245,24 +233,6 @@ interface Env {
   FLOCK_AI_GATEWAY_TOKEN?: string;
   BOT_STATES: DurableObjectNamespace<BotState>;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
-  /** One voice transport per User, `idFromName(userId)` (voice plan D2). */
-  VOICE_SESSIONS: DurableObjectNamespace<VoiceSession>;
-  /**
-   * The direct OpenAI realtime key. Present, dictation takes the direct path;
-   * absent, it takes the AI Gateway's BYOK key. A Worker secret, so the
-   * release workflow's `--secrets-file` list carries the name or no release
-   * ever updates it.
-   */
-  OPENAI_API_KEY?: string;
-  /**
-   * The Gemini key slice B will read the same way. Declared here so the
-   * release workflow can carry it before the code that uses it lands.
-   */
-  GEMINI_API_KEY?: string;
-  /** Local dictation stand-in; set by the end-to-end harness only. */
-  VOICE_UPSTREAM_URL?: string;
-  /** Local Gemini Live stand-in; set by the end-to-end harness only. */
-  VOICE_ASSISTANT_UPSTREAM_URL?: string;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
   COMPUTER_HOST: Fetcher;
   /** Shared secret presented on every Computer host call. */
@@ -324,8 +294,6 @@ function debugSurface(env: Env): DebugGatewaySurface {
     },
     listBots: (userId) =>
       userConfigurationStub(env, userId).listBots({ schemaVersion: 1, userId }),
-    readUsage: (userId) =>
-      userUsageStub(env, userId).readUsage({ schemaVersion: 1, userId }),
     snapshot: (userId, botId, query) =>
       botStateStub(env, userId, botId).debugSnapshot(query),
     isAdminUser: async (userId) => {
@@ -401,10 +369,6 @@ interface BotStateRpc extends BotConfigurationBinding {
   executeUnreadCommand(
     command: BotUnreadCommandV1,
   ): Promise<BotUnreadReceiptV1>;
-  reconcileRun(
-    identity: { userId: string; botId: string },
-    runId: string,
-  ): Promise<BotTurnResult>;
   stopRun(command: ClientRunStopCommandV1): Promise<ClientRunStopReceiptV1>;
 }
 
@@ -418,10 +382,6 @@ interface UserConfigurationRpc extends UserConfigurationBinding {
     schemaVersion: 1;
     userId: string;
   }): Promise<boolean>;
-  readVoiceAssistant(request: {
-    schemaVersion: 1;
-    userId: string;
-  }): Promise<unknown>;
 }
 
 type RpcBoundary<T> = {
@@ -538,8 +498,6 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
         botId,
         notificationId,
       }),
-    reconcileRun: (identity, runId) =>
-      rpc.reconcileRun({ schemaVersion: 1, ...identity, runId }),
     stopRun: (command) =>
       rpc.stopRun({ schemaVersion: 1, userId, botId, command }),
     readFocusedApplet: (input) => rpc.readFocusedApplet(input),
@@ -605,7 +563,6 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     resolveTemplateShare: (request) => rpc.resolveTemplateShare(request),
     listTemplateImports: (request) => rpc.listTemplateImports(request),
     executeTemplateImport: (request) => rpc.executeTemplateImport(request),
-    readVoiceAssistant: (request) => rpc.readVoiceAssistant(request),
   };
 }
 
@@ -723,20 +680,10 @@ interface UserAuditRpc {
   rebuildAuditIndex(input: unknown): Promise<unknown>;
 }
 
-interface UserUsageRpc {
-  readUsage(input: unknown): Promise<unknown>;
-}
-
 function userAuditStub(env: Env, userId: string): UserAuditRpc {
   const id = env.USER_CONFIGURATIONS.idFromName(userId);
   // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated Audit RPC surface.
   return env.USER_CONFIGURATIONS.get(id) as unknown as UserAuditRpc;
-}
-
-function userUsageStub(env: Env, userId: string): UserUsageRpc {
-  const id = env.USER_CONFIGURATIONS.idFromName(userId);
-  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated Usage RPC surface.
-  return env.USER_CONFIGURATIONS.get(id) as unknown as UserUsageRpc;
 }
 
 /** The User Durable Object's Applet directory, addressed by User. */
@@ -1209,21 +1156,6 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       request.botId as string,
     ).stopRun(request.command as ClientRunStopCommandV1);
   }
-
-  async reconcileRun(input: unknown): Promise<BotTurnResult> {
-    const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcBotId,
-      runId: rpcIdentifier,
-    });
-    return botStateStub(
-      this.env,
-      this.ctx.props.userId,
-      request.botId as string,
-    ).reconcileRun(
-      { userId: this.ctx.props.userId, botId: request.botId as string },
-      request.runId as string,
-    );
-  }
 }
 
 function packageArtifactKey(contentHash: string): string {
@@ -1528,51 +1460,6 @@ async function openOwnedBotStateChannel(
 }
 
 /**
- * The composer's dictation socket, handed to this User's `VoiceSession`.
- *
- * The identity travels as a header rather than in the URL for the same reason
- * the Bot-state channel's does: the object trusts what the gateway
- * authenticated and nothing a caller could have written for itself.
- */
-function openVoiceDictation(
-  env: Env,
-  userId: string,
-  request: Request,
-): Promise<Response> {
-  const incoming = new URL(request.url);
-  const internal = new URL(
-    `${VOICE_DICTATION_INTERNAL_PATH}${incoming.search}`,
-    "https://voice-session.internal",
-  );
-  const headers = new Headers(request.headers);
-  headers.delete("x-frockbot-user-id");
-  headers.set("x-frockbot-user-id", userId);
-  const namespace = env.VOICE_SESSIONS;
-  return namespace
-    .get(namespace.idFromName(userId))
-    .fetch(new Request(internal, { method: "GET", headers }));
-}
-
-function openVoiceAssistant(
-  env: Env,
-  userId: string,
-  request: Request,
-): Promise<Response> {
-  const incoming = new URL(request.url);
-  const internal = new URL(
-    `${VOICE_ASSISTANT_INTERNAL_PATH}${incoming.search}`,
-    "https://voice-session.internal",
-  );
-  const headers = new Headers(request.headers);
-  headers.delete("x-frockbot-user-id");
-  headers.set("x-frockbot-user-id", userId);
-  const namespace = env.VOICE_SESSIONS;
-  return namespace
-    .get(namespace.idFromName(userId))
-    .fetch(new Request(internal, { method: "GET", headers }));
-}
-
-/**
  * One published template, for the unauthenticated `GET /templates/v1/:shareId`.
  *
  * The share id names its owner, so the route needs no index and no lookup
@@ -1787,15 +1674,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
             }),
           ),
         ),
-      readUsage: async (userId: string): Promise<UsageReportV1> =>
-        decodeUsageReportV1(
-          rpcJsonSnapshot(
-            await userUsageStub(env, userId).readUsage({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
       rebuildAuditIndex: async (userId: string) =>
         decodeAuditRebuildReceiptV1(
           rpcJsonSnapshot(
@@ -1829,13 +1707,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           userId,
           command,
         }),
-      readVoiceAssistant: (userId) =>
-        userConfigurationStub(env, userId).readVoiceAssistant({
-          schemaVersion: 1,
-          userId,
-        }),
-      openVoiceAssistant: (userId, request) =>
-        openVoiceAssistant(env, userId, request),
       lookupConnectionCommand: (userId, packageId, commandId) =>
         userConfigurationStub(env, userId).lookupConnectionCommand({
           schemaVersion: 1,
@@ -2256,8 +2127,6 @@ export default {
           env.APPLET_STATES.get(
             env.APPLET_STATES.idFromName(appletStateNameV1(userId, appletId)),
           ),
-        openVoiceDictation: (userId, request) =>
-          openVoiceDictation(env, userId, request),
         openBotStateChannel: (userId, botId, request, context) =>
           openOwnedBotStateChannel(env, userId, botId, request, context),
         ...(env.PACKAGE_CATALOG

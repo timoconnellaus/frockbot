@@ -723,7 +723,7 @@
           "const": "refused"
         },
         "reason": {
-          "enum": ["busy", "reconciliation-required", "fenced", "duplicate"]
+          "enum": ["busy", "fenced", "duplicate"]
         },
         "error": {
           "type": "string",
@@ -1300,39 +1300,22 @@
               "maxLength": 64000
             },
             "via": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "bot"
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    },
-                    "botId": {
-                      "$ref": "#/$defs/BotId"
-                    }
-                  },
-                  "required": ["kind", "name", "botId"],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "bot"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "voice"
-                    },
-                    "name": {
-                      "const": "Voice"
-                    }
-                  },
-                  "required": ["kind", "name"],
-                  "additionalProperties": false
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "botId": {
+                  "$ref": "#/$defs/BotId"
                 }
-              ]
+              },
+              "required": ["kind", "name", "botId"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -1411,39 +1394,22 @@
               "additionalProperties": false
             },
             "via": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "bot"
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    },
-                    "botId": {
-                      "$ref": "#/$defs/BotId"
-                    }
-                  },
-                  "required": ["kind", "name", "botId"],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "bot"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "voice"
-                    },
-                    "name": {
-                      "const": "Voice"
-                    }
-                  },
-                  "required": ["kind", "name"],
-                  "additionalProperties": false
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "botId": {
+                  "$ref": "#/$defs/BotId"
                 }
-              ]
+              },
+              "required": ["kind", "name", "botId"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -1528,39 +1494,22 @@
               "additionalProperties": false
             },
             "via": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "bot"
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    },
-                    "botId": {
-                      "$ref": "#/$defs/BotId"
-                    }
-                  },
-                  "required": ["kind", "name", "botId"],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "bot"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "voice"
-                    },
-                    "name": {
-                      "const": "Voice"
-                    }
-                  },
-                  "required": ["kind", "name"],
-                  "additionalProperties": false
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "botId": {
+                  "$ref": "#/$defs/BotId"
                 }
-              ]
+              },
+              "required": ["kind", "name", "botId"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -1645,39 +1594,22 @@
               "additionalProperties": false
             },
             "via": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "bot"
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    },
-                    "botId": {
-                      "$ref": "#/$defs/BotId"
-                    }
-                  },
-                  "required": ["kind", "name", "botId"],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "bot"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "voice"
-                    },
-                    "name": {
-                      "const": "Voice"
-                    }
-                  },
-                  "required": ["kind", "name"],
-                  "additionalProperties": false
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "botId": {
+                  "$ref": "#/$defs/BotId"
                 }
-              ]
+              },
+              "required": ["kind", "name", "botId"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -1763,39 +1695,22 @@
               "additionalProperties": false
             },
             "via": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "bot"
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    },
-                    "botId": {
-                      "$ref": "#/$defs/BotId"
-                    }
-                  },
-                  "required": ["kind", "name", "botId"],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "bot"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "voice"
-                    },
-                    "name": {
-                      "const": "Voice"
-                    }
-                  },
-                  "required": ["kind", "name"],
-                  "additionalProperties": false
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "botId": {
+                  "$ref": "#/$defs/BotId"
                 }
-              ]
+              },
+              "required": ["kind", "name", "botId"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -1806,117 +1721,6 @@
             "status",
             "events",
             "outcome"
-          ],
-          "additionalProperties": false,
-          "allOf": [
-            {
-              "if": {
-                "type": "object",
-                "required": ["via"],
-                "properties": {
-                  "via": {}
-                }
-              },
-              "then": {
-                "type": "object",
-                "properties": {
-                  "schemaVersion": {
-                    "const": 3
-                  }
-                }
-              }
-            }
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "schemaVersion": {
-              "enum": [1, 2, 3]
-            },
-            "runId": {
-              "$ref": "#/$defs/Identifier"
-            },
-            "admittedAt": {
-              "$ref": "#/$defs/Instant"
-            },
-            "input": {
-              "type": "string",
-              "minLength": 0,
-              "maxLength": 32000
-            },
-            "status": {
-              "const": "reconciliation-required"
-            },
-            "events": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/RunEvent"
-              },
-              "minItems": 0,
-              "maxItems": 512
-            },
-            "stopRequestedAt": {
-              "$ref": "#/$defs/Instant"
-            },
-            "recovery": {
-              "type": "object",
-              "properties": {
-                "action": {
-                  "const": "resume"
-                },
-                "message": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 8000
-                }
-              },
-              "required": ["action", "message"],
-              "additionalProperties": false
-            },
-            "via": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "bot"
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    },
-                    "botId": {
-                      "$ref": "#/$defs/BotId"
-                    }
-                  },
-                  "required": ["kind", "name", "botId"],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "voice"
-                    },
-                    "name": {
-                      "const": "Voice"
-                    }
-                  },
-                  "required": ["kind", "name"],
-                  "additionalProperties": false
-                }
-              ]
-            }
-          },
-          "required": [
-            "schemaVersion",
-            "runId",
-            "admittedAt",
-            "input",
-            "status",
-            "events"
           ],
           "additionalProperties": false,
           "allOf": [
@@ -2928,7 +2732,7 @@
               "const": 1
             },
             "state": {
-              "enum": ["running", "reconciliation-required", "terminal"]
+              "enum": ["running", "terminal"]
             },
             "run": {
               "$ref": "#/$defs/Run"

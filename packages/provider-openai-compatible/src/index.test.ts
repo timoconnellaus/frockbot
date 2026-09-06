@@ -388,33 +388,6 @@ describe("OpenAICompatibleProvider", () => {
     expect(cancelled).toBe(true);
   });
 
-  test("reports retrieval as not retrievable without another provider request", async () => {
-    let requests = 0;
-    const provider = new OpenAICompatibleProvider({
-      baseUrl: "https://models.example/v1",
-      fetch: () => {
-        requests += 1;
-        return Promise.resolve(new Response(null, { status: 500 }));
-      },
-    });
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    root.llm.register(provider);
-
-    const outcome = await root.llm.reconcile(
-      request,
-      new AbortController().signal,
-    );
-
-    expect(outcome).toEqual({
-      status: "not-retrievable",
-      reason:
-        'LLM provider "openai-compatible" does not support provider-bound retrieval',
-    });
-    expect(requests).toBe(0);
-    await root.fiber.dispose();
-  });
-
   test.each([
     [400, "permanent"],
     [401, "permanent"],

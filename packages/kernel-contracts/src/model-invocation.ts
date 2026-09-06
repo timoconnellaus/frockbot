@@ -140,37 +140,6 @@ export const MODEL_REQUEST_DEADLINES_V1: ModelRequestDeadlinesV1 = {
   idleMs: MODEL_IDLE_DEADLINE_MS_V1,
 };
 
-export type LlmReconciliationOutcome =
-  | {
-      status: "recovered";
-      events: readonly LlmStreamEvent[];
-    }
-  | {
-      /**
-       * The effect may still exist at the provider but cannot be read right
-       * now. The run parks and can be reconciled again later.
-       */
-      status: "unavailable";
-      reason: string;
-    }
-  | {
-      /**
-       * The provider keeps no durable copy of this effect, so no later attempt
-       * can do better. The run settles as a failure — with whatever text was
-       * already journaled preserved — rather than parking forever on a
-       * retrieval that will never succeed.
-       */
-      status: "not-retrievable";
-      reason: string;
-    };
-
-export interface LlmReconciliationCapability {
-  retrieve(
-    effect: DurableModelEffect,
-    signal: AbortSignal,
-  ): Promise<LlmReconciliationOutcome>;
-}
-
 export interface LlmProvider {
   id: string;
   /** Legacy/test adapters that omit this are treated as supporting nothing. */
@@ -179,7 +148,6 @@ export interface LlmProvider {
     request: NormalizedModelRequest,
     signal: AbortSignal,
   ): AsyncIterable<LlmStreamEvent>;
-  reconciliation?: LlmReconciliationCapability;
 }
 
 /** The kernel-declared model invocation interface. Implemented by a Package. */
@@ -193,10 +161,6 @@ export interface ModelInvocation {
     format: Omit<JsonSchemaResponseFormatV1, "type">,
     signal: AbortSignal,
   ): Promise<StructuredModelResultV1<T>>;
-  reconcile(
-    request: NormalizedModelRequest,
-    signal: AbortSignal,
-  ): Promise<LlmReconciliationOutcome>;
 }
 
 /** Provider Packages register themselves through this surface. */

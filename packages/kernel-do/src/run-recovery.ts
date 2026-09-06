@@ -11,52 +11,15 @@ import type { StoredRunCodecV1, StoredRunV1 } from "./run-records.js";
 
 export type BotRunRecoveryPlan =
   | { kind: "complete"; responseText: string }
-  | { kind: "fail"; failure: string; repairs?: SessionEvent[] }
+  | { kind: "fail"; failure: string }
   | { kind: "restart"; previous: SessionEvent[] }
-  | { kind: "resume" }
-  | { kind: "reconcile"; repairs: SessionEvent[] };
-
-/**
- * What a Turn says when a restart caught it mid-answer and nobody can be asked
- * how it ended.
- *
- * It is written for the person watching, not for an operator: they saw the Bot
- * start talking and then stop, and the only useful thing to tell them is that
- * it will not be finishing that sentence and sending again is safe.
- */
-export const UNRECONCILABLE_RUN_FAILURE_V1 =
-  "This Turn stopped partway — the service restarted while the model was answering, and there is no way to find out how that request ended. Try sending it again.";
-
-/**
- * Whether the provider a run was talking to can be asked what happened to a
- * request it never answered.
- *
- * Given the provider id off the run's own durable `model/request`, so the
- * answer is the same on every recovery of the same run, with no dependency on
- * what happens to be mounted or resident.
- */
-export type ProviderReconcilesV1 = (providerId: string) => boolean;
-
-/** The provider the run's most recent durable model request was addressed to. */
-export function latestModelRequestProviderV1(
-  events: readonly SessionEvent[],
-): string | undefined {
-  const request = events.findLast((event) => event.type === "model/request");
-  return request?.type === "model/request"
-    ? request.request.provider
-    : undefined;
-}
+  | { kind: "resume" };
 
 export type ModelRequestJournalState =
   | { status: "none" }
   | {
       status: "unresolved" | "completed";
       request: Extract<SessionEvent, { type: "model/request" }>;
-    }
-  | {
-      status: "no-effect";
-      request: Extract<SessionEvent, { type: "model/request" }>;
-      outcome: Extract<SessionEvent, { type: "model/effect-not-started" }>;
     };
 
 function invalidToolJournal(error: unknown): BotRunRecoveryPlan {
@@ -76,12 +39,6 @@ export function latestModelRequestJournalState(
     if (event.type === "model/request") {
       state = { status: "unresolved", request: event };
     } else if (
-      event.type === "model/effect-not-started" &&
-      state.status === "unresolved" &&
-      event.requestId === state.request.request.requestId
-    ) {
-      state = { status: "no-effect", request: state.request, outcome: event };
-    } else if (
       (event.type === "assistant/message" ||
         event.type === "model/response-failed") &&
       state.status !== "none" &&
@@ -93,36 +50,10 @@ export function latestModelRequestJournalState(
   return state;
 }
 
-/**
- * Why an unresolved Model request parked its run, in the operator's words
- * where the Agent recorded them.
- *
- * The request id alone names *which* call is unsettled but not what went
- * wrong, and the Agent's own reason is journaled on
- * `model/reconciliation-required` — an event the chat projection drops. Read
- * back here it reaches the banner the person is actually looking at.
- */
-export function unresolvedModelRequestFailure(
-  events: readonly SessionEvent[],
-  request: Extract<SessionEvent, { type: "model/request" }>,
-): string {
-  const requestId = request.request.requestId;
-  const summary = `Model request "${requestId}" has no durable provider outcome`;
-  const journaled = events.findLast(
-    (event) =>
-      event.type === "model/reconciliation-required" &&
-      event.requestId === requestId,
-  );
-  return journaled?.type === "model/reconciliation-required"
-    ? `${summary}: ${journaled.reason}`
-    : summary;
-}
-
 export function planBotRunRecovery<Snapshot>(
   run: StoredRunV1<Snapshot>,
   latest: readonly SessionEvent[],
   codec: StoredRunCodecV1<Snapshot>,
-  providerReconciles: ProviderReconcilesV1 = () => true,
 ): BotRunRecoveryPlan {
   codec.require(run);
   let toolJournal: ReturnType<typeof validateToolOccurrenceJournal>;
@@ -157,18 +88,11 @@ export function planBotRunRecovery<Snapshot>(
   }
   // A direct tool Turn has no model request by construction. Its single
   // synthetic assistant/tool occurrence is nevertheless resumable at every
-  // durable boundary: before intent it can start, after intent it reconciles,
-  // and after result it only needs its terminal events appended.
+  // durable boundary: before intent it can start, after intent it is sent
+  // again under its own key, and after result it only needs its terminal
+  // events appended.
   if (run.directTool) return { kind: "resume" };
   const modelState = latestModelRequestJournalState(run.events);
-  if (modelState.status === "no-effect") {
-    try {
-      validateSettledToolOccurrenceJournal(run.events);
-    } catch (error) {
-      return invalidToolJournal(error);
-    }
-    return { kind: "resume" };
-  }
   if (modelState.status === "completed") {
     const resumableOccurrences = new Set(
       lastAssistant?.type === "assistant/message"
@@ -200,6 +124,9 @@ export function planBotRunRecovery<Snapshot>(
   const hasExternalIntent = run.events.some(
     (event) => event.type === "model/request" || event.type === "tool/call",
   );
+  // Every external effect the log carries is keyed — a model request by its
+  // own id, a tool occurrence by its occurrence id — so an interrupted Turn is
+  // dispatched again under those keys rather than investigated.
   if (!hasExternalIntent) {
     if (toolJournal.size > 0) {
       return invalidToolJournal(
@@ -211,20 +138,7 @@ export function planBotRunRecovery<Snapshot>(
       previous: [...latest.slice(0, run.previousEventCount)],
     };
   }
-  const session = new Session(run.sessionId, () => {}, latest);
-  const repairs = session.reconcileForResume();
-  // A Turn whose model outcome is unknown is parked only when somebody can
-  // actually be asked. When the provider offers no retrieval, parking is not
-  // caution — it is a dead end: nothing will ever arrive to resolve it, the Bot
-  // stays wedged behind it, and the person is handed a Resolve button whose
-  // only possible answer is "give up". So the run is
-  // settled `failed` here, with its repairs and every streamed word it had
-  // already sent kept in the journal.
-  const provider = latestModelRequestProviderV1(run.events);
-  if (provider !== undefined && !providerReconciles(provider)) {
-    return { kind: "fail", failure: UNRECONCILABLE_RUN_FAILURE_V1, repairs };
-  }
-  return { kind: "reconcile", repairs };
+  return { kind: "resume" };
 }
 
 /** True when the durable log ends inside a Turn nothing is going to finish. */

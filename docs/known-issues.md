@@ -72,7 +72,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 34. ~~**The provider set is closed.**~~ **Fixed.** It was a two-entry map. A third provider (`plugin-provider-anthropic`) now ships, built on `@ai-sdk/anthropic`, which demonstrates the registration path takes an arbitrary provider. It has no `user` backend contribution yet, so its Connection cannot be created through the UI.
 
-35. **The default provider is an echo stub.** Any path that fails to apply `modelSelection` answers `"Cordis runtime: <message>"` rather than raising an error.
+35. **The default provider is an echo stub.** Any path that fails to apply `modelSelection` answers `"Cordis runtime: <message>"` rather than raising an error. Still true, and now more visible: with three providers registered, a selection that silently falls through is harder to spot than when there were two.
 
 36. **Frock AI's catalog is one model plus Auto** (`packages/plugin-provider-frock-ai/src/catalog.ts:49-56`).
 
@@ -88,10 +88,14 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 42. **`APPLET_STATES` is typed inconsistently.** It is optional in `UserConfigurationEnv` (`apps/cloudflare/src/user-configuration.ts:210`, guarded at `:1826`) but non-optional and dereferenced unguarded in the gateway (`apps/cloudflare/src/index.ts:1060`, `:2339`).
 
-43. **Voice dictation is not eviction-safe** while the assistant on the same object is: dictation uses `server.accept()` and the assistant uses `ctx.acceptWebSocket`.
+43. ~~**Voice dictation is not eviction-safe.**~~ **Gone.** Voice is removed.
 
 44. **`packages/plugin-audit/src/store.ts:478-503` performs `DROP TABLE` and `ALTER TABLE ... RENAME` shadow-swaps** on the User Durable Object's SQL surface, which it shares with the FTS5 search index.
 
 45. ~~**Dangling directory references.**~~ **Fixed.** `apps/cloudflare/index.html` referenced `apps/mobile` and the computer-host README referenced `apps/fly-host-prototype`; both are removed.
 
 46. **`packages/desktop-core` remains** and is used only by `packages/plugin-user-machine`; `@frockbot/application-foundation` still exports `./desktop-runtime`.
+
+47. **An auto-merged pull request never deploys to staging.** `ci.yml`'s `deploy-staging` is gated on `github.event_name == 'push' && github.ref == 'refs/heads/main'`, but `auto-merge.yml` merges with `GITHUB_TOKEN`, and GitHub does not trigger workflows from pushes made with it. So every auto-merged change reaches `main` without staging ever running it, and production is the first environment to see it. `workflow_dispatch` does not help: the job's `if` excludes it.
+
+48. **The npm publish step fails every release for packages npm does not trust.** `release.yml` publishes every directory under `packages/`, including ones with no external consumer (`compose-*`, `plugin-testkit`). A package whose trusted publisher is not configured on npmjs.com fails the token exchange with an `E404` that reads as "not found". This reddens the release run even though `Deploy FrockBot app` succeeds, which is what makes a red release easy to ignore. Two fixes are needed: stop publishing internal-only packages, and configure trusted publishing for the ones that genuinely ship (`plugin-provider-anthropic` is new and will fail until it is).

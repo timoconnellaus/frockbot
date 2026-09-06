@@ -12,7 +12,6 @@ import { compileFoundationApplication } from "@frockbot/application-foundation/r
 import {
   SessionEventLog,
   sessionEventLogIndexKeyV1,
-  UNRECONCILABLE_RUN_FAILURE_V1,
 } from "@frockbot/kernel-do";
 import { createShellBotBackendContribution } from "./backend.js";
 import {
@@ -20,6 +19,7 @@ import {
   type StoredRun,
 } from "./backend-contracts.js";
 import { planBotRunRecovery } from "./backend-recovery.js";
+import { RUN_FAILURE_COPY_V1 } from "./run-failure-copy.js";
 import {
   CLIENT_RUN_LIST_MAX_BYTES,
   CLIENT_RUN_PAGE_LIMIT,
@@ -114,9 +114,9 @@ async function compileWithoutIsolateMembers(): ReturnType<
 }
 
 /**
- * A Turn caught mid-model-request by a restart: the request is journalled, no
- * outcome ever arrived, and `provider-1` cannot be asked what happened.
- * Reconciliation settles it `failed` on the sentence written for the person.
+ * A Turn caught mid-model-request by a restart: the request is journalled and
+ * no outcome ever arrived. Recovery re-issues it under its own requestId, and
+ * `provider-1` is not mounted here, so the Turn settles `failed`.
  */
 function interruptedModelRequestEvents(): SessionEvent[] {
   return [
@@ -550,19 +550,18 @@ describe("Bot recovery", () => {
     expect(await storage.get<StoredRun>(`run:${run.runId}`)).toEqual(run);
   });
 
-  test("preserves reconciliation state when durable history is malformed", async () => {
+  test("preserves an active run when durable history is malformed", async () => {
     const storage = new MemoryStorage();
     const run = {
-      runId: "run-reconciliation",
+      runId: "run-malformed-history",
       commandFingerprint: "fingerprint",
       sessionId: "user:primary",
       acceptedAt: "2026-08-28T00:00:00.000Z",
       input: "hello",
       events: [],
       effectAdmissions: [],
-      status: "reconciliation-required",
-      phase: "reconciliation-required",
-      failure: "Provider confirmation required",
+      status: "running",
+      phase: "executing",
       compositionGenerationId: "test-composition-generation",
       configurationSnapshot: initializeBotSettingsV1("primary"),
       previousEventCount: 0,
@@ -578,12 +577,9 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
-    await expect(
-      contribution.reconcileRun(
-        { userId: "user-1", botId: "primary" },
-        run.runId,
-      ),
-    ).rejects.toThrow("session event.seq must be an integer");
+    await expect(contribution.listRuns({ schemaVersion: 1 })).rejects.toThrow(
+      "session event.seq must be an integer",
+    );
     expect(await storage.get<string>("active-run")).toBe(run.runId);
     expect(await storage.get<StoredRun>(`run:${run.runId}`)).toEqual(run);
   });
@@ -704,11 +700,10 @@ describe("Bot recovery", () => {
     expect(await recoveredAgain.listNotifications()).toEqual(notifications);
   });
 
-  // This used to park the run and hand the person a Resolve button.
-  // `provider-1` has no retrieval — none of the providers this deployment ships
-  // does — so there was never an answer to resolve it with, and the Bot stayed
-  // wedged behind it.
-  test("settles an unresolved request no provider can be asked about", async () => {
+  // A request nobody can be asked about is not a parked run: the requestId is
+  // the idempotency key, so recovery re-issues the call, and a Turn that still
+  // cannot run settles rather than holding the Bot behind a decision.
+  test("resumes an unanswered request instead of parking the run", async () => {
     const storage = new MemoryStorage();
     const settings = initializeBotSettingsV1("primary");
     const events = [
@@ -763,6 +758,7 @@ describe("Bot recovery", () => {
       previousEventCount: 0,
     } satisfies StoredRun;
     await storage.put({
+      identity: { userId: "user-1", botId: "primary" },
       "active-run": run.runId,
       "run:run-lost-marker": run,
       "latest-events": events,
@@ -772,11 +768,12 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
+    expect(planBotRunRecovery(run, events)).toEqual({ kind: "resume" });
+
     await recovered.listRuns();
 
     const settled = storage.values.get("run:run-lost-marker") as StoredRun;
     expect(settled.status).toBe("failed");
-    expect(settled.failure).toContain("stopped partway");
     // The Bot is released: nothing is holding the next Turn behind a decision
     // nobody can make.
     expect(storage.values.get("active-run")).toBeUndefined();
@@ -796,6 +793,7 @@ describe("Bot recovery", () => {
     const events = interruptedModelRequestEvents();
     const run = interruptedModelRequestRun(events, settings);
     await storage.put({
+      identity: { userId: "user-1", botId: "primary" },
       "active-run": run.runId,
       [`run:${run.runId}`]: run,
       "latest-events": events,
@@ -813,7 +811,7 @@ describe("Bot recovery", () => {
       runId: run.runId,
       title: "Bob couldn't finish",
       // The sentence written for the person, never the stored diagnostic.
-      body: UNRECONCILABLE_RUN_FAILURE_V1,
+      body: RUN_FAILURE_COPY_V1.interrupted,
     });
     expect(notification?.body).not.toContain("provider-1");
 
@@ -838,6 +836,7 @@ describe("Bot recovery", () => {
     const events = interruptedModelRequestEvents();
     const run = interruptedModelRequestRun(events, settings);
     await storage.put({
+      identity: { userId: "user-1", botId: "primary" },
       "active-run": run.runId,
       [`run:${run.runId}`]: run,
       "latest-events": events,
@@ -855,7 +854,15 @@ describe("Bot recovery", () => {
     expect(await recovered.listNotifications()).toEqual([]);
   });
 
-  test("resumes a request whose durable journal proves no effect started", () => {
+  test("resumes an unanswered request, which is re-issued under its own key", () => {
+    const request = {
+      requestId: "request-reissued",
+      provider: "provider-1",
+      model: "model-1",
+      system: "",
+      messages: [],
+      tools: [],
+    };
     const events = [
       {
         type: "model/request" as const,
@@ -863,31 +870,25 @@ describe("Bot recovery", () => {
         timestamp: "2026-08-28T00:00:00.000Z",
         turn: 1,
         step: 1,
-        request: {
-          requestId: "request-with-no-effect",
-          provider: "provider-1",
-          model: "model-1",
-          system: "",
-          messages: [],
-          tools: [],
-        },
+        request,
       },
+      // A second dispatch of the one call: same key, so the provider answers
+      // it at most once however many times the loop sends it.
       {
-        type: "model/effect-not-started" as const,
+        type: "model/request" as const,
         seq: 1,
-        timestamp: "2026-08-28T00:00:00.000Z",
+        timestamp: "2026-08-28T00:00:01.000Z",
         turn: 1,
         step: 1,
-        requestId: "request-with-no-effect",
-        reason: "provider rejected before dispatch",
+        request,
       },
     ] satisfies SessionEvent[];
     const run = {
-      runId: "run-no-effect",
+      runId: "run-reissued",
       commandFingerprint: botTurnCommandFingerprintV1({
         userId: "user-1",
         botId: "primary",
-        runId: "run-no-effect",
+        runId: "run-reissued",
         sessionId: "user:primary",
         acceptedAt: "2026-08-28T00:00:00.000Z",
         text: "hello",
@@ -1143,7 +1144,7 @@ describe("Bot recovery", () => {
     expect(planBotRunRecovery(run, events)).toEqual({ kind: "resume" });
   });
 
-  test("keeps a journaled tool effect in reconciliation", () => {
+  test("resumes a journaled tool occurrence under its own effect id", () => {
     const events = [
       {
         type: "turn/start" as const,
@@ -1211,7 +1212,9 @@ describe("Bot recovery", () => {
       previousEventCount: 0,
     } satisfies StoredRun;
 
-    expect(planBotRunRecovery(run, events).kind).toBe("reconcile");
+    // The occurrence id is the key the tool is executed under, so an
+    // occurrence with an intent and no result is simply executed again.
+    expect(planBotRunRecovery(run, events).kind).toBe("resume");
   });
 
   test("replays only an identical completed Turn command", async () => {
@@ -1327,6 +1330,7 @@ describe("Bot recovery", () => {
       previousEventCount: 0,
     } satisfies StoredRun;
     await storage.put({
+      identity: { userId: "user-1", botId: "primary" },
       "active-run": run.runId,
       [`run:${run.runId}`]: run,
       "latest-events": events,
@@ -1819,13 +1823,13 @@ describe("Bot recovery", () => {
         input: "🧪".repeat(8_000),
         events: [],
         effectAdmissions: [],
-        status: active ? "reconciliation-required" : "completed",
-        phase: active ? "reconciliation-required" : "executing",
+        status: active ? "failed" : "completed",
+        phase: "executing",
         compositionGenerationId: "test-composition-generation",
         configurationSnapshot: initializeBotSettingsV1("primary"),
         previousEventCount: 0,
         ...(active
-          ? { failure: "Provider confirmation required" }
+          ? { failure: "Bot turn ended with outcome model-error" }
           : { responseText: "📦".repeat(16_000) }),
       } satisfies StoredRun;
       await storage.put({

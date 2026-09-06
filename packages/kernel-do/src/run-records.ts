@@ -22,12 +22,7 @@ export interface StoredRunCodecV1<Snapshot> {
 }
 
 export type StoredRunStatus =
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "superseded"
-  | "reconciliation-required";
+  "running" | "completed" | "failed" | "cancelled" | "superseded";
 
 /**
  * The admission lane a Turn was accepted on.
@@ -94,18 +89,9 @@ export interface StoredRunBotOriginV1 {
   messageId: string;
 }
 
-/** The Voice Package asking this Bot on behalf of its User. */
-export interface StoredRunVoiceOriginV1 {
-  kind: "voice";
-  messageId: string;
-}
-
 /** What produced a Turn, when it was not a person speaking to the Bot. */
 export type StoredRunOriginV1 =
-  | StoredRunRoutineOriginV1
-  | StoredRunSubagentOriginV1
-  | StoredRunBotOriginV1
-  | StoredRunVoiceOriginV1;
+  StoredRunRoutineOriginV1 | StoredRunSubagentOriginV1 | StoredRunBotOriginV1;
 
 const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunTriggerV1[] = [
   "cron",
@@ -140,8 +126,7 @@ export interface StoredRunAdmissionV1 {
   origin?: StoredRunOriginV1;
 }
 
-export type StoredRunPhase =
-  "queued" | "admitted" | "executing" | "reconciliation-required";
+export type StoredRunPhase = "queued" | "admitted" | "executing";
 
 export interface StoredRunV1<Snapshot = unknown> {
   runId: string;
@@ -293,13 +278,11 @@ const STORED_RUN_STATUSES: readonly StoredRunStatus[] = [
   "failed",
   "cancelled",
   "superseded",
-  "reconciliation-required",
 ];
 const STORED_RUN_PHASES: readonly StoredRunPhase[] = [
   "queued",
   "admitted",
   "executing",
-  "reconciliation-required",
 ];
 const STORED_RUN_REQUIRED_KEYS = [
   "runId",
@@ -472,13 +455,6 @@ function decodeStoredRunOrigin(
       fromBotName: candidate.fromBotName,
       messageId: candidate.messageId,
     };
-  }
-  if (candidate.kind === "voice") {
-    requireExactOriginFields(candidate, ["kind", "messageId"], runId);
-    if (!boundedString(candidate.messageId, 256)) {
-      throw new Error(`run "${runId}" has an invalid admission origin id`);
-    }
-    return { kind: "voice", messageId: candidate.messageId };
   }
   if (candidate.kind !== "routine") {
     throw new Error(`run "${runId}" has an invalid admission origin kind`);
@@ -788,7 +764,7 @@ function requireStoredRunRecordV1<Snapshot>(
     throw new Error(`run "${runId}" has invalid completion fields`);
   }
   if (
-    status === "failed" || status === "reconciliation-required"
+    status === "failed"
       ? candidate.failure === undefined
       : candidate.failure !== undefined
   ) {
@@ -799,12 +775,6 @@ function requireStoredRunRecordV1<Snapshot>(
   }
   if (status === "superseded" && candidate.supersededAt === undefined) {
     throw new Error(`run "${runId}" has no durable supersede intent`);
-  }
-  if (
-    (status === "reconciliation-required") !==
-    (phase === "reconciliation-required")
-  ) {
-    throw new Error(`run "${runId}" has inconsistent recovery state`);
   }
   return {
     runId,

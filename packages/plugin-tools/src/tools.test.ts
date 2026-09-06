@@ -38,7 +38,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => root.fiber.dispose()));
 });
 
-describe("ToolRegistry effect reconciliation", () => {
+describe("ToolRegistry effect keying", () => {
   test("deny-only guards run after pre-execute and cannot be lifted", async () => {
     const order: string[] = [];
     const fixture = await registryFixture({
@@ -76,7 +76,7 @@ describe("ToolRegistry effect reconciliation", () => {
     expect(order).not.toContain("execute");
   });
 
-  test("retries an idempotent definition with the same durable effect id", async () => {
+  test("hands the occurrence's own id to the definition as its effect id", async () => {
     const effects: string[] = [];
     const fixture = await registryFixture({
       name: "idempotent",
@@ -95,30 +95,32 @@ describe("ToolRegistry effect reconciliation", () => {
     if (preparation.kind !== "ready") throw new Error("tool was denied");
 
     expect(
-      await fixture.root.tools.reconcilePrepared(preparation, fixture.context),
-    ).toEqual({
-      status: "recovered",
-      result: { content: "settled", isError: false },
-    });
+      await fixture.root.tools.executePrepared(preparation, fixture.context),
+    ).toEqual({ content: "settled", isError: false });
     expect(effects).toEqual(["tool:1:1:0"]);
   });
 
-  test("retrieves a non-idempotent result without executing the effect", async () => {
-    let executions = 0;
-    const reconciled: string[] = [];
+  // An occurrence with a journaled intent and no result is executed again
+  // under the same effect id. The registry asks the provider nothing; a tool
+  // that must not repeat an external effect answers from what that key already
+  // holds.
+  test("re-runs under the same effect id, and the tool answers from its own record", async () => {
+    const sent = new Map<string, string>();
+    const dispatches: string[] = [];
     const fixture = await registryFixture({
-      name: "non-idempotent",
-      description: "Non-idempotent fixture.",
+      name: "external_action",
+      description: "External-effect fixture.",
       inputSchema: { type: "object" },
-      execute() {
-        executions += 1;
-        return Promise.resolve({ content: "duplicate", isError: false });
-      },
-      reconcile(_input, context) {
-        reconciled.push(context.effectId);
+      execute(_input, context) {
+        const recorded = sent.get(context.effectId);
+        if (recorded) {
+          return Promise.resolve({ content: recorded, isError: false });
+        }
+        dispatches.push(context.effectId);
+        sent.set(context.effectId, "sent as message-1");
         return Promise.resolve({
-          status: "recovered",
-          result: { content: "original", isError: false },
+          content: "sent as message-1",
+          isError: false,
         });
       },
     });
@@ -128,34 +130,40 @@ describe("ToolRegistry effect reconciliation", () => {
     );
     if (preparation.kind !== "ready") throw new Error("tool was denied");
 
-    expect(
-      await fixture.root.tools.reconcilePrepared(preparation, fixture.context),
-    ).toEqual({
-      status: "recovered",
-      result: { content: "original", isError: false },
-    });
-    expect(executions).toBe(0);
-    expect(reconciled).toEqual(["tool:1:1:0"]);
+    const first = await fixture.root.tools.executePrepared(
+      preparation,
+      fixture.context,
+    );
+    const retried = await fixture.root.tools.executePrepared(
+      preparation,
+      fixture.context,
+    );
+
+    expect(retried).toEqual(first);
+    expect(dispatches).toEqual(["tool:1:1:0"]);
   });
 
-  test("does not let middleware elevate a non-idempotent durable effect", async () => {
-    let executions = 0;
-    let retrievals = 0;
+  test("carries the definition's idempotence onto the preparation", async () => {
+    const fixture = await registryFixture({
+      name: "opaque",
+      description: "Opaque fixture.",
+      inputSchema: { type: "object" },
+      execute: () => Promise.resolve({ content: "effect", isError: false }),
+    });
+    const preparation = await fixture.root.tools.prepare(
+      fixture.call,
+      fixture.context,
+    );
+
+    expect(preparation).toMatchObject({ kind: "ready", idempotent: false });
+  });
+
+  test("lets middleware raise idempotence on the preparation", async () => {
     const fixture = await registryFixture({
       name: "guarded",
       description: "Guarded fixture.",
       inputSchema: { type: "object" },
-      execute() {
-        executions += 1;
-        return Promise.resolve({ content: "duplicate", isError: false });
-      },
-      reconcile() {
-        retrievals += 1;
-        return Promise.resolve({
-          status: "recovered",
-          result: { content: "original", isError: false },
-        });
-      },
+      execute: () => Promise.resolve({ content: "ran", isError: false }),
     });
     fixture.root.on("tools/pre-execute", async (_call, _context, next) => {
       const prepared = await next();
@@ -168,76 +176,8 @@ describe("ToolRegistry effect reconciliation", () => {
       fixture.call,
       fixture.context,
     );
-    if (preparation.kind !== "ready") throw new Error("tool was denied");
-    expect(preparation.idempotent).toBe(true);
 
-    expect(
-      await fixture.root.tools.reconcilePrepared(preparation, fixture.context),
-    ).toEqual({
-      status: "recovered",
-      result: { content: "original", isError: false },
-    });
-    expect(executions).toBe(0);
-    expect(retrievals).toBe(1);
-
-    expect(
-      await fixture.root.tools.reconcilePrepared(
-        {
-          ...preparation,
-          call: { ...fixture.call, input: { changed: true } },
-        },
-        fixture.context,
-      ),
-    ).toMatchObject({ status: "unavailable" });
-    expect(executions).toBe(0);
-  });
-
-  test("normalizes unavailable outcomes to a bounded reason", async () => {
-    const fixture = await registryFixture({
-      name: "pending",
-      description: "Pending fixture.",
-      inputSchema: { type: "object" },
-      execute: () => Promise.resolve({ content: "duplicate", isError: false }),
-      reconcile: () =>
-        Promise.resolve({
-          status: "unavailable",
-          reason: "💥".repeat(1_000),
-        }),
-    });
-    const preparation = await fixture.root.tools.prepare(
-      fixture.call,
-      fixture.context,
-    );
-    if (preparation.kind !== "ready") throw new Error("tool was denied");
-
-    const outcome = await fixture.root.tools.reconcilePrepared(
-      preparation,
-      fixture.context,
-    );
-    expect(outcome.status).toBe("unavailable");
-    if (outcome.status !== "unavailable") return;
-    expect(new TextEncoder().encode(outcome.reason).byteLength).toBe(512);
-  });
-
-  test("returns unavailable when a non-idempotent definition has no retrieval seam", async () => {
-    const fixture = await registryFixture({
-      name: "opaque",
-      description: "Opaque fixture.",
-      inputSchema: { type: "object" },
-      execute: () => Promise.resolve({ content: "effect", isError: false }),
-    });
-    const preparation = await fixture.root.tools.prepare(
-      fixture.call,
-      fixture.context,
-    );
-    if (preparation.kind !== "ready") throw new Error("tool was denied");
-
-    expect(
-      await fixture.root.tools.reconcilePrepared(preparation, fixture.context),
-    ).toEqual({
-      status: "unavailable",
-      reason: "Tool opaque does not support effect reconciliation",
-    });
+    expect(preparation).toMatchObject({ kind: "ready", idempotent: true });
   });
 });
 
@@ -376,7 +316,7 @@ describe("ToolRegistry turn admission", () => {
     expect(denied.kind).toBe("denied");
   });
 
-  test("carries endsTurn through execution and reconciliation", async () => {
+  test("carries endsTurn through execution", async () => {
     const root = await admissionRoot();
     root.tools.register({
       name: "hand_off",
@@ -387,11 +327,6 @@ describe("ToolRegistry turn admission", () => {
           content: "handed off",
           isError: false,
           endsTurn: true,
-        }),
-      reconcile: () =>
-        Promise.resolve({
-          status: "recovered" as const,
-          result: { content: "handed off", isError: false, endsTurn: true },
         }),
     });
     const context = contextFor("hand_off", "automation");
@@ -404,10 +339,6 @@ describe("ToolRegistry turn admission", () => {
       content: "handed off",
       isError: false,
       endsTurn: true,
-    });
-    expect(await root.tools.reconcilePrepared(preparation, context)).toEqual({
-      status: "recovered",
-      result: { content: "handed off", isError: false, endsTurn: true },
     });
   });
   // -------------------------------------------------------------------------

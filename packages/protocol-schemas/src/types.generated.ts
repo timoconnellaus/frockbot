@@ -152,7 +152,7 @@ export type DurableReceipt = {
 export type TurnRefusal = {
   schemaVersion: 1;
   status: "refused";
-  reason: "busy" | "reconciliation-required" | "fenced" | "duplicate";
+  reason: "busy" | "fenced" | "duplicate";
   error: string;
 };
 export type RunCursor = string;
@@ -257,9 +257,7 @@ export type Run =
       stopRequestedAt?: Instant;
       queued?: true;
       partialText?: string;
-      via?:
-        | { kind: "bot"; name: string; botId: BotId }
-        | { kind: "voice"; name: "Voice" };
+      via?: { kind: "bot"; name: string; botId: BotId };
     }
   | {
       schemaVersion: 1 | 2 | 3;
@@ -270,9 +268,7 @@ export type Run =
       events: Array<RunEvent>;
       stopRequestedAt?: Instant;
       outcome: { type: "completed"; text: string };
-      via?:
-        | { kind: "bot"; name: string; botId: BotId }
-        | { kind: "voice"; name: "Voice" };
+      via?: { kind: "bot"; name: string; botId: BotId };
     }
   | {
       schemaVersion: 1 | 2 | 3;
@@ -283,9 +279,7 @@ export type Run =
       events: Array<RunEvent>;
       stopRequestedAt?: Instant;
       outcome: { type: "failed"; message: string; text?: string };
-      via?:
-        | { kind: "bot"; name: string; botId: BotId }
-        | { kind: "voice"; name: "Voice" };
+      via?: { kind: "bot"; name: string; botId: BotId };
     }
   | {
       schemaVersion: 1 | 2 | 3;
@@ -296,9 +290,7 @@ export type Run =
       events: Array<RunEvent>;
       stopRequestedAt: Instant;
       outcome: { type: "cancelled"; message: string; text?: string };
-      via?:
-        | { kind: "bot"; name: string; botId: BotId }
-        | { kind: "voice"; name: "Voice" };
+      via?: { kind: "bot"; name: string; botId: BotId };
     }
   | {
       schemaVersion: 1 | 2 | 3;
@@ -309,22 +301,7 @@ export type Run =
       events: Array<RunEvent>;
       stopRequestedAt?: Instant;
       outcome: { type: "superseded"; message: string; text?: string };
-      via?:
-        | { kind: "bot"; name: string; botId: BotId }
-        | { kind: "voice"; name: "Voice" };
-    }
-  | {
-      schemaVersion: 1 | 2 | 3;
-      runId: Identifier;
-      admittedAt: Instant;
-      input: string;
-      status: "reconciliation-required";
-      events: Array<RunEvent>;
-      stopRequestedAt?: Instant;
-      recovery?: { action: "resume"; message: string };
-      via?:
-        | { kind: "bot"; name: string; botId: BotId }
-        | { kind: "voice"; name: "Voice" };
+      via?: { kind: "bot"; name: string; botId: BotId };
     };
 export type Announcement =
   | {
@@ -557,11 +534,7 @@ export type SurfaceUnavailable = {
 export type UnreadDirectory = { schemaVersion: 1; unread: Array<UnreadView> };
 export type RunLookup =
   | { schemaVersion: 1; state: "not-admitted" }
-  | {
-      schemaVersion: 1;
-      state: "running" | "reconciliation-required" | "terminal";
-      run: Run;
-    };
+  | { schemaVersion: 1; state: "running" | "terminal"; run: Run };
 export type BotIdentity = {
   schemaVersion: 1;
   botId: BotId;

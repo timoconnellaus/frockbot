@@ -41,8 +41,6 @@ import {
   responseFromDesktopApiV1,
 } from "@frockbot/protocol";
 import { BrowserBotStateChannel } from "./bot-state-channel.js";
-import { openVoiceDictationV1 } from "./voice-dictation.js";
-import { openVoiceAssistantV1 } from "./voice-assistant.js";
 
 /**
  * The application this page was served from, as the document itself records
@@ -277,15 +275,6 @@ const application = new ClientApplication({
     );
     return receipt.run;
   },
-  async reconcileRun(botId: string, runId: string) {
-    return decodeClientTurnV1(
-      await apiRequest(
-        `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}/reconcile`,
-        "POST",
-        JSON.stringify({ schemaVersion: 1, action: "resume" }),
-      ),
-    );
-  },
   async acknowledgeNotification(botId: string, notificationId: string) {
     decodeAcknowledgement(
       await apiRequest(
@@ -318,12 +307,6 @@ const application = new ClientApplication({
   },
   watchBotState(botId, observer) {
     return botStateChannel.watch(botId, observer);
-  },
-  openVoiceDictation(observer) {
-    return openVoiceDictationV1(observer);
-  },
-  openVoiceAssistant(deviceId, observer) {
-    return openVoiceAssistantV1(deviceId, observer);
   },
   async readAuthenticatedUserId() {
     return decodeAuthenticatedIdentity(await apiRequest("/api/identity"));

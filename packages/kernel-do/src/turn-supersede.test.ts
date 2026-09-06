@@ -16,10 +16,7 @@ import {
 } from "./authority.ts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
 import { SessionEventLog } from "./session-event-log.ts";
-import {
-  BotTurnReconciliationRequiredError,
-  BotTurnRecoveryRequiredError,
-} from "./turn-errors.ts";
+import { BotTurnRecoveryRequiredError } from "./turn-errors.ts";
 import {
   createStoredRunCodecV1,
   storedRunLaneV1,
@@ -129,16 +126,15 @@ function createAuthority(
     dispatch?(runId: string): boolean;
     /**
      * Ends the named Turn the way the Agent loop ends one whose model stream
-     * was aborted mid-flight: a journaled `model/request` with no durable
-     * provider outcome, and a reconciliation demand.
+     * was aborted mid-flight: a journaled `model/request` with no answer, and
+     * an error carrying the abort's own sentence.
      */
     uncertain?(runId: string): boolean;
     /**
-     * Parks the named Turn when it is released: the provider call it had
-     * dispatched by then has no durable outcome, and nothing but an explicit
-     * reconciliation can settle it.
+     * Fails the named Turn when it is released, with the provider call it had
+     * dispatched by then still unanswered.
      */
-    parkOnRelease?(runId: string): boolean;
+    unresolvedOnRelease?(runId: string): boolean;
     /** Fails the recovery of an evicted Turn, leaving it active and owed. */
     failRecovery?(runId: string): boolean;
   } = {},
@@ -244,42 +240,29 @@ function createAuthority(
       }
       handle.started.resolve();
       const outcome = await handle.settled.promise;
-      if (outcome.interrupted === undefined && options.parkOnRelease?.(runId)) {
-        const reason = `Model request "request-${runId}" has no durable provider outcome`;
-        await persist(
-          {
-            type: "model/request",
-            turn,
-            step: 1,
-            request: {
-              requestId: `request-${runId}`,
-              provider: "foundation",
-              model: "foundation-model",
-              system: "system",
-              messages: [{ role: "user", content: input.command.text }],
-              tools: [],
-            },
-          } as never,
-          {
-            type: "model/reconciliation-required",
-            turn,
-            step: 1,
-            requestId: `request-${runId}`,
-            reason,
-          } as never,
-        );
-        throw new BotTurnReconciliationRequiredError(reason, appended);
-      }
-      if (outcome.interrupted !== undefined && uncertain) {
-        const reason = `Model response outcome is uncertain after cancellation: ${outcome.interrupted}`;
+      if (
+        outcome.interrupted === undefined &&
+        options.unresolvedOnRelease?.(runId)
+      ) {
         await persist({
-          type: "model/reconciliation-required",
+          type: "model/request",
           turn,
           step: 1,
-          requestId: `request-${runId}`,
-          reason,
+          request: {
+            requestId: `request-${runId}`,
+            provider: "foundation",
+            model: "foundation-model",
+            system: "system",
+            messages: [{ role: "user", content: input.command.text }],
+            tools: [],
+          },
         } as never);
-        throw new BotTurnReconciliationRequiredError(reason, appended);
+        throw new Error(`Model request "request-${runId}" was never answered`);
+      }
+      if (outcome.interrupted !== undefined && uncertain) {
+        throw new Error(
+          `Model response outcome is uncertain after cancellation: ${outcome.interrupted}`,
+        );
       }
       if (outcome.interrupted !== undefined) {
         await persist({
@@ -719,18 +702,28 @@ describe("the agent lane", () => {
     ]);
   });
 
-  test("refuses agent admission while the active Turn awaits reconciliation", async () => {
+  // Agent work used to be refused while a Turn sat parked on a reconciliation
+  // only a person could perform. An unanswered model request settles its own
+  // Turn instead, so the Bot is free the moment that Turn stops.
+  test("admits agent work once an unanswered Turn has settled", async () => {
     const storage = new MemoryStorage();
-    const probe = createAuthority(storage, { parkOnRelease: () => true });
+    const probe = createAuthority(storage, {
+      unresolvedOnRelease: (runId) => runId === "run-1",
+    });
     const active = probe.authority.run(command("run-1", "person"));
     await probe.handle("run-1").started;
     probe.handle("run-1").finish();
     await active.catch(() => undefined);
+    expect(storedRun(storage, "run-1").status).toBe("failed");
 
-    await expect(
-      probe.authority.run(command("run-agent", "agent", { turnType: "agent" })),
-    ).rejects.toThrow(/cannot admit agent work.*requires reconciliation/);
-    expect(storage.values.has("run:run-agent")).toBe(false);
+    const agent = probe.authority.run(
+      command("run-agent", "agent", { turnType: "agent" }),
+    );
+    await probe.handle("run-agent").started;
+    probe.handle("run-agent").finish();
+    await agent;
+
+    expect(storedRun(storage, "run-agent").status).toBe("completed");
   });
 
   test("refuses admission when the Bot's bounded agent queue is full", async () => {
@@ -977,15 +970,15 @@ describe("the run admission fence index", () => {
   });
 });
 
-describe("a Turn queued behind a parked run", () => {
-  test("is refused rather than answered with an empty completion", async () => {
+describe("a Turn queued behind a run whose model never answered", () => {
+  test("is started by that run's own settlement", async () => {
     const storage = new MemoryStorage();
     // The first Turn has not dispatched when the second arrives, so it is left
-    // to finish and the second queues behind it. It then parks on a provider
-    // outcome only a User can retrieve.
+    // to finish and the second queues behind it. Its provider call is then
+    // never answered.
     const probe = createAuthority(storage, {
       dispatch: () => false,
-      parkOnRelease: (runId) => runId === "run-1",
+      unresolvedOnRelease: (runId) => runId === "run-1",
     });
 
     const first = probe.authority.run(command("run-1", "first"));
@@ -1000,15 +993,14 @@ describe("a Turn queued behind a parked run", () => {
     probe.handle("run-1").finish();
     await first.catch(() => undefined);
 
-    await expect(second).rejects.toThrow(
-      /is queued: the active run requires reconciliation/,
-    );
-    // And it is still owed a Turn: durable, queued, and started by the
-    // reconciliation's own settlement or by the recovery alarm.
-    const queued = storedRun(storage, "run-2");
-    expect(queued.status).toBe("running");
-    expect(queued.phase).toBe("queued");
-    expect(storage.values.get("pending-run")).toBe("run-2");
+    // Nothing is parked, so the queued Turn is promoted rather than refused.
+    await probe.handle("run-2").started;
+    probe.handle("run-2").finish();
+    await second;
+
+    expect(storedRun(storage, "run-1").status).toBe("failed");
+    expect(storedRun(storage, "run-2").status).toBe("completed");
+    expect(storage.values.get("pending-run")).toBeUndefined();
   });
 });
 
@@ -1157,32 +1149,26 @@ describe("a discarded Turn never crashes the object", () => {
   });
 });
 
-describe("Try again on a parked Turn", () => {
-  test("answers with the run it settled rather than throwing", async () => {
+describe("a Turn whose provider call was never answered", () => {
+  test("answers its caller with the run it settled rather than throwing", async () => {
     const storage = new MemoryStorage();
-    // The Turn parks on a provider outcome only a User can retrieve, which is
-    // the state the Resolve Turn button exists for.
+    // This used to park on a provider outcome only a User could retrieve, and
+    // the Resolve Turn button existed to abandon it. Nothing parks: the run
+    // settles itself, and its caller is handed that settlement.
     const probe = createAuthority(storage, {
       dispatch: () => false,
-      parkOnRelease: () => true,
+      unresolvedOnRelease: () => true,
     });
 
     const first = probe.authority.run(command("run-1", "first"));
     await probe.handle("run-1").started;
     probe.handle("run-1").finish();
-    await first.catch(() => undefined);
-    expect(storedRun(storage, "run-1").status).toBe("reconciliation-required");
+    const completion = await first;
 
-    // "Try again": the retry fails again, the run is abandoned, and that is a
-    // successful abandon — not a failed request. Rethrowing here made the
-    // button answer 409, and the transcript read the browser makes straight
-    // afterwards 500 on the half-repaired record.
-    const abandoned = await probe.authority.reconcileRun(identity, "run-1");
-    expect(abandoned.runId).toBe("run-1");
-
+    expect(completion.runId).toBe("run-1");
     const settled = storedRun(storage, "run-1");
     expect(settled.status).toBe("failed");
-    expect(settled.failure).toContain("explicitly abandoned");
+    expect(settled.failure).toContain("was never answered");
     expect(storage.values.get("active-run")).toBeUndefined();
   });
 });

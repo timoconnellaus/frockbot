@@ -1035,7 +1035,7 @@
     }
   },
   {
-    "name": "old run with via",
+    "name": "Run via must name the Bot it came from",
     "schema": "Run",
     "value": {
       "schemaVersion": 1,
@@ -1045,8 +1045,8 @@
       "events": [],
       "status": "running",
       "via": {
-        "kind": "voice",
-        "name": "Voice"
+        "kind": "bot",
+        "name": "Scout"
       }
     }
   },

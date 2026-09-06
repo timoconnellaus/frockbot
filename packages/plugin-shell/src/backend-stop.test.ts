@@ -12,7 +12,7 @@ import {
   botTurnCommandFingerprintV1,
   type StoredRun,
 } from "./backend-contracts.js";
-import { planInterruptedRunRecoveryV1 } from "./backend-recovery.js";
+import { interruptedRunSettlementV1 } from "./backend-recovery.js";
 import { SessionEventLog } from "@frockbot/kernel-do";
 
 class MemoryStorage {
@@ -321,8 +321,8 @@ describe("durable Stop", () => {
   });
 });
 
-describe("stopped run recovery", () => {
-  test("cancels a stopped run whose model effect was never admitted", async () => {
+describe("stopped run settlement", () => {
+  test("settles a stopped run whose model request went unanswered", async () => {
     const run = storedRun({
       events: modelIntentEvents(),
       stopRequestedAt: timestamp,
@@ -331,22 +331,17 @@ describe("stopped run recovery", () => {
       ],
     });
 
-    const plan = planInterruptedRunRecoveryV1(run, run.events);
+    const events = interruptedRunSettlementV1(run, run.events);
 
-    expect(plan.kind).toBe("cancel");
-    if (plan.kind !== "cancel") throw new Error("expected cancellation");
-    expect(plan.events.map((event) => event.type)).toContain(
-      "model/effect-not-started",
-    );
-    // The journal records the Turn as interrupted; the run record becomes
-    // terminal `cancelled` when `cancelStoredRun` settles it.
-    expect(plan.events.at(-1)).toMatchObject({
+    // The request is keyed by its own requestId; nothing has to be asked
+    // about it for the Turn to close.
+    expect(events.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "interrupted",
     });
   });
 
-  test("cancels a stopped run whose tool effect was never admitted", async () => {
+  test("settles a stopped run whose tool occurrence was left open", async () => {
     const run = storedRun({
       events: toolIntentEvents(),
       stopRequestedAt: timestamp,
@@ -356,16 +351,16 @@ describe("stopped run recovery", () => {
       ],
     });
 
-    const plan = planInterruptedRunRecoveryV1(run, run.events);
+    const events = interruptedRunSettlementV1(run, run.events);
 
-    expect(plan.kind).toBe("cancel");
-    if (plan.kind !== "cancel") throw new Error("expected cancellation");
-    expect(
-      plan.events.find((event) => event.type === "tool/result"),
-    ).toMatchObject({ status: "interrupted", isError: true });
+    expect(events.find((event) => event.type === "tool/result")).toMatchObject({
+      status: "interrupted",
+      isError: true,
+      content: "Durable Stop fenced tool execution.",
+    });
   });
 
-  test("keeps an admitted but unsettled effect reconciling instead of cancelling", async () => {
+  test("settles an admitted effect the same way as a fenced one", async () => {
     const run = storedRun({
       events: modelIntentEvents(),
       stopRequestedAt: timestamp,
@@ -374,15 +369,16 @@ describe("stopped run recovery", () => {
       ],
     });
 
-    expect(planInterruptedRunRecoveryV1(run, run.events)).toEqual({
-      kind: "reconcile",
+    expect(interruptedRunSettlementV1(run, run.events).at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "interrupted",
     });
   });
 
-  test("refuses to plan recovery for a run carrying no durable Stop intent", () => {
+  test("refuses to settle a run carrying no durable Stop intent", () => {
     const run = storedRun({ events: modelIntentEvents() });
 
-    expect(() => planInterruptedRunRecoveryV1(run, run.events)).toThrow(
+    expect(() => interruptedRunSettlementV1(run, run.events)).toThrow(
       `run "${turn.runId}" has no durable stop or supersede intent`,
     );
   });

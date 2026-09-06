@@ -18,12 +18,11 @@ import { projectClientRunV1 } from "./run-protocol.js";
 
 /**
  * Words that describe the machine. Every one of them reached a chat bubble
- * before this: the verification run read "Reconciliation was explicitly
- * abandoned: Bot turn ended with outcome model-error: Flock AI keeps no durable
- * copy of an interrupted response, so it cannot be recovered".
+ * before this: the verification run read "Bot turn ended with outcome
+ * model-error: Flock AI keeps no durable copy of an interrupted response, so
+ * it cannot be recovered".
  */
 const FORBIDDEN_V1 = [
-  "reconcil",
   "outcome",
   "durable",
   "supersede",
@@ -93,7 +92,7 @@ describe("runFailureCopyV1", () => {
 
   test("the stored diagnostic never reaches the copy", () => {
     const failure =
-      "Reconciliation was explicitly abandoned: Bot turn ended with outcome model-error: Flock AI keeps no durable copy of an interrupted response, so it cannot be recovered";
+      "Bot turn ended with outcome model-error: Flock AI keeps no durable copy of an interrupted response, so it cannot be recovered";
     const copy = runFailureCopyV1({
       failure,
       events: [turnEnd("interrupted")],
@@ -130,7 +129,7 @@ describe("runFailureCopyV1", () => {
     for (const diagnostic of [
       undefined,
       "",
-      "Provider reconciliation is required",
+      'Model request "abc" has no durable provider outcome',
       "Bot turn ended with outcome model-error: Model request failed (401)",
       'Skill "bot/no-such-skill" is unknown',
     ]) {
@@ -142,18 +141,15 @@ describe("runFailureCopyV1", () => {
 
   test("the projection sends the copy, not the diagnostic", () => {
     const projected = projectClientRunV1(
-      failedRun(
-        "Reconciliation was explicitly abandoned: Bot turn ended with outcome model-error",
-        [
-          {
-            type: "turn/start",
-            turn: 1,
-            seq: (seq += 1),
-            timestamp: TIMESTAMP,
-          } as unknown as SessionEvent,
-          turnEnd("interrupted"),
-        ],
-      ),
+      failedRun("Bot turn ended with outcome model-error", [
+        {
+          type: "turn/start",
+          turn: 1,
+          seq: (seq += 1),
+          timestamp: TIMESTAMP,
+        } as unknown as SessionEvent,
+        turnEnd("interrupted"),
+      ]),
     );
     expect(projected.outcome?.type).toBe("failed");
     if (projected.outcome?.type !== "failed") throw new Error("unreachable");

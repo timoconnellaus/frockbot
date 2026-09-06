@@ -5,7 +5,6 @@ import {
   validateToolOccurrenceJournal,
 } from "@frockbot/kernel-contracts";
 import {
-  latestModelRequestJournalState,
   planBotRunRecovery as planKernelBotRunRecovery,
   type BotRunRecoveryPlan,
 } from "@frockbot/kernel-do";
@@ -22,25 +21,19 @@ export {
   type ModelRequestJournalState,
 } from "@frockbot/kernel-do";
 
-/** How an interrupted run's unresolved effects settle. */
-export type InterruptedRunRecoveryPlanV1 =
-  { kind: "cancel"; events: SessionEvent[] } | { kind: "reconcile" };
-
 /**
- * Classifies the unresolved effects of a run that has been fenced — by a
- * durable Stop, or by a later user message that superseded it — from their
- * durable admission records. With no compatibility data, a missing admission
- * is the same definitive no-start outcome as `fenced`; only explicit
- * `admitted` remains uncertain.
+ * Everything a fenced run — one a durable Stop or a later user message
+ * interrupted — must append to settle the effects it left open.
  *
- * The two intents share this function because they share the whole question:
- * an effect that may already have run is never assumed not to have, whichever
- * intent stopped the Turn.
+ * Nothing is investigated. A model request with no answer is simply left
+ * unanswered, and every open tool occurrence is closed as `interrupted`; the
+ * effects are keyed, and the admission record is what stops a fenced Turn from
+ * starting another one.
  */
-export function planInterruptedRunRecoveryV1(
+export function interruptedRunSettlementV1(
   run: StoredRun,
   latest: readonly SessionEvent[],
-): InterruptedRunRecoveryPlanV1 {
+): SessionEvent[] {
   requireStoredRunV1(run);
   if (!run.stopRequestedAt && !run.supersededAt) {
     throw new Error(
@@ -48,62 +41,23 @@ export function planInterruptedRunRecoveryV1(
     );
   }
   const fenceReason = run.stopRequestedAt ? "Durable Stop" : "A supersede";
-  const admissionFor = (kind: "model" | "tool", effectId: string) => {
-    const admission = run.effectAdmissions.find(
-      (candidate) => candidate.effectId === effectId,
-    );
-    if (admission && admission.kind !== kind) {
-      throw new Error(
-        `effect admission "${effectId}" collides with ${admission.kind}`,
-      );
-    }
-    return admission?.outcome;
-  };
-
-  const model = latestModelRequestJournalState(run.events);
-  const tools = validateToolOccurrenceJournal(run.events);
-  const openTools = [...tools.values()].filter(
-    (entry) => entry.intent !== undefined && entry.result === undefined,
-  );
-  if (
-    (model.status === "unresolved" &&
-      admissionFor("model", model.request.request.requestId) === "admitted") ||
-    openTools.some(
-      (entry) =>
-        admissionFor("tool", entry.occurrence.occurrenceId) === "admitted",
-    )
-  ) {
-    return { kind: "reconcile" };
-  }
-
   const session = new Session(run.sessionId, () => {}, latest);
-  if (model.status === "unresolved") {
-    session.append({
-      type: "model/effect-not-started",
-      turn: model.request.turn,
-      step: model.request.step,
-      requestId: model.request.request.requestId,
-      reason: `${fenceReason} fenced provider execution before admission`,
-    });
-  }
-  for (const entry of openTools) {
-    const intent = entry.intent!;
+  for (const entry of validateToolOccurrenceJournal(run.events).values()) {
+    if (!entry.intent || entry.result) continue;
+    const intent = entry.intent;
     session.append({
       type: "tool/result",
       turn: intent.turn,
       step: intent.step,
       occurrenceId: intent.occurrenceId,
       name: intent.name,
-      content: `${fenceReason} fenced tool execution before admission.`,
+      content: `${fenceReason} fenced tool execution.`,
       isError: true,
       status: "interrupted",
     });
   }
   session.reconcileInterrupted();
-  return {
-    kind: "cancel",
-    events: [...session.events.slice(run.previousEventCount)],
-  };
+  return [...session.events.slice(run.previousEventCount)];
 }
 
 export function planBotRunRecovery(

@@ -117,11 +117,7 @@ export interface UserApplicationIdentity {
 }
 
 export type StoredRunStatus =
-  | "running"
-  | "completed"
-  | "failed"
-  | "interrupted"
-  | "reconciliation-required";
+  "running" | "completed" | "failed" | "interrupted";
 
 export interface StoredRun {
   runId: string;
@@ -132,7 +128,7 @@ export interface StoredRun {
   status?: StoredRunStatus;
   responseText?: string;
   failure?: string;
-  phase?: "admitted" | "executing" | "reconciliation-required";
+  phase?: "admitted" | "executing";
   compositionGenerationId?: string;
   configurationSnapshot?: BotSettingsViewV1;
   previousEventCount?: number;
@@ -177,7 +173,6 @@ export interface BotStateBinding {
     command: ApprovalDecisionCommandV1,
   ): Promise<ApprovalDecisionReceiptV1>;
   acknowledgeNotification(botId: string, notificationId: string): Promise<void>;
-  reconcileRun(botId: string, runId: string): Promise<BotTurnResult>;
   stopRun(
     botId: string,
     command: ClientRunStopCommandV1,
@@ -336,11 +331,6 @@ export interface UserBotStateBinding {
     botId: string;
     notificationId: string;
   }): Promise<void>;
-  reconcileRun(input: {
-    schemaVersion: 1;
-    botId: string;
-    runId: string;
-  }): Promise<BotTurnResult>;
   stopRun(input: {
     schemaVersion: 1;
     botId: string;
@@ -808,13 +798,6 @@ export interface GatewayDependencies {
     userId: string,
     appletId: string,
   ): { fetch(request: Request): Promise<Response> };
-  /**
-   * The composer's dictation socket, handed to the per-User `VoiceSession`
-   * Durable Object after the gateway has authenticated the identity. Absent in
-   * a deployment without voice, and `/api/voice/dictation` then reports itself
-   * unconfigured rather than the Worker failing to construct.
-   */
-  openVoiceDictation?(userId: string, request: Request): Promise<Response>;
   /** Authenticated observer transport into the Bot Durable Object. */
   openBotStateChannel?(
     userId: string,

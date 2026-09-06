@@ -4,7 +4,6 @@ import {
   cancelStoredRun as cancelKernelStoredRun,
   completeStoredRun as completeKernelStoredRun,
   failStoredRun as failKernelStoredRun,
-  requireStoredRunReconciliation as requireKernelStoredRunReconciliation,
   type TerminalPackageRecords,
 } from "@frockbot/kernel-do";
 import {
@@ -74,24 +73,5 @@ export function cancelStoredRun(
     runId,
     previous,
     events,
-  );
-}
-
-export function requireStoredRunReconciliation(
-  storage: RunTerminalStorage,
-  keys: RunTerminalKeys,
-  runId: string,
-  previous: readonly SessionEvent[],
-  events: readonly SessionEvent[],
-  failure: string,
-): Promise<void> {
-  return requireKernelStoredRunReconciliation(
-    storedRunCodecV1,
-    storage,
-    keys,
-    runId,
-    previous,
-    events,
-    failure,
   );
 }

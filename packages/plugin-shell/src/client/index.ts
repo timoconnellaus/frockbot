@@ -16,7 +16,6 @@ import {
 } from "@frockbot/client-core";
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { COMPACTED_ANNOUNCEMENT_TEXT_V1 } from "../compaction.js";
-import { voiceCaptureSupportedV1 } from "./voice-microphone.js";
 import { deploymentStaleV1 } from "./deployment.js";
 import { readViewerFocusV1, shouldNotifyForBotV1 } from "../focus.js";
 // Connection mutations use the provider-neutral hosted command contract.
@@ -252,26 +251,6 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
       runId: run.runId,
       status: run.status,
       message: "Stop requested; finishing up.",
-      canResume: false,
-    };
-  }
-  if (run.status === "reconciliation-required") {
-    return {
-      runId: run.runId,
-      status: run.status,
-      // Never the backend's own sentence. What arrived here read
-      // `Model request "1c7dd68e-…" has no durable provider outcome:` — a
-      // UUID and two internal nouns, in the one place a User is told what
-      // happened to their reply. The raw text stays on the run for the
-      // console; the banner says what it means and offers the one action.
-      message: run.stopRequestedAt
-        ? "Stopping…"
-        : "Something went wrong mid-reply. Try again to pick it up.",
-      // Offered whenever the run is parked, Stop included. Hiding it there
-      // hid it in exactly the case Stop creates: a Turn that was stopped
-      // while the model was mid-answer parks, and the person was left with a
-      // banner and no way to act on it.
-      canResume: run.recovery?.action === "resume",
     };
   }
   return undefined;
@@ -285,8 +264,6 @@ function activeRunView(run: ClientRun): WebActiveRun | undefined {
 function turnRefusalCopyV1(reason: ClientTurnRefusalReasonV1): string {
   if (reason === "busy")
     return "This Bot is still working on your last message.";
-  if (reason === "reconciliation-required")
-    return "This Bot's last reply stopped partway. Try again to continue it.";
   if (reason === "duplicate") return "That message was already sent.";
   return "That message didn't go through. Try sending it again.";
 }
@@ -421,26 +398,6 @@ function assistantMessage(
       text: visibleAssistantText(run),
       status: "aborted",
       ...(syncNotice ? { notice: syncNotice } : {}),
-      tools: toolsFrom(run.events),
-      sends: [],
-      tasks: tasksFrom(run.events),
-    };
-  }
-  if (run.status === "reconciliation-required") {
-    return {
-      id: `${run.runId}:assistant`,
-      runId: run.runId,
-      role: "assistant",
-      /*
-       * A failure is not something the Bot said. The bubble holds the text
-       * the model actually produced — often none — and the notice under it
-       * says why the Turn ends there: what arrived here read `Model request
-       * "1c7dd68e-…" has no durable provider outcome`, in a bubble styled
-       * exactly like the Bot speaking.
-       */
-      text: visibleAssistantText(run),
-      notice: notice("This reply stopped partway. Try again to continue it."),
-      status: "reconciliation-required",
       tools: toolsFrom(run.events),
       sends: [],
       tasks: tasksFrom(run.events),
@@ -611,14 +568,11 @@ export function projectDurableRuns(
     );
 
     activeRun = activeRunView(run) ?? activeRun;
-    if (run.status === "running" || run.status === "reconciliation-required") {
+    if (run.status === "running") {
       busyRunId = run.runId;
+      // Stop belongs to a Turn that is executing, not one still queued.
+      if (!run.queued) runningRunId = run.runId;
     }
-    // Stop belongs to a Turn that is executing. A Turn parked on a
-    // reconciliation is busy but not running: there is nothing to stop, and
-    // offering it left a Stop button standing for good — across reloads,
-    // because the state it was keyed off never became terminal.
-    if (run.status === "running" && !run.queued) runningRunId = run.runId;
     if (notification && isTerminalRun(run)) {
       projected.add(notification.notificationId);
     }
@@ -1186,7 +1140,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
       runId,
       status: "running",
       message: "Checking whether your message went through…",
-      canResume: false,
     };
     if (!ctx.transport.lookupRun || !ctx.transport.fenceRunAdmission) {
       return "detached";
@@ -1461,9 +1414,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     modelSource: "none",
     settingsAvailable: true,
     connectionsAvailable: ctx.transport.connectionsAvailable !== false,
-    voiceAvailable:
-      typeof ctx.transport.openVoiceDictation === "function" &&
-      voiceCaptureSupportedV1(),
     deploymentStale: false,
     reloadHolds: 0,
     holdReload: () => {
@@ -2931,40 +2881,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
         ) {
           web.value.runningRunId = undefined;
         }
-      }
-    },
-    openVoiceDictation(observer) {
-      return ctx.transport.openVoiceDictation?.(observer);
-    },
-    async resumeRun(runId: string): Promise<void> {
-      if (!ctx.transport.reconcileRun) {
-        web.value.settingsError = "Can't retry this right now.";
-        return;
-      }
-      if (web.value.activeRun?.runId !== runId) return;
-      web.value.activeRun = {
-        runId,
-        status: "running",
-        message: "Retrying…",
-        canResume: false,
-      };
-      const botId = web.value.activeBotId;
-      if (!botId) return;
-      try {
-        await ctx.transport.reconcileRun(botId, runId);
-      } catch (error) {
-        web.value.settingsError = presentClientFailureV1(
-          error,
-          "pick that reply back up",
-        );
-      }
-      try {
-        await deliverNotifications(botId);
-      } catch (error) {
-        web.value.settingsError = presentClientFailureV1(
-          error,
-          "refresh that reply",
-        );
       }
     },
     async stopRun(): Promise<void> {

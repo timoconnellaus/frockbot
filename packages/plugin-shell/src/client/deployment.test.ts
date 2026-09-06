@@ -16,7 +16,6 @@ const idle: DeploymentFollowInputV1 = {
   turnRunning: false,
   draft: "",
   overlayOpen: false,
-  listening: false,
   holds: 0,
   now: 10_000_000,
 };
@@ -66,10 +65,6 @@ describe("deploymentFollowV1", () => {
 
   test("an open overlay is not closed underneath the User", () => {
     expect(deploymentFollowV1({ ...idle, overlayOpen: true })).toBe("offer");
-  });
-
-  test("a live capture is not cut off", () => {
-    expect(deploymentFollowV1({ ...idle, listening: true })).toBe("offer");
   });
 
   test("live work another Package holds is respected", () => {

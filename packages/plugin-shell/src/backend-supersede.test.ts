@@ -17,7 +17,7 @@ import {
   botTurnCommandFingerprintV1,
   type StoredRun,
 } from "./backend-contracts.js";
-import { planInterruptedRunRecoveryV1 } from "./backend-recovery.js";
+import { interruptedRunSettlementV1 } from "./backend-recovery.js";
 import { projectClientRunV1 } from "./run-protocol.js";
 import { TaskStore } from "@frockbot/plugin-subagents/store";
 
@@ -175,7 +175,7 @@ async function fixture(run: StoredRun = storedRun()): Promise<{
 }
 
 describe("a superseded run settles its effects exactly as a stopped one does", () => {
-  test("a tool effect that was never admitted is interrupted, never re-run", () => {
+  test("an open tool occurrence is interrupted, never re-run", () => {
     const run = storedRun({
       events: toolIntentEvents(),
       supersededAt: timestamp,
@@ -186,20 +186,20 @@ describe("a superseded run settles its effects exactly as a stopped one does", (
       ],
     });
 
-    const plan = planInterruptedRunRecoveryV1(run, run.events);
+    const events = interruptedRunSettlementV1(run, run.events);
 
-    expect(plan.kind).toBe("cancel");
-    if (plan.kind !== "cancel") throw new Error("expected cancellation");
-    expect(
-      plan.events.find((event) => event.type === "tool/result"),
-    ).toMatchObject({ status: "interrupted", isError: true });
-    expect(plan.events.at(-1)).toMatchObject({
+    expect(events.find((event) => event.type === "tool/result")).toMatchObject({
+      status: "interrupted",
+      isError: true,
+      content: "A supersede fenced tool execution.",
+    });
+    expect(events.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "interrupted",
     });
   });
 
-  test("a tool effect that was admitted reconciles rather than settling", () => {
+  test("an admitted tool effect settles the same way", () => {
     const run = storedRun({
       events: toolIntentEvents(),
       supersededAt: timestamp,
@@ -210,16 +210,18 @@ describe("a superseded run settles its effects exactly as a stopped one does", (
       ],
     });
 
-    // Identical to Stop: an effect that may already have run is retrieved, not
-    // assumed away, and the Turn that replaced it waits for the answer.
-    expect(planInterruptedRunRecoveryV1(run, run.events)).toEqual({
-      kind: "reconcile",
-    });
+    // Identical to Stop: the occurrence is keyed, so the Turn that replaced it
+    // closes the occurrence rather than waiting to hear what it did.
+    expect(
+      interruptedRunSettlementV1(run, run.events).find(
+        (event) => event.type === "tool/result",
+      ),
+    ).toMatchObject({ status: "interrupted", isError: true });
   });
 
-  test("a run carrying neither intent is refused a plan", () => {
+  test("a run carrying neither intent is refused a settlement", () => {
     expect(() =>
-      planInterruptedRunRecoveryV1(
+      interruptedRunSettlementV1(
         storedRun({ events: toolIntentEvents() }),
         toolIntentEvents(),
       ),

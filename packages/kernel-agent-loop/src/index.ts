@@ -12,9 +12,10 @@ import {
   type CompositionPinV1,
   decodeSkillRefsV1,
   type LoopStepContinuationV1,
+  type NormalizedModelRequest,
   type Session,
-  type SessionEvent,
   type StepOutcome,
+  StructuredOutputValidationError,
   type ToolCall,
   type TurnTypeV1,
   TURN_DEADLINE_MS_V1,
@@ -26,14 +27,12 @@ import { type Context, Service } from "cordis";
 import {
   EffectAdmissionFencedError,
   modelFailureMessage,
-  ModelEffectReconciliationRequiredError,
   ModelOutcomeSettlementRequiredError,
   StepLimitReachedError,
-  ToolEffectReconciliationRequiredError,
   TURN_DEADLINE_REASON_V1,
 } from "./errors.js";
 import { requestModelV1 } from "./model-request.js";
-import { planResumptionV1, recoverModelRequestV1 } from "./resume.js";
+import { planResumptionV1 } from "./resume.js";
 import type {
   EffectAdmittingAgentOptions,
   LoopRuntime,
@@ -60,7 +59,6 @@ declare module "cordis" {
     "agent/model-outcome-committed": (
       agent: Agent,
       requestId: string,
-      outcome: "completed" | "not-started",
     ) => Promise<void>;
   }
 }
@@ -93,30 +91,6 @@ declare module "cordis" {
  * it.
  */
 export { TURN_DEADLINE_MS_V1 };
-
-function hasUnsettledExternalEffect(events: readonly SessionEvent[]): boolean {
-  let unresolvedRequestId: string | undefined;
-  for (const event of events) {
-    if (event.type === "model/request") {
-      unresolvedRequestId = event.request.requestId;
-    } else if (
-      (event.type === "assistant/message" ||
-        event.type === "model/effect-not-started") &&
-      event.requestId === unresolvedRequestId
-    ) {
-      unresolvedRequestId = undefined;
-    }
-  }
-  if (unresolvedRequestId) return true;
-  try {
-    return [...validateToolOccurrenceJournal(events).values()].some(
-      (entry) => entry.intent && !entry.result,
-    );
-  } catch {
-    // Invalid effect history is never safe to close as cancelled.
-    return true;
-  }
-}
 
 class LoopAgent implements Agent, LoopRuntime {
   readonly id: string;
@@ -345,12 +319,12 @@ class LoopAgent implements Agent, LoopRuntime {
     const cursor: TurnCursor = { openStep: undefined };
     let turnOutcome: StepOutcome = "interrupted";
     let turnReason: string | undefined;
-    let reconciliationRequired = false;
+    let settlementPending = false;
     this.#armTurnDeadline();
     try {
       const settlement = await body(cursor);
-      if (settlement.kind === "reconciliation-required") {
-        reconciliationRequired = true;
+      if (settlement.kind === "settlement-pending") {
+        settlementPending = true;
       } else {
         turnOutcome = settlement.outcome;
         turnReason = settlement.reason;
@@ -359,13 +333,8 @@ class LoopAgent implements Agent, LoopRuntime {
       if (this.#turnDeadlineReached) {
         turnOutcome = "interrupted";
         turnReason = this.#deadlineTurnReason(error);
-      } else if (
-        error instanceof ModelEffectReconciliationRequiredError ||
-        error instanceof ToolEffectReconciliationRequiredError ||
-        error instanceof ModelOutcomeSettlementRequiredError ||
-        (signal.aborted && hasUnsettledExternalEffect(this.session.events))
-      ) {
-        reconciliationRequired = true;
+      } else if (error instanceof ModelOutcomeSettlementRequiredError) {
+        settlementPending = true;
         this.ctx.emit("agent/error", this, error);
       } else if (
         error instanceof EffectAdmissionFencedError ||
@@ -384,13 +353,12 @@ class LoopAgent implements Agent, LoopRuntime {
       }
     } finally {
       this.#disarmTurnDeadline();
-      // A Turn owed a reconciliation writes no `turn/end`: its model request
-      // has no durable outcome, and a `turn/end` would claim to know how it
-      // ended. That is right for as long as the run might still resume — and
-      // the moment it will not, the Turn is closed by whoever settles it, in
-      // `kernel-do`'s `settledEventsV1`. Closing it here instead would either
-      // lie about an outcome or make the run unresumable.
-      if (!reconciliationRequired) {
+      // A Turn whose model outcome has not been durably committed writes no
+      // `turn/end`: the commit is the Turn's own durable write, and a resume
+      // re-issues it under the same request id. Everything else settles here,
+      // including a lost provider call — that call is re-issued by its key,
+      // not investigated.
+      if (!settlementPending) {
         // A deadline settles the same way a Stop does: an open tool
         // occurrence gets an `interrupted` result before the step closes,
         // so the journal never carries a `turn/end` over an open call.
@@ -432,29 +400,37 @@ class LoopAgent implements Agent, LoopRuntime {
       openTurn,
       async (cursor) => {
         if (latestAssistant) {
-          await this.notifyModelOutcome(latestAssistant.requestId, "completed");
+          await this.notifyModelOutcome(latestAssistant.requestId);
         }
         let nextStep = latestStep === 0 ? 1 : latestStep + 1;
-        if (plan.unresolvedRequest) {
+        if (plan.pendingRequest) {
           cursor.openStep = latestStep;
-          const recovery = await recoverModelRequestV1(
-            this,
-            { ...plan, openTurn },
-            plan.unresolvedRequest,
-            signal,
-          );
-          if (recovery.kind === "settled") return recovery.settlement;
-          await this.#journalAssistantMessage(
-            recovery.response,
+          if (plan.responseFailure) {
+            // The call answered; what it said was unusable. Re-issuing it
+            // would only produce the same durable failure.
+            await this.notifyModelOutcome(plan.responseFailure.requestId);
+            this.ctx.emit(
+              "agent/error",
+              this,
+              new StructuredOutputValidationError(plan.responseFailure.failure),
+            );
+            return {
+              kind: "settled",
+              outcome: "model-error",
+              reason: turnEndReason(plan.responseFailure.failure.message),
+            };
+          }
+          const response = await this.#callModel(
             openTurn,
             latestStep,
             signal,
+            plan.pendingRequest,
           );
           if (
             await this.#completeStep(
               openTurn,
               latestStep,
-              recovery.response.toolCalls,
+              response.toolCalls,
               cursor,
               signal,
             )
@@ -596,8 +572,9 @@ class LoopAgent implements Agent, LoopRuntime {
     turn: number,
     step: number,
     signal: AbortSignal,
+    pending?: NormalizedModelRequest,
   ): Promise<ModelResponse> {
-    const response = await requestModelV1(this, turn, step, signal);
+    const response = await requestModelV1(this, turn, step, signal, pending);
     await this.#journalAssistantMessage(response, turn, step, signal);
     return response;
   }
@@ -618,7 +595,7 @@ class LoopAgent implements Agent, LoopRuntime {
     });
     await this.session.flush();
     signal.throwIfAborted();
-    await this.notifyModelOutcome(response.request.requestId, "completed");
+    await this.notifyModelOutcome(response.request.requestId);
     await this.#announceAssistantText(response, turn, step);
   }
 
@@ -656,17 +633,16 @@ class LoopAgent implements Agent, LoopRuntime {
     return shouldStop;
   }
 
-  async notifyModelOutcome(
-    requestId: string,
-    outcome: "completed" | "not-started",
-  ): Promise<void> {
+  /**
+   * Hands the request id back to whoever holds something for it — a
+   * credential lease, a spend record — once the loop is done dispatching it.
+   *
+   * A listener that cannot commit leaves the Turn without a `turn/end`, so a
+   * resume re-announces the same id rather than losing the commitment.
+   */
+  async notifyModelOutcome(requestId: string): Promise<void> {
     try {
-      await this.ctx.serial(
-        "agent/model-outcome-committed",
-        this,
-        requestId,
-        outcome,
-      );
+      await this.ctx.serial("agent/model-outcome-committed", this, requestId);
     } catch (error) {
       throw new ModelOutcomeSettlementRequiredError(error);
     }
@@ -718,21 +694,16 @@ class LoopAgent implements Agent, LoopRuntime {
 
   /**
    * The reason a Turn the clock ended carries, and the one place that decides
-   * a deadline is not a cancellation and not a reconciliation.
+   * a deadline is not a cancellation.
    *
-   * Its branch runs ahead of both. Ahead of cancellation, because the deadline
-   * aborts the same controller Stop does and a Turn the clock ended must not
-   * be reported to the person as one they stopped. Ahead of reconciliation,
-   * because that branch writes no `turn/end` on the promise the run may still
-   * resume — and a run the deadline stopped never will. Deferring to it left
-   * `model/reconciliation-required` as the last event of an open Turn, and
-   * every later Turn on that Bot refused with `409` for the life of the Bot.
+   * Its branch runs first, because the deadline aborts the same controller
+   * Stop does and a Turn the clock ended must not be reported to the person as
+   * one they stopped.
    *
-   * The uncertainty is still recorded: whatever the model request wrote before
-   * the clock ran out stays in the journal. What changes is that the Turn is
-   * settled — the open step's tool occurrences closed as `interrupted`, then
-   * `step/end` and `turn/end` — exactly as `kernel-do`'s `settledEventsV1`
-   * settles a Stop or a supersede.
+   * Whatever the model request wrote before the clock ran out stays in the
+   * journal. What the Turn does not do is stay open: the open step's tool
+   * occurrences are closed as `interrupted`, then `step/end` and `turn/end`,
+   * exactly as `kernel-do`'s `settledEventsV1` settles a Stop or a supersede.
    */
   #deadlineTurnReason(error: unknown): string | undefined {
     this.ctx.emit("agent/error", this, error);

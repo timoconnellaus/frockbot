@@ -62,12 +62,7 @@ export const CLIENT_RUN_SCAN_LIMIT = CLIENT_RUN_PAGE_LIMIT * 8;
 export const CLIENT_RUN_LIST_MAX_BYTES = 512_000;
 
 export type ClientRunStatusV1 =
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "superseded"
-  | "reconciliation-required";
+  "running" | "completed" | "failed" | "cancelled" | "superseded";
 
 // Both are sentences for the person, not descriptions of the mechanism: the
 // wire outcome is what a client with no copy of its own renders verbatim, and
@@ -75,19 +70,13 @@ export type ClientRunStatusV1 =
 // about the authentication of their own button press.
 const CANCELLED_RUN_MESSAGE = "You stopped this.";
 const SUPERSEDED_RUN_MESSAGE = "Interrupted by your next message.";
-/** What a Turn waiting on a person's "Try again" says while it waits. */
-export const RESUMABLE_RUN_MESSAGE_V1 =
-  "This reply stopped partway. Try again to continue it.";
-
 /**
  * Why the Bot declined to admit a Turn. A refusal is an ordinary answer — the
- * Bot is busy with a Turn this command did not ask to replace, is holding an
- * effect only a User can settle, or the command was fenced or already used —
- * so the client shows the reason and keeps the person's text rather than
- * treating it as a failure of the send.
+ * Bot is busy with a Turn this command did not ask to replace, or the command
+ * was fenced or already used — so the client shows the reason and keeps the
+ * person's text rather than treating it as a failure of the send.
  */
-export type ClientTurnRefusalReasonV1 =
-  "busy" | "reconciliation-required" | "fenced" | "duplicate";
+export type ClientTurnRefusalReasonV1 = "busy" | "fenced" | "duplicate";
 
 /** The versioned body a refused Turn answers with, decoded by the client. */
 export interface ClientTurnRefusalV1 {
@@ -99,7 +88,6 @@ export interface ClientTurnRefusalV1 {
 
 const TURN_REFUSAL_REASONS_V1: readonly ClientTurnRefusalReasonV1[] = [
   "busy",
-  "reconciliation-required",
   "fenced",
   "duplicate",
 ];
@@ -225,15 +213,10 @@ export type ClientRunOutcomeV1 =
   | { type: "cancelled"; message: string; text?: string }
   | { type: "superseded"; message: string; text?: string };
 
-export interface ClientRunRecoveryV1 {
-  action: "resume";
-  message: string;
-}
-
 /**
  * The run projection. Version 2 added structured `send/to-user` and
- * `wake/parent` events; version 3 adds the bounded `via` marker for agent and
- * Voice Turns without exposing the internal origin record.
+ * `wake/parent` events; version 3 adds the bounded `via` marker for agent
+ * Turns without exposing the internal origin record.
  */
 export interface ClientRunV1 {
   schemaVersion: 1 | 2 | 3;
@@ -259,11 +242,8 @@ export interface ClientRunV1 {
    */
   partialText?: string;
   outcome?: ClientRunOutcomeV1;
-  recovery?: ClientRunRecoveryV1;
   /** Where an agent-lane question entered this Bot's transcript. */
-  via?:
-    | { kind: "bot"; name: string; botId: string }
-    | { kind: "voice"; name: "Voice" };
+  via?: { kind: "bot"; name: string; botId: string };
 }
 
 export interface ClientRunPageV1 {
@@ -438,11 +418,6 @@ export interface ClientNotificationAcknowledgementCommandV1 {
   notificationId: string;
 }
 
-export interface ClientRunReconciliationCommandV1 {
-  schemaVersion: 1;
-  action: "resume";
-}
-
 /** Exact authenticated Stop command; one command targets exactly one run. */
 export interface ClientRunStopCommandV1 {
   schemaVersion: 1;
@@ -473,8 +448,7 @@ export interface ClientRunAdmissionFenceCommandV1 {
   action: "fence-admission";
 }
 
-export type ClientRunLookupStateV1 =
-  "not-admitted" | "running" | "reconciliation-required" | "terminal";
+export type ClientRunLookupStateV1 = "not-admitted" | "running" | "terminal";
 
 export type ClientRunLookupV1 =
   | { schemaVersion: 1; state: "not-admitted" }
@@ -848,17 +822,15 @@ export function assistantTextSoFarV1(
   events: readonly SessionEvent[],
   responseText = "",
 ): string {
-  let requestId: string | undefined;
   let text = responseText;
   for (const event of events) {
-    if (event.type === "assistant/chunk") {
-      if (event.requestId !== requestId) {
-        requestId = event.requestId;
-        text = "";
-      }
+    if (event.type === "model/request") {
+      // Each dispatch starts the answer again, including a re-issue of the
+      // same request under its own idempotency key.
+      text = "";
+    } else if (event.type === "assistant/chunk") {
       text += event.text;
     } else if (event.type === "assistant/message") {
-      requestId = event.requestId;
       text = event.text;
     }
   }
@@ -924,16 +896,6 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
                 ...interruptedOutcomeTextV1(run),
               } satisfies ClientRunOutcomeV1)
             : undefined;
-  const recovery =
-    status === "reconciliation-required"
-      ? ({
-          action: "resume",
-          // The stored failure is the diagnostic the debug surface reads; a
-          // person offered a "Try again" needs the sentence, not the reason
-          // the Bot cannot answer it on its own.
-          message: RESUMABLE_RUN_MESSAGE_V1,
-        } satisfies ClientRunRecoveryV1)
-      : undefined;
   const origin = run.admission?.origin;
   const via =
     origin?.kind === "bot"
@@ -942,9 +904,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
           name: truncateWireString(origin.fromBotName, 100),
           botId: truncate(origin.fromBotId, 128),
         }
-      : origin?.kind === "voice"
-        ? { kind: "voice" as const, name: "Voice" as const }
-        : undefined;
+      : undefined;
   return {
     // Version 3 adds the origin marker for an agent-lane message.
     schemaVersion: 3,
@@ -963,7 +923,6 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
       ? { queued: true as const }
       : {}),
     ...(outcome ? { outcome } : {}),
-    ...(recovery ? { recovery } : {}),
     ...(via ? { via } : {}),
   };
 }
@@ -971,11 +930,7 @@ export function projectClientRunV1(run: StoredRun): ClientRunV1 {
 function lookupState(
   status: ClientRunStatusV1,
 ): Exclude<ClientRunLookupStateV1, "not-admitted"> {
-  if (isTerminalRunStatus(status)) return "terminal";
-  if (status === "reconciliation-required") {
-    return "reconciliation-required";
-  }
-  return "running";
+  return isTerminalRunStatus(status) ? "terminal" : "running";
 }
 
 /**
@@ -1231,8 +1186,7 @@ function status(value: unknown): ClientRunStatusV1 {
     value !== "completed" &&
     value !== "failed" &&
     value !== "cancelled" &&
-    value !== "superseded" &&
-    value !== "reconciliation-required"
+    value !== "superseded"
   ) {
     throw new Error("run.status is invalid");
   }
@@ -1509,30 +1463,6 @@ function decodeInterruptedTextV1(outcome: Record<string, unknown>): {
   };
 }
 
-function decodeRecovery(
-  value: unknown,
-  runStatus: ClientRunStatusV1,
-): ClientRunRecoveryV1 | undefined {
-  if (value === undefined) {
-    if (runStatus === "reconciliation-required") {
-      throw new Error("reconciliation-required run.recovery is required");
-    }
-    return undefined;
-  }
-  if (runStatus !== "reconciliation-required") {
-    throw new Error("run.recovery does not match run.status");
-  }
-  const recovery = record(value, "run.recovery");
-  exactKeys(recovery, ["action", "message"], "run.recovery");
-  if (recovery.action !== "resume") {
-    throw new Error("run.recovery.action is invalid");
-  }
-  return {
-    action: "resume",
-    message: wireString(recovery, "message", MAX_FAILURE_BYTES, "run.recovery"),
-  };
-}
-
 function decodeRun(value: unknown): ClientRun {
   const run = record(value, "run");
   exactKeys(
@@ -1548,7 +1478,6 @@ function decodeRun(value: unknown): ClientRun {
       "queued",
       "partialText",
       "outcome",
-      "recovery",
       "via",
     ],
     "run",
@@ -1575,11 +1504,6 @@ function decodeRun(value: unknown): ClientRun {
         name: wireString(candidate, "name", 100, "run.via"),
         botId: string(candidate, "botId", 128, "run.via"),
       };
-    } else if (candidate.kind === "voice") {
-      exactKeys(candidate, ["kind", "name"], "run.via");
-      if (candidate.name !== "Voice")
-        throw new Error("run.via.name is invalid");
-      via = { kind: "voice", name: "Voice" };
     } else {
       throw new Error("run.via.kind is invalid");
     }
@@ -1599,7 +1523,6 @@ function decodeRun(value: unknown): ClientRun {
   }
   const runStatus = status(run.status);
   const outcome = decodeOutcome(run.outcome, runStatus);
-  const recovery = decodeRecovery(run.recovery, runStatus);
   let stopRequestedAt: string | undefined;
   if (run.stopRequestedAt !== undefined) {
     stopRequestedAt = string(
@@ -1653,7 +1576,6 @@ function decodeRun(value: unknown): ClientRun {
           ...(outcome.text ? { responseText: outcome.text } : {}),
         }
       : {}),
-    ...(recovery ? { failure: recovery.message, recovery } : {}),
     ...(via ? { via } : {}),
   };
 }
@@ -1945,17 +1867,6 @@ export function decodeClientNotificationAcknowledgementCommandV1(
   return { schemaVersion: 1, action: "acknowledge", notificationId };
 }
 
-export function decodeClientRunReconciliationCommandV1(
-  input: unknown,
-): ClientRunReconciliationCommandV1 {
-  const command = record(input, "run reconciliation command");
-  exactKeys(command, ["schemaVersion", "action"], "run reconciliation command");
-  if (command.schemaVersion !== 1 || command.action !== "resume") {
-    throw new Error("run reconciliation command is invalid");
-  }
-  return { schemaVersion: 1, action: "resume" };
-}
-
 export function decodeClientRunStopCommandV1(
   input: unknown,
 ): ClientRunStopCommandV1 {
@@ -2087,11 +1998,7 @@ export function decodeClientRunLookupV1(input: unknown): ClientRunLookup {
     }
     return { state: "not-admitted" };
   }
-  if (
-    lookup.state !== "running" &&
-    lookup.state !== "reconciliation-required" &&
-    lookup.state !== "terminal"
-  ) {
+  if (lookup.state !== "running" && lookup.state !== "terminal") {
     throw new Error("run lookup.state is invalid");
   }
   if (lookup.run === undefined) {

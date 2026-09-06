@@ -294,8 +294,8 @@ describe("generate_image", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content).toContain("NSFW filter tripped");
-    // The intent stands: the effect was attempted, and reconciliation can now
-    // prove it produced nothing.
+    // The intent stands: the effect was attempted, and the empty key proves it
+    // produced nothing, so a re-issued call generates rather than replays.
     expect(
       session.events.some((event) => event.type === "image/generate-intent"),
     ).toBe(true);
@@ -322,15 +322,14 @@ describe("generate_image", () => {
   });
 });
 
-describe("reconciling a generated image", () => {
-  test("is never retried by the registry: the effect is not idempotent", async () => {
+describe("re-running a generated image under its effect id", () => {
+  test("is safe to retry: the effect id is the idempotency key", async () => {
     const { sessions, dispose } = await openSession();
     const tool = createGenerateImageTool(
       host({ model: new FakeImageModel(), files: new FakeImageWorkspace() }),
       sessions,
     );
-    expect(tool.idempotent).toBe(false);
-    expect(tool.reconcile).toBeDefined();
+    expect(tool.idempotent).toBe(true);
     await dispose();
   });
 
@@ -366,18 +365,11 @@ describe("reconciling a generated image", () => {
       second.sessions,
     );
 
-    const reconciliation = await after.reconcile!(
-      { prompt: "a red barn" },
-      CONTEXT,
-    );
+    const retried = await after.execute({ prompt: "a red barn" }, CONTEXT);
 
-    expect(reconciliation.status).toBe("recovered");
-    expect(
-      reconciliation.status === "recovered"
-        ? JSON.parse(reconciliation.result.content)
-        : undefined,
-    ).toEqual(JSON.parse(original.content));
-    // The whole point: recovery read the Workspace and never billed again.
+    expect(retried.isError).toBe(false);
+    expect(JSON.parse(retried.content)).toEqual(JSON.parse(original.content));
+    // The whole point: the re-run read the Workspace and never billed again.
     expect(model.calls).toHaveLength(1);
     // And the outcome the interrupted attempt never recorded is recorded now.
     expect(
@@ -386,7 +378,9 @@ describe("reconciling a generated image", () => {
     await second.dispose();
   });
 
-  test("is unavailable, not a silent retry, when nothing was stored", async () => {
+  // A key with nothing stored under it never generated anything, so the
+  // re-issued call is the first real dispatch rather than a duplicate.
+  test("generates when nothing is stored under the effect id", async () => {
     const { sessions, dispose } = await openSession();
     const model = new FakeImageModel();
     const tool = createGenerateImageTool(
@@ -394,24 +388,21 @@ describe("reconciling a generated image", () => {
       sessions,
     );
 
-    const reconciliation = await tool.reconcile!(
-      { prompt: "a red barn" },
-      CONTEXT,
-    );
+    const result = await tool.execute({ prompt: "a red barn" }, CONTEXT);
 
-    expect(reconciliation).toMatchObject({ status: "unavailable" });
-    expect(model.calls).toHaveLength(0);
+    expect(result.isError).toBe(false);
+    expect(model.calls).toHaveLength(1);
     await dispose();
   });
 
-  test("records the outcome only once across a reconciled replay", async () => {
+  test("records the outcome only once across a re-issued call", async () => {
     const files = new FakeImageWorkspace();
     const model = new FakeImageModel();
     const { session, sessions, dispose } = await openSession();
     const tool = createGenerateImageTool(host({ model, files }), sessions);
 
     await tool.execute({ prompt: "a red barn" }, CONTEXT);
-    await tool.reconcile!({ prompt: "a red barn" }, CONTEXT);
+    await tool.execute({ prompt: "a red barn" }, CONTEXT);
 
     expect(
       session.events.filter((event) => event.type === "image/generated"),

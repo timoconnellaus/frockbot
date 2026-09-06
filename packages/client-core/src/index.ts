@@ -142,13 +142,7 @@ export interface ClientRun {
   admittedAt?: string;
   input: string;
   events: ClientTurnEvent[];
-  status:
-    | "running"
-    | "completed"
-    | "failed"
-    | "cancelled"
-    | "superseded"
-    | "reconciliation-required";
+  status: "running" | "completed" | "failed" | "cancelled" | "superseded";
   responseText?: string;
   failure?: string;
   /** Durable Stop intent, projected independently of the run status. */
@@ -165,68 +159,8 @@ export interface ClientRun {
    * settles, so the thread never draws both.
    */
   partialText?: string;
-  recovery?: { action: "resume"; message: string };
   /** Source marker for a message admitted on the agent lane. */
-  via?:
-    | { kind: "bot"; name: string; botId: string }
-    | { kind: "voice"; name: "Voice" };
-}
-
-/**
- * What the composer is told while a person dictates.
- *
- * Deltas are appended as they are heard; a `transcript` replaces the deltas
- * that built the segment it finishes, because the provider's own segment is
- * punctuated and the deltas are not. `final` says everything captured has been
- * transcribed and the message may be sent.
- */
-export interface VoiceDictationObserverV1 {
-  ready(): void;
-  delta(text: string): void;
-  transcript(text: string): void;
-  final(): void;
-  /** Plain English, already fit to show a person. */
-  failed(message: string): void;
-  closed(): void;
-}
-
-/** The handle the composer drives. Audio is PCM16, 16 kHz, mono. */
-export interface VoiceDictationSessionV1 {
-  sendAudio(pcm16: ArrayBuffer): void;
-  /** Stop capturing and transcribe the rest; `final` follows. */
-  commit(): void;
-  /** Throw the capture away. */
-  cancel(): void;
-  close(): void;
-}
-
-/** The browser projection of one app-wide Voice assistant session. */
-export interface VoiceAssistantObserverV1 {
-  ready(sessionId: string, quotaRemainingSeconds: number): void;
-  state(state: "listening" | "speaking"): void;
-  transcript(entry: {
-    id: string;
-    speaker: "user" | "assistant";
-    text: string;
-    at: string;
-  }): void;
-  tool(entry: { id: string; name: string; label: string; at: string }): void;
-  /** PCM16LE, mono, 24 kHz. */
-  audio(pcm16: ArrayBuffer): void;
-  interrupted(): void;
-  offline(
-    reason: "stopped" | "idle" | "quota" | "error" | "replaced",
-    message: string,
-  ): void;
-  failed(message: string): void;
-  closed(): void;
-}
-
-/** The browser's handle on Voice. Input audio is PCM16LE, mono, 16 kHz. */
-export interface VoiceAssistantSessionV1 {
-  sendAudio(pcm16: ArrayBuffer): void;
-  stop(): void;
-  close(): void;
+  via?: { kind: "bot"; name: string; botId: string };
 }
 
 export interface AgentTransport {
@@ -252,19 +186,6 @@ export interface AgentTransport {
    * bridge, simply never reports one.
    */
   observeDeployment?(observer: (deployment: string) => void): () => void;
-  /**
-   * Opens the composer's dictation socket (voice plan D2). Optional: a
-   * platform that cannot open one simply offers no microphone, and the
-   * composer's send button never changes shape.
-   */
-  openVoiceDictation?(
-    observer: VoiceDictationObserverV1,
-  ): VoiceDictationSessionV1;
-  /** Opens the User-scoped app-wide Voice assistant. */
-  openVoiceAssistant?(
-    deviceId: string,
-    observer: VoiceAssistantObserverV1,
-  ): VoiceAssistantSessionV1;
   turn(
     botId: string,
     text: string,
@@ -320,7 +241,6 @@ export interface AgentTransport {
     botId: string,
     runId: string,
   ): Promise<ClientRun | undefined>;
-  reconcileRun?(botId: string, runId: string): Promise<ClientTurnResponse>;
   /** Sends the durable Stop command and returns the acknowledged projection. */
   stopRun?(botId: string, runId: string, commandId: string): Promise<ClientRun>;
   revokeConnection?(packageId: string, connectionId: string): Promise<void>;

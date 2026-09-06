@@ -1,6 +1,5 @@
 import {
   type LlmProvider,
-  type LlmReconciliationCapability,
   type LlmStreamEvent,
   ModelProviderFailureError,
   type NormalizedModelRequest,
@@ -39,7 +38,6 @@ declare module "cordis" {
     "agent/model-outcome-committed": (
       agent: Agent,
       requestId: string,
-      outcome: "completed" | "not-started",
     ) => Promise<void>;
   }
 }
@@ -205,14 +203,6 @@ class OllamaCloudProvider implements LlmProvider {
    * can never be read back. Saying so settles the run as a failure with its
    * partial text intact instead of parking it forever.
    */
-  readonly reconciliation: LlmReconciliationCapability = {
-    retrieve: async () => ({
-      status: "not-retrievable",
-      reason:
-        "Ollama keeps no durable copy of an interrupted response, so it cannot be recovered",
-    }),
-  };
-
   async *stream(request: NormalizedModelRequest, signal: AbortSignal) {
     await this.authorize(request);
     const authorization = this.authorized.get(request.requestId);

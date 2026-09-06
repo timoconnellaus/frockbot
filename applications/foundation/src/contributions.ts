@@ -45,10 +45,6 @@ import {
   type AuditGatewayHost,
 } from "@frockbot/plugin-audit/backend";
 import {
-  backendContribution as billingGatewayContribution,
-  type BillingGatewayHostV1,
-} from "@frockbot/plugin-billing/backend";
-import {
   backendContribution as botTemplateGatewayContribution,
   type BotTemplateGatewayHostV1,
 } from "@frockbot/plugin-bot-template/backend";
@@ -72,10 +68,6 @@ import {
   backendContribution as searchGatewayContribution,
   type SearchGatewayHost,
 } from "@frockbot/plugin-search/backend";
-import {
-  backendContribution as voiceGatewayContribution,
-  type VoiceGatewayHostV1,
-} from "@frockbot/plugin-voice/backend";
 import {
   backendContribution as settingsGatewayContribution,
   type SettingsGatewayHost,
@@ -126,17 +118,9 @@ import {
   type AuditUserApplicationHostV1,
 } from "@frockbot/plugin-audit/user";
 import {
-  userContribution as billingUserContribution,
-  type BillingUserApplicationHostV1,
-} from "@frockbot/plugin-billing/user";
-import {
   userContribution as flockUserContribution,
   type FlockUserApplicationHostV1,
 } from "@frockbot/plugin-flock/user";
-import {
-  userContribution as voiceUserContribution,
-  type VoiceUserApplicationHostV1,
-} from "@frockbot/plugin-voice/user";
 
 import {
   backendContribution as shellBotContribution,
@@ -154,14 +138,12 @@ import {
 export {
   adminGatewayContribution,
   auditGatewayContribution,
-  billingGatewayContribution,
   botTemplateGatewayContribution,
   computerGatewayContribution,
   flockGatewayContribution,
   packagePublisherGatewayContribution,
   routinesGatewayContribution,
   searchGatewayContribution,
-  voiceGatewayContribution,
   settingsGatewayContribution,
   subagentsGatewayContribution,
   machineGatewayContribution,
@@ -174,9 +156,7 @@ export {
   machineUserContribution,
   searchUserContribution,
   auditUserContribution,
-  billingUserContribution,
   flockUserContribution,
-  voiceUserContribution,
   shellBotContribution,
   flockBotContribution,
   computerBotContribution,
@@ -252,9 +232,7 @@ export type FoundationGatewayHost = {
   MachineGatewayHostV1 &
   SearchGatewayHost &
   AuditGatewayHost &
-  BillingGatewayHostV1 &
-  PackagePublisherGatewayHost &
-  VoiceGatewayHostV1;
+  PackagePublisherGatewayHost;
 
 /**
  * Every User Durable Object host slice, in one object. Each Package names its
@@ -276,9 +254,7 @@ export type FoundationUserBackendHostV1 = {
   MachineUserApplicationHostV1 &
   SearchUserApplicationHostV1 &
   AuditUserApplicationHostV1 &
-  BillingUserApplicationHostV1 &
-  FlockUserApplicationHostV1 &
-  VoiceUserApplicationHostV1;
+  FlockUserApplicationHostV1;
 
 /** Every Bot Durable Object host slice, in one object. */
 export type FoundationBotBackendHostV1 = {
@@ -331,14 +307,12 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
   return [
     adminGatewayContribution,
     auditGatewayContribution,
-    billingGatewayContribution,
     botTemplateGatewayContribution,
     computerGatewayContribution,
     flockGatewayContribution,
     packagePublisherGatewayContribution,
     routinesGatewayContribution,
     searchGatewayContribution,
-    voiceGatewayContribution,
     settingsGatewayContribution,
     subagentsGatewayContribution,
     machineGatewayContribution,
@@ -351,9 +325,7 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     machineUserContribution,
     searchUserContribution,
     auditUserContribution,
-    billingUserContribution,
     flockUserContribution,
-    voiceUserContribution,
     shellBotContribution,
     flockBotContribution,
     computerBotContribution,

@@ -34,7 +34,6 @@
         "@frockbot/plugin-audit": "workspace:*",
         "@frockbot/plugin-auth": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
-        "@frockbot/plugin-billing": "workspace:*",
         "@frockbot/plugin-bot-template": "workspace:*",
         "@frockbot/plugin-clock": "workspace:*",
         "@frockbot/plugin-computer": "workspace:*",
@@ -61,7 +60,6 @@
         "@frockbot/plugin-subagents": "workspace:*",
         "@frockbot/plugin-ui-theme": "workspace:*",
         "@frockbot/plugin-user-machine": "workspace:*",
-        "@frockbot/plugin-voice": "workspace:*",
         "@frockbot/plugin-web": "workspace:*",
         "@frockbot/template-core": "workspace:*",
         "cordis": "4.0.0-rc.8",
@@ -114,7 +112,6 @@
         "@frockbot/plugin-applets": "workspace:*",
         "@frockbot/plugin-audit": "workspace:*",
         "@frockbot/plugin-authoring": "workspace:*",
-        "@frockbot/plugin-billing": "workspace:*",
         "@frockbot/plugin-bot-template": "workspace:*",
         "@frockbot/plugin-computer": "workspace:*",
         "@frockbot/plugin-credentials": "workspace:*",
@@ -133,7 +130,6 @@
         "@frockbot/plugin-subagents": "workspace:*",
         "@frockbot/plugin-tools": "workspace:*",
         "@frockbot/plugin-user-machine": "workspace:*",
-        "@frockbot/plugin-voice": "workspace:*",
         "@frockbot/protocol": "workspace:*",
         "@frockbot/protocol-schemas": "workspace:*",
         "@frockbot/template-core": "workspace:*",
@@ -561,26 +557,6 @@
       "devDependencies": {
         "@types/bun": "1.4.0",
         "typescript": "^7.0.2",
-      },
-    },
-    "packages/plugin-billing": {
-      "name": "@frockbot/plugin-billing",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/kernel-contracts": "workspace:*",
-        "@frockbot/plugin-flock": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "cordis": "4.0.0-rc.8",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "@vitejs/plugin-vue": "6.0.8",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
       },
     },
     "packages/plugin-bot-template": {
@@ -1133,27 +1109,6 @@
         "vue-tsc": "3.3.10",
       },
     },
-    "packages/plugin-voice": {
-      "name": "@frockbot/plugin-voice",
-      "version": "0.0.1",
-      "dependencies": {
-        "@frockbot/client-core": "workspace:*",
-        "@frockbot/client-ui": "workspace:*",
-        "@frockbot/kernel-contracts": "workspace:*",
-        "@frockbot/plugin-flock": "workspace:*",
-        "@frockbot/plugin-shell": "workspace:*",
-        "@frockbot/protocol": "workspace:*",
-        "cordis": "4.0.0-rc.8",
-        "vue": "3.5.41",
-      },
-      "devDependencies": {
-        "@types/bun": "1.4.0",
-        "@vitejs/plugin-vue": "6.0.8",
-        "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-        "vite": "8.2.2",
-        "vue-tsc": "3.3.10",
-      },
-    },
     "packages/plugin-web": {
       "name": "@frockbot/plugin-web",
       "version": "0.0.1",
@@ -1472,8 +1427,6 @@
 
     "@frockbot/plugin-authoring": ["@frockbot/plugin-authoring@workspace:packages/plugin-authoring"],
 
-    "@frockbot/plugin-billing": ["@frockbot/plugin-billing@workspace:packages/plugin-billing"],
-
     "@frockbot/plugin-bot-template": ["@frockbot/plugin-bot-template@workspace:packages/plugin-bot-template"],
 
     "@frockbot/plugin-clock": ["@frockbot/plugin-clock@workspace:packages/plugin-clock"],
@@ -1533,8 +1486,6 @@
     "@frockbot/plugin-ui-theme": ["@frockbot/plugin-ui-theme@workspace:packages/plugin-ui-theme"],
 
     "@frockbot/plugin-user-machine": ["@frockbot/plugin-user-machine@workspace:packages/plugin-user-machine"],
-
-    "@frockbot/plugin-voice": ["@frockbot/plugin-voice@workspace:packages/plugin-voice"],
 
     "@frockbot/plugin-web": ["@frockbot/plugin-web@workspace:packages/plugin-web"],
 

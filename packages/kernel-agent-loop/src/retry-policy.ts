@@ -1,7 +1,10 @@
-import type {
-  ModelProviderFailureClassV1,
-  ModelProviderFailureError,
-} from "@frockbot/kernel-contracts";
+import type { ModelProviderFailureClassV1 } from "@frockbot/kernel-contracts";
+
+/** What the policy needs of a failure; `ModelProviderFailureError` is one. */
+export interface ModelRetryFailureV1 {
+  classification: ModelProviderFailureClassV1;
+  retryAfterMs?: number;
+}
 
 export const MODEL_RETRY_BACKOFF_BASE_MS_V1 = 500;
 export const MODEL_RETRY_BACKOFF_CAP_MS_V1 = 8_000;
@@ -57,7 +60,7 @@ export function modelFailureMayRetryV1(input: {
 
 /** Undefined means the Turn has too little wall clock left for another try. */
 export function nextModelRetryV1(input: {
-  failure: ModelProviderFailureError;
+  failure: ModelRetryFailureV1;
   attempt: number;
   deadlineAt: number;
   runtime: Pick<ModelRetryPolicyRuntimeV1, "now" | "random">;

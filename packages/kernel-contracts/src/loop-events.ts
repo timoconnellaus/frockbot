@@ -168,10 +168,10 @@ export interface LoopEventPayloadMapV1 {
     step: LoopStepSnapshotV1;
     decision: LoopStepContinuationV1;
   };
+  /** The loop is finished with this request id; release what it holds. */
   "agent/model-outcome-committed": {
     agent: LoopAgentSnapshotV1;
     requestId: string;
-    outcome: "completed" | "not-started";
   };
   "agent/turn-stopping": { agent: LoopAgentSnapshotV1; turn: number };
   "agent/cancel-requested": {
@@ -624,7 +624,7 @@ export const LOOP_EVENTS_V1 = {
   },
   "agent/model-outcome-committed": {
     mode: "serial",
-    payload: "{ agent, requestId, outcome }",
+    payload: "{ agent, requestId }",
     returns: "void",
     isolateHook: false,
   },

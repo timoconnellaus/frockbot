@@ -11,7 +11,6 @@ import {
   boundedModelProviderReasonV1,
   type LlmMessage,
   type LlmProvider,
-  type LlmReconciliationCapability,
   type LlmStreamEvent,
   ModelProviderFailureError,
   ModelRequestDeadlineError,
@@ -37,7 +36,6 @@ declare module "cordis" {
     "agent/model-outcome-committed": (
       agent: Agent,
       requestId: string,
-      outcome: "completed" | "not-started",
     ) => Promise<void>;
   }
 }
@@ -330,14 +328,6 @@ class AnthropicProvider implements LlmProvider {
    * so settles the run as a failure with its partial text rather than parking
    * it on a retrieval that never arrives.
    */
-  readonly reconciliation: LlmReconciliationCapability = {
-    retrieve: async () => ({
-      status: "not-retrievable",
-      reason:
-        "Anthropic keeps no durable copy of an interrupted response, so it cannot be recovered",
-    }),
-  };
-
   private async authorize(request: NormalizedModelRequest): Promise<string> {
     const expectedGeneration = request.modelBinding?.connectionGeneration;
     if (

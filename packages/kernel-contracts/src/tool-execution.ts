@@ -13,9 +13,13 @@ export interface ToolExecutionContext {
   agentId: string;
   sessionId: string;
   compositionGenerationId: string;
-  /** Stable durable occurrence identity for provider idempotency and recovery. */
+  /**
+   * The call's idempotency key: stable across every dispatch of this exact
+   * occurrence, so a tool re-issued after an interruption can recognise the
+   * work it already did rather than repeating it.
+   */
   effectId: string;
-  /** Exact durable call; reconciliation fails closed when it is absent. */
+  /** The exact durable call, for a tool that keys its effects by content. */
   toolCall?: ToolCall;
   /** The turn type this Turn was admitted as. */
   turnType: TurnTypeV1;
@@ -120,10 +124,6 @@ export function isSubagentRoleAdmittedV1(
   return admitted.includes(role);
 }
 
-export type ToolEffectReconciliation =
-  | { status: "recovered"; result: ToolExecutionResult }
-  | { status: "unavailable"; reason: string };
-
 export interface ToolDefinition extends ToolSchema {
   /**
    * A dynamic Tool Namespace. Absent means the tool is native and its schema
@@ -131,6 +131,11 @@ export interface ToolDefinition extends ToolSchema {
    * and the tool is invoked only through the registry's two meta-tools.
    */
   namespace?: string;
+  /**
+   * Whether re-running this tool with the same input is free of consequence.
+   * A tool that is not read-only is still re-issued after an interruption —
+   * under the same `effectId` — and is expected to honour that key.
+   */
   idempotent?: boolean;
   /** The turn types this tool is offered on. Absent means all of them. */
   admission?: TurnAdmissionV1;
@@ -139,10 +144,6 @@ export interface ToolDefinition extends ToolSchema {
     input: unknown,
     context: ToolExecutionContext,
   ): Promise<ToolExecutionResult>;
-  reconcile?(
-    input: unknown,
-    context: ToolExecutionContext,
-  ): Promise<ToolEffectReconciliation>;
 }
 
 export type ToolPreparation =
@@ -164,14 +165,6 @@ export interface ToolExecution {
     preparation: Extract<ToolPreparation, { kind: "ready" }>,
     context: ToolExecutionContext,
   ): Promise<ToolExecutionResult>;
-  /**
-   * Recovers the outcome of an already-admitted tool effect without starting a
-   * second one, so an interrupted Turn never duplicates a side effect.
-   */
-  reconcilePrepared(
-    preparation: Extract<ToolPreparation, { kind: "ready" }>,
-    context: ToolExecutionContext,
-  ): Promise<ToolEffectReconciliation>;
 }
 
 /**

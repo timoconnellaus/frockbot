@@ -207,7 +207,6 @@ describe("Ollama Cloud runtime Contribution", () => {
         "agent/model-outcome-committed",
         {} as Agent,
         request.requestId,
-        "completed",
       ),
     ).rejects.toThrow("settlement unavailable");
     expect(settled).toEqual(["effect-1"]);
@@ -418,7 +417,6 @@ describe("Ollama Cloud runtime Contribution", () => {
       "agent/model-outcome-committed",
       {} as Agent,
       "durable-effect",
-      "completed",
     );
 
     expect(settled).toEqual(["durable-effect"]);
@@ -426,7 +424,7 @@ describe("Ollama Cloud runtime Contribution", () => {
   });
 
   test.each([401, 403, 404])(
-    "settles definitive HTTP %i rejections after durable no-effect outcome",
+    "settles definitive HTTP %i rejections when the loop releases the request",
     async (status) => {
       const keyringText = serializedKeyring();
       const envelope = await sealCredentialV1({
@@ -488,7 +486,6 @@ describe("Ollama Cloud runtime Contribution", () => {
         "agent/model-outcome-committed",
         {} as Agent,
         request.requestId,
-        "not-started",
       );
       expect(settled).toEqual(["effect-1"]);
       await root.fiber.dispose();
@@ -496,7 +493,7 @@ describe("Ollama Cloud runtime Contribution", () => {
   );
 
   test.each([408, 429, 500, 502])(
-    "settles pre-stream HTTP %i as not started rather than parking the Turn",
+    "holds the lease over a transient pre-stream HTTP %i, for the retry",
     async (status) => {
       const keyringText = serializedKeyring();
       const envelope = await sealCredentialV1({
@@ -557,31 +554,6 @@ describe("Ollama Cloud runtime Contribution", () => {
       await root.fiber.dispose();
     },
   );
-
-  test("reports an interrupted response as not retrievable so the run settles", async () => {
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await mountCredentialRuntime(root, serializedKeyring());
-    await root.plugin(
-      createOllamaCloudRuntimePlugin({
-        accountId: "account-1",
-        connectionId: "connection-1",
-        packageId: "provider-ollama-cloud",
-        now: () => Date.parse("2026-08-30T00:00:00.000Z"),
-        leaseCredential: () => Promise.reject(new Error("unused")),
-        settleCredential: () => Promise.resolve(),
-        fetch: () => Promise.reject(new Error("unused")),
-      }),
-    );
-
-    const outcome = await root.llm.reconcile(
-      request,
-      new AbortController().signal,
-    );
-
-    expect(outcome.status).toBe("not-retrievable");
-    await root.fiber.dispose();
-  });
 });
 
 /** A clock the test advances by hand, so a deadline costs no real seconds. */

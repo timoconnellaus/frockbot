@@ -25,7 +25,6 @@ import {
   decodeClientRunAdmissionFenceCommandV1,
   decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
-  decodeClientRunReconciliationCommandV1,
   decodeClientRunStopCommandV1,
   decodeClientTurnCommandV1,
   type ClientRunLookupQueryV1,
@@ -40,10 +39,6 @@ import {
   botTurnRefusalCodeV1,
 } from "@frockbot/kernel-do";
 import type { UserApplicationEnv } from "./contracts.js";
-import {
-  VOICE_CAPTURE_WORKLET_PATH_V1,
-  VOICE_CAPTURE_WORKLET_SOURCE_V1,
-} from "@frockbot/plugin-shell/client/voice-worklet";
 import { answeredEntryV1, entryFailureStatusV1 } from "./entry-boundary.js";
 import { INSIGHTS_REPORT_ORIGIN, INSIGHTS_SCRIPT_ORIGIN } from "./insights.js";
 import {
@@ -230,10 +225,6 @@ const TURN_ADMISSION_REFUSALS_V1: readonly {
   reason: ClientTurnRefusalReasonV1;
 }[] = [
   { match: /bot already has an active run/i, reason: "busy" },
-  {
-    match: /requires reconciliation before/i,
-    reason: "reconciliation-required",
-  },
   { match: /admission was fenced/i, reason: "fenced" },
   { match: /already (exists|completed)/i, reason: "duplicate" },
 ];
@@ -395,25 +386,6 @@ function createUserApplicationRoute() {
     if (request.method === "GET" && url.pathname === "/app.js") {
       return withSecurityHeaders(
         new Response(APP_JS, {
-          headers: {
-            "content-type": "text/javascript; charset=utf-8",
-            "cache-control": "no-cache",
-          },
-        }),
-        packageUiArtifactOrigin(url),
-        url,
-      );
-    }
-    // The composer's dictation worklet. A first-party asset rather than a
-    // blob URL because the page is served under `script-src 'self'`, which a
-    // blob module does not satisfy; the alternative was widening that policy
-    // for every script to load one file. See `plugin-shell/.../voice-worklet.ts`.
-    if (
-      request.method === "GET" &&
-      url.pathname === VOICE_CAPTURE_WORKLET_PATH_V1
-    ) {
-      return withSecurityHeaders(
-        new Response(VOICE_CAPTURE_WORKLET_SOURCE_V1, {
           headers: {
             "content-type": "text/javascript; charset=utf-8",
             "cache-control": "no-cache",
@@ -776,9 +748,6 @@ function createUserApplicationRoute() {
     const lookupMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)$/,
     );
-    const reconcileMatch = url.pathname.match(
-      /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/reconcile$/,
-    );
     const fenceMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/fence$/,
     );
@@ -798,7 +767,6 @@ function createUserApplicationRoute() {
       !workspaceFileMatch &&
       !turnMatch &&
       !lookupMatch &&
-      !reconcileMatch &&
       !fenceMatch &&
       !stopMatch
     ) {
@@ -816,7 +784,6 @@ function createUserApplicationRoute() {
         workspaceFileMatch ??
         turnMatch ??
         lookupMatch ??
-        reconcileMatch ??
         fenceMatch ??
         stopMatch;
       botId = decodeURIComponent(matched![1]);
@@ -962,42 +929,6 @@ function createUserApplicationRoute() {
         return jsonError(
           400,
           error instanceof Error ? error.message : "workspace read failed",
-        );
-      }
-    }
-
-    if (reconcileMatch) {
-      if (request.method !== "POST")
-        return jsonError(405, "method not allowed");
-      let runId: string;
-      try {
-        runId = decodeURIComponent(reconcileMatch[2]);
-      } catch {
-        return jsonError(400, "invalid run id");
-      }
-      if (!isRpcIdentifier(runId)) return jsonError(400, "invalid run id");
-      try {
-        decodeClientRunReconciliationCommandV1(await request.json());
-      } catch (error) {
-        return jsonError(
-          400,
-          error instanceof Error
-            ? error.message
-            : "reconciliation action is invalid",
-        );
-      }
-      try {
-        return Response.json(
-          await env.BOT_STATE.reconcileRun({
-            schemaVersion: 1,
-            botId,
-            runId,
-          }),
-        );
-      } catch (error) {
-        return jsonError(
-          409,
-          error instanceof Error ? error.message : "Reconciliation failed",
         );
       }
     }

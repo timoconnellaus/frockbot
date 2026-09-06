@@ -40,17 +40,19 @@ Each step leaves `main` shippable.
 
 **2. Cut what is dead.** _Done._ The Electron and WebView shells, their capability packages, the architecture checks and two prototypes: 11 packages, 14,548 lines.
 
-**3. Park the deferred features.** _Done for MCP and Composio._ They came out first — roughly 11.4k lines, no owned Durable Object class and no owned tables. They return later as plugins over the `http` grant, which is what they should have been.
+**3. Park the deferred features.** _Done._ MCP and Composio came out first — roughly 11.4k lines, no owned Durable Object class and no owned tables. They return later as plugins over the `http` grant, which is what they should have been.
 
 The same ruling cleared two leftovers from that cut: Bot templates carried an `mcpServers` field and Routines a connection-trigger kind whose only provider was Composio, both kept only because changing a stored shape looked like a migration. Both are gone, along with the trigger path they served.
 
-`plugin-voice` and `plugin-billing` follow, in their own tag. Voice owns the `VoiceSession` Durable Object class, so removing it takes a `deleted_classes` migration, and a malformed migration list is one of the few things that hard-fails a production deploy. They are deliberately not bundled with a release that already subtracts 50k lines: if that deploy breaks, the cause should be unambiguous. Both features work today, so the delay costs nothing.
+`plugin-voice` and `plugin-billing` are out too, in their own tag. Voice owned the `VoiceSession` Durable Object class; a `deleted_classes` migration retires it, because a `new_sqlite_classes` entry is immutable once applied.
 
 **4. Providers onto the AI SDK.** _Done._ Replace the hand-written provider stack with one interface over `ai` + `@ai-sdk/*`. The AI SDK's OpenAI-compatible model now owns SSE framing, tool-call accumulation and the non-streamed body; request mapping, failure classification and the deadlines stayed, because the Frock AI gateway and Ollama's native endpoint reach that seam with a stream and no URL. An Anthropic provider proves the seam is open — the provider set was a hardcoded two-entry map. The 2,526-line Ollama connection file is untouched: it is durable-record ceremony, not transport, and belongs to step 7.
 
-**5. Split the agent loop.** _Half done._ The extraction has landed: `index.ts` is 853 lines beside `model-request.ts`, `resume.ts`, `tool-execution.ts`, `reconcile.ts`, `errors.ts` and `runtime.ts`, and it changed no test at all, which is what proves it changed no behaviour.
+**5. Split the agent loop.** _Done._ `index.ts` is 853 lines beside `model-request.ts`, `resume.ts`, `tool-execution.ts`, `errors.ts` and `runtime.ts`. The extraction changed no test, which is what proved it changed no behaviour.
 
-The durability rewrite — at-most-once by idempotency key, in place of retrieving a lost response and verifying it against the durable chunk prefix — is written but not merged. It touches 65 files across nine layers, it writes `model/usage` per dispatch where the old code deduplicated by request id (so a retry the provider served for free is counted twice), and `plugin-image` becomes idempotent with a read-before-generate on a billed effect. It is the reliability fix worth having and it needs its own tag and a real review, not a green suite.
+Forensic reconciliation is gone. Every external effect that matters carries an idempotency key — a model call's `requestId`, a tool call's `occurrenceId` — and is re-issued under that key rather than investigated afterwards. No Turn parks waiting for a person to resolve it. `admitEffect` and supersede fencing survive and now run before every dispatch, re-issues included.
+
+The seam that retrieved a lost response from the provider is deleted outright: `LlmReconciliationCapability`, `ctx.llm.reconcile`, and all four provider implementations. It was declared, implemented everywhere and called by nobody.
 
 **6. Frock Compose replaces cordis.** _The provenance framing is already stripped._ Wire the extension points named in `AGENTS.md`, and delete `kernel-composition`, the manifest system, `plugin-authoring`, `plugin-package-catalog` and `plugin-package-publisher`.
 

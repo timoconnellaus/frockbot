@@ -9,7 +9,6 @@ import type {
 import type { UserConfiguration } from "../src/user-configuration.ts";
 import type { AppletState } from "../src/applet-state.ts";
 import type { DeploymentPolicy } from "../src/deployment-policy.ts";
-import type { VoiceSession } from "../src/voice-session.ts";
 
 interface FlyTestEnv {
   APPLICATION_ARTIFACTS: R2Bucket;
@@ -37,7 +36,6 @@ interface FlyTestEnv {
   ROUTINE_HOOK_SECRET: string;
   MACHINE_TOKEN_SECRET: string;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
-  VOICE_SESSIONS: DurableObjectNamespace<VoiceSession>;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
 }
 

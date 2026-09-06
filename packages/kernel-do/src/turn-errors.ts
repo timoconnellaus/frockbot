@@ -2,8 +2,8 @@ import type { SessionEvent } from "@frockbot/kernel-contracts";
 
 /**
  * Terminal classification of an admitted Turn's failure. The kernel's cursor
- * uses these to decide between failing, deferring, and requiring
- * reconciliation; the Package that executes the Turn raises them.
+ * uses these to decide between failing and deferring; the Package that
+ * executes the Turn raises them.
  */
 export class BotTurnExecutionError extends Error {
   constructor(
@@ -15,19 +15,8 @@ export class BotTurnExecutionError extends Error {
   }
 }
 
-export class BotTurnReconciliationRequiredError extends Error {
-  constructor(
-    message: string,
-    readonly events: SessionEvent[],
-  ) {
-    super(message);
-    this.name = "BotTurnReconciliationRequiredError";
-  }
-}
-
 /** Why the Bot declined to admit a Turn. */
-export type BotTurnRefusalCodeV1 =
-  "busy" | "reconciliation-required" | "fenced" | "duplicate";
+export type BotTurnRefusalCodeV1 = "busy" | "fenced" | "duplicate";
 
 const BOT_TURN_REFUSAL_PREFIX_V1 = "BotTurnRefusedError:";
 
@@ -61,10 +50,7 @@ export function botTurnRefusalCodeV1(
       : "";
   if (!name.startsWith(BOT_TURN_REFUSAL_PREFIX_V1)) return undefined;
   const code = name.slice(BOT_TURN_REFUSAL_PREFIX_V1.length);
-  return code === "busy" ||
-    code === "reconciliation-required" ||
-    code === "fenced" ||
-    code === "duplicate"
+  return code === "busy" || code === "fenced" || code === "duplicate"
     ? code
     : undefined;
 }
