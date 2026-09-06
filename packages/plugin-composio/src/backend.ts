@@ -1,4 +1,3 @@
-import { composioEventRoute } from "./webhook-route.js";
 import {
   ConfigurationDecodeError,
   decodeRevokeConnectionCommandV1,
@@ -198,13 +197,7 @@ function createConfiguredComposioConnections(
 export function createConfiguredComposioBackendContribution(
   host: ComposioBackendHost,
 ): BackendRouteContribution {
-  const connections = createConfiguredComposioConnections(host);
-  return {
-    ...connections,
-    publicRoute: async (request, url, context) =>
-      (await composioEventRoute(host, request, url)) ??
-      (await connections.publicRoute?.(request, url, context)),
-  };
+  return createConfiguredComposioConnections(host);
 }
 
 function decodeCompletion(

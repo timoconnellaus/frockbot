@@ -1,4 +1,3 @@
-import { decodeConnectionTriggerCatalogV1 } from "@frockbot/connection-core";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { BOT_STATE_CHANNEL_INTERNAL_PATH } from "./bot-state-channel.js";
 import {
@@ -300,7 +299,6 @@ interface Env {
    */
   FROCKBOT_AUTHORIZATION_STATE_SECRET?: string;
   COMPOSIO_API_KEY?: string;
-  COMPOSIO_WEBHOOK_SECRET?: string;
   COMPOSIO_TEST_URL?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   FROCKBOT_ADMIN_EMAILS?: string;
@@ -376,7 +374,6 @@ interface UserScopedProps {
 }
 
 interface BotStateRpc extends BotConfigurationBinding {
-  listRoutineTriggers(input: unknown): Promise<unknown>;
   writeUserWorkspaceFileV1(input: {
     schemaVersion: 1;
     userId: string;
@@ -474,7 +471,6 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     listRoutines: (request) => rpc.listRoutines(request),
-    listRoutineTriggers: (request) => rpc.listRoutineTriggers(request),
     listTasks: (request) => rpc.listTasks(request),
     readTask: (request) => rpc.readTask(request),
     stopTask: (request) => rpc.stopTask(request),
@@ -1870,19 +1866,17 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
       // when this deployment has none, so a Worker without the secret has no
       // callback door rather than an unsigned one.
       readSecret: (name: string) =>
-        name === "COMPOSIO_WEBHOOK_SECRET"
-          ? env.COMPOSIO_WEBHOOK_SECRET
-          : name === "COMPOSIO_TEST_URL"
-            ? env.ALLOW_DEVELOPMENT_AUTH === "true"
-              ? env.COMPOSIO_TEST_URL
-              : undefined
-            : name === "COMPOSIO_API_KEY"
-              ? env.COMPOSIO_API_KEY
-              : name === "FROCKBOT_AUTHORIZATION_STATE_SECRET"
-                ? env.FROCKBOT_AUTHORIZATION_STATE_SECRET
-                : name === "BETTER_AUTH_SECRET"
-                  ? env.BETTER_AUTH_SECRET
-                  : undefined,
+        name === "COMPOSIO_TEST_URL"
+          ? env.ALLOW_DEVELOPMENT_AUTH === "true"
+            ? env.COMPOSIO_TEST_URL
+            : undefined
+          : name === "COMPOSIO_API_KEY"
+            ? env.COMPOSIO_API_KEY
+            : name === "FROCKBOT_AUTHORIZATION_STATE_SECRET"
+              ? env.FROCKBOT_AUTHORIZATION_STATE_SECRET
+              : name === "BETTER_AUTH_SECRET"
+                ? env.BETTER_AUTH_SECRET
+                : undefined,
       ...(env.BETTER_AUTH_URL ? { callbackBaseUrl: env.BETTER_AUTH_URL } : {}),
       startMcpAuthorization: async (userId, start) =>
         decodeStartConnectionResultV1(
@@ -1975,16 +1969,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
               userId,
               botId,
               taskId,
-            }),
-          ),
-        ),
-      listTriggers: async (userId, botId) =>
-        decodeConnectionTriggerCatalogV1(
-          rpcJsonSnapshot(
-            await botStateStub(env, userId, botId).listRoutineTriggers({
-              schemaVersion: 1,
-              userId,
-              botId,
             }),
           ),
         ),

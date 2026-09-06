@@ -21,8 +21,7 @@
     "./shared": "./src/shared.ts",
     "./storage-keys": "./src/storage-keys.ts",
     "./store": "./src/store.ts",
-    "./testing": "./src/testing.ts",
-    "./subscriptions": "./src/subscriptions.ts"
+    "./testing": "./src/testing.ts"
   },
   "frockbot": {
     "manifest": "./frockbot.json"

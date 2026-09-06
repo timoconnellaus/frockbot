@@ -1,25 +1,17 @@
-import {
-  SELF,
-  env,
-  evictDurableObject,
-  runDurableObjectAlarm,
-  runInDurableObject,
-} from "cloudflare:test";
+import { SELF, env, evictDurableObject } from "cloudflare:test";
 import { expect, it } from "vitest";
 import type { SessionEvent } from "@frockbot/kernel-contracts";
 import {
   asUser,
   expectOkJson,
   freshUserId,
-  listStoredRunsWithEventsV1,
   postAsUser,
   provisionThroughGateway,
   readStoredRunWithEventsV1,
-  settledRoutineFiringV1,
   toolCallTriggerPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
-import { deliverComposioEvent, toolkitNamespace } from "./composio-helpers.ts";
+import { toolkitNamespace } from "./composio-helpers.ts";
 useApplicationArtifact();
 
 it("Calendar and Gmail use the same connection, account-wide tool and event paths with independent accounts", async () => {
@@ -166,106 +158,6 @@ it("Calendar and Gmail use the same connection, account-wide tool and event path
     );
   }
   const botId = botIds[1]!;
-  const triggerType = "GOOGLECALENDAR_EVENT_STARTING_SOON_TRIGGER";
-  const triggerCatalog = (await expectOkJson(
-    await asUser(userId, `/api/bots/${botId}/routines/triggers`),
-  )) as {
-    items: Array<{ connectionId: string; triggerType: string; name: string }>;
-  };
-  expect(
-    triggerCatalog.items.filter((item) => item.triggerType === triggerType),
-  ).toHaveLength(2);
-  expect(triggerCatalog.items).toContainEqual(
-    expect.objectContaining({
-      connectionId: "calendar-work",
-      name: "Event starting soon in Google Calendar",
-    }),
-  );
-  await expectOkJson(
-    await postAsUser(userId, `/api/bots/${botId}/turns`, {
-      schemaVersion: 1,
-      commandId: "create-meeting-routine",
-      text:
-        "Before an event starts in Google Calendar, prepare a meeting brief.\n" +
-        toolCallTriggerPrompt(
-          ["routine_manage", { action: "list_triggers" }],
-          [
-            "routine_manage",
-            {
-              action: "create",
-              routineId: "meeting-brief",
-              name: "Meeting brief",
-              prompt: "Prepare a brief for the meeting in the event input.",
-              trigger: {
-                composio: {
-                  connectionId: "calendar-work",
-                  triggerType,
-                  config: {
-                    calendarId: "primary",
-                    countdownWindowMinutes: 60,
-                    includeAllDay: false,
-                    interval: 2,
-                    minutesBeforeStart: 10,
-                  },
-                },
-              },
-            },
-          ],
-        ),
-    }),
-  );
-  const authored = await readStoredRunWithEventsV1<{ events: SessionEvent[] }>(
-    userId,
-    botId,
-    "create-meeting-routine",
-  );
-  const authorResults = authored!.events.filter(
-    (e) => e.type === "tool/result" && e.name === "routine_manage",
-  );
-  expect(authorResults).toHaveLength(2);
-  expect(
-    authorResults.every((e) => e.type === "tool/result" && !e.isError),
-  ).toBe(true);
-  const payload = {
-    calendar_id: "primary",
-    event_id: "calendar-event-one",
-    countdown_window_minutes: 60,
-    summary: "Team meeting",
-    start_time: "2026-09-05T09:00:00+10:00",
-    minutes_until_start: 10,
-  };
-  const deliver = () =>
-    deliverComposioEvent({
-      eventId: "calendar-starting-one",
-      accountId: "ca_calendar-work",
-      triggerId: "ti_ca_calendar-work",
-      triggerType,
-      data: payload,
-    });
-  const bot = env.BOT_STATES.getByName(`${userId}:${botId}`);
-  await evictDurableObject(user);
-  await evictDurableObject(bot);
-  expect((await deliver()).status).toBe(202);
-  await evictDurableObject(bot);
-  await runDurableObjectAlarm(bot);
-  const firing = await settledRoutineFiringV1<{
-    runId: string;
-    status: string;
-    events: SessionEvent[];
-    admission: { turnType: string; origin?: { routineId?: string } };
-  }>(userId, botId, "meeting-brief");
-  expect(firing.admission.turnType).toBe("automation");
-  expect(
-    JSON.stringify(firing.events.filter((e) => e.type === "user/message")),
-  ).toContain("Team meeting");
-  expect((await deliver()).status).toBe(202);
-  await runDurableObjectAlarm(bot);
-  const runs = await listStoredRunsWithEventsV1<{
-    admission?: { turnType: string };
-  }>(userId, botId);
-  expect(
-    runs.filter((run) => run.admission?.turnType === "automation"),
-  ).toHaveLength(1);
   await expectOkJson(
     await postAsUser(
       userId,
@@ -276,14 +168,6 @@ it("Calendar and Gmail use the same connection, account-wide tool and event path
       },
     ),
   );
-  await runInDurableObject(user, async (_instance, state) => {
-    const groups = await state.storage.list<{ status: string }>({
-      prefix: "composio:trigger-group:",
-    });
-    expect([...groups.values()].map((item) => item.status)).toEqual([
-      "deleted",
-    ]);
-  });
   for (const namespace of [workNamespace, personalNamespace]) {
     const commandId =
       namespace === workNamespace ? "revoked-calendar" : "personal-calendar";

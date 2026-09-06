@@ -746,7 +746,6 @@ export async function startHarness(
         "--var",
         "COMPOSIO_API_KEY:test-composio-backend-key",
         "--var",
-        "COMPOSIO_WEBHOOK_SECRET:test-provider-webhook-secret",
         "--var",
         `COMPOSIO_TEST_URL:http://127.0.0.1:${options.ollamaPort}/composio/api/v3.1`,
         "--var",

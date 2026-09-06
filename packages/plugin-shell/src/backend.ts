@@ -1,15 +1,3 @@
-import {
-  decodeConnectionTriggerCatalogV1,
-  decodeConnectionTriggerStatusesV1,
-  type ConnectionTriggerStatusesV1,
-  type ConnectionEventDeliveryV1,
-  type ConnectionTriggerCatalogV1,
-} from "@frockbot/connection-core";
-import {
-  flushRoutineSubscriptionsV1,
-  routineSubscriptionDeadlinesV1,
-  routineSubscriptionBindingsV1,
-} from "@frockbot/plugin-routines/subscriptions";
 import type { RoutineWriterV1 } from "@frockbot/plugin-routines/records";
 import { turnToolCatalogPin } from "./tool-catalog-pin.js";
 import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
@@ -3217,7 +3205,6 @@ export class ShellBotBackendContribution {
     }
     return [
       ...(await this.routineScheduler.deadlines(transaction)),
-      ...(await routineSubscriptionDeadlinesV1(transaction)),
       ...expiries.filter((at) => Number.isFinite(at)),
       // A dispatched task's 30-minute lifetime, and a child's own owed Turn,
       // both ride the one alarm this object already has (ADR 0017): the parent
@@ -3281,8 +3268,6 @@ export class ShellBotBackendContribution {
     // woke this Bot again except by a caller's luck. One producer failing must
     // cost that producer its pass, never the clock.
     try {
-      const identity = await this.authority.readDurableIdentity();
-      if (identity) await this.flushRoutineSubscriptions(identity);
       await this.settleRoutineFirings();
       await this.runOwedSubagentTurns();
       await this.reconcileOverdueTasks();
@@ -4774,7 +4759,6 @@ export class ShellBotBackendContribution {
               routines: {
                 ...createBotRoutinesHost(identity, turn, this.routines),
                 list: () => this.listRoutines(identity),
-                listTriggers: () => this.listRoutineTriggers(identity),
                 execute: (command, writer) =>
                   this.executeRoutineCommand(identity, command, writer),
               },
@@ -5120,65 +5104,9 @@ export class ShellBotBackendContribution {
 
   /** Every Routine this Bot holds. Bot-scoped: the caller proved membership. */
   async listRoutines(identity: BotIdentity): Promise<RoutineListViewV1> {
-    await this.flushRoutineSubscriptions(identity, true);
-    const view = await this.routines.list(
+    return this.routines.list(
       identity.botId,
       await this.routineScheduler.nextRuns(),
-    );
-    if (!view.routines.some((row) => row.trigger?.kind === "connection"))
-      return view;
-    let statuses: ConnectionTriggerStatusesV1["routines"] = {};
-    try {
-      const result = await this.userConfiguration(identity).composioRequest(
-        identity.userId,
-        identity.botId,
-        {
-          schemaVersion: 1,
-          operation: "subscription-status",
-          bindings: await routineSubscriptionBindingsV1(this.ctx.storage),
-        },
-      );
-      statuses = decodeConnectionTriggerStatusesV1(result).routines;
-    } catch {
-      /* Existing Routines remain readable during a provider outage. */
-    }
-    return {
-      ...view,
-      routines: view.routines.map((row) =>
-        row.trigger?.kind !== "connection"
-          ? row
-          : {
-              ...row,
-              eventStatus: statuses[row.routineId]?.status ?? "unavailable",
-              eventName: statuses[row.routineId]?.name ?? "Service event",
-            },
-      ),
-    };
-  }
-  async listRoutineTriggers(
-    identity: BotIdentity,
-  ): Promise<ConnectionTriggerCatalogV1> {
-    return decodeConnectionTriggerCatalogV1(
-      await this.userConfiguration(identity).composioRequest(
-        identity.userId,
-        identity.botId,
-        { schemaVersion: 1, operation: "trigger-types" },
-      ),
-    );
-  }
-  private async flushRoutineSubscriptions(
-    identity: BotIdentity,
-    force = false,
-  ): Promise<void> {
-    await flushRoutineSubscriptionsV1(
-      this.ctx.storage,
-      (subscription) =>
-        this.userConfiguration(identity).composioRequest(
-          identity.userId,
-          identity.botId,
-          { schemaVersion: 1, operation: "sync-subscription", subscription },
-        ),
-      force,
     );
   }
 
@@ -5195,27 +5123,13 @@ export class ShellBotBackendContribution {
     if (command.botId !== identity.botId) {
       throw new RoutineNotFoundError(command.routineId ?? command.botId);
     }
-    const receipt = await this.routines.execute(command, writer, async () => {
-      if (
-        (command.type === "routine/create" ||
-          command.type === "routine/update") &&
-        command.trigger?.kind === "connection"
-      ) {
-        const { kind: _, ...trigger } = command.trigger;
-        await this.userConfiguration(identity).composioRequest(
-          identity.userId,
-          identity.botId,
-          { schemaVersion: 1, operation: "validate-trigger", trigger },
-        );
-      }
-    });
+    const receipt = await this.routines.execute(command, writer);
     // A created, re-timed, resumed or manually fired Routine changes what the
     // object is owed next, so the alarm is re-armed in the same call that wrote
     // the record rather than waiting for the next one to happen by.
     await this.ctx.storage.transaction((transaction) =>
       this.authority.refreshRecoveryAlarm(transaction),
     );
-    await this.flushRoutineSubscriptions(identity, true);
     return receipt;
   }
 
@@ -5235,14 +5149,6 @@ export class ShellBotBackendContribution {
     body: string;
     contentType?: string | null;
   }): Promise<{ status: "accepted" | "duplicate"; fireId: string }> {
-    const accepted = await this.routines.deliverHook(input);
-    await this.ctx.storage.transaction((transaction) =>
-      this.authority.refreshRecoveryAlarm(transaction),
-    );
-    return accepted;
-  }
-
-  async deliverConnectionEvent(input: ConnectionEventDeliveryV1) {
     const accepted = await this.routines.deliverHook(input);
     await this.ctx.storage.transaction((transaction) =>
       this.authority.refreshRecoveryAlarm(transaction),

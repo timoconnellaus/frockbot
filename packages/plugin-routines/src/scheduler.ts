@@ -1,4 +1,3 @@
-import { stageRoutineSubscriptionV1 } from "./subscriptions.js";
 // The scheduler: the half of a Routine that makes it fire.
 //
 // It owns no alarm of its own. "The Bot's Durable Object is the authority for
@@ -773,11 +772,6 @@ export class RoutineScheduler {
             enabled: false,
             updatedAt: now.toISOString(),
           } satisfies RoutineRecordV1);
-          await stageRoutineSubscriptionV1(transaction, fire.routineId, {
-            ...decoded,
-            enabled: false,
-            updatedAt: now.toISOString(),
-          });
           await appendRoutineRunEntryV1(transaction, {
             schemaVersion: 1,
             entryId: `${fire.entryId}-paused`,
