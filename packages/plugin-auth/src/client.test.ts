@@ -11,7 +11,7 @@ const styles = await Bun.file(
 test("auth satisfies plugin package conventions", () => {
   expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
     name: "@frockbot/plugin-auth",
-    contributionKinds: ["client", "desktop"],
+    contributionKinds: ["client"],
   });
 });
 

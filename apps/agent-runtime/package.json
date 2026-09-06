@@ -7,7 +7,6 @@
     "./runtime": "./src/runtime.ts"
   },
   "scripts": {
-    "build": "bun run build.ts",
     "test": "bun test src",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
