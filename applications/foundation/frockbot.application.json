@@ -146,16 +146,6 @@
       "grants": []
     },
     {
-      "specifier": "@frockbot/plugin-composio",
-      "version": "0.0.1",
-      "grants": ["connections:manage", "tools:execute"]
-    },
-    {
-      "specifier": "@frockbot/plugin-mcp",
-      "version": "0.0.1",
-      "grants": ["connections:manage", "tools:execute", "network:mcp"]
-    },
-    {
       "specifier": "@frockbot/plugin-subagents",
       "version": "0.0.1",
       "grants": ["subagents:dispatch"]

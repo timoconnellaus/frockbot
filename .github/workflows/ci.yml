@@ -597,11 +597,9 @@ jobs:
           CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
           ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
           MACHINE_TOKEN_SECRET: ${{ secrets.MACHINE_TOKEN_SECRET }}
-          # Both required by `production-secrets.ts`. Without them staging
-          # answers 503 for every Applet and cannot mint an authorization
-          # state, which production would never surface.
+          # Required by `production-secrets.ts`; without it staging answers
+          # 503 for every Applet.
           APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
-          FROCKBOT_AUTHORIZATION_STATE_SECRET: ${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
           # Voice. Optional on both counts: dictation falls back to the AI
           # Gateway's BYOK key without the OpenAI one, and slice B reads the
@@ -629,7 +627,6 @@ jobs:
             'ROUTINE_HOOK_SECRET',
             'MACHINE_TOKEN_SECRET',
             'APPLET_VIEWER_SECRET',
-            'FROCKBOT_AUTHORIZATION_STATE_SECRET',
           ];
           const optional = [
             'DEBUG_TOKEN',

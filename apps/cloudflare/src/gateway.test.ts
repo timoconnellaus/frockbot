@@ -554,51 +554,6 @@ class MemoryConfiguration
     return Promise.resolve(receipt);
   }
 
-  composioRequest(): Promise<unknown> {
-    return Promise.resolve({ schemaVersion: 1, items: [] });
-  }
-  readMcpServers(): ReturnType<UserConfigurationBinding["readMcpServers"]> {
-    return Promise.reject(new Error("MCP status is not used in these tests"));
-  }
-
-  executeMcpCommand(): ReturnType<
-    UserConfigurationBinding["executeMcpCommand"]
-  > {
-    return Promise.reject(
-      new Error("MCP lifecycle is not used in these tests"),
-    );
-  }
-
-  recordMcpMountOutcome(): Promise<void> {
-    return Promise.reject(
-      new Error("MCP outcomes are not used in these tests"),
-    );
-  }
-
-  startMcpAuthorization(): ReturnType<
-    UserConfigurationBinding["startMcpAuthorization"]
-  > {
-    return Promise.reject(
-      new Error("MCP authorization is not used in these tests"),
-    );
-  }
-
-  completeMcpAuthorization(): ReturnType<
-    UserConfigurationBinding["completeMcpAuthorization"]
-  > {
-    return Promise.reject(
-      new Error("MCP authorization is not used in these tests"),
-    );
-  }
-
-  revokeMcpAuthorization(): ReturnType<
-    UserConfigurationBinding["revokeMcpAuthorization"]
-  > {
-    return Promise.reject(
-      new Error("MCP authorization is not used in these tests"),
-    );
-  }
-
   lookupConnectionCommand(
     request: Parameters<UserConfigurationBinding["lookupConnectionCommand"]>[0],
   ): ReturnType<UserConfigurationBinding["lookupConnectionCommand"]> {

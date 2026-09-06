@@ -1,4 +1,3 @@
-import { createComposioFake } from "../test/composio-fake.js";
 // The browser end-to-end harness.
 //
 // It boots the production serving path and nothing else: the real client
@@ -170,40 +169,9 @@ export function startFakeOllama(port: number): Promise<{
   close(): Promise<void>;
 }> {
   let chatMode: FakeOllamaChatMode = "ok";
-  const composio = createComposioFake("https://connect.example.test");
 
   const server: Server = createHttpServer((request, response) => {
     const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
-    if (url.pathname.startsWith("/composio/")) {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk: Buffer) => chunks.push(chunk));
-      request.on("end", () => {
-        const providerUrl = new URL(url);
-        providerUrl.pathname = providerUrl.pathname.replace("/composio", "");
-        void composio(
-          new Request(providerUrl, {
-            method: request.method,
-            headers: {
-              "x-api-key": String(request.headers["x-api-key"] ?? ""),
-            },
-            ...(request.method !== "GET"
-              ? { body: Buffer.concat(chunks).toString("utf8") }
-              : {}),
-          }),
-        )
-          .then(async (result) => {
-            response.writeHead(result.status, {
-              "content-type": "application/json",
-            });
-            response.end(await result.text());
-          })
-          .catch(() => {
-            response.writeHead(500);
-            response.end("Provider stand-in failed");
-          });
-      });
-      return;
-    }
     const header = request.headers.authorization ?? "";
     const key = header.toLowerCase().startsWith("bearer ")
       ? header.slice(7)
@@ -743,15 +711,8 @@ export async function startHarness(
         "--var",
         "ALLOW_DEVELOPMENT_AUTH:true",
         "--var",
-        "COMPOSIO_API_KEY:test-composio-backend-key",
-        "--var",
-        "COMPOSIO_WEBHOOK_SECRET:test-provider-webhook-secret",
-        "--var",
-        `COMPOSIO_TEST_URL:http://127.0.0.1:${options.ollamaPort}/composio/api/v3.1`,
-        "--var",
         `BETTER_AUTH_URL:http://127.0.0.1:${options.port}`,
         "--var",
-        "FROCKBOT_AUTHORIZATION_STATE_SECRET:e2e-composio-state-independent-secret-0123456789",
 
         "--var",
         `CREDENTIAL_KEYRING:${E2E_CREDENTIAL_KEYRING}`,

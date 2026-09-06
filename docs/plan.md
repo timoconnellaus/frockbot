@@ -40,7 +40,9 @@ Each step leaves `main` shippable.
 
 **2. Cut what is dead.** _Done._ The Electron and WebView shells, their capability packages, the architecture checks and two prototypes: 11 packages, 14,548 lines.
 
-**3. Park the deferred features.** Remove `plugin-mcp`, `plugin-composio`, `plugin-voice` and `plugin-billing` and their wiring — roughly 15.5k lines. MCP and Composio return later as plugins over the `http` grant, which is what they should have been.
+**3. Park the deferred features.** _Done for MCP and Composio._ They came out first — roughly 11.4k lines, no owned Durable Object class and no owned tables. They return later as plugins over the `http` grant, which is what they should have been.
+
+`plugin-voice` and `plugin-billing` wait for a migration decision. Voice owns the `VoiceSession` Durable Object class, declared `new_sqlite_classes` in migration v5, so removing it needs a `deleted_classes` migration that destroys those objects. Billing owns three SQLite tables of User spend history inside `UserConfiguration`. Neither is a code deletion; both destroy durable state, and the retention question is the owner's.
 
 **4. Providers onto the AI SDK.** Replace the hand-written provider stack with one interface over `ai` + `@ai-sdk/*`. Removes about 6k lines, including the 2,526-line file that exists to hold an Ollama API key.
 

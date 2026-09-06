@@ -126,11 +126,6 @@ import {
   decodePublishPackageCommandV1,
   decodeRollbackPackageCommandV1,
 } from "@frockbot/plugin-package-publisher/shared";
-import { decodeMcpMountOutcomeV1 } from "@frockbot/plugin-mcp/records";
-import type {
-  McpAuthorizationCompletionRequestV1,
-  McpAuthorizationStartRequestV1,
-} from "@frockbot/plugin-mcp/backend";
 import {
   readVoiceAssistantQuotaV1,
   recordVoiceAssistantUsageSyncV1,
@@ -809,184 +804,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       effectId: request.effectId as string,
       connectionGeneration: request.connectionGeneration as string,
     });
-  }
-
-  /**
-   * The User's MCP servers, as the status projection GrokBot calls
-   * `GetMcpServerStatus`. A read of durable records this object owns; it
-   * reaches no server and wakes nothing.
-   */
-  async composioRequest(input: unknown): Promise<unknown> {
-    const request = decodeRpcEnvelopeV1(
-      input,
-      {
-        userId: rpcIdentifier,
-        command: rpcDecodedValue,
-      },
-      { botId: rpcIdentifier },
-    );
-    const userId = request.userId as string;
-    await this.assertUserIdentity(userId);
-    const contributions = await this.contributions();
-    const operation = (request.command as { operation?: unknown })?.operation;
-    if (
-      operation === "list-tools" ||
-      operation === "execute-tool" ||
-      operation === "tool-availability" ||
-      operation === "validate-trigger" ||
-      operation === "sync-subscription" ||
-      operation === "subscription-status"
-    ) {
-      if (typeof request.botId !== "string")
-        throw new Error("Bot identity is required for tools");
-      await contributions.flock.registration(request.botId);
-    }
-    const contribution = contributions.composio;
-    if (!contribution) throw new Error("Connected apps are unavailable");
-    return contribution.request(
-      userId,
-      request.command,
-      typeof request.botId === "string" ? request.botId : undefined,
-    );
-  }
-
-  async readMcpServers(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.contributions()).mcp.readServerStatus(
-      request.userId as string,
-    );
-  }
-
-  /**
-   * One MCP lifecycle command: add a server, set its instructions, restart
-   * it. Decoded inside the Contribution that owns the records, so the seam
-   * carries no shape of its own.
-   */
-  async executeMcpCommand(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      command: rpcDecodedValue,
-    });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.contributions()).mcp.executeLifecycle(
-      request.userId as string,
-      request.command,
-    );
-  }
-
-  /**
-   * What a Bot's mount of an MCP server found. The Bot Durable Object holds
-   * no MCP record — this object does — so a mount that could not reach the
-   * server reports it here and the failure becomes visible on the User's own
-   * surface rather than dying inside a Turn.
-   */
-  async recordMcpMountOutcome(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      outcome: rpcDecoded(decodeMcpMountOutcomeV1),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    await (
-      await this.contributions()
-    ).mcp.recordMountOutcome({
-      accountId: request.userId as string,
-      ...(request.outcome as ReturnType<typeof decodeMcpMountOutcomeV1>),
-    });
-  }
-
-  /**
-   * Start one `mcp-remote-oauth` authorization.
-   *
-   * The gateway signs the state and forwards; every outbound OAuth request —
-   * discovery, registration, the token exchange — happens on the far side of
-   * this seam, inside the object that holds the keyring. Nothing about the
-   * flow's secrets crosses back: the answer is a redirect URL and nothing
-   * else.
-   */
-  async startMcpAuthorization(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      start: rpcObject(
-        {
-          commandId: rpcIdentifier,
-          redirectUri: rpcString(2_048),
-          callbackState: rpcString(8_192),
-          authorizationStateId: rpcString(128),
-          authorizationStateExpiresAt: rpcInteger({
-            minimum: 0,
-            maximum: Number.MAX_SAFE_INTEGER,
-          }),
-          returnTarget: rpcString(16),
-        },
-        {
-          connectionId: rpcIdentifier,
-          label: rpcString(120),
-          settings: rpcJsonRecord,
-          nativeReturnNonce: rpcIdentifier,
-        },
-      ),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    const start = request.start as McpAuthorizationStartRequestV1;
-    if (start.returnTarget !== "browser" && start.returnTarget !== "desktop") {
-      throw new Error("MCP authorization returnTarget is invalid");
-    }
-    return (await this.contributions()).mcp.startAuthorization(
-      request.userId as string,
-      start,
-    );
-  }
-
-  /**
-   * Finish one authorization, once the gateway has verified its signed state.
-   *
-   * The `authorizationStateId` is consumed here, transactionally: a replayed
-   * callback is a no-op that reports the Connection's settled state rather
-   * than a second token exchange.
-   */
-  async completeMcpAuthorization(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      completion: rpcObject(
-        {
-          authorizationStateId: rpcString(128),
-          connectionId: rpcIdentifier,
-          returnTarget: rpcString(16),
-        },
-        {
-          nativeReturnNonce: rpcIdentifier,
-          code: rpcString(4_096),
-          error: rpcString(512),
-        },
-      ),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    const completion =
-      request.completion as McpAuthorizationCompletionRequestV1;
-    if (
-      completion.returnTarget !== "browser" &&
-      completion.returnTarget !== "desktop"
-    ) {
-      throw new Error("MCP authorization returnTarget is invalid");
-    }
-    return (await this.contributions()).mcp.completeAuthorization(
-      request.userId as string,
-      completion,
-    );
-  }
-
-  /** RFC 7009 revocation, then the local teardown. */
-  async revokeMcpAuthorization(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      connectionId: rpcIdentifier,
-    });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.contributions()).mcp.revokeAuthorization(
-      request.userId as string,
-      request.connectionId as string,
-    );
   }
 
   /**
@@ -1788,12 +1605,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     contributions.search.purge(botId);
     contributions.audit.purgeAuditForBot(botId);
     await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}`);
-    const userId = await this.provenIdentity();
-    if (userId)
-      await contributions.composio?.triggerSubscriptions.removeBot(
-        userId,
-        botId,
-      );
     await contributions.flock.forgetDeletedBot(botId);
   }
 

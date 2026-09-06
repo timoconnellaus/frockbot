@@ -1,15 +1,4 @@
-import {
-  decodeConnectionTriggerCatalogV1,
-  decodeConnectionTriggerStatusesV1,
-  type ConnectionTriggerStatusesV1,
-  type ConnectionEventDeliveryV1,
-  type ConnectionTriggerCatalogV1,
-} from "@frockbot/connection-core";
-import {
-  flushRoutineSubscriptionsV1,
-  routineSubscriptionDeadlinesV1,
-  routineSubscriptionBindingsV1,
-} from "@frockbot/plugin-routines/subscriptions";
+import type { ConnectionEventDeliveryV1 } from "@frockbot/connection-core";
 import type { RoutineWriterV1 } from "@frockbot/plugin-routines/records";
 import { turnToolCatalogPin } from "./tool-catalog-pin.js";
 import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
@@ -400,13 +389,6 @@ import type {
   CompositionGenerationV1,
   CompositionMemberV1,
 } from "@frockbot/kernel-composition/generation";
-import {
-  decodeMcpLifecycleReceiptV1,
-  decodeMcpServerStatusViewV1,
-  type McpLifecycleReceiptV1,
-  type McpMountOutcomeReportV1,
-  type McpServerStatusViewV1,
-} from "@frockbot/plugin-mcp/records";
 import {
   projectCompositionGenerationV1,
   projectPackageIframeCompositionV1,
@@ -3216,7 +3198,6 @@ export class ShellBotBackendContribution {
     }
     return [
       ...(await this.routineScheduler.deadlines(transaction)),
-      ...(await routineSubscriptionDeadlinesV1(transaction)),
       ...expiries.filter((at) => Number.isFinite(at)),
       // A dispatched task's 30-minute lifetime, and a child's own owed Turn,
       // both ride the one alarm this object already has: the parent reconciles
@@ -3281,7 +3262,6 @@ export class ShellBotBackendContribution {
     // cost that producer its pass, never the clock.
     try {
       const identity = await this.authority.readDurableIdentity();
-      if (identity) await this.flushRoutineSubscriptions(identity);
       await this.settleRoutineFirings();
       await this.runOwedSubagentTurns();
       await this.reconcileOverdueTasks();
@@ -4730,19 +4710,6 @@ export class ShellBotBackendContribution {
               }),
             }
           : {}),
-        // The MCP lifecycle is offered only inside a Turn, and only with the
-        // User's own authority: the tools read and write the records this
-        // Bot's User owns, through the seam that already carries them.
-        ...(turn
-          ? {
-              mcp: {
-                readStatus: () =>
-                  userConfiguration.readMcpServers(identity.userId),
-                execute: (command: unknown) =>
-                  userConfiguration.executeMcpCommand(identity.userId, command),
-              },
-            }
-          : {}),
         // A Bot packs itself into a template only inside an admitted Turn, and
         // only through its User's own staging command: the seam it is handed
         // has no way to publish, so the Bot cannot.
@@ -4773,7 +4740,6 @@ export class ShellBotBackendContribution {
               routines: {
                 ...createBotRoutinesHost(identity, turn, this.routines),
                 list: () => this.listRoutines(identity),
-                listTriggers: () => this.listRoutineTriggers(identity),
                 execute: (command, writer) =>
                   this.executeRoutineCommand(identity, command, writer),
               },
@@ -4912,12 +4878,6 @@ export class ShellBotBackendContribution {
               pinToolCatalog: turnToolCatalogPin(this.ctx.storage, turn.turnId),
             }
           : {}),
-        composioRequest: (command) =>
-          userConfiguration.composioRequest(
-            identity.userId,
-            identity.botId,
-            command,
-          ),
         packageSettings,
         // Enabled Contributions reach the network through the same
         // outbound seam the model provider uses, so a deployment that stubs
@@ -4949,11 +4909,6 @@ export class ShellBotBackendContribution {
             effectId,
           );
         },
-        // A mount that could not reach its server writes that down where
-        // the User can read it. The Bot holds no MCP record; the User
-        // Durable Object that owns the Connection does.
-        recordOutcome: (outcome: McpMountOutcomeReportV1) =>
-          userConfiguration.recordMcpMountOutcome(identity.userId, outcome),
       })),
     ];
     const agentPackages: FoundationAgentPackage[] =
@@ -5119,65 +5074,9 @@ export class ShellBotBackendContribution {
 
   /** Every Routine this Bot holds. Bot-scoped: the caller proved membership. */
   async listRoutines(identity: BotIdentity): Promise<RoutineListViewV1> {
-    await this.flushRoutineSubscriptions(identity, true);
-    const view = await this.routines.list(
+    return this.routines.list(
       identity.botId,
       await this.routineScheduler.nextRuns(),
-    );
-    if (!view.routines.some((row) => row.trigger?.kind === "connection"))
-      return view;
-    let statuses: ConnectionTriggerStatusesV1["routines"] = {};
-    try {
-      const result = await this.userConfiguration(identity).composioRequest(
-        identity.userId,
-        identity.botId,
-        {
-          schemaVersion: 1,
-          operation: "subscription-status",
-          bindings: await routineSubscriptionBindingsV1(this.ctx.storage),
-        },
-      );
-      statuses = decodeConnectionTriggerStatusesV1(result).routines;
-    } catch {
-      /* Existing Routines remain readable during a provider outage. */
-    }
-    return {
-      ...view,
-      routines: view.routines.map((row) =>
-        row.trigger?.kind !== "connection"
-          ? row
-          : {
-              ...row,
-              eventStatus: statuses[row.routineId]?.status ?? "unavailable",
-              eventName: statuses[row.routineId]?.name ?? "Service event",
-            },
-      ),
-    };
-  }
-  async listRoutineTriggers(
-    identity: BotIdentity,
-  ): Promise<ConnectionTriggerCatalogV1> {
-    return decodeConnectionTriggerCatalogV1(
-      await this.userConfiguration(identity).composioRequest(
-        identity.userId,
-        identity.botId,
-        { schemaVersion: 1, operation: "trigger-types" },
-      ),
-    );
-  }
-  private async flushRoutineSubscriptions(
-    identity: BotIdentity,
-    force = false,
-  ): Promise<void> {
-    await flushRoutineSubscriptionsV1(
-      this.ctx.storage,
-      (subscription) =>
-        this.userConfiguration(identity).composioRequest(
-          identity.userId,
-          identity.botId,
-          { schemaVersion: 1, operation: "sync-subscription", subscription },
-        ),
-      force,
     );
   }
 
@@ -5194,27 +5093,13 @@ export class ShellBotBackendContribution {
     if (command.botId !== identity.botId) {
       throw new RoutineNotFoundError(command.routineId ?? command.botId);
     }
-    const receipt = await this.routines.execute(command, writer, async () => {
-      if (
-        (command.type === "routine/create" ||
-          command.type === "routine/update") &&
-        command.trigger?.kind === "connection"
-      ) {
-        const { kind: _, ...trigger } = command.trigger;
-        await this.userConfiguration(identity).composioRequest(
-          identity.userId,
-          identity.botId,
-          { schemaVersion: 1, operation: "validate-trigger", trigger },
-        );
-      }
-    });
+    const receipt = await this.routines.execute(command, writer);
     // A created, re-timed, resumed or manually fired Routine changes what the
     // object is owed next, so the alarm is re-armed in the same call that wrote
     // the record rather than waiting for the next one to happen by.
     await this.ctx.storage.transaction((transaction) =>
       this.authority.refreshRecoveryAlarm(transaction),
     );
-    await this.flushRoutineSubscriptions(identity, true);
     return receipt;
   }
 
@@ -6441,11 +6326,6 @@ export class ShellBotBackendContribution {
   }
 
   private userConfiguration(identity: BotIdentity): {
-    composioRequest(
-      userId: string,
-      botId: string,
-      command: unknown,
-    ): Promise<unknown>;
     readConfiguration(input: {
       schemaVersion: 1;
       userId: string;
@@ -6477,15 +6357,6 @@ export class ShellBotBackendContribution {
       effectId: string,
       connectionGeneration: string,
     ): Promise<CredentialLeaseV1>;
-    readMcpServers(userId: string): Promise<McpServerStatusViewV1>;
-    executeMcpCommand(
-      userId: string,
-      command: unknown,
-    ): Promise<McpLifecycleReceiptV1>;
-    recordMcpMountOutcome(
-      userId: string,
-      outcome: McpMountOutcomeReportV1,
-    ): Promise<void>;
     settleToolCredential(
       userId: string,
       connectionId: string,
@@ -6523,7 +6394,6 @@ export class ShellBotBackendContribution {
     const id = this.env.USER_CONFIGURATIONS.idFromName(identity.userId);
     // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
     const rpc = this.env.USER_CONFIGURATIONS.get(id) as unknown as {
-      composioRequest(input: unknown): Promise<unknown>;
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
       executeConfiguration(input: unknown): Promise<unknown>;
       readPackageRevisions(
@@ -6539,9 +6409,6 @@ export class ShellBotBackendContribution {
       settleModelCredential(input: unknown): Promise<void>;
       leaseToolCredential(input: unknown): Promise<unknown>;
       settleToolCredential(input: unknown): Promise<void>;
-      readMcpServers(input: unknown): Promise<unknown>;
-      executeMcpCommand(input: unknown): Promise<unknown>;
-      recordMcpMountOutcome(input: unknown): Promise<void>;
       listBots(input: unknown): Promise<unknown>;
       createBot(input: unknown): Promise<unknown>;
       executeTemplateCommand(input: unknown): Promise<TemplateShareReceiptV1>;
@@ -6551,8 +6418,6 @@ export class ShellBotBackendContribution {
       readMachineResult(input: unknown): Promise<unknown>;
     };
     return {
-      composioRequest: (userId, botId, command) =>
-        rpc.composioRequest({ schemaVersion: 1, userId, botId, command }),
       readConfiguration: (input) =>
         rpc.readConfiguration({ ...input, view: 2 }),
       executeConfiguration: async (command) =>
@@ -6649,18 +6514,6 @@ export class ShellBotBackendContribution {
             connectionGeneration,
           }),
         ),
-      // The MCP lifecycle crosses this seam like every other value: decoded
-      // on arrival rather than trusted in the shape RPC happened to return.
-      readMcpServers: async (userId) =>
-        decodeMcpServerStatusViewV1(
-          await rpc.readMcpServers({ schemaVersion: 1, userId }),
-        ),
-      executeMcpCommand: async (userId, command) =>
-        decodeMcpLifecycleReceiptV1(
-          await rpc.executeMcpCommand({ schemaVersion: 1, userId, command }),
-        ),
-      recordMcpMountOutcome: (userId, outcome) =>
-        rpc.recordMcpMountOutcome({ schemaVersion: 1, userId, outcome }),
       settleToolCredential: (userId, connectionId, effectId) =>
         rpc.settleToolCredential({
           schemaVersion: 1,

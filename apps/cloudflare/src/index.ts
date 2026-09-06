@@ -1,4 +1,3 @@
-import { decodeConnectionTriggerCatalogV1 } from "@frockbot/connection-core";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { BOT_STATE_CHANNEL_INTERNAL_PATH } from "./bot-state-channel.js";
 import {
@@ -111,10 +110,6 @@ import {
   type UsageReportV1,
 } from "@frockbot/plugin-billing";
 import {
-  decodeMcpLifecycleReceiptV1,
-  decodeMcpServerStatusViewV1,
-} from "@frockbot/plugin-mcp/records";
-import {
   decodeTemplateImportListViewV1,
   decodeTemplateImportRecordV1,
   decodeTemplateShareListViewV1,
@@ -125,10 +120,6 @@ import {
   parseTemplateShareIdV1,
   type TemplateVisibilityV1,
 } from "@frockbot/template-core";
-import {
-  decodeRevokeConnectionResultV1,
-  decodeStartConnectionResultV1,
-} from "@frockbot/connection-core";
 import {
   decodeDeploymentPolicyV1,
   type DeploymentPolicyV1,
@@ -294,13 +285,9 @@ interface Env {
   MACHINE_TOKEN_SECRET?: string;
   /**
    * Signs the callback `state` of every redirect-based Connection. Absent — or
-   * weak, or equal to `BETTER_AUTH_SECRET` — closes the `mcp-oauth` door: the
-   * routes answer 503 rather than trusting a forgeable identity.
+   * weak, or equal to `BETTER_AUTH_SECRET` — closes that door: the routes
+   * answer 503 rather than trusting a forgeable identity.
    */
-  FROCKBOT_AUTHORIZATION_STATE_SECRET?: string;
-  COMPOSIO_API_KEY?: string;
-  COMPOSIO_WEBHOOK_SECRET?: string;
-  COMPOSIO_TEST_URL?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   FROCKBOT_ADMIN_EMAILS?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
@@ -375,7 +362,6 @@ interface UserScopedProps {
 }
 
 interface BotStateRpc extends BotConfigurationBinding {
-  listRoutineTriggers(input: unknown): Promise<unknown>;
   writeUserWorkspaceFileV1(input: {
     schemaVersion: 1;
     userId: string;
@@ -473,7 +459,6 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     listRoutines: (request) => rpc.listRoutines(request),
-    listRoutineTriggers: (request) => rpc.listRoutineTriggers(request),
     listTasks: (request) => rpc.listTasks(request),
     readTask: (request) => rpc.readTask(request),
     stopTask: (request) => rpc.stopTask(request),
@@ -608,14 +593,6 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
     lookupConnectionCommand: (request) => rpc.lookupConnectionCommand(request),
-    composioRequest: (request) => rpc.composioRequest(request),
-    readMcpServers: (request) => rpc.readMcpServers(request),
-    executeMcpCommand: (request) => rpc.executeMcpCommand(request),
-    recordMcpMountOutcome: (request) => rpc.recordMcpMountOutcome(request),
-    startMcpAuthorization: (request) => rpc.startMcpAuthorization(request),
-    completeMcpAuthorization: (request) =>
-      rpc.completeMcpAuthorization(request),
-    revokeMcpAuthorization: (request) => rpc.revokeMcpAuthorization(request),
     getConnection: (request) => rpc.getConnection(request),
     leaseModelCredential: (request) => rpc.leaseModelCredential(request),
     settleModelCredential: (request) => rpc.settleModelCredential(request),
@@ -1852,33 +1829,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
           userId,
           command,
         }),
-      composioRequest: async (userId, command) =>
-        rpcJsonSnapshot(
-          await userConfigurationStub(env, userId).composioRequest({
-            schemaVersion: 1,
-            userId,
-            command,
-          }),
-        ),
-      readMcpServers: async (userId) =>
-        decodeMcpServerStatusViewV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).readMcpServers({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      executeMcpCommand: async (userId, command) =>
-        decodeMcpLifecycleReceiptV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).executeMcpCommand({
-              schemaVersion: 1,
-              userId,
-              command,
-            }),
-          ),
-        ),
       readVoiceAssistant: (userId) =>
         userConfigurationStub(env, userId).readVoiceAssistant({
           schemaVersion: 1,
@@ -1886,53 +1836,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
         }),
       openVoiceAssistant: (userId, request) =>
         openVoiceAssistant(env, userId, request),
-      // The `mcp-oauth` gateway seams. The Contribution reads the signing
-      // secret through `readSecret` and refuses to serve its routes at all
-      // when this deployment has none, so a Worker without the secret has no
-      // callback door rather than an unsigned one.
-      readSecret: (name: string) =>
-        name === "COMPOSIO_WEBHOOK_SECRET"
-          ? env.COMPOSIO_WEBHOOK_SECRET
-          : name === "COMPOSIO_TEST_URL"
-            ? env.ALLOW_DEVELOPMENT_AUTH === "true"
-              ? env.COMPOSIO_TEST_URL
-              : undefined
-            : name === "COMPOSIO_API_KEY"
-              ? env.COMPOSIO_API_KEY
-              : name === "FROCKBOT_AUTHORIZATION_STATE_SECRET"
-                ? env.FROCKBOT_AUTHORIZATION_STATE_SECRET
-                : name === "BETTER_AUTH_SECRET"
-                  ? env.BETTER_AUTH_SECRET
-                  : undefined,
-      ...(env.BETTER_AUTH_URL ? { callbackBaseUrl: env.BETTER_AUTH_URL } : {}),
-      startMcpAuthorization: async (userId, start) =>
-        decodeStartConnectionResultV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).startMcpAuthorization({
-              schemaVersion: 1,
-              userId,
-              start,
-            }),
-          ),
-        ),
-      completeMcpAuthorization: async (userId, completion) =>
-        rpcJsonSnapshot(
-          await userConfigurationStub(env, userId).completeMcpAuthorization({
-            schemaVersion: 1,
-            userId,
-            completion,
-          }),
-        ),
-      revokeMcpAuthorization: async (userId, connectionId) =>
-        decodeRevokeConnectionResultV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).revokeMcpAuthorization({
-              schemaVersion: 1,
-              userId,
-              connectionId,
-            }),
-          ),
-        ),
       lookupConnectionCommand: (userId, packageId, commandId) =>
         userConfigurationStub(env, userId).lookupConnectionCommand({
           schemaVersion: 1,
@@ -1996,16 +1899,6 @@ const createGatewayBackendContributions = createImmutablePlanRequestFactory(
               userId,
               botId,
               taskId,
-            }),
-          ),
-        ),
-      listTriggers: async (userId, botId) =>
-        decodeConnectionTriggerCatalogV1(
-          rpcJsonSnapshot(
-            await botStateStub(env, userId, botId).listRoutineTriggers({
-              schemaVersion: 1,
-              userId,
-              botId,
             }),
           ),
         ),

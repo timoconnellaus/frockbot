@@ -1933,18 +1933,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     return shell.listRoutines(identity);
   }
 
-  async listRoutineTriggers(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    return shell.listRoutineTriggers(identity);
-  }
   async deliverConnectionEvent(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

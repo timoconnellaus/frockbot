@@ -78,16 +78,12 @@ export default defineConfig({
           },
         },
         bindings: {
-          COMPOSIO_API_KEY: "test-composio-backend-key",
-          COMPOSIO_WEBHOOK_SECRET: "test-provider-webhook-secret",
           BETTER_AUTH_URL: "https://bot.frockbot.com",
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
           // Signs the `mcp-oauth` callback state. Fixed, so a test can mint a
           // state the gateway accepts and forge one it must refuse; strong
           // enough to pass the same check production makes, because the
           // Contribution refuses to serve its routes at all otherwise.
-          FROCKBOT_AUTHORIZATION_STATE_SECRET:
-            "workerd-mcp-oauth-state-secret-0123456789abcdef",
           // Not a credential: no Sprite token reaches this Worker in
           // production either, because the Computer host holds the only
           // copy. `SPRITES_TOKEN` is only the "is a Computer configured"

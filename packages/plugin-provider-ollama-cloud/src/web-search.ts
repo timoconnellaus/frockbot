@@ -6,8 +6,7 @@
 // `credentialLease.open` is called with this Package's id and the User Durable
 // Object refuses any other. Putting the search transport anywhere else would
 // mean either a second credential for the same account or a Package opening a
-// Connection it does not own. The precedent is `plugin-composio`, whose tools
-// are likewise a Connection-backed Capability. The tool's *contract* is not
+// Connection it does not own. The tool's *contract* is not
 // provider-specific: it lives in `@frockbot/plugin-web/contract`, and a second
 // provider satisfies it with no change here and none in the kernel.
 //

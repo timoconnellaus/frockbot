@@ -132,11 +132,10 @@ export interface TemplateBuildResultV1 {
 /**
  * A private-network or non-https URL never reaches a template.
  *
- * `plugin-mcp/src/ssrf.ts` refuses one on the way *out* of the deployment. A
- * template travels further than that: it is handed to another User, whose
- * deployment would be the one making the request. So the same classifier runs
- * here, and a server that fails it is exported as a placeholder with no URL at
- * all rather than as a public server someone else's Bot would dial.
+ * A template travels further than one outbound request: it is handed to
+ * another User, whose deployment would be the one making it. So the classifier
+ * runs here, and a server that fails it is exported as a placeholder with no
+ * URL at all rather than as a public server someone else's Bot would dial.
  */
 const BLOCKED_HOST_SUFFIXES = [
   ".local",

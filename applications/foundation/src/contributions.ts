@@ -1,11 +1,3 @@
-import {
-  backendContribution as composioGatewayContribution,
-  type ComposioBackendHost,
-} from "@frockbot/plugin-composio/backend";
-import {
-  userContribution as composioUserContribution,
-  type ComposioUserApplicationHostV1,
-} from "@frockbot/plugin-composio/user";
 /**
  * The foundation application's Contribution table.
  *
@@ -69,10 +61,6 @@ import {
   type FlockGatewayHost,
 } from "@frockbot/plugin-flock/backend";
 import {
-  backendContribution as mcpGatewayContribution,
-  type McpGatewayHost,
-} from "@frockbot/plugin-mcp/backend";
-import {
   backendContribution as packagePublisherGatewayContribution,
   type PackagePublisherGatewayHost,
 } from "@frockbot/plugin-package-publisher/backend";
@@ -117,10 +105,6 @@ import {
   userContribution as frockAiUserContribution,
   type FrockAiUserApplicationHostV1,
 } from "@frockbot/plugin-provider-frock-ai/user";
-import {
-  userContribution as mcpUserContribution,
-  type McpUserApplicationHostV1,
-} from "@frockbot/plugin-mcp/user";
 import {
   userContribution as botTemplateUserContribution,
   type BotTemplateUserApplicationHostV1,
@@ -174,8 +158,6 @@ export {
   botTemplateGatewayContribution,
   computerGatewayContribution,
   flockGatewayContribution,
-  composioGatewayContribution,
-  mcpGatewayContribution,
   packagePublisherGatewayContribution,
   routinesGatewayContribution,
   searchGatewayContribution,
@@ -187,8 +169,6 @@ export {
   credentialsUserContribution,
   ollamaCloudUserContribution,
   frockAiUserContribution,
-  composioUserContribution,
-  mcpUserContribution,
   botTemplateUserContribution,
   packagePublisherUserContribution,
   machineUserContribution,
@@ -266,8 +246,6 @@ export type FoundationGatewayHost = {
   BotTemplateGatewayHostV1 &
   ComputerGatewayHost &
   FlockGatewayHost &
-  ComposioBackendHost &
-  McpGatewayHost &
   SettingsGatewayHost &
   RoutinesGatewayHost &
   SubagentsGatewayHost &
@@ -293,8 +271,6 @@ export type FoundationUserBackendHostV1 = {
   CredentialsUserApplicationHostV1 &
   OllamaCloudUserApplicationHostV1 &
   FrockAiUserApplicationHostV1 &
-  ComposioUserApplicationHostV1 &
-  McpUserApplicationHostV1 &
   BotTemplateUserApplicationHostV1 &
   PackagePublisherUserApplicationHostV1 &
   MachineUserApplicationHostV1 &
@@ -359,8 +335,6 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     botTemplateGatewayContribution,
     computerGatewayContribution,
     flockGatewayContribution,
-    composioGatewayContribution,
-    mcpGatewayContribution,
     packagePublisherGatewayContribution,
     routinesGatewayContribution,
     searchGatewayContribution,
@@ -372,8 +346,6 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     credentialsUserContribution,
     ollamaCloudUserContribution,
     frockAiUserContribution,
-    composioUserContribution,
-    mcpUserContribution,
     botTemplateUserContribution,
     packagePublisherUserContribution,
     machineUserContribution,

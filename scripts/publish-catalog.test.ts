@@ -73,7 +73,6 @@ describe("seed catalog generation", () => {
       "echo",
     ]);
     expect(built.entries).toHaveLength(2);
-    // L1 seeds no MCP connectors; L2 adds them with `plugin-mcp`.
     expect(built.index.entries.every((entry) => entry.kind === "package")).toBe(
       true,
     );

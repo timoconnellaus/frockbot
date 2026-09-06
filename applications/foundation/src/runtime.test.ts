@@ -33,7 +33,6 @@ describe("foundation application", () => {
       "billing",
       "bot-template",
       "clock",
-      "composio",
       "computer",
       "credentials",
       "custom-models",
@@ -43,7 +42,6 @@ describe("foundation application", () => {
       "image",
       "user-machine",
       "machine-messages",
-      "mcp",
       "memory",
       "package-catalog",
       "package-publisher",
@@ -66,11 +64,9 @@ describe("foundation application", () => {
         "settings",
         "billing",
         "bot-template",
-        "composio",
         "computer",
         "credentials",
         "user-machine",
-        "mcp",
         "package-publisher",
         "provider-flock-ai",
         "provider-ollama-cloud",
@@ -86,7 +82,6 @@ describe("foundation application", () => {
         "authoring",
         "bot-template",
         "clock",
-        "composio",
         "computer",
         "credentials",
         "echo",
@@ -95,7 +90,6 @@ describe("foundation application", () => {
         "image",
         "user-machine",
         "machine-messages",
-        "mcp",
         "memory",
         "package-catalog",
         "package-publisher",
@@ -140,7 +134,6 @@ describe("foundation application", () => {
       { entry: "./backend", host: "gateway" },
       { entry: "./user", host: "user" },
     ]);
-    expect(first.packages.some((pkg) => pkg.id === "composio")).toBe(true);
   });
 
   test("seeds a default-disabled Package and its dependencies", async () => {
@@ -286,12 +279,10 @@ describe("foundation application", () => {
     expect(listed).toEqual([
       "flock",
       "bot-template",
-      "composio",
       "custom-models",
       "image",
       "user-machine",
       "machine-messages",
-      "mcp",
       "web",
       "provider-ollama-cloud",
       "routines",
@@ -359,19 +350,6 @@ describe("foundation application", () => {
       listBotLifecycles: () =>
         Promise.resolve({ schemaVersion: 1, lifecycles: [] }),
       executeBotLifecycle: () =>
-        Promise.reject(new Error("not used while composing")),
-      readMcpServers: () =>
-        Promise.resolve({
-          schemaVersion: 1 as const,
-          servers: [],
-          refusals: [],
-          quotas: {
-            maxServers: 16,
-            maxToolsPerServer: 64,
-            maxResponseBytes: 262_144,
-          },
-        }),
-      executeMcpCommand: () =>
         Promise.reject(new Error("not used while composing")),
       readSheep: () => Promise.reject(new Error("not used while composing")),
       updateSheep: () => Promise.reject(new Error("not used while composing")),
@@ -463,10 +441,8 @@ describe("foundation application", () => {
       "audit",
       "billing",
       "bot-template",
-      "composio",
       "computer",
       "flock",
-      "mcp",
       "package-publisher",
       "routines",
       "search",
@@ -493,7 +469,7 @@ describe("foundation application", () => {
           lifecycle.mount({ specifier, startConnection() {} }),
       });
     expect(botBackend.contributions).toHaveLength(3);
-    expect(userBackend.contributions).toHaveLength(14);
+    expect(userBackend.contributions).toHaveLength(12);
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,
     );
@@ -581,49 +557,6 @@ describe("foundation application", () => {
       "@frockbot/plugin-computer",
     ]);
 
-    const capability = {
-      packageId: "composio",
-      capabilityId: "app-tools",
-      kind: "tool" as const,
-      connectionId: "connection-1",
-    };
-    const runtime = await createFoundationEnabledRuntimePackages(
-      plan,
-      {
-        schemaVersion: 1,
-        botId: "primary",
-        revision: 1,
-        capabilities: [capability],
-      },
-      {
-        userId: "user-1",
-        readSecret: () => undefined,
-        authorizeConnection: () =>
-          Promise.resolve({
-            connectionId: "connection-1",
-            packageId: "composio",
-            connectionTypeId: "app",
-            displayName: "Gmail",
-            generation: "generation-one",
-            state: "ready",
-            safeMetadata: { connectorId: "gmail" },
-          }),
-        pinToolCatalog: (_id, read) => read(),
-        composioRequest: async (value) =>
-          (value as { operation: string }).operation === "tool-availability"
-            ? { schemaVersion: 1, available: true }
-            : {
-                schemaVersion: 1,
-                namespace: "gmail--account-one",
-                label: "Gmail",
-                tools: [],
-              },
-      },
-    );
-    expect(runtime.map((pkg) => pkg.specifier)).toEqual([
-      "@frockbot/plugin-composio",
-    ]);
-
     const webCapability = {
       packageId: "web",
       capabilityId: "web-fetch",
@@ -656,8 +589,8 @@ describe("merging runtime Contributions that share a specifier", () => {
   test("mounts every one of them, in order, under one Contribution", async () => {
     const mounted: string[] = [];
     const pkg = (name: string) => ({
-      specifier: "@frockbot/plugin-mcp",
-      contributionSpecifier: "@frockbot/plugin-mcp/agent",
+      specifier: "@frockbot/plugin-web",
+      contributionSpecifier: "@frockbot/plugin-web/agent",
       manifest: {},
       plugin: (() => {
         mounted.push(name);

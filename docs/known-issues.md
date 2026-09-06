@@ -10,7 +10,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 3. ~~**`release.yml` omits a required secret.**~~ **Not a defect.** Verified against `release.yml`'s "Deploy Worker" env block: all eleven required names, including `APPLET_VIEWER_SECRET`, `DEBUG_TOKEN`, `OPENAI_API_KEY` and `FROCK_AI_GATEWAY_TOKEN`, are present. Production was fixed on 2026-09-05.
 
-4. ~~**Staging omits two required secrets.**~~ **Fixed.** `APPLET_VIEWER_SECRET` and `FROCKBOT_AUTHORIZATION_STATE_SECRET` are both required by `production-secrets.ts` and were absent from the staging deploy, so staging answered 503 for every Applet. Both are now sent. Still open: the optional Composio pair, and staging runs no secrets gate.
+4. ~~**Staging omits two required secrets.**~~ **Fixed.** `APPLET_VIEWER_SECRET` and `FROCKBOT_AUTHORIZATION_STATE_SECRET` are both required by `production-secrets.ts` and were absent from the staging deploy, so staging answered 503 for every Applet. Both are now sent. Still open: staging runs no secrets gate.
 
 5. **Staging `vars` differ from production silently.** `apps/cloudflare/wrangler.jsonc:361-369` omits `FROCK_AI_GATEWAY_ID`, `FROCK_AI_AUTO_ROUTE` and `NATIVE_SLICE_2_AUTH`; named environments do not inherit top-level vars.
 
@@ -36,7 +36,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 16. **The dynamic Package system has one dynamic member.** `@frockbot/plugin-applets` is the only member with an `artifact`, and its bytes are checked into `applications/foundation/generated/applets-artifact.ts`.
 
-17. **The published catalog cannot install anything.** `scripts/publish-catalog.ts` is invoked by both `ci.yml:582` and `release.yml:458` with no `--published` file. First-party entries carry no bundle and a first-party install is an explicit no-op on Composition (`packages/plugin-shell/src/backend-package-catalog.ts:838-860`); the non-first-party branch then dereferences `entry.bundle!` (`:866`).
+17. **The published catalog cannot install anything.** (The MCP-guided install path is gone with that package; what remains is the first-party no-op.) `scripts/publish-catalog.ts` is invoked by both `ci.yml:582` and `release.yml:458` with no `--published` file. First-party entries carry no bundle and a first-party install is an explicit no-op on Composition (`packages/plugin-shell/src/backend-package-catalog.ts:838-860`); the non-first-party branch then dereferences `entry.bundle!` (`:866`).
 
 18. **`applications/foundation/src/runtime.ts:1153-1200` deletes 19 runtime ids by hardcoded string**, directly below the claim in `contributions.ts` that nothing branches on a Package's identity.
 

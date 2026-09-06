@@ -134,11 +134,6 @@ describe("production setup", () => {
     expect(
       calls.some((call) => call.startsWith("secret-value:CREDENTIAL_KEYRING:")),
     ).toBe(true);
-    expect(calls.join("\n")).not.toContain("COMPOSIO");
-    expect(calls).toContain(
-      "secret set FROCKBOT_AUTHORIZATION_STATE_SECRET --repo timoconnellaus/frockbot --env production",
-    );
-    expect(stdout).not.toContain("Composio");
   });
 
   test("provisions the Package Catalog bucket when it is absent", async () => {
@@ -271,7 +266,7 @@ exit 0
     ).toBe(true);
   });
 
-  test("deploys without Composio configuration and forwards active secrets", async () => {
+  test("forwards active secrets to the deploy", async () => {
     const source = await Bun.file(
       new URL("../.github/workflows/release.yml", import.meta.url),
     ).text();
@@ -295,16 +290,6 @@ exit 0
     );
     const deploy = deploymentSteps.find(
       (step) => step.name === "Deploy Worker",
-    );
-    expect(validation?.env?.COMPOSIO_API_KEY).toBe(
-      "${{ secrets.COMPOSIO_API_KEY }}",
-    );
-    expect(validation?.env?.COMPOSIO_WEBHOOK_SECRET).toBe(
-      "${{ secrets.COMPOSIO_WEBHOOK_SECRET }}",
-    );
-    expect(validation?.env).not.toHaveProperty("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
-    expect(validation?.env?.FROCKBOT_AUTHORIZATION_STATE_SECRET).toBe(
-      "${{ secrets.FROCKBOT_AUTHORIZATION_STATE_SECRET }}",
     );
     expect(computerHost?.env?.SPRITES_TOKEN).toBe(
       "${{ secrets.SPRITES_TOKEN }}",
@@ -363,10 +348,6 @@ exit 0
     );
 
     const productionEnvironment = {
-      COMPOSIO_API_KEY: "composio-production",
-      COMPOSIO_WEBHOOK_SECRET: "provider-signing-secret",
-      FROCKBOT_AUTHORIZATION_STATE_SECRET:
-        "6f0d6ae3ec5c4c448ef2ccdd08b0d4d834422c873244420f8879b6a2e99504fa",
       ...process.env,
       CLOUDFLARE_API_TOKEN: "cloudflare-token",
       CLOUDFLARE_ACCOUNT_ID: "cloudflare-account",
@@ -534,16 +515,6 @@ exit 1
     // The secret whose absence closed every published Applet in production.
     expect(forwarded.APPLET_VIEWER_SECRET).toBe(
       productionEnvironment.APPLET_VIEWER_SECRET,
-    );
-    expect(forwarded.COMPOSIO_API_KEY).toBe(
-      productionEnvironment.COMPOSIO_API_KEY,
-    );
-    expect(forwarded.COMPOSIO_WEBHOOK_SECRET).toBe(
-      productionEnvironment.COMPOSIO_WEBHOOK_SECRET,
-    );
-    expect(forwarded).not.toHaveProperty("COMPOSIO_GMAIL_AUTH_CONFIG_ID");
-    expect(forwarded.FROCKBOT_AUTHORIZATION_STATE_SECRET).toBe(
-      productionEnvironment.FROCKBOT_AUTHORIZATION_STATE_SECRET,
     );
   });
 });

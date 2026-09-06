@@ -52,7 +52,7 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts:196-
 
 - Binding `USER_CONFIGURATIONS`; id `idFromName(userId)`.
 - The only class that uses SQLite, and it does not own the tables. `ctx.storage.sql` is handed to three plugin stores: transcript search FTS5 (`packages/plugin-search/src/index-store.ts:143-177`), audit (`packages/plugin-audit/src/store.ts:166-175`), billing (`packages/plugin-billing/src/store.ts:91-114`). All other state is key-value.
-- One `alarm()` at `:1739` serving credential leases, Composio triggers, publisher and template recovery, flock sagas and archived-Bot sweeps.
+- One `alarm()` at `:1739` serving credential leases, publisher and template recovery, flock sagas and archived-Bot sweeps.
 - No `fetch()`, no WebSockets.
 
 ### `AppletState` — `apps/cloudflare/src/applet-state.ts:228`
@@ -372,7 +372,7 @@ One Sprite, one browser and one screen per User; one slot — window plus clippe
 
 ### Screenshots and live view
 
-A screenshot is a guarded `exec` running `scrot` followed by a `file/read` (`packages/plugin-fly-sprite/src/computer.ts:732-797`); the bytes are filed into the durable `screenshots` root and attached to the model turn. The live view is noVNC iframed directly at `https://<sprite>.sprites.app/...`, with no Worker proxy; CSP allows `frame-src https://*.sprites.app` (`apps/cloudflare/src/user-application.ts:178`). FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
+A screenshot is a guarded `exec` running `scrot`, clipped to the Bot's slot of the shared screen, followed by a `file/read` (`packages/plugin-fly-sprite/src/computer.ts:732-797`); the bytes are filed into the durable `screenshots` root and attached to the model turn. The live view is noVNC iframed directly at `https://<sprite>.sprites.app/...`, with no Worker proxy; CSP allows `frame-src https://*.sprites.app` (`apps/cloudflare/src/user-application.ts:178`). FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
 
 ### Tools
 
@@ -440,7 +440,7 @@ The token is stored in the platform keystore through `flutter_secure_storage` (`
 
 ### Admission and admin
 
-Admin is membership of the comma-separated `FROCKBOT_ADMIN_EMAILS` secret (`apps/cloudflare/src/admin-identities.ts:7-28`), enforced at `apps/cloudflare/src/gateway.ts:801-810`. Signups default to closed (`apps/cloudflare/src/deployment-policy.ts:17`) and are toggled by `deployment/set-signups`. `accountIsAdmitted` (`apps/cloudflare/src/account-admission.ts:8`) admits when the caller is an admin, when the User Durable Object already exists, or when signups are open.
+Admin is membership of the comma-separated `FROCKBOT_ADMIN_EMAILS` secret (`apps/cloudflare/src/admin-identities.ts:7-28`), enforced at `apps/cloudflare/src/gateway.ts:801-810`. Signups default to closed (`apps/cloudflare/src/deployment-policy.ts:17`) and are toggled by `deployment/set-signups`. `accountIsAdmitted` (`apps/cloudflare/src/account-admission.ts:8`) admits when the caller is an admin, when the User Durable Object already exists, or when signups are open. That gate governs use of the product. Account creation is gated separately, in better-auth's `user.create.before` hook (`signupDatabaseHooksV1`, `apps/cloudflare/src/auth.ts`), because `/api/auth/*` is served ahead of it.
 
 `ALLOW_DEVELOPMENT_AUTH` enables an identity bypass: `?as_user=` is accepted and persisted as the `frockbot_dev_user` cookie (`gateway.ts:342-362`, `:673-681`). It skips signup admission. `admin-identities.ts:20-21` treats the id `development` as admin unconditionally, and `:27` treats any development identity as admin when `FROCKBOT_ADMIN_EMAILS` is empty.
 

@@ -38,7 +38,6 @@
     "@frockbot/plugin-credentials": "workspace:*",
     "@frockbot/plugin-flock": "workspace:*",
     "@frockbot/plugin-image": "workspace:*",
-    "@frockbot/plugin-mcp": "workspace:*",
     "@frockbot/plugin-memory": "workspace:*",
     "@frockbot/plugin-package-catalog": "workspace:*",
     "@frockbot/plugin-package-publisher": "workspace:*",
@@ -59,8 +58,7 @@
     "better-auth": "1.7.2",
     "cordis": "4.0.0-rc.8",
     "vue": "3.5.41",
-    "@frockbot/protocol-schemas": "workspace:*",
-    "@frockbot/plugin-composio": "workspace:*"
+    "@frockbot/protocol-schemas": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.1.1",

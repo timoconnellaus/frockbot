@@ -66,10 +66,9 @@ function dismissConnectionReturn(): void {
  * The line under a connector's name.
  *
  * It used to be the Connection Type's own name, which for most Packages is the
- * Package's name again in the singular — "MCP servers" over "MCP server" says
- * nothing a User did not already read on the line above. What a User wants
- * from a card they are not opening is whether it is on, so that is what it
- * says.
+ * Package's name again in the singular, and says nothing a User did not
+ * already read on the line above. What a User wants from a card they are not
+ * opening is whether it is on, so that is what it says.
  */
 function connectorStatus(item: PluginCatalogItem): string {
   if (item.connectionTypes[0]?.authorizationKind === "none") {
@@ -122,22 +121,6 @@ const connectors = computed(() => {
           connectionTypes: [type],
         }));
       });
-    if (item.packageId === MCP_PACKAGE_ID)
-      return [
-        ...mcpServers.value.map((server) => ({
-          ...item,
-          connectionId: server.serverId,
-          displayName: server.label,
-          connectorDescription: "Tools from your connected server",
-        })),
-        {
-          ...item,
-          connectionId: "new-server",
-          displayName: "Custom server",
-          connectorDescription:
-            "Connect a service using its MCP server address",
-        },
-      ];
     return [item];
   });
   const query = search.value.trim().toLowerCase();
@@ -166,7 +149,6 @@ const pendingAuthorizations = computed(() =>
       connection.state !== "revoked",
   ),
 );
-const reconnectingConnectionId = ref<string>();
 const togglingConnectionTypeId = ref<string>();
 
 const apiKeyPackageId = ref<string>();
@@ -174,99 +156,9 @@ const apiKeyConnectionTypeId = ref<string>();
 const apiKeyLabel = ref("");
 const apiKey = ref("");
 
-/**
- * The MCP server form. A remote MCP server is a Connection like any other, but
- * it needs its URL and transport as well as an optional key, so the generic
- * API-key form cannot carry it. Both commands it can send are the ordinary
- * Connection commands: `connection/create-api-key` when a key is given, and
- * `connection/create` when the server is public.
- */
-const MCP_PACKAGE_ID = "mcp";
-const mcpFormOpen = ref(false);
-const mcpLabel = ref("");
-const mcpUrl = ref("");
-const mcpTransport = ref<"streamable-http" | "sse">("streamable-http");
-const mcpApiKey = ref("");
-/**
- * How the custom server authenticates. `oauth` is not a third field on the
- * same form but a different command: it starts an authorization the host
- * authors a redirect for, rather than creating a Connection from a secret the
- * User pasted.
- */
-const mcpAuthMode = ref<"none" | "key" | "oauth">("none");
-const mcpScope = ref("");
-const mcpClientId = ref("");
-
-/**
- * The MCP lifecycle panel: the server records the User Durable Object
- * owns, which the Connection rows cannot show — a server's `needs-auth` or
- * `error` state, when it last handshook, what its instructions are, and the
- * refusals this build recorded rather than performed.
- */
-const editingInstructionsFor = ref<string>();
-const instructionsDraft = ref("");
-const restartingServerId = ref<string>();
-const mcpServers = computed(() => web.value.mcpServers?.servers ?? []);
-const mcpRefusals = computed(() => web.value.mcpServers?.refusals ?? []);
-
 onMounted(() => {
   void web.value.loadPluginCatalog();
-  void web.value.loadMcpServers();
 });
-
-function mcpStateLabel(state: string): string {
-  if (state === "needs-auth") return "Needs authorization";
-  if (state === "connecting") return "Connecting";
-  if (state === "error") return "Error";
-  return "Ready";
-}
-
-function handshakeLabel(value: string): string {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : value;
-}
-
-function beginInstructions(serverId: string, instructions: string): void {
-  editingInstructionsFor.value = serverId;
-  instructionsDraft.value = instructions;
-}
-
-function cancelInstructions(): void {
-  editingInstructionsFor.value = undefined;
-  instructionsDraft.value = "";
-}
-
-async function saveInstructions(serverId: string): Promise<void> {
-  await web.value.setMcpInstructions(serverId, instructionsDraft.value);
-  cancelInstructions();
-}
-
-async function restartServer(serverId: string): Promise<void> {
-  restartingServerId.value = serverId;
-  try {
-    await web.value.restartMcpServer(serverId);
-  } finally {
-    restartingServerId.value = undefined;
-  }
-}
-
-/**
- * *Reconnect*: the authenticated command that mints a fresh redirect, with
- * fresh PKCE and a fresh signed state. Nothing was stored waiting for this —
- * the card only ever said that a decision was pending.
- */
-async function reconnect(connectionId: string): Promise<void> {
-  reconnectingConnectionId.value = connectionId;
-  try {
-    const redirect = await web.value.startMcpAuthorization({ connectionId });
-    if (redirect) await web.value.openConnectionAuthorization(redirect);
-  } catch (error) {
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Could not reconnect";
-  } finally {
-    reconnectingConnectionId.value = undefined;
-  }
-}
 
 function connectionCount(item: PluginCatalogItem): number {
   return (web.value.userSettings?.connections ?? []).filter(
@@ -316,79 +208,11 @@ async function toggleCredentialless(item: PluginCatalogItem): Promise<void> {
   }
 }
 
-function beginMcpConnection(): void {
-  mcpFormOpen.value = true;
-  mcpLabel.value = "";
-  mcpUrl.value = "";
-  mcpTransport.value = "streamable-http";
-  mcpApiKey.value = "";
-  mcpAuthMode.value = "none";
-  mcpScope.value = "";
-  mcpClientId.value = "";
-}
-
-function cancelMcpConnection(): void {
-  mcpFormOpen.value = false;
-  mcpApiKey.value = "";
-  mcpAuthMode.value = "none";
-}
-
-async function addMcpServer(): Promise<void> {
-  const settings = {
-    url: mcpUrl.value.trim(),
-    transport: mcpTransport.value,
-  };
-  try {
-    if (mcpAuthMode.value === "oauth") {
-      // No secret is collected and none is stored: the server is discovered,
-      // a client is registered, and the redirect is authored by the host.
-      const redirect = await web.value.startMcpAuthorization({
-        label: mcpLabel.value,
-        settings: {
-          ...settings,
-          ...(mcpScope.value.trim() ? { scope: mcpScope.value.trim() } : {}),
-          ...(mcpClientId.value.trim()
-            ? { "client-id": mcpClientId.value.trim() }
-            : {}),
-        },
-      });
-      cancelMcpConnection();
-      if (redirect) await web.value.openConnectionAuthorization(redirect);
-      return;
-    }
-    if (mcpApiKey.value) {
-      await web.value.createApiKeyConnection({
-        packageId: MCP_PACKAGE_ID,
-        connectionTypeId: "mcp-remote-key",
-        label: mcpLabel.value,
-        apiKey: mcpApiKey.value,
-        settings,
-      });
-    } else {
-      await web.value.createConnection({
-        packageId: MCP_PACKAGE_ID,
-        connectionTypeId: "mcp-remote",
-        label: mcpLabel.value,
-        settings,
-      });
-    }
-    cancelMcpConnection();
-  } catch (error) {
-    mcpApiKey.value = "";
-    web.value.settingsError =
-      error instanceof Error ? error.message : "Couldn't add that server.";
-  }
-}
-
 /** Start whichever authorization the card's Connection Type declares. */
 const labelingConnector = ref<string>();
 const accountAlias = ref("");
 
 function beginConnect(item: PluginCatalogItem): void {
-  if (item.packageId === MCP_PACKAGE_ID) {
-    beginMcpConnection();
-    return;
-  }
   const connectionType = item.connectionTypes[0];
   if (!connectionType) return;
   if (connectionType.authorizationKind === "api-key") {
@@ -531,7 +355,7 @@ async function connect(
             </UiButton>
             <UiButton
               v-else-if="
-                (!item.connectionId || item.connectionId === 'new-server') &&
+                !item.connectionId &&
                 (connectionCount(item) === 0 ||
                   item.connectionTypes[0]?.allowMultiple)
               "
@@ -574,163 +398,6 @@ async function connect(
             </div>
           </form>
           <PackageAccounts :item="item" />
-
-          <div
-            v-if="
-              item.packageId === MCP_PACKAGE_ID &&
-              (mcpServers.length > 0 || mcpRefusals.length > 0)
-            "
-            class="mcp-status"
-          >
-            <div
-              v-for="server in mcpServers.filter(
-                (server) => server.serverId === item.connectionId,
-              )"
-              :key="server.serverId"
-              class="mcp-server"
-            >
-              <div class="mcp-server-head">
-                <span class="mcp-server-name">{{ server.label }}</span>
-                <span :class="['mcp-state', `mcp-state-${server.state}`]">
-                  {{ mcpStateLabel(server.state) }}
-                </span>
-              </div>
-              <p class="mcp-meta">
-                {{ server.toolCount }} tools · Last checked
-                {{ handshakeLabel(server.lastHandshakeAt) }}
-              </p>
-              <p v-if="server.failure" class="connection-failure">
-                {{ server.failure.message }}
-              </p>
-              <p v-if="server.instructions" class="mcp-instructions">
-                {{ server.instructions }}
-              </p>
-              <div class="connector-actions">
-                <UiButton
-                  v-if="server.state === 'needs-auth'"
-                  :disabled="reconnectingConnectionId === server.serverId"
-                  @click="reconnect(server.serverId)"
-                  >Reconnect</UiButton
-                >
-                <UiButton
-                  @click="
-                    beginInstructions(
-                      server.serverId,
-                      server.instructions ?? '',
-                    )
-                  "
-                >
-                  Instructions
-                </UiButton>
-                <UiButton
-                  :disabled="restartingServerId === server.serverId"
-                  @click="restartServer(server.serverId)"
-                >
-                  {{
-                    restartingServerId === server.serverId
-                      ? "Restarting…"
-                      : "Restart"
-                  }}
-                </UiButton>
-              </div>
-              <form
-                v-if="editingInstructionsFor === server.serverId"
-                class="api-key-form"
-                @submit.prevent="saveInstructions(server.serverId)"
-              >
-                <label>
-                  <span>Instructions for this server's tools</span>
-                  <textarea
-                    v-model="instructionsDraft"
-                    maxlength="4096"
-                    rows="4"
-                  ></textarea>
-                </label>
-                <div class="api-key-actions">
-                  <UiButton @click="cancelInstructions">Cancel</UiButton>
-                  <UiButton type="submit" variant="primary">Save</UiButton>
-                </div>
-              </form>
-            </div>
-            <p
-              v-for="refusal in mcpRefusals"
-              :key="refusal.refusalId"
-              class="connection-failure"
-            >
-              {{ refusal.message }}
-            </p>
-          </div>
-
-          <form
-            v-if="mcpFormOpen && item.connectionId === 'new-server'"
-            class="api-key-form"
-            @submit.prevent="addMcpServer"
-          >
-            <label>
-              <span>Server name</span>
-              <input v-model="mcpLabel" maxlength="120" required />
-            </label>
-            <label>
-              <span>Server URL</span>
-              <input
-                v-model="mcpUrl"
-                type="url"
-                inputmode="url"
-                placeholder="https://example.com/mcp"
-                maxlength="2048"
-                required
-              />
-            </label>
-            <label>
-              <span>Transport</span>
-              <select v-model="mcpTransport">
-                <option value="streamable-http">Streamable HTTP</option>
-                <option value="sse">Server-sent events</option>
-              </select>
-            </label>
-            <label>
-              <span>Authentication</span>
-              <select v-model="mcpAuthMode">
-                <option value="none">None (public server)</option>
-                <option value="key">API key</option>
-                <option value="oauth">OAuth</option>
-              </select>
-            </label>
-            <label v-if="mcpAuthMode === 'key'">
-              <span>API key</span>
-              <input
-                v-model="mcpApiKey"
-                type="password"
-                autocomplete="new-password"
-              />
-            </label>
-            <template v-if="mcpAuthMode === 'oauth'">
-              <label>
-                <span>Scope (optional)</span>
-                <input v-model="mcpScope" maxlength="1024" autocomplete="off" />
-              </label>
-              <label>
-                <span>Client ID (optional)</span>
-                <input
-                  v-model="mcpClientId"
-                  maxlength="512"
-                  autocomplete="off"
-                />
-              </label>
-              <p class="field-hint">
-                Leave both empty unless the server gave you specific values.
-                You'll sign in on the server's own site.
-              </p>
-            </template>
-            <div class="api-key-actions">
-              <UiButton @click="cancelMcpConnection">Cancel</UiButton>
-              <UiButton type="submit" variant="primary">
-                {{
-                  mcpAuthMode === "oauth" ? "Continue to sign in" : "Add server"
-                }}
-              </UiButton>
-            </div>
-          </form>
 
           <form
             v-if="apiKeyPackageId === item.packageId"
@@ -955,55 +622,6 @@ img.connector-logo {
 }
 
 .connections-empty p {
-  margin: 0;
-  color: var(--frock-text-muted);
-  font-size: var(--frock-text-sm);
-}
-
-.mcp-status {
-  display: grid;
-  gap: 12px;
-  margin: 0 8px;
-  padding: 12px 0 4px;
-  border-top: 1px solid var(--frock-border);
-}
-
-.mcp-server {
-  display: grid;
-  gap: 6px;
-}
-
-.mcp-server-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.mcp-server-name {
-  color: var(--frock-text);
-  font-size: var(--frock-text-base);
-}
-
-.mcp-state {
-  padding: 1px 8px;
-  border: 1px solid var(--frock-border);
-  border-radius: 999px;
-  color: var(--frock-text-muted);
-  font-size: var(--frock-text-sm);
-}
-
-.mcp-state-ready {
-  color: var(--frock-text);
-}
-
-.mcp-state-error,
-.mcp-state-needs-auth {
-  border-color: var(--frock-danger-text);
-  color: var(--frock-danger-text);
-}
-
-.mcp-meta,
-.mcp-instructions {
   margin: 0;
   color: var(--frock-text-muted);
   font-size: var(--frock-text-sm);

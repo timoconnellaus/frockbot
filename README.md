@@ -226,8 +226,6 @@ Configure these GitHub `production` environment values:
 | Secret   | `ROUTINE_HOOK_SECRET`       | HMAC secret every Routine webhook key is signed with; generate it                       |
 | Secret   | `MACHINE_TOKEN_SECRET`      | HMAC secret every registered-machine token and pairing code is signed with; generate it |
 
-Composio is temporarily excluded from the foundation application and production setup while its integration is redesigned around Composio Connect MCP. No Composio credential is required or forwarded by the current deployment.
-
 New signups are closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities can open **Admin** from the profile menu and change the durable signup policy. The allowlist stays in the gateway and only an `isAdmin` boolean reaches the client. Existing Users continue to sign in while signups are closed.
 
 `ROUTINE_HOOK_SECRET` is generated too, once, with `openssl rand -hex 32` — `./scripts/setup-production.sh` does it if the secret is absent and preserves it if it is not. Every Routine webhook key is `HMAC-SHA256` over its own claims under this secret, and the gateway verifies that signature before any Durable Object is addressed. Rotating it invalidates every webhook key already handed out, which each Routine's owner then has to re-mint; without it set, the delivery route answers `503` and a webhook Routine is recorded without a key rather than given one nothing could verify.
@@ -289,7 +287,6 @@ packages/
   plugin-authoring/ Bot-authored Package authoring, undo, and self-inspection
   plugin-billing/   Billing surfaces and entitlement state
   plugin-bot-template/ Bot template export, share records, and guarded import
-  plugin-composio/  Dormant Composio source pending Connect MCP redesign
   plugin-computer/  Generic Computer tools, prompt, state, and viewer UI
   plugin-credentials/ Per-User Connection credential encryption and leases
   plugin-custom-models/  Opt-in account and Bot model selection surfaces
@@ -298,7 +295,6 @@ packages/
   plugin-identity/  Sheep identity composition and rendering
   plugin-image/     generate_image through Cloudflare's AI binding, fenced by the Workspace
   plugin-machine-messages/ Message delivery to and from a User's registered machines
-  plugin-mcp/       Remote MCP servers as Connections, and their lifecycle
   plugin-memory/    Bot, User and Project Markdown memory over the Workspace store
   plugin-models/    Model role bindings and the provider-neutral model registry
   plugin-package-catalog/ The remote Catalog surface and its install path
