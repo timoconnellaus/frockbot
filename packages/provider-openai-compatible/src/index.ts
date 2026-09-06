@@ -12,6 +12,9 @@ import {
   type ResponseFormatNoteV1,
   type StructuredOutputSupportV1,
 } from "@frockbot/kernel-contracts";
+import { APICallError, type LanguageModelV4StreamPart } from "@ai-sdk/provider";
+import { OpenAICompatibleChatLanguageModel } from "@ai-sdk/openai-compatible";
+import type { FetchFunction } from "@ai-sdk/provider-utils";
 import type { Plugin } from "cordis";
 
 export type JsonValue =
@@ -238,13 +241,6 @@ function defaultScheduleV1(run: () => void, milliseconds: number): () => void {
   return () => clearTimeout(timer);
 }
 
-interface ToolAccumulator {
-  index: number;
-  id: string;
-  name: string;
-  arguments: string;
-}
-
 /**
  * Model families this adapter will hand an image to.
  *
@@ -458,58 +454,185 @@ export function planOpenAICompatibleRequestV1(
 const MAX_SSE_EVENT_CHARACTERS = 1_048_576;
 const MAX_SSE_RESPONSE_BYTES = 16_777_216;
 
-async function rejectOversizedSse(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-): Promise<never> {
-  await reader.cancel().catch(() => undefined);
-  throw new Error("Model response stream exceeded its size limit");
+const OVERSIZED_RESPONSE_REASON =
+  "Model response stream exceeded its size limit";
+
+/** The data payload of one SSE block, joined the way the wire defines it. */
+function sseEventDataV1(block: string): string {
+  return block
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n");
 }
 
-async function* readSseData(
-  body: ReadableStream<Uint8Array>,
+/**
+ * What the raw byte stream says that the decoded parts cannot.
+ *
+ * `[DONE]` never reaches the decoder as an event, but a stream that ended
+ * without either it or a finish reason is a truncated Turn rather than a
+ * finished one, and the difference decides whether the run may be retried.
+ */
+interface SseStreamObservationsV1 {
+  sawDone: boolean;
+  /**
+   * A cap the bounded stream tripped. The decoder reports a broken source as
+   * an opaque processing failure, and this is what it was.
+   */
+  failure?: unknown;
+}
+
+/**
+ * Bound the provider's stream, and give an index-only tool call an id.
+ *
+ * The size caps have to be applied to the bytes, before anything buffers a
+ * response nobody asked for. The id is repaired here for the same reason it is
+ * seen here: several OpenAI-compatible endpoints number their tool-call deltas
+ * and never name them, and the decoder rejects the first such delta outright.
+ */
+function boundedSseStreamV1(
   signal: AbortSignal,
-): AsyncIterable<string> {
-  const reader = body.getReader();
+  observations: SseStreamObservationsV1,
+): TransformStream<Uint8Array, Uint8Array> {
+  const fail = (
+    controller: TransformStreamDefaultController<Uint8Array>,
+    reason: unknown,
+  ): void => {
+    observations.failure = reason;
+    controller.error(reason);
+  };
   const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const identified = new Set<number>();
   let buffer = "";
   let responseBytes = 0;
-  const cancel = (): void => {
-    void reader.cancel(signal.reason).catch(() => undefined);
+  let abort: (() => void) | undefined;
+
+  let done = false;
+
+  // `[DONE]` ends the response, and the socket behind it may stay open for a
+  // long time yet: closing here is what lets a finished Turn finish rather
+  // than wait out the idle deadline on a provider with nothing left to say.
+  const emit = (
+    controller: TransformStreamDefaultController<Uint8Array>,
+    block: string,
+    framed: boolean,
+  ): void => {
+    const data = sseEventDataV1(block);
+    const repaired = data.includes("tool_calls")
+      ? repairToolCallIdsV1(block, data, identified)
+      : block;
+    controller.enqueue(encoder.encode(framed ? `${repaired}\n\n` : repaired));
+    if (data !== "[DONE]") return;
+    observations.sawDone = true;
+    done = true;
+    if (abort) signal.removeEventListener("abort", abort);
+    controller.terminate();
   };
-  signal.addEventListener("abort", cancel, { once: true });
-  try {
-    signal.throwIfAborted();
-    while (true) {
-      const { done, value } = await reader.read();
-      signal.throwIfAborted();
-      responseBytes += value?.byteLength ?? 0;
-      if (responseBytes > MAX_SSE_RESPONSE_BYTES) {
-        await rejectOversizedSse(reader);
+
+  return new TransformStream<Uint8Array, Uint8Array>({
+    start(controller) {
+      if (signal.aborted) {
+        fail(controller, signal.reason);
+        return;
       }
-      buffer += decoder.decode(value, { stream: !done });
+      abort = () => fail(controller, signal.reason);
+      signal.addEventListener("abort", abort, { once: true });
+    },
+    transform(chunk, controller) {
+      responseBytes += chunk.byteLength;
+      if (responseBytes > MAX_SSE_RESPONSE_BYTES) {
+        fail(controller, new Error(OVERSIZED_RESPONSE_REASON));
+        return;
+      }
+      buffer += decoder.decode(chunk, { stream: true });
       const blocks = buffer.split(/\r?\n\r?\n/);
       buffer = blocks.pop() ?? "";
       if (
         buffer.length > MAX_SSE_EVENT_CHARACTERS ||
         blocks.some((block) => block.length > MAX_SSE_EVENT_CHARACTERS)
       ) {
-        await rejectOversizedSse(reader);
+        fail(controller, new Error(OVERSIZED_RESPONSE_REASON));
+        return;
       }
       for (const block of blocks) {
-        const data = block
-          .split(/\r?\n/)
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trimStart())
-          .join("\n");
-        if (data) yield data;
+        if (done) break;
+        emit(controller, block, true);
       }
-      if (done) break;
-    }
-    if (buffer.startsWith("data:")) yield buffer.slice(5).trimStart();
-  } finally {
-    signal.removeEventListener("abort", cancel);
-    reader.releaseLock();
+    },
+    flush(controller) {
+      if (abort) signal.removeEventListener("abort", abort);
+      if (buffer && !done) emit(controller, buffer, false);
+    },
+  });
+}
+
+/** The cumulative cap alone, for a body that is not an event stream. */
+function boundedBodyStreamV1(
+  signal: AbortSignal,
+  observations: SseStreamObservationsV1,
+): TransformStream<Uint8Array, Uint8Array> {
+  let responseBytes = 0;
+  let abort: (() => void) | undefined;
+  const fail = (
+    controller: TransformStreamDefaultController<Uint8Array>,
+    reason: unknown,
+  ): void => {
+    observations.failure = reason;
+    controller.error(reason);
+  };
+  return new TransformStream<Uint8Array, Uint8Array>({
+    start(controller) {
+      if (signal.aborted) {
+        fail(controller, signal.reason);
+        return;
+      }
+      abort = () => fail(controller, signal.reason);
+      signal.addEventListener("abort", abort, { once: true });
+    },
+    transform(chunk, controller) {
+      responseBytes += chunk.byteLength;
+      if (responseBytes > MAX_SSE_RESPONSE_BYTES) {
+        fail(controller, new Error(OVERSIZED_RESPONSE_REASON));
+        return;
+      }
+      controller.enqueue(chunk);
+    },
+    flush() {
+      if (abort) signal.removeEventListener("abort", abort);
+    },
+  });
+}
+
+function repairToolCallIdsV1(
+  block: string,
+  data: string,
+  identified: Set<number>,
+): string {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(data);
+  } catch {
+    return block;
   }
+  const choices = asRecord(payload)?.choices;
+  const first = Array.isArray(choices) ? asRecord(choices[0]) : undefined;
+  const deltas = asRecord(first?.delta)?.tool_calls;
+  if (!Array.isArray(deltas)) return block;
+  let repaired = false;
+  for (const candidate of deltas) {
+    const delta = asRecord(candidate);
+    if (!delta || typeof delta.index !== "number") continue;
+    if (typeof delta.id === "string" && delta.id) {
+      identified.add(delta.index);
+      continue;
+    }
+    if (identified.has(delta.index)) continue;
+    delta.id = crypto.randomUUID();
+    identified.add(delta.index);
+    repaired = true;
+  }
+  return repaired ? `data: ${JSON.stringify(payload)}` : block;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -588,28 +711,6 @@ export function usageFromPayloadV1(
   };
 }
 
-function applyToolDeltas(
-  value: unknown,
-  tools: Map<number, ToolAccumulator>,
-): void {
-  if (!Array.isArray(value)) return;
-  for (const candidate of value) {
-    const delta = asRecord(candidate);
-    if (!delta || typeof delta.index !== "number") continue;
-    const current = tools.get(delta.index) ?? {
-      index: delta.index,
-      id: "",
-      name: "",
-      arguments: "",
-    };
-    if (typeof delta.id === "string") current.id = delta.id;
-    const fn = asRecord(delta.function);
-    if (typeof fn?.name === "string") current.name += fn.name;
-    if (typeof fn?.arguments === "string") current.arguments += fn.arguments;
-    tools.set(delta.index, current);
-  }
-}
-
 function parseJson(value: string, label: string): JsonValue {
   try {
     return JSON.parse(value) as JsonValue;
@@ -623,10 +724,120 @@ function parseToolInput(value: string): JsonValue {
 }
 
 /**
- * Normalize an OpenAI-compatible SSE body. Native provider bindings can reuse
- * this wire decoder without pretending their in-process call is HTTP.
+ * The AI SDK model this adapter decodes through.
+ *
+ * The request is built by {@link planOpenAICompatibleRequestV1} and opened by
+ * the caller — a native binding has no URL to fetch — so the model is handed
+ * the already-open body through a loopback `fetch` and nothing leaves the
+ * isolate. What it is here for is the reading: event framing, tool-call delta
+ * accumulation and finish reasons.
  */
-export async function* streamOpenAICompatibleBody(
+function decodingModelV1(
+  body: ReadableStream<Uint8Array>,
+  contentType: string,
+): OpenAICompatibleChatLanguageModel {
+  return new OpenAICompatibleChatLanguageModel("frockbot", {
+    provider: "openai-compatible",
+    url: () => "https://model.invalid/chat/completions",
+    headers: () => ({}),
+    fetch: loopbackFetchV1(body, contentType),
+  });
+}
+
+/** `FetchFunction` is `typeof fetch`, whose non-request members go unused. */
+function loopbackFetchV1(
+  body: ReadableStream<Uint8Array>,
+  contentType: string,
+): FetchFunction {
+  const open = (): Promise<Response> =>
+    Promise.resolve(
+      new Response(body, {
+        status: 200,
+        headers: { "content-type": contentType },
+      }),
+    );
+  return open as unknown as FetchFunction;
+}
+
+function accumulateToolNamesV1(
+  value: unknown,
+  ids: Map<number, string>,
+  names: Map<string, string>,
+): void {
+  if (!Array.isArray(value)) return;
+  for (const candidate of value) {
+    const delta = asRecord(candidate);
+    if (!delta || typeof delta.index !== "number") continue;
+    if (typeof delta.id === "string" && delta.id)
+      ids.set(delta.index, delta.id);
+    const id = ids.get(delta.index);
+    const fn = asRecord(delta.function);
+    if (id && typeof fn?.name === "string") {
+      names.set(id, `${names.get(id) ?? ""}${fn.name}`);
+    }
+  }
+}
+
+/**
+ * A failure the caller's stream raised reaches us wrapped as a provider call
+ * error. Unwrapping it keeps the size cap — and a cancelled Turn — reported as
+ * itself rather than as an opaque decoding failure.
+ */
+async function openDecodedStreamV1(
+  model: OpenAICompatibleChatLanguageModel,
+  observations: SseStreamObservationsV1,
+): Promise<ReadableStream<LanguageModelV4StreamPart>> {
+  try {
+    const { stream } = await model.doStream({
+      prompt: [],
+      includeRawChunks: true,
+    });
+    return stream;
+  } catch (error) {
+    throw unwrapDecodeFailureV1(error, observations);
+  }
+}
+
+function unwrapDecodeFailureV1(
+  error: unknown,
+  observations: SseStreamObservationsV1,
+): unknown {
+  if (observations.failure !== undefined) return observations.failure;
+  return error instanceof APICallError && error.cause instanceof Error
+    ? error.cause
+    : error;
+}
+
+function finishReasonV1(
+  toolCalls: number,
+  raw: string | undefined,
+): Extract<LlmStreamEvent, { type: "finish" }>["reason"] {
+  if (toolCalls > 0 || raw === "tool_calls") return "tool-calls";
+  return raw === "length" ? "max-tokens" : "completed";
+}
+
+function toolCallEventV1(
+  id: string,
+  name: string,
+  input: string,
+): Extract<LlmStreamEvent, { type: "tool-call" }> {
+  if (!name) throw new Error("Model returned a tool call without a name");
+  return {
+    type: "tool-call",
+    call: {
+      id: id || crypto.randomUUID(),
+      name,
+      input: parseToolInput(input),
+    },
+  };
+}
+
+/**
+ * Normalize an OpenAI-compatible response body, streamed or whole. Reached
+ * only through {@link streamWithModelRequestDeadlinesV1}, so no transport can
+ * decode a response without also being on the clock.
+ */
+async function* streamOpenAICompatibleBody(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
 ): AsyncIterable<LlmStreamEvent> {
@@ -658,64 +869,77 @@ export async function* streamOpenAICompatibleBody(
     yield* readOpenAICompatibleJsonV1(replayBody, signal);
     return;
   }
-  const tools = new Map<number, ToolAccumulator>();
-  let finishReason: string | undefined;
-  let terminal = false;
+
+  const observations: SseStreamObservationsV1 = { sawDone: false };
+  const stream = await openDecodedStreamV1(
+    decodingModelV1(
+      replayBody.pipeThrough(boundedSseStreamV1(signal, observations)),
+      "text/event-stream",
+    ),
+    observations,
+  );
+
+  const toolCalls: { id: string; name: string; input: string }[] = [];
+  // A tool name may arrive in fragments across deltas, which the decoder's
+  // own accumulator does not join; the raw chunks are where the pieces are.
+  const toolIds = new Map<number, string>();
+  const toolNames = new Map<string, string>();
   let sawChoice = false;
-  for await (const data of readSseData(replayBody, signal)) {
-    if (data === "[DONE]") {
-      terminal = true;
-      break;
+  let sawFinishReason = false;
+  let rawFinishReason: string | undefined;
+  let failure: unknown;
+  try {
+    for await (const part of stream) {
+      if (part.type === "raw") {
+        const payload = asRecord(part.rawValue);
+        const usage = usageFromPayloadV1(payload);
+        if (usage) yield usage;
+        const choices = payload?.choices;
+        const choice = Array.isArray(choices)
+          ? asRecord(choices[0])
+          : undefined;
+        const delta = asRecord(choice?.delta);
+        if (choice && (delta || typeof choice.finish_reason === "string")) {
+          sawChoice = true;
+        }
+        if (typeof choice?.finish_reason === "string") sawFinishReason = true;
+        accumulateToolNamesV1(delta?.tool_calls, toolIds, toolNames);
+      } else if (part.type === "text-delta") {
+        if (part.delta) yield { type: "text-delta", text: part.delta };
+      } else if (part.type === "tool-call") {
+        toolCalls.push({
+          id: part.toolCallId,
+          name: toolNames.get(part.toolCallId) ?? part.toolName,
+          input: typeof part.input === "string" ? part.input : "",
+        });
+      } else if (part.type === "finish") {
+        rawFinishReason = part.finishReason.raw ?? undefined;
+      } else if (part.type === "error") {
+        failure = part.error;
+        break;
+      }
     }
-    const payload = asRecord(
-      parseJson(data, "Model returned an invalid stream event"),
-    );
-    const usage = usageFromPayloadV1(payload);
-    if (usage) yield usage;
-    const choices = payload?.choices;
-    const choice = Array.isArray(choices) ? asRecord(choices[0]) : undefined;
-    const delta = asRecord(choice?.delta);
-    if (choice && (delta || typeof choice.finish_reason === "string")) {
-      sawChoice = true;
-    }
-    if (typeof delta?.content === "string" && delta.content) {
-      yield { type: "text-delta", text: delta.content };
-    }
-    applyToolDeltas(delta?.tool_calls, tools);
-    if (typeof choice?.finish_reason === "string") {
-      finishReason = choice.finish_reason;
-      terminal = true;
-    }
+  } catch (error) {
+    throw unwrapDecodeFailureV1(error, observations);
   }
-  if (!terminal) {
+
+  if (!observations.sawDone && !sawFinishReason) {
     throw new Error("Model response stream ended before a terminal marker");
   }
   if (!sawChoice) {
     throw new Error("Model response stream did not include a valid choice");
   }
+  if (failure !== undefined) {
+    const error = unwrapDecodeFailureV1(failure, observations);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
 
-  for (const tool of [...tools.values()].sort(
-    (left, right) => left.index - right.index,
-  )) {
-    if (!tool.name)
-      throw new Error("Model returned a tool call without a name");
-    yield {
-      type: "tool-call",
-      call: {
-        id: tool.id || crypto.randomUUID(),
-        name: tool.name,
-        input: parseToolInput(tool.arguments),
-      },
-    };
+  for (const call of toolCalls) {
+    yield toolCallEventV1(call.id, call.name, call.input);
   }
   yield {
     type: "finish",
-    reason:
-      tools.size > 0 || finishReason === "tool_calls"
-        ? "tool-calls"
-        : finishReason === "length"
-          ? "max-tokens"
-          : "completed",
+    reason: finishReasonV1(toolCalls.length, rawFinishReason),
   };
 }
 
@@ -723,76 +947,42 @@ async function* readOpenAICompatibleJsonV1(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
 ): AsyncIterable<LlmStreamEvent> {
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let bytes = 0;
+  const observations: SseStreamObservationsV1 = { sawDone: false };
+  let result;
   try {
-    while (true) {
-      signal.throwIfAborted();
-      const { done, value } = await reader.read();
-      if (done) break;
-      bytes += value.byteLength;
-      if (bytes > MAX_SSE_RESPONSE_BYTES) await rejectOversizedSse(reader);
-      chunks.push(value);
+    result = await decodingModelV1(
+      body.pipeThrough(boundedBodyStreamV1(signal, observations)),
+      "application/json",
+    ).doGenerate({ prompt: [] });
+  } catch (error) {
+    const failure = unwrapDecodeFailureV1(error, observations);
+    if (failure instanceof APICallError) {
+      throw new Error("Model response did not include a valid choice");
     }
-  } finally {
-    reader.releaseLock();
+    throw failure;
   }
-  const combined = new Uint8Array(bytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    combined.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  const payload = asRecord(
-    parseJson(
-      new TextDecoder().decode(combined),
-      "Model returned an invalid response",
-    ),
-  );
-  const choices = payload?.choices;
-  const choice = Array.isArray(choices) ? asRecord(choices[0]) : undefined;
-  const message = asRecord(choice?.message);
-  if (!choice || !message) {
-    throw new Error("Model response did not include a valid choice");
-  }
-  const usage = usageFromPayloadV1(payload);
+  const usage = usageFromPayloadV1(result.response?.body);
   if (usage) yield usage;
-  if (typeof message.content === "string" && message.content) {
-    yield { type: "text-delta", text: message.content };
+  let toolCalls = 0;
+  const emitted: LlmStreamEvent[] = [];
+  for (const content of result.content) {
+    if (content.type === "text") {
+      if (content.text) yield { type: "text-delta", text: content.text };
+    } else if (content.type === "tool-call") {
+      toolCalls += 1;
+      emitted.push(
+        toolCallEventV1(
+          content.toolCallId,
+          content.toolName,
+          typeof content.input === "string" ? content.input : "",
+        ),
+      );
+    }
   }
-  const tools = new Map<number, ToolAccumulator>();
-  if (Array.isArray(message.tool_calls)) {
-    applyToolDeltas(
-      message.tool_calls.map((candidate, index) => ({
-        ...(asRecord(candidate) ?? {}),
-        index,
-      })),
-      tools,
-    );
-  }
-  for (const tool of [...tools.values()].sort(
-    (left, right) => left.index - right.index,
-  )) {
-    if (!tool.name)
-      throw new Error("Model returned a tool call without a name");
-    yield {
-      type: "tool-call",
-      call: {
-        id: tool.id || crypto.randomUUID(),
-        name: tool.name,
-        input: parseToolInput(tool.arguments),
-      },
-    };
-  }
+  for (const event of emitted) yield event;
   yield {
     type: "finish",
-    reason:
-      tools.size > 0 || choice.finish_reason === "tool_calls"
-        ? "tool-calls"
-        : choice.finish_reason === "length"
-          ? "max-tokens"
-          : "completed",
+    reason: finishReasonV1(toolCalls, result.finishReason.raw ?? undefined),
   };
 }
 
