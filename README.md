@@ -301,6 +301,7 @@ packages/
   plugin-package-publisher/ Durable User application publication and rollback
   plugin-prompt/    System prompt assembly from Package contributions
   plugin-provider-foundation/ Deterministic credential-free development provider
+  plugin-provider-anthropic/  Optional Anthropic (Claude) model provider
   plugin-provider-frock-ai/  Built-in credential-free Frock AI model provider
   plugin-provider-ollama-cloud/  Optional Ollama Cloud model provider
   plugin-routines/  Durable Routines, the alarm scheduler, and the webhook door
@@ -314,7 +315,7 @@ packages/
   plugin-user-machine/ Registered-machine enrollment and pairing
   plugin-voice/     Voice sessions, quota, and the upstream model seam
   plugin-web/       web_search and a bounded, SSRF-classified web_fetch
-  provider-openai-compatible/  Streaming production model adapter
+  provider-openai-compatible/  Shared model transport: request mapping, deadlines, AI SDK decoding
 docs/
   architecture.md   Current system shape
   grokbot-parity.md The GrokBot capabilities FrockBot must match

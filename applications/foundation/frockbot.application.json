@@ -84,6 +84,11 @@
       "grants": ["connections:manage", "models:invoke"]
     },
     {
+      "specifier": "@frockbot/plugin-provider-anthropic",
+      "version": "0.0.1",
+      "grants": ["connections:manage", "models:invoke", "network:anthropic"]
+    },
+    {
       "specifier": "@frockbot/plugin-package-publisher",
       "version": "0.0.1",
       "grants": ["package:publish"]

@@ -1,26 +1,34 @@
 {
-  "name": "@frockbot/provider-openai-compatible",
+  "name": "@frockbot/plugin-provider-anthropic",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./runtime": "./src/runtime.ts",
+    "./manifest": "./src/manifest.ts",
+    "./frockbot.json": "./frockbot.json",
+    "./package.json": "./package.json"
+  },
+  "frockbot": {
+    "manifest": "./frockbot.json"
   },
   "scripts": {
     "test": "bun test src",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@ai-sdk/openai-compatible": "3.0.44",
+    "@ai-sdk/anthropic": "4.0.49",
     "@ai-sdk/provider": "4.0.10",
-    "@ai-sdk/provider-utils": "5.0.36",
+    "@frockbot/connection-core": "workspace:*",
+    "@frockbot/kernel-agent-loop": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "@frockbot/plugin-models": "workspace:*",
+    "@frockbot/provider-openai-compatible": "workspace:*",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",
-    "@types/node": "26.2.0",
     "typescript": "^7.0.2"
   },
   "publishConfig": {
@@ -29,6 +37,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/timoconnellaus/frockbot.git",
-    "directory": "packages/provider-openai-compatible"
+    "directory": "packages/plugin-provider-anthropic"
   }
 }
