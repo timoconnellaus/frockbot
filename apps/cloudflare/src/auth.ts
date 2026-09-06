@@ -1,9 +1,5 @@
 import { betterAuth } from "better-auth";
 import { bearer } from "better-auth/plugins";
-import {
-  verifyGoogleIdToken,
-  type VerifyGoogleIdTokenOptions,
-} from "better-auth/social-providers";
 import type { GatewayAuth } from "./contracts.js";
 
 export interface AuthEnvironment {
@@ -14,26 +10,13 @@ export interface AuthEnvironment {
   GOOGLE_CLIENT_SECRET: string;
 }
 
-export type GoogleIdTokenVerifier = (
-  options: VerifyGoogleIdTokenOptions,
-) => Promise<unknown | null>;
-
 export interface AuthDependencies {
-  readonly verifyGoogleIdToken?: GoogleIdTokenVerifier;
   /**
    * Decides whether a first-time sign-in may create an account. The gateway's
    * admission check runs after better-auth has already handled `/api/auth/*`,
    * so without this a closed deployment still writes `user` rows.
    */
   readonly mayCreateAccount?: (email: string) => Promise<boolean>;
-}
-
-export function createGoogleIdTokenVerifier(
-  audience: string,
-  verifier: GoogleIdTokenVerifier = verifyGoogleIdToken,
-) {
-  return async (token: string, nonce?: string): Promise<boolean> =>
-    (await verifier({ token, audience, nonce })) !== null;
 }
 
 /**
@@ -70,10 +53,6 @@ export function createAuth(
         clientId: environment.GOOGLE_CLIENT_ID,
         clientSecret: environment.GOOGLE_CLIENT_SECRET,
         prompt: "select_account",
-        verifyIdToken: createGoogleIdTokenVerifier(
-          environment.GOOGLE_CLIENT_ID,
-          dependencies.verifyGoogleIdToken,
-        ),
       },
     },
     account: {

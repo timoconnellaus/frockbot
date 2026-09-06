@@ -3,10 +3,6 @@ import { authSessionClientKey } from "../shared.js";
 import { computed, inject, onMounted, ref } from "vue";
 import { hostedAuthClient } from "./browser.js";
 import { developmentLoginUrl, isLoopbackHost } from "./development-login";
-import {
-  isAndroidNativeShell,
-  requestNativeGoogleCredential,
-} from "./native-google.js";
 
 const providedSession = inject(authSessionClientKey);
 if (!providedSession) throw new Error("auth session client was not provided");
@@ -20,7 +16,6 @@ const user = computed(() =>
     : null,
 );
 const loading = computed(() => session.projection.value.status === "loading");
-const isAndroid = isAndroidNativeShell();
 const isLocalDevelopment = computed(() =>
   isLoopbackHost(window.location.hostname),
 );
@@ -33,23 +28,6 @@ async function signIn(): Promise<void> {
   signingIn.value = true;
   error.value = undefined;
   try {
-    if (isAndroid) {
-      const credential = await requestNativeGoogleCredential();
-      const result = await hostedAuthClient.signIn.social({
-        provider: "google",
-        idToken: {
-          token: credential.idToken,
-          nonce: credential.nonce,
-        },
-      });
-      if (result.error) {
-        throw new Error(
-          "FrockBot could not verify the Google sign-in. Please try again.",
-        );
-      }
-      window.location.reload();
-      return;
-    }
     const callback = new URL("/", window.location.origin).toString();
     const result = await hostedAuthClient.signIn.social({
       provider: "google",
@@ -81,13 +59,7 @@ onMounted(async () => {
       <div class="auth-mark" aria-hidden="true">⌁</div>
       <p class="auth-eyebrow">FrockBot</p>
       <h1 id="auth-title">Welcome back</h1>
-      <p class="auth-copy">
-        {{
-          isAndroid
-            ? "Sign in to continue."
-            : "Sign in with your browser to continue."
-        }}
-      </p>
+      <p class="auth-copy">Sign in with your browser to continue.</p>
       <div v-if="loading" class="auth-loading" aria-live="polite">
         Checking your session…
       </div>
@@ -108,13 +80,7 @@ onMounted(async () => {
           @click="signIn"
         >
           <span class="google-g" aria-hidden="true">G</span>
-          {{
-            signingIn
-              ? isAndroid
-                ? "Signing in…"
-                : "Waiting for browser…"
-              : "Continue with Google"
-          }}
+          {{ signingIn ? "Waiting for browser…" : "Continue with Google" }}
         </button>
       </div>
       <p v-if="error" class="auth-error" role="alert">{{ error }}</p>

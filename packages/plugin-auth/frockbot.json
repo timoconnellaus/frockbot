@@ -10,11 +10,6 @@
       "entry": "./client",
       "mounts": [{ "slot": "root", "order": 20000 }],
       "outlets": ["authenticated-root"]
-    },
-    "desktop": {
-      "entry": "./desktop",
-      "execution": "trusted-main",
-      "commands": []
     }
   },
   "permissions": ["identity:authenticate"]
