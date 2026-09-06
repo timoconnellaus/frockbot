@@ -40,7 +40,7 @@ Each step leaves `main` shippable.
 
 **2. Cut what is dead.** _Done._ The Electron and WebView shells, their capability packages, the architecture checks and two prototypes: 11 packages, 14,548 lines.
 
-**3. Park the deferred features.** _Done for MCP and Composio._ They came out first — roughly 11.4k lines, no owned Durable Object class and no owned tables. They return later as plugins over the `http` grant, which is what they should have been.
+**3. Park the deferred features.** _Done._ MCP and Composio came out first — roughly 11.4k lines, no owned Durable Object class and no owned tables. They return later as plugins over the `http` grant, which is what they should have been.
 
 The same ruling cleared two leftovers from that cut: Bot templates carried an `mcpServers` field and Routines a connection-trigger kind whose only provider was Composio, both kept only because changing a stored shape looked like a migration. Both are gone, along with the trigger path they served.
 
