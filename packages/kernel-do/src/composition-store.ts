@@ -162,9 +162,12 @@ export class DurableCompositionStore implements CompositionStore {
     }
     await assertCompositionArtifactSetHashV1(proposed);
     await this.materialize();
+    // Required core is this deployment's first-party set, not the one the Bot
+    // was created on. Built outside the transaction: it compiles the
+    // application rather than reading storage.
+    const deployed = await this.buildBootstrap();
     await this.ctx.storage.transaction(async (transaction) => {
-      const bootstrap = await this.bootstrapGeneration(transaction);
-      this.assertRequiredCoreSet(bootstrap, proposed);
+      this.assertRequiredCoreSet(deployed, proposed);
       // Compare-and-swap before anything is written: a proposal derived from a
       // pointer that has since moved would drop whatever the winner added, so
       // it is refused whole rather than merged blind. Nothing has been put yet,
@@ -290,6 +293,11 @@ export class DurableCompositionStore implements CompositionStore {
     generationId: string,
     options: { quarantined: boolean },
   ): Promise<void> {
+    // Only quarantine can need it, and it compiles rather than reads storage,
+    // so it is built before the transaction opens.
+    const deployed = options.quarantined
+      ? await this.buildBootstrap()
+      : undefined;
     await this.ctx.storage.transaction(async (transaction) => {
       const stored = await transaction.get<unknown>(
         compositionGenerationKey(generationId),
@@ -310,6 +318,11 @@ export class DurableCompositionStore implements CompositionStore {
           decodeCompositionGenerationV1({ ...generation, status });
       }
       if (options.quarantined) {
+        if (deployed === undefined) {
+          throw new Error(
+            "quarantine has no deployment generation to fail into",
+          );
+        }
         const lastKnownGoodId = await transaction.get<string>(
           COMPOSITION_LAST_KNOWN_GOOD_KEY,
         );
@@ -327,11 +340,19 @@ export class DurableCompositionStore implements CompositionStore {
           // The last known good record is gone, so quarantine has nothing to
           // fail into and the pointer would keep naming the quarantined
           // generation — every later Turn would throw with nothing recorded.
-          // The bootstrap generation always exists: it is the oldest indexed
-          // one, materialized before any other. Falling back to it keeps the
-          // Bot admitting Turns, and the fallback is itself a recorded,
-          // visible failure rather than a silent repair.
-          const bootstrap = await this.bootstrapGeneration(transaction);
+          // This deployment's own first-party generation is what it falls into:
+          // the Bot's oldest stored generation is the set it was created on,
+          // which this deployment may no longer be able to mount at all. The
+          // fallback is itself a recorded, visible failure rather than a silent
+          // repair.
+          const bootstrap = decodeCompositionGenerationV1({
+            ...deployed,
+            status: "active",
+          });
+          writes[compositionGenerationKey(bootstrap.generationId)] = bootstrap;
+          writes[
+            compositionIndexKey(bootstrap.createdAt, bootstrap.generationId)
+          ] = bootstrap.generationId;
           writes[COMPOSITION_CURRENT_KEY] = compositionPinV1(bootstrap);
           writes[COMPOSITION_LAST_KNOWN_GOOD_KEY] = bootstrap.generationId;
           Object.assign(
@@ -441,39 +462,25 @@ export class DurableCompositionStore implements CompositionStore {
   }
 
   /**
-   * The generation this Bot started on. `materialize` writes it before any
-   * other, so the oldest index entry names it and it always exists.
-   */
-  private async bootstrapGeneration(
-    transaction: DurableObjectTransaction,
-  ): Promise<CompositionGenerationV1> {
-    const oldest = await transaction.list<string>({
-      prefix: COMPOSITION_INDEX_PREFIX,
-      limit: 1,
-    });
-    const generationId = [...oldest.values()][0];
-    const stored =
-      generationId === undefined
-        ? undefined
-        : await transaction.get<unknown>(
-            compositionGenerationKey(generationId),
-          );
-    if (stored === undefined) {
-      throw new Error("bot has no bootstrap Composition generation");
-    }
-    return decodeCompositionGenerationV1(stored);
-  }
-
-  /**
-   * Every first-party bootstrap member is required core. No proposal path may
-   * remove it or replace its provenance: callers can update reviewed
-   * first-party members, but cannot turn them into User- or Bot-authored code.
+   * Every first-party member *this deployment ships* is required core. No
+   * proposal path may remove it or replace its provenance: callers can update
+   * reviewed first-party members, but cannot turn them into User- or
+   * Bot-authored code.
+   *
+   * The deployment is the authority, never the Bot's own bootstrap generation.
+   * A Package that is deleted from the product stops being required the moment
+   * it stops shipping; holding the Bot's original set as required instead
+   * deadlocks it (2026-09-06, when removing Voice, Billing and the desktop and
+   * mobile Packages left every Bot pinned to a generation naming them:
+   * `resolveDeploymentCompositionV1` correctly dropped them, this check
+   * refused the proposal for omitting them, and every Turn of every Bot failed
+   * with no way out from inside the product).
    */
   private assertRequiredCoreSet(
-    bootstrap: CompositionGenerationV1,
+    deployed: CompositionGenerationV1,
     proposed: CompositionGenerationV1,
   ): void {
-    for (const required of bootstrap.members.filter(
+    for (const required of deployed.members.filter(
       (member) => member.provenance.kind === "first-party",
     )) {
       const candidate = proposed.members.find(

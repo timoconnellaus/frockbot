@@ -2649,8 +2649,13 @@ export class ShellBotBackendContribution {
             this.authority.composition.propose(generation, options),
         },
       });
-    } catch {
-      // The mount records why; never a wedged Turn on its own.
+    } catch (error) {
+      // Never a wedged Turn on its own. It is logged rather than swallowed
+      // because the mount records only that the generation failed, not that
+      // the Bot was refused the generation that would have fixed it: a refused
+      // proposal here is silent, permanent, and indistinguishable from a Bot
+      // that simply has nothing new to follow.
+      console.error("failed to follow the deployment's Composition", error);
     }
   }
 

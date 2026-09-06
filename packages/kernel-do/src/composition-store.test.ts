@@ -164,6 +164,63 @@ describe("Bot Durable Object Composition records", () => {
     await expect(store.propose(next)).rejects.toThrow("already exists");
   });
 
+  test("a Package this deployment no longer ships stops being required core", async () => {
+    const storage = new MemoryStorage();
+    // The Bot was created on a deployment that shipped `voice` alongside
+    // `shell`, and its bootstrap generation still names both.
+    const retired = () =>
+      bootstrapGeneration(
+        [
+          {
+            packageId: "shell",
+            specifier: "@frockbot/plugin-shell",
+            version: "0.0.1",
+            manifest: { id: "shell", version: "0.0.1" },
+          },
+          {
+            packageId: "voice",
+            specifier: "@frockbot/plugin-voice",
+            version: "0.0.1",
+            manifest: { id: "voice", version: "0.0.1" },
+          },
+        ],
+        { createdAt: "2026-08-31T00:00:00.000Z" },
+      );
+    const created = new DurableCompositionStore({
+      state: { storage } as unknown as DurableObjectState,
+      bootstrap: retired,
+    });
+    const parent = await created.current();
+    expect(parent.members.map((member) => member.packageId)).toContain("voice");
+
+    // This deployment ships `shell` only. Following it drops `voice`, and that
+    // proposal has to be accepted or the Bot can never leave a generation it
+    // cannot mount.
+    const store = createStore(storage);
+    const createdAt = "2026-09-01T00:00:00.000Z";
+    const members = parent.members.filter(
+      (member) => member.packageId !== "voice",
+    );
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
+    await store.propose({
+      schemaVersion: 1,
+      generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+      artifactSetHash,
+      parentGenerationId: parent.generationId,
+      createdAt,
+      origin: { kind: "bootstrap" },
+      members,
+      status: "pending",
+    });
+
+    const generations = await store.list({ limit: 10 });
+    expect(
+      generations.generations.some(
+        (generation) => generation.createdAt === createdAt,
+      ),
+    ).toBe(true);
+  });
+
   test("refuses proposals that remove or replace the first-party bootstrap core", async () => {
     const storage = new MemoryStorage();
     const store = createStore(storage);
