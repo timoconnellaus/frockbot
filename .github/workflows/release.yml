@@ -134,6 +134,7 @@ jobs:
             const file = path.join('packages', entry.name, 'package.json');
             if (!fs.existsSync(file)) continue;
             const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+            if (manifest.frockbot?.npm !== true) continue;
             manifest.version = process.env.VERSION;
             manifest.private = false;
 
@@ -227,7 +228,24 @@ jobs:
           }
           export -f publish_one
 
-          printf '%s\n' packages/*/ \
+          # Only packages that declare `frockbot.npm` are published. Every
+          # other package exists to build this product and has no consumer off
+          # this repository; publishing them meant a release went red whenever
+          # npm had no trusted publisher for one, while the deploy that
+          # actually matters had already succeeded.
+          published=()
+          for package_dir in packages/*/; do
+            if node -e "process.exit(require('./${package_dir}package.json').frockbot?.npm === true ? 0 : 1)" 2>/dev/null; then
+              published+=("$package_dir")
+            fi
+          done
+
+          if (( ${#published[@]} == 0 )); then
+            echo "no package declares frockbot.npm; nothing to publish" >&2
+            exit 1
+          fi
+
+          printf '%s\n' "${published[@]}" \
             | xargs -P 8 -I{} bash -c 'publish_one "$@"' _ {}
 
   github-release:

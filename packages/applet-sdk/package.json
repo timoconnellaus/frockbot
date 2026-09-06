@@ -53,5 +53,8 @@
     "type": "git",
     "url": "git+https://github.com/timoconnellaus/frockbot.git",
     "directory": "packages/applet-sdk"
+  },
+  "frockbot": {
+    "npm": true
   }
 }
