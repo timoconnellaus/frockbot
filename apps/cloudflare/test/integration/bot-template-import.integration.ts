@@ -33,7 +33,6 @@ interface ImportRecord {
   status: string;
   skills: string[];
   routines: { slug: string; disabled: boolean }[];
-  connections: { name: string; connectionTypeId?: string; url?: string }[];
   packages: { catalogId: string; status: string }[];
   steps: { key: string; status: string; failure?: string }[];
   failure?: string;
@@ -131,7 +130,6 @@ describe("importing another User's Bot template", () => {
     expect(planned.status).toBe("planned");
     expect(planned.skills).toEqual([SKILL_SLUG]);
     expect(planned.routines).toEqual([{ slug: "on-delivery", disabled: true }]);
-    expect(planned.connections).toEqual([]);
     expect(planned.steps.every((step) => step.status === "pending")).toBe(true);
 
     // Nothing applied yet: the Bot the card names does not exist.
