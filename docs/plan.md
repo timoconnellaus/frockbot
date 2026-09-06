@@ -30,7 +30,7 @@ Settled, and not to be relitigated without a reason that is new:
 - **At-most-once by idempotency key.** Forensic reconciliation of dispatched effects is removed.
 - **Multi-bot stays.** A single default avatar for now; the wearable system is deferred, not deleted.
 - **Vue is deleted per surface**, in the same change that lands its Flutter replacement, so `main` always ships a working product.
-- **frock-compose is ours.** Vendored, renamed, and free to diverge. It is not tracked against upstream.
+- **Frock Compose is ours.** The `@frockbot/compose-*` packages carry no upstream provenance and are not tracked against another repository. They are free to diverge — which is what makes the Flutter `ViewNode` renderer a first-class part of them rather than a fork.
 
 ## Order
 
@@ -48,7 +48,7 @@ Each step leaves `main` shippable.
 
 **5. Split the agent loop.** Separate provider I/O from the durable state machine. The loop claims input, calls the model, runs tools, appends events, advances the cursor — and nothing else. Resumption becomes its own module: replay the event log to the cursor. Reconciliation and effect fencing go.
 
-**6. frock-compose replaces cordis.** Rename the vendored packages, wire the extension points named in `AGENTS.md`, and delete `kernel-composition`, the manifest system, `plugin-authoring`, `plugin-package-catalog` and `plugin-package-publisher`.
+**6. Frock Compose replaces cordis.** _The provenance framing is already stripped._ Wire the extension points named in `AGENTS.md`, and delete `kernel-composition`, the manifest system, `plugin-authoring`, `plugin-package-catalog` and `plugin-package-publisher`.
 
 **7. Collapse the plugins into the app.** The 21 first-party plugins become directories. The 6,096-line `ShellBotBackendContribution` becomes ordinary feature modules. `applications/foundation` goes.
 
