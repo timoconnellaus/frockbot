@@ -2,10 +2,10 @@
 //
 // `SELF.fetch` enters `src/index.ts`: gateway auth, the User Durable Object,
 // the real application artifact, and the Bot Durable Object. What this proves
-// is the shape of ADR 0017 from outside — a chat Turn dispatches a task, the
-// Bot's own task list is where it is visible, the child's Turn is nowhere in
-// the visible transcript, and a task list is a Bot-scoped read like any other,
-// so another User's request for it is a 404 and not a redaction.
+// is the shape of the parent/child split from outside — a chat Turn dispatches
+// a task, the Bot's own task list is where it is visible, the child's Turn is
+// nowhere in the visible transcript, and a task list is a Bot-scoped read like
+// any other, so another User's request for it is a 404 and not a redaction.
 import { describe, expect, it } from "vitest";
 import {
   asUser,

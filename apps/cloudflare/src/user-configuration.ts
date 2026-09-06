@@ -207,8 +207,8 @@ interface UserConfigurationEnv {
    */
   PACKAGE_CATALOG?: R2Bucket;
   /**
-   * One Applet Durable Object per Applet instance (ADR 0022). The User object
-   * owns the directory and calls `delete()` on the instance; it never reads an
+   * One Applet Durable Object per Applet instance. The User object owns the
+   * directory and calls `delete()` on the instance; it never reads an
    * Applet's contents. Optional so a deployment without the binding still
    * serves every other User RPC, and an Applet deletion refuses visibly.
    */
@@ -1092,7 +1092,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   /**
-   * The per-User concurrent-subagent bound (ADR 0017).
+   * The per-User concurrent-subagent bound.
    *
    * A Bot's own bound is countable in its Durable Object; a User's is not,
    * because a User's Bots are separate objects. So the slot is held here, and
@@ -1797,11 +1797,10 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     await contributions.flock.forgetDeletedBot(botId);
   }
 
-  // --- Applet directory (ADR 0022 decision 3) ------------------------------
+  // --- Applet directory ----------------------------------------------------
   //
-  // Account-wide by decision D2: every Bot of this User sees every Applet. The
-  // directory holds identity, the current generation, and the tool
-  // declarations; the instance itself lives in its own Durable Object and its
+  // Account-wide: every Bot of this User sees every Applet. The directory
+  // holds identity, the current generation, and the tool declarations; the instance itself lives in its own Durable Object and its
   // contents are never read here.
 
   private appletDirectory(): AppletDirectory {

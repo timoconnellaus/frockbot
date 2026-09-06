@@ -422,7 +422,7 @@ function assistantMessage(
     // Quieter than a stopped Turn: it keeps everything it already sent and
     // carries no notice at all. The message that superseded it is sitting
     // right underneath, in the person's own words, and it explains the ending
-    // better than a line of ours would (ADR 0024).
+    // better than a line of ours would.
     return {
       id: `${run.runId}:assistant`,
       runId: run.runId,
@@ -470,7 +470,7 @@ function assistantMessage(
   }
   // A Turn that broke after it had started talking keeps what it said, with
   // the reason underneath it — the treatment a stopped Turn already gets, for
-  // the same reason: the words arrived and the person read them (ADR 0028).
+  // the same reason: the words arrived and the person read them.
   // A Turn that broke before saying anything is still just the reason.
   if (run.status === "failed" && run.responseText) {
     return {
@@ -1074,7 +1074,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
    * redrawn from memory and read back behind the paint. `transcriptEpochs`
    * names the conversation each entry belongs to: the backend does not tell a
    * client its Session id, but the client is the one that ends a conversation,
-   * so counting that action locally is the same boundary (ADR 0027).
+   * so counting that action locally is the same boundary.
    */
   const transcripts = new TranscriptCache();
   const transcriptEpochs = new Map<string, number>();

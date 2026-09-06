@@ -82,7 +82,7 @@ function contextFor(turnType: TurnTypeV1): ToolExecutionContext {
 }
 
 // The tool lives in the `frockbot` namespace, so it is reached the way every
-// namespaced tool is: through the `call_dynamic_tool` envelope (ADR 0023).
+// namespaced tool is: through the `call_dynamic_tool` envelope.
 const call: ToolCall = {
   id: "call-1",
   name: "call_dynamic_tool",

@@ -182,7 +182,7 @@ export function chatWindowV1(
   const state = compactionStateV1(events);
   const current = currentTurnV1(events);
   // A compaction never covers the Turn being assembled, whatever the log says:
-  // the current Turn is carried whole, as it has been since ADR 0027.
+  // the current Turn is always carried whole.
   const compaction =
     state.compaction && state.compaction.throughTurn < current
       ? state.compaction
@@ -238,8 +238,9 @@ export function turnScopedMessagesV1(
   };
   if (chatTurn(current)) {
     const window = chatWindowV1(input.events, input.messages);
-    // Tier 1 of ADR 0030, and the only one that costs nothing: a tool result
-    // older than the newest few Turns keeps its pairing and loses its payload.
+    // The first tier of reduction, and the only one that costs nothing: a tool
+    // result older than the newest few Turns keeps its pairing and loses its
+    // payload.
     const pruned = pruneToolOutputsV1(window.messages, window.turns);
     const preamble = window.compaction
       ? [compactionMessageV1(window.compaction)]

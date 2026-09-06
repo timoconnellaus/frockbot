@@ -1,10 +1,9 @@
 // The composer's Skill-invocation state, as a pure store.
 //
-// GrokBot's users invoke a Skill with `/` or `@`
-// (`docs/research/grokbot-computer.md` §2.8). Selecting one does *not* paste
-// its text into the message: it attaches a ref, and the backend expands the
-// body it resolves at the exact generation the Turn loads. That distinction is
-// the whole point — a pasted body is a message the User could edit into
+// GrokBot's users invoke a Skill with `/` or `@`. Selecting one does *not*
+// paste its text into the message: it attaches a ref, and the backend expands
+// the body it resolves at the exact generation the Turn loads. That distinction
+// is the whole point — a pasted body is a message the User could edit into
 // something the Skill never said, while a ref is a name the Bot resolves.
 //
 // Everything here is framework-free so the ranking, the keyboard model and the

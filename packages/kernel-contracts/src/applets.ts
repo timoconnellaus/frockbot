@@ -1,9 +1,9 @@
 // The Applet DTOs.
 //
 // An Applet is one durable instance per User of a Package's Instance
-// Contribution (ADR 0022). The kernel is the authority for its directory
-// entry, its generations, its viewer sessions, and its deletion — never for
-// its contents. These are the narrow, versioned records and views that cross
+// Contribution. The kernel is the authority for its directory entry, its
+// generations, its viewer sessions, and its deletion — never for its contents.
+// These are the narrow, versioned records and views that cross
 // between the User Durable Object, the Applet Durable Object, the Bot isolate
 // capability, and the hosted client, so they are declared once here and every
 // inbound value is decoded at its seam.
@@ -71,7 +71,7 @@ export type AppletProvenanceV1 =
 /** User Durable Object, key `applets:entry:<appletId>`. */
 export interface AppletDirectoryEntryV1 {
   schemaVersion: 1;
-  /** `<publicUserId>.<random>` — the ADR 0015 shape. */
+  /** `<publicUserId>.<random>` — the share-id shape. */
   appletId: string;
   displayName: string;
   /** Absent until the first successful publish. */

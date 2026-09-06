@@ -160,10 +160,10 @@ import {
 import uiThemeManifest from "@frockbot/plugin-ui-theme/manifest";
 import appletsManifest from "@frockbot/plugin-applets/manifest";
 import applicationJson from "../frockbot.application.json" with { type: "json" };
-// The Applets Package has no runtime plugin to import: it is artifact-backed
-// (ADR 0022 decision 8), so the application declares only its manifest here and
-// its artifact in `frockbot.application.json`, and the isolate host mounts it
-// like a Bot-authored Package.
+// The Applets Package has no runtime plugin to import: it is artifact-backed,
+// so the application declares only its manifest here and its artifact in
+// `frockbot.application.json`, and the isolate host mounts it like a
+// Bot-authored Package.
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 
@@ -585,7 +585,7 @@ function runtimePackage(
 /**
  * The Computer providers this application registers. The in-worker Fly Sprites
  * provider is the default: it is the one that carries a Computer's per-User
- * identity, its Workspace file surface, and the durable-root sync (ADR 0013).
+ * identity, its Workspace file surface, and the durable-root sync.
  * When the host also supplies the shared Computer host, its effect-journaling
  * proxy is registered beside it so an identified effect can be replayed rather
  * than repeated across Durable Object eviction.
@@ -677,7 +677,7 @@ export function createFoundationHostedRuntimePackages(
      */
     computerHost?: SharedComputerHostClient;
     /**
-     * The shared Computer host of ADR 0004: the service binding the Bot
+     * The shared Computer host: the service binding the Bot
      * Durable Object reaches a Computer through, and the secret it presents.
      * Absent, and the Fly provider registers unconfigured — this Worker holds
      * no Sprites SDK and no way to reach a Computer without it.
@@ -722,7 +722,7 @@ export function createFoundationHostedRuntimePackages(
      */
     routines?: RoutinesRuntimeHostV1;
     /**
-     * The Subagents seam (ADR 0017), supplied by the parent Bot Durable Object
+     * The Subagents seam, supplied by the parent Bot Durable Object
      * for one admitted Turn. Absent outside a Turn, and outside a deployment
      * that can address a Subagent Durable Object, and the Package is then not
      * mounted at all: a Bot dispatches a subagent only inside a Turn whose run
@@ -730,7 +730,7 @@ export function createFoundationHostedRuntimePackages(
      */
     subagents?: SubagentsRuntimeHostV1;
     /**
-     * The Computer sync seam (ADR 0013), supplied by the Bot Durable Object
+     * The Computer sync seam, supplied by the Bot Durable Object
      * for one admitted Turn. Absent outside a Turn, and outside one whose
      * durable roots are reachable in object storage — the Computer provider
      * then offers no sync at all, and a Computer's durable roots live on the
@@ -1206,9 +1206,9 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
     packages: plan.packages
       // An artifact-backed member is not in this table and never should be: its
       // runtime Contribution is immutable bytes the isolate host loads, not a
-      // plugin compiled into this bundle (ADR 0022 decision 8). The test is the
-      // artifact, so a first-party Package that ships as one needs no entry
-      // here and no name anywhere in this function.
+      // plugin compiled into this bundle. The test is the artifact, so a
+      // first-party Package that ships as one needs no entry here and no name
+      // anywhere in this function.
       .filter((pkg) => pkg.artifact === undefined && runtimeIds.has(pkg.id))
       .map((pkg) => ({
         specifier: pkg.specifier,

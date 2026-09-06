@@ -18,11 +18,10 @@ describe("the subagent role catalogs", () => {
   });
 
   /**
-   * The table, exactly as `docs/research/grokbot-computer.md` l.351–356 states
-   * it: `executor` gets every work tool, `browserUse` gets the browser page
-   * tools and nothing else, `computerUse` gets the shell, the desktop and the
-   * browser, and the two video roles get what they were given to read and no
-   * Computer at all.
+   * The table, exactly as the parity target states it: `executor` gets every
+   * work tool, `browserUse` gets the browser page tools and nothing else,
+   * `computerUse` gets the shell, the desktop and the browser, and the two
+   * video roles get what they were given to read and no Computer at all.
    */
   const table: Record<SubagentRoleV1, readonly SubagentToolReachV1[]> = {
     executor: ["read", "handoff", "work", "browser", "desktop"],

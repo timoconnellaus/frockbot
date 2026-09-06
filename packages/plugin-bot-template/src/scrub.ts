@@ -1,10 +1,9 @@
 // Building the pack — the only place scrubbing happens.
 //
-// The register's contract, verbatim (`docs/research/grokbot-computer.md` line
-// 326-328): the host **never falls back to the owner's live files** — a
-// selected item whose content is missing is filtered out rather than re-read;
-// scrubbing lives **only in the pack arguments, never in the live files**;
-// managed, plugin and built-in Skills are always excluded.
+// The register's contract, verbatim: the host **never falls back to the
+// owner's live files** — a selected item whose content is missing is filtered
+// out rather than re-read; scrubbing lives **only in the pack arguments, never
+// in the live files**; managed, plugin and built-in Skills are always excluded.
 //
 // So this module is a pure function. It takes a description of what the Bot
 // already is and returns a `BotTemplateV1`; it reads nothing, writes nothing,
@@ -15,8 +14,8 @@
 // What is refused, and why:
 //
 //   Memory, transcripts, unread state, Computer files  a template is
-//     public-shareable and Memory is the User's facts under a durable root
-//     (ADR 0015 records the divergence from GrokBot's `memory:[…]`).
+//     public-shareable and Memory is the User's facts under a durable root,
+//     unlike GrokBot's `memory:[…]`.
 //   Connections, `connectionId`, `safeMetadata`  Connections belong to the
 //     importing User and cannot cross Users.
 //   `PackageInstallationView.values`  setup fields may hold keys.
@@ -115,7 +114,7 @@ export interface TemplateSourceV1 {
    * The recipe the exported profile carries: this Bot's own generated sheep.
    *
    * A `SheepRecipeV1` is four layer ids — deterministic, tiny, and nobody's
-   * photograph — so it travels (ADR 0015, D1).
+   * photograph — so it travels.
    */
   sheep: TemplateSheepRecipeV1;
   skills: readonly TemplateSkillCandidateV1[];

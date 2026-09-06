@@ -21,7 +21,7 @@ export interface ApplicationPackageSelection {
    * Contributions from its own Contribution table, which is how every member
    * of the foundation application works today. Present ⇒ the member loads
    * through the isolate host like a Bot-authored Package, even though its
-   * provenance is first-party — the shape ADR 0022 gives the Applets Package.
+   * provenance is first-party — the shape the Applets Package takes.
    * Declaring one changes nothing about how the plan is compiled; it only
    * records that the code is not in this bundle.
    */

@@ -75,7 +75,7 @@ export type CompositionOriginV1 =
     };
 
 /**
- * An Applet's tools inside one Bot's pinned Composition (ADR 0022 decision 4).
+ * An Applet's tools inside one Bot's pinned Composition.
  *
  * Not a Package member: an Applet contributes no module to the Bot's isolate
  * set, and a Bot can neither author, install, nor remove one. It follows the
@@ -719,13 +719,13 @@ export interface BootstrapCompositionMemberV1 {
    * The immutable module bytes this first-party member loads from, when the
    * application declared one.
    *
-   * ADR 0022 decision 8: a first-party Package that declares only
-   * Bot-authorable Contribution kinds "ships as an artifact-backed member and
-   * loads through the same path as a Bot-authored one". The bootstrap is where
-   * that member enters a Bot's Composition, so it is where the artifact has to
-   * survive — dropping it here would silently turn the member into an
-   * in-process one the application has no table entry for, which is a Bot with
-   * no Applets rather than a mount failure.
+   * A first-party Package that declares only Bot-authorable Contribution kinds
+   * ships as an artifact-backed member and loads through the same path as a
+   * Bot-authored one. The bootstrap is where that member enters a Bot's
+   * Composition, so it is where the artifact has to survive — dropping it here
+   * would silently turn the member into an in-process one the application has
+   * no table entry for, which is a Bot with no Applets rather than a mount
+   * failure.
    */
   artifact?: ArtifactRefV1;
 }

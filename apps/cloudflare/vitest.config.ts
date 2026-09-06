@@ -32,11 +32,11 @@ export default defineConfig({
         compatibilityFlags: ["nodejs_compat"],
         workerLoaders: {
           BOT_PACKAGES: {},
-          // Applet server artifacts (ADR 0022), mounted as a facet of the
-          // AppletState Durable Object.
+          // Applet server artifacts, mounted as a facet of the AppletState
+          // Durable Object.
           APPLETS: {},
         },
-        // The shared Computer host (ADR 0004) as the Durable Object sees it:
+        // The shared Computer host as the Durable Object sees it:
         // a service binding, decoding the real v1 protocol.
         serviceBindings: {
           COMPUTER_HOST: (request: Request) => computerHost.fetch(request),
@@ -89,8 +89,8 @@ export default defineConfig({
           FROCKBOT_AUTHORIZATION_STATE_SECRET:
             "workerd-mcp-oauth-state-secret-0123456789abcdef",
           // Not a credential: no Sprite token reaches this Worker in
-          // production either, because the Computer host holds the only copy
-          // (ADR 0004). `SPRITES_TOKEN` is only the "is a Computer configured"
+          // production either, because the Computer host holds the only
+          // copy. `SPRITES_TOKEN` is only the "is a Computer configured"
           // gate, and this suite exercises a deployment that has one — with it
           // unset the Computer Package mounts no tools at all, which is a
           // different subject.
@@ -106,9 +106,8 @@ export default defineConfig({
           // A leak canary: a Bot isolate — and an Applet facet — must never see
           // a host binding.
           SECRET_TOKEN: "host-only-secret",
-          // The Applet viewer door's signing secret (ADR 0022 §4). Fixed, so a
-          // test can mint the token a page presents and forge one that must be
-          // refused.
+          // The Applet viewer door's signing secret. Fixed, so a test can mint
+          // the token a page presents and forge one that must be refused.
           APPLET_VIEWER_SECRET: "workerd-applet-viewer-secret-0123456789ab",
         },
       },

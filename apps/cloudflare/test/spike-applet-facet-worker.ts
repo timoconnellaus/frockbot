@@ -1,16 +1,15 @@
 // SPIKE (lane S1): the smallest honest stand-in for the `AppletState` Durable
-// Object of `docs/plans/applets.md` §2.
+// Object.
 //
 // A kernel-owned Durable Object loads an Applet's server module through a
 // Worker Loader binding, takes the loaded module's `Applet` class with
 // `getDurableObjectClass`, and mounts it as a **facet** of itself. Everything
-// the plan asks of that seam — SQL and key/value storage inside the facet,
+// that seam must support — SQL and key/value storage inside the facet,
 // abort + remount of new code over the same storage, `facets.delete`, the
 // `env` the facet sees, egress, a loopback capability stub, a hibernatable
 // WebSocket, and an alarm — is exercised from here.
 //
-// Throwaway. It answers `docs/research/spike-applet-facets.md`; it is not
-// production code and lane K3 replaces it.
+// Throwaway: not production code, and lane K3 replaces it.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 
 /**
@@ -23,13 +22,13 @@ export const SPIKE_APPLET_COMPATIBILITY_DATE = "2026-08-27";
 
 /**
  * Empty on purpose, and proven so: cloudflare-os passes
- * `allow_irrevocable_stub_storage` to its gadget worker, but every result in
- * `docs/research/spike-applet-facets.md` passes with **no** compatibility flag
- * on the loaded worker at this compatibility date.
+ * `allow_irrevocable_stub_storage` to its gadget worker, but every result here
+ * passes with **no** compatibility flag on the loaded worker at this
+ * compatibility date.
  */
 export const SPIKE_APPLET_COMPATIBILITY_FLAGS: string[] = [];
 
-/** The one facet name the kernel mounts, per the plan. */
+/** The one facet name the kernel mounts. */
 const FACET_NAME = "applet";
 
 /** A key only the *parent* writes, to prove the facet cannot see it. */
@@ -55,10 +54,9 @@ export interface SpikeCapabilitiesPropsV1 {
 let loaderCallbackRuns = 0;
 
 /**
- * The `CAPABILITIES` slot of the facet's `env`. The prior loader spike
- * (`docs/research/spike-worker-loader-from-do.md` §3) found an `RpcTarget` in
- * `env` is rejected with `DataCloneError`, so this is a `WorkerEntrypoint`
- * minted as a loopback stub with `ctx.exports`.
+ * The `CAPABILITIES` slot of the facet's `env`. The prior loader spike found
+ * an `RpcTarget` in `env` is rejected with `DataCloneError`, so this is a
+ * `WorkerEntrypoint` minted as a loopback stub with `ctx.exports`.
  */
 export class SpikeAppletCapabilities extends WorkerEntrypoint<
   SpikeAppletFacetEnv,
@@ -95,9 +93,9 @@ interface SpikeExports {
 
 /**
  * The Applet server module a Bot would publish, in the shape the SDK's `Applet`
- * base class will take (`docs/plans/applets.md` §8): a `DurableObject`
- * subclass named `Applet`, plus a default `WorkerEntrypoint` so the loaded
- * worker is also callable without a facet (used by the loader-identity result).
+ * base class will take: a `DurableObject` subclass named `Applet`, plus a
+ * default `WorkerEntrypoint` so the loaded worker is also callable without a
+ * facet (used by the loader-identity result).
  *
  * `version` is substituted so two module maps differ in observable behaviour
  * while writing to the same facet storage.

@@ -101,7 +101,7 @@ function payload(shell: string, target: string): string | undefined {
  * and the test host is not. Every path the sync touches is an absolute path in
  * `files`, exactly as it would be on the Sprite.
  *
- * It is the runner behind a `FakeComputerHost` (ADR 0004): the sync's bash now
+ * It is the runner behind a `FakeComputerHost`: the sync's bash now
  * travels to the shared host on a command's stdin rather than on a Sprite
  * argv, so the same script text arrives here as one string.
  */
@@ -421,8 +421,8 @@ const MOUNTS = {
   userSkills: "/home/box/agent-data/workflows",
   botMemory: `/home/box/agent-data/agents/${computerBotKey(BOT)}/memory`,
   userMemory: "/home/box/agent-data/user-memory",
-  // ADR 0022 decision 7's Applet source root, resolved from the layout's one
-  // `package-declared` template. Nothing about Applets is in this Package.
+  // The Applet source root, resolved from the layout's one `package-declared`
+  // template. Nothing about Applets is in this Package.
   appletSource: "/home/box/agent-data/user-packages/applets/source",
 };
 
@@ -622,9 +622,9 @@ describe("the durable-root sync, store to Computer", () => {
     ).toBe(true);
   });
 
-  // ADR 0013: "Deleting a file removes the object and records a tombstone
-  // generation" — and the removal reaches the Computer rather than the file
-  // quietly reappearing on the next pull.
+  // Deleting a file removes the object and records a tombstone generation —
+  // and the removal reaches the Computer rather than the file quietly
+  // reappearing on the next pull.
   test("a delete in the store becomes a recorded removal on the Computer", async () => {
     const { sprite, store, sync } = harness();
     const generation = await writeToStore(
@@ -872,9 +872,9 @@ describe("the durable-root sync, Package-declared roots", () => {
   });
 
   test("a declared root round-trips: store to Computer, and a shell write back", async () => {
-    // ADR 0022 decision 7: this is the root Applet source lives in, and source
-    // edits still move in both directions while reproducible build trees do
-    // not enter the ordinary whole-Workspace manifest.
+    // This is the root Applet source lives in, and source edits still move in
+    // both directions while reproducible build trees do not enter the
+    // ordinary whole-Workspace manifest.
     const { sprite, store, sync, roots } = harness({
       packageRoots: [APPLET_SOURCE_PACKAGE_ROOT],
     });
@@ -997,7 +997,7 @@ describe("the durable-root sync, Package-declared roots", () => {
 describe("the durable-root sync, conflicts", () => {
   // Constitution — Memory: "a write that would overwrite a generation its
   // writer has not seen is preserved as a conflicting generation and surfaced,
-  // never merged or dropped"; ADR 0013 requires this proven before it ships.
+  // never merged or dropped".
   test("a Computer write and a store write to one path both survive, one as a surfaced conflict", async () => {
     const { sprite, store, generations, bucket, sync } = harness();
     const first = await writeToStore(
@@ -1092,9 +1092,9 @@ describe("the durable-root sync, Memory roots", () => {
     expect(refused.status).toBe("refused");
   });
 
-  // ADR 0016 extends exactly this rule to the User-global instruction root:
-  // the Skills Package is its single writer, so the Computer presents it
-  // read-only and the sync only materializes it.
+  // The same rule extends to the User-global instruction root: the Skills
+  // Package is its single writer, so the Computer presents it read-only and
+  // the sync only materializes it.
   test("a User-global Skill changed on the Computer is never pushed and is restored", async () => {
     const { sprite, store, sync } = harness();
     const generation = await writeToStore(
@@ -1263,8 +1263,8 @@ describe("the on-Sprite sync service", () => {
   // Constitution — Computer and Workspace: "Only Computer-provider-declared
   // services may be reattached; other processes are assumed dead after a cold
   // pause." The claim that `WORKSPACE_SYNC_SERVICE` is *declared* no longer has
-  // a subject in this Package: after ADR 0004 the provider never creates a
-  // service — the shared Computer host owns the Sprite's service declarations,
+  // a subject in this Package: the provider never creates a service — the
+  // shared Computer host owns the Sprite's service declarations,
   // and this suite's host double answers `open` without one. The test that
   // asserted it against a `FakeSyncSprite.createService` recorder is gone with
   // the SDK it drove; the declaration belongs to the host's own suite now.
@@ -1440,9 +1440,9 @@ describe("the durable-root sync on the Computer handle", () => {
     expect(summary.detail).toBe("");
   });
 
-  // The sync-now seam of ADR 0022 decision 7, provider side: an Applet publish
-  // needs the bytes `applet build` left on the Computer to be in the store
-  // before it reads them, and it needs that for one root, not the Workspace.
+  // The sync-now seam, provider side: an Applet publish needs the bytes
+  // `applet build` left on the Computer to be in the store before it reads
+  // them, and it needs that for one root, not the Workspace.
   test("reconciles one declared root on demand and refuses a root it does not sync", async () => {
     const { sprite, store, open } = providerHarness([
       APPLET_SOURCE_PACKAGE_ROOT,
@@ -1686,8 +1686,8 @@ describe("the durable-root sync on the Computer handle", () => {
     expect(summary.required).toEqual([{ path, durable: false }]);
   });
 
-  // ADR 0013 makes a delete a recorded generation, so an absence the ledger
-  // never recorded is drift and not a removal. The general case: an ordinary
+  // A delete is a recorded generation, so an absence the ledger never
+  // recorded is drift and not a removal. The general case: an ordinary
   // Skill whose object went missing under a sidecar keeps its bytes, and the
   // sync puts them back rather than deleting the User's file.
   test("re-pushes rather than removes when the store recorded no removal", async () => {

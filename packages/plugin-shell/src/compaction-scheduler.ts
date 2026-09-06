@@ -1,10 +1,10 @@
 // Where a compaction actually runs, now that it no longer runs in the Turn.
 //
-// ADR 0030 always meant the summariser to cost a person nothing: it is
-// evaluated at Turn end, after `turn/end` is journaled, precisely so the Turn
-// they were waiting on is already over. The Turn-end hook honoured the *order*
-// and not the *waiting*: `agent/turn-stopping` is a serial hook the agent loop
-// awaits inside `#runTurn`'s `finally`, so `whenIdle` — and therefore the run's
+// The summariser was always meant to cost a person nothing: it is evaluated at
+// Turn end, after `turn/end` is journaled, precisely so the Turn they were
+// waiting on is already over. The Turn-end hook honoured the *order* and not
+// the *waiting*: `agent/turn-stopping` is a serial hook the agent loop awaits
+// inside `#runTurn`'s `finally`, so `whenIdle` — and therefore the run's
 // terminal record, the `runs` broadcast, and the HTTP response — all sat behind
 // a 40-second model call. The client stayed busy the whole time.
 //
@@ -17,10 +17,10 @@
 // next Turn behind it — is the very latency this removes, one message later. So
 // the next admission aborts it and waits only for that abort to settle, which
 // keeps every write to the session log serialised behind exactly one owner. An
-// aborted compaction leaves an intent with no outcome, which is the case ADR
-// 0028 already covers: the next Turn end settles it as a failure and backoff
-// picks the range up again. Nothing is corrupted by losing one, and nobody
-// waits for one.
+// aborted compaction leaves an intent with no outcome, which reconciliation
+// already covers: the next Turn end settles it as a failure and backoff picks
+// the range up again. Nothing is corrupted by losing one, and nobody waits for
+// one.
 //
 // Keyed by session id and held for the lifetime of the isolate, because that is
 // exactly the scope the work has: a Durable Object holds one conversation, and
@@ -51,8 +51,8 @@ class CompactionWork {
         // Aborted before it ever began — a Turn was admitted in the same tick.
         if (!controller.signal.aborted) await run(controller.signal);
       } catch {
-        // A compaction that fails is a conversation that carries on under ADR
-        // 0027's eviction. There is nobody to tell.
+        // A compaction that fails is a conversation that carries on under
+        // oldest-first eviction. There is nobody to tell.
       } finally {
         if (this.#controller === controller) this.#controller = undefined;
       }

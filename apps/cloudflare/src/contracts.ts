@@ -282,9 +282,9 @@ export interface UserBotStateBinding {
   }): Promise<ClientWorkspaceFileV1>;
   /**
    * The User's Applets, and the two short-lived projections an open Applet
-   * needs (ADR 0022 §4). Account-wide, so they take no Bot: they sit on this
-   * User-scoped binding because it is the only door the hosted application has
-   * to the User Durable Object.
+   * needs. Account-wide, so they take no Bot: they sit on this User-scoped
+   * binding because it is the only door the hosted application has to the
+   * User Durable Object.
    */
   listApplets(input?: { schemaVersion: 1 }): Promise<unknown>;
   mintAppletViewerToken(input: {
@@ -433,10 +433,10 @@ export interface CatalogGatewayStore {
 }
 
 /**
- * Bot-authored Package artifacts (`docs/plans/kernel-and-isolate.md` Step 3).
- * Content-addressed and immutable, stored at `packages/<contentHash>.mjs` in the
- * same `APPLICATION_ARTIFACTS` bucket. Unlike `ApplicationArtifactStore.load`,
- * the reader verifies the hash before the bytes are used.
+ * Bot-authored Package artifacts. Content-addressed and immutable, stored at
+ * `packages/<contentHash>.mjs` in the same `APPLICATION_ARTIFACTS` bucket.
+ * Unlike `ApplicationArtifactStore.load`, the reader verifies the hash before
+ * the bytes are used.
  */
 export interface PackageArtifactStore {
   putPackageArtifact(contentHash: string, module: string): Promise<void>;
@@ -843,9 +843,9 @@ export interface GatewayDependencies {
   userConfigurationFor(userId: string): UserConfigurationBinding;
   botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
   /**
-   * The Applet viewer door (ADR 0022 §4). Both absent in a deployment without
-   * Applets, and `/api/applets/:id/socket` then reports itself unconfigured
-   * rather than the Worker failing to construct.
+   * The Applet viewer door. Both absent in a deployment without Applets, and
+   * `/api/applets/:id/socket` then reports itself unconfigured rather than the
+   * Worker failing to construct.
    */
   appletViewerSecret?: string;
   /**

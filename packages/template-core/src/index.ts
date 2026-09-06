@@ -6,15 +6,13 @@
  * references only. It never carries state, secrets, credentials, Connections,
  * Memory, transcripts, or bytes.
  *
- * The register (`docs/research/grokbot-computer.md` lines 313–330) fixes the
- * shape GrokBot's `create_bot_share_json` packs and the contracts that go with
- * it: the host never falls back to the owner's live files, scrubbing lives only
- * in the pack arguments, managed and plugin Skills are always excluded, and the
- * payload is bounded at ~100 000 characters. Three FrockBot readings depart
- * from it, each recorded in `docs/adr/0015-bot-template-recipe.md`: a
- * marketplace `pluginId` becomes `packageId` + `catalogId` + `version`,
- * publication is a User act rather than a tool argument, and Memory is not
- * exported at all.
+ * The register fixes the shape GrokBot's `create_bot_share_json` packs and the
+ * contracts that go with it: the host never falls back to the owner's live
+ * files, scrubbing lives only in the pack arguments, managed and plugin Skills
+ * are always excluded, and the payload is bounded at ~100 000 characters. Three
+ * FrockBot readings depart from it: a marketplace `pluginId` becomes
+ * `packageId` + `catalogId` + `version`, publication is a User act rather than
+ * a tool argument, and Memory is not exported at all.
  *
  * This module mirrors `catalog-core`'s role exactly: DTOs, strict exact-key
  * decoders, bounds, the object-key layout and the content hash — no I/O, no

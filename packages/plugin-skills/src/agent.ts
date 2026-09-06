@@ -17,7 +17,7 @@
 //  3. Offer the two tools: `skill_load` reads one body on demand (progressive
 //     disclosure, GrokBot parity), `skill_write` authors a Skill into one of
 //     the Bot's instruction roots — its own (self-modification) or its User's
-//     shared root, which every Bot of that User reads (ADR 0016).
+//     shared root, which every Bot of that User reads.
 //
 // It never calls the Computer interface and never wakes a Computer; see the
 // hibernation seam documented in `./catalog.ts`.
@@ -317,8 +317,8 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
  *
  * All four sources are named so a refusal can be specific about *why* two of
  * them are not writable, rather than reading as an unknown-field error. `bot`
- * and `user` are the two instruction roots (ADR 0016) and both are written the
- * same way, with the Bot's own provenance recorded. `managed` and `plugin` are
+ * and `user` are the two instruction roots and both are written the same way,
+ * with the Bot's own provenance recorded. `managed` and `plugin` are
  * not durable-root files at all — one is bytes of a first-party artifact, the
  * other an index over a pinned Catalog generation — so neither has a write
  * path to route to.

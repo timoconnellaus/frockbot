@@ -112,7 +112,7 @@ export interface WebChatMessage {
   /**
    * A line under the bubble saying why the Turn ends where it does — it was
    * stopped, or a later message took its place. The text above it is what the
-   * Bot had already said, which it keeps (ADR 0024).
+   * Bot had already said, which it keeps.
    */
   notice?: string;
   /**
@@ -529,7 +529,7 @@ export interface FrockBotWebData {
   uninstallPackage(packageId: string): Promise<void>;
   /**
    * Puts this conversation down and starts the next one. Memory is kept; only
-   * the history the next Turn carries is new (ADR 0027).
+   * the history the next Turn carries is new.
    */
   startConversation(): Promise<void>;
   startConnection(

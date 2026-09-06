@@ -1,6 +1,6 @@
 # Shared Computer host
 
-The production Computer host of [ADR 0004](../../docs/adr/0004-host-fly-computer-in-cloudflare-containers.md), and the successor to `apps/fly-host-prototype`.
+The production Computer host: a Worker that shards and authorizes, fronting a Cloudflare Container that runs the Fly Sprites SDK.
 
 A Bot Durable Object cannot drive a Fly Sprite itself. This Worker is where the Sprites SDK, `SPRITES_TOKEN`, and the WebSocket exec transport live, behind a versioned protocol the Durable Object speaks and a service binding nothing public can reach.
 

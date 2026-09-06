@@ -135,8 +135,8 @@ export interface BotNotificationPolicy {
  * Where an installed Package came from. `first-party` is a Package compiled
  * into the running application; `catalog` is one admitted from a pinned remote
  * Catalog generation, whose manifest is data and whose executing code is still
- * a reviewed first-party Package (ADR 0014). Absent means `first-party`, so
- * every installation recorded before the Catalog existed keeps its meaning.
+ * a reviewed first-party Package. Absent means `first-party`, so every
+ * installation recorded before the Catalog existed keeps its meaning.
  */
 export type PackageProvenanceV1 = "first-party" | "catalog";
 
@@ -263,7 +263,7 @@ export interface BotSettingsViewV1 {
   notifications: BotNotificationPolicy;
   /**
    * Package-owned Bot overrides. Disabling a Package leaves these durable but
-   * inert so re-enabling restores them (ADR 0019).
+   * inert so re-enabling restores them.
    */
   packageValues: Record<string, Record<string, unknown>>;
 }
@@ -331,7 +331,7 @@ export type ConfigurationCommandV1 =
       values?: Record<string, JsonValue>;
     })
   | (CommandMetaV1 & {
-      /** Removes the installation; Connections remain User-owned (ADR 0019). */
+      /** Removes the installation; Connections remain User-owned. */
       type: "user/uninstall-package";
       packageId: string;
     })
@@ -505,7 +505,7 @@ export interface BotExecutionPlanV1 {
   capabilities: EnabledCapabilityV1[];
 }
 
-/** One Capability granted account-wide by an enabled Package (ADR 0019). */
+/** One Capability granted account-wide by an enabled Package. */
 export interface EnabledCapabilityV1 {
   packageId: string;
   capabilityId: string;

@@ -194,8 +194,8 @@ import {
   VOICE_DICTATION_INTERNAL_PATH,
 } from "./voice-session.js";
 export { BotCapabilities } from "./bot-capabilities.js";
-// The Applet authority (ADR 0022): the Durable Object that owns one Applet
-// instance, and the loopback `CAPABILITIES` entrypoint its facet is handed.
+// The Applet authority: the Durable Object that owns one Applet instance,
+// and the loopback `CAPABILITIES` entrypoint its facet is handed.
 export { AppletCapabilities, AppletState } from "./applet-state.js";
 // The composer's dictation transport (voice plan D2): one object per User,
 // holding the browser leg and the provider leg and no authority at all.
@@ -212,9 +212,8 @@ interface Env {
   BOT_PACKAGES: BotPackageLoader;
   /**
    * Applet server artifacts, loaded from the Applet Durable Object and mounted
-   * as a facet (ADR 0022). Its own loader namespace: a loader id keeps the
-   * `env` it was first loaded with, and an Applet's `env` is not a Bot
-   * Package's.
+   * as a facet. Its own loader namespace: a loader id keeps the `env` it was
+   * first loaded with, and an Applet's `env` is not a Bot Package's.
    */
   APPLETS: WorkerLoader;
   /** One Durable Object per Applet instance, `idFromName("<userId>:<appletId>")`. */
@@ -261,7 +260,7 @@ interface Env {
    * The direct OpenAI realtime key. Present, dictation takes the direct path;
    * absent, it takes the AI Gateway's BYOK key. A Worker secret, so the
    * release workflow's `--secrets-file` list carries the name or no release
-   * ever updates it (ADR 0025).
+   * ever updates it.
    */
   OPENAI_API_KEY?: string;
   /**
@@ -448,9 +447,9 @@ type RpcBoundary<T> = {
 function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   // The one place a Bot Durable Object is named, and therefore the one place
   // the name has to be beyond doubt. A Subagent Durable Object is the same
-  // class in this namespace under `<userId>:<botId>#task:<taskId>` (ADR 0017),
-  // so a `#` reaching here from a path segment would let a caller name an
-  // object the directory never minted. `decodeBotIdV1` rejects it — this
+  // class in this namespace under `<userId>:<botId>#task:<taskId>`, so a `#`
+  // reaching here from a path segment would let a caller name an object the
+  // directory never minted. `decodeBotIdV1` rejects it — this
   // restates the check where the id becomes an object rather than trusting
   // that every route above remembered to.
   const id = env.BOT_STATES.idFromName(
@@ -642,6 +641,28 @@ function deploymentPolicyStub(env: Env): DeploymentPolicyRpc {
   return env.DEPLOYMENT_POLICY.getByName(
     DEPLOYMENT_POLICY_SINGLETON_NAME,
   ) as unknown as DeploymentPolicyRpc;
+}
+
+/**
+ * Refuses account creation while signups are closed, so a closed deployment
+ * writes no `user` row. An existing account still signs in: better-auth only
+ * consults this when it is about to create one.
+ */
+async function mayCreateAccount(env: Env, email: string): Promise<boolean> {
+  if (
+    isDeploymentAdminV1(
+      { id: email, email, mode: "better-auth" },
+      env.FROCKBOT_ADMIN_EMAILS,
+    )
+  ) {
+    return true;
+  }
+  const policy = decodeDeploymentPolicyV1(
+    rpcJsonSnapshot(
+      await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
+    ),
+  );
+  return policy.signups.open;
 }
 
 /**
@@ -929,7 +950,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     ).readWorkspaceFileV1(request.path);
   }
 
-  // --- Applets (ADR 0022) --------------------------------------------------
+  // --- Applets -------------------------------------------------------------
   //
   // A deployment with no `APPLET_VIEWER_SECRET` can sign nothing, so it says
   // so once, honestly, in two places at once: a final sentence for the person
@@ -1270,10 +1291,10 @@ class R2ApplicationArtifacts
   /**
    * A Package's page, from object storage or from this bundle.
    *
-   * A first-party artifact-backed member (ADR 0022 decision 8) is built at
-   * build time and its pages travel here, so the anonymous serving origin can
-   * answer for them with nothing seeded into the bucket. The digest decides in
-   * both cases; object storage wins when it holds the object.
+   * A first-party artifact-backed member is built at build time and its pages
+   * travel here, so the anonymous serving origin can answer for them with
+   * nothing seeded into the bucket. The digest decides in both cases; object
+   * storage wins when it holds the object.
    */
   async loadPackageUiArtifact(
     contentHash: string,
@@ -1339,7 +1360,7 @@ class R2ApplicationArtifacts
 /**
  * Projects one Bot's durable settings onto the Flock identity DTO. The Bot
  * Durable Object stays the authority: this is a read-through view, so the
- * immutable registration seed (ADR 0006) never has to carry mutable identity.
+ * immutable registration seed never has to carry mutable identity.
  */
 function botIdentityView(
   botId: string,
@@ -2232,7 +2253,9 @@ export default {
           .split(",")
           .map((host) => host.trim())
           .filter(Boolean),
-        auth: gatewayAuth(env),
+        auth: gatewayAuth(env, {
+          mayCreateAccount: (email) => mayCreateAccount(env, email),
+        }),
         saveNativeForm: (userId, command) => {
           const stub = env.USER_CONFIGURATIONS.get(
             env.USER_CONFIGURATIONS.idFromName(userId),
@@ -2249,7 +2272,9 @@ export default {
           ? {
               nativeAuth: createNativeAuth({
                 secret: env.BETTER_AUTH_SECRET,
-                auth: gatewayAuth(env),
+                auth: gatewayAuth(env, {
+                  mayCreateAccount: (email) => mayCreateAccount(env, email),
+                }),
                 returnUris: nativeReturnUris(env.NATIVE_SLICE_2_AUTH),
                 canIssueSession: async (userId) => {
                   const identity = await env.AUTH_DB.prepare(

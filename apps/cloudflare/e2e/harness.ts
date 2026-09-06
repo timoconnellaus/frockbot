@@ -100,12 +100,11 @@ function unauthorized(): { status: number; body: string } {
  * A fake Ollama server.
  *
  * The authentication behaviour is the one measured against https://ollama.com
- * on 2026-08-31 and recorded in `docs/research/ollama-cloud-auth.md`, and the
- * same one `test/harness/miniflare.ts` reproduces for the workerd layers: the
- * catalog reads answer 200 for any key at all, and only `POST /api/chat` and
- * `POST /v1/chat/completions` authenticate. Reproducing that asymmetry is what
- * lets a spec prove a Connection is validated by an inference call and not by a
- * catalog read.
+ * on 2026-08-31, and the same one `test/harness/miniflare.ts` reproduces for
+ * the workerd layers: the catalog reads answer 200 for any key at all, and
+ * only `POST /api/chat` and `POST /v1/chat/completions` authenticate.
+ * Reproducing that asymmetry is what lets a spec prove a Connection is
+ * validated by an inference call and not by a catalog read.
  *
  * `POST /__e2e/chat-mode` is not an Ollama route: it lets a spec revoke the key
  * mid-run, so a Turn can fail at the provider after the Connection is ready.
@@ -756,9 +755,9 @@ export async function startHarness(
 
         "--var",
         `CREDENTIAL_KEYRING:${E2E_CREDENTIAL_KEYRING}`,
-        // No Computer: the Sprite is unreachable from workerd (ADR 0004) and
-        // no spec touches it. An empty token is what production hands a Worker
-        // with no Computer configured.
+        // No Computer: the Sprite is unreachable from workerd and no spec
+        // touches it. An empty token is what production hands a Worker with
+        // no Computer configured.
         "--var",
         "SPRITES_TOKEN:",
         // better-auth needs a secret to construct; no spec signs in with it.

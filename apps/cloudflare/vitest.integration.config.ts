@@ -149,8 +149,8 @@ export default defineConfig({
           FROCKBOT_AUTHORIZATION_STATE_SECRET:
             "workerd-mcp-oauth-state-secret-0123456789abcdef",
           // Not a credential: no Sprite token reaches this Worker in
-          // production either, because the Computer host holds the only copy
-          // (ADR 0004). `SPRITES_TOKEN` is only the "is a Computer configured"
+          // production either, because the Computer host holds the only
+          // copy. `SPRITES_TOKEN` is only the "is a Computer configured"
           // gate, so a placeholder is exactly what a deployment with a
           // Computer looks like from here.
           SPRITES_TOKEN: "configured",

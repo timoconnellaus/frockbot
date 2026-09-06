@@ -25,9 +25,9 @@ export interface MemoryOwnerV1 {
 }
 
 /**
- * The three write tiers within a scope (`docs/research/grokbot-computer.md`
- * §2.2): `profile` is foundational and kept in mind every Turn, `log` is dated
- * history and the default, `note` "fades fast". A note is not a separate file:
+ * The three write tiers within a scope: `profile` is foundational and kept in
+ * mind every Turn, `log` is dated history and the default, `note` "fades
+ * fast". A note is not a separate file:
  * GrokBot stores it as a `[note] ` prefix on the fact text in the same monthly
  * log, and so does this Package.
  */

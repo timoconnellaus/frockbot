@@ -1,4 +1,4 @@
-// The Bot Durable Object's half of the Computer sync seam (ADR 0013).
+// The Bot Durable Object's half of the Computer sync seam.
 //
 // The durable-root sync reconciles two halves: the Workspace on the Computer,
 // which the Computer provider Package owns, and object storage, whose
@@ -63,7 +63,7 @@ export interface DeclaredPackageRootSourceV1 {
  * nothing in production passed, so `image/generated` — a root the Image
  * Package has written since it shipped — never reached the durable-root sync
  * and never appeared on a Computer. This is the missing half, and
- * `applets/source` (ADR 0022) is the reason it could no longer be missing.
+ * `applets/source` is the reason it could no longer be missing.
  *
  * ENABLEMENT decides membership, by the same `state === "installed"` test
  * `resolveBotExecutionPlanV1` applies to Capabilities and against the same

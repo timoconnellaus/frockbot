@@ -170,8 +170,8 @@ export interface PackageSettingDefinition {
   scopes: SettingScope[];
   /**
    * A kernel-consumed semantic role. The model role is deliberately generic:
-   * ADR 0019 lets a Package opt the User into model choice without teaching
-   * the kernel that Package's identity or policy.
+   * it lets a Package opt the User into model choice without teaching the
+   * kernel that Package's identity or policy.
    */
   role?: "model";
   schema: PackageSettingSchema;
@@ -224,8 +224,8 @@ export interface CapabilityDefinition {
  *
  * `scope` is `user` and only `user`: `WorkspaceRootV1` names a
  * `package-declared` root by User and Package with no Bot in it, and Package
- * availability is a User-level fact (ADR 0019). A Bot-scoped Package root
- * would be a root the kernel's own root type cannot address.
+ * availability is a User-level fact. A Bot-scoped Package root would be a root
+ * the kernel's own root type cannot address.
  */
 export interface ManifestDeclaredRootV1 {
   /** The `rootId`, in the kernel's `package-declared` root-id shape. */

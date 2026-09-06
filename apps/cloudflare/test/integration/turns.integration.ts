@@ -65,8 +65,8 @@ describe("a Turn through the gateway, the loaded artifact and the Bot", () => {
     expect(response.status).toBe(200);
     expect(JSON.stringify(body)).toContain("Ollama reply");
 
-    // Run records carry a sequence range since ADR 0033; the fixture hydrates
-    // the journal from the paged session log.
+    // Run records carry a sequence range; the fixture hydrates the journal
+    // from the paged session log.
     const stored = await readStoredRunWithEventsV1<{
       events: Array<{
         type: string;

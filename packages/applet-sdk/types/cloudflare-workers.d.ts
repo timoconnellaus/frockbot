@@ -1,11 +1,11 @@
 /**
  * The only part of the Cloudflare programming model the SDK names.
  *
- * ADR 0022 records the ceiling deliberately: an Applet is a Durable Object with
- * alarms and hibernating sockets, and no adapter hides that. What this file
- * does is keep the surface to the handful of members `server/` actually uses,
- * so an Applet author never types a binding name and the SDK type-checks
- * without `@cloudflare/workers-types` in scope. It lives outside `src/` so a
+ * The ceiling is deliberate: an Applet is a Durable Object with alarms and
+ * hibernating sockets, and no adapter hides that. What this file does is keep
+ * the surface to the handful of members `server/` actually uses, so an Applet
+ * author never types a binding name and the SDK type-checks without
+ * `@cloudflare/workers-types` in scope. It lives outside `src/` so a
  * consumer that already has the real Workers types cannot see two declarations
  * of the same module.
  */

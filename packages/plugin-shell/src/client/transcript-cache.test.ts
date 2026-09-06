@@ -44,8 +44,8 @@ describe("TranscriptCache", () => {
   test("a different conversation on the same Bot is a miss, not the old one", () => {
     const cache = new TranscriptCache();
     cache.save("alpha", snapshot("bot:1"));
-    // ADR 0027: "new conversation" moves the Bot to a new Session, and the
-    // transcript that belonged to the previous one must not come back.
+    // "new conversation" moves the Bot to a new Session, and the transcript
+    // that belonged to the previous one must not come back.
     expect(cache.take("alpha", "bot:1#2")).toBeUndefined();
     // The miss drops it: nothing will ask for that conversation again.
     expect(cache.take("alpha", "bot:1")).toBeUndefined();

@@ -22,8 +22,8 @@
 // of writers.
 //
 // The limits live in the Package, not in the User Durable Object, until the
-// durable-root sync of ADR 0013 exists to make "Workspace disk" measurable;
-// `docs/plans/slice-2.md` Step 2 records that as the open half.
+// durable-root sync exists to make "Workspace disk" measurable. That is the
+// open half.
 
 export interface SkillQuotaConfigV1 {
   schemaVersion: 1;

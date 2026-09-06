@@ -134,8 +134,7 @@ describe("the managed Skill source", () => {
     expect(skillWriteScopeRefusalV1("plugin")).toBe(
       "managed skills are not editable this way",
     );
-    // The User-global root landed with ADR 0016, so `user` is writable and no
-    // longer a refusal.
+    // The User-global root is writable, so `user` is no longer a refusal.
     expect(skillWriteScopeRefusalV1("user")).toBeUndefined();
   });
 

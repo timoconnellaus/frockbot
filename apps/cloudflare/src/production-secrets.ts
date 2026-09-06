@@ -137,7 +137,7 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
     },
     {
       name: "FROCK_AI_GATEWAY_TOKEN",
-      why: "The `cf-aig-authorization` bearer for the AI Gateway (ADR 0025).",
+      why: "The `cf-aig-authorization` bearer for the AI Gateway.",
       degraded:
         "Frock AI falls back to the `AI` binding and the Auto model fails",
     },

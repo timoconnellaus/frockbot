@@ -40,8 +40,8 @@ function errorMessage(error: unknown): string {
 // Memory writer on the Computer's Workspace — the Computer had to be awake for
 // the Bot to read its own Memory, which is exactly what "The Agent loop, Memory, Skills,
 // Package composition, and Routines function correctly while the Computer is
-// hibernated and do not wake it" forbids. Under ADR 0013 the Memory Package
-// writes object storage directly, and the surface that backs it is a Durable
+// hibernated and do not wake it" forbids. The Memory Package now writes
+// object storage directly, and the surface that backs it is a Durable
 // Object binding the hosted backend supplies. This Electron utility runtime is
 // a platform shell with no such binding, so it mounts no Memory Package rather
 // than reaching a second store: "Desktop and mobile Contributions provide

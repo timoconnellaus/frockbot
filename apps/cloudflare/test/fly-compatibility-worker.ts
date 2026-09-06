@@ -73,7 +73,7 @@ import { UserConfiguration } from "../src/user-configuration.ts";
 export { DeploymentPolicy } from "../src/deployment-policy.ts";
 
 interface FlyCompatibilityEnv {
-  /** The shared Computer host (ADR 0004). The provider reaches a Sprite here. */
+  /** The shared Computer host. The provider reaches a Sprite here. */
   COMPUTER_HOST: Fetcher;
   COMPUTER_HOST_TOKEN: string;
 }
@@ -84,7 +84,7 @@ export interface FlyMountResult {
 }
 
 export { BotCapabilities } from "../src/bot-capabilities.ts";
-// The Applet authority under test in `applets.workerd.ts` (ADR 0022).
+// The Applet authority under test in `applets.workerd.ts`.
 export { AppletCapabilities, AppletState } from "../src/applet-state.ts";
 export { BotIsolateProbe } from "./bot-isolate-probe.ts";
 export { AuthoringProbe } from "./authoring-probe.ts";
@@ -568,7 +568,7 @@ export class WorkerdBotState extends BotState {
   }
 
   /**
-   * The durable-root sync (ADR 0013) with its production halves in place: the
+   * The durable-root sync with its production halves in place: the
    * object-storage store this object serves, the push intent records this
    * object holds, and its generation ledger. Only the Computer side is a
    * probe — a durable map in this object's own storage standing in for a
@@ -1081,7 +1081,7 @@ export class CompositionProbe extends DurableObject {
  *
  * This probe used to prove the opposite: that the provider could reach a
  * Sprite from workerd only far enough to fail on HTTP chunk framing. It no
- * longer can reach one at all — the SDK is on the host now (ADR 0004) — so
+ * longer can reach one at all — the SDK is on the host now — so
  * what is left to prove here is that the provider still mounts behind the
  * provider-neutral Computer interface and opens a Computer over the binding.
  * The live probe it used to carry is retired with the path it probed.

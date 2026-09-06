@@ -120,9 +120,9 @@ describe("exporting a Bot as a shareable template", () => {
 
     // THE BOT PACKS ITSELF. `bot_export_template` is a chat-turn tool that
     // reaches the User's own staging command and nothing wider. It lives in
-    // the `frockbot` namespace so progressive disclosure can surface it
-    // (ADR 0023), so a model reaches it through `call_dynamic_tool` — the same
-    // envelope every other namespaced tool takes.
+    // the `frockbot` namespace so progressive disclosure can surface it, so a
+    // model reaches it through `call_dynamic_tool` — the same envelope every
+    // other namespaced tool takes.
     const exported = (await expectOkJson(
       await postAsUser(userId, `/api/bots/${botId}/turns`, {
         schemaVersion: 1,

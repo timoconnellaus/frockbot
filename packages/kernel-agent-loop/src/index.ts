@@ -796,7 +796,7 @@ class LoopAgent implements Agent {
       // ended. That is right for as long as the run might still resume — and
       // the moment it will not, the Turn is closed by whoever settles it, in
       // `kernel-do`'s `settledEventsV1`. Closing it here instead would either
-      // lie about an outcome or make the run unresumable (ADR 0028).
+      // lie about an outcome or make the run unresumable.
       if (!reconciliationRequired) {
         // A deadline settles the same way a Stop does: an open tool
         // occurrence gets an `interrupted` result before the step closes,
@@ -981,7 +981,7 @@ class LoopAgent implements Agent {
       // ended. That is right for as long as the run might still resume — and
       // the moment it will not, the Turn is closed by whoever settles it, in
       // `kernel-do`'s `settledEventsV1`. Closing it here instead would either
-      // lie about an outcome or make the run unresumable (ADR 0028).
+      // lie about an outcome or make the run unresumable.
       if (!reconciliationRequired) {
         // A deadline settles the same way a Stop does: an open tool
         // occurrence gets an `interrupted` result before the step closes,
@@ -1056,8 +1056,8 @@ class LoopAgent implements Agent {
     // unresolvable binding, a connection refused before any byte was sent.
     // Those are exactly the failures where retrying cannot duplicate anything,
     // and the ones a person watching a blank screen would retry by hand. Every
-    // other failure is uncertain and is never retried, which is the whole of
-    // ADR 0024's durability contract.
+    // other failure is uncertain and is never retried, which is the whole
+    // durability contract.
     let attempts = 0;
     while (true) {
       attempts += 1;

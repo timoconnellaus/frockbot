@@ -1,5 +1,5 @@
 /**
- * Test support: a double for the shared Computer host (ADR 0004).
+ * Test support: a double for the shared Computer host.
  *
  * It is a module under `src` rather than a fixture inside one test file
  * because three suites need the same one — `computer.test.ts`,

@@ -254,10 +254,10 @@ function withCatalogPin(
 /**
  * The setting values one installation carries after a partial update.
  *
- * `values` on the installation row *is* the store: the Catalog install path of
- * ADR 0014 writes setup values there, and this writes the same field, so a
- * Package has exactly one durable bag of configuration and the projection the
- * client already reads needs no second source.
+ * `values` on the installation row *is* the store: the Catalog install path
+ * writes setup values there, and this writes the same field, so a Package has
+ * exactly one durable bag of configuration and the projection the client
+ * already reads needs no second source.
  */
 function mergePackageSettingValues(
   current: Record<string, JsonValue | PackageSettingValueV1> | undefined,
@@ -357,7 +357,7 @@ function applyUserCommand(
     }
     case "user/uninstall-package": {
       // Removing the row is the whole effect. Connections are the User's own
-      // and outlive any Package (ADR 0019).
+      // and outlive any Package.
       if (
         !current.packages.some((pkg) => pkg.packageId === command.packageId)
       ) {

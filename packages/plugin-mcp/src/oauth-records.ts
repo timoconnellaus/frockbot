@@ -16,9 +16,9 @@
  *   window, because discovery costs outbound requests and a durable record.
  *
  * The tokens themselves are in neither. They are sealed credential generations
- * in the keyring (ADR 0008): the access token under the Connection's own id, so
- * a Bot's mount can lease it, and the refresh token under a derived id that has
- * no active generation at all — which is what makes it unleasable rather than
+ * in the keyring: the access token under the Connection's own id, so a Bot's
+ * mount can lease it, and the refresh token under a derived id that has no
+ * active generation at all — which is what makes it unleasable rather than
  * merely un-leased.
  */
 

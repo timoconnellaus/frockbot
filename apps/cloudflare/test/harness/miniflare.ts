@@ -93,10 +93,10 @@ function bearerKey(request: Request): string {
  * stub only has to answer them.
  *
  * The authentication behaviour is the one measured against https://ollama.com
- * on 2026-08-31 and recorded in `docs/research/ollama-cloud-auth.md`: the
- * catalog reads answer 200 for any key at all, and only the two chat endpoints
- * authenticate. Reproducing that asymmetry is what lets a test prove the
- * Connection is validated by an inference call and not by a catalog read.
+ * on 2026-08-31: the catalog reads answer 200 for any key at all, and only
+ * the two chat endpoints authenticate. Reproducing that asymmetry is what
+ * lets a test prove the Connection is validated by an inference call and not
+ * by a catalog read.
  */
 /**
  * The marker a test puts in a user message to make the stubbed model answer
@@ -147,7 +147,7 @@ interface WireMessage {
 }
 
 /**
- * The sentinel a conversation puts in its own Turns to make the ADR 0030
+ * The sentinel a conversation puts in its own Turns to make the compaction
  * summariser hang. It has to travel in the *conversation*, because the
  * summariser's request is composed by the product and carries the covered
  * Turns verbatim — which is exactly how the stub recognises one.
@@ -466,8 +466,7 @@ function webStub(url: URL): Response {
 
 /**
  * The Ollama Cloud web-search endpoint. Authenticated exactly like the two
- * chat endpoints and unlike the catalog reads — the asymmetry measured in
- * `docs/research/ollama-cloud-auth.md`.
+ * chat endpoints and unlike the catalog reads.
  */
 async function webSearchStub(request: Request, key: string): Promise<Response> {
   if (key !== OLLAMA_GOOD_API_KEY) {
@@ -587,8 +586,8 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
  *
  * Every outbound request is answered by {@link ollamaCloudStub}, and nothing
  * is ever let out. There is no longer an exception for the Sprites API: the
- * Computer host holds the SDK and the token (ADR 0004), so no Worker under
- * test has any business reaching `api.sprites.dev` at all.
+ * Computer host holds the SDK and the token, so no Worker under test has any
+ * business reaching `api.sprites.dev` at all.
  */
 export function createOutboundService(): (
   request: Request,

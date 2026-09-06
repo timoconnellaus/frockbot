@@ -1259,10 +1259,10 @@ export class OllamaCloudUserBackendContribution {
         // A catalog read is not validation: measured against https://ollama.com
         // on 2026-08-31, `GET /api/tags`, `GET /v1/models`, and `POST
         // /api/show` all answer 200 for a valid key, a garbage key, and no key
-        // at all (docs/research/ollama-cloud-auth.md), so `listModels` alone
-        // promotes a bad key to `ready` and the User only learns it is bad when
-        // a Turn ends `model-error`. `POST /api/chat` authenticates, so a
-        // one-token completion is what proves the key.
+        // at all, so `listModels` alone promotes a bad key to `ready` and the
+        // User only learns it is bad when a Turn ends `model-error`. `POST
+        // /api/chat` authenticates, so a one-token completion is what proves
+        // the key.
         const client = this.clientFor(
           record.settings?.[API_BASE_URL_SETTING] ??
             connectionApiBaseUrl(existingProjection),

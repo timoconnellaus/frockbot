@@ -15,7 +15,7 @@ import {
 const APPLET_ID = "pub-user-1.0123456789abcdef0123456789abcdef";
 
 describe("the Applets source root", () => {
-  test("is the Package-declared root ADR 0022 names", () => {
+  test("is the Package-declared root", () => {
     expect(appletsSourceRootV1("user-1")).toEqual({
       kind: "package-declared",
       userId: "user-1",
@@ -62,7 +62,7 @@ describe("an Applet's source directory", () => {
 });
 
 describe("the Applet id shape", () => {
-  test("accepts the ADR 0015 share-id shape", () => {
+  test("accepts the share-id shape", () => {
     expect(assertAppletIdV1(APPLET_ID)).toBe(APPLET_ID);
   });
 

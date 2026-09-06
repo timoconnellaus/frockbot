@@ -93,7 +93,7 @@ export function packageUiGatewayOriginV1(url: URL): string {
  *
  * - `connect-src <gateway origin> <gateway ws origin>` lets an Applet's UI open
  *   its viewer socket back to the `AppletState` object on the gateway, which
- *   is the only endpoint it is given (ADR 0022 §4).
+ *   is the only endpoint it is given.
  * - `frame-src <artifact origin>` lets a page nest another page on the same
  *   anonymous origin — the Applets canvas page nesting the Applet's own UI.
  *   The nested frame is served by this very route, with this very policy.
@@ -1292,7 +1292,7 @@ export function createGateway(dependencies: GatewayDependencies) {
     // opaque origin — and a page on the artifact host itself would send
     // `ui.<this host>`. Either is admitted here and nothing else: the page is
     // cookieless, so this guard protects nothing on that path, and the signed
-    // token in the URL is the whole of the decision (ADR 0022 §4).
+    // token in the URL is the whole of the decision.
     const appletSocketFromArtifactOrigin =
       APPLET_SOCKET_PATH.test(url.pathname) &&
       presentedOrigin !== null &&

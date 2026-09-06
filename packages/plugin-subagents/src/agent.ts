@@ -1,11 +1,11 @@
 // The Subagents runtime Contribution: one tool, `Task`, and one prompt section.
 //
-// GrokBot's `Task` (docs/research/grokbot-computer.md l.468–472) dispatches a
-// child agent that shares none of the parent's memory or transcript and hands
-// its result back when it is done. Here that child is a *Turn*, not an agent:
-// ADR 0017 runs it in a Subagent Durable Object of the same Bot that holds no
-// authority, while this Bot's own Durable Object admits it, pins its
-// Composition and model, and records its lifecycle and terminal result.
+// GrokBot's `Task` dispatches a child agent that shares none of the parent's
+// memory or transcript and hands its result back when it is done. Here that
+// child is a *Turn*, not an agent: it runs in a Subagent Durable Object of the
+// same Bot that holds no authority, while this Bot's own Durable Object admits
+// it, pins its Composition and model, and records its lifecycle and terminal
+// result.
 //
 // Depth is one, and it is not a counter. `Task` declares
 // `admission: {turnTypes: ["chat", "automation"]}`, so a `subagent` Turn is
@@ -416,7 +416,7 @@ function refusal(reason: string): ToolExecutionResult {
 /**
  * The durable Session line one task lifecycle act leaves on the *parent*.
  *
- * The child's Session never enters the visible transcript (ADR 0017), so these
+ * The child's Session never enters the visible transcript, so these
  * events are the only thing the conversation says about a task, and the client
  * draws the dispatch as a chip. Recording is best effort by construction: a
  * line that could not be written must not turn a dispatch that happened into a
@@ -532,7 +532,7 @@ export function createTaskTool(
 }
 
 // ---------------------------------------------------------------------------
-// The lifecycle tools (`docs/research/grokbot-computer.md` l.415–418).
+// The lifecycle tools.
 //
 // All four are the same shape: decode the model's words, call the host seam,
 // render the answer. None of them holds durable state, and none of them can

@@ -1,6 +1,6 @@
 // The Subagents authority: the parent Bot Durable Object's durable task records.
 //
-// ADR 0017 puts the whole of a task's authority here — admission, the bounds,
+// The whole of a task's authority is here — admission, the bounds,
 // the pinned Composition generation and model binding, the lifecycle, and the
 // terminal outcome — and leaves the Subagent Durable Object holding only its
 // own Session. This class is that authority's implementation; the Durable
@@ -561,9 +561,8 @@ export class TaskStore {
 
   /**
    * The task a resume runs in the child of. Refuses a task that is still
-   * running (`docs/research/grokbot-computer.md` l.469–470): `resume` names a
-   * *finished* subagent, and resuming a live one would put two Turns in one
-   * Session.
+   * running: `resume` names a *finished* subagent, and resuming a live one
+   * would put two Turns in one Session.
    */
   async resumable(
     taskId: string,

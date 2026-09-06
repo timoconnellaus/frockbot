@@ -56,8 +56,8 @@ export function createR2ObjectBucketV1(bucket: R2Bucket): ObjectBucketV1 {
       // `If-None-Match: *` is "create only if absent". `uploadedBefore` at the
       // epoch says the same thing in a second way, and is sent alongside so
       // the precondition holds even where a wildcard etag is compared
-      // literally. A create that silently overwrote would be last-writer-wins,
-      // which ADR 0013 forbids outright.
+      // literally. A create that silently overwrote would be
+      // last-writer-wins, which is forbidden outright.
       const conditional: R2Conditional | undefined =
         onlyIf === undefined
           ? undefined

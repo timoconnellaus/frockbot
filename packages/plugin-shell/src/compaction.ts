@@ -1,8 +1,8 @@
 // Compaction: how a conversation keeps its beginning instead of forgetting it.
 //
-// ADR 0027 bounded one model request and evicts whole Turns oldest-first when
-// it overflows. ADR 0030 puts two tiers in front of that eviction, and this
-// module is both of them plus the decision of when to reach for either:
+// One model request is bounded, and whole Turns are evicted oldest-first when
+// it overflows. Two tiers sit in front of that eviction, and this module is
+// both of them plus the decision of when to reach for either:
 //
 //  1. **Prune old tool outputs.** A deterministic assembly rule, no durable
 //     write and no model call. A `tool/result` message older than the newest
@@ -180,7 +180,7 @@ export function pruneToolOutputsV1(
   });
 }
 
-/** The character measure ADR 0027 chose, over whatever window it is given. */
+/** The character measure, over whatever window it is given. */
 export function historyCharsV1(messages: readonly LlmMessage[]): number {
   return messages.reduce(
     (sum, message) => sum + JSON.stringify(message).length,
@@ -460,7 +460,7 @@ export interface CompactionRunnerV1 {
  * settled as a failure first, the range is refused if a `conversation/compacted`
  * already covers it, and the Durable Object is single-threaded between the
  * check and the append. Failure is never fatal — the request that follows is
- * exactly the request ADR 0027 would have assembled.
+ * exactly the request that would have been assembled without it.
  */
 export async function runCompactionV1(
   input: CompactionRunnerV1,
@@ -469,7 +469,7 @@ export async function runCompactionV1(
   const state = input.window.state;
   if (state.unsettled) {
     // A restart interrupted an attempt. Its outcome is unknowable, so it is
-    // settled as a failure and backoff schedules the retry (ADR 0028).
+    // settled as a failure and backoff schedules the retry.
     session.append({
       type: "conversation/compaction-failed",
       effectId: state.unsettled.effectId,

@@ -23,6 +23,12 @@ export type GoogleIdTokenVerifier = (
 
 export interface AuthDependencies {
   readonly verifyGoogleIdToken?: GoogleIdTokenVerifier;
+  /**
+   * Decides whether a first-time sign-in may create an account. The gateway's
+   * admission check runs after better-auth has already handled `/api/auth/*`,
+   * so without this a closed deployment still writes `user` rows.
+   */
+  readonly mayCreateAccount?: (email: string) => Promise<boolean>;
 }
 
 export function createGoogleIdTokenVerifier(
@@ -31,6 +37,26 @@ export function createGoogleIdTokenVerifier(
 ) {
   return async (token: string, nonce?: string): Promise<boolean> =>
     (await verifier({ token, audience, nonce })) !== null;
+}
+
+/**
+ * Refuses the account creation better-auth is about to perform.
+ *
+ * `/api/auth/*` is served before the gateway's admission check, so this is the
+ * only place a closed deployment can stop a `user` row being written. An
+ * existing account is unaffected: better-auth consults this only on create.
+ */
+export function signupDatabaseHooksV1(
+  mayCreateAccount: (email: string) => Promise<boolean>,
+) {
+  return {
+    user: {
+      create: {
+        before: async (user: { email?: string }) =>
+          (await mayCreateAccount(user.email ?? "")) ? { data: user } : false,
+      },
+    },
+  };
 }
 
 export function createAuth(
@@ -57,6 +83,9 @@ export function createAuth(
     account: {
       encryptOAuthTokens: true,
     },
+    ...(dependencies.mayCreateAccount
+      ? { databaseHooks: signupDatabaseHooksV1(dependencies.mayCreateAccount) }
+      : {}),
     plugins: [electron({ clientID: "frockbot-desktop" }), bearer()],
   });
 }

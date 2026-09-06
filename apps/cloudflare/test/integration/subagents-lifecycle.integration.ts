@@ -6,7 +6,7 @@
 //  * A background task that completes while the parent Turn is over leaves
 //    exactly one completion-inbox entry, and the Bot's next chat Turn runs on
 //    the child's *summary* — never on the child's transcript, which is in a
-//    Session this Bot has no door onto (ADR 0017).
+//    Session this Bot has no door onto.
 //  * `POST /api/bots/:id/tasks/:taskId/stop` is a second authenticated door
 //    onto the same durable cancellation `task_stop` performs, and a stranger
 //    reaches neither it nor the task behind it.

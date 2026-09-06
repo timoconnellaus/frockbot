@@ -184,8 +184,7 @@ export function auditKindForToolV1(
     // A background command outlives the Turn that launched it and is acted on
     // afterwards by the three `computer_process_*` tools, so it is a process
     // rather than a command that ended with the call. GrokBot draws the same
-    // line, as `shellKind: foreground | background` on its own audit line
-    // (`docs/research/grokbot-computer.md:189`).
+    // line, as `shellKind: foreground | background` on its own audit line.
     const background =
       isObject(input) && input.background === true ? "process" : "shell";
     return { kind: background, target: onComputer };

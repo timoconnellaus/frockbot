@@ -57,7 +57,7 @@ describe("Applet durable keys", () => {
 });
 
 describe("Applet ids", () => {
-  test("an id is the ADR 0015 share shape", () => {
+  test("an id is the share shape", () => {
     expect(appletIdV1("user-42", "d".repeat(32))).toBe(
       `user-42.${"d".repeat(32)}`,
     );

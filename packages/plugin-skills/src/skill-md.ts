@@ -1,9 +1,8 @@
 // The `SKILL.md` format, decoded.
 //
-// Parity target: GrokBot's skill format (`docs/research/grokbot-computer.md`
-// §2.8) — "a folder containing one `SKILL.md`: YAML frontmatter with `name`
-// and `description` ("use this when …"), then a markdown recipe body". pi and
-// Claude use the same shape (`docs/research/pi-coding-agent.md` §14), so a
+// Parity target: GrokBot's skill format — "a folder containing one
+// `SKILL.md`: YAML frontmatter with `name` and `description` ("use this when
+// …"), then a markdown recipe body". pi and Claude use the same shape, so a
 // FrockBot instruction root is portable to and from those harnesses.
 //
 // Deliberately not a YAML parser. A Skill is untrusted content that becomes

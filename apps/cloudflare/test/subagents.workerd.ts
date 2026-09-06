@@ -1,7 +1,7 @@
 // Subagent dispatch, against real Bot Durable Objects.
 //
-// ADR 0017 splits one Bot across two objects: the Bot's own Durable Object is
-// the authority for a task, and a Subagent Durable Object — the same class, in
+// One Bot is split across two objects: the Bot's own Durable Object is the
+// authority for a task, and a Subagent Durable Object — the same class, in
 // the same namespace, named `<userId>:<botId>#task:<taskId>` — is only an
 // execution host for the one `subagent` Turn it was handed. Three claims, and
 // every one of them is about that split holding when something goes wrong:

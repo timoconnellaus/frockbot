@@ -1,8 +1,7 @@
 // The Memory file format, both halves of it.
 //
-// GrokBot writes and injects a fact in two different shapes
-// (`docs/research/grokbot-computer.md` §4.1b), and matching parity means
-// matching both:
+// GrokBot writes and injects a fact in two different shapes, and matching
+// parity means matching both:
 //
 //   on disk    - (YYYY-MM-DD) <fact>
 //   injected   - (learned YYYY-MM-DD) [via <bot>] <fact>
