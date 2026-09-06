@@ -116,7 +116,7 @@ describe("foundation application", () => {
         "routines",
         "search",
       ],
-      desktop: ["auth", "fly-sprite", "user-machine"],
+      desktop: ["fly-sprite", "user-machine"],
       mobile: [],
     });
     expect(

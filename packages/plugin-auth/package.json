@@ -6,7 +6,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client/index.ts",
-    "./desktop": "./src/desktop.ts",
     "./shared": "./src/shared.ts",
     "./manifest": "./src/manifest.ts",
     "./frockbot.json": "./frockbot.json",
@@ -20,7 +19,6 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@capacitor/core": "8.5.0",
     "@frockbot/client-core": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*",
     "better-auth": "1.7.2",
