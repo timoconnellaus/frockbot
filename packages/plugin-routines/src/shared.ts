@@ -1,7 +1,3 @@
-import {
-  decodeConnectionTriggerStatusV1,
-  type ConnectionTriggerStatusV1,
-} from "@frockbot/connection-core";
 // The Routines DTOs and commands: everything that crosses a runtime seam.
 //
 // "Cross-runtime communication uses narrow, versioned DTOs, and every inbound
@@ -96,8 +92,6 @@ export interface RoutineViewV1 {
    * its digest: the UI needs to say "a key exists", not to re-read one.
    */
   hookKeyVersion?: number;
-  eventStatus?: ConnectionTriggerStatusV1;
-  eventName?: string;
 }
 
 export interface RoutineListViewV1 {
@@ -460,15 +454,7 @@ export function decodeRoutineViewV1(value: unknown): RoutineViewV1 {
       "createdAt",
       "updatedAt",
     ],
-    [
-      "schedule",
-      "trigger",
-      "lastRunAt",
-      "nextRunAt",
-      "hookKeyVersion",
-      "eventStatus",
-      "eventName",
-    ],
+    ["schedule", "trigger", "lastRunAt", "nextRunAt", "hookKeyVersion"],
     "Routine view",
   );
   if (candidate.schemaVersion !== 1) {
@@ -528,26 +514,6 @@ export function decodeRoutineViewV1(value: unknown): RoutineViewV1 {
       ? {}
       : { hookKeyVersion: hookKeyVersion(candidate.hookKeyVersion) }),
   };
-  if (candidate.eventStatus !== undefined) {
-    if (
-      ![
-        "starting",
-        "active",
-        "paused",
-        "missing",
-        "failed",
-        "unavailable",
-      ].includes(String(candidate.eventStatus))
-    )
-      throw new RoutineDecodeError("Routine event status is invalid");
-    view.eventStatus = decodeConnectionTriggerStatusV1(candidate.eventStatus);
-  }
-  if (candidate.eventName !== undefined)
-    view.eventName = routineText(
-      candidate.eventName,
-      500,
-      "Routine event name",
-    );
   requireScheduleXorTriggerV1(view);
   return view;
 }

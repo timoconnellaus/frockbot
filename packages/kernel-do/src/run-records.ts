@@ -62,7 +62,7 @@ export interface StoredEffectAdmission {
 }
 
 /** How a Turn that no person started came to be started. */
-export type StoredRunTriggerV1 = "cron" | "webhook" | "integration" | "manual";
+export type StoredRunTriggerV1 = "cron" | "webhook" | "manual";
 
 /** A Turn a Routine's firing produced. */
 export interface StoredRunRoutineOriginV1 {
@@ -110,7 +110,6 @@ export type StoredRunOriginV1 =
 const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunTriggerV1[] = [
   "cron",
   "webhook",
-  "integration",
   "manual",
 ];
 

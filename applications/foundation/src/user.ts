@@ -1,4 +1,3 @@
-import type { ConnectionEventDeliveryV1 } from "@frockbot/connection-core";
 import type { ApplicationPlan } from "@frockbot/kernel-composition/compiler";
 import {
   type AuditUserBackendContribution,
@@ -199,13 +198,7 @@ export async function createFoundationUserBackendContributions(
         setAlarm(scheduledTime: number | Date): Promise<void>;
       };
     readSecret(
-      name:
-        | "CREDENTIAL_KEYRING"
-        | "MACHINE_TOKEN_SECRET"
-        | "COMPOSIO_API_KEY"
-        | "COMPOSIO_WEBHOOK_SECRET"
-        | "BETTER_AUTH_URL"
-        | "COMPOSIO_TEST_URL",
+      name: "CREDENTIAL_KEYRING" | "MACHINE_TOKEN_SECRET" | "BETTER_AUTH_URL",
     ): string | undefined;
     /**
      * The publication seam: the User Durable Object's own object storage and
@@ -218,11 +211,6 @@ export async function createFoundationUserBackendContributions(
      * than mutating Bot state itself.
      */
     commandBotLifecycle: FlockUserBackendHost["commandBotLifecycle"];
-    deliverConnectionEvent?(
-      userId: string,
-      botId: string,
-      delivery: ConnectionEventDeliveryV1,
-    ): Promise<unknown>;
     readBotLifecycle: FlockUserBackendHost["readBotLifecycle"];
     /**
      * The remote Package Catalog. Absent when the deployment publishes none,

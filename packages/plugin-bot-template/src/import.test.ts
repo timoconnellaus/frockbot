@@ -48,14 +48,6 @@ function template(overrides: Partial<BotTemplateV1> = {}): BotTemplateV1 {
         displayName: "Example",
       },
     ],
-    mcpServers: [
-      {
-        kind: "needs-connection",
-        name: "Beeper",
-        connectionTypeId: "mcp-remote-key",
-        hint: "Bring your own key.",
-      },
-    ],
     ...overrides,
   };
 }
@@ -187,39 +179,11 @@ describe("the step list", () => {
 });
 
 describe("what an import never does", () => {
-  it("plans no Connection or credential, only lines telling the User", () => {
+  it("plans no Connection or credential", () => {
     const plan = planBotTemplateImportV1(input());
-    expect(plan.connections).toEqual([
-      {
-        name: "Beeper",
-        connectionTypeId: "mcp-remote-key",
-        hint: "Bring your own key.",
-      },
-    ]);
     expect(plan.steps.some((step) => step.kind.includes("connection"))).toBe(
       false,
     );
-  });
-
-  it("lists a public server too, because no Connection is created for it", () => {
-    const plan = planBotTemplateImportV1(
-      input({
-        template: template({
-          mcpServers: [
-            {
-              kind: "public",
-              name: "Example",
-              url: "https://mcp.example.test/mcp",
-              transport: "streamable-http",
-            },
-          ],
-        }),
-      }),
-    );
-    expect(plan.connections[0]).toMatchObject({
-      name: "Example",
-      url: "https://mcp.example.test/mcp",
-    });
     expect(plan.steps.some((step) => step.kind === "bot/create")).toBe(true);
   });
 });
@@ -252,14 +216,13 @@ describe("derived identity", () => {
 });
 
 describe("the card's prose", () => {
-  it("says what will be created, installed, skipped and connected", () => {
+  it("says what will be created, installed and skipped", () => {
     const plan = planBotTemplateImportV1(
       input({ availableCatalogIds: [], catalogGeneration: "gen-7" }),
     );
     const described = describeImportPlanV1(plan);
     expect(described).toContain('Will create the Bot "Budget"');
     expect(described).toContain("missing from your catalog");
-    expect(described).toContain("need your own Connection");
     expect(described).toContain("No Connection or credential");
   });
 });

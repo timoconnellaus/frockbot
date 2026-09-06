@@ -168,9 +168,6 @@ const MEMORY_PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const USER_IDENTITY_KEY = "user:identity";
 
 interface UserConfigurationEnv {
-  COMPOSIO_API_KEY?: string;
-  COMPOSIO_WEBHOOK_SECRET?: string;
-  COMPOSIO_TEST_URL?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   BETTER_AUTH_URL?: string;
   CREDENTIAL_KEYRING?: string;
@@ -258,35 +255,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
           readSecret: (name) =>
             name === "MACHINE_TOKEN_SECRET"
               ? this.env.MACHINE_TOKEN_SECRET
-              : name === "COMPOSIO_TEST_URL"
-                ? this.env.ALLOW_DEVELOPMENT_AUTH === "true"
-                  ? this.env.COMPOSIO_TEST_URL
-                  : undefined
-                : name === "COMPOSIO_WEBHOOK_SECRET"
-                  ? this.env.COMPOSIO_WEBHOOK_SECRET
-                  : name === "COMPOSIO_API_KEY"
-                    ? this.env.COMPOSIO_API_KEY
-                    : name === "BETTER_AUTH_URL"
-                      ? this.env.BETTER_AUTH_URL
-                      : this.env.CREDENTIAL_KEYRING,
-          deliverConnectionEvent: async (userId, botId, delivery) => {
-            await this.assertUserIdentity(userId);
-            await (await this.contributions()).flock.registration(botId);
-            // SAFETY: this namespace is bound to BotState; the DTO is decoded at its RPC seam.
-            const rpc = this.env.BOT_STATES.getByName(
-              `${userId}:${botId}`,
-            ) as unknown as {
-              deliverConnectionEvent(input: unknown): Promise<unknown>;
-            };
-            return rpcJsonSnapshotV1(
-              await rpc.deliverConnectionEvent({
-                schemaVersion: 1,
-                userId,
-                botId,
-                delivery,
-              }),
-            );
-          },
+              : name === "BETTER_AUTH_URL"
+                ? this.env.BETTER_AUTH_URL
+                : this.env.CREDENTIAL_KEYRING,
           packagePublisher: createPackagePublicationHost(
             this.env,
             this.ctx.storage,

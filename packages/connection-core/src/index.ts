@@ -1,4 +1,3 @@
-export * from "./triggers.js";
 export * from "./credentials.js";
 export * from "./models.js";
 export * from "./catalog.js";

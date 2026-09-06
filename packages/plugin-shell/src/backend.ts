@@ -1,4 +1,3 @@
-import type { ConnectionEventDeliveryV1 } from "@frockbot/connection-core";
 import type { RoutineWriterV1 } from "@frockbot/plugin-routines/records";
 import { turnToolCatalogPin } from "./tool-catalog-pin.js";
 import type { AgentEffectAdmission } from "@frockbot/kernel-agent-loop/agent";
@@ -3261,7 +3260,6 @@ export class ShellBotBackendContribution {
     // woke this Bot again except by a caller's luck. One producer failing must
     // cost that producer its pass, never the clock.
     try {
-      const identity = await this.authority.readDurableIdentity();
       await this.settleRoutineFirings();
       await this.runOwedSubagentTurns();
       await this.reconcileOverdueTasks();
@@ -5119,14 +5117,6 @@ export class ShellBotBackendContribution {
     body: string;
     contentType?: string | null;
   }): Promise<{ status: "accepted" | "duplicate"; fireId: string }> {
-    const accepted = await this.routines.deliverHook(input);
-    await this.ctx.storage.transaction((transaction) =>
-      this.authority.refreshRecoveryAlarm(transaction),
-    );
-    return accepted;
-  }
-
-  async deliverConnectionEvent(input: ConnectionEventDeliveryV1) {
     const accepted = await this.routines.deliverHook(input);
     await this.ctx.storage.transaction((transaction) =>
       this.authority.refreshRecoveryAlarm(transaction),

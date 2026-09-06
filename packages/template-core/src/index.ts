@@ -36,7 +36,6 @@ export const MAX_TEMPLATE_BYTES_V1 = 100_000;
 export const MAX_TEMPLATE_SKILLS_V1 = 200;
 export const MAX_TEMPLATE_ROUTINES_V1 = 100;
 export const MAX_TEMPLATE_PACKAGES_V1 = 32;
-export const MAX_TEMPLATE_SERVERS_V1 = 16;
 export const MAX_TEMPLATE_SKILL_BODY_BYTES_V1 = 16_384;
 export const MAX_TEMPLATE_ROUTINE_PROMPT_BYTES_V1 = 8_000;
 
@@ -102,20 +101,6 @@ export interface TemplatePackageV1 {
   displayName: string;
 }
 
-export type TemplateMcpServerV1 =
-  | {
-      kind: "public";
-      name: string;
-      url: string;
-      transport: "streamable-http" | "sse";
-    }
-  | {
-      kind: "needs-connection";
-      name: string;
-      connectionTypeId: string;
-      hint?: string;
-    };
-
 /**
  * One template document.
  *
@@ -132,7 +117,6 @@ export interface BotTemplateV1 {
   skills: TemplateSkillV1[];
   routines: TemplateRoutineV1[];
   packages: TemplatePackageV1[];
-  mcpServers: TemplateMcpServerV1[];
   /** The Catalog generation the *source* User was pinned to, for provenance. */
   sourceCatalogGeneration?: string;
 }
@@ -169,7 +153,6 @@ const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const PACKAGE_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 const CATALOG_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const GENERATION_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const CONNECTION_TYPE_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SHARE_SECRET_PATTERN = /^[0-9a-f]{32}$/;
 const SHARE_OWNER_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/;
 
@@ -254,20 +237,6 @@ function timestamp(value: unknown, label: string): string {
   const candidate = text(value, label, 64);
   if (!Number.isFinite(new Date(candidate).getTime())) {
     throw new TemplateDecodeError(`${label} is invalid`);
-  }
-  return candidate;
-}
-
-/**
- * A template's MCP server URL is rendered by a browser and may be handed to a
- * fetch on import, so only an absolute `https:` URL is admitted here — the same
- * rule `catalog-core` holds a logo to, for the same reason.
- */
-function httpsUrl(value: unknown, label: string): string {
-  const candidate = text(value, label, 2_048);
-  const url = URL.parse(candidate);
-  if (!url || url.protocol !== "https:" || url.username || url.password) {
-    throw new TemplateDecodeError(`${label} must be an https URL`);
   }
   return candidate;
 }
@@ -439,63 +408,11 @@ function decodeTemplatePackageV1(value: unknown): TemplatePackageV1 {
   };
 }
 
-function decodeTemplateMcpServerV1(value: unknown): TemplateMcpServerV1 {
-  if (!isRecord(value)) {
-    throw new TemplateDecodeError("template MCP server must be an object");
-  }
-  if (value.kind === "public") {
-    const server = exactRecord(value, "template MCP server", [
-      "kind",
-      "name",
-      "url",
-      "transport",
-    ]);
-    if (server.transport !== "streamable-http" && server.transport !== "sse") {
-      throw new TemplateDecodeError("template MCP transport is invalid");
-    }
-    return {
-      kind: "public",
-      name: text(server.name, "template MCP server name", 100),
-      url: httpsUrl(server.url, "template MCP server url"),
-      transport: server.transport,
-    };
-  }
-  if (value.kind === "needs-connection") {
-    const server = exactRecord(
-      value,
-      "template MCP placeholder",
-      ["kind", "name", "connectionTypeId"],
-      ["hint"],
-    );
-    return withOptional(
-      {
-        kind: "needs-connection" as const,
-        name: text(server.name, "template MCP placeholder name", 100),
-        connectionTypeId: pattern(
-          server.connectionTypeId,
-          "template MCP connectionTypeId",
-          CONNECTION_TYPE_PATTERN,
-          64,
-        ),
-      },
-      { hint: optionalText(server.hint, "template MCP hint", 500) },
-    );
-  }
-  throw new TemplateDecodeError("template MCP server kind is invalid");
-}
-
 export function decodeBotTemplateV1(input: unknown): BotTemplateV1 {
   const value = exactRecord(
     input,
     "bot template",
-    [
-      "schemaVersion",
-      "profile",
-      "skills",
-      "routines",
-      "packages",
-      "mcpServers",
-    ],
+    ["schemaVersion", "profile", "skills", "routines", "packages"],
     ["sourceCatalogGeneration"],
   );
   if (value.schemaVersion !== 1) {
@@ -542,11 +459,6 @@ export function decodeBotTemplateV1(input: unknown): BotTemplateV1 {
     skills,
     routines,
     packages,
-    mcpServers: boundedArray(
-      value.mcpServers,
-      "template MCP servers",
-      MAX_TEMPLATE_SERVERS_V1,
-    ).map(decodeTemplateMcpServerV1),
     ...(sourceCatalogGeneration === undefined
       ? {}
       : { sourceCatalogGeneration }),
@@ -611,21 +523,6 @@ export function canonicalBotTemplateDocumentV1(
       version: entry.version,
       displayName: entry.displayName,
     })),
-    mcpServers: decoded.mcpServers.map((server) =>
-      server.kind === "public"
-        ? {
-            kind: "public",
-            name: server.name,
-            url: server.url,
-            transport: server.transport,
-          }
-        : {
-            kind: "needs-connection",
-            name: server.name,
-            connectionTypeId: server.connectionTypeId,
-            ...(server.hint === undefined ? {} : { hint: server.hint }),
-          },
-    ),
     ...(decoded.sourceCatalogGeneration === undefined
       ? {}
       : { sourceCatalogGeneration: decoded.sourceCatalogGeneration }),

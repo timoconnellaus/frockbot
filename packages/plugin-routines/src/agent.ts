@@ -1,8 +1,3 @@
-import {
-  decodeConnectionTriggerV1,
-  type ConnectionTriggerV1,
-  type ConnectionTriggerCatalogV1,
-} from "@frockbot/connection-core";
 // The Routines runtime Contribution: one tool, `routine_manage`.
 //
 // GrokBot's `update_state target=routine {create,update,pause,resume,delete}`
@@ -55,7 +50,6 @@ export interface RoutinesRuntimeHostV1 {
   botId: string;
   writer?: RoutineWriterIdentityV1;
   list(): Promise<RoutineListViewV1>;
-  listTriggers?(): Promise<ConnectionTriggerCatalogV1>;
   execute(
     command: RoutineCommandV1,
     writer: RoutineWriterV1,
@@ -69,7 +63,6 @@ export const ROUTINE_MANAGE_ACTIONS = [
   "resume",
   "delete",
   "run_now",
-  "list_triggers",
 ] as const;
 
 export type RoutineManageActionV1 = (typeof ROUTINE_MANAGE_ACTIONS)[number];
@@ -99,28 +92,10 @@ const ROUTINE_MANAGE_INPUT_SCHEMA = {
         "A five-field cron expression, or @hourly, @daily, @weekly, @monthly, or @every 15m. Optionally prefixed with CRON_TZ=<zone>. A Routine has a schedule or a webhook trigger, never both.",
     },
     trigger: {
-      oneOf: [
-        { type: "string", enum: ["webhook"] },
-        {
-          type: "object",
-          properties: {
-            composio: {
-              type: "object",
-              properties: {
-                connectionId: { type: "string" },
-                triggerType: { type: "string" },
-                config: { type: "object" },
-              },
-              required: ["connectionId", "triggerType", "config"],
-              additionalProperties: false,
-            },
-          },
-          required: ["composio"],
-          additionalProperties: false,
-        },
-      ],
+      type: "string",
+      enum: ["webhook"],
       description:
-        "Fire on an event from an existing connected account. Use list_triggers first to find the account, event type and configuration schema. A Routine has a schedule or a trigger, never both.",
+        "Fire on a delivered webhook rather than on a clock. A Routine has a schedule or a trigger, never both.",
     },
     timezone: {
       type: "string",
@@ -150,7 +125,7 @@ interface RoutineManageInputV1 {
   name?: string;
   prompt?: string;
   schedule?: string;
-  trigger?: "webhook" | { composio: ConnectionTriggerV1 };
+  trigger?: "webhook";
   timezone?: string;
   userAsked?: boolean;
 }
@@ -191,17 +166,8 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
   };
   let trigger: RoutineManageInputV1["trigger"];
   if (value.trigger === "webhook") trigger = "webhook";
-  else if (value.trigger !== undefined) {
-    if (
-      !value.trigger ||
-      typeof value.trigger !== "object" ||
-      Array.isArray(value.trigger) ||
-      Object.keys(value.trigger).some((key) => key !== "composio") ||
-      !("composio" in value.trigger)
-    )
-      throw new RoutineDecodeError("Choose a service event or webhook trigger");
-    trigger = { composio: decodeConnectionTriggerV1(value.trigger.composio) };
-  }
+  else if (value.trigger !== undefined)
+    throw new RoutineDecodeError('routine_manage trigger must be "webhook"');
   if (value.userAsked !== undefined && typeof value.userAsked !== "boolean") {
     throw new RoutineDecodeError("routine_manage userAsked must be a boolean");
   }
@@ -261,14 +227,7 @@ export function routineManageCommandV1(
       name: input.name,
       prompt: input.prompt,
       ...(input.schedule === undefined ? {} : { schedule: input.schedule }),
-      ...(input.trigger === undefined
-        ? {}
-        : {
-            trigger:
-              input.trigger === "webhook"
-                ? { kind: "webhook" }
-                : { kind: "connection", ...input.trigger.composio },
-          }),
+      ...(input.trigger === undefined ? {} : { trigger: { kind: "webhook" } }),
       ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
     });
   }
@@ -285,14 +244,7 @@ export function routineManageCommandV1(
       ...(input.name === undefined ? {} : { name: input.name }),
       ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
       ...(input.schedule === undefined ? {} : { schedule: input.schedule }),
-      ...(input.trigger === undefined
-        ? {}
-        : {
-            trigger:
-              input.trigger === "webhook"
-                ? { kind: "webhook" }
-                : { kind: "connection", ...input.trigger.composio },
-          }),
+      ...(input.trigger === undefined ? {} : { trigger: { kind: "webhook" } }),
       ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
     });
   }
@@ -340,7 +292,7 @@ export function createRoutineManageTool(
     // video roles. See `@frockbot/plugin-subagents` `SUBAGENT_TOOL_REACH_V1`.
     admission: { subagentRoles: ["executor"] },
     description: [
-      "Create, edit, pause, resume, delete, or immediately run one of your own Routines. Use list_triggers to list events and configuration schemas on the User’s existing connected accounts.",
+      "Create, edit, pause, resume, delete, or immediately run one of your own Routines.",
       "A Routine is a standing instruction that fires on a schedule or on a delivered webhook,",
       `as its own Turn rather than inside this conversation. Names are at most ${ROUTINE_NAME_MAX_LENGTH}`,
       `characters and prompts at most ${ROUTINE_PROMPT_MAX_LENGTH}.`,
@@ -367,13 +319,6 @@ export function createRoutineManageTool(
       let command: RoutineCommandV1;
       try {
         decoded = decodeRoutineManageInputV1(input);
-        if (decoded.action === "list_triggers")
-          return {
-            content: JSON.stringify(
-              (await host.listTriggers?.()) ?? { schemaVersion: 1, items: [] },
-            ),
-            isError: false,
-          };
         command = routineManageCommandV1(decoded, {
           botId: host.botId,
           commandId: routineToolCommandIdV1(context.effectId),
@@ -426,9 +371,7 @@ export function createRoutineManageTool(
       const routine = receipt.routine;
       const timing = routine.schedule
         ? `schedule ${routine.schedule} (${routine.timezone})`
-        : routine.trigger?.kind === "connection"
-          ? (routine.eventName ?? "a service event")
-          : "webhook trigger";
+        : "webhook trigger";
       return {
         content: [
           `Routine "${routine.name}" (${routine.routineId}) is ${

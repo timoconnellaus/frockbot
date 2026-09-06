@@ -1,7 +1,3 @@
-import {
-  decodeConnectionTriggerV1,
-  type ConnectionTriggerV1,
-} from "@frockbot/connection-core";
 // The durable Routine records, and their strict codecs.
 //
 // Every record is versioned, exact-field, and decoded at the seam it crosses.
@@ -31,12 +27,7 @@ export const ROUTINE_RUN_STATUSES = [
 export type RoutineRunStatusV1 = (typeof ROUTINE_RUN_STATUSES)[number];
 
 /** What produced a firing. Mirrors `StoredRunOriginV1.trigger` exactly. */
-export const ROUTINE_TRIGGER_KINDS = [
-  "cron",
-  "webhook",
-  "integration",
-  "manual",
-] as const;
+export const ROUTINE_TRIGGER_KINDS = ["cron", "webhook", "manual"] as const;
 
 export type RoutineTriggerKindV1 = (typeof ROUTINE_TRIGGER_KINDS)[number];
 
@@ -50,8 +41,7 @@ export type RoutineWriterV1 =
   | { kind: "bot"; botId: string; sessionId: string; turnId: string };
 
 /** A Routine that fires on a delivered event rather than on a clock. */
-export type RoutineTriggerV1 =
-  { kind: "webhook" } | ({ kind: "connection" } & ConnectionTriggerV1);
+export type RoutineTriggerV1 = { kind: "webhook" };
 
 /**
  * One Routine. `schedule` and `trigger` are exclusive: "never both `schedule`
@@ -181,33 +171,9 @@ export function decodeRoutineTriggerV1(
   label = "Routine trigger",
 ): RoutineTriggerV1 {
   const candidate = record(value, label);
-  if (candidate.kind === "connection") {
-    routineExactKeys(
-      candidate,
-      ["kind", "connectionId", "triggerType", "config"],
-      [],
-      label,
-    );
-    try {
-      return {
-        kind: "connection",
-        ...decodeConnectionTriggerV1({
-          connectionId: candidate.connectionId,
-          triggerType: candidate.triggerType,
-          config: candidate.config,
-        }),
-      };
-    } catch {
-      throw new RoutineDecodeError(
-        "Choose an available event from an existing connection",
-      );
-    }
-  }
   routineExactKeys(candidate, ["kind"], [], label);
   if (candidate.kind !== "webhook") {
-    throw new RoutineDecodeError(
-      `${label} kind must be "webhook" or "connection"`,
-    );
+    throw new RoutineDecodeError(`${label} kind must be "webhook"`);
   }
   return { kind: "webhook" };
 }

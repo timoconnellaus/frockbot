@@ -180,13 +180,6 @@ function template(overrides: Partial<BotTemplateV1> = {}): BotTemplateV1 {
         displayName: "Example",
       },
     ],
-    mcpServers: [
-      {
-        kind: "needs-connection",
-        name: "Beeper",
-        connectionTypeId: "mcp-remote-key",
-      },
-    ],
     ...overrides,
   };
 }
@@ -331,7 +324,6 @@ describe("planning", () => {
     expect(record.botName).toBe("Budget");
     expect(record.skills).toEqual(["reconcile"]);
     expect(record.routines).toEqual([{ slug: "on-delivery", disabled: true }]);
-    expect(record.connections).toHaveLength(1);
     expect(record.steps.every((step) => step.status === "pending")).toBe(true);
     // Nothing applied before the User confirms.
     expect(recording.calls).toEqual([]);
@@ -398,11 +390,10 @@ describe("applying", () => {
   it("creates no Connection or credential", async () => {
     const { contribution, recording } = await harness();
     await plan(contribution);
-    const applied = await apply(contribution);
+    await apply(contribution);
     expect(recording.calls.some((call) => call.includes("connection"))).toBe(
       false,
     );
-    expect(applied.connections[0]!.name).toBe("Beeper");
   });
 });
 
