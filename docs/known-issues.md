@@ -95,3 +95,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 45. ~~**Dangling directory references.**~~ **Fixed.** `apps/cloudflare/index.html` referenced `apps/mobile` and the computer-host README referenced `apps/fly-host-prototype`; both are removed.
 
 46. **`packages/desktop-core` remains** and is used only by `packages/plugin-user-machine`; `@frockbot/application-foundation` still exports `./desktop-runtime`.
+
+47. **An auto-merged pull request never deploys to staging.** `ci.yml`'s `deploy-staging` is gated on `github.event_name == 'push' && github.ref == 'refs/heads/main'`, but `auto-merge.yml` merges with `GITHUB_TOKEN`, and GitHub does not trigger workflows from pushes made with it. So every auto-merged change reaches `main` without staging ever running it, and production is the first environment to see it. `workflow_dispatch` does not help: the job's `if` excludes it.
+
+48. **The npm publish step fails every release for packages npm does not trust.** `release.yml` publishes every directory under `packages/`, including ones with no external consumer (`compose-*`, `plugin-testkit`). A package whose trusted publisher is not configured on npmjs.com fails the token exchange with an `E404` that reads as "not found". This reddens the release run even though `Deploy FrockBot app` succeeds, which is what makes a red release easy to ignore. Two fixes are needed: stop publishing internal-only packages, and configure trusted publishing for the ones that genuinely ship (`plugin-provider-anthropic` is new and will fail until it is).
