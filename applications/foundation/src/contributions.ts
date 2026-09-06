@@ -1,11 +1,3 @@
-import {
-  backendContribution as composioGatewayContribution,
-  type ComposioBackendHost,
-} from "@frockbot/plugin-composio/backend";
-import {
-  userContribution as composioUserContribution,
-  type ComposioUserApplicationHostV1,
-} from "@frockbot/plugin-composio/user";
 /**
  * The foundation application's Contribution table.
  *
@@ -22,7 +14,7 @@ import {
  * A member of the plan that carries an `artifact` is not in this table at all:
  * it loads through `packages/kernel-composition/src/isolate-host.ts` like any
  * Bot-authored Package. That is the seam an artifact-backed first-party
- * Package — the Applets Package of ADR 0022 — arrives through, and
+ * Package — the Applets Package — arrives through, and
  * {@link assertFoundationBackendContributionsResolvable} is where a member
  * that is neither artifact-backed nor in the table becomes a compile error of
  * the application.
@@ -31,8 +23,8 @@ import {
  * this module deliberately does not import: a client Contribution is React in
  * the browser bundle, and the backend table is server code in the Worker
  * bundle. Importing either from the other would put each in the other's
- * bundle. `packages/architecture-checks` asserts the two halves together
- * cover every Contribution the application declares.
+ * bundle. The two halves together cover every Contribution the application
+ * declares.
  */
 import type {
   ApplicationPlan,
@@ -68,10 +60,6 @@ import {
   backendContribution as flockGatewayContribution,
   type FlockGatewayHost,
 } from "@frockbot/plugin-flock/backend";
-import {
-  backendContribution as mcpGatewayContribution,
-  type McpGatewayHost,
-} from "@frockbot/plugin-mcp/backend";
 import {
   backendContribution as packagePublisherGatewayContribution,
   type PackagePublisherGatewayHost,
@@ -117,10 +105,6 @@ import {
   userContribution as frockAiUserContribution,
   type FrockAiUserApplicationHostV1,
 } from "@frockbot/plugin-provider-frock-ai/user";
-import {
-  userContribution as mcpUserContribution,
-  type McpUserApplicationHostV1,
-} from "@frockbot/plugin-mcp/user";
 import {
   userContribution as botTemplateUserContribution,
   type BotTemplateUserApplicationHostV1,
@@ -174,8 +158,6 @@ export {
   botTemplateGatewayContribution,
   computerGatewayContribution,
   flockGatewayContribution,
-  composioGatewayContribution,
-  mcpGatewayContribution,
   packagePublisherGatewayContribution,
   routinesGatewayContribution,
   searchGatewayContribution,
@@ -187,8 +169,6 @@ export {
   credentialsUserContribution,
   ollamaCloudUserContribution,
   frockAiUserContribution,
-  composioUserContribution,
-  mcpUserContribution,
   botTemplateUserContribution,
   packagePublisherUserContribution,
   machineUserContribution,
@@ -266,8 +246,6 @@ export type FoundationGatewayHost = {
   BotTemplateGatewayHostV1 &
   ComputerGatewayHost &
   FlockGatewayHost &
-  ComposioBackendHost &
-  McpGatewayHost &
   SettingsGatewayHost &
   RoutinesGatewayHost &
   SubagentsGatewayHost &
@@ -293,8 +271,6 @@ export type FoundationUserBackendHostV1 = {
   CredentialsUserApplicationHostV1 &
   OllamaCloudUserApplicationHostV1 &
   FrockAiUserApplicationHostV1 &
-  ComposioUserApplicationHostV1 &
-  McpUserApplicationHostV1 &
   BotTemplateUserApplicationHostV1 &
   PackagePublisherUserApplicationHostV1 &
   MachineUserApplicationHostV1 &
@@ -359,8 +335,6 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     botTemplateGatewayContribution,
     computerGatewayContribution,
     flockGatewayContribution,
-    composioGatewayContribution,
-    mcpGatewayContribution,
     packagePublisherGatewayContribution,
     routinesGatewayContribution,
     searchGatewayContribution,
@@ -372,8 +346,6 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
     credentialsUserContribution,
     ollamaCloudUserContribution,
     frockAiUserContribution,
-    composioUserContribution,
-    mcpUserContribution,
     botTemplateUserContribution,
     packagePublisherUserContribution,
     machineUserContribution,

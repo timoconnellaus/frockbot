@@ -7,8 +7,7 @@
  * ExportedHandler'". That is why `wrangler dev` on this Worker never ran, and
  * why `package_author` could not succeed in local development (finding F5b).
  *
- * `apps/cloudflare-bundler` — the Package bundler service
- * (`docs/plans/kernel-and-isolate.md` Step 3, decisions D1/D4/D5/D7).
+ * `apps/cloudflare-bundler` — the Package bundler service.
  *
  * The Bot Durable Object records `authorship:intent:<effectId>` first, then
  * calls `bundle` over the `PACKAGE_BUNDLER` service binding. This Worker is

@@ -4,7 +4,7 @@
 // Driven the way production drives it. Bot A's stubbed model answers with a
 // `skill_write` tool call carrying `scope: "user"`, so the Skill is authored by
 // the Agent loop inside Bot A's Durable Object and lands in the User-global
-// instruction root over R2 (ADR 0016). Bot B then takes an ordinary Turn.
+// instruction root over R2. Bot B then takes an ordinary Turn.
 //
 // Three claims, every one read back out of what a Bot durably recorded:
 //

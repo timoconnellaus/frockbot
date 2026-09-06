@@ -84,6 +84,11 @@
       "grants": ["connections:manage", "models:invoke"]
     },
     {
+      "specifier": "@frockbot/plugin-provider-anthropic",
+      "version": "0.0.1",
+      "grants": ["connections:manage", "models:invoke", "network:anthropic"]
+    },
+    {
       "specifier": "@frockbot/plugin-package-publisher",
       "version": "0.0.1",
       "grants": ["package:publish"]
@@ -136,31 +141,6 @@
       "grants": ["network:sprites"]
     },
     {
-      "specifier": "@frockbot/plugin-desktop-notifications",
-      "version": "0.0.1",
-      "grants": ["desktop:notifications"]
-    },
-    {
-      "specifier": "@frockbot/plugin-desktop-directory-picker",
-      "version": "0.0.1",
-      "grants": ["desktop:directory-picker"]
-    },
-    {
-      "specifier": "@frockbot/plugin-desktop-clipboard",
-      "version": "0.0.1",
-      "grants": ["desktop:clipboard:read", "desktop:clipboard:write"]
-    },
-    {
-      "specifier": "@frockbot/plugin-mobile-notifications",
-      "version": "0.0.1",
-      "grants": ["mobile:notifications"]
-    },
-    {
-      "specifier": "@frockbot/plugin-mobile-clipboard",
-      "version": "0.0.1",
-      "grants": ["mobile:clipboard:read", "mobile:clipboard:write"]
-    },
-    {
       "specifier": "@frockbot/plugin-user-machine",
       "version": "0.0.1",
       "grants": []
@@ -169,16 +149,6 @@
       "specifier": "@frockbot/plugin-machine-messages",
       "version": "0.0.1",
       "grants": []
-    },
-    {
-      "specifier": "@frockbot/plugin-composio",
-      "version": "0.0.1",
-      "grants": ["connections:manage", "tools:execute"]
-    },
-    {
-      "specifier": "@frockbot/plugin-mcp",
-      "version": "0.0.1",
-      "grants": ["connections:manage", "tools:execute", "network:mcp"]
     },
     {
       "specifier": "@frockbot/plugin-subagents",

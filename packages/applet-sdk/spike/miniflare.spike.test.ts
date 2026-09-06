@@ -1,7 +1,7 @@
 /**
- * Spike S2 (`docs/plans/applets.md` D12c): Miniflare embedded in a Node process,
- * running an Applet class as a SQLite Durable Object with function service
- * bindings and a hibernating WebSocket.
+ * Spike S2: Miniflare embedded in a Node process, running an Applet class as a
+ * SQLite Durable Object with function service bindings and a hibernating
+ * WebSocket.
  *
  * Findings, against `miniflare@5.20260828.0-alpha` / `workerd@1.20260828.1`:
  *

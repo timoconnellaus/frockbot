@@ -11,11 +11,10 @@
 // Package carries every scrap of behaviour. Nothing here decides what a turn
 // type admits, when a payload ends a Turn, or how a client draws one.
 //
-// Only the `widget` shape is host-source (§4.2 of `docs/research/
-// grokbot-computer.md`). The other members are named in the same section
-// but their field lists are not recorded, so they are declared here in the
-// narrowest shape that carries the observed meaning, and widened when a
-// primary source says more.
+// Only the `widget` shape is host-source. The other members are named
+// alongside it but their field lists were never recorded, so they are declared
+// here in the narrowest shape that carries the observed meaning, and widened
+// when a primary source says more.
 //
 // `approval` has no GrokBot payload behind it at all: row 53 records only the
 // harness sentence "when your own action needs approval". It carries a human
@@ -23,7 +22,7 @@
 // Like `widget` it ends the Turn: the Bot has nothing to do until a human
 // answers.
 
-/** The widget shape, verbatim from §4.2: `options` holds 1–6 entries. */
+/** The widget shape, verbatim from the register: `options` holds 1–6 entries. */
 export interface SendToUserWidgetV1 {
   prompt: string;
   helpText?: string;

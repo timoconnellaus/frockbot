@@ -7,10 +7,10 @@
 // kernel isolate, everything else runs in a loaded Worker with
 // `globalOutbound` disabled and only the Bot's authority bindings.
 //
-// Two behaviours come straight from `docs/research/spike-worker-loader-from-do.md`:
-// `.get()` never throws, so mount and `health()` are a single guarded phase;
-// and a reused loader id silently serves the first code, so the id is nothing
-// but the content address of the module set actually mounted.
+// Two loader behaviours are load-bearing here: `.get()` never throws, so mount
+// and `health()` are a single guarded phase; and a reused loader id silently
+// serves the first code, so the id is nothing but the content address of the
+// module set actually mounted.
 import {
   decodeBotIsolateHookReplacementV1,
   decodeIsolateHealthV1,

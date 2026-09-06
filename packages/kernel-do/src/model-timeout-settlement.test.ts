@@ -9,9 +9,9 @@
 // connection and try again", blaming a network that was fine, over a Bot that
 // stayed wedged behind a banner nothing could ever resolve.
 //
-// ADR 0028 already settled the question for recovery: park only when somebody
-// can be asked, and Flock AI keeps no addressable copy of a completion, so
-// nobody can. This is that rule on the live path.
+// Recovery already answers this: park only when somebody can be asked, and
+// Flock AI keeps no addressable copy of a completion, so nobody can. This is
+// that rule on the live path.
 import { describe, expect, test } from "bun:test";
 import {
   bootstrapGeneration,

@@ -72,12 +72,12 @@ const source = computed(() => {
 /*
  * The theme a page is given.
  *
- * Design tokens are the contract between the shell and a Package's page (ADR
- * 0007): a page is handed semantic names, never the shell's stylesheet, and
- * never a colour to hard-code. The list is what an Applet kit needs to build a
- * whole screen — surfaces, text, borders, the accent, the three status
- * colours, the focus ring, geometry, and the type scale — under names that say
- * what a value is for rather than which shell control it came from.
+ * Design tokens are the contract between the shell and a Package's page: a page
+ * is handed semantic names, never the shell's stylesheet, and never a colour to
+ * hard-code. The list is what an Applet kit needs to build a whole screen —
+ * surfaces, text, borders, the accent, the three status colours, the focus
+ * ring, geometry, and the type scale — under names that say what a value is for
+ * rather than which shell control it came from.
  */
 const THEME_TOKENS: ReadonlyArray<readonly [string, string]> = [
   ["surface", "surface"],

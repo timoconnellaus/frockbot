@@ -1,6 +1,6 @@
 // The Memory Package against real R2 and two real Durable Objects.
 //
-// One claim, and it is the whole point of Step 3 of `docs/plans/slice-2.md`:
+// One claim, and it is the whole point of User Memory:
 //
 //   A Bot writes a fact to the *User* Memory scope. Its generation is recorded
 //   in the **User** Durable Object — "The User's Durable Object is the

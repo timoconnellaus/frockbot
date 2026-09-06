@@ -178,8 +178,8 @@ export function createPackagePublisherAgentPlugin(
         }
       },
       execute: async (input, context) => {
-        // One Computer per User (ADR 0012): the assignment is keyed by the
-        // User, and the Bot attaches to it as a tenant.
+        // One Computer per User: the assignment is keyed by the User, and the
+        // Bot attaches to it as a tenant.
         const identity = { userId };
         if (!ctx.computers.assignment(identity)) {
           ctx.computers.assign(identity, defaultProviderId);

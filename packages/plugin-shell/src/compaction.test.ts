@@ -565,7 +565,8 @@ describe("running a compaction", () => {
     expect(
       failure?.type === "conversation/compaction-failed" && failure.reason,
     ).toBe("provider refused the request");
-    // The request that follows is exactly the one ADR 0027 would assemble.
+    // The request that follows is exactly the one that would be assembled
+    // without a compaction.
     expect(compactionStateV1(session.events).compaction).toBeUndefined();
   });
 

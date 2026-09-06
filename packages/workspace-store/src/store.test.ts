@@ -430,7 +430,7 @@ describe("who may write", () => {
     ).toMatchObject({ status: "refused" });
   });
 
-  // ADR 0013: the Computer-side sync mirrors a durable root. It never writes a
+  // The Computer-side sync mirrors a durable root. It never writes a
   // Memory root — that would give the root a second writer — and it reads
   // every root, because a Memory root has to be readable to be presented
   // read-only on the Computer.

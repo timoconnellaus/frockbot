@@ -1,7 +1,7 @@
 // Lane K3's proof, in workerd, against the real `AppletState` Durable Object.
 //
-// Every claim ADR 0022 and `AGENTS.md` make about an Applet is exercised here
-// on the production class, not a probe: an Applet's facet storage survives a
+// Every claim `AGENTS.md` makes about an Applet is exercised here on the
+// production class, not a probe: an Applet's facet storage survives a
 // code generation change and a revert; a generation whose health check fails
 // leaves the prior facet resident and records a durable failure; deleting an
 // Applet deletes its storage, versions, and directory entry; a facet cannot see
@@ -290,7 +290,7 @@ describe("Applet authority", () => {
       content: "A:added:milk",
     });
 
-    // Different code, same storage — the whole point of ADR 0022.
+    // Different code, same storage — the whole point of an Applet.
     const second = await publishGeneration(applet, {
       version: "B",
       tools: ["add_todo", "list_todos"],
@@ -510,9 +510,9 @@ describe("Applet authority", () => {
 
 // The counterexample the 2026-09-05 review reproduced, and its three siblings.
 //
-// Before ADR 0041 the kernel mounted a candidate generation against the live
-// facet and treated a health failure as a rollback. It was not one: the
-// candidate's constructor, the SDK's migration step, and `health()` itself all
+// The kernel used to mount a candidate generation against the live facet and
+// treat a health failure as a rollback. It was not one: the candidate's
+// constructor, the SDK's migration step, and `health()` itself all
 // run against the Applet's real rows first, so a generation could delete the
 // previous generation's data and *then* fail, leaving the host reporting the
 // previous generation resident over storage it no longer recognised.
@@ -630,9 +630,9 @@ describe("an activation trial cannot change the previous generation's data", () 
   });
 });
 
-// ADR 0041's second half. A Turn's Composition advertises one Applet generation
-// to the model — its tools, their schemas, and its provenance — and the call it
-// makes names that generation. The instance runs it or refuses.
+// A Turn's Composition advertises one Applet generation to the model — its
+// tools, their schemas, and its provenance — and the call it makes names that
+// generation. The instance runs it or refuses.
 describe("Applet tool calls execute the generation the Turn pinned", () => {
   test("a call pinned to a superseded generation is refused, and nothing runs", async () => {
     const applet = appletId("pinned");

@@ -28,8 +28,8 @@ const ROUTINE_ORIGIN: StoredRunOriginV1 = {
 };
 
 /**
- * A subagent Turn's origin (ADR 0017): recorded in the *child* Durable Object,
- * naming the task it is and the parent run that asked for it.
+ * A subagent Turn's origin: recorded in the *child* Durable Object, naming the
+ * task it is and the parent run that asked for it.
  */
 const SUBAGENT_ORIGIN: StoredRunOriginV1 = {
   kind: "subagent",

@@ -321,9 +321,9 @@ describe("runtime files", () => {
 
 describe("provisioning script", () => {
   test("is far larger than the argv budget that produced the measured 431", () => {
-    // ADR 0004: Fly answered a ~2.5 KB `cmd=` query with 431. The script must
-    // reach the Sprite on stdin, and this asserts the size that makes argv
-    // delivery impossible rather than merely unwise.
+    // Fly answered a ~2.5 KB `cmd=` query with 431. The script must reach the
+    // Sprite on stdin, and this asserts the size that makes argv delivery
+    // impossible rather than merely unwise.
     expect(provisionScript.length).toBeGreaterThan(3_000);
   });
 
@@ -341,8 +341,8 @@ describe("provisioning script", () => {
   });
 
   test("installs no browser from the distribution", () => {
-    // ADR 0004: on the Sprite base image `chromium` is a snap transitional
-    // package. Installing it pulls `snapd` and `systemd` and had not finished
+    // On the Sprite base image `chromium` is a snap transitional package.
+    // Installing it pulls `snapd` and `systemd` and had not finished
     // after 25 minutes, which is the whole reason a cold Computer could not
     // open. The browser is Playwright's own build instead, and the way that
     // stays true is that the package list never names one again.
@@ -697,8 +697,8 @@ describe("Sprite naming", () => {
 // script into a temp tree, stubs only `flock` and GNU `stat`, and runs it.
 describe("installed shell scripts", () => {
   test("all of a User's Bots share one browser profile", () => {
-    // ADR 0012: one Computer per User, and "all Bots share the User's browser
-    // profile". One directory, not one per Bot — the assertion lives here
+    // One Computer per User, and all Bots share the User's browser profile.
+    // One directory, not one per Bot — the assertion lives here
     // because the provisioning document is what creates it.
     expect(provisionScript).toContain(`${HOME_ROOT}/chrome-profile `);
     expect(provisionScript).not.toContain("chrome-profiles");
@@ -713,8 +713,8 @@ describe("installed shell scripts", () => {
   });
 
   test("one browser holds the shared profile, and the launcher takes no Bot key", () => {
-    // ADR 0031. Chromium's singleton lock is per `--user-data-dir`, so a
-    // per-slot launch could only ever produce one browser: the first Bot to
+    // Chromium's singleton lock is per `--user-data-dir`, so a per-slot
+    // launch could only ever produce one browser: the first Bot to
     // ask got a screen and the rest got "Opening in existing browser session"
     // and a dead CDP port. One browser, one display, one port.
     const launcher = installedScript(provisionScript, CHROME_LAUNCHER);
@@ -1244,7 +1244,7 @@ describe("desktop slots are reclaimed from idle tenants only", () => {
     }
   }, 30_000);
   test("prunes a slot from the superseded hundred-display layout", async () => {
-    // The migration's registry half (ADR 0031). A Computer that allocated
+    // The migration's registry half. A Computer that allocated
     // displays 0-99 carries slots the one screen has no rectangle for; a window
     // pinned past its last slot is a window nobody can see. They are pruned
     // under the same lock that allocates, so the tenant re-allocates in range

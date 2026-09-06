@@ -1,9 +1,9 @@
 // Journey 6 step 2: "start a new conversation with the same Bot".
 //
-// Until ADR 0027 there was no way to do it. A Bot had one Session for its
-// whole life, so the transcript only ever grew and the memory-recall proof the
-// journey exists to make was confounded — the fact the Bot "remembered" was
-// still sitting in message history.
+// There used to be no way to do it. A Bot had one Session for its whole life,
+// so the transcript only ever grew and the memory-recall proof the journey
+// exists to make was confounded — the fact the Bot "remembered" was still
+// sitting in message history.
 //
 // This is the seam from the composer's action through the application Worker
 // to the Bot Durable Object's durable conversation boundary: the transcript

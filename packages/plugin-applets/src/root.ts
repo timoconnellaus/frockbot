@@ -1,21 +1,20 @@
 // Where an Applet's source lives, and why there.
 //
-// ADR 0022 decision 7: "Applet source lives under a `package-declared` durable
-// root of the Applets Package, `applets/<appletId>/`, synchronized by the
-// durable-root sync of ADR 0013." An Applet is *written* on the Computer and
-// *run* in the loader, so its source has to be a real file a Bot can open with
-// ordinary file tools, type-check, lint, and preview — and it has to survive
-// hibernation, cold start, host migration, and an image rebuild. That is the
-// definition of a durable root, and `package-declared` is the only kind a
-// Package declares for itself (`kernel-contracts/src/workspace.ts`).
+// Applet source lives under a `package-declared` durable root of the Applets
+// Package, `applets/<appletId>/`, synchronized by the durable-root sync. An
+// Applet is *written* on the Computer and *run* in the loader, so its source
+// has to be a real file a Bot can open with ordinary file tools, type-check,
+// lint, and preview — and it has to survive hibernation, cold start, host
+// migration, and an image rebuild. That is the definition of a durable root,
+// and `package-declared` is the only kind a Package declares for itself
+// (`kernel-contracts/src/workspace.ts`).
 //
 // The root is User-scoped, like every `package-declared` root: Applets are
-// account-wide (ADR 0022 decision 3, plan D2), so one User's Bots share the
-// root and an Applet a Bot wrote is an Applet every Bot of that User can edit.
-// It is read-write on the Computer — unlike Memory and the User instruction
-// root, whose single writer is a Package — because writing source with a shell
-// is exactly what the Bot is meant to do here.
-//
+// account-wide, so one User's Bots share the root and an Applet a Bot wrote is
+// an Applet every Bot of that User can edit. It is read-write on the Computer
+// — unlike Memory and the User instruction root, whose single writer is a
+// Package — because writing source with a shell is exactly what the Bot is
+// meant to do here.
 // The published artifact is *not* what runs. `applet build` writes
 // `<appletId>/dist/` inside this root, the sync pushes it to object storage,
 // and publish reads the built bytes back through the Workspace file surface
@@ -27,7 +26,7 @@ import {
   type WorkspacePathV1,
   type WorkspaceRootV1,
 } from "@frockbot/kernel-contracts";
-// The Applet id shape is ADR 0015's share id, `<publicUserId>.<random>`, and
+// The Applet id shape is the share id, `<publicUserId>.<random>`, and
 // this is its one validator. Reused rather than re-expressed: a second regex
 // for the same shape is a second answer to "is this id well formed", and the
 // difference between the two would be found by a path that accepted an id the

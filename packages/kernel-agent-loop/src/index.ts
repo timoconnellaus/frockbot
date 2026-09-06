@@ -11,34 +11,49 @@ import {
 import {
   type CompositionPinV1,
   decodeSkillRefsV1,
-  LlmEffectNotStartedError,
-  type LlmStreamEvent,
-  type LlmUsageV1,
   type LoopStepContinuationV1,
-  type NormalizedModelRequest,
-  ModelProviderFailureError,
   type Session,
   type SessionEvent,
   type StepOutcome,
-  StructuredOutputValidationError,
   type ToolCall,
-  type ToolCallOccurrence,
-  type ToolExecutionResult,
   type TurnTypeV1,
   TURN_DEADLINE_MS_V1,
   toolCallOccurrences,
   turnEndReason,
-  validateSettledToolOccurrenceJournal,
   validateToolOccurrenceJournal,
 } from "@frockbot/kernel-contracts";
 import { type Context, Service } from "cordis";
 import {
+  EffectAdmissionFencedError,
+  modelFailureMessage,
+  ModelEffectReconciliationRequiredError,
+  ModelOutcomeSettlementRequiredError,
+  StepLimitReachedError,
+  ToolEffectReconciliationRequiredError,
+  TURN_DEADLINE_REASON_V1,
+} from "./errors.js";
+import { requestModelV1 } from "./model-request.js";
+import { planResumptionV1, recoverModelRequestV1 } from "./resume.js";
+import type {
+  EffectAdmittingAgentOptions,
+  LoopRuntime,
+  ModelResponse,
+  TurnCursor,
+  TurnSettlement,
+} from "./runtime.js";
+import { executeToolsV1 } from "./tool-execution.js";
+import {
   defaultModelRetrySleepV1,
   type ModelRetryPolicyRuntimeV1,
-  nextModelRetryV1,
 } from "./retry-policy.js";
 
 export * from "./retry-policy.js";
+export {
+  MODEL_REQUEST_ATTEMPTS_V1,
+  STEP_LIMIT_REASON_V1,
+  TURN_DEADLINE_REASON_V1,
+} from "./errors.js";
+export { estimateModelUsageV1 } from "./model-request.js";
 
 declare module "cordis" {
   interface Events {
@@ -63,102 +78,11 @@ export interface AgentLoopConfig {
   composition: CompositionPinV1;
 }
 
-type EffectAdmittingAgentOptions = AgentOptions & {
-  admitEffect(effect: {
-    kind: "model" | "tool";
-    effectId: string;
-  }): Promise<boolean>;
-};
-
 declare module "cordis" {
   interface Context {
     agentLoop: AgentLoop;
   }
 }
-
-interface ModelResponse {
-  request: NormalizedModelRequest;
-  text: string;
-  toolCalls: ToolCall[];
-}
-
-const TOKEN_ESTIMATE_BYTES_PER_TOKEN_V1 = 4;
-
-function estimatedTokensV1(value: unknown): number {
-  const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
-  return Math.ceil(bytes / TOKEN_ESTIMATE_BYTES_PER_TOKEN_V1);
-}
-
-/**
- * The provider-neutral fallback for transports that return no token counts.
- * It is intentionally based on the exact normalized request and assembled
- * response that are journaled, and is always marked estimated at the event.
- */
-export function estimateModelUsageV1(
-  request: NormalizedModelRequest,
-  response: Pick<ModelResponse, "text" | "toolCalls">,
-): LlmUsageV1 {
-  return {
-    inputTokens: estimatedTokensV1(request),
-    outputTokens: estimatedTokensV1({
-      text: response.text,
-      toolCalls: response.toolCalls,
-    }),
-  };
-}
-
-type ModelReconciliation =
-  | { status: "recovered"; response: ModelResponse }
-  | { status: "unavailable"; reason: string }
-  | { status: "not-retrievable"; reason: string };
-
-class ModelEffectReconciliationRequiredError extends Error {
-  constructor(
-    readonly requestId: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "ModelEffectReconciliationRequiredError";
-  }
-}
-
-class ToolEffectReconciliationRequiredError extends Error {
-  constructor(
-    readonly occurrenceId: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "ToolEffectReconciliationRequiredError";
-  }
-}
-
-/**
- * The Turn used every step it was allowed.
- *
- * Not a model error: nothing failed, and everything the Turn did in those
- * steps is durable. It is reported as what it is — a Turn that stopped after
- * so many steps — so the person is told the Bot ran out of room rather than
- * that their model broke.
- */
-class StepLimitReachedError extends Error {
-  constructor(readonly steps: number) {
-    // The sentence is written for the person, the way the Turn deadline's is:
-    // it is what reaches the chat bubble once `kernel-do` wraps it into the
-    // run's failure. The step count stays on the error for the log.
-    super(STEP_LIMIT_REASON_V1);
-    this.name = "StepLimitReachedError";
-  }
-}
-
-/**
- * What a person is told when a reply used every step it was allowed. Bob
- * (2026-09-04) ran a to-do applet build to the 64-step ceiling and the thread
- * showed the generic "stopped before it finished" under a spinner that never
- * ended; this names what happened and what to do, and stays true whatever
- * the ceiling is.
- */
-export const STEP_LIMIT_REASON_V1 =
-  "This Bot used all the steps it had for one reply and stopped. What it finished is saved. Send another message to carry on.";
 
 /**
  * The longest a single Turn may run before the loop stops waiting for it.
@@ -169,21 +93,6 @@ export const STEP_LIMIT_REASON_V1 =
  * it.
  */
 export { TURN_DEADLINE_MS_V1 };
-
-/** Legacy ceiling for unknown failures: the first attempt plus one retry. */
-export const MODEL_REQUEST_ATTEMPTS_V1 = 2;
-
-/** What a `turn/end` records when the Turn ran out of wall clock. */
-export const TURN_DEADLINE_REASON_V1 =
-  "This Turn ran for 15 minutes without finishing and was stopped. Try sending it again.";
-
-/** Durable Stop won the final effect-admission transaction. */
-class EffectAdmissionFencedError extends Error {
-  constructor(readonly effectId: string) {
-    super(`Effect "${effectId}" was fenced by durable Stop`);
-    this.name = "EffectAdmissionFencedError";
-  }
-}
 
 function hasUnsettledExternalEffect(events: readonly SessionEvent[]): boolean {
   let unresolvedRequestId: string | undefined;
@@ -209,31 +118,19 @@ function hasUnsettledExternalEffect(events: readonly SessionEvent[]): boolean {
   }
 }
 
-class ModelOutcomeSettlementRequiredError extends Error {
-  constructor(readonly cause: unknown) {
-    super("Durable model outcome settlement is pending");
-    this.name = "ModelOutcomeSettlementRequiredError";
-  }
-}
-
-function modelFailureMessage(error: unknown): string {
-  return error instanceof Error && error.message
-    ? error.message
-    : "Model provider response was lost";
-}
-
-class LoopAgent implements Agent {
+class LoopAgent implements Agent, LoopRuntime {
   readonly id: string;
   readonly botId: string;
   readonly session: Session;
-  #ctx: Context;
-  #options: EffectAdmittingAgentOptions;
-  #maxSteps: number;
-  #composition: CompositionPinV1;
+  readonly ctx: Context;
+  readonly options: EffectAdmittingAgentOptions;
+  readonly maxSteps: number;
+  readonly composition: CompositionPinV1;
   /** The turn type every Turn of this Agent is admitted as. */
-  #turnType: TurnTypeV1;
+  readonly turnType: TurnTypeV1;
   /** The subagent role that turn type was admitted under, when it has one. */
-  #subagentRole: string | undefined;
+  readonly subagentRole: string | undefined;
+  readonly retry: ModelRetryPolicyRuntimeV1;
   #status: AgentStatus = "idle";
   #inbox: AgentInput[] = [];
   #activity: Promise<void> = Promise.resolve();
@@ -258,7 +155,6 @@ class LoopAgent implements Agent {
   #turnDeadlineReached = false;
   #turnDeadlineMs: number;
   #turnDeadlineAt = 0;
-  #retry: ModelRetryPolicyRuntimeV1;
 
   constructor(
     ctx: Context,
@@ -269,20 +165,28 @@ class LoopAgent implements Agent {
     turnDeadlineMs: number,
     retry: ModelRetryPolicyRuntimeV1,
   ) {
-    this.#ctx = ctx;
-    this.#composition = composition;
+    this.ctx = ctx;
+    this.composition = composition;
     this.session = session;
     this.botId = options.botId;
     const explicitAgentId = (
       options as AgentOptions & { agentId?: string }
     ).agentId?.trim();
     this.id = explicitAgentId || options.sessionId;
-    this.#options = options;
-    this.#turnType = options.turnType ?? "chat";
-    this.#subagentRole = options.subagentRole;
-    this.#maxSteps = maxSteps;
+    this.options = options;
+    this.turnType = options.turnType ?? "chat";
+    this.subagentRole = options.subagentRole;
+    this.maxSteps = maxSteps;
     this.#turnDeadlineMs = turnDeadlineMs;
-    this.#retry = retry;
+    this.retry = retry;
+  }
+
+  get agent(): Agent {
+    return this;
+  }
+
+  get turnDeadlineAt(): number {
+    return this.#turnDeadlineAt;
   }
 
   get status(): AgentStatus {
@@ -309,7 +213,7 @@ class LoopAgent implements Agent {
     };
     this.session.append({ type: "input/queued", ...input });
     this.#inbox.push(input);
-    this.#ctx.emit("agent/inbox/inserted", this, input);
+    this.ctx.emit("agent/inbox/inserted", this, input);
     this.#wake();
     return input.messageId;
   }
@@ -331,7 +235,7 @@ class LoopAgent implements Agent {
   cancel(reason: "user" | "shutdown" = "user", detail?: string): void {
     if (this.#status === "disposed") return;
     this.#cancelDetail = turnEndReason(detail);
-    this.#ctx.emit("agent/cancel-requested", this, reason);
+    this.ctx.emit("agent/cancel-requested", this, reason);
     const queued = this.#inbox.splice(0);
     if (queued.length > 0) {
       this.session.appendBatch(
@@ -353,7 +257,7 @@ class LoopAgent implements Agent {
   #armTurnDeadline(): void {
     this.#disarmTurnDeadline();
     this.#turnDeadlineReached = false;
-    this.#turnDeadlineAt = this.#retry.now() + this.#turnDeadlineMs;
+    this.#turnDeadlineAt = this.retry.now() + this.#turnDeadlineMs;
     this.#turnDeadlineTimer = setTimeout(() => {
       this.#turnDeadlineReached = true;
       this.#controller?.abort(new Error(TURN_DEADLINE_REASON_V1));
@@ -386,7 +290,7 @@ class LoopAgent implements Agent {
   #setStatus(status: AgentStatus): void {
     if (status === this.#status) return;
     this.#status = status;
-    this.#ctx.emit("agent/status", this, status);
+    this.ctx.emit("agent/status", this, status);
   }
 
   #wake(): void {
@@ -429,339 +333,28 @@ class LoopAgent implements Agent {
     }
   }
 
-  async #resumeTurn(signal: AbortSignal): Promise<void> {
-    let openTurn: number | undefined;
-    let latestStep = 0;
-    let latestStepStatus: "none" | "open" | "ended" = "none";
-    let latestStepOutcome: StepOutcome | undefined;
-    let unresolvedRequest: NormalizedModelRequest | undefined;
-    let definitiveNoEffect:
-      Extract<SessionEvent, { type: "model/effect-not-started" }> | undefined;
-    let definitiveResponseFailure:
-      Extract<SessionEvent, { type: "model/response-failed" }> | undefined;
-    for (const event of this.session.events) {
-      if (event.type === "turn/start") {
-        openTurn = event.turn;
-        latestStep = 0;
-        latestStepStatus = "none";
-        latestStepOutcome = undefined;
-        unresolvedRequest = undefined;
-        definitiveNoEffect = undefined;
-        definitiveResponseFailure = undefined;
-      }
-      if (event.type === "turn/end" && event.turn === openTurn)
-        openTurn = undefined;
-      if (event.type === "step/start" && event.turn === openTurn) {
-        latestStep = Math.max(latestStep, event.step);
-        latestStepStatus = "open";
-        latestStepOutcome = undefined;
-      }
-      if (
-        event.type === "step/end" &&
-        event.turn === openTurn &&
-        event.step === latestStep
-      ) {
-        latestStepStatus = "ended";
-        latestStepOutcome = event.outcome;
-      }
-      if (event.type === "model/request" && event.turn === openTurn) {
-        unresolvedRequest = event.request;
-        definitiveNoEffect = undefined;
-        definitiveResponseFailure = undefined;
-      }
-      if (
-        event.type === "model/effect-not-started" &&
-        event.requestId === unresolvedRequest?.requestId
-      ) {
-        definitiveNoEffect = event;
-      }
-      if (
-        event.type === "model/response-failed" &&
-        event.requestId === unresolvedRequest?.requestId
-      ) {
-        definitiveResponseFailure = event;
-      }
-      if (
-        event.type === "assistant/message" &&
-        event.requestId === unresolvedRequest?.requestId
-      ) {
-        unresolvedRequest = undefined;
-        definitiveNoEffect = undefined;
-      }
-    }
-    if (openTurn === undefined)
-      throw new Error("session has no resumable turn");
-    let latestAssistant:
-      Extract<SessionEvent, { type: "assistant/message" }> | undefined;
-    for (const event of this.session.events) {
-      if (
-        event.type === "assistant/message" &&
-        event.turn === openTurn &&
-        event.step === latestStep
-      ) {
-        latestAssistant = event;
-      }
-    }
-    let openStep: number | undefined;
+  /**
+   * The Turn's clock, its failure classification and its settlement, around a
+   * body that only has to say how the Turn finished.
+   */
+  async #driveTurn(
+    turn: number,
+    body: (cursor: TurnCursor) => Promise<TurnSettlement>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const cursor: TurnCursor = { openStep: undefined };
     let turnOutcome: StepOutcome = "interrupted";
     let turnReason: string | undefined;
     let reconciliationRequired = false;
     this.#armTurnDeadline();
     try {
-      if (latestAssistant) {
-        await this.#notifyModelOutcome(latestAssistant.requestId, "completed");
+      const settlement = await body(cursor);
+      if (settlement.kind === "reconciliation-required") {
+        reconciliationRequired = true;
+      } else {
+        turnOutcome = settlement.outcome;
+        turnReason = settlement.reason;
       }
-      let nextStep = latestStep === 0 ? 1 : latestStep + 1;
-      if (unresolvedRequest) {
-        openStep = latestStep;
-        if (definitiveResponseFailure) {
-          await this.#notifyModelOutcome(
-            definitiveResponseFailure.requestId,
-            "completed",
-          );
-          turnOutcome = "model-error";
-          turnReason = turnEndReason(definitiveResponseFailure.failure.message);
-          this.#ctx.emit(
-            "agent/error",
-            this,
-            new StructuredOutputValidationError(
-              definitiveResponseFailure.failure,
-            ),
-          );
-          return;
-        }
-        if (definitiveNoEffect) {
-          await this.#notifyModelOutcome(
-            definitiveNoEffect.requestId,
-            "not-started",
-          );
-          turnOutcome = "model-error";
-          turnReason = turnEndReason(definitiveNoEffect.reason);
-          this.#ctx.emit(
-            "agent/error",
-            this,
-            new LlmEffectNotStartedError(definitiveNoEffect.reason),
-          );
-          return;
-        }
-        const reconciliation = await this.#reconcileModel(
-          unresolvedRequest,
-          openTurn,
-          latestStep,
-          signal,
-        );
-        if (reconciliation.status === "not-retrievable") {
-          // No later attempt can retrieve this effect, so the run settles now.
-          // The chunks already journaled stay in the session, so whatever the
-          // model produced before the interruption is still shown.
-          await this.#notifyModelOutcome(
-            unresolvedRequest.requestId,
-            "not-started",
-          );
-          turnOutcome = "model-error";
-          turnReason = turnEndReason(reconciliation.reason);
-          this.#ctx.emit("agent/error", this, new Error(reconciliation.reason));
-          return;
-        }
-        if (reconciliation.status === "unavailable") {
-          const existing = this.session.events.findLast(
-            (event) =>
-              event.type === "model/reconciliation-required" &&
-              event.requestId === unresolvedRequest.requestId,
-          );
-          if (
-            existing?.type !== "model/reconciliation-required" ||
-            existing.reason !== reconciliation.reason
-          ) {
-            this.session.append({
-              type: "model/reconciliation-required",
-              turn: openTurn,
-              step: latestStep,
-              requestId: unresolvedRequest.requestId,
-              reason: reconciliation.reason,
-            });
-          }
-          reconciliationRequired = true;
-          return;
-        }
-        const { response } = reconciliation;
-        this.session.append({
-          type: "assistant/message",
-          turn: openTurn,
-          step: latestStep,
-          requestId: response.request.requestId,
-          text: response.text,
-          toolCalls: response.toolCalls,
-        });
-        await this.session.flush();
-        signal.throwIfAborted();
-        await this.#notifyModelOutcome(response.request.requestId, "completed");
-        await this.#announceAssistantText(response, openTurn, latestStep);
-        if (response.toolCalls.length === 0) {
-          const shouldStop = await this.#stepShouldStop(
-            openTurn,
-            latestStep,
-            { kind: "stop" },
-            signal,
-          );
-          this.session.append({
-            type: "step/end",
-            turn: openTurn,
-            step: latestStep,
-            outcome: "completed",
-          });
-          openStep = undefined;
-          if (shouldStop) {
-            turnOutcome = "completed";
-            return;
-          }
-        } else {
-          const endsTurn = await this.#executeTools(
-            toolCallOccurrences(openTurn, latestStep, response.toolCalls),
-            signal,
-          );
-          signal.throwIfAborted();
-          const shouldStop = await this.#stepShouldStop(
-            openTurn,
-            latestStep,
-            { kind: endsTurn ? "stop" : "continue" },
-            signal,
-          );
-          this.session.append({
-            type: "step/end",
-            turn: openTurn,
-            step: latestStep,
-            outcome: "completed",
-          });
-          openStep = undefined;
-          if (shouldStop) {
-            turnOutcome = "completed";
-            return;
-          }
-        }
-        nextStep = latestStep + 1;
-      } else if (latestStepStatus === "open" && latestAssistant) {
-        openStep = latestStep;
-        if (latestAssistant.toolCalls.length === 0) {
-          const shouldStop = await this.#stepShouldStop(
-            openTurn,
-            latestStep,
-            { kind: "stop" },
-            signal,
-          );
-          this.session.append({
-            type: "step/end",
-            turn: openTurn,
-            step: latestStep,
-            outcome: "completed",
-          });
-          openStep = undefined;
-          if (shouldStop) {
-            turnOutcome = "completed";
-            return;
-          }
-        } else {
-          const occurrences = toolCallOccurrences(
-            openTurn,
-            latestStep,
-            latestAssistant.toolCalls,
-          );
-          const endsTurn = await this.#executeTools(occurrences, signal);
-          signal.throwIfAborted();
-          const shouldStop = await this.#stepShouldStop(
-            openTurn,
-            latestStep,
-            { kind: endsTurn ? "stop" : "continue" },
-            signal,
-          );
-          this.session.append({
-            type: "step/end",
-            turn: openTurn,
-            step: latestStep,
-            outcome: "completed",
-          });
-          openStep = undefined;
-          if (shouldStop) {
-            turnOutcome = "completed";
-            return;
-          }
-        }
-        nextStep = latestStep + 1;
-      } else if (latestStepStatus === "ended") {
-        turnOutcome = latestStepOutcome ?? "interrupted";
-        if (
-          turnOutcome !== "completed" ||
-          !latestAssistant ||
-          latestAssistant.toolCalls.length === 0
-        ) {
-          return;
-        }
-      } else if (latestStepStatus === "open") {
-        nextStep = latestStep;
-      }
-      for (let step = nextStep; step <= this.#maxSteps; step += 1) {
-        signal.throwIfAborted();
-        openStep = step;
-        if (!(latestStepStatus === "open" && step === latestStep)) {
-          this.session.append({ type: "step/start", turn: openTurn, step });
-        }
-        const response = await this.#requestModel(openTurn, step, signal);
-        this.session.append({
-          type: "assistant/message",
-          turn: openTurn,
-          step,
-          requestId: response.request.requestId,
-          text: response.text,
-          toolCalls: response.toolCalls,
-        });
-        await this.session.flush();
-        signal.throwIfAborted();
-        await this.#notifyModelOutcome(response.request.requestId, "completed");
-        await this.#announceAssistantText(response, openTurn, step);
-        if (response.toolCalls.length === 0) {
-          const shouldStop = await this.#stepShouldStop(
-            openTurn,
-            step,
-            { kind: "stop" },
-            signal,
-          );
-          this.session.append({
-            type: "step/end",
-            turn: openTurn,
-            step,
-            outcome: "completed",
-          });
-          openStep = undefined;
-          if (shouldStop) {
-            turnOutcome = "completed";
-            return;
-          }
-        } else {
-          const endsTurn = await this.#executeTools(
-            toolCallOccurrences(openTurn, step, response.toolCalls),
-            signal,
-          );
-          signal.throwIfAborted();
-          const shouldStop = await this.#stepShouldStop(
-            openTurn,
-            step,
-            { kind: endsTurn ? "stop" : "continue" },
-            signal,
-          );
-          this.session.append({
-            type: "step/end",
-            turn: openTurn,
-            step,
-            outcome: "completed",
-          });
-          openStep = undefined;
-          if (shouldStop) {
-            turnOutcome = "completed";
-            return;
-          }
-        }
-      }
-      throw new StepLimitReachedError(this.#maxSteps);
     } catch (error) {
       if (this.#turnDeadlineReached) {
         turnOutcome = "interrupted";
@@ -773,7 +366,7 @@ class LoopAgent implements Agent {
         (signal.aborted && hasUnsettledExternalEffect(this.session.events))
       ) {
         reconciliationRequired = true;
-        this.#ctx.emit("agent/error", this, error);
+        this.ctx.emit("agent/error", this, error);
       } else if (
         error instanceof EffectAdmissionFencedError ||
         signal.aborted
@@ -787,7 +380,7 @@ class LoopAgent implements Agent {
       } else {
         turnOutcome = "model-error";
         turnReason = turnEndReason(modelFailureMessage(error));
-        this.#ctx.emit("agent/error", this, error);
+        this.ctx.emit("agent/error", this, error);
       }
     } finally {
       this.#disarmTurnDeadline();
@@ -796,28 +389,28 @@ class LoopAgent implements Agent {
       // ended. That is right for as long as the run might still resume — and
       // the moment it will not, the Turn is closed by whoever settles it, in
       // `kernel-do`'s `settledEventsV1`. Closing it here instead would either
-      // lie about an outcome or make the run unresumable (ADR 0028).
+      // lie about an outcome or make the run unresumable.
       if (!reconciliationRequired) {
         // A deadline settles the same way a Stop does: an open tool
         // occurrence gets an `interrupted` result before the step closes,
         // so the journal never carries a `turn/end` over an open call.
         if (
-          openStep !== undefined &&
+          cursor.openStep !== undefined &&
           (turnOutcome === "cancelled" || this.#turnDeadlineReached)
         ) {
-          await this.#settleCancelledStep(openTurn, openStep);
+          await this.#settleCancelledStep(turn, cursor.openStep);
         }
-        if (openStep !== undefined) {
+        if (cursor.openStep !== undefined) {
           this.session.append({
             type: "step/end",
-            turn: openTurn,
-            step: openStep,
+            turn,
+            step: cursor.openStep,
             outcome: turnOutcome,
           });
         }
         this.session.append({
           type: "turn/end",
-          turn: openTurn,
+          turn,
           outcome: turnOutcome,
           ...(turnOutcome !== "completed" && turnReason !== undefined
             ? { reason: turnReason }
@@ -825,8 +418,99 @@ class LoopAgent implements Agent {
         });
       }
       await this.session.flush();
-      await this.#ctx.serial("agent/turn-stopping", this, openTurn);
+      await this.ctx.serial("agent/turn-stopping", this, turn);
     }
+  }
+
+  async #resumeTurn(signal: AbortSignal): Promise<void> {
+    const plan = planResumptionV1(this.session.events);
+    const openTurn = plan.openTurn;
+    if (openTurn === undefined)
+      throw new Error("session has no resumable turn");
+    const { latestStep, latestStepStatus, latestAssistant } = plan;
+    await this.#driveTurn(
+      openTurn,
+      async (cursor) => {
+        if (latestAssistant) {
+          await this.notifyModelOutcome(latestAssistant.requestId, "completed");
+        }
+        let nextStep = latestStep === 0 ? 1 : latestStep + 1;
+        if (plan.unresolvedRequest) {
+          cursor.openStep = latestStep;
+          const recovery = await recoverModelRequestV1(
+            this,
+            { ...plan, openTurn },
+            plan.unresolvedRequest,
+            signal,
+          );
+          if (recovery.kind === "settled") return recovery.settlement;
+          await this.#journalAssistantMessage(
+            recovery.response,
+            openTurn,
+            latestStep,
+            signal,
+          );
+          if (
+            await this.#completeStep(
+              openTurn,
+              latestStep,
+              recovery.response.toolCalls,
+              cursor,
+              signal,
+            )
+          ) {
+            return { kind: "settled", outcome: "completed" };
+          }
+          nextStep = latestStep + 1;
+        } else if (latestStepStatus === "open" && latestAssistant) {
+          cursor.openStep = latestStep;
+          if (
+            await this.#completeStep(
+              openTurn,
+              latestStep,
+              latestAssistant.toolCalls,
+              cursor,
+              signal,
+            )
+          ) {
+            return { kind: "settled", outcome: "completed" };
+          }
+          nextStep = latestStep + 1;
+        } else if (latestStepStatus === "ended") {
+          const outcome = plan.latestStepOutcome ?? "interrupted";
+          if (
+            outcome !== "completed" ||
+            !latestAssistant ||
+            latestAssistant.toolCalls.length === 0
+          ) {
+            return { kind: "settled", outcome };
+          }
+        } else if (latestStepStatus === "open") {
+          nextStep = latestStep;
+        }
+        for (let step = nextStep; step <= this.maxSteps; step += 1) {
+          signal.throwIfAborted();
+          cursor.openStep = step;
+          if (!(latestStepStatus === "open" && step === latestStep)) {
+            this.session.append({ type: "step/start", turn: openTurn, step });
+          }
+          const response = await this.#callModel(openTurn, step, signal);
+          if (
+            await this.#completeStep(
+              openTurn,
+              step,
+              response.toolCalls,
+              cursor,
+              signal,
+            )
+          ) {
+            return { kind: "settled", outcome: "completed" };
+          }
+        }
+        throw new StepLimitReachedError(this.maxSteps);
+      },
+      signal,
+    );
   }
 
   async #runTurn(signal: AbortSignal): Promise<void> {
@@ -838,10 +522,10 @@ class LoopAgent implements Agent {
       {
         type: "composition/pinned",
         turn,
-        generationId: this.#composition.generationId,
-        artifactSetHash: this.#composition.artifactSetHash,
+        generationId: this.composition.generationId,
+        artifactSetHash: this.composition.artifactSetHash,
       },
-      { type: "turn/admission", turn, turnType: this.#turnType },
+      { type: "turn/admission", turn, turnType: this.turnType },
       { type: "input/admitted", messageId: input.messageId, turn },
     ]);
     // Claimed before the flush, not after: the input has been journaled as
@@ -849,177 +533,135 @@ class LoopAgent implements Agent {
     // failed first flush handed it straight back to `#wake`.
     this.#inbox.shift();
     await this.session.flush();
-    this.#ctx.emit("agent/inbox/claimed", this, [input], turn);
+    this.ctx.emit("agent/inbox/claimed", this, [input], turn);
 
-    let openStep: number | undefined;
-    let turnOutcome: StepOutcome = "interrupted";
-    let turnReason: string | undefined;
-    let reconciliationRequired = false;
-    this.#armTurnDeadline();
-    try {
-      let inputs = [input];
-      for (let step = 1; step <= this.#maxSteps; step += 1) {
-        signal.throwIfAborted();
-        const decision = await this.#ctx.waterfall(
-          "agent/pre-step",
-          this,
-          inputs,
-          turn,
-          step,
-          () => Promise.resolve<PreStepDecision>({ kind: "enter", inputs }),
-        );
-        if (decision.kind === "reject") {
-          turnOutcome = "blocked";
-          turnReason = turnEndReason(decision.reason);
-          return;
-        }
-
-        openStep = step;
-        this.session.append({ type: "step/start", turn, step });
-        for (const admitted of decision.inputs) {
-          this.session.append({
-            type: "user/message",
-            turn,
-            step,
-            messageId: admitted.messageId,
-            text: admitted.text,
-          });
-        }
-
-        const response = await this.#requestModel(turn, step, signal);
-        this.session.append({
-          type: "assistant/message",
-          turn,
-          step,
-          requestId: response.request.requestId,
-          text: response.text,
-          toolCalls: response.toolCalls,
-        });
-        await this.session.flush();
-        signal.throwIfAborted();
-        await this.#notifyModelOutcome(response.request.requestId, "completed");
-        await this.#announceAssistantText(response, turn, step);
-
-        if (response.toolCalls.length === 0) {
-          const shouldStop = await this.#stepShouldStop(
-            turn,
-            step,
-            { kind: "stop" },
-            signal,
-          );
-          this.session.append({
-            type: "step/end",
-            turn,
-            step,
-            outcome: "completed",
-          });
-          openStep = undefined;
-          if (shouldStop) {
-            turnOutcome = "completed";
-            return;
-          }
-        } else {
-          const endsTurn = await this.#executeTools(
-            toolCallOccurrences(turn, step, response.toolCalls),
-            signal,
-          );
+    await this.#driveTurn(
+      turn,
+      async (cursor) => {
+        let inputs = [input];
+        for (let step = 1; step <= this.maxSteps; step += 1) {
           signal.throwIfAborted();
-          const shouldStop = await this.#stepShouldStop(
+          const decision = await this.ctx.waterfall(
+            "agent/pre-step",
+            this,
+            inputs,
             turn,
             step,
-            { kind: endsTurn ? "stop" : "continue" },
-            signal,
+            () => Promise.resolve<PreStepDecision>({ kind: "enter", inputs }),
           );
-          this.session.append({
-            type: "step/end",
-            turn,
-            step,
-            outcome: "completed",
-          });
-          openStep = undefined;
+          if (decision.kind === "reject") {
+            return {
+              kind: "settled",
+              outcome: "blocked",
+              reason: turnEndReason(decision.reason),
+            };
+          }
+
+          cursor.openStep = step;
+          this.session.append({ type: "step/start", turn, step });
+          for (const admitted of decision.inputs) {
+            this.session.append({
+              type: "user/message",
+              turn,
+              step,
+              messageId: admitted.messageId,
+              text: admitted.text,
+            });
+          }
+
+          const response = await this.#callModel(turn, step, signal);
           // A tool result that ends the Turn closes it here unless declared
           // termination policy replaces that default for this step.
-          if (shouldStop) {
-            turnOutcome = "completed";
-            return;
+          if (
+            await this.#completeStep(
+              turn,
+              step,
+              response.toolCalls,
+              cursor,
+              signal,
+            )
+          ) {
+            return { kind: "settled", outcome: "completed" };
           }
+          inputs = [];
         }
-        inputs = [];
-      }
-      throw new StepLimitReachedError(this.#maxSteps);
-    } catch (error) {
-      if (this.#turnDeadlineReached) {
-        turnOutcome = "interrupted";
-        turnReason = this.#deadlineTurnReason(error);
-      } else if (
-        error instanceof ModelEffectReconciliationRequiredError ||
-        error instanceof ToolEffectReconciliationRequiredError ||
-        error instanceof ModelOutcomeSettlementRequiredError ||
-        (signal.aborted && hasUnsettledExternalEffect(this.session.events))
-      ) {
-        reconciliationRequired = true;
-        this.#ctx.emit("agent/error", this, error);
-      } else if (
-        error instanceof EffectAdmissionFencedError ||
-        signal.aborted
-      ) {
-        turnOutcome = "cancelled";
-        turnReason = this.#cancelDetail;
-      } else if (error instanceof StepLimitReachedError) {
-        // The Turn ran out of room, which is not a failure of the model.
-        turnOutcome = "interrupted";
-        turnReason = turnEndReason(error.message);
-      } else {
-        turnOutcome = "model-error";
-        turnReason = turnEndReason(modelFailureMessage(error));
-        this.#ctx.emit("agent/error", this, error);
-      }
-    } finally {
-      this.#disarmTurnDeadline();
-      // A Turn owed a reconciliation writes no `turn/end`: its model request
-      // has no durable outcome, and a `turn/end` would claim to know how it
-      // ended. That is right for as long as the run might still resume — and
-      // the moment it will not, the Turn is closed by whoever settles it, in
-      // `kernel-do`'s `settledEventsV1`. Closing it here instead would either
-      // lie about an outcome or make the run unresumable (ADR 0028).
-      if (!reconciliationRequired) {
-        // A deadline settles the same way a Stop does: an open tool
-        // occurrence gets an `interrupted` result before the step closes,
-        // so the journal never carries a `turn/end` over an open call.
-        if (
-          openStep !== undefined &&
-          (turnOutcome === "cancelled" || this.#turnDeadlineReached)
-        ) {
-          await this.#settleCancelledStep(turn, openStep);
-        }
-        if (openStep !== undefined) {
-          this.session.append({
-            type: "step/end",
-            turn,
-            step: openStep,
-            outcome: turnOutcome,
-          });
-        }
-        this.session.append({
-          type: "turn/end",
-          turn,
-          outcome: turnOutcome,
-          ...(turnOutcome !== "completed" && turnReason !== undefined
-            ? { reason: turnReason }
-            : {}),
-        });
-      }
-      await this.session.flush();
-      await this.#ctx.serial("agent/turn-stopping", this, turn);
-    }
+        throw new StepLimitReachedError(this.maxSteps);
+      },
+      signal,
+    );
   }
 
-  async #notifyModelOutcome(
+  /** Asks the model and journals what it said. */
+  async #callModel(
+    turn: number,
+    step: number,
+    signal: AbortSignal,
+  ): Promise<ModelResponse> {
+    const response = await requestModelV1(this, turn, step, signal);
+    await this.#journalAssistantMessage(response, turn, step, signal);
+    return response;
+  }
+
+  async #journalAssistantMessage(
+    response: ModelResponse,
+    turn: number,
+    step: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    this.session.append({
+      type: "assistant/message",
+      turn,
+      step,
+      requestId: response.request.requestId,
+      text: response.text,
+      toolCalls: response.toolCalls,
+    });
+    await this.session.flush();
+    signal.throwIfAborted();
+    await this.notifyModelOutcome(response.request.requestId, "completed");
+    await this.#announceAssistantText(response, turn, step);
+  }
+
+  /**
+   * Runs the step's tool calls, closes the step, and reports whether the Turn
+   * stops here.
+   */
+  async #completeStep(
+    turn: number,
+    step: number,
+    toolCalls: readonly ToolCall[],
+    cursor: TurnCursor,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    let proposed: LoopStepContinuationV1;
+    if (toolCalls.length === 0) {
+      proposed = { kind: "stop" };
+    } else {
+      const endsTurn = await executeToolsV1(
+        this,
+        toolCallOccurrences(turn, step, [...toolCalls]),
+        signal,
+      );
+      signal.throwIfAborted();
+      proposed = { kind: endsTurn ? "stop" : "continue" };
+    }
+    const shouldStop = await this.#stepShouldStop(turn, step, proposed, signal);
+    this.session.append({
+      type: "step/end",
+      turn,
+      step,
+      outcome: "completed",
+    });
+    cursor.openStep = undefined;
+    return shouldStop;
+  }
+
+  async notifyModelOutcome(
     requestId: string,
     outcome: "completed" | "not-started",
   ): Promise<void> {
     try {
-      await this.#ctx.serial(
+      await this.ctx.serial(
         "agent/model-outcome-committed",
         this,
         requestId,
@@ -1028,580 +670,6 @@ class LoopAgent implements Agent {
     } catch (error) {
       throw new ModelOutcomeSettlementRequiredError(error);
     }
-  }
-
-  async #requestModel(
-    turn: number,
-    step: number,
-    signal: AbortSignal,
-  ): Promise<ModelResponse> {
-    validateSettledToolOccurrenceJournal(this.session.events);
-    const assembly = await this.#ctx.systemPrompt.assemble({
-      sessionId: this.session.id,
-      provider: this.#options.provider,
-      model: this.#options.model,
-      // The same turn type the tool catalog is trimmed to. A section that
-      // renders what a Turn may do would otherwise have to guess it.
-      turnType: this.#turnType,
-      // Where the Turn is in its budget, so a section can warn the model
-      // before the loop stops it.
-      step: { current: step, max: this.#maxSteps },
-      // The same loop clock that armed the deadline. Prompt policy receives
-      // the deadline as data; the kernel retains ownership of the timer.
-      deadline: { at: this.#turnDeadlineAt, now: this.#retry.now() },
-    });
-
-    // One automatic retry, and only for a failure the provider itself
-    // classified as "the request never started" — a rejected key, an
-    // unresolvable binding, a connection refused before any byte was sent.
-    // Those are exactly the failures where retrying cannot duplicate anything,
-    // and the ones a person watching a blank screen would retry by hand. Every
-    // other failure is uncertain and is never retried, which is the whole of
-    // ADR 0024's durability contract.
-    let attempts = 0;
-    while (true) {
-      attempts += 1;
-      const proposedMessages = this.session.deriveMessages();
-      const messages = await this.#ctx.waterfall(
-        "agent/message-window",
-        this,
-        proposedMessages,
-        turn,
-        step,
-        signal,
-        () => Promise.resolve(proposedMessages),
-      );
-      const proposedTools = this.#ctx.tools.schemas({
-        turnType: this.#turnType,
-        ...(this.#subagentRole === undefined
-          ? {}
-          : { subagentRole: this.#subagentRole }),
-      });
-      const tools = await this.#ctx.waterfall(
-        "agent/tool-exposure",
-        this,
-        proposedTools,
-        turn,
-        step,
-        signal,
-        () => Promise.resolve(proposedTools),
-      );
-      const proposed: NormalizedModelRequest = {
-        requestId: crypto.randomUUID(),
-        provider: this.#options.provider,
-        model: this.#options.model,
-        system: assembly.text,
-        messages,
-        tools,
-        ...(this.#options.modelBinding
-          ? { modelBinding: structuredClone(this.#options.modelBinding) }
-          : {}),
-      };
-      const request = await this.#ctx.waterfall(
-        "agent/request",
-        this,
-        proposed,
-        signal,
-        () => Promise.resolve(proposed),
-      );
-      this.session.append({ type: "model/request", turn, step, request });
-      await this.session.flush();
-      if (
-        !(await this.#options.admitEffect({
-          kind: "model",
-          effectId: request.requestId,
-        }))
-      ) {
-        this.session.append({
-          type: "model/effect-not-started",
-          turn,
-          step,
-          requestId: request.requestId,
-          reason: "Durable Stop fenced provider execution",
-        });
-        await this.session.flush();
-        throw new EffectAdmissionFencedError(request.requestId);
-      }
-
-      try {
-        return await this.#consumeStream(request, turn, step, signal);
-      } catch (error) {
-        if (error instanceof StructuredOutputValidationError) {
-          await this.session.flush();
-          await this.#notifyModelOutcome(request.requestId, "completed");
-          throw error;
-        }
-        if (signal.aborted) {
-          const reason = `Model response outcome is uncertain after cancellation: ${modelFailureMessage(error)}`;
-          this.session.append({
-            type: "model/reconciliation-required",
-            turn,
-            step,
-            requestId: request.requestId,
-            reason,
-          });
-          await this.session.flush();
-          throw new ModelEffectReconciliationRequiredError(
-            request.requestId,
-            reason,
-          );
-        }
-        if (!(error instanceof ModelProviderFailureError)) {
-          const reason = `Model response outcome is uncertain: ${modelFailureMessage(error)}`;
-          this.session.append({
-            type: "model/reconciliation-required",
-            turn,
-            step,
-            requestId: request.requestId,
-            reason,
-          });
-          await this.session.flush();
-          throw new ModelEffectReconciliationRequiredError(
-            request.requestId,
-            reason,
-          );
-        }
-        this.session.append({
-          type: "model/effect-not-started",
-          turn,
-          step,
-          requestId: request.requestId,
-          reason: modelFailureMessage(error),
-        });
-        await this.session.flush();
-        await this.#notifyModelOutcome(request.requestId, "not-started");
-        const retry = nextModelRetryV1({
-          failure: error,
-          attempt: attempts,
-          deadlineAt: this.#turnDeadlineAt,
-          runtime: this.#retry,
-        });
-        // A Package can refuse a planned retry, or replace a permanent failure
-        // with a provider-owned fallback. It cannot turn a permanent failure
-        // into another attempt against the same model.
-        const action = await this.#ctx.waterfall(
-          "agent/request-error",
-          this,
-          error,
-          signal,
-          () =>
-            Promise.resolve(
-              retry
-                ? ({ kind: "retry" } as const)
-                : ({ kind: "fail" } as const),
-            ),
-        );
-        if (action.kind === "fail") throw error;
-        if (action.kind === "retry" && !retry) throw error;
-        const delayMs = action.kind === "fallback" ? 0 : retry!.delayMs;
-        this.session.append({
-          type: "model/retry",
-          turn,
-          step,
-          attempt: attempts + 1,
-          classification: error.classification,
-          delayMs,
-        });
-        await this.session.flush();
-        this.#ctx.emit("agent/error", this, error);
-        await this.#retry.sleep(delayMs, signal);
-      }
-    }
-  }
-
-  async #consumeStream(
-    request: NormalizedModelRequest,
-    turn: number,
-    step: number,
-    signal: AbortSignal,
-  ): Promise<ModelResponse> {
-    let text = "";
-    const toolCalls: ToolCall[] = [];
-    let usage: LlmUsageV1 | undefined;
-    let structuredFailure:
-      | Extract<
-          LlmStreamEvent,
-          { type: "structured-output-failure" }
-        >["failure"]
-      | undefined;
-    let receivedProviderEvent = false;
-    const startedAt = Date.now();
-    try {
-      for await (const event of this.#ctx.llm.stream(request, signal)) {
-        if (event.type !== "response-format-note") receivedProviderEvent = true;
-        signal.throwIfAborted();
-        if (event.type === "usage") usage = structuredClone(event.usage);
-        this.#applyStreamEvent(
-          event,
-          request.requestId,
-          turn,
-          step,
-          toolCalls,
-          (delta) => {
-            text += delta;
-          },
-        );
-        if (event.type === "structured-output-failure") {
-          structuredFailure = event.failure;
-        }
-      }
-    } catch (error) {
-      if (receivedProviderEvent && error instanceof ModelProviderFailureError) {
-        const invalidNoEffectClaim = new Error(
-          error.message ||
-            "Model provider reported a retryable failure after returning response data",
-        );
-        this.#recordModelUsage(
-          request,
-          turn,
-          step,
-          usage,
-          text,
-          toolCalls,
-          Math.max(0, Date.now() - startedAt),
-        );
-        throw invalidNoEffectClaim;
-      }
-      // Once dispatch may have begun, the call can have incurred spend even
-      // when its terminal response is lost. Preserve the provider's partial
-      // counts when present and otherwise write the same explicit estimate as
-      // a successful unmetered stream. A definitive no-effect result is the
-      // sole exception because the provider says no billable call occurred.
-      if (!(error instanceof ModelProviderFailureError)) {
-        this.#recordModelUsage(
-          request,
-          turn,
-          step,
-          usage,
-          text,
-          toolCalls,
-          Math.max(0, Date.now() - startedAt),
-        );
-      }
-      throw error;
-    }
-    this.#recordModelUsage(
-      request,
-      turn,
-      step,
-      usage,
-      text,
-      toolCalls,
-      Math.max(0, Date.now() - startedAt),
-    );
-    if (structuredFailure) {
-      throw new StructuredOutputValidationError(structuredFailure);
-    }
-    return { request, text, toolCalls };
-  }
-
-  async #reconcileModel(
-    request: NormalizedModelRequest,
-    turn: number,
-    step: number,
-    signal: AbortSignal,
-  ): Promise<ModelReconciliation> {
-    const reconciliation = await this.#ctx.llm.reconcile(request, signal);
-    if (reconciliation.status !== "recovered") return reconciliation;
-    const durablePrefix = this.session.events.flatMap((event) =>
-      event.type === "assistant/chunk" &&
-      event.turn === turn &&
-      event.step === step &&
-      event.requestId === request.requestId
-        ? [{ type: "text-delta" as const, text: event.text }]
-        : [],
-    );
-    const recoveredTextDeltas = reconciliation.events.flatMap((event) =>
-      event.type === "text-delta" ? [event] : [],
-    );
-    const prefixMatches = durablePrefix.every((event, index) => {
-      const recovered = recoveredTextDeltas[index];
-      return recovered?.text === event.text;
-    });
-    if (!prefixMatches || recoveredTextDeltas.length < durablePrefix.length) {
-      return {
-        status: "unavailable",
-        reason: `Provider-bound retrieval diverged from durable response prefix for request "${request.requestId}"`,
-      };
-    }
-    const finishIndexes = reconciliation.events.flatMap((event, index) =>
-      event.type === "finish" ? [index] : [],
-    );
-    if (
-      finishIndexes.length !== 1 ||
-      finishIndexes[0] !== reconciliation.events.length - 1
-    ) {
-      return {
-        status: "unavailable",
-        reason: `Provider-bound retrieval returned an invalid event structure for request "${request.requestId}"`,
-      };
-    }
-    let text = "";
-    const toolCalls: ToolCall[] = [];
-    let usage: LlmUsageV1 | undefined;
-    let structuredFailure:
-      | Extract<
-          LlmStreamEvent,
-          { type: "structured-output-failure" }
-        >["failure"]
-      | undefined;
-    let textDeltaIndex = 0;
-    const startedAt = Date.now();
-    for (const event of reconciliation.events) {
-      signal.throwIfAborted();
-      if (event.type === "usage") usage = structuredClone(event.usage);
-      const journalTextDelta =
-        event.type !== "text-delta" || textDeltaIndex >= durablePrefix.length;
-      this.#applyStreamEvent(
-        event,
-        request.requestId,
-        turn,
-        step,
-        toolCalls,
-        (delta) => {
-          text += delta;
-        },
-        journalTextDelta,
-      );
-      if (event.type === "text-delta") textDeltaIndex += 1;
-      if (event.type === "structured-output-failure") {
-        structuredFailure = event.failure;
-      }
-    }
-    this.#recordModelUsage(
-      request,
-      turn,
-      step,
-      usage,
-      text,
-      toolCalls,
-      Math.max(0, Date.now() - startedAt),
-    );
-    if (structuredFailure) {
-      await this.session.flush();
-      await this.#notifyModelOutcome(request.requestId, "completed");
-      throw new StructuredOutputValidationError(structuredFailure);
-    }
-    return {
-      status: "recovered",
-      response: { request, text, toolCalls },
-    };
-  }
-
-  #recordModelUsage(
-    request: NormalizedModelRequest,
-    turn: number,
-    step: number,
-    reported: LlmUsageV1 | undefined,
-    text: string,
-    toolCalls: readonly ToolCall[],
-    latencyMs: number,
-  ): void {
-    const existing = this.session.events.some(
-      (event) =>
-        event.type === "model/usage" && event.requestId === request.requestId,
-    );
-    if (existing) return;
-    const usage =
-      reported ??
-      estimateModelUsageV1(request, { text, toolCalls: [...toolCalls] });
-    this.session.append({
-      type: "model/usage",
-      turn,
-      step,
-      requestId: request.requestId,
-      provider: request.provider,
-      model: request.model,
-      ...(request.modelBinding
-        ? { modelBinding: structuredClone(request.modelBinding) }
-        : {}),
-      ...usage,
-      latencyMs,
-      estimated: reported === undefined,
-    });
-  }
-
-  #applyStreamEvent(
-    event: LlmStreamEvent,
-    requestId: string,
-    turn: number,
-    step: number,
-    toolCalls: ToolCall[],
-    appendText: (text: string) => void,
-    journal = true,
-  ): void {
-    if (event.type === "text-delta") {
-      appendText(event.text);
-      if (journal) {
-        this.session.append({
-          type: "assistant/chunk",
-          turn,
-          step,
-          requestId,
-          text: event.text,
-        });
-      }
-    } else if (event.type === "tool-call") {
-      toolCalls.push(event.call);
-    } else if (event.type === "response-format-note") {
-      this.session.append({
-        type: "model/response-format-note",
-        turn,
-        step,
-        requestId,
-        note: event.note,
-      });
-    } else if (event.type === "structured-output-failure") {
-      this.session.append({
-        type: "model/response-failed",
-        turn,
-        step,
-        requestId,
-        failure: event.failure,
-      });
-    }
-  }
-
-  /**
-   * Runs every occurrence and reports whether any result ended the Turn. The
-   * boolean is per *result*, not per definition: one tool can end a Turn for
-   * one payload and not another, and the kernel never inspects which.
-   */
-  async #executeTools(
-    occurrences: readonly ToolCallOccurrence[],
-    signal: AbortSignal,
-  ): Promise<boolean> {
-    let endsTurn = false;
-    for (const occurrence of occurrences) {
-      signal.throwIfAborted();
-      const { call, occurrenceId, turn, step } = occurrence;
-      const journal = validateToolOccurrenceJournal(this.session.events);
-      const existing = journal.get(occurrenceId);
-      if (existing?.result) continue;
-      const context = {
-        botId: this.botId,
-        agentId: this.id,
-        sessionId: this.session.id,
-        effectId: occurrenceId,
-        toolCall: call,
-        compositionGenerationId: this.#composition.generationId,
-        turnType: this.#turnType,
-        ...(this.#subagentRole === undefined
-          ? {}
-          : { subagentRole: this.#subagentRole }),
-        signal,
-      };
-      const preparation = await this.#ctx.tools.prepare(call, context);
-      signal.throwIfAborted();
-      if (existing?.intent && preparation.kind !== "ready") {
-        throw new ToolEffectReconciliationRequiredError(
-          occurrenceId,
-          `Tool effect "${occurrenceId}" cannot be reconciled because its definition is unavailable`,
-        );
-      }
-      if (!existing?.intent) {
-        this.session.append({
-          type: "tool/call",
-          turn,
-          step,
-          occurrenceId,
-          name: call.name,
-          input: call.input,
-        });
-        await this.session.flush();
-        if (signal.aborted) {
-          this.session.append({
-            type: "tool/result",
-            turn,
-            step,
-            occurrenceId,
-            name: call.name,
-            content: "Cancelled before tool execution started.",
-            isError: true,
-            status: "interrupted",
-          });
-          await this.session.flush();
-          signal.throwIfAborted();
-        }
-      }
-      let result: ToolExecutionResult;
-      if (existing?.intent) {
-        if (preparation.kind !== "ready") {
-          throw new ToolEffectReconciliationRequiredError(
-            occurrenceId,
-            `Tool effect "${occurrenceId}" cannot be reconciled because its definition is unavailable`,
-          );
-        }
-        const reconciliation = await this.#ctx.tools.reconcilePrepared(
-          preparation,
-          context,
-        );
-        if (reconciliation.status === "unavailable") {
-          throw new ToolEffectReconciliationRequiredError(
-            occurrenceId,
-            reconciliation.reason,
-          );
-        }
-        result = reconciliation.result;
-      } else if (preparation.kind === "denied") {
-        result = preparation.result;
-        this.#ctx.emit("tools/result", call, result);
-      } else {
-        if (
-          !(await this.#options.admitEffect({
-            kind: "tool",
-            effectId: occurrenceId,
-          }))
-        ) {
-          this.session.append({
-            type: "tool/result",
-            turn,
-            step,
-            occurrenceId,
-            name: call.name,
-            content: "Cancelled before tool execution started.",
-            isError: true,
-            status: "interrupted",
-          });
-          await this.session.flush();
-          throw new EffectAdmissionFencedError(occurrenceId);
-        }
-        try {
-          result = await this.#ctx.tools.executePrepared(preparation, context);
-        } catch (error) {
-          if (signal.aborted || !preparation.idempotent) {
-            throw new ToolEffectReconciliationRequiredError(
-              occurrenceId,
-              signal.aborted
-                ? `Tool effect "${occurrenceId}" outcome is uncertain after cancellation`
-                : `Non-idempotent tool effect "${occurrenceId}" outcome is uncertain`,
-            );
-          }
-          result = {
-            content:
-              error instanceof Error ? error.message : "Tool execution failed",
-            isError: true,
-          };
-          this.#ctx.emit("tools/result", call, result);
-        }
-      }
-      if (result.endsTurn === true) endsTurn = true;
-      this.session.append({
-        type: "tool/result",
-        turn,
-        step,
-        occurrenceId,
-        name: call.name,
-        content: result.content,
-        isError: result.isError,
-        status: "completed",
-        ...(result.attachments && result.attachments.length > 0
-          ? { attachments: result.attachments }
-          : {}),
-      });
-      await this.session.flush();
-    }
-    return endsTurn;
   }
 
   /**
@@ -1622,7 +690,7 @@ class LoopAgent implements Agent {
   ): Promise<void> {
     if (response.toolCalls.length === 0) return;
     if (response.text.trim().length === 0) return;
-    await this.#ctx.serial("agent/assistant-text", this, response.text, {
+    await this.ctx.serial("agent/assistant-text", this, response.text, {
       turn,
       step,
       requestId: response.request.requestId,
@@ -1636,7 +704,7 @@ class LoopAgent implements Agent {
     proposed: LoopStepContinuationV1,
     signal: AbortSignal,
   ): Promise<boolean> {
-    const decision = await this.#ctx.waterfall(
+    const decision = await this.ctx.waterfall(
       "agent/step-continuation",
       this,
       proposed,
@@ -1667,7 +735,7 @@ class LoopAgent implements Agent {
    * settles a Stop or a supersede.
    */
   #deadlineTurnReason(error: unknown): string | undefined {
-    this.#ctx.emit("agent/error", this, error);
+    this.ctx.emit("agent/error", this, error);
     return turnEndReason(TURN_DEADLINE_REASON_V1);
   }
 

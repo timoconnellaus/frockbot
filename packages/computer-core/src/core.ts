@@ -72,10 +72,10 @@ export class ComputerError extends Error {
 }
 
 /**
- * The provisioning key of a Computer. "One Computer serves all of a User's
- * Bots" (ADR 0012), so a Computer is identified by its User and by nothing
- * else. Provisioning, hibernation, the browser profile, and the Workspace are
- * all properties of this identity.
+ * The provisioning key of a Computer. One Computer serves all of a User's
+ * Bots, so a Computer is identified by its User and by nothing else.
+ * Provisioning, hibernation, the browser profile, and the Workspace are all
+ * properties of this identity.
  */
 export interface ComputerIdentityV1 {
   userId: string;
@@ -135,7 +135,7 @@ export function computerTenantBotIdV1(tenant: ComputerTenantV1): string {
  * `kind` is the kernel's `WorkspaceRootKindV1`, so the Computer Package, the
  * Skills loader, and the Memory Package all name the same roots. `access` is
  * how the Computer presents the root: Memory roots are `read-only` there
- * because the Memory Package is their single writer (ADR 0013).
+ * because the Memory Package is their single writer.
  *
  * `mountPath` is a template. Three placeholders are substituted:
  * `{bot}` — the provider's directory key for the tenant Bot;
@@ -642,9 +642,9 @@ export interface ComputerControl {
  * Why one run of the durable-root sync happened.
  *
  * `publish` is the only reason outside the Turn's own policy, and it is one
- * root rather than all of them: an Applet publish (ADR 0022 decision 7) reads
- * the built artifact from the Workspace *store*, so the bytes `applet build`
- * left on the Computer have to reach the store before it looks. It is recorded
+ * root rather than all of them: an Applet publish reads the built artifact
+ * from the Workspace *store*, so the bytes `applet build` left on the Computer
+ * have to reach the store before it looks. It is recorded
  * under its own name rather than borrowed from `signal`, because a record that
  * said "the watcher moved" when a publish asked would be a record nobody could
  * use to explain the sync afterwards.
@@ -725,8 +725,8 @@ export function computerSyncSummaryV1(
 }
 
 /**
- * The durable-root sync of ADR 0013, as the provider-neutral Computer
- * interface exposes it. "Bots invoke Computers only through the
+ * The durable-root sync, as the provider-neutral Computer interface exposes
+ * it. "Bots invoke Computers only through the
  * provider-neutral Computer interface", so the Package that gives a Bot its
  * Computer tools reaches the sync here and never through a provider type.
  *
@@ -842,9 +842,9 @@ export interface ComputerProvider {
   workspaceLayout?: WorkspaceLayoutV1;
   /**
    * Provisions the User's Computer when needed and attaches one Bot tenant to
-   * it. The split arguments are ADR 0012 in a signature: `identity` is the
-   * provisioning key, `tenant` is the caller, and a provider can finally tell
-   * "provision the Computer" from "attach this tenant".
+   * it. The split arguments put one Computer per User in a signature:
+   * `identity` is the provisioning key, `tenant` is the caller, and a provider
+   * can finally tell "provision the Computer" from "attach this tenant".
    */
   open(
     identity: ComputerIdentityV1,

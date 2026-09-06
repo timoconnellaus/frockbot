@@ -34,15 +34,6 @@ export interface TemplateImportPackageLineV1 {
   status: TemplateImportPackageStatusV1;
 }
 
-/** One server the importer would have to connect themselves. */
-export interface TemplateImportConnectionLineV1 {
-  name: string;
-  connectionTypeId?: string;
-  /** Present only for a public server; a placeholder carries no address. */
-  url?: string;
-  hint?: string;
-}
-
 export type TemplateImportStepKindV1 =
   | "bot/create"
   | "user/install-package"
@@ -70,7 +61,6 @@ export interface TemplateImportPlanV1 {
   skills: TemplateSkillV1[];
   routines: TemplateRoutineV1[];
   packages: TemplateImportPackageLineV1[];
-  connections: TemplateImportConnectionLineV1[];
   /** The generation the plan was diffed against; absent when unpinned. */
   catalogGeneration?: string;
   steps: TemplateImportStepV1[];
@@ -118,27 +108,6 @@ function packageLines(
           // gap the User can close, never installed off an index that moved.
           ("missing" as const),
   }));
-}
-
-function connectionLines(
-  template: BotTemplateV1,
-): TemplateImportConnectionLineV1[] {
-  // Every server is a line, public ones included: the import creates no
-  // Connection at all, so even a server whose address travelled is still
-  // something the importing User has to connect for themselves.
-  return template.mcpServers.map((server) =>
-    server.kind === "public"
-      ? {
-          name: server.name,
-          url: server.url,
-          hint: "Add this server as your own Connection to use it.",
-        }
-      : {
-          name: server.name,
-          connectionTypeId: server.connectionTypeId,
-          ...(server.hint === undefined ? {} : { hint: server.hint }),
-        },
-  );
 }
 
 /**
@@ -211,7 +180,6 @@ export function planBotTemplateImportV1(
     skills: input.template.skills,
     routines: input.template.routines,
     packages,
-    connections: connectionLines(input.template),
     ...(input.catalogGeneration === undefined
       ? {}
       : { catalogGeneration: input.catalogGeneration }),
@@ -269,9 +237,6 @@ export function describeImportPlanV1(plan: TemplateImportPlanV1): string {
     installing > 0 ? `Will install ${installing} Package(s).` : "",
     missing > 0
       ? `${missing} Package(s) are missing from your catalog and will be skipped.`
-      : "",
-    plan.connections.length > 0
-      ? `${plan.connections.length} server(s) need your own Connection; none is created for you.`
       : "",
     "No Connection or credential is created by an import.",
   ]

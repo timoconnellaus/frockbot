@@ -178,7 +178,6 @@ describe("template/stage", () => {
     expect(receipt.share.shareId).toBe(`${USER}.${"a".repeat(32)}`);
     expect(receipt.summary?.skills).toBe(1);
     expect(receipt.summary?.routines).toBe(1);
-    expect(receipt.summary?.needsConnection).toBe(1);
 
     const document = blobs.objects.get(templateObjectKeyV1(receipt.share.hash));
     expect(document).toBeDefined();

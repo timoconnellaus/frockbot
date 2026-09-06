@@ -129,24 +129,23 @@ describe("check --live", () => {
   });
 
   test("says an optional secret removed from GitHub is still live and unrevoked", async () => {
-    const { COMPOSIO_API_KEY: _removed, ...environment } =
-      completeEnvironment();
+    const { DEBUG_TOKEN: _removed, ...environment } = completeEnvironment();
     const { exitCode, output } = await run(["check", "--live"], {
       environment,
-      live: ["COMPOSIO_API_KEY"],
+      live: ["DEBUG_TOKEN"],
     });
 
     expect(exitCode).toBe(0);
     expect(output).toContain(
-      "COMPOSIO_API_KEY is unset in this release's environment, but the deployed Worker still holds it",
+      "DEBUG_TOKEN is unset in this release's environment, but the deployed Worker still holds it",
     );
     expect(output).toContain("does not revoke it");
     expect(output).toContain(
-      "bun scripts/check-production-secrets.ts revoke COMPOSIO_API_KEY",
+      "bun scripts/check-production-secrets.ts revoke DEBUG_TOKEN",
     );
-    // And it does not tell the operator Composio is off: it is still running
-    // on the old key.
-    expect(output).not.toContain("Composio Connections are unavailable");
+    // And it does not tell the operator the debug routes are shut: they are
+    // still running on the old token.
+    expect(output).not.toContain("the operator debug routes 404");
   });
 
   test("fails the release when the Worker holds a door production must not have", async () => {
@@ -186,12 +185,12 @@ describe("revoke", () => {
   });
 
   test("fails when wrangler could not delete it, saying it is still live", async () => {
-    const { exitCode, output } = await run(["revoke", "COMPOSIO_API_KEY"], {
+    const { exitCode, output } = await run(["revoke", "DEBUG_TOKEN"], {
       deleteExit: "7",
     });
 
     expect(exitCode).toBe(7);
-    expect(output).toContain("Could not delete COMPOSIO_API_KEY");
+    expect(output).toContain("Could not delete DEBUG_TOKEN");
     expect(output).toContain("still live");
   });
 

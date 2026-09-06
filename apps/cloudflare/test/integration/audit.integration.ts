@@ -1,12 +1,10 @@
-// One Turn, two audited effects, through the gateway and the loaded artifact.
+// One Turn's audited effects, through the gateway and the loaded artifact.
 //
-// This is the layer that proves the classifier against real tools rather than
+// This is the layer that proves the classifier against a real tool rather than
 // against a table of names. The model asks for `computer_exec` against the
-// shared Computer host fake and for an MCP tool against the stubbed remote
-// server, in one Turn; both are audited, and the two targets that come back —
-// `computer` and `remote:<host>` — are the parity item itself (register rows
-// 30 and 30b: shell on the box, MCP on a remote server, one surface covering
-// both).
+// shared Computer host fake; the effect is audited, and the target that comes
+// back — `computer` — is the parity item itself (register row 30: shell on the
+// box).
 //
 // It also proves the redaction where it matters. The command carries a bearer
 // token; the durable entry carries a digest, a redacted preview, and no
@@ -15,11 +13,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import type { AuditEntryV1 } from "@frockbot/plugin-audit";
 import type { FakeExecScript } from "../computer-host-fake.ts";
-import {
-  MCP_ENDPOINT,
-  MCP_GOOD_API_KEY,
-  toolCallTriggerPrompt,
-} from "../harness/miniflare.ts";
+import { toolCallTriggerPrompt } from "../harness/miniflare.ts";
 import {
   asUser,
   expectJson,
@@ -63,39 +57,8 @@ async function script(rule: FakeExecScript): Promise<void> {
   expect(response.status).toBe(200);
 }
 
-/** Install `mcp` and enable the `Example` server account-wide. */
-async function connectMcpServer(userId: string): Promise<void> {
-  const settings = (await expectOkJson(
-    await asUser(userId, "/api/settings"),
-  )) as {
-    revision: number;
-  };
-  await expectOkJson(
-    await postAsUser(userId, "/api/settings", {
-      schemaVersion: 1,
-      type: "user/install-package",
-      commandId: "install-mcp-audit",
-      expectedRevision: settings.revision,
-      packageId: "mcp",
-      version: "0.0.1",
-    }),
-  );
-  await expectOkJson(
-    await postAsUser(userId, "/api/connections", {
-      schemaVersion: 1,
-      type: "connection/create-api-key",
-      commandId: "connect-mcp-audit",
-      packageId: "mcp",
-      connectionTypeId: "mcp-remote-key",
-      label: "Example",
-      apiKey: MCP_GOOD_API_KEY,
-      settings: { url: MCP_ENDPOINT, transport: "streamable-http" },
-    }),
-  );
-}
-
 describe("auditing one Turn's effects", () => {
-  it("records the shell call and the MCP call, with two targets and no secret", async () => {
+  it("records the shell call, with its target and no secret", async () => {
     const userId = freshUserId("audit");
     const botId = "auditor";
     const marker = `frockbot-audit-${crypto.randomUUID()}`;
@@ -105,19 +68,15 @@ describe("auditing one Turn's effects", () => {
       stdout: `audited\n${EXEC_EXIT_MARKER}0\n`,
     });
     await provisionThroughGateway({ userId, botId });
-    await connectMcpServer(userId);
 
     const turn = (await expectOkJson(
       await postAsUser(userId, `/api/bots/${botId}/turns`, {
         schemaVersion: 1,
         commandId: "audit-turn-1",
-        text: toolCallTriggerPrompt(
-          [
-            "computer_exec",
-            { command: `echo ${marker} # Authorization: ${secret}` },
-          ],
-          ["mcp__example__echo", { message: "audited" }],
-        ),
+        text: toolCallTriggerPrompt([
+          "computer_exec",
+          { command: `echo ${marker} # Authorization: ${secret}` },
+        ]),
       }),
     )) as { runId: string };
     expect(turn.runId).toBe("audit-turn-1");
@@ -129,10 +88,7 @@ describe("auditing one Turn's effects", () => {
     const byTool = new Map(
       page.entries.map((entry) => [entry.toolName, entry]),
     );
-    expect([...byTool.keys()].sort()).toEqual([
-      "computer_exec",
-      "mcp__example__echo",
-    ]);
+    expect([...byTool.keys()].sort()).toEqual(["computer_exec"]);
 
     const shell = byTool.get("computer_exec")!;
     expect(shell).toMatchObject({
@@ -141,13 +97,6 @@ describe("auditing one Turn's effects", () => {
       kind: "shell",
       // The Bot's own Computer, not a registered machine.
       target: "computer",
-    });
-    // THE HOST IS RESOLVED FROM THE CONNECTION REGISTRY. The tool name carries
-    // the Connection's slug; the User Durable Object owns the settings that
-    // say which server that is, and it is the only place the two are joined.
-    expect(byTool.get("mcp__example__echo")).toMatchObject({
-      kind: "mcp",
-      target: "remote:mcp.example.test",
     });
 
     // A DIGEST, NOT THE ARGUMENTS. The command line never reaches the table.
@@ -174,23 +123,22 @@ describe("auditing one Turn's effects", () => {
       stdout: `audited\n${EXEC_EXIT_MARKER}0\n`,
     });
     await provisionThroughGateway({ userId, botId });
-    await connectMcpServer(userId);
 
     await expectOkJson(
       await postAsUser(userId, `/api/bots/${botId}/turns`, {
         schemaVersion: 1,
         commandId: "audit-route-1",
-        text: toolCallTriggerPrompt(
-          ["computer_exec", { command: `echo ${marker}` }],
-          ["mcp__example__echo", { message: "routed" }],
-        ),
+        text: toolCallTriggerPrompt([
+          "computer_exec",
+          { command: `echo ${marker}` },
+        ]),
       }),
     );
 
     const all = (await expectOkJson(
       await asUser(userId, "/api/audit"),
     )) as AuditPage;
-    expect(all.total).toBe(2);
+    expect(all.total).toBe(1);
     expect(all.indexState).toBe("ready");
 
     // THE FILTER IS APPLIED IN THE TABLE, not by the client. `?kind=shell`
@@ -203,11 +151,6 @@ describe("auditing one Turn's effects", () => {
       "computer_exec",
     ]);
     expect(shellOnly.total).toBe(1);
-
-    const remote = (await expectOkJson(
-      await asUser(userId, "/api/audit?target=remote:mcp.example.test"),
-    )) as AuditPage;
-    expect(remote.entries.map((entry) => entry.kind)).toEqual(["mcp"]);
 
     // A REBUILD ACCOUNTS FOR EXACTLY WHAT WAS THERE. The receipt is the claim,
     // and the table after it is the evidence.

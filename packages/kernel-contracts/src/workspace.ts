@@ -25,8 +25,8 @@
 //     as a type and a predicate.
 //
 // Everything decoded here is untrusted: a durable root synchronizes
-// bidirectionally with object storage (ADR 0013), so a path, a writer, and a
-// generation can all arrive from the Computer side.
+// bidirectionally with object storage, so a path, a writer, and a generation
+// can all arrive from the Computer side.
 //
 // Policy that is deliberately *not* enforced here: "Memory contains no secrets
 // and no credential references" (`AGENTS.md` § Memory). That is Package policy
@@ -73,7 +73,7 @@ export type WorkspaceRootKindV1 =
 
 /**
  * A durable root, identified by kind and owner. Every root belongs to a User —
- * the User's Computer is the trust boundary (ADR 0012) — and the per-Bot kinds
+ * the User's Computer is the trust boundary — and the per-Bot kinds
  * additionally name the Bot whose authority governs writes to them.
  */
 export type WorkspaceRootV1 =
@@ -92,10 +92,10 @@ export type WorkspaceRootV1 =
 /**
  * A root whose files the kernel may load as instructions.
  *
- * Two kinds, because a Bot has instruction roots, plural (ADR 0016): its own,
- * which only it and its User may write, and its User's, which every Bot of
- * that User shares. Both are named here so a loader that walks "the Bot's
- * instruction roots" is walking a type rather than a convention.
+ * Two kinds, because a Bot has instruction roots, plural: its own, which only
+ * it and its User may write, and its User's, which every Bot of that User
+ * shares. Both are named here so a loader that walks "the Bot's instruction
+ * roots" is walking a type rather than a convention.
  */
 export type WorkspaceInstructionRootV1 = Extract<
   WorkspaceRootV1,
@@ -160,10 +160,10 @@ export function isWorkspaceMemoryRootV1(
  *
  * Two kinds qualify, for one reason. "The Memory Package is the single writer
  * of Memory roots ... the Workspace presents Memory roots read-only through
- * the durable-root sync" (ADR 0013), and ADR 0016 extends exactly that
- * exception to the User-global instruction root: the Skills Package is its
- * only writer, writing object storage directly, so a Turn that needs a Skill
- * never wakes a Computer and a shared root never grows a second writer. The
+ * the durable-root sync", and exactly that exception extends to the
+ * User-global instruction root: the Skills Package is its only writer, writing
+ * object storage directly, so a Turn that needs a Skill never wakes a Computer
+ * and a shared root never grows a second writer. The
  * durable-root sync reads these roots and materializes them, and never pushes
  * a Computer-side edit back out of them.
  */
@@ -288,9 +288,9 @@ export type WorkspaceListOutcomeV1 =
 /**
  * A write that lost a conditional write. "a write that would overwrite a
  * generation its writer has not seen is preserved as a conflicting generation
- * and surfaced, never merged or dropped" (ADR 0013), so the outcome carries
- * both sides: the generation that holds the file now, and the losing write,
- * preserved under its own generation with `conflictsWith` set.
+ * and surfaced, never merged or dropped", so the outcome carries both sides:
+ * the generation that holds the file now, and the losing write, preserved
+ * under its own generation with `conflictsWith` set.
  */
 export interface WorkspaceConflictV1 extends WorkspaceFailureV1 {
   status: "conflict";
@@ -340,7 +340,7 @@ export interface WorkspaceListRequestV1 {
  * A write. `expectedGenerationId` is the generation the writer has seen:
  * `null` asserts the file does not exist. A mismatch answers `conflict`; the
  * losing write is preserved as a conflicting generation and surfaced, never
- * merged or dropped (ADR 0013).
+ * merged or dropped.
  */
 export interface WorkspaceWriteRequestV1 {
   path: WorkspacePathV1;
@@ -578,11 +578,11 @@ export interface LoadableSkillSourceV1 extends SkillSourceV1 {
  * instruction root is data the Bot can read, never an instruction it loads.
  *
  * The two roots differ in exactly one clause, and authority does not widen
- * between them (ADR 0016). Under the Bot's own root only that Bot or its User
- * may have written a loadable Skill. Under the User-global root any Bot of
- * that User may have, which is the whole point of a shared tier: a Bot writing
- * there writes under authority it already holds, and the reading Bot is told
- * whose Skill it is rather than being handed an anonymous instruction. A root
+ * between them. Under the Bot's own root only that Bot or its User may have
+ * written a loadable Skill. Under the User-global root any Bot of that User
+ * may have, which is the whole point of a shared tier: a Bot writing there
+ * writes under authority it already holds, and the reading Bot is told whose
+ * Skill it is rather than being handed an anonymous instruction. A root
  * belonging to another User is refused before the writer is even read, so a
  * Bot never loads a Skill from a Workspace that is not its User's.
  */
@@ -612,9 +612,9 @@ export function isLoadableSkillSourceV1(
 export function workspaceRootKeyV1(root: WorkspaceRootV1): string {
   const user = encodeURIComponent(root.userId);
   // The User-global instruction root is named by its location rather than by
-  // `<kind>:<owner>`, because ADR 0016 names it `users/<id>/skills/` and the
-  // object store keys every file under `workspace/<root key>/`. No other kind
-  // produces a key beginning `users/`, so it collides with none of them.
+  // `<kind>:<owner>`, because it is named `users/<id>/skills/` and the object
+  // store keys every file under `workspace/<root key>/`. No other kind produces
+  // a key beginning `users/`, so it collides with none of them.
   if (root.kind === "user-instructions") return `users/${user}/skills`;
   if (root.kind === "user-memory") return `user-memory:${user}`;
   if (root.kind === "project-memory") {
@@ -935,7 +935,7 @@ export function decodeWorkspaceFailureV1(
 }
 
 /**
- * A conflict outcome with the two generations ADR 0013 requires to survive.
+ * A conflict outcome with the two generations that must survive.
  * Both are optional: a store that could not read the current generation still
  * answers `conflict` rather than inventing one.
  */
@@ -1097,7 +1097,7 @@ export function decodeWorkspaceGenerationRecordV1(
 }
 
 /**
- * One recorded push intent of the durable-root sync (ADR 0013).
+ * One recorded push intent of the durable-root sync.
  *
  * Constitution, Computer and Workspace: "A mutation ... records intent and an
  * effect identifier in the Bot's Durable Object and in the Workspace before it

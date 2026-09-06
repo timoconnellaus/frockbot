@@ -32,15 +32,6 @@ import type {
   RevokeConnectionResult,
   StartConnectionResult,
 } from "@frockbot/connection-core";
-import type {
-  McpLifecycleReceiptV1,
-  McpMountOutcomeReportV1,
-  McpServerStatusViewV1,
-} from "@frockbot/plugin-mcp/records";
-import type {
-  McpAuthorizationCompletionRequestV1,
-  McpAuthorizationStartRequestV1,
-} from "@frockbot/plugin-mcp/backend";
 import type { MemoryVector, MemoryVectorMatch } from "@frockbot/plugin-memory";
 // Flock DTOs cross only the authenticated hosted/backend seam.
 import type {
@@ -282,9 +273,9 @@ export interface UserBotStateBinding {
   }): Promise<ClientWorkspaceFileV1>;
   /**
    * The User's Applets, and the two short-lived projections an open Applet
-   * needs (ADR 0022 §4). Account-wide, so they take no Bot: they sit on this
-   * User-scoped binding because it is the only door the hosted application has
-   * to the User Durable Object.
+   * needs. Account-wide, so they take no Bot: they sit on this User-scoped
+   * binding because it is the only door the hosted application has to the
+   * User Durable Object.
    */
   listApplets(input?: { schemaVersion: 1 }): Promise<unknown>;
   mintAppletViewerToken(input: {
@@ -433,10 +424,10 @@ export interface CatalogGatewayStore {
 }
 
 /**
- * Bot-authored Package artifacts (`docs/plans/kernel-and-isolate.md` Step 3).
- * Content-addressed and immutable, stored at `packages/<contentHash>.mjs` in the
- * same `APPLICATION_ARTIFACTS` bucket. Unlike `ApplicationArtifactStore.load`,
- * the reader verifies the hash before the bytes are used.
+ * Bot-authored Package artifacts. Content-addressed and immutable, stored at
+ * `packages/<contentHash>.mjs` in the same `APPLICATION_ARTIFACTS` bucket.
+ * Unlike `ApplicationArtifactStore.load`, the reader verifies the hash before
+ * the bytes are used.
  */
 export interface PackageArtifactStore {
   putPackageArtifact(contentHash: string, module: string): Promise<void>;
@@ -594,45 +585,6 @@ export interface UserConfigurationBinding {
     packageId: string;
     commandId: string;
   }): Promise<ConnectionCommandReceiptV1 | undefined>;
-  composioRequest(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: unknown;
-  }): Promise<unknown>;
-  readMcpServers(request: {
-    schemaVersion: 1;
-    userId: string;
-  }): Promise<McpServerStatusViewV1>;
-  executeMcpCommand(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: unknown;
-  }): Promise<McpLifecycleReceiptV1>;
-  recordMcpMountOutcome(request: {
-    schemaVersion: 1;
-    userId: string;
-    outcome: McpMountOutcomeReportV1;
-  }): Promise<void>;
-  /**
-   * The three `mcp-oauth` seams. Every outbound OAuth request and every token
-   * lives on the far side of them: the gateway signs a callback state and
-   * forwards, and holds nothing.
-   */
-  startMcpAuthorization(request: {
-    schemaVersion: 1;
-    userId: string;
-    start: McpAuthorizationStartRequestV1;
-  }): Promise<StartConnectionResult>;
-  completeMcpAuthorization(request: {
-    schemaVersion: 1;
-    userId: string;
-    completion: McpAuthorizationCompletionRequestV1;
-  }): Promise<ConnectionCompletionResult>;
-  revokeMcpAuthorization(request: {
-    schemaVersion: 1;
-    userId: string;
-    connectionId: string;
-  }): Promise<RevokeConnectionResult>;
   getConnection(request: {
     schemaVersion: 1;
     userId: string;
@@ -843,9 +795,9 @@ export interface GatewayDependencies {
   userConfigurationFor(userId: string): UserConfigurationBinding;
   botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
   /**
-   * The Applet viewer door (ADR 0022 §4). Both absent in a deployment without
-   * Applets, and `/api/applets/:id/socket` then reports itself unconfigured
-   * rather than the Worker failing to construct.
+   * The Applet viewer door. Both absent in a deployment without Applets, and
+   * `/api/applets/:id/socket` then reports itself unconfigured rather than the
+   * Worker failing to construct.
    */
   appletViewerSecret?: string;
   /**

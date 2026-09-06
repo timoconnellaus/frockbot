@@ -4,9 +4,9 @@
  * Each one exists because of a way an Applet can look right and be wrong: a
  * hard-coded colour that ignores the user's theme, a network call the loader
  * would block anyway, an import that will not exist at build time, and state
- * or tools declared in a shape the server cannot see. ADR 0022 decision 10
- * says this set grows from observed failures — add a rule and a test here,
- * never a paragraph in a prompt.
+ * or tools declared in a shape the server cannot see. This set grows from
+ * observed failures — add a rule and a test here, never a paragraph in a
+ * prompt.
  */
 
 /** A syntax node, walked structurally so no parser type leaks into the rules. */

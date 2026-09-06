@@ -43,8 +43,6 @@ export const CATALOG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   image: "Generate pictures from a written description.",
   "machine-messages":
     "Read and send messages on your Mac, so the Bot can follow and answer your texts.",
-  composio: "Connect Gmail, Calendar, and other services for all your Bots.",
-  mcp: "Connect outside MCP servers, so the tools they offer show up for the Bot to use.",
   memory:
     "Remember things across conversations, so you do not have to repeat yourself.",
   "mobile-clipboard": "Let the Bot read and write the clipboard on your phone.",
@@ -54,6 +52,8 @@ export const CATALOG_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Search for plugins and install, update, or remove them, so the Bot picks up new tools.",
   "package-publisher":
     "Publish a plugin you built, so other people can find and install it.",
+  "provider-anthropic":
+    "Use Anthropic's Claude models, on your own Anthropic account, to power the Bot's replies.",
   "provider-flock-ai": "Use Frock AI models to power the Bot's replies.",
   "provider-foundation":
     "Use the models that ship with the app, so a brand new Bot answers with no setup.",

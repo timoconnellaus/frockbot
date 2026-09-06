@@ -4,8 +4,8 @@
 // Voice costs money per second of audio, and a stuck microphone spends it with
 // nobody watching. So the budget lives where the User's authority already is —
 // the `UserConfiguration` object — and the `VoiceSession` Durable Object,
-// which holds no authority of its own (D2, and ADR 0017's rule for subagent
-// objects), *asks* before it opens a microphone and *reports* when it closes
+// which holds no authority of its own (D2, the same rule subagent objects
+// follow), *asks* before it opens a microphone and *reports* when it closes
 // one.
 //
 // The unit is a whole second of captured audio, counted against a rolling

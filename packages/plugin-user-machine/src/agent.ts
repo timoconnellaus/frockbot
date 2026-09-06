@@ -3,10 +3,10 @@
 // Parity register rows 48 and 49. GrokBot reaches Tim's Mac by passing
 // `machineId` to `Shell`, `Read`, `AwaitShell`, `CopyToBox` and `CopyFromBox`,
 // and "each action needs Tim's local-exec approval" (§2.16). FrockBot spells
-// them as six named tools rather than a parameter on `computer_exec`, because
-// `packages/architecture-checks` enforces that a Turn which does not use the
-// Computer makes no Computer interface call — and the machine is "a separate
-// filesystem" with no Workspace, no durable roots and no generations.
+// them as six named tools rather than a parameter on `computer_exec`, because a
+// Turn which does not use the Computer makes no Computer interface call — and
+// the machine is "a separate filesystem" with no Workspace, no durable roots
+// and no generations.
 //
 // The shape of every effectful tool here is the same, and it is the whole
 // point of the slice:

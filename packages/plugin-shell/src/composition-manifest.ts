@@ -6,12 +6,11 @@ import type { CompositionMemberV1 } from "@frockbot/kernel-composition/generatio
 
 /**
  * Where a Composition member's manifest can be found. `stored` is
- * `authorship:manifest:<hash>` — written by the authoring path and by a
- * Catalog install, so it covers every member a Bot or its User put into the
+ * `authorship:manifest:<hash>` — written by the authoring path and by a Catalog
+ * install, so it covers every member a Bot or its User put into the
  * Composition. `application` is the compiled-in manifest of a first-party
- * artifact-backed member (ADR 0022 decision 8), which came from neither and is
- * already in this bundle. Two *places*, never two answers: the `manifestHash`
- * decides in both.
+ * artifact-backed member, which came from neither and is already in this
+ * bundle. Two *places*, never two answers: the `manifestHash` decides in both.
  */
 export interface CompositionManifestSourcesV1 {
   stored(manifestHash: string): Promise<{ manifest: unknown } | undefined>;

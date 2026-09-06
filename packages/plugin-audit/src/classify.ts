@@ -8,9 +8,9 @@
 // `searchRowsFromClientRunV1` does for the transcript index.
 //
 // The MCP target is the one thing a tool name cannot answer on its own: the
-// name carries the Connection's *slug* (`mcp__<slug>__<tool>`,
-// `plugin-mcp/src/agent.ts`), and the host lives in the Connection's settings,
-// which the User Durable Object owns. So this answers `remote:<slug>` and the
+// name carries the Connection's *slug* (`mcp__<slug>__<tool>`), and the host
+// lives in the Connection's settings, which the User Durable Object owns. So
+// this answers `remote:<slug>` and the
 // User object — the authority for Connections — resolves it to `remote:<host>`
 // on the one code path both projection and rebuild go through
 // (`resolveAuditTargetV1` in `user.ts`). One resolution point, in the object
@@ -184,8 +184,7 @@ export function auditKindForToolV1(
     // A background command outlives the Turn that launched it and is acted on
     // afterwards by the three `computer_process_*` tools, so it is a process
     // rather than a command that ended with the call. GrokBot draws the same
-    // line, as `shellKind: foreground | background` on its own audit line
-    // (`docs/research/grokbot-computer.md:189`).
+    // line, as `shellKind: foreground | background` on its own audit line.
     const background =
       isObject(input) && input.background === true ? "process" : "shell";
     return { kind: background, target: onComputer };

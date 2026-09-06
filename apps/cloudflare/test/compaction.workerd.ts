@@ -1,4 +1,4 @@
-// Compaction against a real Bot Durable Object (ADR 0030).
+// Compaction against a real Bot Durable Object.
 //
 // The claims a Bun double cannot make, because all three are claims about the
 // deployed object:

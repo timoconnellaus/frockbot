@@ -2,8 +2,6 @@
 import { decodeProtocol } from "@frockbot/protocol-schemas";
 
 import { foundationClientPlugins } from "@frockbot/application-foundation/client";
-import { foundationMobilePackages } from "@frockbot/application-foundation/mobile";
-import { startHostedMobileCapabilities } from "@frockbot/mobile/host";
 import {
   decodeBotSettingsViewV1,
   decodeOperationReceiptV1,
@@ -391,14 +389,6 @@ const application = new ClientApplication({
 await application.install(() => () => botStateChannel.dispose());
 for (const plugin of foundationClientPlugins) await application.install(plugin);
 application.mount("#app");
-// Optional native Contributions never block the hosted product bootstrap.
-void startHostedMobileCapabilities(foundationMobilePackages).catch(
-  (error: unknown) =>
-    console.error(
-      "Optional mobile capabilities failed",
-      error instanceof Error ? error.message : "unknown failure",
-    ),
-);
 window.addEventListener("pagehide", () => application.dispose(), {
   once: true,
 });

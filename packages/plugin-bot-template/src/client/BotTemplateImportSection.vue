@@ -152,21 +152,6 @@ async function plan(): Promise<void> {
         </ul>
       </section>
 
-      <section v-if="review.connections.length > 0" class="review__section">
-        <h4>Needs your own Connection</h4>
-        <ul>
-          <li v-for="entry in review.connections" :key="entry.name">
-            {{ entry.name
-            }}<template v-if="entry.url"> — {{ entry.url }}</template>
-            <small v-if="entry.hint"> {{ entry.hint }}</small>
-          </li>
-        </ul>
-        <p class="import__note">
-          None of these is created for you. Add each one in Connectors; once
-          enabled, it is available to every Bot you own.
-        </p>
-      </section>
-
       <p v-if="review.failure" class="import__error" role="alert">
         {{ review.failure }}
       </p>

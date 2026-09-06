@@ -1,5 +1,5 @@
-// When the Computer Package runs the durable-root sync (ADR 0013), and when it
-// refuses to.
+// When the Computer Package runs the durable-root sync, and when it refuses
+// to.
 //
 // The provider here records every call the provider-neutral Computer interface
 // receives, in order, so the claims are about ordering and about absence:
@@ -285,10 +285,10 @@ describe("the Computer Package as the sync's caller", () => {
 });
 
 /**
- * The one sanctioned caller outside the Turn's own sync policy (ADR 0022
- * decision 7). `applet build` writes `dist/` on the Computer with a shell, and
- * an Applet publish reads those bytes from the *store*; without a push in
- * between it would publish the previous build, or nothing.
+ * The one sanctioned caller outside the Turn's own sync policy. `applet
+ * build` writes `dist/` on the Computer with a shell, and an Applet publish
+ * reads those bytes from the *store*; without a push in between it would
+ * publish the previous build, or nothing.
  */
 describe("syncWorkspaceRootNowV1", () => {
   const appletsRoot: WorkspaceRootV1 = {

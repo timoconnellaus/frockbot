@@ -3,8 +3,7 @@
 // WHAT AUDIT IS. Parity register rows 30 and 30b: GrokBot writes one
 // `audit.jsonl` line per shell command carrying turn id and target, and a
 // separate `audit-outbox.json` covering shell, browser navigation and MCP
-// calls (`docs/research/grokbot-computer.md:189-195`, `:546-547`). FrockBot
-// answers with one surface over all five kinds.
+// calls. FrockBot answers with one surface over all five kinds.
 //
 // WHAT IT IS NOT. It is not authority, and it records nothing a Turn did not
 // already record. `AGENTS.md` § Authorities: the Bot's Durable Object holds

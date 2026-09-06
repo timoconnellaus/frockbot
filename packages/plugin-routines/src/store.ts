@@ -1,7 +1,3 @@
-import {
-  stageRoutineSubscriptionV1,
-  routineSubscriptionMatchesV1,
-} from "./subscriptions.js";
 // The Routines authority: the Bot Durable Object's durable Routine records.
 //
 // "The Bot's Durable Object is the authority for everything Bot-scoped: …
@@ -145,7 +141,7 @@ export interface RoutineFiringSeamV1 {
     transaction: RoutineStorageWritesV1,
     input: {
       routineId: string;
-      trigger: "manual" | "webhook" | "integration";
+      trigger: "manual" | "webhook";
       discriminator: string;
       delivery?: string;
     },
@@ -381,7 +377,6 @@ export class RoutineStore {
     routineId: string;
     keyVersion?: number;
     digest?: string;
-    subscriptionId?: string;
     deliveryId: string;
     body: string;
     contentType?: string | null;
@@ -399,62 +394,34 @@ export class RoutineStore {
         throw new RoutineHookError(404, "Routine not found");
       }
       const record = decodeRoutineRecordV1(stored);
-      const integration = input.subscriptionId !== undefined;
-      if (integration) {
-        if (
-          record.trigger?.kind !== "connection" ||
-          input.digest !== undefined ||
-          input.keyVersion !== undefined ||
-          !(await routineSubscriptionMatchesV1(
-            transaction,
-            input.routineId,
-            input.subscriptionId!,
-          ))
-        )
-          throw new RoutineHookError(401, "Event subscription is invalid");
-      } else {
-        const held = await transaction.get<unknown>(
-          routineHookKeyRecordV1(input.routineId),
-        );
-        if (record.trigger?.kind !== "webhook" || held === undefined)
-          throw new RoutineHookError(401, "webhook key is invalid");
-        const key = decodeRoutineHookKeyV1(held);
-        if (
-          key.keyVersion !== input.keyVersion ||
-          !input.digest ||
-          !constantTimeEqualsV1(key.digest, input.digest)
-        )
-          throw new RoutineHookError(401, "webhook key is invalid");
-      }
+      const held = await transaction.get<unknown>(
+        routineHookKeyRecordV1(input.routineId),
+      );
+      if (record.trigger?.kind !== "webhook" || held === undefined)
+        throw new RoutineHookError(401, "webhook key is invalid");
+      const key = decodeRoutineHookKeyV1(held);
+      if (
+        key.keyVersion !== input.keyVersion ||
+        !input.digest ||
+        !constantTimeEqualsV1(key.digest, input.digest)
+      )
+        throw new RoutineHookError(401, "webhook key is invalid");
       if (!record.enabled) {
         // The key is good and the Routine is real; it is simply paused. That
         // is worth telling the caller, so a delivery can be retried later.
         throw new RoutineHookError(409, "Routine is paused");
       }
-      const receiptKey = integration
-        ? `routine-event-delivery:${input.deliveryId}`
-        : routineDeliveryKeyV1(input.deliveryId);
+      const receiptKey = routineDeliveryKeyV1(input.deliveryId);
       const seen = await transaction.get<RoutineDeliveryReceiptV1>(receiptKey);
       if (
         seen &&
-        (integration ||
-          Date.parse(seen.acceptedAt) > now.getTime() - ROUTINE_DELIVERY_TTL_MS)
+        Date.parse(seen.acceptedAt) > now.getTime() - ROUTINE_DELIVERY_TTL_MS
       ) {
         return { status: "duplicate" as const, fireId: seen.fireId };
       }
-      if (integration) {
-        const count =
-          (await transaction.get<number>("routine-event-delivery-count")) ?? 0;
-        if (count >= 100_000)
-          throw new RoutineHookError(
-            429,
-            "This Bot has reached its event history limit",
-          );
-        await transaction.put("routine-event-delivery-count", count + 1);
-      }
       const { fireId } = await firings.enqueueWithin(transaction, {
         routineId: input.routineId,
-        trigger: integration ? "integration" : "webhook",
+        trigger: "webhook",
         discriminator: `hook-${input.deliveryId.slice(0, 40)}`,
         delivery: renderRoutineDeliveryV1(input.body, input.contentType),
       });
@@ -464,7 +431,7 @@ export class RoutineStore {
         fireId,
         acceptedAt: now.toISOString(),
       } satisfies RoutineDeliveryReceiptV1);
-      if (!integration) await this.#trimDeliveries(transaction, now);
+      await this.#trimDeliveries(transaction, now);
       return { status: "accepted" as const, fireId };
     });
   }
@@ -507,13 +474,7 @@ export class RoutineStore {
   async execute(
     command: RoutineCommandV1,
     writer: RoutineWriterV1,
-    validate?: () => Promise<void>,
   ): Promise<RoutineCommandReceiptV1> {
-    if (
-      validate &&
-      !(await this.#storage.get(routineReceiptKeyV1(command.commandId)))
-    )
-      await validate();
     const fingerprint = routineCommandFingerprintV1(command);
     // A refused command is returned out of the transaction rather than thrown
     // through it: every refusal happens before the first write, so rolling back
@@ -542,19 +503,6 @@ export class RoutineStore {
         receipt = await this.#apply(transaction, command, writer);
       } catch (error) {
         return { ok: false, error };
-      }
-      if (receipt.status !== "fired") {
-        const id =
-          receipt.status === "deleted"
-            ? receipt.routineId
-            : receipt.routine.routineId;
-        const next = await transaction.get<unknown>(routineKeyV1(id));
-        await stageRoutineSubscriptionV1(
-          transaction,
-          id,
-          next === undefined ? undefined : decodeRoutineRecordV1(next),
-          true,
-        );
       }
       await transaction.put(receiptKey, {
         commandFingerprint: fingerprint,

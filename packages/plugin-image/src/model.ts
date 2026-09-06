@@ -33,9 +33,8 @@ export interface ImageModelInputV1 {
 
 /**
  * The default model. Cloudflare's own catalog calls FLUX.1 [schnell] the
- * fastest text-to-image model on Workers AI, and it is the one the parity
- * slice was specified against (`docs/plans/` slice O, §2). Overridable through
- * the `image.model` Package setting.
+ * fastest text-to-image model on Workers AI, and it is the one the parity slice
+ * was specified against. Overridable through the `image.model` Package setting.
  */
 export const DEFAULT_IMAGE_MODEL_V1 = "@cf/black-forest-labs/flux-1-schnell";
 

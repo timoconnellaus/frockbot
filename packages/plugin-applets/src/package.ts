@@ -1,12 +1,12 @@
 // The Applets Package's isolate module.
 //
 // This is the whole Package. There is no in-process code anywhere in
-// `@frockbot/plugin-applets`: ADR 0022 decision 8 makes the Applets product
-// itself the pressure test for "every Contribution kind is resolved from the
-// manifest and an artifact, never from a switch over Package identity", so the
-// seven `applet_*` tools are written the way a Bot would have to write them —
-// one `package.ts` exporting `tools` and `execute`, reaching the kernel only
-// through the narrow `ctx` the generated wrapper hands it.
+// `@frockbot/plugin-applets`: the Applets product itself is the pressure test
+// for "every Contribution kind is resolved from the manifest and an artifact,
+// never from a switch over Package identity", so the seven `applet_*` tools
+// are written the way a Bot would have to write them — one `package.ts`
+// exporting `tools` and `execute`, reaching the kernel only through the narrow
+// `ctx` the generated wrapper hands it.
 //
 // Everything here is text a model reads. A tool that returns a JSON blob makes
 // the model guess; a tool that returns a sentence naming the next command does

@@ -2,10 +2,10 @@
  * The opt-in live test: the production container image, built by Docker and
  * run against a real, disposable Fly Sprite.
  *
- * It exists for the one thing no fake can prove. ADR 0004 records a measured
- * HTTP 431 from Fly when a ~2.5 KB provisioning script travelled on a
- * command's argv, and the whole shape of this host — `bash -s`, script on
- * stdin, bytes through the filesystem API — is the answer to it. Only a real
+ * It exists for the one thing no fake can prove. Fly answered a ~2.5 KB
+ * provisioning script travelling on a command's argv with HTTP 431, and the
+ * whole shape of this host — `bash -s`, script on stdin, bytes through the
+ * filesystem API — is the answer to it. Only a real
  * Sprite can say whether the answer works, so this test sends a script far
  * larger than the one that failed and asserts exit 0.
  *
@@ -180,8 +180,8 @@ async function waitForHealth(deadlineMs = 120_000): Promise<void> {
  * distribution for a browser: `apt-get update` 6 s, the desktop packages 82 s,
  * Playwright's Chromium build about a minute, and the rest cold-start first
  * reads. The budget is a wide margin over that — the point is to fail
- * when a regression puts the install back into the ten-minute bound (ADR
- * 0004), not to police a minute either way on a shared archive.
+ * when a regression puts the install back into the ten-minute bound, not to
+ * police a minute either way on a shared archive.
  */
 const COLD_OPEN_BUDGET_SECONDS = 8 * 60;
 

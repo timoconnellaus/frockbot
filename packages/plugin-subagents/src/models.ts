@@ -1,11 +1,11 @@
 // Per-turn subagent model slugs.
 //
-// GrokBot injects `<available_subagent_models>` into the system prompt of every
-// turn that may dispatch one, and `createTaskTool` reads the slug back out of
-// the `model` argument (`docs/research/grokbot-computer.md` l.472–474). Two
-// rules come with it: an automation turn holds exactly one slug — the Bot's own
-// default binding, GrokBot's `sand-automation` — and an omitted `model`
-// inherits the parent's binding rather than picking anything.
+// GrokBot injects `<available_subagent_models>` into the system prompt of
+// every turn that may dispatch one, and `createTaskTool` reads the slug back
+// out of the `model` argument. Two rules come with it: an automation turn
+// holds exactly one slug — the Bot's own default binding, GrokBot's
+// `sand-automation` — and an omitted `model` inherits the parent's binding
+// rather than picking anything.
 //
 // A slug is `<packageId>/<providerModelId>`. It names an enabled binding, not a
 // provider: resolution runs against the User's enabled model Capabilities, so a

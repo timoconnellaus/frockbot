@@ -1,10 +1,9 @@
 // Building the pack — the only place scrubbing happens.
 //
-// The register's contract, verbatim (`docs/research/grokbot-computer.md` line
-// 326-328): the host **never falls back to the owner's live files** — a
-// selected item whose content is missing is filtered out rather than re-read;
-// scrubbing lives **only in the pack arguments, never in the live files**;
-// managed, plugin and built-in Skills are always excluded.
+// The register's contract, verbatim: the host **never falls back to the
+// owner's live files** — a selected item whose content is missing is filtered
+// out rather than re-read; scrubbing lives **only in the pack arguments, never
+// in the live files**; managed, plugin and built-in Skills are always excluded.
 //
 // So this module is a pure function. It takes a description of what the Bot
 // already is and returns a `BotTemplateV1`; it reads nothing, writes nothing,
@@ -15,8 +14,8 @@
 // What is refused, and why:
 //
 //   Memory, transcripts, unread state, Computer files  a template is
-//     public-shareable and Memory is the User's facts under a durable root
-//     (ADR 0015 records the divergence from GrokBot's `memory:[…]`).
+//     public-shareable and Memory is the User's facts under a durable root,
+//     unlike GrokBot's `memory:[…]`.
 //   Connections, `connectionId`, `safeMetadata`  Connections belong to the
 //     importing User and cannot cross Users.
 //   `PackageInstallationView.values`  setup fields may hold keys.
@@ -26,11 +25,9 @@ import {
   MAX_TEMPLATE_SKILL_BODY_BYTES_V1,
   MAX_TEMPLATE_PACKAGES_V1,
   MAX_TEMPLATE_ROUTINES_V1,
-  MAX_TEMPLATE_SERVERS_V1,
   MAX_TEMPLATE_SKILLS_V1,
   decodeBotTemplateV1,
   type BotTemplateV1,
-  type TemplateMcpServerV1,
   type TemplatePackageV1,
   type TemplateRoutineV1,
   type TemplateSheepRecipeV1,
@@ -68,7 +65,7 @@ export interface TemplateRoutineCandidateV1 {
   name: string;
   prompt: string;
   schedule?: string;
-  trigger?: { kind: "webhook" | "connection" };
+  trigger?: { kind: "webhook" };
   timezone: string;
 }
 
@@ -89,19 +86,14 @@ export interface TemplatePackageCandidateV1 {
 /**
  * One Connection candidate.
  *
- * `settings` is the only field carried, and only `url` and `transport` are ever
- * read out of it. A `ConnectionView` also has `connectionId`, `safeMetadata`,
- * `authorization` and `generation`; none of them is in this shape, so no
- * refactor can leak one by forgetting to strip it.
+ * A Connection never travels, so this shape carries only what the export
+ * counts. A `ConnectionView` also has `connectionId`, `safeMetadata`,
+ * `settings`, `authorization` and `generation`; none of them is in this shape,
+ * so no refactor can leak one by forgetting to strip it.
  */
 export interface TemplateConnectionCandidateV1 {
   packageId: string;
   connectionTypeId: string;
-  displayName: string;
-  state: string;
-  /** Whether this Connection Type needs a credential the importer must supply. */
-  keyed: boolean;
-  settings?: { url?: unknown; transport?: unknown };
 }
 
 export interface TemplateSourceV1 {
@@ -115,7 +107,7 @@ export interface TemplateSourceV1 {
    * The recipe the exported profile carries: this Bot's own generated sheep.
    *
    * A `SheepRecipeV1` is four layer ids — deterministic, tiny, and nobody's
-   * photograph — so it travels (ADR 0015, D1).
+   * photograph — so it travels.
    */
   sheep: TemplateSheepRecipeV1;
   skills: readonly TemplateSkillCandidateV1[];
@@ -128,86 +120,6 @@ export interface TemplateSourceV1 {
 export interface TemplateBuildResultV1 {
   template: BotTemplateV1;
   summary: TemplateExportSummaryV1;
-}
-
-/**
- * A private-network or non-https URL never reaches a template.
- *
- * `plugin-mcp/src/ssrf.ts` refuses one on the way *out* of the deployment. A
- * template travels further than that: it is handed to another User, whose
- * deployment would be the one making the request. So the same classifier runs
- * here, and a server that fails it is exported as a placeholder with no URL at
- * all rather than as a public server someone else's Bot would dial.
- */
-const BLOCKED_HOST_SUFFIXES = [
-  ".local",
-  ".internal",
-  ".localhost",
-  ".home.arpa",
-];
-
-const BLOCKED_HOSTNAMES = new Set([
-  "localhost",
-  "metadata.google.internal",
-  "metadata",
-]);
-
-function isIpv4Literal(host: string): number[] | undefined {
-  const parts = host.split(".");
-  if (parts.length !== 4) return undefined;
-  const octets = parts.map((part) =>
-    /^\d{1,3}$/.test(part) ? Number(part) : Number.NaN,
-  );
-  if (octets.some((octet) => !Number.isInteger(octet) || octet > 255)) {
-    return undefined;
-  }
-  return octets;
-}
-
-function isPrivateIpv4(octets: number[]): boolean {
-  const [a = 0, b = 0] = octets;
-  if (a === 0 || a === 10 || a === 127) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
-  if (a === 198 && (b === 18 || b === 19)) return true;
-  if (a >= 224) return true;
-  return false;
-}
-
-function isPrivateIpv6(host: string): boolean {
-  const inner =
-    host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
-  if (!inner.includes(":")) return false;
-  if (inner === "::" || inner === "::1") return true;
-  if (/^f[cd]/.test(inner) || /^fe[89ab]/.test(inner)) return true;
-  const mapped = inner.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped?.[1]) {
-    const octets = isIpv4Literal(mapped[1]);
-    return octets ? isPrivateIpv4(octets) : true;
-  }
-  return false;
-}
-
-/** The shareable form of a server URL, or `undefined` when it must not travel. */
-export function shareableServerUrlV1(value: unknown): string | undefined {
-  if (typeof value !== "string" || !value || value.length > 2_048) {
-    return undefined;
-  }
-  const url = URL.parse(value);
-  if (!url || url.protocol !== "https:" || url.username || url.password) {
-    return undefined;
-  }
-  const host = url.hostname.toLowerCase();
-  if (BLOCKED_HOSTNAMES.has(host)) return undefined;
-  if (BLOCKED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) {
-    return undefined;
-  }
-  const octets = isIpv4Literal(host);
-  if (octets && isPrivateIpv4(octets)) return undefined;
-  if (isPrivateIpv6(host)) return undefined;
-  return value;
 }
 
 /**
@@ -319,10 +231,6 @@ function scrubRoutines(
   for (const candidate of source.routines) {
     if (routines.length >= MAX_TEMPLATE_ROUTINES_V1) break;
     if (!candidate.prompt) continue;
-    if (candidate.trigger?.kind === "connection") {
-      omissions.add("connection");
-      continue;
-    }
     const webhook = candidate.trigger?.kind === "webhook";
     routines.push({
       slug: uniqueSlug(templateSlugV1(candidate.name, "routine"), slugs),
@@ -377,60 +285,6 @@ function scrubPackages(
   return packages;
 }
 
-function scrubServers(
-  source: TemplateSourceV1,
-  omissions: Omissions,
-): TemplateMcpServerV1[] {
-  const servers: TemplateMcpServerV1[] = [];
-  for (const candidate of source.connections) {
-    // Every Connection is omitted as a Connection: what may travel is a
-    // *description* of the server it points at, never the Connection itself.
-    omissions.add("connection");
-    if (servers.length >= MAX_TEMPLATE_SERVERS_V1) continue;
-    if (candidate.state !== "ready") continue;
-    // What may travel is a description of a *server*, and a Connection is one
-    // only when it names an endpoint. A model account, a provider grant, or
-    // any other Connection has nothing a recipe could describe, so it is
-    // omitted as a Connection and nothing else — rather than becoming a
-    // placeholder telling the importer to connect something that is not a
-    // server at all.
-    if (candidate.settings?.url === undefined) continue;
-    const url = shareableServerUrlV1(candidate.settings.url);
-    if (candidate.keyed) {
-      if (url === undefined) omissions.add("private-network-server");
-      // A keyed server is always a placeholder: the importer supplies their own
-      // key, and the URL is not carried at all, so a custom server behind a
-      // private network cannot be pointed at from someone else's deployment.
-      servers.push({
-        kind: "needs-connection",
-        name: candidate.displayName.slice(0, 100),
-        connectionTypeId: candidate.connectionTypeId,
-        hint: "This server needs your own Connection and credential.",
-      });
-      continue;
-    }
-    if (url === undefined) {
-      omissions.add("private-network-server");
-      servers.push({
-        kind: "needs-connection",
-        name: candidate.displayName.slice(0, 100),
-        connectionTypeId: candidate.connectionTypeId,
-        hint: "This server's address is not reachable from another deployment.",
-      });
-      continue;
-    }
-    const transport =
-      candidate.settings?.transport === "sse" ? "sse" : "streamable-http";
-    servers.push({
-      kind: "public",
-      name: candidate.displayName.slice(0, 100),
-      url,
-      transport,
-    });
-  }
-  return servers;
-}
-
 /** Build one template from what the Bot already is. Pure; never re-reads. */
 export function buildBotTemplateV1(
   source: TemplateSourceV1,
@@ -443,7 +297,7 @@ export function buildBotTemplateV1(
   const skills = scrubSkills(source, omissions);
   const routines = scrubRoutines(source, omissions);
   const packages = scrubPackages(source, omissions);
-  const mcpServers = scrubServers(source, omissions);
+  for (const _ of source.connections) omissions.add("connection");
 
   const template = decodeBotTemplateV1({
     schemaVersion: 1,
@@ -460,7 +314,6 @@ export function buildBotTemplateV1(
     skills,
     routines,
     packages,
-    mcpServers,
     ...(source.sourceCatalogGeneration
       ? { sourceCatalogGeneration: source.sourceCatalogGeneration }
       : {}),
@@ -474,12 +327,6 @@ export function buildBotTemplateV1(
       skills: template.skills.length,
       routines: template.routines.length,
       packages: template.packages.length,
-      publicServers: template.mcpServers.filter(
-        (server) => server.kind === "public",
-      ).length,
-      needsConnection: template.mcpServers.filter(
-        (server) => server.kind === "needs-connection",
-      ).length,
       omitted: omissions.list(),
     },
   };
@@ -493,14 +340,8 @@ export function describeTemplateSummaryV1(
     `${summary.skills} Skill${summary.skills === 1 ? "" : "s"}`,
     `${summary.routines} Routine${summary.routines === 1 ? "" : "s"}`,
     `${summary.packages} Package${summary.packages === 1 ? "" : "s"}`,
-    `${summary.publicServers} public MCP server${summary.publicServers === 1 ? "" : "s"}`,
   ].join(", ");
   const scrubbed: string[] = ["Memory", "Connections"];
-  if (summary.needsConnection > 0) {
-    scrubbed.push(
-      `${summary.needsConnection} server${summary.needsConnection === 1 ? "" : "s"} left as a placeholder`,
-    );
-  }
   for (const omission of summary.omitted) {
     if (omission.reason === "managed-skill") {
       scrubbed.push(`${omission.count} managed Skill(s)`);

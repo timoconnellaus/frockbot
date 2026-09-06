@@ -16,10 +16,10 @@
 // Package declared: an unknown setting id, a wrong type, a value outside its
 // bounds or off its enum is refused and nothing is stored. A read is lenient
 // about keys it does not recognise, because the durable bag has a second
-// writer — a Catalog install's setup `values` (ADR 0014) — whose keys a
-// Package's declared settings need not cover. Refusing a read over one of
-// those would take a Package's whole configuration away over a value written
-// by someone else.
+// writer — a Catalog install's setup `values` — whose keys a Package's
+// declared settings need not cover. Refusing a read over one of those would
+// take a Package's whole configuration away over a value written by someone
+// else.
 import type {
   PackageSettingDefinition,
   PackageSettingSchema,
@@ -39,7 +39,7 @@ export interface ModelBindingV1 {
 
 /**
  * What one Package-level setting may hold. Ordinary settings remain scalars;
- * ADR 0019 adds exactly one structured exception, the model role's binding.
+ * there is exactly one structured exception, the model role's binding.
  */
 export type PackageSettingValueV1 = string | number | boolean | ModelBindingV1;
 

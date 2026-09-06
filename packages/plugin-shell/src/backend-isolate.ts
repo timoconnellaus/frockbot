@@ -306,12 +306,12 @@ async function sha256Hex(value: string): Promise<string> {
  *
  * `bundled` is a second *place* to find the same immutable bytes, not a second
  * kind of thing. A first-party Package that ships as an artifact-backed member
- * (ADR 0022 decision 8) is built at build time and travels inside this bundle,
- * so its bytes are already here and object storage never has to be seeded for
- * a deploy to be correct. Object storage still wins when it holds the object,
- * the digest is still verified either way, and nothing is ever *built* here —
- * which is what "Composition consumes immutable content-addressed artifacts and
- * never builds them" asks of this seam.
+ * is built at build time and travels inside this bundle, so its bytes are
+ * already here and object storage never has to be seeded for a deploy to be
+ * correct. Object storage still wins when it holds the object, the digest is
+ * still verified either way, and nothing is ever *built* here — which is what
+ * "Composition consumes immutable content-addressed artifacts and never builds
+ * them" asks of this seam.
  */
 export function createR2PackageArtifactStore(
   bucket: R2Bucket,

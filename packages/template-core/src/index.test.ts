@@ -54,14 +54,6 @@ function template(overrides: Partial<BotTemplateV1> = {}): BotTemplateV1 {
         displayName: "Example",
       },
     ],
-    mcpServers: [
-      {
-        kind: "public",
-        name: "Example",
-        url: "https://mcp.example.test/mcp",
-        transport: "streamable-http",
-      },
-    ],
     sourceCatalogGeneration: "gen-1",
     ...overrides,
   };
@@ -168,44 +160,6 @@ describe("decodeBotTemplateV1", () => {
       ),
     ).toThrow(/carries no schedule/);
   });
-
-  it("refuses a non-https MCP server url", () => {
-    expect(() =>
-      decodeBotTemplateV1(
-        template({
-          mcpServers: [
-            {
-              kind: "public",
-              name: "Example",
-              url: "http://mcp.example.test/mcp",
-              transport: "sse",
-            },
-          ],
-        }),
-      ),
-    ).toThrow(/https/);
-  });
-
-  it("accepts a needs-connection placeholder with no url at all", () => {
-    const decoded = decodeBotTemplateV1(
-      template({
-        mcpServers: [
-          {
-            kind: "needs-connection",
-            name: "Beeper",
-            connectionTypeId: "mcp-remote-key",
-            hint: "Add your own key.",
-          },
-        ],
-      }),
-    );
-    expect(decoded.mcpServers[0]).toEqual({
-      kind: "needs-connection",
-      name: "Beeper",
-      connectionTypeId: "mcp-remote-key",
-      hint: "Add your own key.",
-    });
-  });
 });
 
 describe("canonical bytes and the content hash", () => {
@@ -213,7 +167,6 @@ describe("canonical bytes and the content hash", () => {
     const one = canonicalBotTemplateDocumentV1(template());
     const shuffled = JSON.parse(
       JSON.stringify({
-        mcpServers: template().mcpServers,
         packages: template().packages,
         routines: template().routines,
         skills: template().skills,

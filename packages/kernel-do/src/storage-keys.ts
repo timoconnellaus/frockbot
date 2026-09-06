@@ -20,7 +20,7 @@ export const PENDING_RUN_KEY = "pending-run";
 export const PENDING_AGENT_RUN_PREFIX = "pending-agent-run:";
 /** A Bot cannot accumulate an unbounded cross-Bot inbox. */
 export const MAX_PENDING_AGENT_RUNS_V1 = 32;
-/** Legacy pre-ADR-0033 Session value, read only for transparent migration. */
+/** Legacy Session value, read only for transparent migration. */
 export const LATEST_EVENTS_KEY = "latest-events";
 export const SESSION_EVENT_LOG_INDEX_PREFIX = "session-events:index:";
 export const SESSION_EVENT_LOG_PAGE_PREFIX = "session-events:page:";
@@ -41,7 +41,7 @@ export const RECOVERY_ALARM_DELAY_MS = 60_000;
 export const WORKSPACE_GENERATION_PREFIX = "workspace:generation:";
 /** Preserved losing writes for one durable-root file. */
 export const WORKSPACE_CONFLICT_PREFIX = "workspace:conflict:";
-/** One unsettled durable-root sync push intent, by effect id (ADR 0013). */
+/** One unsettled durable-root sync push intent, by effect id. */
 export const WORKSPACE_SYNC_EFFECT_PREFIX = "workspace:sync-effect:";
 /** The monotonic cursor every minted Workspace generation id advances. */
 export const WORKSPACE_GENERATION_CURSOR_KEY = "workspace:generation-cursor";

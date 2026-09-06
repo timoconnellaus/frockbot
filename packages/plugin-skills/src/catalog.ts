@@ -1,8 +1,8 @@
 // The Skills loader: what a Turn is allowed to load as instructions.
 //
 // FOUR SOURCES, ONE CATALOG. This module loads the Bot's two instruction roots
-// — its own, and the User-global one every Bot of that User shares (ADR 0016)
-// — and assembles them with the sources that are not durable-root files at all
+// — its own, and the User-global one every Bot of that User shares — and
+// assembles them with the sources that are not durable-root files at all
 // — the managed set compiled into this Package's artifact (`./managed.ts`) and
 // the index over the User's installed Catalog entries (`./plugin-index.ts`).
 // Those two never meet `isLoadableSkillSourceV1`, because they are not
@@ -24,8 +24,8 @@
 // never provisions or wakes a Computer, and holds no provider type. "The Agent
 // loop, Memory, Skills, Package composition, and Routines function correctly
 // while the Computer is hibernated and do not wake it." Whoever supplies
-// `WorkspaceReadsV1` owns that promise: the durable-root sync (ADR 0013) backs
-// an instruction root from object storage, so a read here is an object-storage
+// `WorkspaceReadsV1` owns that promise: the durable-root sync backs an
+// instruction root from object storage, so a read here is an object-storage
 // read whether or not a Computer host is running. Swapping that implementation
 // is invisible to everything below.
 //
@@ -569,8 +569,7 @@ export async function loadFullSkillCatalogV1(
  * The progressive-disclosure prompt block, in GrokBot's shape: the catalog is
  * injected every Turn as `<agent_skills>` with each Skill's ref, source and
  * description; bodies are not. The Bot reads a body on demand with
- * `skill_load`, and is told that mentioning a Skill is not running it
- * (`docs/research/grokbot-computer.md` §2.8).
+ * `skill_load`, and is told that mentioning a Skill is not running it.
  *
  * `source` and `by` are rendered because they change what a Skill *is*: a
  * managed one is first-party and unchangeable, a plugin one arrived with

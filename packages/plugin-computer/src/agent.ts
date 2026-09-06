@@ -1,5 +1,5 @@
 // The Package that gives a Bot its Computer tools, and the caller of the
-// durable-root sync (ADR 0013).
+// durable-root sync.
 //
 // "Bots invoke Computers only through the provider-neutral Computer
 // interface", so the sync is reached here as `handle.sync` and never as a
@@ -518,14 +518,14 @@ export async function recordComputerSyncV1(
  * THE ONE SANCTIONED EXTRA CALLER. {@link ComputerTurnSync} was deliberately
  * narrowed — "a caller cannot get the policy wrong because there is no way to
  * ask for a sync at another time" — and this function is the single, named
- * exception to that sentence, added for Applet publish (ADR 0022 decision 7):
- * "Publishing reads the built artifact from the durable root through the
- * Workspace file surface." `applet build` writes `<appletId>/dist/` on the
- * Computer with an ordinary shell write, and the publish reads it from the
- * *store*. Without a push between those two the publish would read the
- * previous build, or nothing, and record a generation for bytes that never
- * existed — a wrong artifact rather than a visible failure. The Turn's own
- * `turn-end` push is too late: publish happens inside the Turn.
+ * exception to that sentence, added for Applet publish: "Publishing reads the
+ * built artifact from the durable root through the Workspace file surface."
+ * `applet build` writes `<appletId>/dist/` on the Computer with an ordinary
+ * shell write, and the publish reads it from the *store*. Without a push
+ * between those two the publish would read the previous build, or nothing, and
+ * record a generation for bytes that never existed — a wrong artifact rather
+ * than a visible failure. The Turn's own `turn-end` push is too late: publish
+ * happens inside the Turn.
  *
  * It stays narrow in four ways, and the narrowness is the reason it is
  * allowed. It reconciles one root and not the Workspace. It wakes nothing: it
@@ -719,7 +719,7 @@ export function createComputerAgentPlugin(
     // budget discovering what this host already knows, and leaves the model
     // inventing a way for the User to fix it.
     if (config.configured === false) return [];
-    // One Computer per User (ADR 0012): the assignment is keyed by the User,
+    // One Computer per User: the assignment is keyed by the User,
     // and the Bot attaches to it as a tenant.
     const identity = { userId };
     const turnSync = new ComputerTurnSync(ctx.sessions);

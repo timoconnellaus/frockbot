@@ -5,18 +5,12 @@
 // pastes the link, gets a review card, confirms it, and ends up with a Bot of
 // their own.
 //
-// The four claims: the card is shown before anything is applied; the imported
+// The three claims: the card is shown before anything is applied; the imported
 // Skill is loadable on the new Bot, which is only true if its recorded writer
-// is user B; the imported webhook Routine is present but disabled; and **no
-// Connection** was created by the import, even though the source account had
-// one enabled.
+// is user B; and the imported webhook Routine is present but disabled.
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import {
-  MCP_ENDPOINT,
-  MCP_GOOD_API_KEY,
-  TOOL_CALL_TRIGGER,
-} from "../harness/miniflare.ts";
+import { TOOL_CALL_TRIGGER } from "../harness/miniflare.ts";
 import {
   asUser,
   expectOkJson,
@@ -39,7 +33,6 @@ interface ImportRecord {
   status: string;
   skills: string[];
   routines: { slug: string; disabled: boolean }[];
-  connections: { name: string; connectionTypeId?: string; url?: string }[];
   packages: { catalogId: string; status: string }[];
   steps: { key: string; status: string; failure?: string }[];
   failure?: string;
@@ -94,33 +87,6 @@ async function buildSourceBot(userId: string, botId: string): Promise<string> {
     }),
   );
 
-  // A keyed MCP Connection, so the template carries a placeholder.
-  const settings = (await expectOkJson(
-    await asUser(userId, "/api/settings"),
-  )) as { revision: number };
-  await expectOkJson(
-    await postAsUser(userId, "/api/settings", {
-      schemaVersion: 1,
-      type: "user/install-package",
-      commandId: "import-install-mcp",
-      expectedRevision: settings.revision,
-      packageId: "mcp",
-      version: "0.0.1",
-    }),
-  );
-  await expectOkJson(
-    await postAsUser(userId, "/api/connections", {
-      schemaVersion: 1,
-      type: "connection/create-api-key",
-      commandId: "import-connect-mcp",
-      packageId: "mcp",
-      connectionTypeId: "mcp-remote-key",
-      label: "Example connector",
-      apiKey: MCP_GOOD_API_KEY,
-      settings: { url: MCP_ENDPOINT, transport: "streamable-http" },
-    }),
-  );
-
   const staged = (await expectOkJson(
     await postAsUser(userId, "/api/bot-templates", {
       schemaVersion: 1,
@@ -164,14 +130,6 @@ describe("importing another User's Bot template", () => {
     expect(planned.status).toBe("planned");
     expect(planned.skills).toEqual([SKILL_SLUG]);
     expect(planned.routines).toEqual([{ slug: "on-delivery", disabled: true }]);
-    // The keyed server the source had is a line telling user B to connect it.
-    expect(planned.connections).toEqual([
-      {
-        name: "Example connector",
-        connectionTypeId: "mcp-remote-key",
-        hint: "This server needs your own Connection and credential.",
-      },
-    ]);
     expect(planned.steps.every((step) => step.status === "pending")).toBe(true);
 
     // Nothing applied yet: the Bot the card names does not exist.
@@ -232,19 +190,6 @@ describe("importing another User's Bot template", () => {
       trigger: { kind: "webhook" },
       createdBy: { kind: "user" },
     });
-    expect(JSON.stringify(routines)).not.toContain(MCP_GOOD_API_KEY);
-
-    // NO CONNECTION. User B's account gained none even though the source
-    // account had one enabled.
-    const importerSettings = (await expectOkJson(
-      await asUser(importerId, "/api/settings"),
-    )) as { connections: { connectionTypeId: string }[] };
-    expect(
-      importerSettings.connections.some(
-        (connection) => connection.connectionTypeId === "mcp-remote-key",
-      ),
-    ).toBe(false);
-    expect(JSON.stringify(importerSettings)).not.toContain(MCP_GOOD_API_KEY);
 
     // REPLAY. Confirming again is a read: no second Bot, no second Routine.
     await expectOkJson(

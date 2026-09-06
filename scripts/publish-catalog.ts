@@ -10,9 +10,6 @@
  * generation id *is* the content hash of the entry set, so republishing the
  * same application produces the same generation and overwrites nothing.
  *
- * L2 adds `plugin-mcp` and the connector entries that need it; this seed
- * generation deliberately contains zero MCP connectors.
- *
  * A User-selected Bot-authored Package may be supplied with
  * `--published <json>`; its immutable artifact already lives in the shared
  * Package artifact store, so publication adds only the Catalog entry that

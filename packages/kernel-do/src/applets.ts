@@ -1,6 +1,6 @@
 // The durable records and keys of one Applet, on both sides of the seam.
 //
-// ADR 0022 splits an Applet in two. Its *code* is a Package generation:
+// An Applet is split in two. Its *code* is a Package generation:
 // immutable, content-addressed, reverted like every other Package. Its *state*
 // is a Durable Object facet the kernel mounts and never reads. This module owns
 // everything in between — the records the kernel really is the authority for:
@@ -58,18 +58,17 @@ export const APPLET_FAILURE_PREFIX = "applet:failure:";
 /**
  * Applet Durable Object: the durable mount input.
  *
- * The facet cannot set an alarm (`docs/research/spike-applet-facets.md` §5b),
- * so the kernel object holds it — and its `alarm()` handler may run after an
- * eviction that lost every in-memory field. The input it needs to remount the
- * current generation is therefore written on the synchronous key/value surface
- * at mount time.
+ * The facet cannot set an alarm, so the kernel object holds it — and its
+ * `alarm()` handler may run after an eviction that lost every in-memory field.
+ * The input it needs to remount the current generation is therefore written on
+ * the synchronous key/value surface at mount time.
  */
 export const APPLET_MOUNT_INPUT_KEY = "applet:mount-input";
 /**
  * Applet Durable Object: the open activation trial, if one is in flight.
  *
  * An activation is a commit boundary the kernel owns, not a mount the candidate
- * is trusted to survive (ADR 0041). While this key exists the facet's storage is
+ * is trusted to survive. While this key exists the facet's storage is
  * provisional: a byte copy of it is parked in the rollback facet, and whatever
  * reads the Applet next either finds the trial committed — the key deleted — or
  * rolls it back before answering. That is what makes an interrupted publish
@@ -97,7 +96,7 @@ export const APPLET_ROLLBACK_FACET_NAME_V1 = "applet-rollback";
 export const APPLET_CONTRACT_V1 = 1;
 /** Most generations one Applet retains before the oldest are pruned. */
 export const APPLET_MAX_GENERATIONS_V1 = 64;
-/** Most Applets one User may hold. Quotas proper are deferred (ADR 0022). */
+/** Most Applets one User may hold. Quotas proper are deferred. */
 export const APPLET_MAX_PER_USER_V1 = 64;
 
 /**
@@ -476,7 +475,7 @@ const APPLET_SECRET_V1 = /^[0-9a-f]{32}$/;
 const APPLET_OWNER_V1 = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/;
 
 /**
- * `<publicUserId>.<random>` — ADR 0015's share-id shape, reused.
+ * `<publicUserId>.<random>` — the share-id shape, reused.
  *
  * The owner half routes: an Applet id names the one User Durable Object and the
  * one `AppletState` object that can answer for it, with no global index. The
@@ -527,12 +526,11 @@ export function appletBindingDigestV1(input: {
 /**
  * The loader id an Applet's server artifact is loaded under.
  *
- * `appletId` is an input, and that is the spike's sharpest finding
- * (`docs/research/spike-applet-facets.md` §7): the loader freezes the first
- * caller's `env` for an id process-wide, so two Applets of one User with
- * byte-identical code would otherwise share one `IDENTITY` and one
- * `CAPABILITIES` stub, and the second Applet's capability calls would land on
- * the first Applet's kernel object.
+ * `appletId` is an input, and that is the sharpest finding of all: the loader
+ * freezes the first caller's `env` for an id process-wide, so two Applets of
+ * one User with byte-identical code would otherwise share one `IDENTITY` and
+ * one `CAPABILITIES` stub, and the second Applet's capability calls would land
+ * on the first Applet's kernel object.
  */
 export function appletLoaderIdV1(input: {
   contract: number;
