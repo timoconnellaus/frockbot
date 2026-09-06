@@ -19,6 +19,8 @@
     "build:marketing": "bun run --filter @frockbot/marketing build",
     "bootstrap:npm-trust": "./scripts/bootstrap-npm-trust.sh",
     "dogfood:dev": "./scripts/dogfood/dev-stack.sh",
+    "dev:native": "bun scripts/native-dev.ts up",
+    "smoke:native": "bun scripts/native-dev.ts smoke",
     "dogfood:stop": "./scripts/dogfood/dev-stack.sh stop",
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
     "dev": "bun run build:webui && bun run dev:cloudflare",

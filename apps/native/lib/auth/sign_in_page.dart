@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../client/auth.dart';
+
 import '../theme/frock_theme.dart';
 
 class SignInPage extends StatelessWidget {
@@ -92,6 +94,8 @@ class SignInPage extends StatelessWidget {
                                             ? 'Try sign-in again'
                                             : awaitingBrowser
                                             ? 'Open sign-in again'
+                                            : NativeSignIn.development
+                                            ? 'Continue as local developer'
                                             : 'Continue with Google',
                                       ),
                                     ),

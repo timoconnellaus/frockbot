@@ -65,7 +65,7 @@ class _SettingsPageState extends State<SettingsPage>
           body: {'schemaVersion': 1, 'home': 'models'},
         ),
       );
-      final uri = Uri.parse(result.authorizationUrl.value);
+      final uri = Uri.parse(result.authorizationUrl.value as String);
       if (uri.origin != hostedOrigin ||
           uri.path != '/native/settings' ||
           uri.userInfo.isNotEmpty ||

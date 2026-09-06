@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
@@ -12,8 +13,13 @@ class NativeSignIn {
   final LocalStore store;
   bool _exchanging = false;
   NativeSignIn(this.api, this.store);
-  String get returnUri =>
-      '$hostedOrigin/native/return/${Platform.isAndroid ? 'android' : 'macos'}';
+  /// A development build signs in through the local stack's development
+  /// door and comes back on a custom scheme: its origin is plain HTTP on a
+  /// private address, which no App Link can name.
+  static const development = bool.fromEnvironment('FROCKBOT_DEV_AUTH');
+  String get returnUri => development
+      ? 'frockbot-dev://native/return/android'
+      : '$hostedOrigin/native/return/${Platform.isAndroid ? 'android' : 'macos'}';
   Future<void> start() async {
     final verifier = '${randomId()}${randomId()}';
     final state = '${randomId()}${randomId()}';
@@ -46,10 +52,13 @@ class NativeSignIn {
         limit: 8192,
       ),
     );
-    final uri = Uri.parse(response.authorizationUrl.value);
+    final uri = Uri.parse(response.authorizationUrl.value as String);
     if (uri.origin != hostedOrigin || uri.path != '/native/authorize') {
       throw const RequestFailure('Couldn’t open sign-in. Please try again.');
     }
+    // The local smoke completes the browser leg itself from this line rather
+    // than driving Chrome's first-run screens on a fresh emulator.
+    if (development) debugPrint('FROCKBOT_DEV_AUTHORIZE $uri');
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       throw const RequestFailure(
         'Couldn’t open your browser. Please try again.',
@@ -58,8 +67,11 @@ class NativeSignIn {
   }
 
   Future<bool> accept(Uri uri) async {
-    if (uri.origin != hostedOrigin ||
-        uri.path != Uri.parse(returnUri).path ||
+    final expected = Uri.parse(returnUri);
+    if (uri.scheme != expected.scheme ||
+        uri.host != expected.host ||
+        uri.port != expected.port ||
+        uri.path != expected.path ||
         uri.fragment.isNotEmpty ||
         uri.userInfo.isNotEmpty) {
       return false;

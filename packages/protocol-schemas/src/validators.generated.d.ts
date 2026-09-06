@@ -6,6 +6,10 @@ declare const validators: {
   isDigest(value: unknown): value is ProtocolTypes["Digest"];
   isInstant(value: unknown): value is ProtocolTypes["Instant"];
   isHttpsUrl(value: unknown): value is ProtocolTypes["HttpsUrl"];
+  isNativeReturnUri(value: unknown): value is ProtocolTypes["NativeReturnUri"];
+  isAuthorizationUrl(
+    value: unknown,
+  ): value is ProtocolTypes["AuthorizationUrl"];
   isJson(value: unknown): value is ProtocolTypes["Json"];
   isCatalogRef(value: unknown): value is ProtocolTypes["CatalogRef"];
   isClientHello(value: unknown): value is ProtocolTypes["ClientHello"];

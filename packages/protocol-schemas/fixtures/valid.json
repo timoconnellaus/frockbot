@@ -25,6 +25,26 @@
     "value": "https://bot.frockbot.com/return"
   },
   {
+    "name": "NativeReturnUri production",
+    "schema": "NativeReturnUri",
+    "value": "https://bot.frockbot.com/native/return/android"
+  },
+  {
+    "name": "NativeReturnUri development",
+    "schema": "NativeReturnUri",
+    "value": "frockbot-dev://native/return/android"
+  },
+  {
+    "name": "AuthorizationUrl production",
+    "schema": "AuthorizationUrl",
+    "value": "https://bot.frockbot.com/native/authorize?request=abc"
+  },
+  {
+    "name": "AuthorizationUrl emulator",
+    "schema": "AuthorizationUrl",
+    "value": "http://10.0.2.2:8787/native/authorize?request=abc"
+  },
+  {
     "name": "Json valid",
     "schema": "Json",
     "value": null
@@ -763,7 +783,7 @@
     "value": {
       "schemaVersion": 1,
       "commandId": "command-1",
-      "text": "Hello \ud83d\udc11 \u3053\u3093\u306b\u3061\u306f"
+      "text": "Hello 🐑 こんにちは"
     }
   },
   {

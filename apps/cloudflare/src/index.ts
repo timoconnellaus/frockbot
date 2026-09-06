@@ -122,9 +122,16 @@ import {
   type SetSignupsCommandV1,
 } from "@frockbot/plugin-admin/shared";
 import { gatewayAuth } from "./auth.js";
-import { createNativeAuth, nativeReturnUris } from "./native-auth.js";
+import {
+  createNativeAuth,
+  NATIVE_RETURN_DEVELOPMENT,
+  nativeReturnUris,
+} from "./native-auth.js";
 import { accountIsAdmitted } from "./account-admission.js";
-import { isDeploymentAdminV1 } from "./admin-identities.js";
+import {
+  DEVELOPMENT_USER_ID,
+  isDeploymentAdminV1,
+} from "./admin-identities.js";
 import type { DebugGatewaySurface } from "./debug.js";
 import type { BotDebugQueryV1 } from "@frockbot/plugin-shell/debug-protocol";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
@@ -582,6 +589,22 @@ function deploymentPolicyStub(env: Env): DeploymentPolicyRpc {
  * writes no `user` row. An existing account still signs in: better-auth only
  * consults this when it is about to create one.
  */
+function developmentAuthAllowed(env: Env): boolean {
+  return env.ALLOW_DEVELOPMENT_AUTH === "true";
+}
+
+/**
+ * Where the app may be sent back after sign-in. Production's App Links, plus
+ * the development scheme on a stack that allows development auth — the flag
+ * production's secret gate refuses.
+ */
+function nativeReturnUrisFor(env: Env): readonly string[] {
+  return [
+    ...nativeReturnUris(env.NATIVE_SLICE_2_AUTH),
+    ...(developmentAuthAllowed(env) ? [NATIVE_RETURN_DEVELOPMENT] : []),
+  ];
+}
+
 async function mayCreateAccount(env: Env, email: string): Promise<boolean> {
   if (
     isDeploymentAdminV1(
@@ -2031,16 +2054,32 @@ export default {
           >;
           return rpc.saveNativeForm({ schemaVersion: 1, userId, command });
         },
-        ...(nativeReturnUris(env.NATIVE_SLICE_2_AUTH).length > 0 &&
-        env.BETTER_AUTH_SECRET
+        ...(nativeReturnUrisFor(env).length > 0 && env.BETTER_AUTH_SECRET
           ? {
               nativeAuth: createNativeAuth({
                 secret: env.BETTER_AUTH_SECRET,
                 auth: gatewayAuth(env, {
                   mayCreateAccount: (email) => mayCreateAccount(env, email),
                 }),
-                returnUris: nativeReturnUris(env.NATIVE_SLICE_2_AUTH),
+                returnUris: nativeReturnUrisFor(env),
+                // A development stack answers on whatever `BETTER_AUTH_URL`
+                // names — the emulator reaches the host as 10.0.2.2, never
+                // as the production origin — and signs the app in as the
+                // development identity in place of Google.
+                ...(developmentAuthAllowed(env)
+                  ? {
+                      ...(env.BETTER_AUTH_URL
+                        ? { origin: env.BETTER_AUTH_URL }
+                        : {}),
+                      developmentUserId: DEVELOPMENT_USER_ID,
+                    }
+                  : {}),
                 canIssueSession: async (userId) => {
+                  if (
+                    developmentAuthAllowed(env) &&
+                    userId === DEVELOPMENT_USER_ID
+                  )
+                    return true;
                   const identity = await env.AUTH_DB.prepare(
                     'select "id", "email" from "user" where "id" = ? limit 1',
                   )

@@ -20,7 +20,10 @@ import {
   AppletViewerTokenError,
   verifyAppletViewerTokenV1,
 } from "@frockbot/kernel-do";
-import { isDeploymentAdminV1 } from "./admin-identities.js";
+import {
+  DEVELOPMENT_USER_ID,
+  isDeploymentAdminV1,
+} from "./admin-identities.js";
 import type {
   CatalogGatewayDocument,
   CatalogGatewayStore,
@@ -775,11 +778,19 @@ export function createGateway(dependencies: GatewayDependencies) {
       if (response) return response;
     }
 
-    const development = dependencies.allowDevelopmentIdentity
+    let development = dependencies.allowDevelopmentIdentity
       ? developmentIdentity(request)
       : { persist: false };
     const nativeIdentity = await dependencies.nativeAuth?.authenticate(request);
     if (nativeIdentity?.refusal) return nativeIdentity.refusal;
+    // The app signed in through the development door: the same identity the
+    // browser's "Continue as local developer" carries, with the same standing.
+    if (
+      dependencies.allowDevelopmentIdentity &&
+      nativeIdentity?.session?.user.id === DEVELOPMENT_USER_ID
+    ) {
+      development = { userId: DEVELOPMENT_USER_ID, persist: false };
+    }
     const session = nativeIdentity
       ? nativeIdentity.session
       : development.userId

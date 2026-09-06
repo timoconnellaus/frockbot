@@ -87,7 +87,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           body: {'schemaVersion': 1, 'home': 'connections'},
         ),
       );
-      final uri = Uri.parse(result.authorizationUrl.value);
+      final uri = Uri.parse(result.authorizationUrl.value as String);
       if (uri.origin != hostedOrigin ||
           uri.path != '/native/settings' ||
           uri.userInfo.isNotEmpty ||

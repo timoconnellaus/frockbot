@@ -153,6 +153,10 @@
   },
   "env": {
     "development": {
+      // Never deployed, and without an empty list `wrangler dev` inherits the
+      // top-level custom domain and rewrites every request URL to
+      // bot.frockbot.com — which the native auth origin check then refuses.
+      "routes": [],
       "worker_loaders": [
         {
           "binding": "USER_APPLICATIONS",

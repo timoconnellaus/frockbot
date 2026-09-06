@@ -25,6 +25,26 @@
     "value": null
   },
   {
+    "name": "NativeReturnUri other scheme",
+    "schema": "NativeReturnUri",
+    "value": "frockbot-dev://native/return/macos"
+  },
+  {
+    "name": "NativeReturnUri plain http",
+    "schema": "NativeReturnUri",
+    "value": "http://10.0.2.2:8787/native/return/android"
+  },
+  {
+    "name": "AuthorizationUrl http off loopback",
+    "schema": "AuthorizationUrl",
+    "value": "http://bot.frockbot.com/native/authorize?request=abc"
+  },
+  {
+    "name": "AuthorizationUrl wrong shape",
+    "schema": "AuthorizationUrl",
+    "value": null
+  },
+  {
     "name": "Json wrong shape",
     "schema": "Json",
     "value": [
