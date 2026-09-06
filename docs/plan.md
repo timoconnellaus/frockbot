@@ -42,11 +42,11 @@ Each step leaves `main` shippable.
 
 **3. Park the deferred features.** _Done for MCP and Composio._ They came out first — roughly 11.4k lines, no owned Durable Object class and no owned tables. They return later as plugins over the `http` grant, which is what they should have been.
 
-`plugin-voice` and `plugin-billing` follow. Voice owns the `VoiceSession` Durable Object class, so removing it takes a `deleted_classes` migration; billing owns three SQLite tables inside `UserConfiguration`. Both destroy durable state, which is why they were held back — and no longer a reason to hold them, because there are no users and stored state is disposable.
+The same ruling cleared two leftovers from that cut: Bot templates carried an `mcpServers` field and Routines a connection-trigger kind whose only provider was Composio, both kept only because changing a stored shape looked like a migration. Both are gone, along with the trigger path they served.
 
-The same ruling clears two leftovers from the MCP and Composio cut: Bot templates keep an `mcpServers` field and Routines keep a `composio` trigger key, both kept only because changing a stored shape looked like a migration. Delete them.
+`plugin-voice` and `plugin-billing` follow, in their own tag. Voice owns the `VoiceSession` Durable Object class, so removing it takes a `deleted_classes` migration, and a malformed migration list is one of the few things that hard-fails a production deploy. They are deliberately not bundled with a release that already subtracts 50k lines: if that deploy breaks, the cause should be unambiguous. Both features work today, so the delay costs nothing.
 
-**4. Providers onto the AI SDK.** Replace the hand-written provider stack with one interface over `ai` + `@ai-sdk/*`. Removes about 6k lines, including the 2,526-line file that exists to hold an Ollama API key.
+**4. Providers onto the AI SDK.** _Done._ Replace the hand-written provider stack with one interface over `ai` + `@ai-sdk/*`. The AI SDK's OpenAI-compatible model now owns SSE framing, tool-call accumulation and the non-streamed body; request mapping, failure classification and the deadlines stayed, because the Frock AI gateway and Ollama's native endpoint reach that seam with a stream and no URL. An Anthropic provider proves the seam is open — the provider set was a hardcoded two-entry map. The 2,526-line Ollama connection file is untouched: it is durable-record ceremony, not transport, and belongs to step 7.
 
 **5. Split the agent loop.** Separate provider I/O from the durable state machine. The loop claims input, calls the model, runs tools, appends events, advances the cursor — and nothing else. Resumption becomes its own module: replay the event log to the cursor. Reconciliation and effect fencing go.
 

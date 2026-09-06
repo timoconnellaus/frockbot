@@ -70,7 +70,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 33. **The GUI-shell refusal is a regex plus a PATH shim**, defeatable with one `export`. It is a policy control, not a security boundary.
 
-34. **The provider set is closed.** `applications/foundation/src/runtime.ts:369-419` is a two-entry map; there is no Anthropic, OpenAI or OpenRouter provider package despite `provider-openai-compatible` supplying the transport.
+34. ~~**The provider set is closed.**~~ **Fixed.** It was a two-entry map. A third provider (`plugin-provider-anthropic`) now ships, built on `@ai-sdk/anthropic`, which demonstrates the registration path takes an arbitrary provider. It has no `user` backend contribution yet, so its Connection cannot be created through the UI.
 
 35. **The default provider is an echo stub.** Any path that fails to apply `modelSelection` answers `"Cordis runtime: <message>"` rather than raising an error.
 
