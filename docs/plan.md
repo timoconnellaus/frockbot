@@ -48,7 +48,9 @@ The same ruling cleared two leftovers from that cut: Bot templates carried an `m
 
 **4. Providers onto the AI SDK.** _Done._ Replace the hand-written provider stack with one interface over `ai` + `@ai-sdk/*`. The AI SDK's OpenAI-compatible model now owns SSE framing, tool-call accumulation and the non-streamed body; request mapping, failure classification and the deadlines stayed, because the Frock AI gateway and Ollama's native endpoint reach that seam with a stream and no URL. An Anthropic provider proves the seam is open — the provider set was a hardcoded two-entry map. The 2,526-line Ollama connection file is untouched: it is durable-record ceremony, not transport, and belongs to step 7.
 
-**5. Split the agent loop.** Separate provider I/O from the durable state machine. The loop claims input, calls the model, runs tools, appends events, advances the cursor — and nothing else. Resumption becomes its own module: replay the event log to the cursor. Reconciliation and effect fencing go.
+**5. Split the agent loop.** _Half done._ The extraction has landed: `index.ts` is 853 lines beside `model-request.ts`, `resume.ts`, `tool-execution.ts`, `reconcile.ts`, `errors.ts` and `runtime.ts`, and it changed no test at all, which is what proves it changed no behaviour.
+
+The durability rewrite — at-most-once by idempotency key, in place of retrieving a lost response and verifying it against the durable chunk prefix — is written but not merged. It touches 65 files across nine layers, it writes `model/usage` per dispatch where the old code deduplicated by request id (so a retry the provider served for free is counted twice), and `plugin-image` becomes idempotent with a read-before-generate on a billed effect. It is the reliability fix worth having and it needs its own tag and a real review, not a green suite.
 
 **6. Frock Compose replaces cordis.** _The provenance framing is already stripped._ Wire the extension points named in `AGENTS.md`, and delete `kernel-composition`, the manifest system, `plugin-authoring`, `plugin-package-catalog` and `plugin-package-publisher`.
 
