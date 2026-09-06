@@ -124,14 +124,9 @@ async function copyLink(share: TemplateShareRecordV1): Promise<void> {
         class="templates__summary"
       >
         Packed {{ templates.summary.skills }} Skill(s),
-        {{ templates.summary.routines }} Routine(s),
-        {{ templates.summary.packages }} plugin(s) and
-        {{ templates.summary.publicServers }} public MCP server(s).
-        <template v-if="templates.summary.needsConnection > 0">
-          {{ templates.summary.needsConnection }} server(s) are left for whoever
-          imports this to connect themselves.
-        </template>
-        Memory, credentials, and Connections were not included.
+        {{ templates.summary.routines }} Routine(s) and
+        {{ templates.summary.packages }} plugin(s). Memory, credentials, and
+        Connections were not included.
       </p>
 
       <p

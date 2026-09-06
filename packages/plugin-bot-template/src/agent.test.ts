@@ -38,8 +38,6 @@ function receipt(commandId: string): TemplateShareReceiptV1 {
       skills: 2,
       routines: 1,
       packages: 0,
-      publicServers: 0,
-      needsConnection: 1,
       omitted: [{ reason: "memory", count: 1 }],
     },
   };

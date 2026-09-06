@@ -31,7 +31,6 @@ export const TEMPLATE_OMISSION_REASONS_V1 = [
   "package-values",
   "connection",
   "memory",
-  "private-network-server",
 ] as const;
 
 export type TemplateOmissionReasonV1 =
@@ -55,8 +54,6 @@ export interface TemplateExportSummaryV1 {
   skills: number;
   routines: number;
   packages: number;
-  publicServers: number;
-  needsConnection: number;
   omitted: TemplateOmissionV1[];
 }
 
@@ -228,16 +225,7 @@ export function decodeTemplateExportSummaryV1(
   const value = record(input, "template summary");
   exact(
     value,
-    [
-      "schemaVersion",
-      "botId",
-      "skills",
-      "routines",
-      "packages",
-      "publicServers",
-      "needsConnection",
-      "omitted",
-    ],
+    ["schemaVersion", "botId", "skills", "routines", "packages", "omitted"],
     "template summary",
   );
   if (value.schemaVersion !== 1) {
@@ -255,11 +243,6 @@ export function decodeTemplateExportSummaryV1(
     skills: count(value.skills, "template summary skills"),
     routines: count(value.routines, "template summary routines"),
     packages: count(value.packages, "template summary packages"),
-    publicServers: count(value.publicServers, "template summary publicServers"),
-    needsConnection: count(
-      value.needsConnection,
-      "template summary needsConnection",
-    ),
     omitted: value.omitted.map(decodeTemplateOmissionV1),
   };
 }
@@ -392,12 +375,6 @@ export interface TemplateImportRecordV1 {
     version: string;
     status: "will-install" | "already-installed" | "missing";
   }[];
-  connections: {
-    name: string;
-    connectionTypeId?: string;
-    url?: string;
-    hint?: string;
-  }[];
   skills: string[];
   routines: { slug: string; disabled: boolean }[];
   steps: TemplateImportStepReceiptV1[];
@@ -507,7 +484,6 @@ export function decodeTemplateImportRecordV1(
   if (
     !Array.isArray(value.steps) ||
     !Array.isArray(value.packages) ||
-    !Array.isArray(value.connections) ||
     !Array.isArray(value.skills) ||
     !Array.isArray(value.routines)
   ) {
@@ -538,27 +514,6 @@ export function decodeTemplateImportRecordV1(
         displayName: required(line.displayName, "displayName", 100),
         version: required(line.version, "version", 100),
         status: status as "will-install" | "already-installed" | "missing",
-      };
-    }),
-    connections: value.connections.map((entry) => {
-      const line = record(entry, "template import connection");
-      return {
-        name: required(line.name, "connection name", 100),
-        ...(line.connectionTypeId === undefined
-          ? {}
-          : {
-              connectionTypeId: required(
-                line.connectionTypeId,
-                "connectionTypeId",
-                64,
-              ),
-            }),
-        ...(line.url === undefined
-          ? {}
-          : { url: required(line.url, "connection url", 2_048) }),
-        ...(line.hint === undefined
-          ? {}
-          : { hint: required(line.hint, "connection hint", 500) }),
       };
     }),
     skills: value.skills.map((slug) => required(slug, "skill slug", 128)),

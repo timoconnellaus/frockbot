@@ -9,7 +9,6 @@ import { describe, expect, it } from "bun:test";
 import {
   buildBotTemplateV1,
   describeTemplateSummaryV1,
-  shareableServerUrlV1,
   templateSlugV1,
   type TemplateSourceV1,
 } from "./scrub.ts";
@@ -359,112 +358,27 @@ describe("packages", () => {
   });
 });
 
-describe("MCP servers and Connections", () => {
-  const publicServer = {
-    packageId: "mcp",
-    connectionTypeId: "mcp-remote",
-    displayName: "Example",
-    state: "ready",
-    keyed: false,
-    settings: { url: "https://mcp.example.test/mcp", transport: "sse" },
-  } as const;
-
-  const keyedServer = {
-    packageId: "mcp",
-    connectionTypeId: "mcp-remote-key",
-    displayName: "Beeper",
-    state: "ready",
-    keyed: true,
-    settings: { url: "https://beeper.example.test/mcp" },
-  } as const;
-
-  it("carries a public server as its url and transport", () => {
-    const { template } = buildBotTemplateV1(
-      source({ connections: [publicServer] }),
-    );
-    expect(template.mcpServers).toEqual([
-      {
-        kind: "public",
-        name: "Example",
-        url: "https://mcp.example.test/mcp",
-        transport: "sse",
-      },
-    ]);
-  });
-
-  it("carries a keyed server as a placeholder with no url and no key", () => {
-    const { template, summary } = buildBotTemplateV1(
-      source({ connections: [keyedServer] }),
-    );
-    expect(template.mcpServers).toEqual([
-      {
-        kind: "needs-connection",
-        name: "Beeper",
-        connectionTypeId: "mcp-remote-key",
-        hint: "This server needs your own Connection and credential.",
-      },
-    ]);
-    expect(JSON.stringify(template)).not.toContain("beeper.example.test");
-    expect(summary.needsConnection).toBe(1);
-  });
-
-  it("never carries a url for a private-network server", () => {
-    const { template, summary } = buildBotTemplateV1(
-      source({
-        connections: [
-          {
-            packageId: "mcp",
-            connectionTypeId: "mcp-remote",
-            displayName: "Local",
-            state: "ready",
-            keyed: false,
-            settings: { url: "https://10.1.2.3/mcp" },
-          },
-        ],
-      }),
-    );
-    expect(template.mcpServers[0]).toMatchObject({ kind: "needs-connection" });
-    expect(JSON.stringify(template)).not.toContain("10.1.2.3");
-    expect(omitted(summary, "private-network-server")).toBe(1);
-  });
-
-  it("never carries a connectionId or safeMetadata", () => {
-    const { template, summary } = buildBotTemplateV1(
-      source({
-        connections: [publicServer, keyedServer],
-      }),
-    );
-    const document = JSON.stringify(template);
-    expect(document).not.toContain("connectionId");
-    expect(document).not.toContain("safeMetadata");
-    expect(omitted(summary, "connection")).toBe(2);
-  });
-
-  it("omits a Connection that names no server endpoint", () => {
+describe("Connections", () => {
+  it("carries no Connection, and counts every one it left behind", () => {
     const { template, summary } = buildBotTemplateV1(
       source({
         connections: [
           {
             packageId: "provider-ollama-cloud",
             connectionTypeId: "ollama-cloud-account",
-            displayName: "Work",
-            state: "ready",
-            keyed: true,
+          },
+          {
+            packageId: "provider-frock-ai",
+            connectionTypeId: "frock-ai-account",
           },
         ],
       }),
     );
-    expect(template.mcpServers).toEqual([]);
-    expect(omitted(summary, "connection")).toBe(1);
-  });
-
-  it("skips a Connection that is not ready", () => {
-    const { template } = buildBotTemplateV1(
-      source({
-        connections: [{ ...publicServer, state: "failed" }],
-      }),
-    );
-    expect(template.mcpServers).toEqual([]);
+    const document = JSON.stringify(template);
+    expect(document).not.toContain("connectionId");
+    expect(document).not.toContain("safeMetadata");
+    expect(document).not.toContain("ollama-cloud-account");
+    expect(omitted(summary, "connection")).toBe(2);
   });
 });
 
@@ -482,20 +396,6 @@ describe("profile avatar and Memory", () => {
 });
 
 describe("helpers", () => {
-  it("refuses a non-https or private server url", () => {
-    expect(shareableServerUrlV1("https://mcp.example.test/mcp")).toBe(
-      "https://mcp.example.test/mcp",
-    );
-    expect(shareableServerUrlV1("http://mcp.example.test/mcp")).toBeUndefined();
-    expect(shareableServerUrlV1("https://localhost/mcp")).toBeUndefined();
-    expect(shareableServerUrlV1("https://192.168.0.4/mcp")).toBeUndefined();
-    expect(shareableServerUrlV1("https://[::1]/mcp")).toBeUndefined();
-    expect(
-      shareableServerUrlV1("https://a:b@mcp.example.test/"),
-    ).toBeUndefined();
-    expect(shareableServerUrlV1(42)).toBeUndefined();
-  });
-
   it("falls back when a name slugifies to nothing", () => {
     expect(templateSlugV1("   ", "routine")).toBe("routine");
     expect(templateSlugV1("Morning Ledger!", "routine")).toBe("morning-ledger");
@@ -520,22 +420,4 @@ describe("helpers", () => {
     expect(description).toContain("Memory");
     expect(description).toContain("Nothing is shared until you choose");
   });
-});
-
-it("omits account-event Routines instead of exporting a grant or converting them to webhooks", () => {
-  const { template, summary } = buildBotTemplateV1(
-    source({
-      routines: [
-        {
-          routineId: "mail",
-          name: "Mail",
-          prompt: "Read the incoming message",
-          trigger: { kind: "connection" },
-          timezone: "UTC",
-        },
-      ],
-    }),
-  );
-  expect(template.routines).toEqual([]);
-  expect(omitted(summary, "connection")).toBe(1);
 });

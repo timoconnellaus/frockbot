@@ -236,19 +236,6 @@ function defaultSecret(): string {
   return hex(crypto.getRandomValues(new Uint8Array(16)));
 }
 
-/**
- * Whether the importer will have to bring their own credential for this
- * Connection Type.
- *
- * Read off the Connection's declared authorization rather than off any
- * Package's Connection Type id, so this stays provider-neutral: a Connection
- * whose authorization is anything but `none` — or whose authorization is not
- * recorded at all — is a placeholder in the template.
- */
-function isKeyedConnection(authorizationKind: string | undefined): boolean {
-  return authorizationKind !== "none";
-}
-
 export class BotTemplateUserBackendContribution {
   readonly packageId = BOT_TEMPLATE_PACKAGE_ID;
 
@@ -463,17 +450,6 @@ export class BotTemplateUserBackendContribution {
       connections: user.connections.map((connection) => ({
         packageId: connection.packageId,
         connectionTypeId: connection.connectionTypeId,
-        displayName: connection.displayName,
-        state: connection.state,
-        keyed: isKeyedConnection(connection.authorization?.kind),
-        ...(connection.settings === undefined
-          ? {}
-          : {
-              settings: {
-                url: connection.settings.url,
-                transport: connection.settings.transport,
-              },
-            }),
       })),
       ...(user.catalogGeneration === undefined
         ? {}
@@ -601,7 +577,6 @@ export class BotTemplateUserBackendContribution {
       status: "planned",
       botName: plan.profile.name,
       packages: plan.packages,
-      connections: plan.connections,
       skills: plan.skills.map((skill) => skill.slug),
       routines: plan.routines.map((routine) => ({
         slug: routine.slug,
