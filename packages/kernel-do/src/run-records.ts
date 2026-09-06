@@ -89,18 +89,9 @@ export interface StoredRunBotOriginV1 {
   messageId: string;
 }
 
-/** The Voice Package asking this Bot on behalf of its User. */
-export interface StoredRunVoiceOriginV1 {
-  kind: "voice";
-  messageId: string;
-}
-
 /** What produced a Turn, when it was not a person speaking to the Bot. */
 export type StoredRunOriginV1 =
-  | StoredRunRoutineOriginV1
-  | StoredRunSubagentOriginV1
-  | StoredRunBotOriginV1
-  | StoredRunVoiceOriginV1;
+  StoredRunRoutineOriginV1 | StoredRunSubagentOriginV1 | StoredRunBotOriginV1;
 
 const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunTriggerV1[] = [
   "cron",
@@ -464,13 +455,6 @@ function decodeStoredRunOrigin(
       fromBotName: candidate.fromBotName,
       messageId: candidate.messageId,
     };
-  }
-  if (candidate.kind === "voice") {
-    requireExactOriginFields(candidate, ["kind", "messageId"], runId);
-    if (!boundedString(candidate.messageId, 256)) {
-      throw new Error(`run "${runId}" has an invalid admission origin id`);
-    }
-    return { kind: "voice", messageId: candidate.messageId };
   }
   if (candidate.kind !== "routine") {
     throw new Error(`run "${runId}" has an invalid admission origin kind`);

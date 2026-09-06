@@ -22,10 +22,6 @@ import type {
   SendToUserPayloadV1,
   SkillRefV1,
 } from "@frockbot/kernel-contracts";
-import type {
-  VoiceDictationObserverV1,
-  VoiceDictationSessionV1,
-} from "@frockbot/client-core";
 import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import type { ClientSkillCatalogEntryV1 } from "./skill-protocol.js";
 import type { ApprovalCardViewV1 } from "./approvals.js";
@@ -92,9 +88,7 @@ export interface WebChatMessage {
   /** When the line happened, so system lines sort into the conversation. */
   at?: string;
   status: "streaming" | "completed" | "aborted" | "error" | "interrupted";
-  via?:
-    | { kind: "bot"; name: string; botId: string }
-    | { kind: "voice"; name: "Voice" };
+  via?: { kind: "bot"; name: string; botId: string };
   /**
    * True while this line's Turn is admitted but has not started, because the
    * User sent it while the Bot was still on the previous one. The thread
@@ -268,12 +262,6 @@ export interface FrockBotWebData {
   modelSource: "bot" | "default" | "none";
   settingsAvailable: boolean;
   connectionsAvailable: boolean;
-  /**
-   * False when this platform cannot dictate — no transport socket, or a
-   * browser with no microphone API. The composer's send button then never
-   * changes shape and nothing about it moves.
-   */
-  voiceAvailable: boolean;
   /**
    * The application answering is no longer the one this page was served, so
    * the code running here is behind a release. FrockBot ships several times a
@@ -532,13 +520,6 @@ export interface FrockBotWebData {
     text: string,
     skills?: readonly SkillRefV1[],
   ): Promise<SendPromptResult>;
-  /**
-   * Opens one dictation session (voice plan D2). `undefined` on a platform
-   * whose transport cannot, which is what `voiceAvailable` reports up front.
-   */
-  openVoiceDictation(
-    observer: VoiceDictationObserverV1,
-  ): VoiceDictationSessionV1 | undefined;
   /** Sends the durable Stop command for the observed active run. */
   stopRun(): Promise<void>;
   /** Detaches the local observer only; admitted work stays durable. */

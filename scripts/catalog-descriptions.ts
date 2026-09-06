@@ -16,8 +16,6 @@ export const CATALOG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   auth: "Sign in and stay signed in across the web app and your desktop.",
   authoring:
     "Let the Bot write and revise its own tools when no existing tool does the job.",
-  billing:
-    "See what your Bots and models have cost this month and over the last 30 days.",
   "bot-template":
     "Export a Bot as a shareable template so someone else can start from your setup.",
   clock:
@@ -73,8 +71,6 @@ export const CATALOG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   "ui-theme": "Choose how the app looks, including light and dark mode.",
   "user-machine":
     "Register your own computer, so the Bot can run commands and move files on it once you approve.",
-  voice:
-    "Talk to an app-wide voice assistant that can check your Bots, their activity, and memory.",
   web: "Search the web and read pages, so the Bot can answer with current information.",
 };
 

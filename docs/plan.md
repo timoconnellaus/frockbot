@@ -44,7 +44,7 @@ Each step leaves `main` shippable.
 
 The same ruling cleared two leftovers from that cut: Bot templates carried an `mcpServers` field and Routines a connection-trigger kind whose only provider was Composio, both kept only because changing a stored shape looked like a migration. Both are gone, along with the trigger path they served.
 
-`plugin-voice` and `plugin-billing` follow, in their own tag. Voice owns the `VoiceSession` Durable Object class, so removing it takes a `deleted_classes` migration, and a malformed migration list is one of the few things that hard-fails a production deploy. They are deliberately not bundled with a release that already subtracts 50k lines: if that deploy breaks, the cause should be unambiguous. Both features work today, so the delay costs nothing.
+`plugin-voice` and `plugin-billing` are out too, in their own tag. Voice owned the `VoiceSession` Durable Object class; a `deleted_classes` migration retires it, because a `new_sqlite_classes` entry is immutable once applied.
 
 **4. Providers onto the AI SDK.** _Done._ Replace the hand-written provider stack with one interface over `ai` + `@ai-sdk/*`. The AI SDK's OpenAI-compatible model now owns SSE framing, tool-call accumulation and the non-streamed body; request mapping, failure classification and the deadlines stayed, because the Frock AI gateway and Ollama's native endpoint reach that seam with a stream and no URL. An Anthropic provider proves the seam is open — the provider set was a hardcoded two-entry map. The 2,526-line Ollama connection file is untouched: it is durable-record ceremony, not transport, and belongs to step 7.
 

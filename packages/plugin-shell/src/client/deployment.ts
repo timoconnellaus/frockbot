@@ -56,8 +56,6 @@ export interface DeploymentFollowInputV1 {
   draft: string;
   /** A surface is floating over the workspace. */
   overlayOpen: boolean;
-  /** A microphone is open, dictating or in a Voice session. */
-  listening: boolean;
   /** Live work another Package holds, which a reload would throw away. */
   holds: number;
   now: number;
@@ -73,7 +71,6 @@ export function deploymentFollowV1(
     input.turnRunning ||
     input.draft.trim().length > 0 ||
     input.overlayOpen ||
-    input.listening ||
     input.holds > 0;
   if (busy) return "offer";
   if (

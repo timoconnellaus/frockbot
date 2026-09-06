@@ -125,16 +125,6 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
       degraded:
         "Frock AI falls back to the `AI` binding and the Auto model fails",
     },
-    {
-      name: "OPENAI_API_KEY",
-      why: "The direct realtime key composer dictation prefers.",
-      degraded: "dictation falls back to the AI Gateway's BYOK key",
-    },
-    {
-      name: "GEMINI_API_KEY",
-      why: "Read the same way by the voice assistant.",
-      degraded: "the voice assistant falls back to the AI Gateway",
-    },
   ];
 
 /**
@@ -185,17 +175,6 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
       why: "Opens the Workspace seed door; set by the end-to-end harness only.",
       forbiddenLive:
         "whoever holds the token can write a Bot's Workspace without a Computer",
-    },
-    {
-      name: "VOICE_UPSTREAM_URL",
-      why: "Local dictation stand-in; set by the end-to-end harness only.",
-      forbiddenLive: "every dictation session is sent to that host instead",
-    },
-    {
-      name: "VOICE_ASSISTANT_UPSTREAM_URL",
-      why: "Local Gemini Live stand-in; set by the end-to-end harness only.",
-      forbiddenLive:
-        "every voice assistant session is sent to that host instead",
     },
   ];
 

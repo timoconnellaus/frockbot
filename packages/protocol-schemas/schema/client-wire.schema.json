@@ -1300,39 +1300,22 @@
               "maxLength": 64000
             },
             "via": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "bot"
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    },
-                    "botId": {
-                      "$ref": "#/$defs/BotId"
-                    }
-                  },
-                  "required": ["kind", "name", "botId"],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "bot"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "voice"
-                    },
-                    "name": {
-                      "const": "Voice"
-                    }
-                  },
-                  "required": ["kind", "name"],
-                  "additionalProperties": false
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "botId": {
+                  "$ref": "#/$defs/BotId"
                 }
-              ]
+              },
+              "required": ["kind", "name", "botId"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -1411,39 +1394,22 @@
               "additionalProperties": false
             },
             "via": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "bot"
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    },
-                    "botId": {
-                      "$ref": "#/$defs/BotId"
-                    }
-                  },
-                  "required": ["kind", "name", "botId"],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "bot"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "voice"
-                    },
-                    "name": {
-                      "const": "Voice"
-                    }
-                  },
-                  "required": ["kind", "name"],
-                  "additionalProperties": false
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "botId": {
+                  "$ref": "#/$defs/BotId"
                 }
-              ]
+              },
+              "required": ["kind", "name", "botId"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -1528,39 +1494,22 @@
               "additionalProperties": false
             },
             "via": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "bot"
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    },
-                    "botId": {
-                      "$ref": "#/$defs/BotId"
-                    }
-                  },
-                  "required": ["kind", "name", "botId"],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "bot"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "voice"
-                    },
-                    "name": {
-                      "const": "Voice"
-                    }
-                  },
-                  "required": ["kind", "name"],
-                  "additionalProperties": false
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "botId": {
+                  "$ref": "#/$defs/BotId"
                 }
-              ]
+              },
+              "required": ["kind", "name", "botId"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -1645,39 +1594,22 @@
               "additionalProperties": false
             },
             "via": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "bot"
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    },
-                    "botId": {
-                      "$ref": "#/$defs/BotId"
-                    }
-                  },
-                  "required": ["kind", "name", "botId"],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "bot"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "voice"
-                    },
-                    "name": {
-                      "const": "Voice"
-                    }
-                  },
-                  "required": ["kind", "name"],
-                  "additionalProperties": false
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "botId": {
+                  "$ref": "#/$defs/BotId"
                 }
-              ]
+              },
+              "required": ["kind", "name", "botId"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -1763,39 +1695,22 @@
               "additionalProperties": false
             },
             "via": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "bot"
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    },
-                    "botId": {
-                      "$ref": "#/$defs/BotId"
-                    }
-                  },
-                  "required": ["kind", "name", "botId"],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "bot"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "const": "voice"
-                    },
-                    "name": {
-                      "const": "Voice"
-                    }
-                  },
-                  "required": ["kind", "name"],
-                  "additionalProperties": false
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "botId": {
+                  "$ref": "#/$defs/BotId"
                 }
-              ]
+              },
+              "required": ["kind", "name", "botId"],
+              "additionalProperties": false
             }
           },
           "required": [

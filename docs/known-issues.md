@@ -88,7 +88,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 42. **`APPLET_STATES` is typed inconsistently.** It is optional in `UserConfigurationEnv` (`apps/cloudflare/src/user-configuration.ts:210`, guarded at `:1826`) but non-optional and dereferenced unguarded in the gateway (`apps/cloudflare/src/index.ts:1060`, `:2339`).
 
-43. **Voice dictation is not eviction-safe** while the assistant on the same object is: dictation uses `server.accept()` and the assistant uses `ctx.acceptWebSocket`.
+43. ~~**Voice dictation is not eviction-safe.**~~ **Gone.** Voice is removed.
 
 44. **`packages/plugin-audit/src/store.ts:478-503` performs `DROP TABLE` and `ALTER TABLE ... RENAME` shadow-swaps** on the User Durable Object's SQL surface, which it shares with the FTS5 search index.
 
