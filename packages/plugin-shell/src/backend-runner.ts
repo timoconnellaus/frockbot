@@ -13,7 +13,6 @@ import {
 import type { ShellMountedComposition } from "./backend-composition.js";
 import {
   BotTurnExecutionError,
-  BotTurnReconciliationRequiredError,
   BotTurnRecoveryRequiredError,
 } from "@frockbot/kernel-do";
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
@@ -22,11 +21,7 @@ import {
   whenCompactionSettledV1,
 } from "./compaction-scheduler.js";
 
-export {
-  BotTurnExecutionError,
-  BotTurnReconciliationRequiredError,
-  BotTurnRecoveryRequiredError,
-};
+export { BotTurnExecutionError, BotTurnRecoveryRequiredError };
 
 function appendedSessionEvents(
   previous: readonly SessionEvent[],
@@ -47,8 +42,7 @@ function appendedSessionEvents(
 /**
  * Classifies one finished Agent handle against the durable history it started
  * from. Shared by the Composition-mounted and the resident execution paths, so
- * both reach exactly the same durable terminal, recovery, or reconciliation
- * outcome.
+ * both reach exactly the same durable terminal or recovery outcome.
  */
 function settleBotTurn(
   handle: AgentHandle,
@@ -63,26 +57,6 @@ function settleBotTurn(
     (event) => event.type === "turn/end" && event.turn === currentTurn,
   );
   if (!terminalTurn || terminalTurn.type !== "turn/end") {
-    const unresolvedTool = [
-      ...validateToolOccurrenceJournal(events).values(),
-    ].find((entry) => entry.intent && !entry.result);
-    if (unresolvedTool) {
-      throw new BotTurnReconciliationRequiredError(
-        `Tool effect "${unresolvedTool.occurrence.occurrenceId}" requires reconciliation`,
-        appendedSessionEvents(previousEvents, events),
-      );
-    }
-    const reconciliation = events.findLast(
-      (event) =>
-        event.type === "model/reconciliation-required" &&
-        event.turn === currentTurn,
-    );
-    if (reconciliation?.type === "model/reconciliation-required") {
-      throw new BotTurnReconciliationRequiredError(
-        reconciliation.reason,
-        appendedSessionEvents(previousEvents, events),
-      );
-    }
     const latestRequest = events.findLast(
       (event) => event.type === "model/request" && event.turn === currentTurn,
     );
@@ -91,8 +65,7 @@ function settleBotTurn(
       events.some(
         (event) =>
           (event.type === "assistant/message" ||
-            event.type === "model/response-failed" ||
-            event.type === "model/effect-not-started") &&
+            event.type === "model/response-failed") &&
           event.requestId === latestRequest.request.requestId,
       );
     if (hasDurableOutcome) {
@@ -141,7 +114,6 @@ function turnExecutionError(
 ): never {
   if (
     error instanceof BotTurnExecutionError ||
-    error instanceof BotTurnReconciliationRequiredError ||
     error instanceof BotTurnRecoveryRequiredError
   ) {
     throw error;
@@ -253,25 +225,7 @@ export async function executeDirectToolTurn(
       };
       const preparation = await composition.root.tools.prepare(call, context);
       let result;
-      if (existing.intent) {
-        if (preparation.kind !== "ready") {
-          throw new BotTurnReconciliationRequiredError(
-            `Tool effect "${occurrenceId}" cannot be reconciled because its definition is unavailable`,
-            appendedSessionEvents(previousEvents, session.events),
-          );
-        }
-        const reconciled = await composition.root.tools.reconcilePrepared(
-          preparation,
-          context,
-        );
-        if (reconciled.status === "unavailable") {
-          throw new BotTurnReconciliationRequiredError(
-            reconciled.reason,
-            appendedSessionEvents(previousEvents, session.events),
-          );
-        }
-        result = reconciled.result;
-      } else {
+      if (!existing.intent) {
         session.append({
           type: "tool/call",
           turn,
@@ -281,47 +235,42 @@ export async function executeDirectToolTurn(
           input: call.input,
         });
         await session.flush();
-        if (preparation.kind === "denied") {
-          result = preparation.result;
-        } else {
-          if (!(await admitEffect({ kind: "tool", effectId: occurrenceId }))) {
-            session.appendBatch([
-              {
-                type: "tool/result",
-                turn,
-                step: 1,
-                occurrenceId,
-                name: call.name,
-                content: "Cancelled before tool execution started.",
-                isError: true,
-                status: "interrupted",
-              },
-              { type: "step/end", turn, step: 1, outcome: "cancelled" },
-              { type: "turn/end", turn, outcome: "cancelled" },
-            ]);
-            await session.flush();
-            throw new Error("Package UI tool effect was fenced by Stop");
-          }
-          try {
-            result = await composition.root.tools.executePrepared(
-              preparation,
-              context,
-            );
-          } catch (error) {
-            if (signal.aborted || !preparation.idempotent) {
-              throw new BotTurnReconciliationRequiredError(
-                `Tool effect "${occurrenceId}" outcome is uncertain`,
-                appendedSessionEvents(previousEvents, session.events),
-              );
-            }
-            result = {
-              content:
-                error instanceof Error
-                  ? error.message
-                  : "Tool execution failed",
+      }
+      if (preparation.kind === "denied") {
+        result = preparation.result;
+      } else {
+        // Admission is keyed by effect id, so a call the object had already
+        // started is fenced by a later Stop exactly as a new one is.
+        if (!(await admitEffect({ kind: "tool", effectId: occurrenceId }))) {
+          session.appendBatch([
+            {
+              type: "tool/result",
+              turn,
+              step: 1,
+              occurrenceId,
+              name: call.name,
+              content: "Cancelled before tool execution started.",
               isError: true,
-            };
-          }
+              status: "interrupted",
+            },
+            { type: "step/end", turn, step: 1, outcome: "cancelled" },
+            { type: "turn/end", turn, outcome: "cancelled" },
+          ]);
+          await session.flush();
+          throw new Error("Package UI tool effect was fenced by Stop");
+        }
+        try {
+          result = await composition.root.tools.executePrepared(
+            preparation,
+            context,
+          );
+        } catch (error) {
+          if (signal.aborted) throw error;
+          result = {
+            content:
+              error instanceof Error ? error.message : "Tool execution failed",
+            isError: true,
+          };
         }
       }
       session.append({

@@ -11,7 +11,6 @@ import {
   STEP_LIMIT_REASON_V1,
   TURN_DEADLINE_REASON_V1,
 } from "@frockbot/kernel-agent-loop";
-import { UNRECONCILABLE_RUN_FAILURE_V1 } from "@frockbot/kernel-do";
 
 /**
  * The one place a Turn that did not finish is turned into a sentence for the
@@ -19,20 +18,17 @@ import { UNRECONCILABLE_RUN_FAILURE_V1 } from "@frockbot/kernel-do";
  *
  * A run's stored `failure` is a diagnostic. It is composed by whoever settled
  * the run, out of whatever the layer below handed up, and it reads like it:
- * "Reconciliation was explicitly abandoned: Bot turn ended with outcome
- * model-error: Flock AI keeps no durable copy of an interrupted response, so it
- * cannot be recovered". Every word of that is useful — on the debug surface,
- * where it stays, unchanged. None of it belongs in a chat bubble. A person
- * asked for a countdown applet; they should not have to learn what
- * reconciliation is to find out that the model gave up.
+ * "Bot turn ended with outcome model-error: the provider closed the connection
+ * before the response finished". Every word of that is useful — on the debug
+ * surface, where it stays, unchanged. None of it belongs in a chat bubble.
  *
  * So the projection stops forwarding the diagnostic and picks the sentence
  * instead. Two inputs, in order:
  *
  *  1. The kernel's own user-facing reasons. A handful of failures already have
  *     a sentence written for a person — the model deadlines, the Turn deadline,
- *     the unretrievable settlement — and those say something the outcome alone
- *     cannot, so a stored failure that carries one hands it straight through.
+ *     the step limit — and those say something the outcome alone cannot, so a
+ *     stored failure that carries one hands it straight through.
  *  2. Otherwise the Turn's terminal outcome, which is a closed set, mapped
  *     below. It says less, and it can never leak.
  *
@@ -51,7 +47,6 @@ export const USER_FACING_FAILURE_REASONS_V1: readonly string[] = [
   MODEL_IDLE_DEADLINE_REASON_V1,
   TURN_DEADLINE_REASON_V1,
   STEP_LIMIT_REASON_V1,
-  UNRECONCILABLE_RUN_FAILURE_V1,
 ];
 
 /**

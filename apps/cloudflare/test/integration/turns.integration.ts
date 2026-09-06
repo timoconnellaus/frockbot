@@ -205,10 +205,9 @@ describe("a stored run the current codec refuses", () => {
   });
 
   it("degrades a record whose recovery state is inconsistent", async () => {
-    // The exact shape a resolve bug can leave behind: `reconciliation-required`
-    // on a record still phased `executing`. The strict storage codec throws on
-    // it, which used to blank the whole transcript — the per-run degradation
-    // never ran, because nothing reached it.
+    // A record carrying a status the durable codec does not allow. The strict
+    // storage codec throws on it, which used to blank the whole transcript —
+    // the per-run degradation never ran, because nothing reached it.
     const userId = freshUserId("recovery-state");
     const botId = "recovery-state-bot";
     await provisionThroughGateway({ userId, botId });
@@ -227,7 +226,7 @@ describe("a stored run the current codec refuses", () => {
             runId: "turn-command-broken",
             acceptedAt: "2026-01-02T00:00:00.000Z",
             input: "what did I ask?",
-            status: "reconciliation-required",
+            status: "parked",
             phase: "executing",
           },
           "run-index:2026-01-02T00:00:00.000Z:turn-command-broken":

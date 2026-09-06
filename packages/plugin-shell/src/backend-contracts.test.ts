@@ -189,11 +189,11 @@ describe("StoredRun durable contract", () => {
     expect(() =>
       requireStoredRunV1({
         ...storedRun(),
-        status: "reconciliation-required",
+        status: "parked",
         phase: "executing",
         failure: "uncertain",
       }),
-    ).toThrow("inconsistent recovery state");
+    ).toThrow("no valid status");
   });
 
   test("accepts completed output up to the public wire byte limit", () => {

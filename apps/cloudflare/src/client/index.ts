@@ -277,15 +277,6 @@ const application = new ClientApplication({
     );
     return receipt.run;
   },
-  async reconcileRun(botId: string, runId: string) {
-    return decodeClientTurnV1(
-      await apiRequest(
-        `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}/reconcile`,
-        "POST",
-        JSON.stringify({ schemaVersion: 1, action: "resume" }),
-      ),
-    );
-  },
   async acknowledgeNotification(botId: string, notificationId: string) {
     decodeAcknowledgement(
       await apiRequest(

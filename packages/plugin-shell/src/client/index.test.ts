@@ -1364,7 +1364,7 @@ describe("detached Turn projection", () => {
           input: "Do something risky",
           events: [],
           status: "failed",
-          failure: "Provider reconciliation is required",
+          failure: 'Model request "abc" has no durable provider outcome',
         },
       ],
     );
@@ -1383,7 +1383,7 @@ describe("detached Turn projection", () => {
       },
     ]);
     expect(JSON.stringify(messages)).not.toContain(
-      "Provider reconciliation is required",
+      "no durable provider outcome",
     );
   });
 });
@@ -1929,46 +1929,33 @@ describe("active durable Turn projection", () => {
     expect(state.messages[2]).toMatchObject({ text: "", status: "streaming" });
   });
 
-  test("projects reconciliation-required recovery state", () => {
-    const reconciliation: Pick<
+  test("projects a re-issued Turn as a Turn that is still running", () => {
+    const resumed: Pick<
       FrockBotWebData,
       "messages" | "activeRunId" | "activeRun"
     > = { messages: [] };
     projectDurableRuns(
-      reconciliation,
+      resumed,
       [],
       [
         {
-          runId: "run-reconciliation",
+          runId: "run-resumed",
           input: "Continue",
           events: [],
-          status: "reconciliation-required",
-          failure: "Provider result needs confirmation",
-          recovery: {
-            action: "resume",
-            message: "Provider result needs confirmation",
-          },
+          status: "running",
+          partialText: "Half a",
         },
       ],
     );
-    // One sentence of the product's own, and the raw provider text nowhere on
-    // screen — the banner, the bubble and the notice all read the same way
-    // whatever the provider called the failure.
-    expect(reconciliation.activeRun).toEqual({
-      runId: "run-reconciliation",
-      status: "reconciliation-required",
-      message: "Something went wrong mid-reply. Try again to pick it up.",
-      canResume: true,
-    });
-    expect(reconciliation.messages[1]).toMatchObject({
+    // A Turn whose request the loop re-issues is running like any other: the
+    // animated avatar says so, and there is no banner and nothing to press.
+    expect(resumed.activeRun).toBeUndefined();
+    expect(resumed.activeRunId).toBe("run-resumed");
+    expect(resumed.messages[1]).toMatchObject({
       role: "assistant",
-      text: "",
-      notice: "This reply stopped partway. Try again to continue it.",
-      status: "reconciliation-required",
+      text: "Half a",
+      status: "streaming",
     });
-    expect(JSON.stringify(reconciliation.messages)).not.toContain(
-      "Provider result needs confirmation",
-    );
   });
 
   test("keeps busy state until the durable run becomes terminal", () => {
@@ -1984,11 +1971,7 @@ describe("active durable Turn projection", () => {
           runId: "run-1",
           input: "Continue",
           events: [],
-          status: "reconciliation-required",
-          recovery: {
-            action: "resume",
-            message: "Provider reconciliation is required",
-          },
+          status: "running",
         },
       ],
     );
@@ -2014,11 +1997,9 @@ describe("active durable Turn projection", () => {
     });
   });
 
-  test("uses the hosted reconciliation action and projects its result", async () => {
+  test("waits for the backend to settle a running Turn, with nothing to press", async () => {
     let provided: Ref<FrockBotWebData> | undefined;
-    let status: "reconciliation-required" | "completed" =
-      "reconciliation-required";
-    const reconciled: string[] = [];
+    let status: "running" | "completed" = "running";
     await shellClientPlugin({
       transport: {
         turn: () => Promise.resolve({ runId: "run", text: "", events: [] }),
@@ -2034,31 +2015,21 @@ describe("active durable Turn projection", () => {
                   connections: [],
                 },
           ),
-        listRuns: () =>
-          Promise.resolve([
-            {
-              runId: "run-1",
-              input: "Continue",
-              events: [],
-              status,
-              ...(status === "completed" ? { responseText: "Done" } : {}),
-              ...(status === "reconciliation-required"
-                ? {
-                    recovery: {
-                      action: "resume" as const,
-                      message: "Provider confirmation required",
-                    },
-                  }
-                : {}),
-            },
-          ]),
+        listRuns: () => {
+          const run: ClientRun = {
+            runId: "run-1",
+            input: "Continue",
+            events: [],
+            status,
+            ...(status === "completed" ? { responseText: "Done" } : {}),
+          };
+          // The loop re-issues the interrupted request itself; the next read
+          // is what tells the client the Turn is finished.
+          status = "completed";
+          return Promise.resolve([run]);
+        },
         listNotifications: () =>
           Promise.reject(new Error("notifications unavailable")),
-        reconcileRun: (_botId, runId) => {
-          reconciled.push(runId);
-          status = "completed";
-          return Promise.resolve({ runId, text: "Done", events: [] });
-        },
       },
       slot: () => () => {},
       inject: () => {
@@ -2075,9 +2046,10 @@ describe("active durable Turn projection", () => {
 
     await provided.value.loadBotSettings();
     expect(provided.value.activeRunId).toBe("run-1");
-    await provided.value.resumeRun("run-1");
+    expect(provided.value.activeRun).toBeUndefined();
 
-    expect(reconciled).toEqual(["run-1"]);
+    await provided.value.loadBotSettings();
+
     expect(provided.value.activeRunId).toBeUndefined();
     expect(provided.value.messages[1]).toMatchObject({
       text: "Done",
@@ -2157,7 +2129,7 @@ describe("Bot selection", () => {
 });
 
 describe("hosted Stop", () => {
-  test("sends one durable command and projects accepted, reconciling, then cancelled", async () => {
+  test("sends one durable command and projects accepted, then cancelled", async () => {
     let provided: Ref<FrockBotWebData> | undefined;
     const commands: {
       botId: string;
@@ -2176,9 +2148,8 @@ describe("hosted Stop", () => {
         runId: "run-1",
         input: "Continue",
         events: [],
-        status: "reconciliation-required",
+        status: "running",
         stopRequestedAt: "2026-08-30T00:00:01.000Z",
-        recovery: { action: "resume", message: "Provider confirmation" },
       },
       {
         runId: "run-1",
@@ -2239,16 +2210,15 @@ describe("hosted Stop", () => {
       runId: "run-1",
       status: "running",
       message: "Stop requested; finishing up.",
-      canResume: false,
     });
 
+    // The Turn is still settling its keyed effects, so the banner stands and
+    // the thread offers nothing else to press.
     await provided.value.stopRun();
     expect(provided.value.activeRun).toMatchObject({
-      status: "reconciliation-required",
-      message: "Stopping…",
-      // A parked Turn is offered the resolve control, Stop included: hiding
-      // it there hid it in exactly the case Stop creates.
-      canResume: true,
+      runId: "run-1",
+      status: "running",
+      message: "Stop requested; finishing up.",
     });
 
     await provided.value.stopRun();
@@ -2309,7 +2279,6 @@ describe("hosted Stop", () => {
       runId: "run-1",
       status: "running",
       message: "Running",
-      canResume: false,
     };
 
     await provided.value.stopRun();

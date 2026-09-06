@@ -22,12 +22,7 @@ export interface StoredRunCodecV1<Snapshot> {
 }
 
 export type StoredRunStatus =
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "superseded"
-  | "reconciliation-required";
+  "running" | "completed" | "failed" | "cancelled" | "superseded";
 
 /**
  * The admission lane a Turn was accepted on.
@@ -141,8 +136,7 @@ export interface StoredRunAdmissionV1 {
   origin?: StoredRunOriginV1;
 }
 
-export type StoredRunPhase =
-  "queued" | "admitted" | "executing" | "reconciliation-required";
+export type StoredRunPhase = "queued" | "admitted" | "executing";
 
 export interface StoredRunV1<Snapshot = unknown> {
   runId: string;
@@ -294,13 +288,11 @@ const STORED_RUN_STATUSES: readonly StoredRunStatus[] = [
   "failed",
   "cancelled",
   "superseded",
-  "reconciliation-required",
 ];
 const STORED_RUN_PHASES: readonly StoredRunPhase[] = [
   "queued",
   "admitted",
   "executing",
-  "reconciliation-required",
 ];
 const STORED_RUN_REQUIRED_KEYS = [
   "runId",
@@ -789,7 +781,7 @@ function requireStoredRunRecordV1<Snapshot>(
     throw new Error(`run "${runId}" has invalid completion fields`);
   }
   if (
-    status === "failed" || status === "reconciliation-required"
+    status === "failed"
       ? candidate.failure === undefined
       : candidate.failure !== undefined
   ) {
@@ -800,12 +792,6 @@ function requireStoredRunRecordV1<Snapshot>(
   }
   if (status === "superseded" && candidate.supersededAt === undefined) {
     throw new Error(`run "${runId}" has no durable supersede intent`);
-  }
-  if (
-    (status === "reconciliation-required") !==
-    (phase === "reconciliation-required")
-  ) {
-    throw new Error(`run "${runId}" has inconsistent recovery state`);
   }
   return {
     runId,

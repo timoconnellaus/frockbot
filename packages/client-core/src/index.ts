@@ -142,13 +142,7 @@ export interface ClientRun {
   admittedAt?: string;
   input: string;
   events: ClientTurnEvent[];
-  status:
-    | "running"
-    | "completed"
-    | "failed"
-    | "cancelled"
-    | "superseded"
-    | "reconciliation-required";
+  status: "running" | "completed" | "failed" | "cancelled" | "superseded";
   responseText?: string;
   failure?: string;
   /** Durable Stop intent, projected independently of the run status. */
@@ -165,7 +159,6 @@ export interface ClientRun {
    * settles, so the thread never draws both.
    */
   partialText?: string;
-  recovery?: { action: "resume"; message: string };
   /** Source marker for a message admitted on the agent lane. */
   via?:
     | { kind: "bot"; name: string; botId: string }
@@ -320,7 +313,6 @@ export interface AgentTransport {
     botId: string,
     runId: string,
   ): Promise<ClientRun | undefined>;
-  reconcileRun?(botId: string, runId: string): Promise<ClientTurnResponse>;
   /** Sends the durable Stop command and returns the acknowledged projection. */
   stopRun?(botId: string, runId: string, commandId: string): Promise<ClientRun>;
   revokeConnection?(packageId: string, connectionId: string): Promise<void>;

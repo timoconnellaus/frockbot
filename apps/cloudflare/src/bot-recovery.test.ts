@@ -42,7 +42,7 @@ describe("Bot run recovery", () => {
     });
   });
 
-  test("reconciles an uncertain model effect without duplicating it", () => {
+  test("resumes an unanswered model request under its own key", () => {
     const events = [
       {
         type: "session/created" as const,
@@ -79,10 +79,11 @@ describe("Bot run recovery", () => {
         },
       },
     ] satisfies SessionEvent[];
-    const plan = planBotRunRecovery(run(events.slice(1)), events);
-    expect(plan.kind).toBe("reconcile");
-    if (plan.kind !== "reconcile") throw new Error("expected reconciliation");
-    expect(plan.repairs).toEqual([]);
+    // The requestId is the idempotency key, so the loop re-issues the very
+    // same request rather than asking the provider what became of it.
+    expect(planBotRunRecovery(run(events.slice(1)), events)).toEqual({
+      kind: "resume",
+    });
   });
 
   test("fails recovery when the durable Turn ended unsuccessfully", () => {

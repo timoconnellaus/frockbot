@@ -91,13 +91,7 @@ export interface WebChatMessage {
   text: string;
   /** When the line happened, so system lines sort into the conversation. */
   at?: string;
-  status:
-    | "streaming"
-    | "completed"
-    | "aborted"
-    | "error"
-    | "interrupted"
-    | "reconciliation-required";
+  status: "streaming" | "completed" | "aborted" | "error" | "interrupted";
   via?:
     | { kind: "bot"; name: string; botId: string }
     | { kind: "voice"; name: "Voice" };
@@ -139,9 +133,8 @@ export interface WebChatMessage {
 
 export interface WebActiveRun {
   runId: string;
-  status: "running" | "interrupted" | "reconciliation-required";
+  status: "running" | "interrupted";
   message: string;
-  canResume: boolean;
 }
 
 export interface SendPromptResult {
@@ -539,7 +532,6 @@ export interface FrockBotWebData {
     text: string,
     skills?: readonly SkillRefV1[],
   ): Promise<SendPromptResult>;
-  resumeRun(runId: string): Promise<void>;
   /**
    * Opens one dictation session (voice plan D2). `undefined` on a platform
    * whose transport cannot, which is what `voiceAvailable` reports up front.

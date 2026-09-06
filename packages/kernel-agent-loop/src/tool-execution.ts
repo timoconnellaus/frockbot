@@ -3,16 +3,26 @@ import {
   type ToolExecutionResult,
   validateToolOccurrenceJournal,
 } from "@frockbot/kernel-contracts";
-import {
-  EffectAdmissionFencedError,
-  ToolEffectReconciliationRequiredError,
-} from "./errors.js";
+import { EffectAdmissionFencedError } from "./errors.js";
 import type { LoopRuntime } from "./runtime.js";
+
+/**
+ * What a tool reports when its own dispatch failed and the loop cannot tell
+ * whether the work happened. The model reads it and decides; the loop does
+ * not try to find out.
+ */
+function uncertainToolFailure(message: string): string {
+  return `${message} (the loop cannot tell whether this call took effect)`;
+}
 
 /**
  * Runs every occurrence and reports whether any result ended the Turn. The
  * boolean is per *result*, not per definition: one tool can end a Turn for
  * one payload and not another, and the kernel never inspects which.
+ *
+ * The occurrence id is the call's idempotency key. It is derived from the
+ * Turn, the step and the call's position, so a call re-issued after a crash
+ * carries the same key and a tool that honours keys runs its effect once.
  */
 export async function executeToolsV1(
   runtime: LoopRuntime,
@@ -42,12 +52,6 @@ export async function executeToolsV1(
     };
     const preparation = await ctx.tools.prepare(call, context);
     signal.throwIfAborted();
-    if (existing?.intent && preparation.kind !== "ready") {
-      throw new ToolEffectReconciliationRequiredError(
-        occurrenceId,
-        `Tool effect "${occurrenceId}" cannot be reconciled because its definition is unavailable`,
-      );
-    }
     if (!existing?.intent) {
       session.append({
         type: "tool/call",
@@ -74,28 +78,13 @@ export async function executeToolsV1(
       }
     }
     let result: ToolExecutionResult;
-    if (existing?.intent) {
-      if (preparation.kind !== "ready") {
-        throw new ToolEffectReconciliationRequiredError(
-          occurrenceId,
-          `Tool effect "${occurrenceId}" cannot be reconciled because its definition is unavailable`,
-        );
-      }
-      const reconciliation = await ctx.tools.reconcilePrepared(
-        preparation,
-        context,
-      );
-      if (reconciliation.status === "unavailable") {
-        throw new ToolEffectReconciliationRequiredError(
-          occurrenceId,
-          reconciliation.reason,
-        );
-      }
-      result = reconciliation.result;
-    } else if (preparation.kind === "denied") {
+    if (preparation.kind === "denied") {
       result = preparation.result;
       ctx.emit("tools/result", call, result);
     } else {
+      // Re-admitted on every dispatch, including a re-issue of an already
+      // journaled intent: admission is keyed by effect id, so a Stop or a
+      // supersede still fences a call the evicted Turn had already started.
       if (
         !(await options.admitEffect({
           kind: "tool",
@@ -118,17 +107,13 @@ export async function executeToolsV1(
       try {
         result = await ctx.tools.executePrepared(preparation, context);
       } catch (error) {
-        if (signal.aborted || !preparation.idempotent) {
-          throw new ToolEffectReconciliationRequiredError(
-            occurrenceId,
-            signal.aborted
-              ? `Tool effect "${occurrenceId}" outcome is uncertain after cancellation`
-              : `Non-idempotent tool effect "${occurrenceId}" outcome is uncertain`,
-          );
-        }
+        if (signal.aborted) throw error;
+        const message =
+          error instanceof Error ? error.message : "Tool execution failed";
         result = {
-          content:
-            error instanceof Error ? error.message : "Tool execution failed",
+          content: preparation.idempotent
+            ? message
+            : uncertainToolFailure(message),
           isError: true,
         };
         ctx.emit("tools/result", call, result);

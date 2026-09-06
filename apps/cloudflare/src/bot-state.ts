@@ -1679,20 +1679,6 @@ export class BotState extends DurableObject<BotStateEnv> {
     return shell.stopRun(identity, request.command as ClientRunStopCommandV1);
   }
 
-  async reconcileRun(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      runId: rpcIdentifier,
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    return shell.reconcileRun(identity, request.runId as string);
-  }
-
   /** The Bot's unread projection; the Bot Durable Object derives the count. */
   async readUnread(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);

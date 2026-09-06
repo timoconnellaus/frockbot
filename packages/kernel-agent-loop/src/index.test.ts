@@ -304,11 +304,6 @@ describe("AgentLoop", () => {
       }),
     ]);
     expect(
-      handle.agent.session.events.some(
-        (event) => event.type === "model/reconciliation-required",
-      ),
-    ).toBe(false);
-    expect(
       handle.agent.session.events.findLast(
         (event) => event.type === "turn/end",
       ),
@@ -434,12 +429,6 @@ describe("AgentLoop", () => {
       { kind: "model", effectId: request.request.requestId },
     ]);
     expect(streams).toBe(0);
-    expect(handle.agent.session.events).toContainEqual(
-      expect.objectContaining({
-        type: "model/effect-not-started",
-        requestId: request.request.requestId,
-      }),
-    );
     expect(handle.agent.session.events.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "cancelled",
@@ -1007,61 +996,35 @@ describe("AgentLoop", () => {
     });
   });
 
-  test("reconciles an admitted model request by its durable id", async () => {
-    let streams = 0;
-    const reconciled: string[] = [];
+  test("re-issues an unresolved model request under the same key", async () => {
+    const dispatched: string[] = [];
     const provider: LlmProvider = {
-      id: "recoverable",
-      async *stream() {
-        streams += 1;
+      id: "keyed",
+      async *stream(request) {
+        dispatched.push(request.requestId);
+        yield { type: "text-delta", text: "Answered once" };
         yield { type: "finish", reason: "completed" };
       },
-      reconciliation: {
-        retrieve(effect) {
-          reconciled.push(effect.providerEffectId);
-          return recovered(
-            { type: "text-delta", text: "Recovered response" },
-            { type: "finish", reason: "completed" },
-          );
-        },
-      },
     };
+    const timestamp = "2026-08-28T00:00:00.000Z";
     const initial = [
+      { type: "session/created", createdAt: timestamp },
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
       {
-        type: "session/created" as const,
-        createdAt: "2026-08-28T00:00:00.000Z",
-        seq: 0,
-        timestamp: "2026-08-28T00:00:00.000Z",
-      },
-      {
-        type: "turn/start" as const,
-        turn: 1,
-        seq: 1,
-        timestamp: "2026-08-28T00:00:01.000Z",
-      },
-      {
-        type: "step/start" as const,
-        turn: 1,
-        step: 1,
-        seq: 2,
-        timestamp: "2026-08-28T00:00:01.000Z",
-      },
-      {
-        type: "model/request" as const,
+        type: "model/request",
         turn: 1,
         step: 1,
         request: {
           requestId: "durable-request-1",
-          provider: "recoverable",
+          provider: "keyed",
           model: "model-1",
           system: "",
           messages: [],
           tools: [],
         },
-        seq: 3,
-        timestamp: "2026-08-28T00:00:01.000Z",
       },
-    ] satisfies SessionEvent[];
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
     const root = await mountRuntime(provider, undefined, undefined, {
       recovering: initial,
     });
@@ -1069,20 +1032,21 @@ describe("AgentLoop", () => {
       ...allowEffectOptions,
       botId: "bot-1",
       sessionId: "recovering",
-      provider: "recoverable",
+      provider: "keyed",
       model: "model-1",
     });
 
     handle.agent.resume();
     await handle.agent.whenIdle();
 
-    expect(streams).toBe(0);
-    expect(reconciled).toEqual(["durable-request-1"]);
+    // The exact request the log carries, sent again under its own id: at most
+    // once for a provider that honours the key, and never investigated.
+    expect(dispatched).toEqual(["durable-request-1"]);
     expect(handle.agent.session.events).toContainEqual(
       expect.objectContaining({
         type: "assistant/message",
         requestId: "durable-request-1",
-        text: "Recovered response",
+        text: "Answered once",
       }),
     );
     expect(handle.agent.session.events.at(-1)).toMatchObject({
@@ -1091,7 +1055,14 @@ describe("AgentLoop", () => {
     });
   });
 
-  test("reconciles a mixed stream and journals only its unseen text suffix", async () => {
+  test("marks each dispatch of one key with its own model/request", async () => {
+    const provider: LlmProvider = {
+      id: "partial-provider",
+      async *stream() {
+        yield { type: "text-delta", text: "Finished." };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
     const timestamp = "2026-08-28T00:00:00.000Z";
     const initial = [
       { type: "session/created", createdAt: timestamp },
@@ -1118,53 +1089,7 @@ describe("AgentLoop", () => {
         text: "A",
       },
     ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
-    let streamedFollowUp = 0;
-    let toolExecutions = 0;
-    const provider: LlmProvider = {
-      id: "partial-provider",
-      async *stream() {
-        streamedFollowUp += 1;
-        yield { type: "text-delta", text: "Finished." };
-        yield { type: "finish", reason: "completed" };
-      },
-      reconciliation: {
-        retrieve: () =>
-          recovered(
-            { type: "text-delta", text: "A" },
-            {
-              type: "tool-call",
-              call: {
-                id: "recovered-call",
-                name: "echo",
-                input: { value: "mixed" },
-              },
-            },
-            { type: "text-delta", text: "B" },
-            { type: "finish", reason: "tool-calls" },
-          ),
-      },
-    };
-    const tool: ToolDefinition = {
-      name: "echo",
-      description: "Return a supplied value.",
-      inputSchema: {
-        type: "object",
-        properties: { value: { type: "string" } },
-        required: ["value"],
-      },
-      validate: (input) =>
-        typeof input === "object" &&
-        input !== null &&
-        typeof (input as { value?: unknown }).value === "string",
-      execute(input) {
-        toolExecutions += 1;
-        return Promise.resolve({
-          content: (input as { value: string }).value,
-          isError: false,
-        });
-      },
-    };
-    const root = await mountRuntime(provider, tool, undefined, {
+    const root = await mountRuntime(provider, undefined, undefined, {
       partial: initial,
     });
     const handle = await root.agents.create({
@@ -1178,381 +1103,117 @@ describe("AgentLoop", () => {
     handle.agent.resume();
     await handle.agent.whenIdle();
 
-    expect(
-      handle.agent.session.events.flatMap((event) =>
-        event.type === "assistant/chunk" &&
-        event.requestId === "partial-request"
-          ? [event.text]
-          : [],
-      ),
-    ).toEqual(["A", "B"]);
+    // Two sends of one key. The second `model/request` is what tells every
+    // reader of the answer so far that the words before it were abandoned.
+    const timeline = handle.agent.session.events.flatMap((event) =>
+      (event.type === "model/request" &&
+        event.request.requestId === "partial-request") ||
+      (event.type === "assistant/chunk" &&
+        event.requestId === "partial-request")
+        ? [event.type === "model/request" ? "sent" : event.text]
+        : [],
+    );
+    expect(timeline).toEqual(["sent", "A", "sent", "Finished."]);
     expect(handle.agent.session.events).toContainEqual(
       expect.objectContaining({
         type: "assistant/message",
         requestId: "partial-request",
-        text: "AB",
-        toolCalls: [
-          {
-            id: "recovered-call",
-            name: "echo",
-            input: { value: "mixed" },
-          },
-        ],
+        text: "Finished.",
       }),
     );
-    expect(toolExecutions).toBe(1);
-    expect(streamedFollowUp).toBe(1);
-    expect(
-      handle.agent.session.events.filter(
-        (event) =>
-          event.type === "tool/call" &&
-          event.occurrenceId === "tool:1:1:0" &&
-          event.name === "echo",
-      ),
-    ).toHaveLength(1);
-    expect(
-      handle.agent.session.events.filter(
-        (event) =>
-          event.type === "tool/result" &&
-          event.occurrenceId === "tool:1:1:0" &&
-          event.content === "mixed",
-      ),
-    ).toHaveLength(1);
   });
 
-  test("fails closed when retrieval diverges from a durable partial stream", async () => {
-    const timestamp = "2026-08-28T00:00:00.000Z";
-    const initial = [
-      { type: "session/created", createdAt: timestamp },
-      { type: "turn/start", turn: 1 },
-      { type: "step/start", turn: 1, step: 1 },
-      {
-        type: "model/request",
-        turn: 1,
-        step: 1,
-        request: {
-          requestId: "divergent-request",
-          provider: "divergent-provider",
-          model: "model-1",
-          system: "",
-          messages: [],
-          tools: [],
-        },
-      },
-      {
-        type: "assistant/chunk",
-        turn: 1,
-        step: 1,
-        requestId: "divergent-request",
-        text: "A",
-      },
-    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+  test("retries a lost response under the same key, not a new one", async () => {
+    const dispatched: string[] = [];
     const provider: LlmProvider = {
-      id: "divergent-provider",
-      async *stream() {
-        throw new Error("recovery must not dispatch another request");
-      },
-      reconciliation: {
-        retrieve: () =>
-          recovered(
-            { type: "text-delta", text: "X" },
-            { type: "text-delta", text: "B" },
-            { type: "finish", reason: "completed" },
-          ),
-      },
-    };
-    const root = await mountRuntime(provider, undefined, undefined, {
-      divergent: initial,
-    });
-    const handle = await root.agents.create({
-      ...allowEffectOptions,
-      botId: "divergent-bot",
-      sessionId: "divergent",
-      provider: "divergent-provider",
-      model: "model-1",
-    });
-
-    handle.agent.resume();
-    await handle.agent.whenIdle();
-
-    expect(
-      handle.agent.session.events.flatMap((event) =>
-        event.type === "assistant/chunk" ? [event.text] : [],
-      ),
-    ).toEqual(["A"]);
-    expect(handle.agent.session.events).toContainEqual(
-      expect.objectContaining({
-        type: "model/reconciliation-required",
-        requestId: "divergent-request",
-        reason:
-          'Provider-bound retrieval diverged from durable response prefix for request "divergent-request"',
-      }),
-    );
-    expect(
-      handle.agent.session.events.some(
-        (event) =>
-          event.type === "assistant/message" || event.type === "turn/end",
-      ),
-    ).toBe(false);
-  });
-
-  test("fails closed when a mixed recovered stream continues after finish", async () => {
-    const timestamp = "2026-08-28T00:00:00.000Z";
-    const initial = [
-      { type: "session/created", createdAt: timestamp },
-      { type: "turn/start", turn: 1 },
-      { type: "step/start", turn: 1, step: 1 },
-      {
-        type: "model/request",
-        turn: 1,
-        step: 1,
-        request: {
-          requestId: "structural-request",
-          provider: "structural-provider",
-          model: "model-1",
-          system: "",
-          messages: [],
-          tools: [],
-        },
-      },
-      {
-        type: "assistant/chunk",
-        turn: 1,
-        step: 1,
-        requestId: "structural-request",
-        text: "A",
-      },
-      {
-        type: "assistant/chunk",
-        turn: 1,
-        step: 1,
-        requestId: "structural-request",
-        text: "B",
-      },
-    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
-    const provider: LlmProvider = {
-      id: "structural-provider",
-      async *stream() {
-        throw new Error("recovery must not dispatch another request");
-      },
-      reconciliation: {
-        retrieve: () =>
-          recovered(
-            { type: "text-delta", text: "A" },
-            {
-              type: "tool-call",
-              call: {
-                id: "invalid-call",
-                name: "echo",
-                input: { value: "mixed" },
-              },
-            },
-            { type: "finish", reason: "tool-calls" },
-            { type: "text-delta", text: "B" },
-          ),
-      },
-    };
-    const root = await mountRuntime(provider, undefined, undefined, {
-      structural: initial,
-    });
-    const handle = await root.agents.create({
-      ...allowEffectOptions,
-      botId: "structural-bot",
-      sessionId: "structural",
-      provider: "structural-provider",
-      model: "model-1",
-    });
-
-    handle.agent.resume();
-    await handle.agent.whenIdle();
-
-    expect(
-      handle.agent.session.events.flatMap((event) =>
-        event.type === "assistant/chunk" ? [event.text] : [],
-      ),
-    ).toEqual(["A", "B"]);
-    expect(handle.agent.session.events).toContainEqual(
-      expect.objectContaining({
-        type: "model/reconciliation-required",
-        requestId: "structural-request",
-        reason:
-          'Provider-bound retrieval returned an invalid event structure for request "structural-request"',
-      }),
-    );
-    expect(
-      handle.agent.session.events.some(
-        (event) =>
-          event.type === "assistant/message" || event.type === "tool/call",
-      ),
-    ).toBe(false);
-  });
-
-  test("settles a turn whose provider cannot retrieve the effect", async () => {
-    let streams = 0;
-    const provider: LlmProvider = {
-      id: "unretrievable",
-      async *stream() {
-        streams += 1;
+      id: "lost-response",
+      async *stream(request) {
+        dispatched.push(request.requestId);
+        if (dispatched.length === 1) {
+          throw new Error("response lost after dispatch");
+        }
+        yield { type: "text-delta", text: "Second time" };
         yield { type: "finish", reason: "completed" };
       },
     };
-    const initial = [
-      {
-        type: "session/created" as const,
-        createdAt: "2026-08-28T00:00:00.000Z",
-        seq: 0,
-        timestamp: "2026-08-28T00:00:00.000Z",
-      },
-      {
-        type: "turn/start" as const,
-        turn: 1,
-        seq: 1,
-        timestamp: "2026-08-28T00:00:01.000Z",
-      },
-      {
-        type: "step/start" as const,
-        turn: 1,
-        step: 1,
-        seq: 2,
-        timestamp: "2026-08-28T00:00:01.000Z",
-      },
-      {
-        type: "model/request" as const,
-        turn: 1,
-        step: 1,
-        request: {
-          requestId: "unretrievable-effect-1",
-          provider: "unretrievable",
-          model: "model-1",
-          system: "",
-          messages: [],
-          tools: [],
-        },
-        seq: 3,
-        timestamp: "2026-08-28T00:00:01.000Z",
-      },
-    ] satisfies SessionEvent[];
-    const root = await mountRuntime(provider, undefined, undefined, {
-      unretrievable: initial,
-    });
+    const root = await mountRuntime(provider);
     const handle = await root.agents.create({
       ...allowEffectOptions,
-      botId: "bot-1",
-      sessionId: "unretrievable",
-      provider: "unretrievable",
+      botId: "bot-lost",
+      sessionId: "agent-lost",
+      provider: "lost-response",
       model: "model-1",
     });
 
-    handle.agent.resume();
+    handle.agent.send("Ask once.");
     await handle.agent.whenIdle();
 
-    // A provider that declares no retrieval will never grow one, so the run
-    // settles as a model error rather than parking on a reconciliation that
-    // can never happen (and throwing out of the Durable Object).
-    expect(streams).toBe(0);
+    // An uncertain failure is retried now that the key makes the retry safe,
+    // and the retry is the same call rather than a second one.
+    expect(dispatched).toHaveLength(2);
+    expect(dispatched[0]).toBe(dispatched[1]);
     expect(
-      handle.agent.session.events.some(
-        (event) => event.type === "model/reconciliation-required",
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/request",
       ),
-    ).toBe(false);
-    const turnEnd = handle.agent.session.events.findLast(
-      (event) => event.type === "turn/end",
-    );
-    expect(turnEnd).toMatchObject({
-      outcome: "model-error",
-      reason:
-        'LLM provider "unretrievable" does not support provider-bound retrieval',
+    ).toHaveLength(2);
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
     });
   });
 
-  test("keeps an ambiguous dispatched effect open for provider reconciliation", async () => {
-    let streams = 0;
-    const retrieved: string[] = [];
-    const durableEventTypes: string[] = [];
-    let dispatchSawDurableIntent = false;
+  test("settles a cancelled Turn rather than holding it open", async () => {
     const provider: LlmProvider = {
-      id: "lost-response",
-      async *stream() {
-        streams += 1;
-        dispatchSawDurableIntent = durableEventTypes.at(-1) === "model/request";
-        throw new Error("response lost after dispatch");
-      },
-      reconciliation: {
-        retrieve(effect) {
-          retrieved.push(effect.providerEffectId);
-          return Promise.resolve({
-            status: "unavailable",
-            reason: "provider result is not retrievable yet",
+      id: "blocking",
+      async *stream(_request, signal) {
+        await new Promise<void>((_resolve, reject) => {
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
           });
-        },
+        });
+        yield { type: "finish", reason: "completed" };
       },
     };
-    const root = await mountRuntime(
-      provider,
-      undefined,
-      (_sessionId, events) => {
-        durableEventTypes.push(...events.map((event) => event.type));
-        return Promise.resolve();
-      },
-    );
+    const root = await mountRuntime(provider);
     const handle = await root.agents.create({
       ...allowEffectOptions,
-      botId: "bot-lost-response",
-      sessionId: "lost-response",
-      provider: "lost-response",
+      botId: "bot-2",
+      sessionId: "agent-2",
+      provider: "blocking",
       model: "test-model",
     });
 
-    handle.agent.send("Dispatch once.");
-    await handle.agent.whenIdle();
-    const request = handle.agent.session.events.find(
-      (event) => event.type === "model/request",
+    handle.agent.send("Wait forever.");
+    await eventually(() =>
+      expect(
+        handle.agent.session.events.some(
+          (event) => event.type === "model/request",
+        ),
+      ).toBe(true),
     );
-    if (request?.type !== "model/request") {
-      throw new Error("model request was not recorded");
-    }
-    expect(handle.agent.session.events).toContainEqual(
-      expect.objectContaining({
-        type: "model/reconciliation-required",
-        requestId: request.request.requestId,
-        reason:
-          "Model response outcome is uncertain: response lost after dispatch",
-      }),
-    );
-    expect(
-      handle.agent.session.events.filter(
-        (event) => event.type === "model/usage",
-      ),
-    ).toEqual([
-      expect.objectContaining({
-        requestId: request.request.requestId,
-        estimated: true,
-      }),
-    ]);
-    expect(
-      handle.agent.session.events.some(
-        (event) => event.type === "step/end" || event.type === "turn/end",
-      ),
-    ).toBe(false);
-
-    handle.agent.resume();
+    handle.agent.cancel();
     await handle.agent.whenIdle();
 
-    expect(streams).toBe(1);
-    expect(dispatchSawDurableIntent).toBe(true);
-    expect(durableEventTypes).toContain("model/reconciliation-required");
-    expect(durableEventTypes).not.toContain("turn/end");
-    expect(retrieved).toEqual([request.request.requestId]);
+    // The request stays in the log with no answer — it is keyed, so a resume
+    // could send it again — and the Turn is closed either way rather than
+    // parked on a question nobody can answer.
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "cancelled",
+    });
     expect(
       handle.agent.session.events.some(
-        (event) => event.type === "step/end" || event.type === "turn/end",
+        (event) => event.type === "assistant/message",
       ),
     ).toBe(false);
   });
 
-  test("terminally fails only an explicitly unstarted model effect", async () => {
-    const durableEventTypes: string[] = [];
-    let retryPolicySawDurableNoEffect = false;
+  test("fails a Turn whose provider says the request never started", async () => {
     const provider: LlmProvider = {
       id: "pre-effect-failure",
       async *stream() {
@@ -1561,118 +1222,22 @@ describe("AgentLoop", () => {
         );
       },
     };
-    const root = await mountRuntime(
-      provider,
-      undefined,
-      (_sessionId, events) => {
-        durableEventTypes.push(...events.map((event) => event.type));
-        return Promise.resolve();
-      },
-    );
-    root.on("agent/request-error", async (_agent, _error, _signal, next) => {
-      retryPolicySawDurableNoEffect = durableEventTypes.includes(
-        "model/effect-not-started",
-      );
-      return next();
-    });
+    const root = await mountRuntime(provider);
     const handle = await root.agents.create({
       ...allowEffectOptions,
-      botId: "bot-pre-effect-failure",
-      sessionId: "pre-effect-failure",
+      botId: "bot-no-effect",
+      sessionId: "agent-no-effect",
       provider: "pre-effect-failure",
-      model: "test-model",
-    });
-
-    handle.agent.send("Fail safely.");
-    await handle.agent.whenIdle();
-
-    expect(
-      handle.agent.session.events.some(
-        (event) => event.type === "model/reconciliation-required",
-      ),
-    ).toBe(false);
-    expect(durableEventTypes.indexOf("model/request")).toBeLessThan(
-      durableEventTypes.indexOf("model/effect-not-started"),
-    );
-    expect(durableEventTypes.indexOf("model/effect-not-started")).toBeLessThan(
-      durableEventTypes.indexOf("turn/end"),
-    );
-    expect(retryPolicySawDurableNoEffect).toBe(true);
-    expect(handle.agent.session.events.at(-2)).toMatchObject({
-      type: "step/end",
-      outcome: "model-error",
-    });
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
-      type: "turn/end",
-      outcome: "model-error",
-    });
-  });
-
-  test("recovers a durable no-effect outcome without provider reconciliation", async () => {
-    const timestamp = "2026-08-28T00:00:00.000Z";
-    const initial = [
-      { type: "session/created", createdAt: timestamp },
-      { type: "turn/start", turn: 1 },
-      { type: "step/start", turn: 1, step: 1 },
-      {
-        type: "model/request",
-        turn: 1,
-        step: 1,
-        request: {
-          requestId: "no-effect-request",
-          provider: "no-effect-provider",
-          model: "model-1",
-          system: "",
-          messages: [],
-          tools: [],
-        },
-      },
-      {
-        type: "model/effect-not-started",
-        turn: 1,
-        step: 1,
-        requestId: "no-effect-request",
-        reason: "provider rejected before dispatch",
-      },
-    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
-    let streams = 0;
-    let retrievals = 0;
-    const provider: LlmProvider = {
-      id: "no-effect-provider",
-      async *stream() {
-        streams += 1;
-        yield { type: "finish", reason: "completed" };
-      },
-      reconciliation: {
-        retrieve: () => {
-          retrievals += 1;
-          return recovered({ type: "finish", reason: "completed" });
-        },
-      },
-    };
-    const root = await mountRuntime(provider, undefined, undefined, {
-      "no-effect": initial,
-    });
-    const handle = await root.agents.create({
-      ...allowEffectOptions,
-      botId: "no-effect-bot",
-      sessionId: "no-effect",
-      provider: "no-effect-provider",
       model: "model-1",
     });
 
-    handle.agent.resume();
+    handle.agent.send("Try once.");
     await handle.agent.whenIdle();
 
-    expect(streams).toBe(0);
-    expect(retrievals).toBe(0);
-    expect(handle.agent.session.events.at(-2)).toMatchObject({
-      type: "step/end",
-      outcome: "model-error",
-    });
     expect(handle.agent.session.events.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "model-error",
+      reason: expect.stringContaining("provider rejected before effect"),
     });
   });
 
@@ -1862,56 +1427,7 @@ describe("AgentLoop", () => {
     expect(session.events.at(-1)?.type).toBe("session/disposed");
   });
 
-  test("keeps an aborted durable model request open for reconciliation", async () => {
-    const provider: LlmProvider = {
-      id: "blocking",
-      async *stream(_request, signal) {
-        await new Promise<void>((_resolve, reject) => {
-          if (signal.aborted) {
-            reject(signal.reason);
-            return;
-          }
-          signal.addEventListener("abort", () => reject(signal.reason), {
-            once: true,
-          });
-        });
-        yield { type: "finish", reason: "completed" };
-      },
-    };
-    const root = await mountRuntime(provider);
-    const handle = await root.agents.create({
-      ...allowEffectOptions,
-      botId: "bot-2",
-      sessionId: "agent-2",
-      provider: "blocking",
-      model: "test-model",
-    });
-
-    handle.agent.send("Wait forever.");
-    await eventually(() =>
-      expect(
-        handle.agent.session.events.some(
-          (event) => event.type === "model/request",
-        ),
-      ).toBe(true),
-    );
-    handle.agent.cancel();
-    await handle.agent.whenIdle();
-
-    expect(
-      handle.agent.session.events.some(
-        (event) => event.type === "step/end" || event.type === "turn/end",
-      ),
-    ).toBe(false);
-    expect(handle.agent.session.events).toContainEqual(
-      expect.objectContaining({
-        type: "model/reconciliation-required",
-        reason: expect.stringContaining("uncertain after cancellation"),
-      }),
-    );
-  });
-
-  test("cancels after a recovered assistant response is durably flushed", async () => {
+  test("cancels after a re-issued assistant response is durably flushed", async () => {
     const timestamp = "2026-08-30T00:00:00.000Z";
     const initial = [
       { type: "session/created", createdAt: timestamp },
@@ -1933,15 +1449,10 @@ describe("AgentLoop", () => {
     ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
     const provider: LlmProvider = {
       id: "flush-cancellation",
-      async *stream() {
-        throw new Error("recovery must not dispatch another model request");
-      },
-      reconciliation: {
-        retrieve: () =>
-          recovered(
-            { type: "text-delta", text: "Recovered answer" },
-            { type: "finish", reason: "completed" },
-          ),
+      async *stream(request) {
+        expect(request.requestId).toBe("flush-request");
+        yield { type: "text-delta", text: "Recovered answer" };
+        yield { type: "finish", reason: "completed" };
       },
     };
     let cancel = () => {};
@@ -1984,7 +1495,7 @@ describe("AgentLoop", () => {
     ).toEqual([]);
   });
 
-  test("keeps a cancelled non-idempotent tool effect open", async () => {
+  test("settles a cancelled tool occurrence instead of holding it open", async () => {
     const provider: LlmProvider = {
       id: "tool-cancellation",
       async *stream() {
@@ -1997,8 +1508,7 @@ describe("AgentLoop", () => {
     };
     let effectId: string | undefined;
     let executions = 0;
-    const reconciliations: string[] = [];
-    const tool: RecoverableToolDefinition = {
+    const tool: ToolDefinition = {
       name: "external",
       description: "Potentially non-idempotent external effect.",
       inputSchema: { type: "object" },
@@ -2011,13 +1521,6 @@ describe("AgentLoop", () => {
             () => reject(context.signal.reason),
             { once: true },
           );
-        });
-      },
-      reconcile(_input, context) {
-        reconciliations.push(context.effectId);
-        return Promise.resolve({
-          status: "unavailable",
-          reason: "provider result is not retrievable yet",
         });
       },
     };
@@ -2039,50 +1542,40 @@ describe("AgentLoop", () => {
     handle.agent.cancel();
     await handle.agent.whenIdle();
 
+    // The call carried its key, so nothing has to be worked out afterwards:
+    // the occurrence closes as interrupted and the Turn ends.
     expect(effectId).toBe("tool:1:1:0");
-    expect(
-      handle.agent.session.events.some(
-        (event) => event.type === "tool/result" || event.type === "turn/end",
-      ),
-    ).toBe(false);
-
-    handle.agent.resume();
-    await handle.agent.whenIdle();
     expect(executions).toBe(1);
-    expect(reconciliations).toEqual(["tool:1:1:0"]);
-    expect(
-      handle.agent.session.events.some(
-        (event) => event.type === "tool/result" || event.type === "turn/end",
-      ),
-    ).toBe(false);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "tool/result",
+        occurrenceId: "tool:1:1:0",
+        status: "interrupted",
+      }),
+    );
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "cancelled",
+    });
   });
-
-  test("recovers a non-idempotent open tool without executing it again", async () => {
+  test("re-issues an open tool occurrence under the same effect id", async () => {
     let modelRequests = 0;
-    let executions = 0;
-    const reconciled: string[] = [];
+    const executed: string[] = [];
     const provider: LlmProvider = {
-      id: "non-idempotent-tool-recovery",
+      id: "open-tool-recovery",
       async *stream() {
         modelRequests += 1;
         yield { type: "text-delta", text: "Recovered safely." };
         yield { type: "finish", reason: "completed" };
       },
     };
-    const tool: RecoverableToolDefinition = {
+    const tool: ToolDefinition = {
       name: "external",
-      description: "Recoverable non-idempotent effect.",
+      description: "An effect keyed by its occurrence.",
       inputSchema: { type: "object" },
-      execute() {
-        executions += 1;
-        return Promise.resolve({ content: "duplicated", isError: false });
-      },
-      reconcile(_input, context) {
-        reconciled.push(context.effectId);
-        return Promise.resolve({
-          status: "recovered",
-          result: { content: "original result", isError: false },
-        });
+      execute(_input, context) {
+        executed.push(context.effectId);
+        return Promise.resolve({ content: "settled once", isError: false });
       },
     };
     const root = await mountRuntime(provider, tool, undefined, {
@@ -2100,20 +1593,25 @@ describe("AgentLoop", () => {
     handle.agent.resume();
     await handle.agent.whenIdle();
 
-    expect(executions).toBe(0);
-    expect(reconciled).toEqual(["tool:1:1:0"]);
+    // The occurrence id is the key. The tool is asked again under it — a tool
+    // that honours the key runs its effect once — rather than the loop trying
+    // to find out what the interrupted call did.
+    expect(executed).toEqual(["tool:1:1:0"]);
     expect(modelRequests).toBe(1);
     expect(handle.agent.session.events).toContainEqual(
       expect.objectContaining({
         type: "tool/result",
         occurrenceId: "tool:1:1:0",
-        content: "original result",
+        content: "settled once",
         status: "completed",
       }),
     );
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
   });
-
-  test("reconciles an open idempotent tool with its durable effect id", async () => {
+  test("re-runs an open idempotent tool under its durable effect id", async () => {
     const timestamp = "2026-08-30T00:00:00.000Z";
     const initial = [
       { type: "session/created", createdAt: timestamp },
@@ -2378,7 +1876,7 @@ describe("AgentLoop", () => {
     });
   });
 
-  test("resumes an explicitly reconciled turn without admitting input twice", async () => {
+  test("resumes an interrupted turn without admitting its input twice", async () => {
     const timestamp = "2026-08-28T00:00:00.000Z";
     const initial = [
       { type: "session/created", createdAt: timestamp },
@@ -2409,17 +1907,12 @@ describe("AgentLoop", () => {
     ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
     const provider: LlmProvider = {
       id: "resume-provider",
-      async *stream() {
-        throw new Error("resume must not create a new model request");
-      },
-      reconciliation: {
-        retrieve(effect) {
-          expect(effect.providerEffectId).toBe("uncertain-request");
-          return recovered(
-            { type: "text-delta", text: "Resumed safely." },
-            { type: "finish", reason: "completed" },
-          );
-        },
+      async *stream(request) {
+        // The same key the log carries: a resume sends the call again, it does
+        // not compose a new one.
+        expect(request.requestId).toBe("uncertain-request");
+        yield { type: "text-delta", text: "Resumed safely." };
+        yield { type: "finish", reason: "completed" };
       },
     };
     const root = await mountRuntime(provider, undefined, undefined, {
@@ -2441,17 +1934,22 @@ describe("AgentLoop", () => {
         (event) => event.type === "input/admitted",
       ),
     ).toHaveLength(1);
+    // Two sends of one key, and exactly one answer.
     expect(
       handle.agent.session.events.filter(
         (event) => event.type === "model/request",
       ),
-    ).toHaveLength(1);
-    expect(handle.agent.session.events).toContainEqual(
+    ).toHaveLength(2);
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "assistant/message",
+      ),
+    ).toEqual([
       expect.objectContaining({
         type: "assistant/message",
         requestId: "uncertain-request",
       }),
-    );
+    ]);
     expect(handle.agent.session.events.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",

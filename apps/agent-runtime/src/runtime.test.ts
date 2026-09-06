@@ -351,27 +351,19 @@ describe("resident foundation Bot runtime", () => {
     });
   });
 
-  test("cold recovery retrieves a non-idempotent tool result before Stop cancellation", async () => {
+  test("cold recovery re-runs an open tool under its own effect id", async () => {
     const root = new Context();
     const runtime = await createFoundationResidentRuntime(root);
     residentRuntimes.push({ runtime, root });
-    const reconciled: string[] = [];
-    let executions = 0;
+    const executed: string[] = [];
     let modelRequests = 0;
     const tool: ToolDefinition = {
       name: "recover-non-idempotent",
-      description: "Non-idempotent recovery fixture.",
+      description: "An effect keyed by its occurrence.",
       inputSchema: { type: "object" },
-      execute() {
-        executions += 1;
-        return Promise.resolve({ content: "duplicate", isError: false });
-      },
-      reconcile(_input, context) {
-        reconciled.push(context.effectId);
-        return Promise.resolve({
-          status: "recovered",
-          result: { content: "retrieved original", isError: false },
-        });
+      execute(_input, context) {
+        executed.push(context.effectId);
+        return Promise.resolve({ content: "settled once", isError: false });
       },
     };
     await runtime.project({
@@ -410,14 +402,15 @@ describe("resident foundation Bot runtime", () => {
       text: "",
     });
 
-    expect(executions).toBe(0);
-    expect(reconciled).toEqual(["tool:1:1:0"]);
+    // The occurrence id is the key the interrupted call already carried, so a
+    // cold start dispatches it again rather than asking what it did.
+    expect(executed).toEqual(["tool:1:1:0"]);
     expect(modelRequests).toBe(0);
     expect(durable).toContainEqual(
       expect.objectContaining({
         type: "tool/result",
         occurrenceId: "tool:1:1:0",
-        content: "retrieved original",
+        content: "settled once",
       }),
     );
     expect(handle.agent.session.events.at(-1)).toMatchObject({
@@ -425,66 +418,60 @@ describe("resident foundation Bot runtime", () => {
       outcome: "cancelled",
     });
   });
-
-  test("cold recovery keeps an unavailable non-idempotent effect resumable across eviction", async () => {
-    const reconciled: string[] = [];
-    let executions = 0;
+  test("cold recovery settles a tool that fails, rather than leaving it open", async () => {
+    const executed: string[] = [];
     let modelRequests = 0;
     const tool: ToolDefinition = {
       name: "unavailable-non-idempotent",
-      description: "Unavailable recovery fixture.",
+      description: "An effect whose dispatch fails.",
       inputSchema: { type: "object" },
-      execute() {
-        executions += 1;
-        return Promise.resolve({ content: "duplicate", isError: false });
-      },
-      reconcile(_input, context) {
-        reconciled.push(context.effectId);
-        return Promise.resolve({
-          status: "unavailable",
-          reason: "provider result is still pending",
-        });
+      execute(_input, context) {
+        executed.push(context.effectId);
+        return Promise.reject(new Error("the downstream service is down"));
       },
     };
-    const durable = openToolEvents(tool.name);
+    let durable = openToolEvents(tool.name);
+    const root = new Context();
+    const runtime = await createFoundationResidentRuntime(root);
+    residentRuntimes.push({ runtime, root });
+    await runtime.project({
+      generation: 1,
+      agentPackages: [
+        reconciliationPackage(tool, () => {
+          modelRequests += 1;
+        }),
+      ],
+    });
+    const handle = await runtime.execute({
+      admitEffect: allowEffect,
+      botId: "primary",
+      sessionId: "alice:primary",
+      runId: "run-unavailable-stop",
+      previousEvents: durable,
+      persistSessionEvents: async (_sessionId, events) => {
+        durable = [...durable, ...structuredClone([...events])];
+      },
+      beforeStart: () => Promise.resolve(true),
+      resume: true,
+      text: "",
+    });
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const root = new Context();
-      const runtime = await createFoundationResidentRuntime(root);
-      residentRuntimes.push({ runtime, root });
-      await runtime.project({
-        generation: 1,
-        agentPackages: [
-          reconciliationPackage(tool, () => {
-            modelRequests += 1;
-          }),
-        ],
-      });
-      const handle = await runtime.execute({
-        admitEffect: allowEffect,
-        botId: "primary",
-        sessionId: "alice:primary",
-        runId: "run-unavailable-stop",
-        previousEvents: durable,
-        persistSessionEvents: () =>
-          Promise.reject(new Error("unavailable recovery must not append")),
-        beforeStart: () => Promise.resolve(true),
-        resume: true,
-        text: "",
-      });
-      expect(handle.agent.session.events).toEqual(durable);
-    }
-
-    expect(executions).toBe(0);
-    expect(reconciled).toEqual(["tool:1:1:0", "tool:1:1:0"]);
-    expect(modelRequests).toBe(0);
-    expect(
-      durable.some(
-        (event) => event.type === "tool/result" || event.type === "turn/end",
-      ),
-    ).toBe(false);
+    // A failed dispatch is an answer the model can read, not a question the
+    // Turn has to stay open on. The content says the outcome is uncertain,
+    // because the loop does not know whether the work happened.
+    expect(executed).toEqual(["tool:1:1:0"]);
+    expect(modelRequests).toBe(1);
+    expect(durable).toContainEqual(
+      expect.objectContaining({
+        type: "tool/result",
+        occurrenceId: "tool:1:1:0",
+        isError: true,
+      }),
+    );
+    expect(handle.agent.session.events.at(-1)).toMatchObject({
+      type: "turn/end",
+    });
   });
-
   test("remounts runtime generations inside one Cordis root and keeps durable history", async () => {
     const root = new Context();
     const runtime = await createFoundationResidentRuntime(root);

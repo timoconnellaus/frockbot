@@ -1,17 +1,14 @@
 import {
   type LlmStreamEvent,
   type LlmUsageV1,
+  type ModelProviderFailureClassV1,
   type NormalizedModelRequest,
   ModelProviderFailureError,
   StructuredOutputValidationError,
   type ToolCall,
   validateSettledToolOccurrenceJournal,
 } from "@frockbot/kernel-contracts";
-import {
-  EffectAdmissionFencedError,
-  ModelEffectReconciliationRequiredError,
-  modelFailureMessage,
-} from "./errors.js";
+import { EffectAdmissionFencedError, modelFailureMessage } from "./errors.js";
 import { nextModelRetryV1 } from "./retry-policy.js";
 import type { LoopRuntime, ModelResponse } from "./runtime.js";
 
@@ -40,11 +37,84 @@ export function estimateModelUsageV1(
   };
 }
 
+/**
+ * Assembles one model request and lets the mounted Packages shape it.
+ *
+ * Its `requestId` is the call's idempotency key: every dispatch of this
+ * request — a retry, or a re-issue after the object was evicted — carries the
+ * same id, so a provider that honours the key answers once.
+ */
+async function buildModelRequestV1(
+  runtime: LoopRuntime,
+  system: string,
+  turn: number,
+  step: number,
+  signal: AbortSignal,
+): Promise<NormalizedModelRequest> {
+  const { ctx, session, options } = runtime;
+  const proposedMessages = session.deriveMessages();
+  const messages = await ctx.waterfall(
+    "agent/message-window",
+    runtime.agent,
+    proposedMessages,
+    turn,
+    step,
+    signal,
+    () => Promise.resolve(proposedMessages),
+  );
+  const proposedTools = ctx.tools.schemas({
+    turnType: runtime.turnType,
+    ...(runtime.subagentRole === undefined
+      ? {}
+      : { subagentRole: runtime.subagentRole }),
+  });
+  const tools = await ctx.waterfall(
+    "agent/tool-exposure",
+    runtime.agent,
+    proposedTools,
+    turn,
+    step,
+    signal,
+    () => Promise.resolve(proposedTools),
+  );
+  const proposed: NormalizedModelRequest = {
+    requestId: crypto.randomUUID(),
+    provider: options.provider,
+    model: options.model,
+    system,
+    messages,
+    tools,
+    ...(options.modelBinding
+      ? { modelBinding: structuredClone(options.modelBinding) }
+      : {}),
+  };
+  return ctx.waterfall("agent/request", runtime.agent, proposed, signal, () =>
+    Promise.resolve(proposed),
+  );
+}
+
+function failureClassificationV1(error: unknown): ModelProviderFailureClassV1 {
+  return error instanceof ModelProviderFailureError
+    ? error.classification
+    : "unknown";
+}
+
+/**
+ * Asks the model, retrying the same request under the same idempotency key.
+ *
+ * `pending` is a request the durable log already carries with no answer — the
+ * step was interrupted mid-call. It is dispatched again under its own key
+ * rather than investigated: a provider that honours the key returns the one
+ * answer, and one that does not may run the call twice. That is the trade,
+ * and it is taken openly because reconstructing what a lost call did was the
+ * thing that wedged Bots.
+ */
 export async function requestModelV1(
   runtime: LoopRuntime,
   turn: number,
   step: number,
   signal: AbortSignal,
+  pending?: NormalizedModelRequest,
 ): Promise<ModelResponse> {
   const { ctx, session, options } = runtime;
   validateSettledToolOccurrenceJournal(session.events);
@@ -63,59 +133,15 @@ export async function requestModelV1(
     deadline: { at: runtime.turnDeadlineAt, now: runtime.retry.now() },
   });
 
-  // One automatic retry, and only for a failure the provider itself
-  // classified as "the request never started" — a rejected key, an
-  // unresolvable binding, a connection refused before any byte was sent.
-  // Those are exactly the failures where retrying cannot duplicate anything,
-  // and the ones a person watching a blank screen would retry by hand. Every
-  // other failure is uncertain and is never retried, which is the whole
-  // durability contract.
+  let request =
+    pending ??
+    (await buildModelRequestV1(runtime, assembly.text, turn, step, signal));
   let attempts = 0;
   while (true) {
     attempts += 1;
-    const proposedMessages = session.deriveMessages();
-    const messages = await ctx.waterfall(
-      "agent/message-window",
-      runtime.agent,
-      proposedMessages,
-      turn,
-      step,
-      signal,
-      () => Promise.resolve(proposedMessages),
-    );
-    const proposedTools = ctx.tools.schemas({
-      turnType: runtime.turnType,
-      ...(runtime.subagentRole === undefined
-        ? {}
-        : { subagentRole: runtime.subagentRole }),
-    });
-    const tools = await ctx.waterfall(
-      "agent/tool-exposure",
-      runtime.agent,
-      proposedTools,
-      turn,
-      step,
-      signal,
-      () => Promise.resolve(proposedTools),
-    );
-    const proposed: NormalizedModelRequest = {
-      requestId: crypto.randomUUID(),
-      provider: options.provider,
-      model: options.model,
-      system: assembly.text,
-      messages,
-      tools,
-      ...(options.modelBinding
-        ? { modelBinding: structuredClone(options.modelBinding) }
-        : {}),
-    };
-    const request = await ctx.waterfall(
-      "agent/request",
-      runtime.agent,
-      proposed,
-      signal,
-      () => Promise.resolve(proposed),
-    );
+    // One `model/request` per dispatch, all sharing the key: the log says how
+    // many times the call was sent, and every reader of the answer so far
+    // starts again from the latest send.
     session.append({ type: "model/request", turn, step, request });
     await session.flush();
     if (
@@ -124,66 +150,28 @@ export async function requestModelV1(
         effectId: request.requestId,
       }))
     ) {
-      session.append({
-        type: "model/effect-not-started",
-        turn,
-        step,
-        requestId: request.requestId,
-        reason: "Durable Stop fenced provider execution",
-      });
-      await session.flush();
       throw new EffectAdmissionFencedError(request.requestId);
     }
 
     try {
       return await consumeStreamV1(runtime, request, turn, step, signal);
     } catch (error) {
-      if (error instanceof StructuredOutputValidationError) {
-        await session.flush();
-        await runtime.notifyModelOutcome(request.requestId, "completed");
-        throw error;
-      }
-      if (signal.aborted) {
-        const reason = `Model response outcome is uncertain after cancellation: ${modelFailureMessage(error)}`;
-        session.append({
-          type: "model/reconciliation-required",
-          turn,
-          step,
-          requestId: request.requestId,
-          reason,
-        });
-        await session.flush();
-        throw new ModelEffectReconciliationRequiredError(
-          request.requestId,
-          reason,
-        );
-      }
-      if (!(error instanceof ModelProviderFailureError)) {
-        const reason = `Model response outcome is uncertain: ${modelFailureMessage(error)}`;
-        session.append({
-          type: "model/reconciliation-required",
-          turn,
-          step,
-          requestId: request.requestId,
-          reason,
-        });
-        await session.flush();
-        throw new ModelEffectReconciliationRequiredError(
-          request.requestId,
-          reason,
-        );
-      }
-      session.append({
-        type: "model/effect-not-started",
-        turn,
-        step,
-        requestId: request.requestId,
-        reason: modelFailureMessage(error),
-      });
       await session.flush();
-      await runtime.notifyModelOutcome(request.requestId, "not-started");
+      // The dispatch is over either way, so whatever is held against this id
+      // — a credential lease above all — is released before the next one asks
+      // for it, even though the next one carries the same id.
+      await runtime.notifyModelOutcome(request.requestId);
+      if (error instanceof StructuredOutputValidationError) throw error;
+      signal.throwIfAborted();
+      const classification = failureClassificationV1(error);
       const retry = nextModelRetryV1({
-        failure: error,
+        failure: {
+          classification,
+          ...(error instanceof ModelProviderFailureError &&
+          error.retryAfterMs !== undefined
+            ? { retryAfterMs: error.retryAfterMs }
+            : {}),
+        },
         attempt: attempts,
         deadlineAt: runtime.turnDeadlineAt,
         runtime: runtime.retry,
@@ -209,12 +197,23 @@ export async function requestModelV1(
         turn,
         step,
         attempt: attempts + 1,
-        classification: error.classification,
+        classification,
         delayMs,
       });
       await session.flush();
       ctx.emit("agent/error", runtime.agent, error);
       await runtime.retry.sleep(delayMs, signal);
+      // A fallback is a different call — another provider, another binding —
+      // so it gets its own key rather than inheriting this one's.
+      if (action.kind === "fallback") {
+        request = await buildModelRequestV1(
+          runtime,
+          assembly.text,
+          turn,
+          step,
+          signal,
+        );
+      }
     }
   }
 }
@@ -232,11 +231,9 @@ export async function consumeStreamV1(
   let structuredFailure:
     | Extract<LlmStreamEvent, { type: "structured-output-failure" }>["failure"]
     | undefined;
-  let receivedProviderEvent = false;
   const startedAt = Date.now();
   try {
     for await (const event of runtime.ctx.llm.stream(request, signal)) {
-      if (event.type !== "response-format-note") receivedProviderEvent = true;
       signal.throwIfAborted();
       if (event.type === "usage") usage = structuredClone(event.usage);
       applyStreamEventV1(
@@ -255,23 +252,6 @@ export async function consumeStreamV1(
       }
     }
   } catch (error) {
-    if (receivedProviderEvent && error instanceof ModelProviderFailureError) {
-      const invalidNoEffectClaim = new Error(
-        error.message ||
-          "Model provider reported a retryable failure after returning response data",
-      );
-      recordModelUsageV1(
-        runtime,
-        request,
-        turn,
-        step,
-        usage,
-        text,
-        toolCalls,
-        Math.max(0, Date.now() - startedAt),
-      );
-      throw invalidNoEffectClaim;
-    }
     // Once dispatch may have begun, the call can have incurred spend even
     // when its terminal response is lost. Preserve the provider's partial
     // counts when present and otherwise write the same explicit estimate as
@@ -307,6 +287,7 @@ export async function consumeStreamV1(
   return { request, text, toolCalls };
 }
 
+/** One `model/usage` per dispatch, because each dispatch may have been billed. */
 export function recordModelUsageV1(
   runtime: LoopRuntime,
   request: NormalizedModelRequest,
@@ -317,11 +298,6 @@ export function recordModelUsageV1(
   toolCalls: readonly ToolCall[],
   latencyMs: number,
 ): void {
-  const existing = runtime.session.events.some(
-    (event) =>
-      event.type === "model/usage" && event.requestId === request.requestId,
-  );
-  if (existing) return;
   const usage =
     reported ??
     estimateModelUsageV1(request, { text, toolCalls: [...toolCalls] });
@@ -349,19 +325,16 @@ export function applyStreamEventV1(
   step: number,
   toolCalls: ToolCall[],
   appendText: (text: string) => void,
-  journal = true,
 ): void {
   if (event.type === "text-delta") {
     appendText(event.text);
-    if (journal) {
-      runtime.session.append({
-        type: "assistant/chunk",
-        turn,
-        step,
-        requestId,
-        text: event.text,
-      });
-    }
+    runtime.session.append({
+      type: "assistant/chunk",
+      turn,
+      step,
+      requestId,
+      text: event.text,
+    });
   } else if (event.type === "tool-call") {
     toolCalls.push(event.call);
   } else if (event.type === "response-format-note") {
