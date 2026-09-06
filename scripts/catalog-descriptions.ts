@@ -54,6 +54,8 @@ export const CATALOG_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Search for plugins and install, update, or remove them, so the Bot picks up new tools.",
   "package-publisher":
     "Publish a plugin you built, so other people can find and install it.",
+  "provider-anthropic":
+    "Use Anthropic's Claude models, on your own Anthropic account, to power the Bot's replies.",
   "provider-flock-ai": "Use Frock AI models to power the Bot's replies.",
   "provider-foundation":
     "Use the models that ship with the app, so a brand new Bot answers with no setup.",

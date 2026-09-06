@@ -311,6 +311,7 @@ packages/
   plugin-mcp/       Remote MCP servers as Connections, and their lifecycle
   plugin-memory/    Bot, User and Project Markdown memory over the Workspace store
   plugin-package-publisher/ Durable User application publication and rollback
+  plugin-provider-anthropic/  Optional Anthropic (Claude) model provider
   plugin-provider-frock-ai/  Built-in credential-free Frock AI model provider
   plugin-provider-ollama-cloud/  Optional Ollama Cloud model provider
   plugin-routines/  Durable Routines, the alarm scheduler, and the webhook door
@@ -321,7 +322,7 @@ packages/
   plugin-ui-theme/  Global semantic tokens for hosted client Contributions
   plugin-web/       web_search and a bounded, SSRF-classified web_fetch
   protocol/         Commands and events shared across process seams
-  provider-openai-compatible/  Streaming production model adapter
+  provider-openai-compatible/  Shared model transport: request mapping, deadlines, AI SDK decoding
 docs/
   architecture.md   Current system shape
   adr/              Architectural decisions

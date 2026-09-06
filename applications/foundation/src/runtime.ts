@@ -115,6 +115,8 @@ import {
 } from "@frockbot/plugin-provider-ollama-cloud/runtime";
 import frockAiManifest from "@frockbot/plugin-provider-frock-ai/manifest";
 import { createFrockAiRuntimePlugin } from "@frockbot/plugin-provider-frock-ai/runtime";
+import anthropicManifest from "@frockbot/plugin-provider-anthropic/manifest";
+import { createAnthropicRuntimePlugin } from "@frockbot/plugin-provider-anthropic/runtime";
 import routinesManifest from "@frockbot/plugin-routines/manifest";
 import {
   createRoutinesRuntimePlugin,
@@ -187,6 +189,7 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-web", webManifest],
   ["@frockbot/plugin-provider-ollama-cloud", ollamaCloudManifest],
   ["@frockbot/plugin-provider-frock-ai", frockAiManifest],
+  ["@frockbot/plugin-provider-anthropic", anthropicManifest],
   ["@frockbot/plugin-echo", echoManifest],
   ["@frockbot/plugin-fly-sprite", flySpriteManifest],
   ["@frockbot/plugin-flock", flockManifest],
@@ -426,6 +429,31 @@ const modelRuntimeContributionFactories = new Map<
           connectionGeneration,
           autoRoute: frockAiAutoRoute,
           runChatCompletion: runFrockAiChatCompletion,
+        });
+      },
+    },
+  ],
+  [
+    "@frockbot/plugin-provider-anthropic/runtime",
+    {
+      providerType: "anthropic",
+      create: ({
+        apiBaseUrl,
+        leaseCredential,
+        settleCredential,
+        accountId,
+        connectionId,
+      }) => {
+        if (!leaseCredential || !settleCredential) {
+          throw new Error("Anthropic credential host is unavailable");
+        }
+        return createAnthropicRuntimePlugin({
+          accountId,
+          connectionId,
+          packageId: "provider-anthropic",
+          leaseCredential,
+          settleCredential,
+          ...(apiBaseUrl ? { apiBaseUrl } : {}),
         });
       },
     },
@@ -1209,6 +1237,7 @@ export async function createFoundationRuntimeApplication(): Promise<FoundationRu
   runtimeIds.delete("mcp");
   runtimeIds.delete("provider-ollama-cloud");
   runtimeIds.delete("provider-flock-ai");
+  runtimeIds.delete("provider-anthropic");
   // The Web Package's `web_fetch` mounts only while its User keeps the
   // `web-fetch` Capability enabled.
   runtimeIds.delete("web");

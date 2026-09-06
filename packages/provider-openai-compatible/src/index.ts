@@ -359,6 +359,66 @@ export interface OpenAIRequestPlanV1 {
   note?: ResponseFormatNoteV1;
 }
 
+export interface StructuredOutputPlanV1 {
+  /** The step down this provider had to take, if it took one. */
+  note?: ResponseFormatNoteV1;
+  /** Prompt guidance that goes into the system message, whatever the wire. */
+  instruction?: string;
+}
+
+/**
+ * What a provider can and cannot honour about a requested response format.
+ *
+ * The degradation chain is a promise the Agent loop makes to a Bot, not an
+ * OpenAI detail: every provider owes the same note when it steps down, so the
+ * decision lives here rather than in each adapter's wire mapping.
+ */
+export function structuredOutputPlanV1(
+  request: NormalizedModelRequest,
+  support: StructuredOutputSupportV1,
+): StructuredOutputPlanV1 {
+  const format = request.responseFormat;
+  if (!format) return {};
+  const instruction =
+    format.type === "json_schema"
+      ? `Return only JSON matching this schema exactly: ${JSON.stringify(format.schema)}`
+      : "Return only one valid JSON value, with no Markdown or commentary.";
+  if (format.type === "json_schema" && support === "json_schema") {
+    return { instruction };
+  }
+  if (support !== "none") {
+    return format.type === "json_schema"
+      ? {
+          instruction,
+          note: {
+            code: "structured-output-downgraded",
+            requested: "json_schema",
+            effective: "json",
+            message: `Provider ${request.provider} supports JSON mode but not JSON Schema; the shared validator remains authoritative`,
+          },
+        }
+      : { instruction };
+  }
+  return {
+    instruction,
+    note: {
+      code: "structured-output-downgraded",
+      requested: format.type,
+      effective: "prompt",
+      message: `Provider ${request.provider} has no native structured-output mode; the request uses prompt guidance and shared validation`,
+    },
+  };
+}
+
+/** Prepends `instruction` to a system prompt, or makes one of it. */
+export function systemWithInstructionV1(
+  system: string | undefined,
+  instruction: string | undefined,
+): string | undefined {
+  if (!instruction) return system || undefined;
+  return system ? `${system}\n\n${instruction}` : instruction;
+}
+
 /** Maps the provider-neutral format and records any fidelity downgrade. */
 export function planOpenAICompatibleRequestV1(
   request: NormalizedModelRequest,
@@ -374,8 +434,8 @@ export function planOpenAICompatibleRequestV1(
   }
   const support = options.structuredOutput ?? "none";
   const format = request.responseFormat;
+  const { note, instruction } = structuredOutputPlanV1(request, support);
   let responseFormat: Record<string, unknown> | undefined;
-  let note: ResponseFormatNoteV1 | undefined;
   if (format?.type === "json_schema" && support === "json_schema") {
     responseFormat =
       options.responseFormatDialect === "workers-ai"
@@ -390,35 +450,11 @@ export function planOpenAICompatibleRequestV1(
           };
   } else if (format && support !== "none") {
     responseFormat = { type: "json_object" };
-    if (format.type === "json_schema") {
-      note = {
-        code: "structured-output-downgraded",
-        requested: "json_schema",
-        effective: "json",
-        message: `Provider ${request.provider} supports JSON mode but not JSON Schema; the shared validator remains authoritative`,
-      };
-    }
-  } else if (format) {
-    note = {
-      code: "structured-output-downgraded",
-      requested: format.type,
-      effective: "prompt",
-      message: `Provider ${request.provider} has no native structured-output mode; the request uses prompt guidance and shared validation`,
-    };
   }
-  if (format) {
-    const instruction =
-      format.type === "json_schema"
-        ? `Return only JSON matching this schema exactly: ${JSON.stringify(format.schema)}`
-        : "Return only one valid JSON value, with no Markdown or commentary.";
-    if (request.system) {
-      messages[0] = {
-        role: "system",
-        content: `${request.system}\n\n${instruction}`,
-      };
-    } else {
-      messages.unshift({ role: "system", content: instruction });
-    }
+  if (instruction) {
+    const system = systemWithInstructionV1(request.system, instruction);
+    if (request.system) messages[0] = { role: "system", content: system };
+    else messages.unshift({ role: "system", content: system });
   }
   const stream = !(
     format &&
@@ -1039,8 +1075,31 @@ async function openWithinDeadlineV1(
  * deadlines, and there is one place to change what they are. `open` is handed
  * the deadline-aware signal and returns the response body to decode.
  */
-export async function* streamWithModelRequestDeadlinesV1(
+export function streamWithModelRequestDeadlinesV1(
   open: (signal: AbortSignal) => Promise<ReadableStream<Uint8Array>>,
+  signal: AbortSignal,
+  options: ModelRequestDeadlineOptionsV1 = {},
+): AsyncIterable<LlmStreamEvent> {
+  return streamEventsWithModelRequestDeadlinesV1(
+    async (deadlineSignal) =>
+      streamOpenAICompatibleBody(
+        await openWithinDeadlineV1(open(deadlineSignal), deadlineSignal),
+        deadlineSignal,
+      ),
+    signal,
+    options,
+  );
+}
+
+/**
+ * The same clock, for a provider that decodes its own wire.
+ *
+ * An adapter whose SDK owns the whole request has no byte stream to hand
+ * over, only the events it produced; the deadlines are the Turn's, not the
+ * dialect's, so they still apply.
+ */
+export async function* streamEventsWithModelRequestDeadlinesV1(
+  open: (signal: AbortSignal) => Promise<AsyncIterable<LlmStreamEvent>>,
   signal: AbortSignal,
   options: ModelRequestDeadlineOptionsV1 = {},
 ): AsyncIterable<LlmStreamEvent> {
@@ -1050,8 +1109,7 @@ export async function* streamWithModelRequestDeadlinesV1(
     options.schedule ?? defaultScheduleV1,
   );
   try {
-    const body = await openWithinDeadlineV1(open(clock.signal), clock.signal);
-    for await (const event of streamOpenAICompatibleBody(body, clock.signal)) {
+    for await (const event of await open(clock.signal)) {
       clock.progressed();
       yield event;
     }

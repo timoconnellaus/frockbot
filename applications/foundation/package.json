@@ -54,6 +54,7 @@
     "@frockbot/plugin-mobile-notifications": "workspace:*",
     "@frockbot/plugin-package-catalog": "workspace:*",
     "@frockbot/plugin-package-publisher": "workspace:*",
+    "@frockbot/plugin-provider-anthropic": "workspace:*",
     "@frockbot/plugin-provider-frock-ai": "workspace:*",
     "@frockbot/plugin-provider-foundation": "workspace:*",
     "@frockbot/plugin-provider-ollama-cloud": "workspace:*",
