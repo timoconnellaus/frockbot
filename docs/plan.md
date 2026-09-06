@@ -42,7 +42,9 @@ Each step leaves `main` shippable.
 
 **3. Park the deferred features.** _Done for MCP and Composio._ They came out first — roughly 11.4k lines, no owned Durable Object class and no owned tables. They return later as plugins over the `http` grant, which is what they should have been.
 
-`plugin-voice` and `plugin-billing` wait for a migration decision. Voice owns the `VoiceSession` Durable Object class, declared `new_sqlite_classes` in migration v5, so removing it needs a `deleted_classes` migration that destroys those objects. Billing owns three SQLite tables of User spend history inside `UserConfiguration`. Neither is a code deletion; both destroy durable state, and the retention question is the owner's.
+`plugin-voice` and `plugin-billing` follow. Voice owns the `VoiceSession` Durable Object class, so removing it takes a `deleted_classes` migration; billing owns three SQLite tables inside `UserConfiguration`. Both destroy durable state, which is why they were held back — and no longer a reason to hold them, because there are no users and stored state is disposable.
+
+The same ruling clears two leftovers from the MCP and Composio cut: Bot templates keep an `mcpServers` field and Routines keep a `composio` trigger key, both kept only because changing a stored shape looked like a migration. Delete them.
 
 **4. Providers onto the AI SDK.** Replace the hand-written provider stack with one interface over `ai` + `@ai-sdk/*`. Removes about 6k lines, including the 2,526-line file that exists to hold an Ollama API key.
 
