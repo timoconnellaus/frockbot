@@ -36,10 +36,7 @@ import {
 } from "@frockbot/plugin-shell/run-protocol";
 import { decodeClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
 import type { SkillRefV1 } from "@frockbot/kernel-contracts";
-import {
-  DEPLOYMENT_HEADER_V1,
-  responseFromDesktopApiV1,
-} from "@frockbot/protocol";
+import { DEPLOYMENT_HEADER_V1 } from "@frockbot/protocol";
 import { BrowserBotStateChannel } from "./bot-state-channel.js";
 
 /**
@@ -90,15 +87,11 @@ async function apiRequest(
   method: "GET" | "POST" = "GET",
   body?: string,
 ): Promise<unknown> {
-  const response = window.frockbotDesktop
-    ? await window.frockbotDesktop
-        .request({ schemaVersion: 1, path, method, body })
-        .then(responseFromDesktopApiV1)
-    : await fetch(path, {
-        method,
-        headers: body ? { "content-type": "application/json" } : undefined,
-        body,
-      });
+  const response = await fetch(path, {
+    method,
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body,
+  });
   observeDeploymentHeader(response);
   /*
    * Every read of a response goes through the shared reader: it classifies a
@@ -140,24 +133,12 @@ const application = new ClientApplication({
       ...(skills && skills.length > 0 ? { skills } : {}),
       ...(supersedes ? { supersedes } : {}),
     });
-    const response = window.frockbotDesktop
-      ? await Promise.race([
-          window.frockbotDesktop
-            .request({ schemaVersion: 1, path, method: "POST", body })
-            .then(responseFromDesktopApiV1),
-          new Promise<never>((_, reject) => {
-            const aborted = () =>
-              reject(new DOMException("Aborted", "AbortError"));
-            if (signal.aborted) aborted();
-            else signal.addEventListener("abort", aborted, { once: true });
-          }),
-        ])
-      : await fetch(path, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body,
-          signal,
-        });
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      signal,
+    });
     signal.throwIfAborted();
     observeDeploymentHeader(response);
     /*
@@ -345,16 +326,7 @@ const application = new ClientApplication({
       ),
     );
   },
-  openExternalAuthorization(
-    url: string,
-    nativeReturnNonce?: string,
-  ): Promise<void> {
-    if (window.frockbotDesktop) {
-      return window.frockbotDesktop.openExternalAuthorization(
-        url,
-        nativeReturnNonce,
-      );
-    }
+  openExternalAuthorization(url: string): Promise<void> {
     window.location.assign(url);
     return Promise.resolve();
   },

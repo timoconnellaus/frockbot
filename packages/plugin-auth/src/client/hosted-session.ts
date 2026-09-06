@@ -16,18 +16,12 @@ export interface HostedBetterAuthAdapter {
   signOut(): Promise<BetterAuthResult>;
 }
 
-export interface HostedDesktopAuthAdapter {
-  getUser(): Promise<AuthUserLike | null>;
-  signOut(): Promise<void>;
-}
-
 export interface HostedAuthAdapterInput {
   location: URL;
   embeddedUserId?: string;
   embeddedMode?: "anonymous" | "better-auth" | "development";
   embeddedIsAdmin?: boolean;
   betterAuth: HostedBetterAuthAdapter;
-  desktop?: HostedDesktopAuthAdapter;
 }
 
 function userProjection(
@@ -112,18 +106,6 @@ export function createHostedAuthAdapter(input: HostedAuthAdapterInput) {
         );
       }
 
-      if (input.desktop) {
-        const user = await input.desktop.getUser();
-        return user
-          ? {
-              schemaVersion: 1,
-              status: "authenticated",
-              mode: "desktop",
-              user: userProjection(user, input.embeddedIsAdmin === true),
-            }
-          : { schemaVersion: 1, status: "anonymous" };
-      }
-
       const user = betterAuthUser(await input.betterAuth.getSession());
       if (user) {
         return {
@@ -143,13 +125,9 @@ export function createHostedAuthAdapter(input: HostedAuthAdapterInput) {
       ) {
         throw new Error("Development identity cannot be signed out");
       }
-      if (input.desktop) {
-        await input.desktop.signOut();
-      } else {
-        const result = await input.betterAuth.signOut();
-        if (result.error) {
-          throw new Error(result.error.message || "Sign-out failed");
-        }
+      const result = await input.betterAuth.signOut();
+      if (result.error) {
+        throw new Error(result.error.message || "Sign-out failed");
       }
       return { schemaVersion: 1, status: "anonymous" };
     },

@@ -45,30 +45,6 @@ describe("hosted auth adapter", () => {
     expect(signOuts).toBe(1);
   });
 
-  test("uses the trusted desktop bridge", async () => {
-    let signOuts = 0;
-    const adapter = browser({
-      desktop: {
-        getUser: () => Promise.resolve(user),
-        signOut: () => {
-          signOuts += 1;
-          return Promise.resolve();
-        },
-      },
-    });
-
-    expect(await adapter.read()).toMatchObject({
-      status: "authenticated",
-      mode: "desktop",
-      user: { ...user, isAdmin: true },
-    });
-    expect(await adapter.signOut()).toEqual({
-      schemaVersion: 1,
-      status: "anonymous",
-    });
-    expect(signOuts).toBe(1);
-  });
-
   test("projects explicit and persisted development identity separately", async () => {
     const direct = browser({
       location: new URL("http://localhost:8787/?as_user=development"),
@@ -81,22 +57,6 @@ describe("hosted auth adapter", () => {
     await expect(direct.signOut()).rejects.toThrow(
       "Development identity cannot be signed out",
     );
-
-    let desktopSignOuts = 0;
-    const directInDesktop = browser({
-      location: new URL("http://localhost:8787/?as_user=development"),
-      desktop: {
-        getUser: () => Promise.resolve(user),
-        signOut: () => {
-          desktopSignOuts += 1;
-          return Promise.resolve();
-        },
-      },
-    });
-    await expect(directInDesktop.signOut()).rejects.toThrow(
-      "Development identity cannot be signed out",
-    );
-    expect(desktopSignOuts).toBe(0);
 
     const persisted = browser({
       location: new URL("http://localhost:8787/"),
@@ -113,24 +73,12 @@ describe("hosted auth adapter", () => {
     });
   });
 
-  test("keeps embedded development authority ahead of desktop and Better Auth", async () => {
-    let desktopReads = 0;
-    let desktopSignOuts = 0;
+  test("keeps embedded development authority ahead of Better Auth", async () => {
     let sessionReads = 0;
     let betterAuthSignOuts = 0;
     const adapter = browser({
       embeddedUserId: "development",
       embeddedMode: "development",
-      desktop: {
-        getUser: () => {
-          desktopReads += 1;
-          return Promise.resolve(user);
-        },
-        signOut: () => {
-          desktopSignOuts += 1;
-          return Promise.resolve();
-        },
-      },
       betterAuth: {
         getSession: () => {
           sessionReads += 1;
@@ -154,12 +102,10 @@ describe("hosted auth adapter", () => {
         isAdmin: true,
       },
     });
-    expect(desktopReads).toBe(0);
     expect(sessionReads).toBe(0);
     await expect(adapter.signOut()).rejects.toThrow(
       "Development identity cannot be signed out",
     );
-    expect(desktopSignOuts).toBe(0);
     expect(betterAuthSignOuts).toBe(0);
   });
 

@@ -413,7 +413,7 @@ Durable Object storage is key-value in every class. SQLite is used only inside `
 
 Not used anywhere in the repository: KV namespaces, Queues, Workflows, Hyperdrive, Browser Rendering, Analytics Engine, Pipelines. Containers appear only in `apps/computer-host`.
 
-Top-level vars (:139-157): `NATIVE_SLICE_2_AUTH`, `DEFAULT_APPLICATION_HASH`, `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, `ALLOWED_CLIENT_ORIGINS`, `UI_ARTIFACT_HOSTS`.
+Top-level vars: `NATIVE_SLICE_2_AUTH`, `DEFAULT_APPLICATION_HASH`, `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, `UI_ARTIFACT_HOSTS`. `ALLOWED_CLIENT_ORIGINS` is read but set nowhere: the web app is same-origin and the Flutter app sends no `Origin`.
 
 Secrets are declared in `apps/cloudflare/src/production-secrets.ts`. Required (`:60-103`): `FROCKBOT_AUTHORIZATION_STATE_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPRITES_TOKEN`, `COMPUTER_HOST_TOKEN`, `CREDENTIAL_KEYRING`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `APPLET_VIEWER_SECRET`. Optional: `FROCKBOT_ADMIN_EMAILS`, `DEBUG_TOKEN`, `FROCK_AI_GATEWAY_TOKEN`.
 
@@ -421,7 +421,7 @@ Secrets are declared in `apps/cloudflare/src/production-secrets.ts`. Required (`
 
 ## 11. Auth
 
-better-auth 1.7.2, configured once at `apps/cloudflare/src/auth.ts:36-62`. Enabled plugins are `electron({clientID: "frockbot-desktop"})` and `bearer()`. There is no admin plugin, no organization plugin and no jwt plugin. `trustedOrigins` includes `com.frockbot.desktop:/`; `account.encryptOAuthTokens` is true. Missing secrets yield a stub that returns 503 for every route (`:64-97`).
+better-auth 1.7.2, configured once in `apps/cloudflare/src/auth.ts`. `bearer()` is the only enabled plugin: there is no admin plugin, no organization plugin and no jwt plugin. `trustedOrigins` is left at its `baseURL` default; `account.encryptOAuthTokens` is true. Missing secrets yield a stub that returns 503 for every route (`:64-97`).
 
 Google is the only configured provider. The `verification` table and the `account.password` column are unused.
 
