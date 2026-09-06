@@ -52,6 +52,8 @@ function fixture(overrides: Partial<NativeAuthOptions> = {}) {
         headers.get("cookie") === "test=signed-in"
           ? { user: { id: "user-1" } }
           : null,
+      profile: async (userId) =>
+        userId === "user-1" ? { email: "owner@example.com" } : null,
     },
     session: async (_user, input) =>
       nativeSessionOperation(storage, input, time),
@@ -129,6 +131,15 @@ describe("native system browser exchange", () => {
         )
       )?.session?.user.id,
     ).toBe("user-1");
+    // The email travels with a native session, because admission and the admin
+    // check read it: without it a listed admin was ordinary on the phone.
+    expect(
+      (
+        await f.auth.authenticate(
+          f.request("/api/identity", undefined, headers),
+        )
+      )?.session?.user.email,
+    ).toBe("owner@example.com");
     expect(
       (await f.auth.route(f.request("/api/auth/native/exchange", command)))
         ?.status,
