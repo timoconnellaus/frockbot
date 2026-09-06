@@ -72,7 +72,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 34. ~~**The provider set is closed.**~~ **Fixed.** It was a two-entry map. A third provider (`plugin-provider-anthropic`) now ships, built on `@ai-sdk/anthropic`, which demonstrates the registration path takes an arbitrary provider. It has no `user` backend contribution yet, so its Connection cannot be created through the UI.
 
-35. **The default provider is an echo stub.** Any path that fails to apply `modelSelection` answers `"Cordis runtime: <message>"` rather than raising an error.
+35. **The default provider is an echo stub.** Any path that fails to apply `modelSelection` answers `"Cordis runtime: <message>"` rather than raising an error. Still true, and now more visible: with three providers registered, a selection that silently falls through is harder to spot than when there were two.
 
 36. **Frock AI's catalog is one model plus Auto** (`packages/plugin-provider-frock-ai/src/catalog.ts:49-56`).
 

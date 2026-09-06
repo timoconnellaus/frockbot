@@ -48,9 +48,11 @@ The same ruling cleared two leftovers from that cut: Bot templates carried an `m
 
 **4. Providers onto the AI SDK.** _Done._ Replace the hand-written provider stack with one interface over `ai` + `@ai-sdk/*`. The AI SDK's OpenAI-compatible model now owns SSE framing, tool-call accumulation and the non-streamed body; request mapping, failure classification and the deadlines stayed, because the Frock AI gateway and Ollama's native endpoint reach that seam with a stream and no URL. An Anthropic provider proves the seam is open — the provider set was a hardcoded two-entry map. The 2,526-line Ollama connection file is untouched: it is durable-record ceremony, not transport, and belongs to step 7.
 
-**5. Split the agent loop.** _Half done._ The extraction has landed: `index.ts` is 853 lines beside `model-request.ts`, `resume.ts`, `tool-execution.ts`, `reconcile.ts`, `errors.ts` and `runtime.ts`, and it changed no test at all, which is what proves it changed no behaviour.
+**5. Split the agent loop.** _Done._ `index.ts` is 853 lines beside `model-request.ts`, `resume.ts`, `tool-execution.ts`, `errors.ts` and `runtime.ts`. The extraction changed no test, which is what proved it changed no behaviour.
 
-The durability rewrite — at-most-once by idempotency key, in place of retrieving a lost response and verifying it against the durable chunk prefix — is written but not merged. It touches 65 files across nine layers, it writes `model/usage` per dispatch where the old code deduplicated by request id (so a retry the provider served for free is counted twice), and `plugin-image` becomes idempotent with a read-before-generate on a billed effect. It is the reliability fix worth having and it needs its own tag and a real review, not a green suite.
+Forensic reconciliation is gone. Every external effect that matters carries an idempotency key — a model call's `requestId`, a tool call's `occurrenceId` — and is re-issued under that key rather than investigated afterwards. No Turn parks waiting for a person to resolve it. `admitEffect` and supersede fencing survive and now run before every dispatch, re-issues included.
+
+The seam that retrieved a lost response from the provider is deleted outright: `LlmReconciliationCapability`, `ctx.llm.reconcile`, and all four provider implementations. It was declared, implemented everywhere and called by nobody.
 
 **6. Frock Compose replaces cordis.** _The provenance framing is already stripped._ Wire the extension points named in `AGENTS.md`, and delete `kernel-composition`, the manifest system, `plugin-authoring`, `plugin-package-catalog` and `plugin-package-publisher`.
 
