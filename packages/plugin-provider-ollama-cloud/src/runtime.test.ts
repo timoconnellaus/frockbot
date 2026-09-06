@@ -554,31 +554,6 @@ describe("Ollama Cloud runtime Contribution", () => {
       await root.fiber.dispose();
     },
   );
-
-  test("reports an interrupted response as not retrievable so the run settles", async () => {
-    const root = new Context();
-    await root.plugin(LlmRegistry);
-    await mountCredentialRuntime(root, serializedKeyring());
-    await root.plugin(
-      createOllamaCloudRuntimePlugin({
-        accountId: "account-1",
-        connectionId: "connection-1",
-        packageId: "provider-ollama-cloud",
-        now: () => Date.parse("2026-08-30T00:00:00.000Z"),
-        leaseCredential: () => Promise.reject(new Error("unused")),
-        settleCredential: () => Promise.resolve(),
-        fetch: () => Promise.reject(new Error("unused")),
-      }),
-    );
-
-    const outcome = await root.llm.reconcile(
-      request,
-      new AbortController().signal,
-    );
-
-    expect(outcome.status).toBe("not-retrievable");
-    await root.fiber.dispose();
-  });
 });
 
 /** A clock the test advances by hand, so a deadline costs no real seconds. */

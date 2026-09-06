@@ -2,7 +2,6 @@ import { type Context, Service } from "cordis";
 import {
   LlmEffectNotStartedError,
   type LlmProvider,
-  type LlmReconciliationOutcome,
   type LlmStreamEvent,
   type ModelInvocation,
   type NormalizedModelRequest,
@@ -114,63 +113,6 @@ export class LlmRegistry extends Service implements ModelInvocation {
     if (validated.status === "failed") return validated;
     // SAFETY: callers choose T alongside the schema that was just validated.
     return { status: "completed", value: validated.value as T, raw };
-  }
-
-  async reconcile(
-    request: NormalizedModelRequest,
-    signal: AbortSignal,
-  ): Promise<LlmReconciliationOutcome> {
-    const provider = this.providers.get(request.provider);
-    if (!provider) {
-      return {
-        status: "unavailable",
-        reason: `LLM provider "${request.provider}" is unavailable`,
-      };
-    }
-    if (!provider.reconciliation) {
-      // A provider that declares no retrieval will never grow one mid-run, so
-      // parking the run on it would wedge the Bot permanently. Settle instead.
-      return {
-        status: "not-retrievable",
-        reason: `LLM provider "${request.provider}" does not support provider-bound retrieval`,
-      };
-    }
-    try {
-      const outcome = await provider.reconciliation.retrieve(
-        { providerEffectId: request.requestId, request },
-        signal,
-      );
-      if (outcome.status !== "recovered" || !request.responseFormat) {
-        return outcome;
-      }
-      const raw = outcome.events
-        .filter(
-          (event): event is Extract<LlmStreamEvent, { type: "text-delta" }> =>
-            event.type === "text-delta",
-        )
-        .map((event) => event.text)
-        .join("");
-      const failure = responseFormatFailureV1(request, raw);
-      if (!failure) return outcome;
-      const finish = outcome.events.findIndex(
-        (event) => event.type === "finish",
-      );
-      const events = [...outcome.events];
-      events.splice(finish < 0 ? events.length : finish, 0, {
-        type: "structured-output-failure",
-        failure,
-      });
-      return { status: "recovered", events };
-    } catch (error) {
-      signal.throwIfAborted();
-      return {
-        status: "unavailable",
-        reason:
-          error instanceof Error
-            ? error.message
-            : "Provider-bound retrieval failed",
-      };
-    }
   }
 }
 

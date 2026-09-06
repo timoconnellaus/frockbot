@@ -109,13 +109,6 @@ export const foundationProvider: LlmProvider = {
   id: FOUNDATION_PROVIDER,
   supports: { structuredOutput: "none" },
   stream: classifiedFoundationStream,
-  reconciliation: {
-    retrieve: async (effect, signal) =>
-      ({
-        status: "recovered",
-        events: await foundationReconciliation(effect.request, signal),
-      }) as const,
-  },
 };
 
 export const foundationProviderPlugin: Plugin.Function = (ctx) =>

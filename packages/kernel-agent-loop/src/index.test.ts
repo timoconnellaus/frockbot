@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   decodeSessionEvent,
   LlmEffectNotStartedError,
-  type LlmReconciliationOutcome,
   type LlmProvider,
   type NormalizedModelRequest,
   type LlmStreamEvent,
@@ -32,15 +31,6 @@ type RecoverableToolDefinition = ToolDefinition & {
     | { status: "unavailable"; reason: string }
   >;
 };
-
-function recovered(
-  ...events: LlmStreamEvent[]
-): Promise<LlmReconciliationOutcome> {
-  return Promise.resolve({
-    status: "recovered",
-    events,
-  });
-}
 
 const TEST_COMPOSITION = {
   generationId: "1970-01-01T00:00:00.000Z:0123456789abcdef",

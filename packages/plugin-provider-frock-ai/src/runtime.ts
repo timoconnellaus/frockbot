@@ -1,7 +1,6 @@
 import {
   boundedModelProviderReasonV1,
   type LlmProvider,
-  type LlmReconciliationCapability,
   type LlmStreamEvent,
   ModelProviderFailureError,
   type ModelProviderFailureClassV1,
@@ -136,14 +135,6 @@ class FrockAiProvider implements LlmProvider {
    * failure with its partial text intact; staying silent parks it on a
    * retrieval that would never arrive.
    */
-  readonly reconciliation: LlmReconciliationCapability = {
-    retrieve: async () => ({
-      status: "not-retrievable",
-      reason:
-        "Frock AI keeps no durable copy of an interrupted response, so it cannot be recovered",
-    }),
-  };
-
   constructor(private readonly config: FrockAiRuntimeConfig) {}
 
   async *stream(
