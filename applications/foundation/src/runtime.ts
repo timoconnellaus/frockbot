@@ -59,11 +59,7 @@ import {
 import credentialsManifest from "@frockbot/plugin-credentials/manifest";
 import { createCredentialRuntimePlugin } from "@frockbot/plugin-credentials/user";
 import customModelsManifest from "@frockbot/plugin-custom-models/manifest";
-// Desktop and mobile Package manifests remain part of the immutable plan.
-import clipboardManifest from "@frockbot/plugin-desktop-clipboard/manifest";
-import directoryPickerManifest from "@frockbot/plugin-desktop-directory-picker/manifest";
 // pi-lens-ignore: ts:2307
-import notificationsManifest from "@frockbot/plugin-desktop-notifications/manifest";
 // Runtime implementations are statically bound by the immutable application.
 import echoRuntimePlugin from "@frockbot/plugin-echo/agent";
 import flySpriteManifest from "@frockbot/plugin-fly-sprite/manifest";
@@ -95,8 +91,6 @@ import {
 } from "@frockbot/plugin-mcp/lifecycle-tools";
 export type { McpLifecycleToolHostV1 } from "@frockbot/plugin-mcp/lifecycle-tools";
 import memoryManifest from "@frockbot/plugin-memory/manifest";
-import mobileClipboardManifest from "@frockbot/plugin-mobile-clipboard/manifest";
-import mobileNotificationsManifest from "@frockbot/plugin-mobile-notifications/manifest";
 import packagePublisherManifest from "@frockbot/plugin-package-publisher/manifest";
 import {
   createPackagePublisherAgentPlugin,
@@ -194,14 +188,9 @@ const manifests = new Map<string, unknown>([
   ["@frockbot/plugin-mcp", mcpManifest],
   ["@frockbot/plugin-memory", memoryManifest],
   ["@frockbot/plugin-image", imageManifest],
-  ["@frockbot/plugin-mobile-clipboard", mobileClipboardManifest],
-  ["@frockbot/plugin-mobile-notifications", mobileNotificationsManifest],
   ["@frockbot/plugin-package-publisher", packagePublisherManifest],
   ["@frockbot/plugin-clock", clockManifest],
   ["@frockbot/plugin-computer", computerManifest],
-  ["@frockbot/plugin-desktop-clipboard", clipboardManifest],
-  ["@frockbot/plugin-desktop-directory-picker", directoryPickerManifest],
-  ["@frockbot/plugin-desktop-notifications", notificationsManifest],
   ["@frockbot/plugin-shell", shellManifest],
   ["@frockbot/plugin-skills", skillsManifest],
   ["@frockbot/plugin-search", searchManifest],

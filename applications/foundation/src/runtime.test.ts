@@ -12,20 +12,9 @@ import {
   isUserInstallablePackageV1,
 } from "./runtime.js";
 import { Context, type Plugin } from "cordis";
-import { resolveFoundationTrustedDesktopContribution } from "./desktop.js";
 import { foundationDefaultPackageIds } from "./user.js";
 
 describe("foundation application", () => {
-  test("resolves trusted desktop declarations without asynchronous startup work", () => {
-    const declarations = compileFoundationApplicationDeclarations();
-    expect(
-      resolveFoundationTrustedDesktopContribution(declarations, "auth"),
-    ).toMatchObject({
-      packageId: "auth",
-      contributionSpecifier: "@frockbot/plugin-auth/desktop",
-    });
-  });
-
   test("compiles one deterministic package graph for every contribution kind", async () => {
     const first = await compileFoundationApplication();
     const second = await compileFoundationApplication();
@@ -48,9 +37,6 @@ describe("foundation application", () => {
       "computer",
       "credentials",
       "custom-models",
-      "desktop-clipboard",
-      "desktop-directory-picker",
-      "desktop-notifications",
       "echo",
       "fly-sprite",
       "identity",
@@ -59,8 +45,6 @@ describe("foundation application", () => {
       "machine-messages",
       "mcp",
       "memory",
-      "mobile-clipboard",
-      "mobile-notifications",
       "package-catalog",
       "package-publisher",
       "provider-flock-ai",
@@ -142,15 +126,8 @@ describe("foundation application", () => {
         "search",
         "voice",
       ],
-      desktop: [
-        "auth",
-        "desktop-clipboard",
-        "desktop-directory-picker",
-        "desktop-notifications",
-        "fly-sprite",
-        "user-machine",
-      ],
-      mobile: ["mobile-clipboard", "mobile-notifications"],
+      desktop: ["auth", "fly-sprite", "user-machine"],
+      mobile: [],
     });
     expect(
       first.packages.find((pkg) => pkg.id === "shell")?.manifest.contributions
@@ -345,29 +322,6 @@ describe("foundation application", () => {
     // Audit has no User control, but it is not a default installation. It is
     // statically mounted rather than repaired into User enablement state.
     expect(platformOwned("audit")).toBe(false);
-  });
-
-  test("resolves trusted desktop code only from the compiled declaration", async () => {
-    const plan = await compileFoundationApplication();
-    expect(
-      resolveFoundationTrustedDesktopContribution(plan, "auth"),
-    ).toMatchObject({
-      packageId: "auth",
-      contributionSpecifier: "@frockbot/plugin-auth/desktop",
-    });
-
-    expect(() =>
-      resolveFoundationTrustedDesktopContribution(
-        {
-          ...plan,
-          contributions: {
-            ...plan.contributions,
-            desktop: plan.contributions.desktop.filter((id) => id !== "auth"),
-          },
-        },
-        "auth",
-      ),
-    ).toThrow('foundation desktop package "auth" is not declared');
   });
 
   test("resolves declared backend and enabled runtime Contributions through host seams", async () => {
