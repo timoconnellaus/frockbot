@@ -350,7 +350,19 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           claims.userId,
           operation(claims, "read"),
         );
-        return { session: record ? { user: { id: record.userId } } : null };
+        if (!record) return { session: null };
+        // The email, not just the id: admission and the admin check read it,
+        // so a native session that omitted it made a listed admin ordinary on
+        // the phone while the same account was an admin in a browser.
+        const profile = await options.auth.profile?.(record.userId);
+        return {
+          session: {
+            user: {
+              id: record.userId,
+              ...(profile?.email ? { email: profile.email } : {}),
+            },
+          },
+        };
       } catch {
         return { session: null };
       }

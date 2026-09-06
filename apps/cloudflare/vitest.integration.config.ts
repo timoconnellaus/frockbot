@@ -124,7 +124,6 @@ export default defineConfig({
           // per-test identities here are ordinary Users.
           FROCKBOT_ADMIN_EMAILS: "owner@example.com",
           DEBUG_TOKEN: "integration-debug-token",
-          ALLOWED_CLIENT_ORIGINS: "capacitor://localhost,frockbot://localhost",
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
           // Signs the `mcp-oauth` callback state. Fixed, so a test can mint a
           // state the gateway accepts and forge one it must refuse; strong

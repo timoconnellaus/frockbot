@@ -18,11 +18,11 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 7. ~~**Signups-closed does not prevent account creation.**~~ **Fixed.** `/api/auth/*` is served at `gateway.ts:753` ahead of the admission check, so any Google account could write `user`, `account` and `session` rows while signups were closed. `signupDatabaseHooksV1` (`apps/cloudflare/src/auth.ts`) now refuses the create unless signups are open or the email is a configured admin.
 
-8. **Admin is unreachable from the native app.** The native session projects `{user: {id}}` with no email, and admin derives solely from `session.user.email`, so `/api/identity` returns `isAdmin: false` on native even for a listed admin — while `canIssueSession` does look the email up in D1 for the same user.
+8. ~~**Admin is unreachable from the native app.**~~ **Fixed.** `gateway.ts` derives `isAdmin` from `session.user.email`, and `native-auth.ts` built a native session as `{user: {id}}` with no email, so a listed admin was ordinary on the phone while the same account was an admin in a browser. The native session now carries the email, looked up through the `profile` seam the same object already exposed — the lookup `canIssueSession` was already doing for the same user.
 
-9. **The Electron desktop shell is not in the repository**, yet `electron()` is an enabled better-auth plugin and `com.frockbot.desktop:/` is a trusted origin. `packages/plugin-auth/src/desktop.ts` is an abstract capability with no implementation, and `apps/cloudflare/src/client/index.ts` retains a `window.frockbotDesktop` branch that cannot be reached.
+9. ~~**The Electron desktop shell is not in the repository**, yet `electron()` is an enabled better-auth plugin and `com.frockbot.desktop:/` is a trusted origin.~~ **Mostly fixed.** The better-auth plugin, the trusted origin, the `electronProxyClient`, the `window.frockbotDesktop` branches and the `frockbot://localhost` client origin are gone. Still there: `packages/plugin-auth/src/desktop.ts`, an abstract capability with no implementation, and the `"desktop"` client vocabulary the backends and Subagent roles still carry.
 
-10. **The Capacitor path is dead.** `FrockBotGoogleAuth` is registered in TypeScript with no native implementation and no `capacitor.config.*`, while `capacitor://localhost` remains in `ALLOWED_CLIENT_ORIGINS`. The server's `verifyIdToken` exists only for it.
+10. **The Capacitor path is dead.** `FrockBotGoogleAuth` is registered in TypeScript with no native implementation and no `capacitor.config.*`, and `@capacitor/core` is still a `plugin-auth` dependency. `capacitor://localhost` is no longer a configured client origin. The server's `verifyIdToken` exists only for this path.
 
 11. **`apple-app-site-association` is served unconditionally**, but `nativeReturnUris("android")` omits the macOS URI, so a macOS app following it reaches a 404.
 
@@ -48,7 +48,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 22. **Applet capabilities are unreachable from authored code.** The SDK's `Applet extends DurableObject<unknown>` and never surfaces `env.CAPABILITIES` or `env.IDENTITY`. The alarm mechanism (`scheduleAlarm`, `AppletFacetStub.onAlarm`) has no SDK API.
 
-23. **Applet `canWrite` is inert.** The gateway never forwards `x-applet-viewer` or `x-applet-can-write`, so every viewer resolves to `{id: "viewer", canWrite: true}`.
+23. **Applet `canWrite` is inert.** _Verified._ `applet-sdk/src/server/applet.ts:287-293` reads `x-applet-viewer` and `x-applet-can-write`, defaulting to `canWrite: true`; neither the gateway nor `AppletState` ever sets them. Not an active hole — Applets are account-wide with no cross-User sharing, so every viewer is the owner and `true` is the right answer today. The defect is that an Applet author can write `if (!peer.viewer.canWrite)` and that guard can never fire. Either derive it from the viewer token or drop the concept until sharing exists; shipping a knob nothing populates is the thing to avoid.
 
 24. **`apps/cloudflare/src/native-fallback.ts:1` hardcodes `ARTIFACT_ORIGIN = "https://ui.bot.frockbot.com"`**, so staging cannot serve the native Applet page.
 

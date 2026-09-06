@@ -149,8 +149,6 @@
     // The `flock-auto` dynamic route's target model is configured and deployed
     // in the Cloudflare AI Gateway dashboard, never selected in application code.
     "FROCK_AI_AUTO_ROUTE": "flock-auto",
-    // Comma-separated webview origins allowed to call /api/* cross-origin.
-    "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
     "UI_ARTIFACT_HOSTS": "ui.bot.frockbot.com",
   },
   "env": {
@@ -241,7 +239,6 @@
         // with the FROCK_AI_GATEWAY_TOKEN secret.
         "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
         "FROCK_AI_AUTO_ROUTE": "flock-auto",
-        "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
         "UI_ARTIFACT_HOSTS": "ui.localhost",
         // Placeholder only. Production supplies this as a secret.
         "FROCKBOT_ADMIN_EMAILS": "owner@example.com",
@@ -354,7 +351,6 @@
         // transport's account id is repeated here (cloudflare/ai#617). The
         // Gateway id and Auto route keep their code defaults.
         "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
-        "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
         "UI_ARTIFACT_HOSTS": "ui.staging-bot.frockbot.com",
       },
     },
@@ -464,7 +460,6 @@
         // with the FROCK_AI_GATEWAY_TOKEN secret.
         "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
         "FROCK_AI_AUTO_ROUTE": "flock-auto",
-        "ALLOWED_CLIENT_ORIGINS": "capacitor://localhost,frockbot://localhost",
         "UI_ARTIFACT_HOSTS": "ui.localhost",
         // The canonical `development` identity is admin in this environment;
         // this placeholder also proves the configured-allowlist rule.
