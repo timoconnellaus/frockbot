@@ -76,6 +76,8 @@ export class DurableCompositionStore implements CompositionStore {
   private readonly ctx: DurableObjectState;
   private readonly buildBootstrap: () => Promise<CompositionGenerationV1>;
   private readonly now: () => Date;
+  /** The pinned generation was checked to decode once for this object. */
+  private verified = false;
 
   constructor(options: DurableCompositionStoreOptions) {
     this.ctx = options.state;
@@ -91,7 +93,19 @@ export class DurableCompositionStore implements CompositionStore {
     const existing = await this.ctx.storage.get<unknown>(
       COMPOSITION_CURRENT_KEY,
     );
-    if (existing !== undefined) return decodeCompositionPinV1(existing);
+    if (existing !== undefined) {
+      const pin = decodeCompositionPinV1(existing);
+      if (this.verified) return pin;
+      if (await this.decodes(pin.generationId)) {
+        this.verified = true;
+        return pin;
+      }
+      // Records written while generations still listed first-party members
+      // do not decode. Nothing in them survives: the Applet set is re-read
+      // from the directory at the next Turn, and there was no other member.
+      await this.clear();
+    }
+    this.verified = true;
     const bootstrap = await this.buildBootstrap();
     await assertCompositionArtifactSetHashV1(bootstrap);
     const generation = decodeCompositionGenerationV1({
@@ -111,6 +125,28 @@ export class DurableCompositionStore implements CompositionStore {
       });
       return pin;
     });
+  }
+
+  private async decodes(generationId: string): Promise<boolean> {
+    const stored = await this.ctx.storage.get<unknown>(
+      compositionGenerationKey(generationId),
+    );
+    if (stored === undefined) return false;
+    try {
+      decodeCompositionGenerationV1(stored);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async clear(): Promise<void> {
+    const keys = [
+      ...(
+        await this.ctx.storage.list<unknown>({ prefix: "composition:" })
+      ).keys(),
+    ];
+    if (keys.length > 0) await this.ctx.storage.delete(keys);
   }
 
   /** The pinned pointer, read inside the caller's transaction. */
