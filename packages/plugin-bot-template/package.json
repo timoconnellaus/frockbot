@@ -8,15 +8,11 @@
     "./agent": "./src/agent.ts",
     "./backend": "./src/backend.ts",
     "./client": "./src/client/index.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./manifest": "./src/manifest.ts",
+    "./definition": "./src/definition.ts",
     "./package.json": "./package.json",
     "./scrub": "./src/scrub.ts",
     "./shared": "./src/shared.ts",
     "./user": "./src/user.ts"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
   },
   "scripts": {
     "test": "bun test src",

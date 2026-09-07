@@ -1,21 +1,23 @@
 import { describe, expect, test } from "bun:test";
+import { foundationClientContributions } from "./client-contributions.js";
 import { foundationClientPlugins } from "./client.js";
-import { compileFoundationApplication } from "./runtime.js";
+import { FOUNDATION_PACKAGES_V1 } from "./packages.js";
 
 describe("foundation client composition", () => {
-  test("matches the client contribution set compiled from the descriptor", async () => {
-    const plan = await compileFoundationApplication();
-
-    // Artifact-backed members are excluded on purpose: their client
-    // Contribution is an immutable iframe page the shell hosts, not a Plugin
-    // compiled into this bundle, so it has no entry in the client
-    // Contribution table and never should.
-    const compiledIntoTheBundle = plan.packages.filter(
-      (pkg) =>
-        pkg.artifact === undefined &&
-        plan.contributions.client.includes(pkg.id),
+  test("takes one Plugin from each client Contribution the table lists", () => {
+    expect(foundationClientPlugins).toHaveLength(
+      foundationClientContributions.length,
     );
+  });
 
-    expect(foundationClientPlugins).toHaveLength(compiledIntoTheBundle.length);
+  test("every client Contribution belongs to a Package this deployment ships", () => {
+    const specifiers = new Set(
+      FOUNDATION_PACKAGES_V1.map((pkg) => `@frockbot/plugin-${pkg.id}`),
+    );
+    for (const contribution of foundationClientContributions) {
+      // `@frockbot/plugin-shell/client` names the Package before its entry.
+      const [scope, name] = contribution.specifier.split("/");
+      expect(specifiers.has(`${scope}/${name}`)).toBe(true);
+    }
   });
 });

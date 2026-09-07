@@ -18,7 +18,7 @@ import type {
   SendToUserPayloadV1,
   SkillRefV1,
 } from "@frockbot/kernel-contracts";
-import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
+import type { PackageSettingDefinition } from "@frockbot/kernel-contracts";
 import type { ClientSkillCatalogEntryV1 } from "./skill-protocol.js";
 import type { ApprovalCardViewV1 } from "./approvals.js";
 import type { AppletCanvasFailureV1 } from "./client/applet-canvas-failure.js";

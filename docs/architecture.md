@@ -178,53 +178,52 @@ Provider-reported token counts are used when present. Otherwise `estimateModelUs
 
 ### Resolution and mounting
 
-The application is a static selection: `applications/foundation/frockbot.application.json`, 35 packages, compiled by `compileFoundationApplication()` (`applications/foundation/src/runtime.ts:512`).
+Composition is the untrusted layer and nothing else. First-party Packages are ordinary imports: `applications/foundation/src/packages.ts` lists the 29 the deployment ships as `PackageDefinitionV1` records, and a Package that carries data (settings, Capabilities, Connection Types, durable roots, dependencies) exports its own definition from its own package. There is no manifest, no compiler and no application hash over a plan.
 
-1. On first use the Bot Durable Object receives a bootstrap generation of every compiled member (`packages/plugin-shell/src/backend-composition.ts:47`; `packages/kernel-composition/src/generation.ts:737`).
-2. Before a Turn is admitted, `resolveDeploymentCompositionV1` (`backend-composition.ts:95`) re-derives first-party members against the current deployment and pins a new generation if anything moved. Non-first-party and Applet members carry over verbatim.
-3. At admission, `activateCompositionV1` (`packages/plugin-shell/src/backend.ts:1852`) reads the pin, mounts, verifies, commits and records last-known-good.
-4. Mounting builds one runtime per Turn (`backend-composition.ts`): the registries, a `LoopHookListV1`, and the features the host and the foundation list, mounted in order by `mountRuntimeFeaturesV1`. Artifact-bearing members go through `BotIsolateContributionHost`, whose hooks are appended to the same list after the app's. Applet members register as tools routed to `APPLET_STATES` (`backend-composition.ts:385-420`).
+1. On first use the Bot Durable Object receives an empty bootstrap generation (`packages/plugin-shell/src/backend-composition.ts`; `packages/kernel-do/src/composition/generation.ts`). A Bot that has installed and authored nothing composes nothing, which is why a release no longer has to rewrite every Bot's generation to follow the deploy.
+2. At admission, `activateCompositionV1` (`packages/plugin-shell/src/backend.ts`) reads the pin, mounts, verifies, commits and records last-known-good.
+3. Mounting builds one runtime per Turn (`backend-composition.ts`): the registries, a `LoopHookListV1`, and the features the host and the foundation list, mounted in order by `mountRuntimeFeaturesV1`. Every member goes through `BotIsolateContributionHost`, whose hooks are appended to the same list after the app's. Applet members register as tools routed to `APPLET_STATES`.
 
 ### Generation shape
 
-`CompositionGenerationV1` — `packages/kernel-composition/src/generation.ts:136`:
+`CompositionGenerationV1` — `packages/kernel-do/src/composition/generation.ts`:
 
 ```
 { schemaVersion: 1, generationId, artifactSetHash, parentGenerationId?,
   summary?, createdAt, origin, members[], applets?, status }
 ```
 
-- `status ∈ pending | active | superseded | failed | quarantined` (`:133`).
-- `origin ∈ bootstrap | bot-authored | bot-catalog | user-install | revert` (`:54`).
-- `members[]` is `{packageId, specifier, version, manifestHash, provenance, artifact?}` (`:44`); `provenance ∈ first-party | catalog | user | bot` (`:8`).
-- `artifactSetHash = sha256(canonicalJson(members sorted by packageId))`, or over `{members, applets}` when Applets exist (`:672-687`).
-- `generationId = "<createdAt>:<artifactSetHash[0..16]>"` (`:706`).
-- Caps: 512 members, 64 applets, 64 applet tools, 160-character summary (`:277-289`).
+- `status ∈ pending | active | superseded | failed | quarantined`.
+- `origin ∈ bootstrap | bot-authored | revert`.
+- `members[]` is `{packageId, version, provenance, artifact, descriptor}`; `provenance ∈ user | bot`. Every member is untrusted, so the artifact and the Frock Compose descriptor are required, not optional.
+- `artifactSetHash = sha256(canonicalJson(members sorted by packageId))`, or over `{members, applets}` when Applets exist.
+- `generationId = "<createdAt>:<artifactSetHash[0..16]>"`.
+- Caps: 64 members, 64 applets, 64 applet tools, 160-character summary.
 
 ### Where the pin lives
 
-`DurableCompositionStore` (`packages/kernel-do/src/composition-store.ts:74`) writes into the Bot Durable Object: `composition:current` (a `{generationId, artifactSetHash}` pin), `composition:generation:<id>`, `composition:index:<createdAt>:<id>`, `composition:last-known-good`, plus failure, failure-count and quarantine keys. Pinning is compare-and-swap; a lost race raises `CompositionPinConflictError` (`generation.ts:168`) and the caller re-reads and re-derives (retry helper at `:193`, four attempts).
+`DurableCompositionStore` (`packages/kernel-do/src/composition-store.ts:74`) writes into the Bot Durable Object: `composition:current` (a `{generationId, artifactSetHash}` pin), `composition:generation:<id>`, `composition:index:<createdAt>:<id>`, `composition:last-known-good`, plus failure, failure-count and quarantine keys. Pinning is compare-and-swap; a lost race raises `CompositionPinConflictError` and the caller re-reads and re-derives (four attempts).
 
 An in-flight Turn keeps the generation it pinned. Activation takes effect at the next admitted Turn.
 
-### Activation and failure — `packages/kernel-composition/src/activation.ts`
+### Activation and failure — `packages/kernel-do/src/composition/activation.ts`
 
-Failure phases are `resolve | bundle | mount | health` (`:22`). `activateCompositionV1` (`:318`) reads the pin, mounts and verifies, then commits and clears failures. On failure it records the attempt, marks the generation `failed` or `quarantined`, mounts last-known-good, notifies, and admits the Turn on the fallback. The quarantine threshold is three attempts (`:65`); a quarantined generation is never retried. If last-known-good is itself the failing generation, the error is rethrown (`:377-390`).
+Failure phases are `resolve | bundle | mount | health`, declared with the host that raises them (`packages/compose-frockbot/src/failure.ts`). `activateCompositionV1` reads the pin, mounts and verifies, then commits and clears failures. On failure it records the attempt, marks the generation `failed` or `quarantined`, mounts last-known-good, notifies, and admits the Turn on the fallback. The quarantine threshold is three attempts; a quarantined generation is never retried. If last-known-good is itself the failing generation, the error is rethrown.
 
 ### Isolate loading — `packages/compose-frockbot/src/isolate-host.ts`
 
 - Loading uses the `BOT_PACKAGES` Worker Loader binding, typed structurally as `BotIsolateLoader` (`:72`). There is no dynamic `import()`.
 - `loader.get(loaderId, () => ({compatibilityDate, mainModule, modules, globalOutbound: null, env: {IDENTITY, CAPABILITIES}, limits: {cpuMs: 5000, subRequests: 5}}))` (`:434-455`).
-- The loader id is `isolateLoaderIdV1({userId, artifactSetHash: botIsolateModuleSetHashV1(artifactContentHash, bindingDigest)})` (`:273`). The module-set hash covers wrapper version, wrapper source hash, package hash and binding digest (`:146-158`), because a loader id is served from cache with the `env` it was first loaded with.
+- The loader id is `isolateLoaderIdV1({userId, artifactSetHash: botIsolateModuleSetHashV1(artifactContentHash, bindingDigest, grants)})`. The module-set hash covers wrapper version, wrapper source hash, package hash, binding digest and the member's declared grants, because a loader id is served from cache with the `env` it was first loaded with.
 - Artifacts come from `createR2PackageArtifactStore` (`packages/plugin-shell/src/backend-isolate.ts`): R2 key `packages/<contentHash>.mjs`, sha-256 verified before load.
-- `BotIsolateContributionHost.prepare` (`:266`) loads the artifact, mounts and calls `entrypoint.health()` as one guarded phase, then requires `health.ok`, non-empty tools, a matching `packageId`, and tool and hook names equal to the stored manifest's (`:305-345`). It also enforces the manifest's admission ceiling (`:162`).
+- `BotIsolateContributionHost.prepare` first refuses a descriptor naming a grant, action or slot this deployment has not opened, then loads the artifact, mounts and calls `entrypoint.health()` as one guarded phase, requiring `health.ok`, non-empty tools, a matching `packageId`, and tool and hook names equal to the descriptor's. Per-tool turn admission comes from the isolate's own health report.
 - `BotCapabilities` (`apps/cloudflare/src/bot-capabilities.ts:68`), a `WorkerEntrypoint`, is the loopback through which an isolate reaches the kernel. It is minted per Turn at `packages/plugin-shell/src/backend.ts:2069-2125`.
 
 ### Built-in versus dynamic
 
-Every member carries no `artifact` and resolves from the compiled contribution tables. `createFoundationRuntimeApplication` (`applications/foundation/src/runtime.ts`) filters the runtime table to `pkg.artifact === undefined`, then removes the runtime ids that mount only inside an admitted Turn.
+First-party code is never a Composition member: it is imported, and `applications/foundation/src/packages.ts` is the list that says it exists. A member is untrusted by definition and always carries an artifact and a descriptor.
 
-Nothing produces an artifact-bearing member today. The isolate host, the `BOT_PACKAGES` loader and the capability contract are all still here and still exercised by the Applet instance path; a _Package_ artifact returns with the step 8 build service (`plan.md`).
+Nothing produces a member today. The isolate host, the `BOT_PACKAGES` loader and the capability contract are all still here and still exercised by the Applet instance path and the isolate probe; a _Package_ artifact returns with the step 8 build service (`plan.md`).
 
 ---
 
@@ -242,7 +241,7 @@ The shipping client is Vue 3. Comments in `applications/foundation/src/client-co
 Plugin UI mounts two ways.
 
 1. **In-bundle Vue components, through slots and the surface registry.** `ClientApplication` (`packages/client-core/src/index.ts:585`) requires exactly one `root` slot and registers a global `<k-slot name="...">` outlet (`:624-643`). `packages/plugin-auth/src/client/index.ts:13` fills `root` with `AuthGate.vue`, which renders `<k-slot name="authenticated-root">` (`AuthGate.vue:157`); `packages/plugin-shell/src/client/index.ts:3374-3378` fills that with `FrockBotApp.vue`. The contribution table is `applications/foundation/src/client-contributions.ts:36-63` — 17 entries, mounted in order.
-2. **Sandboxed iframes, for Bot-authored and user-installed package UI.** `packages/plugin-shell/src/client/index.ts:3159-3187` reads iframe entries from the Bot's Composition manifest and registers a sidebar trigger plus a surface per entry. Frames load from `ui.bot.frockbot.com/packages/<sha256>.html` (`apps/cloudflare/src/gateway.ts:1275`) and communicate through a versioned postMessage bridge (`packages/plugin-shell/src/client/PackageIframeHost.vue`). Package-supplied code does not execute in the app origin.
+2. **Sandboxed iframes, for Bot-authored and user-installed package UI.** `packages/plugin-shell/src/client/index.ts` reads iframe entries from the Bot's first-party page registry (`packages/plugin-applets/src/pages.ts`) and registers a sidebar trigger plus a surface per entry. Frames load from `ui.bot.frockbot.com/packages/<sha256>.html` (`apps/cloudflare/src/gateway.ts:1275`) and communicate through a versioned postMessage bridge (`packages/plugin-shell/src/client/PackageIframeHost.vue`). Package-supplied code does not execute in the app origin.
 
 The chat view lives in `packages/plugin-shell/src/client/FrockBotApp.vue` (2108 lines). The transcript is a `v-for` at `:1520`; assistant text renders through `UiMarkdown` at `:1551`. Turn merge logic is `replaceTurnMessages()` (`packages/plugin-shell/src/client/index.ts:3405`). Data arrives over REST, with invalidation over the state channel (`apps/cloudflare/src/client/bot-state-channel.ts:147-170`).
 
@@ -318,11 +317,11 @@ Adjacent, outside the loop: image generation uses Workers AI ids directly (`pack
 
 The Bot writes Applet code on the Computer with ordinary file tools. `packages/plugin-applets` exposes seven tools — `applet_list`, `applet_create`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`packages/plugin-applets/src/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`applications/foundation/src/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`packages/plugin-shell/src/backend-applets.ts`), built per call because a publish needs the Turn's mounted Computer. `applet_create` scaffolds from templates into the durable root `applets/source/<appletId>/` (`src/root.ts`), mounted on the Sprite at `/home/box/agent-data/user-packages/applets/source`. Guidance ships at `packages/plugin-applets/skills/applets.md`.
 
-The Applets Package keeps a manifest for one reason: it declares that durable root, which the Computer's durable-root sync reads from the compiled application (`declaredPackageRootsV1`).
+The Applets Package declares that durable root in its definition (`packages/plugin-applets/src/definition.ts`), which the Computer's durable-root sync reads (`declaredPackageRootsV1`).
 
 ### Build
 
-esbuild, run by the SDK CLI on the Computer — `packages/applet-sdk/src/cli/build.ts:46-183`. The server bundle is ESM, `platform: neutral`, with `cloudflare:workers` external. The UI bundle is IIFE, minified and inlined into one self-contained HTML page. The tool manifest is derived by booting the built Durable Object in Miniflare 5 and calling `/health` and `/describe` (`:104-131`). `apps/cloudflare-bundler` is not involved; that service bundles Bot Packages.
+esbuild, run by the SDK CLI on the Computer — `packages/applet-sdk/src/cli/build.ts:46-183`. The server bundle is ESM, `platform: neutral`, with `cloudflare:workers` external. The UI bundle is IIFE, minified and inlined into one self-contained HTML page. The tool declaration is derived by booting the built Durable Object in Miniflare 5 and calling `/health` and `/describe` (`:104-131`). `apps/cloudflare-bundler` is not involved; that service bundles Bot Packages.
 
 ### Storage
 

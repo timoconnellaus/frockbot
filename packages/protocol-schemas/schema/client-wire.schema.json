@@ -3445,19 +3445,6 @@
                     "type": "object",
                     "properties": {
                       "kind": {
-                        "enum": ["user-install"]
-                      },
-                      "userId": {
-                        "$ref": "#/$defs/Identifier"
-                      }
-                    },
-                    "required": ["kind", "userId"],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
                         "enum": ["revert"]
                       },
                       "revertsTo": {
@@ -3512,7 +3499,7 @@
               },
               "members": {
                 "type": "array",
-                "maxItems": 512,
+                "maxItems": 64,
                 "items": {
                   "type": "object",
                   "properties": {
@@ -3526,16 +3513,6 @@
                     },
                     "provenance": {
                       "oneOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "kind": {
-                              "enum": ["first-party"]
-                            }
-                          },
-                          "required": ["kind"],
-                          "additionalProperties": false
-                        },
                         {
                           "type": "object",
                           "properties": {

@@ -7,15 +7,11 @@
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
     "./bytes": "./src/bytes.ts",
-    "./manifest": "./src/manifest.ts",
+    "./definition": "./src/definition.ts",
     "./model": "./src/model.ts",
+    "./package.json": "./package.json",
     "./root": "./src/root.ts",
-    "./testing": "./src/testing.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "test": "bun test src",

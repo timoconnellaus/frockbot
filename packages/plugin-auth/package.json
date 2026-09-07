@@ -6,13 +6,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client/index.ts",
-    "./shared": "./src/shared.ts",
-    "./manifest": "./src/manifest.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
+    "./definition": "./src/definition.ts",
+    "./package.json": "./package.json",
+    "./shared": "./src/shared.ts"
   },
   "scripts": {
     "test": "bun test src",

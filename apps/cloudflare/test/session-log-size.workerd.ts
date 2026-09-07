@@ -6,7 +6,7 @@ import { runInDurableObject } from "cloudflare:test";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
-} from "@frockbot/kernel-composition/generation";
+} from "@frockbot/kernel-do";
 import { Session, type SessionEvent } from "@frockbot/kernel-contracts";
 import {
   BotDurableAuthority,
@@ -30,17 +30,7 @@ const codec = createStoredRunCodecV1<undefined>({
 });
 
 function bootstrap(): Promise<CompositionGenerationV1> {
-  return bootstrapGeneration(
-    [
-      {
-        packageId: "shell",
-        specifier: "@frockbot/plugin-shell",
-        version: "0.0.1",
-        manifest: { id: "shell", version: "0.0.1" },
-      },
-    ],
-    { createdAt: "2026-09-04T00:00:00.000Z" },
-  );
+  return bootstrapGeneration({ createdAt: "2026-09-04T00:00:00.000Z" });
 }
 
 function legacyEvents(): SessionEvent[] {

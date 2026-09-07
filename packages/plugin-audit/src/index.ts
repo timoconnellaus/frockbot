@@ -23,4 +23,3 @@ export {
   type AuditSqlV1,
   type AuditSqlValueV1,
 } from "./store.js";
-export { default as manifest } from "./manifest.js";

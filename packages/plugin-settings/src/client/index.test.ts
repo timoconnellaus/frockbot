@@ -8,7 +8,6 @@ import {
   type ClientSlotRegistration,
 } from "@frockbot/client-core";
 import { createClientSurfaceRegistry } from "@frockbot/client-ui";
-import manifest from "../../frockbot.json";
 import { settingsClientPlugin } from "./index.js";
 
 describe("settings client contribution", () => {
@@ -63,9 +62,6 @@ describe("settings client contribution", () => {
     surfaces.open("connections");
     expect(surfaces.active.value?.title).toBe("Connectors");
     surfaces.close();
-    expect(manifest.contributions.client.outlets).toContain(
-      "frockbot.models-sections",
-    );
 
     for (const dispose of result.toReversed()) dispose();
     expect(slots).toEqual([]);

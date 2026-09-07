@@ -12,15 +12,11 @@
     "./client": "./src/client/index.ts",
     "./client/BotAvatar.vue": "./src/client/BotAvatar.vue",
     "./client/state": "./src/client/state.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./manifest": "./src/manifest.ts",
-    "./quota": "./src/quota.ts",
+    "./definition": "./src/definition.ts",
     "./package.json": "./package.json",
+    "./quota": "./src/quota.ts",
     "./shared": "./src/shared.ts",
     "./user": "./src/user.ts"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
   },
   "scripts": {
     "test": "bun test src",

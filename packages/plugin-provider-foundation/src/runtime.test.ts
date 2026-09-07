@@ -3,12 +3,7 @@ import {
   type LlmStreamEvent,
   type NormalizedModelRequest,
 } from "@frockbot/kernel-contracts";
-import {
-  createAgentRuntimeHarness,
-  verifyPluginPackage,
-} from "@frockbot/plugin-testkit";
-import manifest from "../frockbot.json" with { type: "json" };
-import packageJson from "../package.json" with { type: "json" };
+import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import foundationProviderFeature, {
   classifyFoundationFailureV1,
   FOUNDATION_MODEL,
@@ -58,12 +53,5 @@ describe("foundation provider feature", () => {
       failure = error;
     }
     expect(failure).toBeInstanceOf(Error);
-  });
-
-  test("satisfies plugin package conventions", () => {
-    expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
-      name: "@frockbot/plugin-provider-foundation",
-      contributionKinds: ["runtime"],
-    });
   });
 });

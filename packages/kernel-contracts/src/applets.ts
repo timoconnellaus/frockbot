@@ -7,10 +7,6 @@
 // between the User Durable Object, the Applet Durable Object, the Bot isolate
 // capability, and the hosted client, so they are declared once here and every
 // inbound value is decoded at its seam.
-//
-// The manifest side of the same feature lives in `@frockbot/kernel-composition`
-// (`InstanceContributionV1`); the durable authority that writes these records
-// is lane K3.
 
 type AppletJsonScalarV1 = null | boolean | number | string;
 type AppletJsonDepth1V1 =
@@ -38,7 +34,7 @@ export type AppletJsonValueV1 =
   | AppletJsonDepth3V1[]
   | { [key: string]: AppletJsonDepth3V1 };
 
-/** The tool declaration an Applet generation copies from its manifest. */
+/** The tool declaration an Applet generation copies from its build. */
 export interface AppletToolDeclarationV1 {
   name: string;
   description: string;

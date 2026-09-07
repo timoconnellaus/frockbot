@@ -14,4 +14,3 @@ export {
   type SearchProjectableRunV1,
   type SearchSinkV1,
 } from "./bot.js";
-export { default as manifest } from "./manifest.js";

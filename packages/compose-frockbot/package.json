@@ -7,6 +7,8 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
+    "./descriptor": "./src/descriptor.ts",
+    "./failure": "./src/failure.ts",
     "./package.json": "./package.json"
   },
   "sideEffects": false,
@@ -15,7 +17,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/kernel-composition": "workspace:*",
     "@frockbot/kernel-contracts": "workspace:*"
   },
   "devDependencies": {

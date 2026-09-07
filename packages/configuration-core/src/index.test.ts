@@ -144,7 +144,7 @@ describe("stored configuration migrations", () => {
         {
           packageId: "current-provider",
           version: "0.0.1",
-          dependencies: { "model-choice": ">=0.0.1" },
+          dependencies: ["model-choice"],
         },
         { packageId: "model-choice", version: "0.0.1" },
       ]),
@@ -206,7 +206,7 @@ describe("stored configuration migrations", () => {
       {
         packageId: "provider",
         version: "0.0.1",
-        dependencies: { web: ">=0.0.1" },
+        dependencies: ["web"],
       },
       { packageId: "shell", version: "0.0.1", platformOwned: true },
       { packageId: "ui-theme", version: "0.0.1", platformOwned: true },

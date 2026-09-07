@@ -12,10 +12,7 @@ import {
   type PackageIframeCompositionV1,
 } from "@frockbot/kernel-contracts";
 import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
-import {
-  compileFoundationApplication,
-  createFoundationBackendContributions,
-} from "@frockbot/application-foundation/runtime";
+import { createFoundationBackendContributions } from "@frockbot/application-foundation/runtime";
 import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/plugin-applets/pages";
 import {
   decodeBotLifecycleDirectoryViewV1,
@@ -161,7 +158,6 @@ import {
   rpcPattern,
   rpcString,
 } from "./durable-rpc.js";
-import { createImmutablePlanRequestFactory } from "./immutable-application.js";
 import { UserConfiguration } from "./user-configuration.js";
 import {
   DEPLOYMENT_POLICY_SINGLETON_NAME,
@@ -1514,452 +1510,445 @@ interface RuntimeExports {
   UserBotState(options: { props: UserScopedProps }): RpcBoundary<UserBotState>;
 }
 
-const createGatewayBackendContributions = createImmutablePlanRequestFactory(
-  compileFoundationApplication,
-  (application, env: Env) =>
-    createFoundationBackendContributions(application, {
-      backendHost: "gateway",
-      readDeploymentPolicy: async (): Promise<DeploymentPolicyV1> =>
-        decodeDeploymentPolicyV1(
-          rpcJsonSnapshot(
-            await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
-          ),
+const createGatewayBackendContributions = (env: Env) =>
+  createFoundationBackendContributions({
+    backendHost: "gateway",
+    readDeploymentPolicy: async (): Promise<DeploymentPolicyV1> =>
+      decodeDeploymentPolicyV1(
+        rpcJsonSnapshot(
+          await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
         ),
-      setDeploymentSignups: async (
-        command: SetSignupsCommandV1,
-        updatedBy: string,
-      ): Promise<DeploymentPolicyV1> =>
-        decodeDeploymentPolicyV1(
-          rpcJsonSnapshot(
-            await deploymentPolicyStub(env).setSignups({
-              schemaVersion: 1,
-              command,
-              updatedBy,
-            }),
-          ),
+      ),
+    setDeploymentSignups: async (
+      command: SetSignupsCommandV1,
+      updatedBy: string,
+    ): Promise<DeploymentPolicyV1> =>
+      decodeDeploymentPolicyV1(
+        rpcJsonSnapshot(
+          await deploymentPolicyStub(env).setSignups({
+            schemaVersion: 1,
+            command,
+            updatedBy,
+          }),
         ),
-      listTemplateShares: async (userId: string) =>
-        decodeTemplateShareListViewV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).listTemplateShares({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      executeTemplateCommand: async (
-        userId: string,
-        command: TemplateCommandV1,
-      ) =>
-        decodeTemplateShareReceiptV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).executeTemplateCommand({
-              schemaVersion: 1,
-              userId,
-              command,
-            }),
-          ),
-        ),
-      readPublishedTemplate: (shareId: string) =>
-        readPublishedTemplate(env, shareId),
-      listTemplateImports: async (userId: string) =>
-        decodeTemplateImportListViewV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).listTemplateImports({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      executeTemplateImport: async (
-        userId: string,
-        command: TemplateCommandV1,
-      ) =>
-        decodeTemplateImportRecordV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).executeTemplateImport({
-              schemaVersion: 1,
-              userId,
-              command,
-            }),
-          ),
-        ),
-      listBots: async (userId) =>
-        decodeDirectoryViewV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).listBots({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      listBotLifecycles: async (userId: string) =>
-        decodeBotLifecycleDirectoryViewV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).listBotLifecycles({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      executeBotLifecycle: async (
-        userId: string,
-        command: BotLifecycleCommandV1,
-      ) =>
-        decodeBotLifecycleReceiptV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).executeBotLifecycle({
-              schemaVersion: 1,
-              userId,
-              command,
-            }),
-          ),
-        ),
-      createBot: async (userId, command) =>
-        decodeFlockReceiptV1(
-          rpcJsonSnapshot(
-            await userConfigurationStub(env, userId).createBot({
-              schemaVersion: 1,
-              userId,
-              command,
-            }),
-          ),
-        ),
-      listBotIdentities: (userId: string) => listBotIdentities(env, userId),
-      readComputer: async (userId: string, botId: string) =>
-        decodeComputerProjectionV1(
-          rpcJsonSnapshot(
-            await (
-              await ownedComputerBotState(env, userId, botId)
-            ).readComputerPresence(),
-          ),
-        ),
-      executeComputerCommand: async (
-        userId: string,
-        botId: string,
-        command: ComputerCommandV1,
-      ) =>
-        decodeComputerCommandResponse(
-          rpcJsonSnapshot(
-            await (
-              await ownedComputerBotState(env, userId, botId)
-            ).executeComputerPresenceCommand(command),
-          ),
-        ),
-      searchTranscripts: async (userId: string, query: SearchQueryV1) =>
-        decodeSearchIndexResultsV1(
-          rpcJsonSnapshot(
-            await userSearchStub(env, userId).searchTranscripts({
-              schemaVersion: 1,
-              userId,
-              query,
-            }),
-          ),
-        ),
-      rebuildSearchIndex: async (userId: string) =>
-        decodeClientSearchRebuildReceiptV1(
-          rpcJsonSnapshot(
-            await userSearchStub(env, userId).rebuildSearchIndex({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      readAudit: async (userId: string, query: AuditQueryV1) =>
-        decodeClientAuditPageV1(
-          rpcJsonSnapshot(
-            await userAuditStub(env, userId).readAuditEntries({
-              schemaVersion: 1,
-              userId,
-              ...(query.botId === undefined ? {} : { botId: query.botId }),
-              ...(query.kind === undefined ? {} : { kind: query.kind }),
-              ...(query.target === undefined ? {} : { target: query.target }),
-              ...(query.before === undefined ? {} : { before: query.before }),
-              ...(query.limit === undefined ? {} : { limit: query.limit }),
-            }),
-          ),
-        ),
-      rebuildAuditIndex: async (userId: string) =>
-        decodeAuditRebuildReceiptV1(
-          rpcJsonSnapshot(
-            await userAuditStub(env, userId).rebuildAuditIndex({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      listBotUnread: (userId: string) => listBotUnread(env, userId),
-      listBotNotifications: (userId: string) =>
-        listBotNotifications(env, userId),
-      executeBotUnreadCommand: (
-        userId: string,
-        botId: string,
-        command: BotUnreadCommandV1,
-      ) => executeBotUnreadCommand(env, userId, botId, command),
-      readSheep: async (userId, botId) =>
-        decodeSheepIdentityViewV1(
-          rpcJsonSnapshot(
-            await botStateStub(env, userId, botId).readSheep({
-              schemaVersion: 1,
-              userId,
-              botId,
-            }),
-          ),
-        ),
-      executeConnection: (userId, command) =>
-        userConfigurationStub(env, userId).executeConnection({
-          schemaVersion: 1,
-          userId,
-          command,
-        }),
-      lookupConnectionCommand: (userId, packageId, commandId) =>
-        userConfigurationStub(env, userId).lookupConnectionCommand({
-          schemaVersion: 1,
-          userId,
-          packageId,
-          commandId,
-        }),
-      listCompositionGenerations: async (userId, botId, query) =>
-        decodeCompositionGenerationListViewV1(
-          await botStateStub(env, userId, botId).listCompositionGenerations({
+      ),
+    listTemplateShares: async (userId: string) =>
+      decodeTemplateShareListViewV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).listTemplateShares({
             schemaVersion: 1,
             userId,
-            botId,
+          }),
+        ),
+      ),
+    executeTemplateCommand: async (
+      userId: string,
+      command: TemplateCommandV1,
+    ) =>
+      decodeTemplateShareReceiptV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).executeTemplateCommand({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        ),
+      ),
+    readPublishedTemplate: (shareId: string) =>
+      readPublishedTemplate(env, shareId),
+    listTemplateImports: async (userId: string) =>
+      decodeTemplateImportListViewV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).listTemplateImports({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      ),
+    executeTemplateImport: async (userId: string, command: TemplateCommandV1) =>
+      decodeTemplateImportRecordV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).executeTemplateImport({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        ),
+      ),
+    listBots: async (userId) =>
+      decodeDirectoryViewV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).listBots({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      ),
+    listBotLifecycles: async (userId: string) =>
+      decodeBotLifecycleDirectoryViewV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).listBotLifecycles({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      ),
+    executeBotLifecycle: async (
+      userId: string,
+      command: BotLifecycleCommandV1,
+    ) =>
+      decodeBotLifecycleReceiptV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).executeBotLifecycle({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        ),
+      ),
+    createBot: async (userId, command) =>
+      decodeFlockReceiptV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).createBot({
+            schemaVersion: 1,
+            userId,
+            command,
+          }),
+        ),
+      ),
+    listBotIdentities: (userId: string) => listBotIdentities(env, userId),
+    readComputer: async (userId: string, botId: string) =>
+      decodeComputerProjectionV1(
+        rpcJsonSnapshot(
+          await (
+            await ownedComputerBotState(env, userId, botId)
+          ).readComputerPresence(),
+        ),
+      ),
+    executeComputerCommand: async (
+      userId: string,
+      botId: string,
+      command: ComputerCommandV1,
+    ) =>
+      decodeComputerCommandResponse(
+        rpcJsonSnapshot(
+          await (
+            await ownedComputerBotState(env, userId, botId)
+          ).executeComputerPresenceCommand(command),
+        ),
+      ),
+    searchTranscripts: async (userId: string, query: SearchQueryV1) =>
+      decodeSearchIndexResultsV1(
+        rpcJsonSnapshot(
+          await userSearchStub(env, userId).searchTranscripts({
+            schemaVersion: 1,
+            userId,
             query,
           }),
         ),
-      getCompositionGeneration: async (userId, botId, generationId) => {
-        const generation = await botStateStub(
-          env,
-          userId,
-          botId,
-        ).getCompositionGeneration({
-          schemaVersion: 1,
-          userId,
-          botId,
-          generationId,
-        });
-        return generation === undefined
-          ? undefined
-          : decodeCompositionGenerationViewV1(generation);
-      },
-      listTasks: async (userId, botId) =>
-        // Snapshotted first: a cross-object answer arrives as a live stub
-        // carrying `Symbol.dispose`, and an exact-keys decoder is right to
-        // refuse that.
-        decodeTaskListViewV1(
-          rpcJsonSnapshotV1(
-            await botStateStub(env, userId, botId).listTasks({
-              schemaVersion: 1,
-              userId,
-              botId,
-            }),
-          ),
+      ),
+    rebuildSearchIndex: async (userId: string) =>
+      decodeClientSearchRebuildReceiptV1(
+        rpcJsonSnapshot(
+          await userSearchStub(env, userId).rebuildSearchIndex({
+            schemaVersion: 1,
+            userId,
+          }),
         ),
-      readTask: async (userId, botId, taskId) =>
-        decodeTaskViewV1(
-          rpcJsonSnapshotV1(
-            await botStateStub(env, userId, botId).readTask({
-              schemaVersion: 1,
-              userId,
-              botId,
-              taskId,
-            }),
-          ),
+      ),
+    readAudit: async (userId: string, query: AuditQueryV1) =>
+      decodeClientAuditPageV1(
+        rpcJsonSnapshot(
+          await userAuditStub(env, userId).readAuditEntries({
+            schemaVersion: 1,
+            userId,
+            ...(query.botId === undefined ? {} : { botId: query.botId }),
+            ...(query.kind === undefined ? {} : { kind: query.kind }),
+            ...(query.target === undefined ? {} : { target: query.target }),
+            ...(query.before === undefined ? {} : { before: query.before }),
+            ...(query.limit === undefined ? {} : { limit: query.limit }),
+          }),
         ),
-      stopTask: async (userId, botId, taskId) =>
-        decodeTaskViewV1(
-          rpcJsonSnapshotV1(
-            await botStateStub(env, userId, botId).stopTask({
-              schemaVersion: 1,
-              userId,
-              botId,
-              taskId,
-            }),
-          ),
+      ),
+    rebuildAuditIndex: async (userId: string) =>
+      decodeAuditRebuildReceiptV1(
+        rpcJsonSnapshot(
+          await userAuditStub(env, userId).rebuildAuditIndex({
+            schemaVersion: 1,
+            userId,
+          }),
         ),
-      listRoutines: async (userId, botId) =>
-        decodeRoutineListViewV1(
-          await botStateStub(env, userId, botId).listRoutines({
+      ),
+    listBotUnread: (userId: string) => listBotUnread(env, userId),
+    listBotNotifications: (userId: string) => listBotNotifications(env, userId),
+    executeBotUnreadCommand: (
+      userId: string,
+      botId: string,
+      command: BotUnreadCommandV1,
+    ) => executeBotUnreadCommand(env, userId, botId, command),
+    readSheep: async (userId, botId) =>
+      decodeSheepIdentityViewV1(
+        rpcJsonSnapshot(
+          await botStateStub(env, userId, botId).readSheep({
             schemaVersion: 1,
             userId,
             botId,
           }),
         ),
-      executeRoutineCommand: async (userId, botId, command) =>
-        decodeRoutineCommandReceiptV1(
-          await botStateStub(env, userId, botId).executeRoutineCommand({
-            schemaVersion: 1,
-            userId,
-            botId,
-            command,
-          }),
-        ),
-      // The secret the gateway verifies a presented machine token or pairing
-      // code against, before any Durable Object is addressed. It never leaves
-      // the Worker: what crosses to the User object is the token's claims and
-      // its digest, never the token.
-      ...(typeof env.MACHINE_TOKEN_SECRET === "string"
-        ? { machineTokenSecret: env.MACHINE_TOKEN_SECRET }
-        : {}),
-      createMachinePairing: async (userId, request) =>
-        decodeMachinePairingOfferV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).createMachinePairing({
-              schemaVersion: 1,
-              userId,
-              ...(request.label === undefined ? {} : { label: request.label }),
-            }),
-          ),
-        ),
-      enrollMachine: async (userId, input) =>
-        decodeMachineEnrollmentReceiptV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).enrollMachine({
-              schemaVersion: 1,
-              userId,
-              machineId: input.machineId,
-              enrollment: input.enrollment,
-            }),
-          ),
-        ),
-      pollMachine: async (userId, call) =>
-        decodeMachinePollResultV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).pollMachine({
-              schemaVersion: 1,
-              userId,
-              machineId: call.machineId,
-              claims: call.claims,
-              tokenDigest: call.tokenDigest,
-              waitSeconds: call.waitSeconds,
-            }),
-          ),
-        ),
-      claimMachineCommand: async (userId, call) =>
-        decodeMachineClaimReceiptV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).claimMachineCommand({
-              schemaVersion: 1,
-              userId,
-              machineId: call.machineId,
-              commandId: call.commandId,
-              claims: call.claims,
-              tokenDigest: call.tokenDigest,
-            }),
-          ),
-        ),
-      recordMachineResult: async (userId, call) => {
-        const receipt = decodeMachineResultReceiptV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).recordMachineResult({
-              schemaVersion: 1,
-              userId,
-              machineId: call.machineId,
-              commandId: call.commandId,
-              claims: call.claims,
-              tokenDigest: call.tokenDigest,
-              result: call.result,
-            }),
-          ),
-        );
-        // The Bot that asked is told here rather than by the User Durable
-        // Object: a Durable Object holding a live reference to another one
-        // cannot be evicted while it does, and this registry is built to
-        // depend on neither presence nor residency. The outbox is durable, so
-        // the hand-off is not lost by being made from out here.
-        await deliverMachineResults(env, userId);
-        return receipt;
-      },
-      listMachines: async (userId) =>
-        decodeMachineListViewV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).listMachines({
-              schemaVersion: 1,
-              userId,
-            }),
-          ),
-        ),
-      revokeMachine: async (userId, machineId) =>
-        decodeMachineListViewV1(
-          rpcJsonSnapshot(
-            await userMachineStub(env, userId).revokeMachine({
-              schemaVersion: 1,
-              userId,
-              machineId,
-            }),
-          ),
-        ),
-      // The secret the gateway verifies a presented webhook key against. It
-      // never leaves the Worker; a Bot only ever sees a digest.
-      ...(typeof env.ROUTINE_HOOK_SECRET === "string"
-        ? { routineHookSecret: env.ROUTINE_HOOK_SECRET }
-        : {}),
-      deliverRoutineHook: async (userId, botId, delivery) =>
-        botStateStub(env, userId, botId).deliverRoutineHook({
+      ),
+    executeConnection: (userId, command) =>
+      userConfigurationStub(env, userId).executeConnection({
+        schemaVersion: 1,
+        userId,
+        command,
+      }),
+    lookupConnectionCommand: (userId, packageId, commandId) =>
+      userConfigurationStub(env, userId).lookupConnectionCommand({
+        schemaVersion: 1,
+        userId,
+        packageId,
+        commandId,
+      }),
+    listCompositionGenerations: async (userId, botId, query) =>
+      decodeCompositionGenerationListViewV1(
+        await botStateStub(env, userId, botId).listCompositionGenerations({
           schemaVersion: 1,
           userId,
           botId,
-          delivery,
+          query,
         }),
-      listRoutineRuns: async (userId, botId, routineId) =>
-        decodeRoutineRunListViewV1(
-          await botStateStub(env, userId, botId).listRoutineRuns({
+      ),
+    getCompositionGeneration: async (userId, botId, generationId) => {
+      const generation = await botStateStub(
+        env,
+        userId,
+        botId,
+      ).getCompositionGeneration({
+        schemaVersion: 1,
+        userId,
+        botId,
+        generationId,
+      });
+      return generation === undefined
+        ? undefined
+        : decodeCompositionGenerationViewV1(generation);
+    },
+    listTasks: async (userId, botId) =>
+      // Snapshotted first: a cross-object answer arrives as a live stub
+      // carrying `Symbol.dispose`, and an exact-keys decoder is right to
+      // refuse that.
+      decodeTaskListViewV1(
+        rpcJsonSnapshotV1(
+          await botStateStub(env, userId, botId).listTasks({
             schemaVersion: 1,
             userId,
             botId,
-            routineId,
           }),
         ),
-      readRoutineRun: async (userId, botId, routineId, runId) =>
-        decodeRoutineRunDetailViewV1(
-          await botStateStub(env, userId, botId).readRoutineRun({
+      ),
+    readTask: async (userId, botId, taskId) =>
+      decodeTaskViewV1(
+        rpcJsonSnapshotV1(
+          await botStateStub(env, userId, botId).readTask({
             schemaVersion: 1,
             userId,
             botId,
-            routineId,
-            runId,
+            taskId,
           }),
         ),
-      listRoutineInbox: async (userId, botId) =>
-        decodeRoutineInboxViewV1(
-          await botStateStub(env, userId, botId).listRoutineInbox({
+      ),
+    stopTask: async (userId, botId, taskId) =>
+      decodeTaskViewV1(
+        rpcJsonSnapshotV1(
+          await botStateStub(env, userId, botId).stopTask({
             schemaVersion: 1,
             userId,
             botId,
+            taskId,
           }),
         ),
-      executeRoutineInboxCommand: async (userId, botId, command) =>
-        decodeRoutineInboxReceiptV1(
-          await botStateStub(env, userId, botId).executeRoutineInboxCommand({
+      ),
+    listRoutines: async (userId, botId) =>
+      decodeRoutineListViewV1(
+        await botStateStub(env, userId, botId).listRoutines({
+          schemaVersion: 1,
+          userId,
+          botId,
+        }),
+      ),
+    executeRoutineCommand: async (userId, botId, command) =>
+      decodeRoutineCommandReceiptV1(
+        await botStateStub(env, userId, botId).executeRoutineCommand({
+          schemaVersion: 1,
+          userId,
+          botId,
+          command,
+        }),
+      ),
+    // The secret the gateway verifies a presented machine token or pairing
+    // code against, before any Durable Object is addressed. It never leaves
+    // the Worker: what crosses to the User object is the token's claims and
+    // its digest, never the token.
+    ...(typeof env.MACHINE_TOKEN_SECRET === "string"
+      ? { machineTokenSecret: env.MACHINE_TOKEN_SECRET }
+      : {}),
+    createMachinePairing: async (userId, request) =>
+      decodeMachinePairingOfferV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).createMachinePairing({
+            schemaVersion: 1,
+            userId,
+            ...(request.label === undefined ? {} : { label: request.label }),
+          }),
+        ),
+      ),
+    enrollMachine: async (userId, input) =>
+      decodeMachineEnrollmentReceiptV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).enrollMachine({
+            schemaVersion: 1,
+            userId,
+            machineId: input.machineId,
+            enrollment: input.enrollment,
+          }),
+        ),
+      ),
+    pollMachine: async (userId, call) =>
+      decodeMachinePollResultV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).pollMachine({
+            schemaVersion: 1,
+            userId,
+            machineId: call.machineId,
+            claims: call.claims,
+            tokenDigest: call.tokenDigest,
+            waitSeconds: call.waitSeconds,
+          }),
+        ),
+      ),
+    claimMachineCommand: async (userId, call) =>
+      decodeMachineClaimReceiptV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).claimMachineCommand({
+            schemaVersion: 1,
+            userId,
+            machineId: call.machineId,
+            commandId: call.commandId,
+            claims: call.claims,
+            tokenDigest: call.tokenDigest,
+          }),
+        ),
+      ),
+    recordMachineResult: async (userId, call) => {
+      const receipt = decodeMachineResultReceiptV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).recordMachineResult({
+            schemaVersion: 1,
+            userId,
+            machineId: call.machineId,
+            commandId: call.commandId,
+            claims: call.claims,
+            tokenDigest: call.tokenDigest,
+            result: call.result,
+          }),
+        ),
+      );
+      // The Bot that asked is told here rather than by the User Durable
+      // Object: a Durable Object holding a live reference to another one
+      // cannot be evicted while it does, and this registry is built to
+      // depend on neither presence nor residency. The outbox is durable, so
+      // the hand-off is not lost by being made from out here.
+      await deliverMachineResults(env, userId);
+      return receipt;
+    },
+    listMachines: async (userId) =>
+      decodeMachineListViewV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).listMachines({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      ),
+    revokeMachine: async (userId, machineId) =>
+      decodeMachineListViewV1(
+        rpcJsonSnapshot(
+          await userMachineStub(env, userId).revokeMachine({
+            schemaVersion: 1,
+            userId,
+            machineId,
+          }),
+        ),
+      ),
+    // The secret the gateway verifies a presented webhook key against. It
+    // never leaves the Worker; a Bot only ever sees a digest.
+    ...(typeof env.ROUTINE_HOOK_SECRET === "string"
+      ? { routineHookSecret: env.ROUTINE_HOOK_SECRET }
+      : {}),
+    deliverRoutineHook: async (userId, botId, delivery) =>
+      botStateStub(env, userId, botId).deliverRoutineHook({
+        schemaVersion: 1,
+        userId,
+        botId,
+        delivery,
+      }),
+    listRoutineRuns: async (userId, botId, routineId) =>
+      decodeRoutineRunListViewV1(
+        await botStateStub(env, userId, botId).listRoutineRuns({
+          schemaVersion: 1,
+          userId,
+          botId,
+          routineId,
+        }),
+      ),
+    readRoutineRun: async (userId, botId, routineId, runId) =>
+      decodeRoutineRunDetailViewV1(
+        await botStateStub(env, userId, botId).readRoutineRun({
+          schemaVersion: 1,
+          userId,
+          botId,
+          routineId,
+          runId,
+        }),
+      ),
+    listRoutineInbox: async (userId, botId) =>
+      decodeRoutineInboxViewV1(
+        await botStateStub(env, userId, botId).listRoutineInbox({
+          schemaVersion: 1,
+          userId,
+          botId,
+        }),
+      ),
+    executeRoutineInboxCommand: async (userId, botId, command) =>
+      decodeRoutineInboxReceiptV1(
+        await botStateStub(env, userId, botId).executeRoutineInboxCommand({
+          schemaVersion: 1,
+          userId,
+          botId,
+          command,
+        }),
+      ),
+    revertComposition: async (userId, botId, command) =>
+      decodeCompositionCommandReceiptV1(
+        await botStateStub(env, userId, botId).revertComposition({
+          schemaVersion: 1,
+          userId,
+          botId,
+          command,
+        }),
+      ),
+    updateSheep: async (userId, botId, command) =>
+      decodeFlockReceiptV1(
+        rpcJsonSnapshot(
+          await botStateStub(env, userId, botId).updateSheep({
             schemaVersion: 1,
             userId,
             botId,
             command,
           }),
         ),
-      revertComposition: async (userId, botId, command) =>
-        decodeCompositionCommandReceiptV1(
-          await botStateStub(env, userId, botId).revertComposition({
-            schemaVersion: 1,
-            userId,
-            botId,
-            command,
-          }),
-        ),
-      updateSheep: async (userId, botId, command) =>
-        decodeFlockReceiptV1(
-          rpcJsonSnapshot(
-            await botStateStub(env, userId, botId).updateSheep({
-              schemaVersion: 1,
-              userId,
-              botId,
-              command,
-            }),
-          ),
-        ),
-    }),
-);
+      ),
+  });
 
 /**
  * The last net under every entry point, for the rejections no boundary caught.

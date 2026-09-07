@@ -26,6 +26,7 @@
 //    record, the Shell's expiry alarm, the Shell's settlement — by calling the
 //    very factory `machine_exec` is built from. There is no second approval
 //    mechanism here, and there is deliberately no way to write one.
+import { packageAdmissionCeilingV1 } from "@frockbot/kernel-contracts";
 import {
   MACHINE_MESSAGES_LIMITS_V1,
   MachineDecodeError,
@@ -62,7 +63,7 @@ import {
   type ToolExecutionResult,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
-import manifest from "../frockbot.json" with { type: "json" };
+import { machineMessagesDefinitionV1 } from "./definition.js";
 
 export const MESSAGES_CHECK_PERMISSIONS_TOOL_V1 =
   "machine_messages_check_permissions";
@@ -91,26 +92,7 @@ export const MACHINE_MESSAGES_CAPABILITY_V1 = "machine-messages";
 export function machineMessagesAdmissionCeilingV1(
   capabilityId: string = MACHINE_MESSAGES_CAPABILITY_V1,
 ): readonly TurnTypeV1[] | undefined {
-  const capabilities = (
-    manifest as {
-      configuration?: {
-        capabilities?: Array<{
-          id: string;
-          admission?: { turnTypes: string[] };
-        }>;
-      };
-    }
-  ).configuration?.capabilities;
-  const turnTypes = capabilities?.find(
-    (candidate) => candidate.id === capabilityId,
-  )?.admission?.turnTypes;
-  if (!turnTypes) return undefined;
-  return turnTypes.map((turnType) =>
-    decodeTurnTypeV1(
-      turnType,
-      `machine-messages capability "${capabilityId}" admission`,
-    ),
-  );
+  return packageAdmissionCeilingV1(machineMessagesDefinitionV1, capabilityId);
 }
 
 /**

@@ -37,23 +37,89 @@ import {
   type ToolRegistration,
   type TurnTypeV1,
 } from "@frockbot/kernel-contracts";
-import { CompositionMountFailureError } from "@frockbot/kernel-composition/activation";
-import { canonicalJson, sha256 } from "@frockbot/kernel-composition/compiler";
-import type { CompositionMemberV1 } from "@frockbot/kernel-composition/generation";
+import { canonicalJson, sha256 } from "@frockbot/kernel-contracts";
+import { CompositionMountFailureError } from "./failure.ts";
 import {
-  decodeFrockBotManifest,
-  type ActiveContribution,
-  type ContributionHost,
-  type FrockBotManifest,
-  type PackageDescriptor,
-  type PreparedContribution,
-} from "@frockbot/kernel-composition";
+  PLUGIN_ACTIONS_V1,
+  type PluginActionV1,
+  type PluginDescriptorV1,
+  type PluginGrantV1,
+} from "./descriptor.ts";
 import {
   BOT_ISOLATE_MAIN_MODULE,
   BOT_ISOLATE_WRAPPER_SOURCE,
   BOT_ISOLATE_WRAPPER_VERSION,
   botIsolateModuleMap,
 } from "./isolate-wrapper.ts";
+
+/**
+ * What the host needs of a Composition member. Structural, so this package
+ * never imports the Durable Object that stores one.
+ */
+export interface BotIsolateMemberV1 {
+  packageId: string;
+  version: string;
+  artifact: { contentHash: string };
+  descriptor: PluginDescriptorV1;
+}
+
+/** What a mounted member holds until the Turn disposes it. */
+export interface ActiveContribution {
+  dispose(): Promise<void>;
+}
+
+export interface PreparedContribution {
+  commit(): Promise<ActiveContribution>;
+  rollback(): Promise<void>;
+}
+
+/**
+ * The grants a host actually implements, and the loop seam each action needs.
+ *
+ * `storage`, `files` and `computer` are names in the vocabulary with nothing
+ * behind them yet, and `memory.read`/`memory.write` have no loop seam. A
+ * member declaring one is refused at prepare rather than mounted into a
+ * surface that would silently do nothing.
+ */
+const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
+  "http",
+  "schedule",
+  "ai",
+  "memory",
+  "workspace",
+];
+
+/** Each action's loop seam. Absent ⇒ declared in the vocabulary, not yet open. */
+const PLUGIN_ACTION_HOOKS_V1: Partial<
+  Record<PluginActionV1, BotIsolateHookEventNameV1>
+> = {
+  "context.assemble": "system-prompt/assemble",
+  "tools.expose": "agent/tool-exposure",
+  "turn.terminate": "agent/turn-stopping",
+};
+
+/** `tool.call` is the one action that wraps both halves of a tool call. */
+const PLUGIN_TOOL_CALL_HOOKS_V1: readonly BotIsolateHookEventNameV1[] = [
+  "tools/pre-execute",
+  "tools/post-execute",
+];
+
+/** The loop hooks a descriptor's actions add, in vocabulary order. */
+export function pluginHookEventsV1(
+  actions: readonly PluginActionV1[],
+): BotIsolateHookEventNameV1[] {
+  const events: BotIsolateHookEventNameV1[] = [];
+  for (const action of PLUGIN_ACTIONS_V1) {
+    if (!actions.includes(action)) continue;
+    if (action === "tool.call") {
+      events.push(...PLUGIN_TOOL_CALL_HOOKS_V1);
+      continue;
+    }
+    const event = PLUGIN_ACTION_HOOKS_V1[action];
+    if (event) events.push(event);
+  }
+  return events;
+}
 
 /** The `WorkerCode` a Bot isolate is loaded from. Structurally the platform's. */
 export interface BotIsolateWorkerCode {
@@ -142,13 +208,16 @@ export const BOT_ISOLATE_DEFAULT_DEADLINE_MS = 15_000;
 export const BOT_ISOLATE_DEFAULT_HEALTH_DEADLINE_MS = 10_000;
 
 /**
- * The content address of what a Bot isolate mounts: the kernel wrapper text,
- * the Package artifact, and the digest of the Bot authority bindings it
- * is loaded with. A change to any of the three is a new isolate.
+ * The content address of what a Bot isolate mounts: the wrapper text, the
+ * Package artifact, the digest of the Bot authority bindings, and the grants
+ * baked into its `IDENTITY`. A change to any of them is a new isolate —
+ * grants included, because a loader id is served from cache and the `env` an
+ * isolate was first loaded with is the `env` it keeps.
  */
 export async function botIsolateModuleSetHashV1(
   artifactContentHash: string,
   bindingDigest: string,
+  grants: readonly PluginGrantV1[] = [],
 ): Promise<string> {
   return sha256(
     canonicalJson({
@@ -156,98 +225,9 @@ export async function botIsolateModuleSetHashV1(
       wrapperHash: await sha256(BOT_ISOLATE_WRAPPER_SOURCE),
       packageHash: artifactContentHash,
       bindingDigest,
+      grants: [...grants].sort(),
     }),
   );
-}
-
-/**
- * The durable ceiling a manifest puts on the turn types a Package's tools may
- * be admitted onto (manifest v4, `CapabilityDefinition.admission`). It is the
- * union over the Package's tool Capabilities, because a tool descriptor names
- * no Capability: a Package bounds its tools only when every tool Capability it
- * declares bounds them. Absent means the manifest set no bound.
- */
-export function botIsolateAdmissionCeilingV1(
-  manifest: FrockBotManifest,
-): readonly TurnTypeV1[] | undefined {
-  const capabilities = (manifest.configuration?.capabilities ?? []).filter(
-    (capability) => capability.kind === "tool",
-  );
-  if (
-    capabilities.length === 0 ||
-    capabilities.some((capability) => capability.admission === undefined)
-  ) {
-    return undefined;
-  }
-  const turnTypes = new Set<TurnTypeV1>();
-  for (const capability of capabilities) {
-    for (const turnType of capability.admission?.turnTypes ?? []) {
-      turnTypes.add(turnType);
-    }
-  }
-  return [...turnTypes];
-}
-
-/**
- * The same durable ceiling on the second dimension: the subagent roles a
- * Package's tools may be offered to. Union over the tool Capabilities, and
- * absent unless *every* one of them names roles — a Package bounds its tools
- * only when it has bounded all of them.
- */
-export function botIsolateSubagentRoleCeilingV1(
-  manifest: FrockBotManifest,
-): readonly string[] | undefined {
-  const capabilities = (manifest.configuration?.capabilities ?? []).filter(
-    (capability) => capability.kind === "tool",
-  );
-  if (
-    capabilities.length === 0 ||
-    capabilities.some(
-      (capability) => capability.admission?.subagentRoles === undefined,
-    )
-  ) {
-    return undefined;
-  }
-  const roles = new Set<string>();
-  for (const capability of capabilities) {
-    for (const role of capability.admission?.subagentRoles ?? []) {
-      roles.add(role);
-    }
-  }
-  return [...roles];
-}
-
-/**
- * A Composition member and its stored manifest projected onto the descriptor
- * a contribution host consumes. Hash and identity checks happen here so no
- * mount caller can replace the durable manifest with a synthesized one.
- */
-export async function botIsolatePackageDescriptorV1(
-  member: CompositionMemberV1,
-  storedManifest: unknown,
-): Promise<PackageDescriptor> {
-  const manifestHash = await sha256(canonicalJson(storedManifest));
-  if (manifestHash !== member.manifestHash) {
-    throw new Error(
-      `package "${member.packageId}" stored manifest failed hash verification`,
-    );
-  }
-  const manifest = decodeFrockBotManifest(storedManifest);
-  if (manifest.id !== member.packageId || manifest.version !== member.version) {
-    throw new Error(
-      `package "${member.packageId}" stored manifest does not match its Composition member`,
-    );
-  }
-  if (manifest.contributions.runtime?.host !== "bot-isolate") {
-    throw new Error(
-      `package "${member.packageId}" manifest declares no Bot isolate runtime`,
-    );
-  }
-  return {
-    specifier: member.specifier,
-    manifest,
-    ...(member.artifact ? { artifact: member.artifact } : {}),
-  };
 }
 
 function errorMessage(error: unknown): string {
@@ -255,26 +235,58 @@ function errorMessage(error: unknown): string {
 }
 
 /** Mounts an isolate Composition member and registers the tools it reports. */
-export class BotIsolateContributionHost implements ContributionHost {
-  readonly kind = "bot-isolate" as const;
+export class BotIsolateContributionHost {
   private readonly options: BotIsolateHostOptions;
 
   constructor(options: BotIsolateHostOptions) {
     this.options = options;
   }
 
-  async prepare(
-    pkg: PackageDescriptor,
-  ): Promise<PreparedContribution | undefined> {
-    const artifact = pkg.artifact;
-    if (!artifact) return undefined;
-    const packageId = pkg.manifest.id;
+  async prepare(member: BotIsolateMemberV1): Promise<PreparedContribution> {
+    const packageId = member.packageId;
+    const descriptor = member.descriptor;
+    if (descriptor.id !== packageId || descriptor.version !== member.version) {
+      throw new CompositionMountFailureError(
+        "resolve",
+        `package "${packageId}" descriptor does not match its Composition member`,
+      );
+    }
+    // A grant or action the vocabulary names but no host implements yet. The
+    // Memory seam opens when Memory becomes an app module (plan step 7); the
+    // rest wait on their own hosts. Refused here rather than mounted inert.
+    const closedGrants = descriptor.grants.filter(
+      (grant) => !OPEN_PLUGIN_GRANTS_V1.includes(grant),
+    );
+    if (closedGrants.length > 0) {
+      throw new CompositionMountFailureError(
+        "resolve",
+        `package "${packageId}" declares grants this deployment has not opened: ${closedGrants.join(", ")}`,
+      );
+    }
+    const closedActions = descriptor.actions.filter(
+      (action) =>
+        action !== "tool.call" && PLUGIN_ACTION_HOOKS_V1[action] === undefined,
+    );
+    if (closedActions.length > 0) {
+      throw new CompositionMountFailureError(
+        "resolve",
+        `package "${packageId}" declares actions with no loop seam yet: ${closedActions.join(", ")}`,
+      );
+    }
+    if (descriptor.slots && descriptor.slots.length > 0) {
+      throw new CompositionMountFailureError(
+        "resolve",
+        `package "${packageId}" declares slots, which open when the Flutter renderer lands`,
+      );
+    }
+    const artifact = member.artifact;
     const source = await this.loadSource(packageId, artifact.contentHash);
     const loaderId = isolateLoaderIdV1({
       userId: this.options.userId,
       artifactSetHash: await botIsolateModuleSetHashV1(
         artifact.contentHash,
         this.options.bindingDigest,
+        descriptor.grants,
       ),
     });
 
@@ -283,7 +295,12 @@ export class BotIsolateContributionHost implements ContributionHost {
     let health: IsolateHealthV1;
     let entrypoint: BotIsolateEntrypoint;
     try {
-      entrypoint = this.load(loaderId, packageId, source).getEntrypoint();
+      entrypoint = this.load(
+        loaderId,
+        packageId,
+        source,
+        descriptor.grants,
+      ).getEntrypoint();
       health = decodeIsolateHealthV1(
         await raceDeadline(
           () => entrypoint.health(),
@@ -319,9 +336,10 @@ export class BotIsolateContributionHost implements ContributionHost {
         [`reported:${health.packageId}`],
       );
     }
-    const declaredTools = (pkg.manifest.tools ?? [])
-      .map((tool) => tool.name)
-      .toSorted();
+    // The descriptor is the durable declaration; the isolate's health report
+    // is what the code actually offers. They have to agree exactly, or the
+    // catalog the model reads is not the catalog the Composition pinned.
+    const declaredTools = descriptor.tools.map((tool) => tool.name).toSorted();
     const reportedTools = health.tools.map((tool) => tool.name).toSorted();
     if (
       declaredTools.length !== reportedTools.length ||
@@ -329,14 +347,14 @@ export class BotIsolateContributionHost implements ContributionHost {
     ) {
       throw new CompositionMountFailureError(
         "health",
-        `package "${packageId}" isolate tools do not match its stored manifest`,
+        `package "${packageId}" isolate tools do not match its descriptor`,
         [
           `declared:${declaredTools.join(",")}`,
           `reported:${reportedTools.join(",")}`,
         ],
       );
     }
-    const declaredHooks = (pkg.manifest.hooks ?? []).toSorted();
+    const declaredHooks = pluginHookEventsV1(descriptor.actions).toSorted();
     const reportedHooks = (health.hooks ?? []).toSorted();
     if (
       declaredHooks.length !== reportedHooks.length ||
@@ -344,7 +362,7 @@ export class BotIsolateContributionHost implements ContributionHost {
     ) {
       throw new CompositionMountFailureError(
         "health",
-        `package "${packageId}" isolate hooks do not match its stored manifest`,
+        `package "${packageId}" isolate hooks do not match its declared actions`,
         [
           `declared:${declaredHooks.join(",")}`,
           `reported:${reportedHooks.join(",")}`,
@@ -355,21 +373,7 @@ export class BotIsolateContributionHost implements ContributionHost {
     let disposed = false;
     const registered: (() => void)[] = [];
     return {
-      kind: this.kind,
       commit: (): Promise<ActiveContribution> => {
-        // The manifest ceiling is applied at registration, so the catalog the
-        // model is offered and the call the loop admits cannot disagree.
-        const admissionCeiling = botIsolateAdmissionCeilingV1(pkg.manifest);
-        const subagentRoleCeiling = botIsolateSubagentRoleCeilingV1(
-          pkg.manifest,
-        );
-        const options =
-          admissionCeiling || subagentRoleCeiling
-            ? {
-                ...(admissionCeiling ? { admissionCeiling } : {}),
-                ...(subagentRoleCeiling ? { subagentRoleCeiling } : {}),
-              }
-            : undefined;
         registered.push(
           this.options.tools.registerNamespace({
             name: packageId,
@@ -389,11 +393,10 @@ export class BotIsolateContributionHost implements ContributionHost {
             status: "ready",
           }),
         );
-        for (const descriptor of health.tools) {
+        for (const tool of health.tools) {
           registered.push(
             this.options.tools.register(
-              this.definition(packageId, entrypoint, descriptor),
-              options,
+              this.definition(packageId, entrypoint, tool),
             ),
           );
         }
@@ -434,12 +437,15 @@ export class BotIsolateContributionHost implements ContributionHost {
     loaderId: string,
     packageId: string,
     source: string,
+    grants: readonly PluginGrantV1[],
   ): BotIsolateLoadedWorker {
     const limits = this.options.limits ?? BOT_ISOLATE_DEFAULT_LIMITS;
     const identity = {
+      userId: this.options.userId,
       botId: this.options.botId,
       generationId: this.options.generationId,
       packageId,
+      grants: [...grants],
     };
     return this.options.loader.get(loaderId, () =>
       Promise.resolve({
@@ -489,24 +495,6 @@ export class BotIsolateContributionHost implements ContributionHost {
     // Every hook lets the app's own policy run first and then offers the
     // Bot-authored code the result, fenced to this Bot and this generation.
     switch (event) {
-      case "agent/pre-step":
-        return hooks.add({
-          preStep: async (agent, inputs, turn, step, next) => {
-            const current = await next();
-            if (agent.botId !== this.options.botId) return current;
-            return this.invokeHook(
-              packageId,
-              entrypoint,
-              event,
-              {
-                step: this.stepSnapshot(agent, turn, step),
-                inputs: current.kind === "enter" ? current.inputs : inputs,
-                decision: current,
-              },
-              current,
-            );
-          },
-        });
       case "system-prompt/assemble":
         return hooks.add({
           assemblePrompt: async (context, next) => {
@@ -517,24 +505,6 @@ export class BotIsolateContributionHost implements ContributionHost {
               event,
               { context: structuredClone(context), assembly: current },
               current,
-            );
-          },
-        });
-      case "agent/message-window":
-        return hooks.add({
-          messageWindow: async (agent, _messages, turn, step, signal, next) => {
-            const current = await next();
-            if (agent.botId !== this.options.botId) return current;
-            return this.invokeHook(
-              packageId,
-              entrypoint,
-              event,
-              {
-                step: this.stepSnapshot(agent, turn, step),
-                messages: current,
-              },
-              current,
-              signal,
             );
           },
         });
@@ -601,28 +571,20 @@ export class BotIsolateContributionHost implements ContributionHost {
             );
           },
         });
-      case "agent/step-continuation":
+      case "agent/turn-stopping":
         return hooks.add({
-          stepContinuation: async (
-            agent,
-            _decision,
-            turn,
-            step,
-            signal,
-            next,
-          ) => {
-            const current = await next();
-            if (agent.botId !== this.options.botId) return current;
-            return this.invokeHook(
+          turnStopping: async (agent, turn) => {
+            if (agent.botId !== this.options.botId) return;
+            // A notification, not a waterfall: the isolate is told the Turn is
+            // settling and has nothing to replace. `invokeHook` still records
+            // a failure and returns, so a slow or broken plugin cannot hold up
+            // settlement.
+            await this.invokeHook(
               packageId,
               entrypoint,
               event,
-              {
-                step: this.stepSnapshot(agent, turn, step),
-                decision: current,
-              },
-              current,
-              signal,
+              { agent: this.agentSnapshot(agent), turn },
+              undefined,
             );
           },
         });

@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./definition": "./src/definition.ts",
     "./feature": "./src/feature.ts",
-    "./manifest": "./src/manifest.ts",
+    "./package.json": "./package.json",
     "./pages": "./src/pages.ts",
-    "./root": "./src/root.ts",
-    "./package.json": "./package.json"
+    "./root": "./src/root.ts"
   },
   "scripts": {
     "test": "bun test src",

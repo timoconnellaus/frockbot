@@ -7,16 +7,11 @@
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
     "./computer": "./src/computer.ts",
-    "./frockbot.json": "./frockbot.json",
     "./host-client": "./src/host-client.ts",
-    "./manifest": "./src/manifest.ts",
     "./package.json": "./package.json",
     "./provider": "./src/provider.ts",
     "./sync": "./src/sync.ts",
     "./workspace": "./src/workspace.ts"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
   },
   "scripts": {
     "test": "bun test src",

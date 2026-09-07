@@ -7,8 +7,7 @@
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
     "./backend": "./src/backend.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./manifest": "./src/manifest.ts",
+    "./definition": "./src/definition.ts",
     "./models": "./src/models.ts",
     "./package.json": "./package.json",
     "./quota": "./src/quota.ts",
@@ -18,9 +17,6 @@
     "./storage-keys": "./src/storage-keys.ts",
     "./store": "./src/store.ts",
     "./testing": "./src/testing.ts"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
   },
   "scripts": {
     "test": "bun test src",

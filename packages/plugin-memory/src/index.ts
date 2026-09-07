@@ -5,7 +5,6 @@ export * from "./documents.js";
 export * from "./embeddings.js";
 export * from "./facts.js";
 export * from "./indexer.js";
-export { default as memoryManifest } from "./manifest.js";
 export * from "./projects.js";
 export * from "./render.js";
 export * from "./roots.js";

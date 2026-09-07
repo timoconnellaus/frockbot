@@ -5,7 +5,6 @@ import {
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateScheduleRequestV1,
-  decodeIsolateToolRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
   decodeIsolateWorkspacePathV1,
@@ -17,7 +16,7 @@ import {
   type IsolateConnectionOutcomeV1,
   type IsolateConnectionV1,
   type IsolateMemoryOutcomeV1,
-  type IsolateToolOutcomeV1,
+  type IsolateScheduleOutcomeV1,
   type IsolateWorkspaceOutcomeV1,
   type PersistSessionEvents,
   type SessionEvent,
@@ -32,11 +31,7 @@ import {
   type TurnTypeV1,
   type WorkspaceFilesV1,
 } from "@frockbot/kernel-contracts";
-import {
-  decodeFrockBotManifest,
-  type FrockBotManifest,
-} from "@frockbot/kernel-composition";
-import { canonicalJson, sha256 } from "@frockbot/kernel-composition/compiler";
+import { canonicalJson, sha256 } from "@frockbot/kernel-contracts";
 import type { ComputerRegistry } from "@frockbot/computer-core";
 import {
   appletSourceFilePathV1,
@@ -76,7 +71,9 @@ import {
   type CredentialLeaseV1,
 } from "@frockbot/connection-core";
 import {
-  compileFoundationApplication,
+  FOUNDATION_PACKAGES_V1,
+  FOUNDATION_PACKAGE_VERSION_V1,
+  foundationPackageV1,
   createFoundationModelRuntimePackage,
 } from "@frockbot/application-foundation/runtime";
 import {
@@ -132,7 +129,6 @@ import {
   type ShellAppletMountOptions,
   type ShellIsolateMountOptions,
   type ShellMountedComposition,
-  resolveDeploymentCompositionV1,
 } from "./backend-composition.js";
 import {
   createAppletCapabilityHostV1,
@@ -159,7 +155,7 @@ import {
   type CompositionFailureV1,
   type CompositionMountHost,
   type CompositionQuarantineV1,
-} from "@frockbot/kernel-composition/activation";
+} from "@frockbot/kernel-do";
 import {
   createBotComputerSyncHost,
   declaredPackageRootsV1,
@@ -359,7 +355,7 @@ import type { BotIsolateLoader } from "@frockbot/compose-frockbot";
 import type {
   CompositionGenerationV1,
   CompositionMemberV1,
-} from "@frockbot/kernel-composition/generation";
+} from "@frockbot/kernel-do";
 import {
   projectCompositionGenerationV1,
   projectFirstPartyPackageIframeV1,
@@ -580,7 +576,6 @@ export type CreateBotDurableAuthority = <Snapshot>(
 export interface ShellBotBackendHost {
   state: DurableObjectState;
   env: BotStateEnv;
-  compileApplication?: typeof compileFoundationApplication;
   assertLifecycleActive?(
     storage: DurableObjectTransaction,
     botId: string,
@@ -634,10 +629,25 @@ export function requirePackageUiToolDeclarationV1(
   return contribution;
 }
 
+/**
+ * The deployment's Packages in the shape the configuration resolvers read.
+ *
+ * A first-party Package's version is the deploy, so every row carries the one
+ * deployment version rather than a version of its own.
+ */
+function executionPackagesV1() {
+  return FOUNDATION_PACKAGES_V1.map((pkg) => ({
+    packageId: pkg.id,
+    version: FOUNDATION_PACKAGE_VERSION_V1,
+    settings: [...(pkg.settings ?? [])],
+    capabilities: [...(pkg.capabilities ?? [])],
+    connectionTypes: [...(pkg.connectionTypes ?? [])],
+  }));
+}
+
 export class ShellBotBackendContribution {
   readonly ctx: DurableObjectState;
   readonly env: BotStateEnv;
-  private readonly compileApplication: typeof compileFoundationApplication;
   private readonly lifecycleAdmission?: ShellBotBackendHost["assertLifecycleActive"];
   private readonly outboundFetch?: typeof fetch;
   private readonly configurationActivities = new Map<
@@ -698,8 +708,6 @@ export class ShellBotBackendContribution {
   constructor(host: ShellBotBackendHost) {
     this.ctx = host.state;
     this.env = host.env;
-    this.compileApplication =
-      host.compileApplication ?? compileFoundationApplication;
     this.lifecycleAdmission = host.assertLifecycleActive;
     this.outboundFetch = host.outboundFetch;
     this.invalidateComputerProjectionFile =
@@ -867,18 +875,11 @@ export class ShellBotBackendContribution {
     let packageValues: Record<string, unknown> | undefined;
     let packageUnset: string[] | undefined;
     if (command.type === "bot/set-package-settings") {
-      const [user, application] = await Promise.all([
-        this.userConfiguration(identity).readConfiguration({
-          schemaVersion: 1,
-          userId: identity.userId,
-        }),
-        this.compileApplication(),
-      ]);
-      const packages = application.packages.map((pkg) => ({
-        packageId: pkg.id,
-        version: pkg.version,
-        settings: pkg.manifest.configuration?.settings ?? [],
-      }));
+      const user = await this.userConfiguration(identity).readConfiguration({
+        schemaVersion: 1,
+        userId: identity.userId,
+      });
+      const packages = executionPackagesV1();
       if (command.values) {
         packageValues = decodeInstalledPackageSettingsPatchV1({
           packageId: command.packageId,
@@ -1132,9 +1133,8 @@ export class ShellBotBackendContribution {
     // Before the authority reads the session log, so a compaction detached
     // from the previous Turn has already handed the log back.
     await yieldCompactionWorkV1(command.sessionId);
-    // Before admission, so the pin this Turn takes already carries whatever the
-    // deployment ships and whatever the User's Applet directory says now.
-    await this.followDeploymentComposition();
+    // Before admission, so the pin this Turn takes already carries whatever
+    // the User's Applet directory says now.
     await this.resolveAppletComposition(
       { userId: command.userId, botId: command.botId },
       command,
@@ -1149,7 +1149,6 @@ export class ShellBotBackendContribution {
     await this.validateIdentity(identity);
     const catalog = await this.listPackageUi(identity);
     const contribution = requirePackageUiToolDeclarationV1(catalog, command);
-    await this.followDeploymentComposition();
     return projectClientTurnV1(
       await this.authority.run({
         ...identity,
@@ -1203,45 +1202,6 @@ export class ShellBotBackendContribution {
       );
     }
     return { schemaVersion: 1, skills: entries };
-  }
-
-  /**
-   * The manifest a mount is handed. Every mount re-verifies the hash
-   * (`botIsolatePackageDescriptorV1`), so the plan's manifest is accepted only
-   * when it hashes to exactly what the generation recorded.
-   */
-  private readCompositionMemberManifestDocument(
-    member: CompositionMemberV1,
-  ): Promise<unknown | undefined> {
-    return this.readCompositionMemberManifest(member);
-  }
-
-  /** The manifest of an artifact-backed member the application declared. */
-  private async readCompositionMemberManifest(
-    member: CompositionMemberV1,
-  ): Promise<FrockBotManifest | undefined> {
-    if (!member.artifact) return undefined;
-    const application = await this.compileApplication();
-    const declared = application.packages.find(
-      (candidate) => candidate.id === member.packageId,
-    );
-    if (!declared) return undefined;
-    const hash = await sha256(canonicalJson(declared.manifest));
-    if (hash !== member.manifestHash) return undefined;
-    return declared.manifest;
-  }
-
-  /** The stored manifest document a mount hashes, or a modelled failure. */
-  private async requireCompositionMemberManifestDocument(
-    member: CompositionMemberV1,
-  ): Promise<unknown> {
-    const document = await this.readCompositionMemberManifestDocument(member);
-    if (document === undefined) {
-      throw new Error(
-        `package "${member.packageId}" manifest "${member.manifestHash}" is unavailable`,
-      );
-    }
-    return document;
   }
 
   /** The first-party page registry, as inert iframe metadata for one Bot. */
@@ -1801,8 +1761,6 @@ export class ShellBotBackendContribution {
       turnId: turn.runId,
       loader,
       artifacts: createR2PackageArtifactStore(artifacts),
-      manifestFor: (member) =>
-        this.requireCompositionMemberManifestDocument(member),
       capabilitiesFor: (member) =>
         mintCapabilities({
           props: {
@@ -1842,13 +1800,10 @@ export class ShellBotBackendContribution {
     memory: boolean;
     workspace: boolean;
   }> {
-    const [user, application] = await Promise.all([
-      this.userConfiguration(identity).readConfiguration({
-        schemaVersion: 1,
-        userId: identity.userId,
-      }),
-      this.compileApplication(),
-    ]);
+    const user = await this.userConfiguration(identity).readConfiguration({
+      schemaVersion: 1,
+      userId: identity.userId,
+    });
     const connections = user.connections.flatMap((connection) =>
       connection.state === "ready" && connection.generation
         ? [
@@ -1866,13 +1821,7 @@ export class ShellBotBackendContribution {
     const effective = resolveEffectiveBotModelV1({
       bot: settings,
       user,
-      packages: application.packages.map((pkg) => ({
-        packageId: pkg.id,
-        version: pkg.version,
-        settings: pkg.manifest.configuration?.settings ?? [],
-        capabilities: pkg.manifest.configuration?.capabilities ?? [],
-        connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-      })),
+      packages: executionPackagesV1(),
     });
     const binding = effective.binding;
     const model =
@@ -1949,7 +1898,14 @@ export class ShellBotBackendContribution {
     ).invokeModel(input.request);
   }
 
-  async isolateInvokeTool(input: {
+  /**
+   * The Bot's own tool dispatch, reached only by the `schedule` grant.
+   *
+   * Calling the Bot's tools is not a grant a plugin may name, so this is
+   * private: `routine_manage` is the one tool a granted plugin reaches, and it
+   * reaches it through `isolateSchedule`.
+   */
+  private async invokeBotToolForIsolateV1(input: {
     userId: string;
     botId: string;
     runId: string;
@@ -1957,9 +1913,9 @@ export class ShellBotBackendContribution {
     turnId: string;
     packageId: string;
     generationId: string;
-    request: unknown;
-  }): Promise<IsolateToolOutcomeV1> {
-    const request = decodeIsolateToolRequestV1(input.request);
+    request: { callId: string; name: string; input: unknown };
+  }): Promise<IsolateScheduleOutcomeV1> {
+    const request = input.request;
     const active = this.activeIsolateTurn(input);
     if (!active) {
       return {
@@ -2442,44 +2398,6 @@ export class ShellBotBackendContribution {
   }
 
   /**
-   * Bring this Bot's built-in members up to the deployment before a Turn is
-   * admitted, so a release that changed a first-party manifest or artifact is
-   * a new generation rather than a Bot that cannot mount (2026-09-05, when
-   * every Bot failed every Turn after the Applets list page changed). Outside
-   * the admission transaction like the Applet resolve below; a failure here
-   * leaves the Bot on the generation it has and is visible where that
-   * generation fails to mount.
-   */
-  private async followDeploymentComposition(): Promise<void> {
-    try {
-      // A Bot with nothing pinned yet bootstraps from this deployment when
-      // its first Turn is admitted; reading the current generation here would
-      // materialize that bootstrap early, and a refused command must leave
-      // storage exactly as it found it.
-      if (
-        (await this.ctx.storage.get<unknown>(COMPOSITION_CURRENT_KEY)) ===
-        undefined
-      )
-        return;
-      await resolveDeploymentCompositionV1({
-        plan: await this.compileApplication(),
-        composition: {
-          current: () => this.authority.composition.current(),
-          propose: (generation, options) =>
-            this.authority.composition.propose(generation, options),
-        },
-      });
-    } catch (error) {
-      // Never a wedged Turn on its own. It is logged rather than swallowed
-      // because the mount records only that the generation failed, not that
-      // the Bot was refused the generation that would have fixed it: a refused
-      // proposal here is silent, permanent, and indistinguishable from a Bot
-      // that simply has nothing new to follow.
-      console.error("failed to follow the deployment's Composition", error);
-    }
-  }
-
-  /**
    * Resolve the User's Applet directory into this Bot's next Composition
    * generation, before a Turn is admitted.
    *
@@ -2656,9 +2574,9 @@ export class ShellBotBackendContribution {
 
   async isolateSchedule(
     input: IsolateCallScopeV1,
-  ): Promise<IsolateToolOutcomeV1> {
+  ): Promise<IsolateScheduleOutcomeV1> {
     const request = decodeIsolateScheduleRequestV1(input.request);
-    return this.isolateInvokeTool({
+    return this.invokeBotToolForIsolateV1({
       ...input,
       request: {
         callId: request.callId,
@@ -2840,12 +2758,9 @@ export class ShellBotBackendContribution {
     };
   }
 
-  /** The first-party generation this Bot starts on, from the compiled application. */
+  /** The generation this Bot starts on: empty until it installs or authors. */
   private async bootstrapComposition() {
-    return bootstrapCompositionGeneration(
-      await this.compileApplication(),
-      new Date().toISOString(),
-    );
+    return bootstrapCompositionGeneration(new Date().toISOString());
   }
 
   private async resolveAdmissionSnapshot(
@@ -2997,7 +2912,6 @@ export class ShellBotBackendContribution {
     fire: RoutineFireV1,
   ): Promise<RoutineFireOutcomeV1> {
     try {
-      await this.followDeploymentComposition();
       await this.authority.run(
         routineTurnCommandV1(identity, fire, new Date().toISOString()),
       );
@@ -3933,7 +3847,6 @@ export class ShellBotBackendContribution {
       await this.ctx.storage.put(key, { ...context, status: "running" });
       let outcome: TaskOutcomeV1;
       try {
-        await this.followDeploymentComposition();
         await this.authority.run({
           ...identity,
           runId: context.taskId,
@@ -4105,25 +4018,18 @@ export class ShellBotBackendContribution {
       schemaVersion: 1,
       userId: identity.userId,
     });
-    const application = await this.compileApplication();
-    const packageDefinitions = application.packages.map((pkg) => ({
-      packageId: pkg.id,
-      version: pkg.version,
-      settings: pkg.manifest.configuration?.settings ?? [],
-      capabilities: pkg.manifest.configuration?.capabilities ?? [],
-      connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-    }));
+    const packageDefinitions = executionPackagesV1();
     const plan = resolveBotExecutionPlanV1({
       bot: settings,
       user,
       packages: packageDefinitions,
     });
     // The durable roots this User's enabled Packages declare, read from the
-    // same installations and the same compiled manifests the Composition is
-    // resolved from. Handed to the Computer sync below; nothing else reads it.
+    // same installations the Composition is resolved from. Handed to the
+    // Computer sync below; nothing else reads it.
     const packageRoots = declaredPackageRootsV1({
       installations: user.packages,
-      packages: application.packages,
+      packages: FOUNDATION_PACKAGES_V1,
     });
     const readSecret = (name: string) => {
       // SAFETY: Worker secrets are dynamic string bindings not enumerable in Env.
@@ -4163,13 +4069,9 @@ export class ShellBotBackendContribution {
       const installation = user.packages.find(
         (candidate) => candidate.packageId === packageId,
       );
-      const declared = application.packages.find(
-        (candidate) =>
-          candidate.id === packageId &&
-          candidate.version === installation?.version,
-      );
+      const declared = foundationPackageV1(packageId);
       return resolvePackageSettingValuesV1(
-        declared?.manifest.configuration?.settings ?? [],
+        [...(declared?.settings ?? [])],
         installation?.values,
       );
     };
@@ -4183,7 +4085,7 @@ export class ShellBotBackendContribution {
         ),
       );
     // The `image.model` Package setting, already checked against the enum the
-    // Image Package's manifest declares.
+    // Image Package's definition declares.
     const configuredImageModel = packageSettings("image").model;
     // Row 57g. Resolved before the Composition is built, because the answer
     // decides whether a Package is mounted at all: a feature gate that let the
@@ -4200,7 +4102,7 @@ export class ShellBotBackendContribution {
     // and the prompt section both read it lazily, from inside the Turn.
     const subagentModels: SubagentModelOptionV1[] = [];
     const resolvedAgentPackages: FoundationAgentPackage[] = [
-      ...createFoundationHostedRuntimePackages(application, {
+      ...createFoundationHostedRuntimePackages({
         userId: identity.userId,
         readSecret,
         ...(turn
@@ -4425,7 +4327,7 @@ export class ShellBotBackendContribution {
             }
           : {}),
       }),
-      ...(await createFoundationEnabledRuntimePackages(application, plan, {
+      ...(await createFoundationEnabledRuntimePackages(plan, {
         userId: identity.userId,
         readSecret,
         authorizeConnection: authorizeEnabledConnection,
@@ -4515,7 +4417,7 @@ export class ShellBotBackendContribution {
     }
     const bindingPackageId = binding.packageId;
     agentPackages.push(
-      createFoundationModelRuntimePackage(application, binding, {
+      createFoundationModelRuntimePackage(binding, {
         accountId: identity.userId,
         connectionId: binding.connection.connectionId,
         leaseCredential: (
@@ -6055,17 +5957,10 @@ export class ShellBotBackendContribution {
       schemaVersion: 1,
       userId: identity.userId,
     });
-    const application = await this.compileApplication();
     const plan = resolveBotExecutionPlanV1({
       bot: settings,
       user,
-      packages: application.packages.map((pkg) => ({
-        packageId: pkg.id,
-        version: pkg.version,
-        settings: pkg.manifest.configuration?.settings ?? [],
-        capabilities: pkg.manifest.configuration?.capabilities ?? [],
-        connectionTypes: pkg.manifest.configuration?.connectionTypes ?? [],
-      })),
+      packages: executionPackagesV1(),
     });
     return { settings, user, plan };
   }

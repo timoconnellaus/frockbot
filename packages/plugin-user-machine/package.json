@@ -10,12 +10,11 @@
     "./backend": "./src/backend.ts",
     "./client": "./src/client/index.ts",
     "./client/state": "./src/client/state.ts",
+    "./definition": "./src/definition.ts",
     "./delivery": "./src/delivery.ts",
     "./device": "./src/device.ts",
     "./device-runner": "./src/device-runner.ts",
-    "./frockbot.json": "./frockbot.json",
     "./intent": "./src/intent.ts",
-    "./manifest": "./src/manifest.ts",
     "./package.json": "./package.json",
     "./pairing": "./src/pairing.ts",
     "./storage-keys": "./src/storage-keys.ts",
@@ -23,9 +22,6 @@
     "./target": "./src/target.ts",
     "./testing": "./src/testing.ts",
     "./user": "./src/user.ts"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
   },
   "scripts": {
     "test": "bun test src",

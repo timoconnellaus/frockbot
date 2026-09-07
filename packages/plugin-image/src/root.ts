@@ -1,6 +1,6 @@
 // Where a generated image lives, and why there.
 //
-// The durable Workspace, under a root this Package's manifest declares:
+// The durable Workspace, under a root this Package's definition declares:
 // `{kind: "package-declared", userId, packageId: "image", rootId: "generated"}`
 // (`kernel-contracts/src/workspace.ts`). Object storage backs it, every write
 // records its writer and produces a generation, and the durable-root sync
@@ -24,7 +24,7 @@ import {
   type WorkspaceRootV1,
 } from "@frockbot/kernel-contracts";
 
-/** The Package id the declared root belongs to. Matches `frockbot.json`. */
+/** The Package id the declared root belongs to. Matches `./definition.ts`. */
 export const IMAGE_PACKAGE_ID_V1 = "image";
 /** The declared root generated images are written under. */
 export const IMAGE_GENERATED_ROOT_ID_V1 = "generated";

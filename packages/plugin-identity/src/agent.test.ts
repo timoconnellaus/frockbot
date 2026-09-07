@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  createAgentRuntimeHarness,
-  verifyPluginPackage,
-} from "@frockbot/plugin-testkit";
-import manifest from "../frockbot.json" with { type: "json" };
-import packageJson from "../package.json" with { type: "json" };
+import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
 import { createIdentityFeature, DEFAULT_IDENTITY_TEXT } from "./agent.js";
 
 const assemblyContext = {
@@ -48,12 +43,5 @@ describe("identity feature", () => {
       (await runtime.systemPrompt.assemble(assemblyContext)).sections,
     ).toContainEqual({ id: "persona", text: "You are a test bot." });
     await runtime.dispose();
-  });
-
-  test("satisfies plugin package conventions", () => {
-    expect(verifyPluginPackage({ packageJson, manifest })).toMatchObject({
-      name: "@frockbot/plugin-identity",
-      contributionKinds: ["runtime"],
-    });
   });
 });

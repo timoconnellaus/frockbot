@@ -9,7 +9,6 @@ import type {
   IsolateMemoryOutcomeV1,
   IsolateModelOutcomeV1,
   IsolateScheduleOutcomeV1,
-  IsolateToolOutcomeV1,
   IsolateWorkspaceOutcomeV1,
 } from "@frockbot/kernel-contracts";
 import {
@@ -18,7 +17,6 @@ import {
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateModelInvocationV1,
   decodeIsolateScheduleRequestV1,
-  decodeIsolateToolRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
   decodeIsolateWorkspacePathV1,
@@ -46,7 +44,6 @@ export interface BotCapabilitiesEnv {
 
 interface BotIsolateRpc {
   isolateInvokeModel(input: unknown): Promise<unknown>;
-  isolateInvokeTool(input: unknown): Promise<IsolateToolOutcomeV1>;
   isolateMemoryRead(input: unknown): Promise<IsolateMemoryOutcomeV1>;
   isolateMemoryWrite(input: unknown): Promise<IsolateMemoryOutcomeV1>;
   isolateMemoryForget(input: unknown): Promise<IsolateMemoryOutcomeV1>;
@@ -91,7 +88,6 @@ export class BotCapabilities extends WorkerEntrypoint<
           status: "available",
           connections: this.ctx.props.connections,
           ...(this.ctx.props.model ? { model: this.ctx.props.model } : {}),
-          tools: true,
           memory: this.ctx.props.memory,
           workspace: this.ctx.props.workspace,
           schedule: true,
@@ -129,16 +125,6 @@ export class BotCapabilities extends WorkerEntrypoint<
       );
     } catch {
       return unavailable("the model request could not be served");
-    }
-  }
-
-  async invokeTool(request: unknown): Promise<IsolateToolOutcomeV1> {
-    try {
-      return await this.rpc.isolateInvokeTool(
-        this.scope(decodeIsolateToolRequestV1(request)),
-      );
-    } catch {
-      return unavailable("the tool request could not be served");
     }
   }
 

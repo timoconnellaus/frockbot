@@ -5,4 +5,6 @@
 // loads it: the Composition member's content-addressed artifact, the generated
 // wrapper that narrows the capability stub into the `ctx` a Package author
 // writes against, and the tool registrations its health report declares.
+export * from "./descriptor.ts";
+export * from "./failure.ts";
 export * from "./isolate-host.ts";

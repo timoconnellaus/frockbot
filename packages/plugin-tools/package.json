@@ -6,12 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent": "./src/tools.ts",
-    "./manifest": "./src/manifest.ts",
-    "./frockbot.json": "./frockbot.json",
     "./package.json": "./package.json"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"

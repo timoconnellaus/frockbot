@@ -1,34 +1,15 @@
 /**
- * The foundation application's Contribution table.
+ * The foundation application's backend Contribution list.
  *
- * This is the one module in the application that knows which first-party
- * Package implements which Contribution specifier. Every other module —
- * `runtime.ts`, `user.ts`, `client.ts`, and the Bot Durable Object in
- * `apps/cloudflare` — iterates the compiled {@link ApplicationPlan} and looks
- * the specifier the *manifest* declares up in here. Nothing branches on a
- * Package's identity to find its code, which is what `AGENTS.md` requires:
+ * Ordinary imports, mounted in the order they are listed. A Contribution that
+ * needs an earlier one names the table entry it imported, never a specifier
+ * string.
  *
- * > Every Contribution kind is resolved from the manifest and an artifact,
- * > never from a switch over Package identity.
- *
- * A member of the plan that carries an `artifact` is not in this table at all:
- * it loads through `packages/compose-frockbot/src/isolate-host.ts` like any
- * Bot-authored Package. No member carries one today, and
- * {@link assertFoundationBackendContributionsResolvable} is where a member
- * that is neither artifact-backed nor in the table becomes a compile error of
- * the application.
- *
- * The client half of the table lives in `./client-contributions.ts`, which
- * this module deliberately does not import: a client Contribution is React in
- * the browser bundle, and the backend table is server code in the Worker
- * bundle. Importing either from the other would put each in the other's
- * bundle. The two halves together cover every Contribution the application
- * declares.
+ * The client half lives in `./client-contributions.ts`, which this module
+ * deliberately does not import: a client Contribution is React in the browser
+ * bundle, and the backend table is server code in the Worker bundle.
+ * Importing either from the other would put each in the other's bundle.
  */
-import type {
-  ApplicationPlan,
-  CompiledPackage,
-} from "@frockbot/kernel-composition/compiler";
 import type {
   BackendContributionDescriptorV1,
   ContributionLifecycleV1,
@@ -290,7 +271,7 @@ export function createFoundationMountedContributionsV1(): FoundationMountedContr
  * "Cannot access 'shellBotContribution' before initialization". Deferring the
  * read to the first call makes the cycle unobservable from either direction.
  */
-function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
+export function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
   return [
     adminGatewayContribution,
     auditGatewayContribution,
@@ -317,121 +298,20 @@ function backendDescriptorsV1(): readonly AnyBackendDescriptor[] {
   ] as AnyBackendDescriptor[];
 }
 
-let table: ReadonlyMap<string, AnyBackendDescriptor> | undefined;
-
-/**
- * The table: Contribution specifier to the first-party descriptor that
- * implements it.
- *
- * Built on first use rather than at module evaluation. `plugin-shell/backend`
- * imports this application's runtime for the model and Composition seams, so
- * the module graph has a cycle; reading the descriptor bindings when the table
- * is first asked for, instead of while the modules are still initializing,
- * makes the cycle unobservable.
- */
-export function foundationBackendContributions(): ReadonlyMap<
-  string,
-  AnyBackendDescriptor
-> {
-  if (!table) {
-    const built = new Map<string, AnyBackendDescriptor>();
-    for (const descriptor of backendDescriptorsV1()) {
-      if (built.has(descriptor.specifier)) {
-        throw new Error(
-          `duplicate foundation Contribution descriptor: ${descriptor.specifier}`,
-        );
-      }
-      built.set(descriptor.specifier, descriptor);
-    }
-    table = built;
-  }
-  return table;
-}
-
-/** The Contribution specifier a manifest entry names, in package terms. */
-export function contributionSpecifierV1(
-  specifier: string,
-  entry: string,
-): string {
-  return `${specifier}${entry.slice(1)}`;
-}
-
-interface PlannedBackendContribution {
-  pkg: CompiledPackage;
-  specifier: string;
-  host: "gateway" | "bot" | "user";
-  /** Present ⇒ the member loads through the isolate host, not the table. */
-  artifactBacked: boolean;
-}
-
-/** Every backend Contribution the plan declares, in plan order. */
-export function plannedFoundationBackendContributions(
-  plan: ApplicationPlan,
-): PlannedBackendContribution[] {
-  const declared = new Set(plan.contributions.backend);
-  const planned: PlannedBackendContribution[] = [];
-  for (const pkg of plan.packages) {
-    if (!declared.has(pkg.id)) continue;
-    for (const backend of pkg.manifest.contributions.backend ?? []) {
-      planned.push({
-        pkg,
-        specifier: contributionSpecifierV1(pkg.specifier, backend.entry),
-        host: backend.host,
-        artifactBacked: pkg.artifact !== undefined,
-      });
-    }
-  }
-  return planned;
-}
-
-/**
- * Fail the application's compilation when a member reaches neither the table
- * nor an artifact.
- *
- * This is the whole point of the table: a plan that names a Contribution the
- * application cannot resolve is a broken application, and it says so once,
- * where the plan is compiled, rather than at the moment some request happens
- * to reach that Contribution's route.
- */
-export function assertFoundationBackendContributionsResolvable(
-  plan: ApplicationPlan,
-): void {
-  const contributions = foundationBackendContributions();
-  for (const planned of plannedFoundationBackendContributions(plan)) {
-    if (planned.artifactBacked) continue;
-    const descriptor = contributions.get(planned.specifier);
-    if (!descriptor) {
-      throw new Error(
-        `foundation Contribution "${planned.specifier}" is neither in the application's Contribution table nor artifact-backed`,
-      );
-    }
-    if (descriptor.host !== planned.host) {
-      throw new Error(
-        `foundation Contribution "${planned.specifier}" is declared for the ${planned.host} host but its descriptor is a ${descriptor.host} Contribution`,
-      );
-    }
-  }
-}
-
-/** Mount every declared backend Contribution, in plan order. */
+/** Mount every backend Contribution for one host, in table order. */
 export async function createFoundationBackendContributions(
-  plan: ApplicationPlan,
   host: FoundationGatewayHost,
 ): Promise<MountedFoundationBackend<BackendRouteContribution>>;
 export async function createFoundationBackendContributions<T>(
-  plan: ApplicationPlan,
   host: FoundationBackendPluginHost<T>,
 ): Promise<MountedFoundationBackend<T>>;
 export async function createFoundationBackendContributions<T>(
-  plan: ApplicationPlan,
   host: FoundationUserBackendHostV1,
 ): Promise<MountedFoundationBackend<T>>;
 export async function createFoundationBackendContributions<T>(
-  plan: ApplicationPlan,
   host: FoundationBotBackendHostV1,
 ): Promise<MountedFoundationBackend<T>>;
 export async function createFoundationBackendContributions<T>(
-  plan: ApplicationPlan,
   host:
     | FoundationGatewayHost
     | FoundationBackendPluginHost<T>
@@ -443,7 +323,6 @@ export async function createFoundationBackendContributions<T>(
   const mountedByDescriptor =
     ("mountedContributions" in host && host.mountedContributions) ||
     createFoundationMountedContributionsV1();
-  const table = foundationBackendContributions();
   const lifecycle: BackendContributionLifecycle<BackendRouteContribution | T> =
     {
       mount(contribution: BackendRouteContribution | T) {
@@ -461,21 +340,12 @@ export async function createFoundationBackendContributions<T>(
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   };
   try {
-    for (const planned of plannedFoundationBackendContributions(plan)) {
-      if (planned.host !== host.backendHost) continue;
+    for (const descriptor of backendDescriptorsV1()) {
+      if (descriptor.host !== host.backendHost) continue;
       let cleanup: void | RuntimeCleanupV1;
       if ("resolve" in host) {
-        cleanup = await host.resolve(planned.specifier, lifecycle);
+        cleanup = await host.resolve(descriptor.specifier, lifecycle);
       } else {
-        // An artifact-backed member never reaches the table: it loads through
-        // the isolate host, exactly as a Bot-authored Package does.
-        if (planned.artifactBacked) continue;
-        const descriptor = table.get(planned.specifier);
-        if (!descriptor || descriptor.host !== planned.host) {
-          throw new Error(
-            `foundation Contribution "${planned.specifier}" is neither in the application's Contribution table nor artifact-backed`,
-          );
-        }
         cleanup = await descriptor.mount(host as never, {
           mount(contribution: unknown) {
             mountedByDescriptor.record(descriptor, contribution);

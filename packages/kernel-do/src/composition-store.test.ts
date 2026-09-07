@@ -8,7 +8,7 @@ import {
   pinCompositionWithRetryV1,
   type CompositionGenerationV1,
   type CompositionMemberV1,
-} from "@frockbot/kernel-composition/generation";
+} from "./composition/generation.js";
 import {
   BotDurableAuthority,
   type BotDurableAuthorityHooks,
@@ -19,17 +19,7 @@ import { createStoredRunCodecV1, type StoredRunV1 } from "./run-records.ts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
 
 function bootstrap(createdAt: string): Promise<CompositionGenerationV1> {
-  return bootstrapGeneration(
-    [
-      {
-        packageId: "shell",
-        specifier: "@frockbot/plugin-shell",
-        version: "0.0.1",
-        manifest: { id: "shell", version: "0.0.1" },
-      },
-    ],
-    { createdAt },
-  );
+  return bootstrapGeneration({ createdAt });
 }
 
 async function successor(
@@ -41,7 +31,12 @@ async function successor(
     generationId: `${createdAt}:${parent.artifactSetHash.slice(0, 16)}`,
     parentGenerationId: parent.generationId,
     createdAt,
-    origin: { kind: "user-install", userId: "user-1" },
+    origin: {
+      kind: "bot-authored",
+      runId: "run-1",
+      sessionId: "user-1:primary",
+      turnId: "turn-1",
+    },
     status: "pending",
   };
 }
@@ -56,9 +51,22 @@ function createStore(storage: MemoryStorage, now?: () => Date) {
 
 const authoredMember: CompositionMemberV1 = {
   packageId: "bot-authored-greeter",
-  specifier: "bot:greeter",
   version: "0.0.1",
-  manifestHash: "a".repeat(64),
+  descriptor: {
+    id: "bot-authored-greeter",
+    displayName: "Greeter",
+    version: "0.0.1",
+    tools: [
+      {
+        name: "greet",
+        description: "Greets",
+        inputSchema: { type: "object" },
+      },
+    ],
+    actions: [],
+    grants: [],
+    contextKeys: ["user", "bot", "session"],
+  },
   provenance: {
     kind: "bot",
     packageId: "bot-authored-greeter",
@@ -162,141 +170,6 @@ describe("Bot Durable Object Composition records", () => {
     ).rejects.toThrow("mismatched artifact set hash");
     await store.propose(next);
     await expect(store.propose(next)).rejects.toThrow("already exists");
-  });
-
-  test("a Package this deployment no longer ships stops being required core", async () => {
-    const storage = new MemoryStorage();
-    // The Bot was created on a deployment that shipped `voice` alongside
-    // `shell`, and its bootstrap generation still names both.
-    const retired = () =>
-      bootstrapGeneration(
-        [
-          {
-            packageId: "shell",
-            specifier: "@frockbot/plugin-shell",
-            version: "0.0.1",
-            manifest: { id: "shell", version: "0.0.1" },
-          },
-          {
-            packageId: "voice",
-            specifier: "@frockbot/plugin-voice",
-            version: "0.0.1",
-            manifest: { id: "voice", version: "0.0.1" },
-          },
-        ],
-        { createdAt: "2026-08-31T00:00:00.000Z" },
-      );
-    const created = new DurableCompositionStore({
-      state: { storage } as unknown as DurableObjectState,
-      bootstrap: retired,
-    });
-    const parent = await created.current();
-    expect(parent.members.map((member) => member.packageId)).toContain("voice");
-
-    // This deployment ships `shell` only. Following it drops `voice`, and that
-    // proposal has to be accepted or the Bot can never leave a generation it
-    // cannot mount.
-    const store = createStore(storage);
-    const createdAt = "2026-09-01T00:00:00.000Z";
-    const members = parent.members.filter(
-      (member) => member.packageId !== "voice",
-    );
-    const artifactSetHash = await compositionArtifactSetHashV1(members);
-    await store.propose({
-      schemaVersion: 1,
-      generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
-      artifactSetHash,
-      parentGenerationId: parent.generationId,
-      createdAt,
-      origin: { kind: "bootstrap" },
-      members,
-      status: "pending",
-    });
-
-    const generations = await store.list({ limit: 10 });
-    expect(
-      generations.generations.some(
-        (generation) => generation.createdAt === createdAt,
-      ),
-    ).toBe(true);
-  });
-
-  test("refuses proposals that remove or replace the first-party bootstrap core", async () => {
-    const storage = new MemoryStorage();
-    const store = createStore(storage);
-    const parent = await store.current();
-    const createdAt = "2026-09-01T00:00:00.000Z";
-
-    const omittedHash = await compositionArtifactSetHashV1([]);
-    await expect(
-      store.propose({
-        schemaVersion: 1,
-        generationId: compositionGenerationIdV1(createdAt, omittedHash),
-        artifactSetHash: omittedHash,
-        parentGenerationId: parent.generationId,
-        createdAt,
-        origin: {
-          kind: "bot-authored",
-          runId: "run-1",
-          sessionId: "s",
-          turnId: "t",
-        },
-        members: [],
-        status: "pending",
-      }),
-    ).rejects.toThrow(/omits required first-party Package "shell"/);
-
-    const shadow: CompositionMemberV1 = {
-      ...authoredMember,
-      packageId: "shell",
-      specifier: "bot-authored:shell",
-      provenance: {
-        ...authoredMember.provenance,
-        packageId: "shell",
-      },
-    };
-    const replacedHash = await compositionArtifactSetHashV1([shadow]);
-    await expect(
-      store.propose({
-        schemaVersion: 1,
-        generationId: compositionGenerationIdV1(createdAt, replacedHash),
-        artifactSetHash: replacedHash,
-        parentGenerationId: parent.generationId,
-        createdAt,
-        origin: {
-          kind: "bot-authored",
-          runId: "run-1",
-          sessionId: "s",
-          turnId: "t",
-        },
-        members: [shadow],
-        status: "pending",
-      }),
-    ).rejects.toThrow(
-      /replaces required first-party Package "shell" with bot provenance/,
-    );
-
-    const changedCore = {
-      ...parent.members[0]!,
-      version: "9.9.9",
-      provenance: {
-        ...parent.members[0]!.provenance,
-        version: "9.9.9",
-      },
-    };
-    const changedHash = await compositionArtifactSetHashV1([changedCore]);
-    await expect(
-      store.propose({
-        schemaVersion: 1,
-        generationId: compositionGenerationIdV1(createdAt, changedHash),
-        artifactSetHash: changedHash,
-        parentGenerationId: parent.generationId,
-        createdAt,
-        origin: { kind: "user-install", userId: "user-1" },
-        members: [changedCore],
-        status: "pending",
-      }),
-    ).resolves.toBeUndefined();
   });
 
   test("reverting records a new pending generation with the target's members", async () => {
@@ -569,7 +442,7 @@ describe("a pinning proposal compares and swaps the pointer", () => {
     // And the authored member is still there — the whole point of refusing.
     expect(
       (await store.current()).members.map((member) => member.packageId),
-    ).toEqual(["bot-authored-greeter", "shell"]);
+    ).toEqual(["bot-authored-greeter"]);
   });
 
   test("the loser re-derives from the winner and keeps both members", async () => {
@@ -606,7 +479,6 @@ describe("a pinning proposal compares and swaps the pointer", () => {
     expect((await store.current()).generationId).toBe(pinned.generationId);
     expect(pinned.members.map((member) => member.packageId)).toEqual([
       "bot-authored-greeter",
-      "shell",
     ]);
   });
 

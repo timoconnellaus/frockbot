@@ -8,14 +8,21 @@ import {
 const call = { id: "call-1", name: "write", input: { value: 1 } };
 
 describe("the public loop event declaration", () => {
-  test("marks every isolate event as a waterfall", () => {
+  test("flags every isolate event, and only those, as an isolate hook", () => {
+    const flagged = Object.entries(LOOP_EVENTS_V1)
+      .filter(([, definition]) => definition.isolateHook)
+      .map(([event]) => event);
+    expect(flagged.toSorted()).toEqual([...BOT_ISOLATE_HOOK_EVENTS_V1].sort());
+  });
+
+  test("dispatches every isolate event a plugin can replace as a waterfall", () => {
+    // `turn.terminate` is the exception: it notifies a settling Turn and has
+    // no value to replace, so it is serial.
     expect(
-      BOT_ISOLATE_HOOK_EVENTS_V1.every(
-        (event) =>
-          LOOP_EVENTS_V1[event].mode === "waterfall" &&
-          LOOP_EVENTS_V1[event].isolateHook,
+      BOT_ISOLATE_HOOK_EVENTS_V1.filter(
+        (event) => LOOP_EVENTS_V1[event].mode !== "waterfall",
       ),
-    ).toBe(true);
+    ).toEqual(["agent/turn-stopping"]);
   });
 
   test("decodes an exact tool exposure replacement", () => {

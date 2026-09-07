@@ -1,11 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { compileFoundationApplication } from "@frockbot/application-foundation/runtime";
 import type {
   BotConfigurationCommandV1,
   BotSettingsViewV1,
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import type { PackageSettingDefinition } from "@frockbot/kernel-composition";
 import { SessionEventLog } from "@frockbot/kernel-do";
 import { createShellBotBackendContribution } from "./backend.js";
 import { createIsolateCapabilityHost } from "./backend-isolate.js";
@@ -53,76 +51,6 @@ class MemoryStorage {
   deleteAlarm(): Promise<void> {
     return Promise.resolve();
   }
-}
-
-const MODEL_SETTING = {
-  id: "model",
-  schemaVersion: 1,
-  scopes: ["user", "bot"],
-  role: "model",
-  schema: {
-    type: "object",
-    properties: {
-      connectionId: { type: "string" },
-      providerModelId: { type: "string" },
-    },
-    required: ["connectionId", "providerModelId"],
-    additionalProperties: false,
-  },
-} as const satisfies PackageSettingDefinition;
-
-const TONE_SETTING = {
-  id: "tone",
-  schemaVersion: 1,
-  scopes: ["bot"],
-  schema: { type: "string", maxLength: 40 },
-} as const satisfies PackageSettingDefinition;
-
-async function compileModelTestApplication(): ReturnType<
-  typeof compileFoundationApplication
-> {
-  const application = await compileFoundationApplication();
-  const provider = application.packages.find(
-    (pkg) => pkg.id === "provider-flock-ai",
-  );
-  const template = application.packages.find((pkg) => pkg.id === "settings");
-  if (!provider || !template) throw new Error("Fixture Packages unavailable");
-  return {
-    ...application,
-    packages: [
-      // Artifact-backed members are dropped with them: `bun test` gives this
-      // host no Worker Loader, so an isolate member has nowhere to load from
-      // and the Composition would fail verification closed — correct, and not
-      // what this suite is about. workerd's suites mount the real thing.
-      ...application.packages.filter(
-        (pkg) =>
-          pkg.artifact === undefined &&
-          pkg.id !== provider.id &&
-          pkg.id !== "custom-models",
-      ),
-      provider,
-      {
-        ...template,
-        id: "custom-models",
-        specifier: "@test/custom-models",
-        version: "0.0.1",
-        manifest: {
-          ...template.manifest,
-          id: "custom-models",
-          displayName: "Custom models",
-          version: "0.0.1",
-          dependencies: {},
-          contributions: {},
-          permissions: [],
-          configuration: {
-            settings: [MODEL_SETTING, TONE_SETTING],
-            connectionTypes: [],
-            capabilities: [],
-          },
-        },
-      },
-    ],
-  };
 }
 
 function model(connectionId: string, providerModelId: string) {
@@ -214,7 +142,6 @@ function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
           ),
       },
     } as never,
-    compileApplication: compileModelTestApplication,
   });
 }
 
@@ -773,10 +700,7 @@ describe("Bot Package setting commands", () => {
       botId: "primary",
       expectedRevision: 0,
       packageId: "custom-models",
-      values: {
-        model: model("flock-ai-ambient", "bot-model"),
-        tone: "concise",
-      },
+      values: { model: model("flock-ai-ambient", "bot-model") },
     };
     const receipt = await contribution.executeConfiguration(request(first));
     await expect(
@@ -785,10 +709,7 @@ describe("Bot Package setting commands", () => {
     expect(await contribution.getSettings(identity)).toMatchObject({
       revision: 1,
       packageValues: {
-        "custom-models": {
-          model: model("flock-ai-ambient", "bot-model"),
-          tone: "concise",
-        },
+        "custom-models": { model: model("flock-ai-ambient", "bot-model") },
       },
     });
 
@@ -803,10 +724,7 @@ describe("Bot Package setting commands", () => {
     expect(await contribution.getSettings(identity)).toMatchObject({
       revision: 2,
       packageValues: {
-        "custom-models": {
-          model: model("flock-ai-ambient", "new-bot-model"),
-          tone: "concise",
-        },
+        "custom-models": { model: model("flock-ai-ambient", "new-bot-model") },
       },
     });
 
@@ -821,7 +739,8 @@ describe("Bot Package setting commands", () => {
     );
     expect(await contribution.getSettings(identity)).toMatchObject({
       revision: 3,
-      packageValues: { "custom-models": { tone: "concise" } },
+      // Unsetting the Package's only setting leaves it with no values at all.
+      packageValues: {},
     });
 
     await expect(
@@ -849,7 +768,7 @@ describe("Bot Package setting commands", () => {
       contribution.executeConfiguration(
         request({
           ...first,
-          values: { tone: "different" },
+          values: { model: model("flock-ai-ambient", "different") },
         }),
       ),
     ).rejects.toThrow("reused for a different command");

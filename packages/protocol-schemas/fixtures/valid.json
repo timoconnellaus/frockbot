@@ -783,7 +783,7 @@
     "value": {
       "schemaVersion": 1,
       "commandId": "command-1",
-      "text": "Hello 🐑 こんにちは"
+      "text": "Hello \ud83d\udc11 \u3053\u3093\u306b\u3061\u306f"
     }
   },
   {
@@ -1199,7 +1199,12 @@
               "packageId": "example",
               "version": "1.0.0",
               "provenance": {
-                "kind": "first-party"
+                "kind": "bot",
+                "botId": "alpha",
+                "sessionId": "user-1:alpha",
+                "turnId": "turn-1",
+                "runId": "run-1",
+                "authoredAt": "2026-09-05T10:00:00.000Z"
               }
             }
           ],

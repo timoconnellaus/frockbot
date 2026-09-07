@@ -24,7 +24,7 @@ import type {
   PackageSettingDefinition,
   PackageSettingSchema,
   PackageSettingSchemaValue,
-} from "@frockbot/kernel-composition";
+} from "@frockbot/kernel-contracts";
 import { ConfigurationDecodeError } from "./errors.js";
 import { isConnectionIdentifier, isPublicIdentifier } from "./identifiers.js";
 

@@ -70,33 +70,28 @@ test("does not report the account model unavailable before a Bot exists", async 
         Promise.resolve({
           schemaVersion: 1,
           deployment: { userId: "development", applicationHash: "hash-1" },
-          applicationHash: "hash-1",
           packages: [
             {
               id: "provider-flock-ai",
               displayName: "Frock AI",
               version: "0.0.1",
-              contributions: ["backend", "runtime"],
-              configuration: {
-                settings: [],
-                connectionTypes: [
-                  {
-                    id: "flock-ai-account",
-                    displayName: "Frock AI",
-                    allowMultiple: false,
-                    authorization: { kind: "ambient-native" },
-                    capabilities: ["flock-ai-models"],
-                  },
-                ],
-                capabilities: [
-                  {
-                    id: "flock-ai-models",
-                    kind: "model",
-                    connectionTypes: ["flock-ai-account"],
-                    admission: { turnTypes: ["chat"] },
-                  },
-                ],
-              },
+              connectionTypes: [
+                {
+                  id: "flock-ai-account",
+                  displayName: "Frock AI",
+                  allowMultiple: false,
+                  authorization: { kind: "ambient-native" },
+                  capabilities: ["flock-ai-models"],
+                },
+              ],
+              capabilities: [
+                {
+                  id: "flock-ai-models",
+                  kind: "model",
+                  connectionTypes: ["flock-ai-account"],
+                  admission: { turnTypes: ["chat"] },
+                },
+              ],
             },
           ],
         }),

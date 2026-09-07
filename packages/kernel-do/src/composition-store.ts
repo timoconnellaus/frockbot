@@ -4,7 +4,7 @@
 // mutates a recorded generation, and an in-flight Turn keeps the pin it was
 // admitted under.
 import type { CompositionPinV1 } from "@frockbot/kernel-contracts";
-import { decodeCompositionFailureV1 } from "@frockbot/kernel-composition/activation";
+import { decodeCompositionFailureV1 } from "./composition/activation.js";
 import {
   assertCompositionArtifactSetHashV1,
   compositionGenerationIdV1,
@@ -13,7 +13,7 @@ import {
   type CompositionOriginV1,
   type CompositionStore,
   decodeCompositionGenerationV1,
-} from "@frockbot/kernel-composition/generation";
+} from "./composition/generation.js";
 import {
   COMPOSITION_CURRENT_KEY,
   COMPOSITION_INDEX_PREFIX,
@@ -162,12 +162,7 @@ export class DurableCompositionStore implements CompositionStore {
     }
     await assertCompositionArtifactSetHashV1(proposed);
     await this.materialize();
-    // Required core is this deployment's first-party set, not the one the Bot
-    // was created on. Built outside the transaction: it compiles the
-    // application rather than reading storage.
-    const deployed = await this.buildBootstrap();
     await this.ctx.storage.transaction(async (transaction) => {
-      this.assertRequiredCoreSet(deployed, proposed);
       // Compare-and-swap before anything is written: a proposal derived from a
       // pointer that has since moved would drop whatever the winner added, so
       // it is refused whole rather than merged blind. Nothing has been put yet,
@@ -459,44 +454,6 @@ export class DurableCompositionStore implements CompositionStore {
       generations,
       ...(page.length === limit && last ? { cursor: last[0] } : {}),
     };
-  }
-
-  /**
-   * Every first-party member *this deployment ships* is required core. No
-   * proposal path may remove it or replace its provenance: callers can update
-   * reviewed first-party members, but cannot turn them into User- or
-   * Bot-authored code.
-   *
-   * The deployment is the authority, never the Bot's own bootstrap generation.
-   * A Package that is deleted from the product stops being required the moment
-   * it stops shipping; holding the Bot's original set as required instead
-   * deadlocks it (2026-09-06, when removing Voice, Billing and the desktop and
-   * mobile Packages left every Bot pinned to a generation naming them:
-   * `resolveDeploymentCompositionV1` correctly dropped them, this check
-   * refused the proposal for omitting them, and every Turn of every Bot failed
-   * with no way out from inside the product).
-   */
-  private assertRequiredCoreSet(
-    deployed: CompositionGenerationV1,
-    proposed: CompositionGenerationV1,
-  ): void {
-    for (const required of deployed.members.filter(
-      (member) => member.provenance.kind === "first-party",
-    )) {
-      const candidate = proposed.members.find(
-        (member) => member.packageId === required.packageId,
-      );
-      if (!candidate) {
-        throw new Error(
-          `composition generation "${proposed.generationId}" omits required first-party Package "${required.packageId}"`,
-        );
-      }
-      if (candidate.provenance.kind !== "first-party") {
-        throw new Error(
-          `composition generation "${proposed.generationId}" replaces required first-party Package "${required.packageId}" with ${candidate.provenance.kind} provenance`,
-        );
-      }
-    }
   }
 
   /**

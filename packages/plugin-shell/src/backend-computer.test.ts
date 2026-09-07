@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { FrockBotManifest } from "@frockbot/kernel-composition";
+import type { PackageDefinitionV1 } from "@frockbot/kernel-contracts";
 import {
   createBotComputerSyncHost,
   declaredPackageRootsV1,
@@ -7,30 +7,15 @@ import {
 
 function pkg(
   id: string,
-  version: string,
-  roots?: FrockBotManifest["roots"],
-): { id: string; version: string; manifest: FrockBotManifest } {
-  return {
-    id,
-    version,
-    manifest: {
-      schemaVersion: 4,
-      id,
-      displayName: id,
-      version,
-      compatibility: { frockbot: "*" },
-      dependencies: {},
-      contributions: {},
-      permissions: [],
-      ...(roots ? { roots } : {}),
-    },
-  };
+  roots?: PackageDefinitionV1["roots"],
+): PackageDefinitionV1 {
+  return { id, displayName: id, ...(roots ? { roots } : {}) };
 }
 
 const packages = [
-  pkg("image", "0.0.1", [{ id: "generated", scope: "user" }]),
-  pkg("applets", "0.0.1", [{ id: "source", scope: "user" }]),
-  pkg("clock", "0.0.1"),
+  pkg("image", [{ id: "generated", scope: "user" }]),
+  pkg("applets", [{ id: "source", scope: "user" }]),
+  pkg("clock"),
 ];
 
 describe("the durable roots a User's Packages declare", () => {
@@ -38,9 +23,9 @@ describe("the durable roots a User's Packages declare", () => {
     expect(
       declaredPackageRootsV1({
         installations: [
-          { packageId: "applets", version: "0.0.1", state: "installed" },
-          { packageId: "image", version: "0.0.1", state: "installed" },
-          { packageId: "clock", version: "0.0.1", state: "installed" },
+          { packageId: "applets", state: "installed" },
+          { packageId: "image", state: "installed" },
+          { packageId: "clock", state: "installed" },
         ],
         packages,
       }),
@@ -53,9 +38,7 @@ describe("the durable roots a User's Packages declare", () => {
   test("a Package that declares no root contributes none", () => {
     expect(
       declaredPackageRootsV1({
-        installations: [
-          { packageId: "clock", version: "0.0.1", state: "installed" },
-        ],
+        installations: [{ packageId: "clock", state: "installed" }],
         packages,
       }),
     ).toEqual([]);
@@ -68,30 +51,19 @@ describe("the durable roots a User's Packages declare", () => {
     for (const state of ["disabled", "failed"] as const) {
       expect(
         declaredPackageRootsV1({
-          installations: [{ packageId: "image", version: "0.0.1", state }],
+          installations: [{ packageId: "image", state }],
           packages,
         }),
       ).toEqual([]);
     }
   });
 
-  test("the installed version decides which manifest declares the roots", () => {
-    expect(
-      declaredPackageRootsV1({
-        installations: [
-          { packageId: "image", version: "0.0.2", state: "installed" },
-        ],
-        packages,
-      }),
-    ).toEqual([]);
-  });
-
   test("one entry per root, whatever the installations say", () => {
     expect(
       declaredPackageRootsV1({
         installations: [
-          { packageId: "image", version: "0.0.1", state: "installed" },
-          { packageId: "image", version: "0.0.1", state: "installed" },
+          { packageId: "image", state: "installed" },
+          { packageId: "image", state: "installed" },
         ],
         packages,
       }),

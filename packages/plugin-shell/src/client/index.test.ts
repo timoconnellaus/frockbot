@@ -133,21 +133,11 @@ describe("application manifest protocol", () => {
   const emptyManifest = {
     schemaVersion: 1,
     deployment: { userId: "user-1", applicationHash: "hash-1" },
-    applicationHash: "hash-1",
     packages: [],
   };
 
   test("requires the exact owned manifest response", () => {
     expect(decodePluginCatalog(emptyManifest)).toEqual([]);
-    // The artifact the gateway loaded and the plan it compiled are hashed
-    // separately, so a hosted manifest always carries two different digests.
-    expect(
-      decodePluginCatalog({
-        ...emptyManifest,
-        deployment: { userId: "user-1", applicationHash: "sha256-of-bytes" },
-        applicationHash: "sha256-of-plan",
-      }),
-    ).toEqual([]);
     expect(
       decodePluginCatalog({
         ...emptyManifest,
@@ -156,29 +146,25 @@ describe("application manifest protocol", () => {
             id: "provider-ollama-cloud",
             displayName: "Ollama Cloud",
             version: "0.0.1",
-            contributions: ["backend", "runtime", "client"],
-            configuration: {
-              settings: [],
-              capabilities: [
-                {
-                  id: "ollama-cloud-models",
-                  kind: "model",
-                  connectionTypes: ["ollama-cloud-account"],
+            capabilities: [
+              {
+                id: "ollama-cloud-models",
+                kind: "model",
+                connectionTypes: ["ollama-cloud-account"],
+              },
+            ],
+            connectionTypes: [
+              {
+                id: "ollama-cloud-account",
+                displayName: "Ollama Cloud account",
+                allowMultiple: true,
+                authorization: {
+                  kind: "api-key",
+                  driverId: "ollama-api-key",
                 },
-              ],
-              connectionTypes: [
-                {
-                  id: "ollama-cloud-account",
-                  displayName: "Ollama Cloud account",
-                  allowMultiple: true,
-                  authorization: {
-                    kind: "api-key",
-                    driverId: "ollama-api-key",
-                  },
-                  capabilities: ["ollama-cloud-models"],
-                },
-              ],
-            },
+                capabilities: ["ollama-cloud-models"],
+              },
+            ],
           },
         ],
       }),
@@ -206,7 +192,6 @@ describe("application manifest protocol", () => {
             id: "ui-theme",
             displayName: "Theme",
             version: "0.0.1",
-            contributions: ["client"],
           },
         ],
       }),
@@ -222,14 +207,9 @@ describe("application manifest protocol", () => {
             id: "web",
             displayName: "Web",
             version: "0.0.1",
-            contributions: ["runtime"],
-            configuration: {
-              settings: [],
-              connectionTypes: [],
-              capabilities: [
-                { id: "web-fetch", kind: "tool", connectionTypes: [] },
-              ],
-            },
+            capabilities: [
+              { id: "web-fetch", kind: "tool", connectionTypes: [] },
+            ],
           },
         ],
       }),
@@ -250,28 +230,23 @@ describe("application manifest protocol", () => {
             id: "custom-models",
             displayName: "Custom models",
             version: "0.0.1",
-            contributions: ["client"],
-            configuration: {
-              settings: [
-                {
-                  id: "account-model",
-                  schemaVersion: 1,
-                  scopes: ["user"],
-                  role: "model",
-                  schema: {
-                    type: "object",
-                    properties: {
-                      connectionId: { type: "string" },
-                      providerModelId: { type: "string" },
-                    },
-                    required: ["connectionId", "providerModelId"],
-                    additionalProperties: false,
+            settings: [
+              {
+                id: "account-model",
+                schemaVersion: 1,
+                scopes: ["user"],
+                role: "model",
+                schema: {
+                  type: "object",
+                  properties: {
+                    connectionId: { type: "string" },
+                    providerModelId: { type: "string" },
                   },
+                  required: ["connectionId", "providerModelId"],
+                  additionalProperties: false,
                 },
-              ],
-              connectionTypes: [],
-              capabilities: [],
-            },
+              },
+            ],
           },
         ],
       }),
@@ -299,19 +274,13 @@ describe("application manifest protocol", () => {
             id: "web",
             displayName: "Web",
             version: "0.0.1",
-            contributions: ["runtime"],
-            configuration: {
-              settings: [],
-              connectionTypes: [],
-              capabilities: [
-                {
-                  id: "web-fetch",
-                  kind: "tool",
-                  connectionTypes: [],
-                  admission: { turnTypes: ["chat", "automation"] },
-                },
-              ],
-            },
+            capabilities: [
+              {
+                id: "web-fetch",
+                kind: "tool",
+                admission: { turnTypes: ["chat", "automation"] },
+              },
+            ],
           },
         ],
       }),
@@ -553,8 +522,8 @@ describe("Bot selection", () => {
             return Promise.resolve({
               schemaVersion: 1,
               botId: "primary",
-              artifactOrigin: "https://ui.app.example",
               contributions: [contribution],
+              artifactOrigin: "https://ui.app.example",
             });
           }
           if (path.endsWith("/package-ui/tools")) {
@@ -737,7 +706,6 @@ describe("Bot selection", () => {
     catalogManifest.resolve({
       schemaVersion: 1,
       deployment: { userId: "user-1", applicationHash: "hash-1" },
-      applicationHash: "hash-1",
       packages: [],
     });
     await catalogLoad;

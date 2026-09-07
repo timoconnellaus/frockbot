@@ -213,18 +213,19 @@ export interface LoopEventReturnMapV1 {
 export type LoopEventNameV1 = keyof LoopEventPayloadMapV1;
 
 /**
- * Waterfalls safe to bridge into a Bot isolate. Operational wrappers that
- * carry an AbortSignal, an async stream, or an effect body remain first-party:
- * the isolate receives policy DTOs, never control of the durable skeleton.
+ * The loop seams a plugin may wrap, and only these. They are exactly the
+ * actions `AGENTS.md` names — `context.assemble`, `tools.expose`, `tool.call`
+ * (both halves) and `turn.terminate` — and adding one is a deliberate widening
+ * of the plugin surface. Operational wrappers that carry an AbortSignal, an
+ * async stream, or an effect body stay first-party: the isolate receives
+ * policy DTOs, never control of the durable skeleton.
  */
 export const BOT_ISOLATE_HOOK_EVENTS_V1 = [
-  "agent/pre-step",
   "system-prompt/assemble",
-  "agent/message-window",
   "agent/tool-exposure",
   "tools/pre-execute",
   "tools/post-execute",
-  "agent/step-continuation",
+  "agent/turn-stopping",
 ] as const satisfies readonly LoopEventNameV1[];
 
 export type BotIsolateHookEventNameV1 =
@@ -380,26 +381,11 @@ export function decodeBotIsolateHookReplacementV1<
   const label = `isolate hook ${event} replacement`;
   let decoded: LoopEventReturnMapV1[BotIsolateHookEventNameV1];
   switch (event) {
-    case "agent/pre-step": {
-      const decision = hookRecord(input, label);
-      if (decision.kind === "enter") {
-        hookExactKeys(decision, ["kind", "inputs"], [], label);
-        decoded = {
-          kind: "enter",
-          inputs: decodeHookInputs(decision.inputs, `${label}.inputs`),
-        };
-        break;
-      }
-      hookExactKeys(decision, ["kind", "reason"], [], label);
-      if (decision.kind !== "reject") {
-        throw new Error(`${label}.kind is invalid`);
-      }
-      decoded = {
-        kind: "reject",
-        reason: hookString(decision.reason, `${label}.reason`, 2_048),
-      };
-      break;
-    }
+    case "agent/turn-stopping":
+      // A settlement notification, not a waterfall: there is no value to
+      // replace, so an isolate offering one is refused and the hook's own
+      // failure path keeps the original.
+      throw new Error(`${label} cannot replace a notification`);
     case "system-prompt/assemble": {
       const assembly = hookRecord(input, label);
       hookExactKeys(assembly, ["text", "sections"], [], label);
@@ -423,20 +409,6 @@ export function decodeBotIsolateHookReplacementV1<
           };
         }),
       };
-      break;
-    }
-    case "agent/message-window": {
-      decoded = decodeNormalizedModelRequestV1(
-        {
-          requestId: "hook-decode",
-          provider: "hook-decode",
-          model: "hook-decode",
-          system: "",
-          messages: input,
-          tools: [],
-        },
-        label,
-      ).messages;
       break;
     }
     case "agent/tool-exposure": {
@@ -494,15 +466,6 @@ export function decodeBotIsolateHookReplacementV1<
     case "tools/post-execute":
       decoded = decodeHookResult(input, label);
       break;
-    case "agent/step-continuation": {
-      const decision = hookRecord(input, label);
-      hookExactKeys(decision, ["kind"], [], label);
-      if (decision.kind !== "continue" && decision.kind !== "stop") {
-        throw new Error(`${label}.kind is invalid`);
-      }
-      decoded = { kind: decision.kind };
-      break;
-    }
   }
   return decoded as LoopEventReturnMapV1[Event];
 }
@@ -553,7 +516,7 @@ export const LOOP_EVENTS_V1 = {
     mode: "waterfall",
     payload: "{ step, inputs, decision }",
     returns: "LoopPreStepDecisionV1",
-    isolateHook: true,
+    isolateHook: false,
   },
   "system-prompt/assemble": {
     mode: "waterfall",
@@ -565,7 +528,7 @@ export const LOOP_EVENTS_V1 = {
     mode: "waterfall",
     payload: "{ step, messages }",
     returns: "LlmMessage[]",
-    isolateHook: true,
+    isolateHook: false,
   },
   "agent/tool-exposure": {
     mode: "waterfall",
@@ -619,7 +582,7 @@ export const LOOP_EVENTS_V1 = {
     mode: "waterfall",
     payload: "{ step, decision }",
     returns: "LoopStepContinuationV1",
-    isolateHook: true,
+    isolateHook: false,
   },
   "agent/model-outcome-committed": {
     mode: "serial",
@@ -631,7 +594,7 @@ export const LOOP_EVENTS_V1 = {
     mode: "serial",
     payload: "{ agent, turn }",
     returns: "void",
-    isolateHook: false,
+    isolateHook: true,
   },
   "agent/cancel-requested": {
     mode: "emit",

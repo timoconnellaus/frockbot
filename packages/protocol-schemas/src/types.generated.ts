@@ -704,7 +704,6 @@ export type SetupHistory = {
           sessionId: string;
           turnId: string;
         }
-      | { kind: "user-install"; userId: Identifier }
       | { kind: "revert"; revertsTo: GenerationId; userId: Identifier }
       | {
           kind: "revert";
@@ -719,7 +718,6 @@ export type SetupHistory = {
       packageId: Identifier;
       version: string;
       provenance:
-        | { kind: "first-party" }
         | { kind: "user"; userId: Identifier; authoredAt: Instant }
         | {
             kind: "bot";

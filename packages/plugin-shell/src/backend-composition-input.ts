@@ -1,5 +1,5 @@
-import type { CompositionFailureV1 } from "@frockbot/kernel-composition/activation";
-import type { CompositionGenerationV1 } from "@frockbot/kernel-composition/generation";
+import type { CompositionFailureV1 } from "@frockbot/kernel-do";
+import type { CompositionGenerationV1 } from "@frockbot/kernel-do";
 
 /**
  * Model-visible durable input for the Turn that fell back from a broken

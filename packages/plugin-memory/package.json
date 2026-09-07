@@ -7,16 +7,11 @@
     ".": "./src/index.ts",
     "./agent": "./src/agent.ts",
     "./chunk-index": "./src/chunk-index.ts",
-    "./manifest": "./src/manifest.ts",
+    "./package.json": "./package.json",
     "./projects": "./src/projects.ts",
     "./roots": "./src/roots.ts",
     "./store": "./src/store.ts",
-    "./testing": "./src/testing.ts",
-    "./frockbot.json": "./frockbot.json",
-    "./package.json": "./package.json"
-  },
-  "frockbot": {
-    "manifest": "./frockbot.json"
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "test": "bun test src",

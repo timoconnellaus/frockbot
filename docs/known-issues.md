@@ -36,64 +36,62 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 16. **The dynamic Package system has no dynamic member.** No Composition member carries an `artifact`. The isolate host, the `BOT_PACKAGES` loader and the capability contract are all still here; nothing produces a Package artifact until the step 8 build service.
 
-17. **`applications/foundation/src/runtime.ts:1153-1200` deletes 19 runtime ids by hardcoded string**, directly below the claim in `contributions.ts` that nothing branches on a Package's identity.
+17. **Applet members carry a `provenance: PackageProvenanceV1` field** (`kernel-do/src/composition/generation.ts`) whose variants describe Packages, two lines below a comment stating that an Applet is not a Package member.
 
-18. **`resolveDeploymentCompositionV1` compares only `manifestHash` and `artifact.contentHash`** (`backend-composition.ts:126-135`), so a version change alone produces no new generation and a pinned member's `version` can disagree with what runs.
+18. **A first-party Package's installation row still carries a `version`.** Its definition has none — a first-party Package's version is the deploy — so every row carries the single `FOUNDATION_PACKAGE_VERSION_V1` constant and every version comparison in the configuration resolvers is a tautology. The field survives because it is durable User state; removing it belongs with step 7.
 
-19. **Applet members carry a `provenance: PackageProvenanceV1` field** (`generation.ts:93`) whose four variants all describe Packages, two lines below a comment stating that an Applet is not a Package member.
+19. **`AppletCapabilities.invokeModel()` is a stub.** It always returns `{status: "unavailable"}` with `TODO(model access)` (`apps/cloudflare/src/applet-state.ts:207-226`), while `APPLET_CAPABILITY_NAMES_V1` (`:67`) advertises it.
 
-20. **`AppletCapabilities.invokeModel()` is a stub.** It always returns `{status: "unavailable"}` with `TODO(model access)` (`apps/cloudflare/src/applet-state.ts:207-226`), while `APPLET_CAPABILITY_NAMES_V1` (`:67`) advertises it.
+20. **Applet capabilities are unreachable from authored code.** The SDK's `Applet extends DurableObject<unknown>` and never surfaces `env.CAPABILITIES` or `env.IDENTITY`. The alarm mechanism (`scheduleAlarm`, `AppletFacetStub.onAlarm`) has no SDK API.
 
-21. **Applet capabilities are unreachable from authored code.** The SDK's `Applet extends DurableObject<unknown>` and never surfaces `env.CAPABILITIES` or `env.IDENTITY`. The alarm mechanism (`scheduleAlarm`, `AppletFacetStub.onAlarm`) has no SDK API.
+21. **Applet `canWrite` is inert.** _Verified._ `applet-sdk/src/server/applet.ts:287-293` reads `x-applet-viewer` and `x-applet-can-write`, defaulting to `canWrite: true`; neither the gateway nor `AppletState` ever sets them. Not an active hole — Applets are account-wide with no cross-User sharing, so every viewer is the owner and `true` is the right answer today. The defect is that an Applet author can write `if (!peer.viewer.canWrite)` and that guard can never fire. Either derive it from the viewer token or drop the concept until sharing exists; shipping a knob nothing populates is the thing to avoid.
 
-22. **Applet `canWrite` is inert.** _Verified._ `applet-sdk/src/server/applet.ts:287-293` reads `x-applet-viewer` and `x-applet-can-write`, defaulting to `canWrite: true`; neither the gateway nor `AppletState` ever sets them. Not an active hole — Applets are account-wide with no cross-User sharing, so every viewer is the owner and `true` is the right answer today. The defect is that an Applet author can write `if (!peer.viewer.canWrite)` and that guard can never fire. Either derive it from the viewer token or drop the concept until sharing exists; shipping a knob nothing populates is the thing to avoid.
+22. **`apps/cloudflare/src/native-fallback.ts:1` hardcodes `ARTIFACT_ORIGIN = "https://ui.bot.frockbot.com"`**, so staging cannot serve the native Applet page.
 
-23. **`apps/cloudflare/src/native-fallback.ts:1` hardcodes `ARTIFACT_ORIGIN = "https://ui.bot.frockbot.com"`**, so staging cannot serve the native Applet page.
+23. **`@frockbot/applet-sdk` is not published to npm**; the Computer installs dist-tag `latest` and writes `.sdk-unavailable` on failure.
 
-24. **`@frockbot/applet-sdk` is not published to npm**; the Computer installs dist-tag `latest` and writes `.sdk-unavailable` on failure.
+24. **`packages/plugin-applets/package.json` lacks the `frockbot.manifest` field**, so its manifest is reached through the `./manifest` export rather than the field every other Package declares.
 
-25. **`packages/plugin-applets/package.json` lacks the `frockbot.manifest` field**, so its manifest is reached through the `./manifest` export rather than the field every other Package declares.
+25. ~~**`computer_screenshot` captures the whole 5120×720 root window.**~~ **Fixed.** The capture was a bare `scrot` with no `-a` clip, so one Bot's screenshot contained its siblings' windows. It now clips to the Bot's slot, read from the same `bots/<key>/slot` file the VNC viewer clips by.
 
-26. ~~**`computer_screenshot` captures the whole 5120×720 root window.**~~ **Fixed.** The capture was a bare `scrot` with no `-a` clip, so one Bot's screenshot contained its siblings' windows. It now clips to the Bot's slot, read from the same `bots/<key>/slot` file the VNC viewer clips by.
+26. **Bots of one User share a browser.** One profile, one process and one CDP port, so a login made by one Bot is available to all of them (`packages/computer-host-runtime/src/runtime.ts:1005-1008`).
 
-27. **Bots of one User share a browser.** One profile, one process and one CDP port, so a login made by one Bot is available to all of them (`packages/computer-host-runtime/src/runtime.ts:1005-1008`).
+27. **`credentialRef` is decoded and length-limited but never read.** One account-wide `SPRITES_TOKEN` serves every User. The comment at `apps/computer-host/src/index.ts:101` stating that the container resolves the reference does not describe the code.
 
-28. **`credentialRef` is decoded and length-limited but never read.** One account-wide `SPRITES_TOKEN` serves every User. The comment at `apps/computer-host/src/index.ts:101` stating that the container resolves the reference does not describe the code.
+28. **No Sprite teardown exists.** `deleteSprite` is called only from `live-test.ts`. There is no reaper, and no account-deletion or Computer-deletion surface anywhere in the repo to hang one on, so orphaned Sprites accumulate for abandoned accounts. **Needs a decision before it can be fixed:** a Sprite holds the User's files and browser logins, so any automatic reaper destroys real data on a schedule someone has to choose. The options are an explicit "delete my Computer" action, deletion on account deletion (which does not exist yet), or an idle reaper with a stated retention period.
 
-29. **No Sprite teardown exists.** `deleteSprite` is called only from `live-test.ts`. There is no reaper, and no account-deletion or Computer-deletion surface anywhere in the repo to hang one on, so orphaned Sprites accumulate for abandoned accounts. **Needs a decision before it can be fixed:** a Sprite holds the User's files and browser logins, so any automatic reaper destroys real data on a schedule someone has to choose. The options are an explicit "delete my Computer" action, deletion on account deletion (which does not exist yet), or an idle reaper with a stated retention period.
+29. _Partly a misread: `ContainerProxy` is a `@cloudflare/containers` class, not a FrockBot export, and it is used by live tests._ **A superseded computer-host seam remains deployed**: `/v1/effects`, `ComputerEffectJournal`, the `FLY_HOST` binding and `shared-provider.ts` have no production callers. `apps/computer-host/wrangler.jsonc` migrations v3 and v4 rename `FlyHostContainer` to `ComputerHostContainer` and back. `apps/computer-host/src/index.ts:112` re-exports `ContainerProxy`, for which no binding is declared. Removing `ComputerEffectJournal` needs a second `deleted_classes` migration, on a different Worker from the one `VoiceSession` was retired on; worth doing deliberately rather than alongside other work.
 
-30. _Partly a misread: `ContainerProxy` is a `@cloudflare/containers` class, not a FrockBot export, and it is used by live tests._ **A superseded computer-host seam remains deployed**: `/v1/effects`, `ComputerEffectJournal`, the `FLY_HOST` binding and `shared-provider.ts` have no production callers. `apps/computer-host/wrangler.jsonc` migrations v3 and v4 rename `FlyHostContainer` to `ComputerHostContainer` and back. `apps/computer-host/src/index.ts:112` re-exports `ContainerProxy`, for which no binding is declared. Removing `ComputerEffectJournal` needs a second `deleted_classes` migration, on a different Worker from the one `VoiceSession` was retired on; worth doing deliberately rather than alongside other work.
+30. **`PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64`** misreports the platform to Playwright's detector.
 
-31. **`PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64`** misreports the platform to Playwright's detector.
+31. **The GUI-shell refusal is a regex plus a PATH shim**, defeatable with one `export`. It is a policy control, not a security boundary.
 
-32. **The GUI-shell refusal is a regex plus a PATH shim**, defeatable with one `export`. It is a policy control, not a security boundary.
+32. ~~**The provider set is closed.**~~ **Fixed.** It was a two-entry map. A third provider (`plugin-provider-anthropic`) now ships, built on `@ai-sdk/anthropic`, which demonstrates the registration path takes an arbitrary provider. It has no `user` backend contribution yet, so its Connection cannot be created through the UI.
 
-33. ~~**The provider set is closed.**~~ **Fixed.** It was a two-entry map. A third provider (`plugin-provider-anthropic`) now ships, built on `@ai-sdk/anthropic`, which demonstrates the registration path takes an arbitrary provider. It has no `user` backend contribution yet, so its Connection cannot be created through the UI.
+33. **The default provider is an echo stub.** Any path that fails to apply `modelSelection` answers `"Built-in model: <message>"` rather than raising an error. Still true, and now more visible: with three providers registered, a selection that silently falls through is harder to spot than when there were two.
 
-34. **The default provider is an echo stub.** Any path that fails to apply `modelSelection` answers `"Built-in model: <message>"` rather than raising an error. Still true, and now more visible: with three providers registered, a selection that silently falls through is harder to spot than when there were two.
+34. **Frock AI's catalog is one model plus Auto** (`packages/plugin-provider-frock-ai/src/catalog.ts:49-56`).
 
-35. **Frock AI's catalog is one model plus Auto** (`packages/plugin-provider-frock-ai/src/catalog.ts:49-56`).
+35. **Tool calls never stream incrementally** (`packages/provider-openai-compatible/src/index.ts:696-708`), so a long tool-argument generation displays nothing until `finish`.
 
-36. **Tool calls never stream incrementally** (`packages/provider-openai-compatible/src/index.ts:696-708`), so a long tool-argument generation displays nothing until `finish`.
+36. **Manifest schema versions are inconsistent**: `plugin-models` and `plugin-provider-foundation` declare `schemaVersion: 2`; the other providers declare `4`.
 
-37. **Manifest schema versions are inconsistent**: `plugin-models` and `plugin-provider-foundation` declare `schemaVersion: 2`; the other providers declare `4`.
+37. **The `flock` to `frock` rename is partial.** Code reads `FROCK_AI_*` with `FLOCK_AI_*` fallbacks (`apps/cloudflare/src/index.ts:249-256`), while the Cloudflare resources (`FROCK_AI_GATEWAY_ID: "flock"`, `FROCK_AI_AUTO_ROUTE: "flock-auto"`), the package `@frockbot/plugin-flock` and every stored id remain `flock`.
 
-38. **The `flock` to `frock` rename is partial.** Code reads `FROCK_AI_*` with `FLOCK_AI_*` fallbacks (`apps/cloudflare/src/index.ts:249-256`), while the Cloudflare resources (`FROCK_AI_GATEWAY_ID: "flock"`, `FROCK_AI_AUTO_ROUTE: "flock-auto"`), the package `@frockbot/plugin-flock` and every stored id remain `flock`.
+38. **`release.yml` publishes test fixtures to npm.** All of `packages/*` is published by flipping `private: false`, including `plugin-testkit`, `compose-cloudflare` and `compose-typescript`.
 
-39. **`release.yml` publishes test fixtures to npm.** All of `packages/*` is published by flipping `private: false`, including `plugin-testkit`, `compose-cloudflare` and `compose-typescript`.
+39. **Compatibility dates drift.** Every deployed Worker is `2026-08-27`; `packages/compose-cloudflare/wrangler.jsonc` and `packages/compose-typescript/wrangler.jsonc` are `2026-05-01`.
 
-40. **Compatibility dates drift.** Every deployed Worker is `2026-08-27`; `packages/compose-cloudflare/wrangler.jsonc` and `packages/compose-typescript/wrangler.jsonc` are `2026-05-01`.
+40. **`APPLET_STATES` is typed inconsistently.** It is optional in `UserConfigurationEnv` (`apps/cloudflare/src/user-configuration.ts:210`, guarded at `:1826`) but non-optional and dereferenced unguarded in the gateway (`apps/cloudflare/src/index.ts:1060`, `:2339`).
 
-41. **`APPLET_STATES` is typed inconsistently.** It is optional in `UserConfigurationEnv` (`apps/cloudflare/src/user-configuration.ts:210`, guarded at `:1826`) but non-optional and dereferenced unguarded in the gateway (`apps/cloudflare/src/index.ts:1060`, `:2339`).
+41. ~~**Voice dictation is not eviction-safe.**~~ **Gone.** Voice is removed.
 
-42. ~~**Voice dictation is not eviction-safe.**~~ **Gone.** Voice is removed.
+42. **`packages/plugin-audit/src/store.ts:478-503` performs `DROP TABLE` and `ALTER TABLE ... RENAME` shadow-swaps** on the User Durable Object's SQL surface, which it shares with the FTS5 search index.
 
-43. **`packages/plugin-audit/src/store.ts:478-503` performs `DROP TABLE` and `ALTER TABLE ... RENAME` shadow-swaps** on the User Durable Object's SQL surface, which it shares with the FTS5 search index.
+43. ~~**Dangling directory references.**~~ **Fixed.** `apps/cloudflare/index.html` referenced `apps/mobile` and the computer-host README referenced `apps/fly-host-prototype`; both are removed.
 
-44. ~~**Dangling directory references.**~~ **Fixed.** `apps/cloudflare/index.html` referenced `apps/mobile` and the computer-host README referenced `apps/fly-host-prototype`; both are removed.
+44. **An auto-merged pull request never deploys to staging.** `ci.yml`'s `deploy-staging` is gated on `github.event_name == 'push' && github.ref == 'refs/heads/main'`, but `auto-merge.yml` merges with `GITHUB_TOKEN`, and GitHub does not trigger workflows from pushes made with it. So every auto-merged change reaches `main` without staging ever running it, and production is the first environment to see it. `workflow_dispatch` does not help: the job's `if` excludes it.
 
-45. **An auto-merged pull request never deploys to staging.** `ci.yml`'s `deploy-staging` is gated on `github.event_name == 'push' && github.ref == 'refs/heads/main'`, but `auto-merge.yml` merges with `GITHUB_TOKEN`, and GitHub does not trigger workflows from pushes made with it. So every auto-merged change reaches `main` without staging ever running it, and production is the first environment to see it. `workflow_dispatch` does not help: the job's `if` excludes it.
+45. ~~**The npm publish step fails every release for packages npm does not trust.**~~ **Fixed.** `release.yml` published every directory under `packages/`, so a package whose trusted publisher was not configured on npmjs.com failed the token exchange with an `E404` and reddened a release whose production deploy had already succeeded — the worst shape for a signal, because it trains you to ignore it. Publication is now opt-in through `frockbot.npm` in a package's own manifest, and exactly one package declares it: `@frockbot/applet-sdk`, which the Computer installs from npm. It has no `@frockbot` dependencies, so it publishes alone. Nothing else has a consumer off this repository.
 
-46. ~~**The npm publish step fails every release for packages npm does not trust.**~~ **Fixed.** `release.yml` published every directory under `packages/`, so a package whose trusted publisher was not configured on npmjs.com failed the token exchange with an `E404` and reddened a release whose production deploy had already succeeded — the worst shape for a signal, because it trains you to ignore it. Publication is now opt-in through `frockbot.npm` in a package's own manifest, and exactly one package declares it: `@frockbot/applet-sdk`, which the Computer installs from npm. It has no `@frockbot` dependencies, so it publishes alone. Nothing else has a consumer off this repository.
-
-47. **`chat.e2e.ts` "a send the server refuses for size keeps the draft and says why" is intermittently flaky.** It failed once in the full browser suite and passed immediately on its own, and passed in the four other full runs on 2026-09-06/07. The suite runs `fullyParallel: false` with one worker, so this is timing under load rather than interference. Not yet diagnosed; recorded so a red shard is not assumed to be a regression.
+46. **`chat.e2e.ts` "a send the server refuses for size keeps the draft and says why" is intermittently flaky.** It failed once in the full browser suite and passed immediately on its own, and passed in the four other full runs on 2026-09-06/07. The suite runs `fullyParallel: false` with one worker, so this is timing under load rather than interference. Not yet diagnosed; recorded so a red shard is not assumed to be a regression.

@@ -12,7 +12,7 @@ import {
   type CompositionFailureOutcomeV1,
   type CompositionFailureV1,
   type CompositionQuarantineV1,
-} from "@frockbot/kernel-composition/activation";
+} from "./composition/activation.js";
 import {
   COMPOSITION_FAILURE_STREAK_KEY,
   compositionFailureCountKey,

@@ -38,7 +38,7 @@ import type { ConnectionCommandV1 } from "@frockbot/connection-core";
 import type {
   PackageSettingDefinition,
   ConnectionTypeDefinition,
-} from "@frockbot/kernel-composition";
+} from "@frockbot/kernel-contracts";
 import { defineUserBackendContribution } from "@frockbot/kernel-contracts/contributions";
 
 const STATE_KEY = "user-configuration";
@@ -115,8 +115,8 @@ export interface AvailableUserPackage {
   defaultEnablement?: "enabled" | "disabled";
   /** Derived from immutable manifest facts by the application compiler. */
   platformOwned?: boolean;
-  /** The Package manifest's Package-id-to-version-range dependency record. */
-  dependencies?: Readonly<Record<string, string>>;
+  /** The Package ids that must be enabled beside this one. */
+  dependencies?: readonly string[];
   /**
    * `configuration.settings` from this version's manifest. Absent is the same
    * as empty and means the Package offers no User-level setting, so every
@@ -351,10 +351,7 @@ export class UserSettingsBackendContribution {
   private readonly platformOwnedPackageIds: ReadonlySet<string>;
 
   /** Declared Package dependencies, by Package id and version. */
-  private readonly packageDependencies: ReadonlyMap<
-    string,
-    Readonly<Record<string, string>>
-  >;
+  private readonly packageDependencies: ReadonlyMap<string, readonly string[]>;
 
   /** The immutable first-party installation rows written on first read. */
   private readonly defaultPackages: readonly PackageInstallationView[];
@@ -409,7 +406,7 @@ export class UserSettingsBackendContribution {
     this.packageDependencies = new Map(
       host.availablePackages.map((pkg) => [
         `${pkg.packageId}\u0000${pkg.version}`,
-        pkg.dependencies ?? {},
+        pkg.dependencies ?? [],
       ]),
     );
     this.packageSettingDefinitions = new Map(
@@ -444,9 +441,8 @@ export class UserSettingsBackendContribution {
         .map((pkg) => pkg.packageId),
     );
     for (const packageId of rolloutPackageIds) {
-      for (const dependencyId of Object.keys(
-        byPackageId.get(packageId)?.dependencies ?? {},
-      )) {
+      for (const dependencyId of byPackageId.get(packageId)?.dependencies ??
+        []) {
         if (byPackageId.has(dependencyId)) rolloutPackageIds.add(dependencyId);
       }
     }
@@ -668,7 +664,7 @@ export class UserSettingsBackendContribution {
       `${packageId}\u0000${version}`,
     );
     if (!dependencies) return undefined;
-    for (const dependencyId of Object.keys(dependencies).sort()) {
+    for (const dependencyId of [...dependencies].sort()) {
       const available = settings.packages.some(
         (pkg) => pkg.packageId === dependencyId && pkg.state === "installed",
       );
@@ -711,7 +707,7 @@ export class UserSettingsBackendContribution {
           `${pkg.packageId}\u0000${pkg.version}`,
         );
         if (!dependencies) return pkg;
-        const missing = Object.keys(dependencies).some(
+        const missing = dependencies.some(
           (dependencyId) => !enabled.has(dependencyId),
         );
         return missing
@@ -782,7 +778,7 @@ export class UserSettingsBackendContribution {
           "A provider dependency is unavailable",
         );
       visiting.add(id);
-      for (const dependency of Object.keys(available.dependencies ?? {}).sort())
+      for (const dependency of [...(available.dependencies ?? [])].sort())
         enable(dependency);
       visiting.delete(id);
       packages = [
