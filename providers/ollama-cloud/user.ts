@@ -15,12 +15,12 @@ import type {
   CredentialStorage,
   CredentialTransaction,
   CredentialUserBackendContribution,
-} from "@frockbot/plugin-credentials/user";
+} from "@frockbot/app/credentials/user";
 import type {
   UserSettingsBackendContribution,
   UserSettingsStorage,
   UserSettingsTransaction,
-} from "@frockbot/plugin-settings/user";
+} from "@frockbot/app/settings/user";
 import {
   decodeOllamaApiBaseUrl,
   OllamaCloudClient,

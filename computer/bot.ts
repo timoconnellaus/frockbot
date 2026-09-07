@@ -1137,7 +1137,7 @@ export class ComputerBotBackendContribution {
       // failing host can be trusted to reach. The failure still reaches the
       // User — it rejects the receipt and records the `error` phase — but it
       // never becomes a lease nobody can drop.
-      // Prior art: `releaseDesktopLease` in `@frockbot/plugin-subagents`.
+      // Prior art: `releaseDesktopLease` in `@frockbot/app/subagents`.
       await this.host.storage.delete(COMPUTER_CONTROL_RECORD_KEY);
     }
   }

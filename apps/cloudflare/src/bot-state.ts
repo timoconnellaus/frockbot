@@ -3,7 +3,7 @@ import {
   BotStateChannel,
   BOT_STATE_CHANNEL_INTERNAL_PATH,
 } from "./bot-state-channel.js";
-import { foundationShellApplicationV1 } from "@frockbot/application-foundation/runtime";
+import { foundationShellApplicationV1 } from "@frockbot/app/runtime";
 import {
   computerBotContribution,
   createFoundationBackendContributions,
@@ -11,7 +11,7 @@ import {
   flockBotContribution,
   backendDescriptorsV1,
   shellBotContribution,
-} from "@frockbot/application-foundation/contributions";
+} from "@frockbot/app/contributions";
 import { ComputerRegistry } from "@frockbot/computer/core";
 import { createFlySpriteProviderFeature } from "@frockbot/computer/fly/agent";
 import { mountRuntimeFeaturesV1 } from "@frockbot/core/contracts";
@@ -38,8 +38,8 @@ import type {
   BotStateEnv,
   OwnedBotTurnCommand,
   ShellBotBackendContribution,
-} from "@frockbot/plugin-shell/backend";
-import type { FlockBotBackendContribution } from "@frockbot/plugin-flock/bot";
+} from "@frockbot/app/shell/backend";
+import type { FlockBotBackendContribution } from "@frockbot/app/flock/bot";
 import type { ComputerBotBackendContribution } from "@frockbot/computer/bot";
 import { decodeComputerCommandV1 } from "@frockbot/computer/protocol";
 import {
@@ -48,8 +48,8 @@ import {
   decodeUpdateSheepCommandV1,
   type BotLifecycleCommandV1,
   type BotRegistrationV1,
-} from "@frockbot/plugin-flock/shared";
-import { decodeBotDebugQueryV1 } from "@frockbot/plugin-shell/debug-protocol";
+} from "@frockbot/app/flock/shared";
+import { decodeBotDebugQueryV1 } from "@frockbot/app/shell/debug-protocol";
 import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupQueryV1,
@@ -57,15 +57,15 @@ import {
   type ClientRunListQueryV1,
   type ClientRunLookupQueryV1,
   type ClientRunStopCommandV1,
-} from "@frockbot/plugin-shell/run-protocol";
+} from "@frockbot/app/shell/run-protocol";
 import {
   decodeBotUnreadCommandV1,
   type BotUnreadCommandV1,
-} from "@frockbot/plugin-shell/unread";
+} from "@frockbot/app/shell/unread";
 import {
   decodeApprovalDecisionCommandV1,
   type ApprovalDecisionCommandV1,
-} from "@frockbot/plugin-shell/approvals";
+} from "@frockbot/app/shell/approvals";
 import {
   decodePackageIframeToolCommandV1,
   decodeIsolateMemoryReadRequestV1,
@@ -118,23 +118,23 @@ import {
   decodeRoutineInboxCommandV1,
   type RoutineCommandV1,
   type RoutineInboxCommandV1,
-} from "@frockbot/plugin-routines/shared";
+} from "@frockbot/app/routines/shared";
 import {
   decodeRoutineHookDeliveryV1,
   type RoutineHookDeliveryV1,
-} from "@frockbot/plugin-routines/hook";
+} from "@frockbot/app/routines/hook";
 import {
   decodeSubagentRunTaskRequestV1,
   type SubagentRunTaskRequestV1,
-} from "@frockbot/plugin-shell/backend-subagents";
+} from "@frockbot/app/shell/backend-subagents";
 import {
   decodeTaskOutcomeV1,
   type TaskOutcomeV1,
-} from "@frockbot/plugin-subagents/records";
+} from "@frockbot/app/subagents/records";
 import {
   decodeMachineResultDeliveryV1,
   type MachineResultDeliveryV1,
-} from "@frockbot/plugin-user-machine/delivery";
+} from "@frockbot/app/machine/delivery";
 import {
   createDurableWorkspaceFilesV1,
   deleteBotWorkspaceRootsV1,
@@ -144,24 +144,24 @@ import {
   DurableWorkspaceGenerations,
   DurableWorkspaceSyncEffects,
 } from "@frockbot/core/durable";
-import type { MemoryProjectsV1 } from "@frockbot/plugin-memory/agent";
+import type { MemoryProjectsV1 } from "@frockbot/app/memory/agent";
 import {
   decodeMemoryChunkIndexEntryV1,
   memoryChunkIndexEntriesV1,
   MEMORY_CHUNK_INDEX_PREFIX_V1,
   type MemoryChunkIndexWriterV1,
-} from "@frockbot/plugin-memory/chunk-index";
+} from "@frockbot/app/memory/chunk-index";
 import {
   botMemoryRootV1,
   buildMemoryIndexV1,
   readAllMemoryDocumentsV1,
   searchMemoryV1,
   userMemoryRootV1,
-} from "@frockbot/plugin-memory";
+} from "@frockbot/app/memory";
 import {
   searchRowsFromClientRunV1,
   type SearchSinkV1,
-} from "@frockbot/plugin-search";
+} from "@frockbot/app/search";
 import {
   createBotSearchRowPageV1,
   createUserSearchSinkV1,
@@ -171,7 +171,7 @@ import {
   AuditOutboxV1,
   auditEntriesFromStoredRunV1,
   type AuditSinkV1,
-} from "@frockbot/plugin-audit";
+} from "@frockbot/app/audit";
 import {
   createBotAuditEntryPageV1,
   createUserAuditSinkV1,

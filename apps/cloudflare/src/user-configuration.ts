@@ -9,7 +9,7 @@ import {
   createFoundationUserBackendContributions,
   type FoundationConnectionUserBackendContribution,
   type MountedFoundationUserBackend,
-} from "@frockbot/application-foundation/user";
+} from "@frockbot/app/user";
 import {
   decodeConnectionCommandIdV1,
   decodeConnectionCommandV1,
@@ -27,16 +27,16 @@ import {
 import {
   decodeRoutineCommandReceiptV1,
   decodeRoutineListViewV1,
-} from "@frockbot/plugin-routines/shared";
+} from "@frockbot/app/routines/shared";
 import {
   decodeTemplateCommandV1,
   type TemplateCommandV1,
-} from "@frockbot/plugin-bot-template/shared";
+} from "@frockbot/app/bot-template/shared";
 import type {
   TemplateBlobStoreV1,
   TemplateBotReaderV1,
   TemplateImportWriterV1,
-} from "@frockbot/plugin-bot-template/user";
+} from "@frockbot/app/bot-template/user";
 import {
   decodeBotLifecycleCommandV1,
   decodeBotLifecycleReceiptV1,
@@ -44,17 +44,17 @@ import {
   decodeCreateBotCommandV1,
   decodeSheepIdentityViewV1,
   BotNotFoundError,
-} from "@frockbot/plugin-flock/shared";
+} from "@frockbot/app/flock/shared";
 import {
   releaseSubagentSlotV1,
   reserveSubagentSlotV1,
   type SubagentSlotReceiptV1,
-} from "@frockbot/plugin-subagents/quota";
+} from "@frockbot/app/subagents/quota";
 import {
   releaseAgentTurnSlotV1,
   reserveAgentTurnSlotV1,
   type AgentTurnSlotReceiptV1,
-} from "@frockbot/plugin-flock/quota";
+} from "@frockbot/app/flock/quota";
 import { machineTokenClaimsV1 } from "@frockbot/core/machine-protocol";
 import {
   appletStateNameV1,
@@ -78,13 +78,13 @@ import {
   type WorkspaceGenerationRecordV1,
   type WorkspaceRootV1,
 } from "@frockbot/core/contracts";
-import type { MemoryProjectV1 } from "@frockbot/plugin-memory/agent";
+import type { MemoryProjectV1 } from "@frockbot/app/memory/agent";
 import {
   SEARCH_MAX_ROW_PAGE_V1,
   decodeSearchQueryV1,
   type ClientSearchRebuildReceiptV1,
   type SearchIndexResultsV1,
-} from "@frockbot/plugin-search";
+} from "@frockbot/app/search";
 import type { BotSearchRpc } from "./search.js";
 import {
   AUDIT_KINDS_V1,
@@ -92,7 +92,7 @@ import {
   AUDIT_MAX_RESULTS_V1,
   type AuditRebuildReceiptV1,
   type ClientAuditPageV1,
-} from "@frockbot/plugin-audit";
+} from "@frockbot/app/audit";
 import type { BotAuditRpc } from "./audit.js";
 import type { WorkerLoader } from "./contracts.js";
 import {

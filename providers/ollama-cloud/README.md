@@ -22,7 +22,7 @@ model provider, rather than in a Package that would have to be handed a key it
 does not own. This is the pattern for a Connection-backed tool
 Capability.
 
-The _contract_ is not provider-specific. `@frockbot/plugin-web/contract` owns the
+The _contract_ is not provider-specific. `@frockbot/app/web/contract` owns the
 `WebSearchV1` interface, the result DTO, its decoder and the `web_search` tool
 definition; this Package supplies transport and the credential, and a second
 search provider satisfies the same contract with no change here and none in the

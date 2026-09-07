@@ -11,7 +11,7 @@
 // argument list at all.
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import type { AuditEntryV1 } from "@frockbot/plugin-audit";
+import type { AuditEntryV1 } from "@frockbot/app/audit";
 import type { FakeExecScript } from "../computer-host-fake.ts";
 import { toolCallTriggerPrompt } from "../harness/miniflare.ts";
 import {

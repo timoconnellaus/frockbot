@@ -1,7 +1,7 @@
 /**
  * The client-side half of the settings deep-link scheme.
  *
- * The scheme itself lives in `@frockbot/plugin-shell/settings-links`, which
+ * The scheme itself lives in `@frockbot/app/shell/settings-links`, which
  * `client-ui` must not depend on — a primitive cannot import the shell. What
  * the primitives need is narrower: the name of the event the shell fires when
  * a link resolves, so an anchored row can highlight itself without either side

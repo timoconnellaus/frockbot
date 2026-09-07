@@ -4,7 +4,7 @@ import {
   type SkillRefV1,
 } from "@frockbot/core/contracts";
 import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/core/configuration";
-import { decodeRunIdV1 } from "@frockbot/plugin-shell/backend-contracts";
+import { decodeRunIdV1 } from "@frockbot/app/shell/backend-contracts";
 
 type RpcValueDecoder = (value: unknown, label: string) => unknown;
 export type RpcJsonValue =

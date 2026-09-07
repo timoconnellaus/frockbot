@@ -24,7 +24,7 @@ import {
   MEMORY_VECTOR_DELETE_BATCH_SIZE_V1,
 } from "../src/bot-state.ts";
 import { entryFailureStatusV1 } from "../src/entry-boundary.ts";
-import { MEMORY_CHUNK_INDEX_PREFIX_V1 } from "@frockbot/plugin-memory/chunk-index";
+import { MEMORY_CHUNK_INDEX_PREFIX_V1 } from "@frockbot/app/memory/chunk-index";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 
 function bot(userId: string, botId: string) {
@@ -277,7 +277,7 @@ describe("deleting a Bot in Workerd", () => {
     // the Bot object never even gets as far as its own tombstone. The
     // tombstone answers the crash window — the Bot torn down but the
     // registration not yet removed — and `BotDeletedError` (410) is asserted
-    // over that window in `packages/plugin-flock/src/bot.test.ts`.
+    // over that window in `app/flock/bot.test.ts`.
     for (const attempt of [
       () =>
         stub.run({
@@ -328,7 +328,7 @@ describe("deleting a Bot in Workerd", () => {
     // Deletion is idempotent by command id: the replay settles from the stored
     // receipt rather than reporting a Bot that is no longer registered. (A
     // *fresh* delete of an already-deleted Bot is a `BotNotFoundError`, which
-    // `packages/plugin-flock/src/user.test.ts` asserts.)
+    // `app/flock/user.test.ts` asserts.)
     expect(
       await userRpc(identity.userId).executeBotLifecycle({
         schemaVersion: 1,

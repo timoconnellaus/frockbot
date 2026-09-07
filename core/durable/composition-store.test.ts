@@ -154,7 +154,7 @@ describe("Bot Durable Object Composition records", () => {
         members: [
           {
             packageId: "shell",
-            specifier: "@frockbot/plugin-shell",
+            specifier: "@frockbot/app/shell",
             version: "0.0.1",
             manifestHash: "1".repeat(64),
             provenance: { kind: "first-party" },

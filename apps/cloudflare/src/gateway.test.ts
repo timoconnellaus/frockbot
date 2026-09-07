@@ -1,11 +1,11 @@
 import type {
   ApprovalDecisionReceiptV1,
   ApprovalListViewV1,
-} from "@frockbot/plugin-shell/approvals";
+} from "@frockbot/app/shell/approvals";
 import { describe, expect, test } from "bun:test";
 import { type SessionEvent } from "@frockbot/core/contracts";
 import type { ConnectionCommandReceiptV1 } from "@frockbot/core/connection";
-import { createSettingsBackendContribution } from "@frockbot/plugin-settings/backend";
+import { createSettingsBackendContribution } from "@frockbot/app/settings/backend";
 import { applyBotProfilePatchV1 } from "@frockbot/core/configuration";
 import type {
   BotConfigurationReadRpcV1,
@@ -17,16 +17,16 @@ import type {
   UserConfigurationReadRpcV1,
   UserSettingsViewV1,
 } from "@frockbot/core/configuration";
-import type { StoredRun } from "@frockbot/plugin-shell/backend-contracts";
-import type { DeploymentPolicyV1 } from "@frockbot/plugin-admin/shared";
-import { createFlockBackendContribution } from "@frockbot/plugin-flock/backend";
-import { foundationBaseRuntimePackagesV1 } from "@frockbot/application-foundation/runtime";
+import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
+import type { DeploymentPolicyV1 } from "@frockbot/app/admin/shared";
+import { createFlockBackendContribution } from "@frockbot/app/flock/backend";
+import { foundationBaseRuntimePackagesV1 } from "@frockbot/app/runtime";
 import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
-} from "@frockbot/plugin-shell/backend-composition";
-import { executeBotTurn } from "@frockbot/plugin-shell/backend-runner";
-import { randomSheepRecipeV1 } from "@frockbot/plugin-flock/shared";
+} from "@frockbot/app/shell/backend-composition";
+import { executeBotTurn } from "@frockbot/app/shell/backend-runner";
+import { randomSheepRecipeV1 } from "@frockbot/app/flock/shared";
 import {
   createClientRunStopReceiptV1,
   decodeClientRunLookupV1,
@@ -43,7 +43,7 @@ import {
   type ClientRunListV1,
   type ClientRunStopCommandV1,
   type ClientRunStopReceiptV1,
-} from "@frockbot/plugin-shell/run-protocol";
+} from "@frockbot/app/shell/run-protocol";
 import type {
   BotNotificationIntent,
   BotConfigurationBinding,
@@ -59,9 +59,9 @@ import type {
   WorkerCode,
   WorkerLoader,
 } from "./contracts.js";
-import { RoutineStore } from "@frockbot/plugin-routines/store";
-import { RoutineInboxStore } from "@frockbot/plugin-routines/inbox-store";
-import { createMemoryRoutineStorageV1 } from "@frockbot/plugin-routines/testing";
+import { RoutineStore } from "@frockbot/app/routines/store";
+import { RoutineInboxStore } from "@frockbot/app/routines/inbox-store";
+import { createMemoryRoutineStorageV1 } from "@frockbot/app/routines/testing";
 import {
   applicationDeploymentId,
   createGateway,

@@ -19,16 +19,16 @@ import type {
 } from "@frockbot/client-core";
 import { clientSurfaceRegistryKey } from "@frockbot/client-core";
 import { MACHINE_LIMITS_V1 } from "@frockbot/core/machine-protocol";
-import { userMachineClientPlugin } from "@frockbot/plugin-user-machine/client";
+import { userMachineClientPlugin } from "@frockbot/app/machine/client";
 import {
   machinesStateKey,
   type MachinesClientState,
-} from "@frockbot/plugin-user-machine/client/state";
+} from "@frockbot/app/machine/client/state";
 import {
   MachineDeviceAgentV1,
   createMemoryMachineSecretStoreV1,
-} from "@frockbot/plugin-user-machine/device";
-import { createMachineDeviceRunnerV1 } from "@frockbot/plugin-user-machine/device-runner";
+} from "@frockbot/app/machine/device";
+import { createMachineDeviceRunnerV1 } from "@frockbot/app/machine/device-runner";
 import {
   asUser,
   freshUserId,

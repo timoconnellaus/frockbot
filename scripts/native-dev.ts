@@ -254,8 +254,7 @@ function wrangler(args: string[], cwd = cloudflareRoot): void {
 }
 
 function buildAndSeed(): void {
-  say("building the web client and the foundation artifact");
-  run(["bun", "run", "build:webui"]);
+  say("building the foundation artifact");
   run(["bun", "run", "artifact:build"], { cwd: cloudflareRoot });
 
   say("seeding the foundation artifact into local R2");

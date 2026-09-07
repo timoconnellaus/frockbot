@@ -32,12 +32,12 @@ import { SessionStore } from "@frockbot/core/contracts";
 import {
   createMemoryWriteTool,
   MemoryProjection,
-} from "@frockbot/plugin-memory/agent";
-import { memoryChunkIndexEntriesV1 } from "@frockbot/plugin-memory/chunk-index";
-import { createBotMemoryHost } from "@frockbot/plugin-shell/backend-memory";
-import { createBotSkillsReads } from "@frockbot/plugin-shell/backend-skills";
-import { loadFullSkillCatalogV1 } from "@frockbot/plugin-skills/catalog";
-import { createBotComputerSyncHost } from "@frockbot/plugin-shell/backend-computer";
+} from "@frockbot/app/memory/agent";
+import { memoryChunkIndexEntriesV1 } from "@frockbot/app/memory/chunk-index";
+import { createBotMemoryHost } from "@frockbot/app/shell/backend-memory";
+import { createBotSkillsReads } from "@frockbot/app/shell/backend-skills";
+import { loadFullSkillCatalogV1 } from "@frockbot/app/skills/catalog";
+import { createBotComputerSyncHost } from "@frockbot/app/shell/backend-computer";
 import {
   createWorkspaceRootSyncV1,
   type ComputerSyncBytesOutcomeV1,
@@ -60,9 +60,9 @@ import {
   type CompositionFailureV1,
 } from "@frockbot/core/durable";
 import { BotState } from "../src/bot-state.ts";
-import { BOT_CONFIGURATION_KEY } from "@frockbot/plugin-shell/backend";
-import { ISOLATE_MODEL_REQUEST_PREFIX } from "@frockbot/plugin-shell/backend-isolate";
-import { notificationIdV1 } from "@frockbot/plugin-shell/notification-id";
+import { BOT_CONFIGURATION_KEY } from "@frockbot/app/shell/backend";
+import { ISOLATE_MODEL_REQUEST_PREFIX } from "@frockbot/app/shell/backend-isolate";
+import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import { UserConfiguration } from "../src/user-configuration.ts";
 export { DeploymentPolicy } from "../src/deployment-policy.ts";

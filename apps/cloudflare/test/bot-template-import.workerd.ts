@@ -16,8 +16,8 @@ import type {
   TemplateImportListViewV1,
   TemplateImportRecordV1,
   TemplateShareReceiptV1,
-} from "@frockbot/plugin-bot-template/shared";
-import { templateImportRecordKeyV1 } from "@frockbot/plugin-bot-template/shared";
+} from "@frockbot/app/bot-template/shared";
+import { templateImportRecordKeyV1 } from "@frockbot/app/bot-template/shared";
 import { provisionBot } from "./provision-bot.ts";
 
 /**

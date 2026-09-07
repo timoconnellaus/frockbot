@@ -13,7 +13,7 @@ import {
   SELF,
 } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
-import { mintRoutineHookTokenV1 } from "@frockbot/plugin-routines/hook";
+import { mintRoutineHookTokenV1 } from "@frockbot/app/routines/hook";
 import {
   expectJson,
   expectOkJson,

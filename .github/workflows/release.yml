@@ -113,16 +113,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build publishable packages
-        # A webui package declares no `files`, so whatever sits in its
-        # directory at pack time ships in its tarball — `dist/` included. Only
-        # the webui build writes into `packages/`; the app builds the verify
-        # job runs write into `apps/`, so this is the whole of `bun run build`
-        # that can change a published tarball. `applets/sdk` is the exception
-        # and needs nothing here: it names its `files` and builds its own
-        # `dist/` from `prepublishOnly`.
-        run: bun run build:webui
-
       - name: Set package versions
         env:
           VERSION: ${{ needs.verify.outputs.version }}

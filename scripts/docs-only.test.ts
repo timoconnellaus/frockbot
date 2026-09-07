@@ -29,18 +29,13 @@ describe("scripts/docs-only.sh", () => {
   });
 
   test("one code path makes the whole change code", async () => {
-    expect(
-      await classify([
-        "docs/plans/voice.md",
-        "packages/plugin-shell/src/agent.ts",
-      ]),
-    ).toBe(false);
+    expect(await classify(["docs/plans/voice.md", "app/shell/agent.ts"])).toBe(
+      false,
+    );
   });
 
   test("Markdown outside docs/ and the root is code", async () => {
-    expect(await classify(["packages/plugin-skills/skills/deploy.md"])).toBe(
-      false,
-    );
+    expect(await classify(["app/skills/deploy.md"])).toBe(false);
     expect(await classify([".github/PULL_REQUEST_TEMPLATE.md"])).toBe(false);
   });
 

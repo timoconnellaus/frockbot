@@ -8,10 +8,11 @@
 //
 // What it writes:
 //
-//   applets/template.generated.ts   the SDK scaffold
-//   applets/pages.generated.ts      the two pages, with the bridge helper
-//                                   inlined and each page's digest
-//   packages/plugin-skills/src/managed-applets.generated.ts   the Skill
+//   applets/template.generated.ts           the SDK scaffold
+//   applets/pages.generated.ts              the two pages, with the bridge
+//                                           helper inlined and each page's
+//                                           digest
+//   app/skills/managed-applets.generated.ts the Skill
 //
 // Freshness is proved by `--check`, which `bun run typecheck` runs.
 import { format } from "prettier";
@@ -28,7 +29,7 @@ const PAGE_IDS = ["list", "canvas"] as const;
 const TEMPLATE_OUTPUT = "applets/template.generated.ts";
 const PAGES_OUTPUT = "applets/pages.generated.ts";
 const SKILL_SOURCE = "applets/skills/applets.md";
-const SKILL_OUTPUT = "packages/plugin-skills/src/managed-applets.generated.ts";
+const SKILL_OUTPUT = "app/skills/managed-applets.generated.ts";
 
 /** Content addressing, the same digest the page route verifies against. */
 async function sha256Hex(text: string): Promise<string> {
@@ -166,7 +167,7 @@ async function pagesModule(): Promise<string> {
  * The Applets Skill, as a managed Skill document.
  *
  * It is authored in `applets/skills/applets.md`, beside the feature it
- * documents, and copied here into `plugin-skills`'s managed set — string
+ * documents, and copied here into `app/skills`'s managed set — string
  * constants compiled into that Package, read-only because there is no path
  * from `skill_write` to one.
  */

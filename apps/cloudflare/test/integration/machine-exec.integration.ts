@@ -17,8 +17,8 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { machineRoutePathV1 } from "@frockbot/core/machine-protocol";
-import { MachineAgentDriverV1 } from "@frockbot/plugin-user-machine/testing";
-import type { AuditEntryV1 } from "@frockbot/plugin-audit";
+import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
+import type { AuditEntryV1 } from "@frockbot/app/audit";
 import { toolCallTriggerPrompt } from "../harness/miniflare.ts";
 import {
   asUser,
@@ -115,7 +115,7 @@ describe("running a command on a registered machine", () => {
           outcome: "ok",
           truncated: false,
           exitCode: 0,
-          stdout: " M packages/plugin-user-machine/src/agent.ts\n",
+          stdout: " M app/machine/agent.ts\n",
         },
       }),
     });
@@ -198,9 +198,7 @@ describe("running a command on a registered machine", () => {
     expect(read?.isError).toBe(false);
     expect(read?.content).toContain("outcome: ok");
     expect(read?.content).toContain("exitCode: 0");
-    expect(read?.content).toContain(
-      "packages/plugin-user-machine/src/agent.ts",
-    );
+    expect(read?.content).toContain("app/machine/agent.ts");
 
     // 6. The audit says which machine it ran on. The row carries a digest and
     //    a redacted preview; the argument list itself is never stored, which

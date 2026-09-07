@@ -30,17 +30,17 @@ import type {
 import {
   createShellCompositionHost,
   type ShellMountedComposition,
-} from "@frockbot/plugin-shell/backend-composition";
+} from "@frockbot/app/shell/backend-composition";
 import {
   BOT_ISOLATE_COMPATIBILITY_DATE,
   isolateBindingDigestV1,
   type BotCapabilitiesPropsV1,
-} from "@frockbot/plugin-shell/backend-isolate";
+} from "@frockbot/app/shell/backend-isolate";
 import type {
   IsolateConnectionV1,
   IsolateModelBindingV1,
 } from "@frockbot/core/contracts";
-import type { FoundationAgentPackage } from "@frockbot/agent-runtime/runtime";
+import type { FoundationAgentPackage } from "@frockbot/app/agent-runtime";
 import type { BotCapabilities } from "../src/bot-capabilities.ts";
 import type { WorkerdBotState } from "./fly-compatibility-worker.ts";
 import { dynamicToolCallV1, twoTierStepV1 } from "./dynamic-tools.ts";

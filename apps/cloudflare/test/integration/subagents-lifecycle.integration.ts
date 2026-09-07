@@ -23,7 +23,7 @@ import {
   toolCallTriggerPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
-import { subagentDurableObjectNameV1 } from "@frockbot/plugin-subagents/storage-keys";
+import { subagentDurableObjectNameV1 } from "@frockbot/app/subagents/storage-keys";
 import { env } from "cloudflare:workers";
 
 useApplicationArtifact();

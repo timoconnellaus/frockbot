@@ -4,7 +4,7 @@
 // versioned command per action. The viewer bearer URL is held only on this
 // in-memory state object and is never copied into browser navigation state.
 import type { ClientPlugin } from "@frockbot/client-core";
-import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
+import { frockBotWebDataKey } from "@frockbot/app/shell/shared";
 import { ref, watch } from "vue";
 import {
   decodeComputerCommandResponse,

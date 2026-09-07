@@ -10,7 +10,7 @@ import {
   ref,
   watch,
 } from "vue";
-import { frockBotWebDataKey } from "@frockbot/plugin-shell/shared";
+import { frockBotWebDataKey } from "@frockbot/app/shell/shared";
 import { computerKey, type ComputerState } from "../shared.ts";
 import { dialogFocusWrapTarget } from "./dialog-focus.ts";
 import { computerProgressFrame, computerProgressRunKind } from "./progress.ts";

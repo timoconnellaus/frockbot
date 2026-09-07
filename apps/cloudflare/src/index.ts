@@ -3,7 +3,7 @@ import { BOT_STATE_CHANNEL_INTERNAL_PATH } from "./bot-state-channel.js";
 import {
   decodeMachineResultDeliveryV1,
   type MachineResultDeliveryV1,
-} from "@frockbot/plugin-user-machine/delivery";
+} from "@frockbot/app/machine/delivery";
 import {
   APPLET_ID_V1,
   decodePackageIframeToolCommandV1,
@@ -11,8 +11,8 @@ import {
   type AppletSourceViewV1,
   type PackageIframeCompositionV1,
 } from "@frockbot/core/contracts";
-import type { ClientSkillCatalogV1 } from "@frockbot/plugin-shell/skill-protocol";
-import { createFoundationBackendContributions } from "@frockbot/application-foundation/runtime";
+import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
+import { createFoundationBackendContributions } from "@frockbot/app/runtime";
 import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/applets/pages";
 import {
   decodeBotLifecycleDirectoryViewV1,
@@ -27,7 +27,7 @@ import {
   FLOCK_DIRECTORY_LIMIT,
   type BotIdentityDirectoryViewV1,
   type BotIdentityViewV1,
-} from "@frockbot/plugin-flock/shared";
+} from "@frockbot/app/flock/shared";
 import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupQueryV1,
@@ -40,7 +40,7 @@ import {
   type ClientRunListV1,
   type ClientRunStopCommandV1,
   type ClientRunStopReceiptV1,
-} from "@frockbot/plugin-shell/run-protocol";
+} from "@frockbot/app/shell/run-protocol";
 import {
   decodeBotNotificationDirectoryViewV1,
   decodeBotUnreadDirectoryViewV1,
@@ -50,7 +50,7 @@ import {
   type BotUnreadDirectoryViewV1,
   type BotUnreadReceiptV1,
   type BotUnreadViewV1,
-} from "@frockbot/plugin-shell/unread";
+} from "@frockbot/app/shell/unread";
 import {
   decodeApprovalDecisionCommandV1,
   decodeApprovalDecisionReceiptV1,
@@ -58,7 +58,7 @@ import {
   type ApprovalDecisionCommandV1,
   type ApprovalDecisionReceiptV1,
   type ApprovalListViewV1,
-} from "@frockbot/plugin-shell/approvals";
+} from "@frockbot/app/shell/approvals";
 import {
   decodeCompositionCommandReceiptV1,
   decodeCompositionGenerationListViewV1,
@@ -73,7 +73,7 @@ import {
   decodeRoutineListViewV1,
   decodeRoutineRunDetailViewV1,
   decodeRoutineRunListViewV1,
-} from "@frockbot/plugin-routines/shared";
+} from "@frockbot/app/routines/shared";
 import {
   decodeComputerCommandResponse,
   decodeComputerProjectionV1,
@@ -83,7 +83,7 @@ import { ComputerBotNotFoundError } from "@frockbot/computer/backend";
 import {
   decodeTaskListViewV1,
   decodeTaskViewV1,
-} from "@frockbot/plugin-subagents/shared";
+} from "@frockbot/app/subagents/shared";
 import {
   decodeMachineClaimReceiptV1,
   decodeMachineEnrollmentReceiptV1,
@@ -96,19 +96,19 @@ import {
   decodeClientSearchRebuildReceiptV1,
   decodeSearchIndexResultsV1,
   type SearchQueryV1,
-} from "@frockbot/plugin-search";
+} from "@frockbot/app/search";
 import {
   decodeAuditRebuildReceiptV1,
   decodeClientAuditPageV1,
   type AuditQueryV1,
-} from "@frockbot/plugin-audit";
+} from "@frockbot/app/audit";
 import {
   decodeTemplateImportListViewV1,
   decodeTemplateImportRecordV1,
   decodeTemplateShareListViewV1,
   decodeTemplateShareReceiptV1,
   type TemplateCommandV1,
-} from "@frockbot/plugin-bot-template/shared";
+} from "@frockbot/app/bot-template/shared";
 import {
   parseTemplateShareIdV1,
   type TemplateVisibilityV1,
@@ -117,7 +117,7 @@ import {
   decodeDeploymentPolicyV1,
   type DeploymentPolicyV1,
   type SetSignupsCommandV1,
-} from "@frockbot/plugin-admin/shared";
+} from "@frockbot/app/admin/shared";
 import { gatewayAuth } from "./auth.js";
 import {
   createNativeAuth,
@@ -130,7 +130,7 @@ import {
   isDeploymentAdminV1,
 } from "./admin-identities.js";
 import type { DebugGatewaySurface } from "./debug.js";
-import type { BotDebugQueryV1 } from "@frockbot/plugin-shell/debug-protocol";
+import type { BotDebugQueryV1 } from "@frockbot/app/shell/debug-protocol";
 import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
 import type {
   ApplicationArtifactStore,

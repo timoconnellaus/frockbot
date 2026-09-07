@@ -15,7 +15,7 @@ import {
 import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,
-} from "@frockbot/plugin-testkit";
+} from "@frockbot/app/testkit";
 import { createComputerAgentFeature, pngDimensionsV1 } from "./agent.js";
 import { FakeWorkspace } from "./workspace-fixture.js";
 

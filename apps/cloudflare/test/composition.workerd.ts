@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
-import { notificationIdV1 } from "@frockbot/plugin-shell/notification-id";
+import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 
 function probe(name: string) {
   return env.COMPOSITIONS.getByName(name);

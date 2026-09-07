@@ -27,13 +27,14 @@ interface Target {
 }
 
 const manifestPaths = [
+  "app/package.json",
   "applets/package.json",
   "applets/sdk/package.json",
   "computer/package.json",
   "core/package.json",
   "providers/package.json",
 ];
-for (const group of ["packages", "apps", "applications"]) {
+for (const group of ["packages", "apps"]) {
   manifestPaths.push(
     ...new Bun.Glob(`${group}/*/package.json`).scanSync({
       cwd: repoRoot,

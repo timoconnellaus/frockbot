@@ -25,8 +25,8 @@ import type {
   MachineEnrollmentReceiptV1,
   MachinePairingOfferV1,
 } from "@frockbot/core/machine-protocol";
-import type { MachineIntentRecordV1 } from "@frockbot/plugin-user-machine/intent";
-import { machineIntentKeyV1 } from "@frockbot/plugin-user-machine/intent";
+import type { MachineIntentRecordV1 } from "@frockbot/app/machine/intent";
+import { machineIntentKeyV1 } from "@frockbot/app/machine/intent";
 import { provisionBot } from "./provision-bot.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
 

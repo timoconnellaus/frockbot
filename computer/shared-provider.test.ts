@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createAgentRuntimeHarness } from "@frockbot/plugin-testkit";
+import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import {
   createSharedComputerProviderFeature,
   SHARED_COMPUTER_PROVIDER_ID,

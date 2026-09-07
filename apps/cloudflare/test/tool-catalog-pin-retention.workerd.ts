@@ -13,7 +13,7 @@ import {
   TURN_TOOL_CATALOG_TURN_RETENTION_V1,
   turnToolCatalogPin,
   turnToolCatalogPinKeyV1,
-} from "@frockbot/plugin-shell/tool-catalog-pin";
+} from "@frockbot/app/shell/tool-catalog-pin";
 import { describe, expect, test } from "vitest";
 
 const CATALOG_BYTES = 900_000;

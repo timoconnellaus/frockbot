@@ -3,7 +3,7 @@ import { ComputerError, type ComputerProvider } from "@frockbot/computer/core";
 import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,
-} from "@frockbot/plugin-testkit";
+} from "@frockbot/app/testkit";
 import { SessionStore } from "@frockbot/core/contracts";
 import {
   COMPUTER_OVERLOADED_TOOL_MESSAGE_V1,

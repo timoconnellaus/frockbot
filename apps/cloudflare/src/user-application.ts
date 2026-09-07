@@ -1,7 +1,7 @@
 import {
   FOUNDATION_PACKAGES_V1,
   FOUNDATION_PACKAGE_VERSION_V1,
-} from "@frockbot/application-foundation/runtime";
+} from "@frockbot/app/runtime";
 import {
   decodeBotIdV1,
   isApplicationDeploymentHash,
@@ -31,8 +31,8 @@ import {
   type ClientTurnCommandV1,
   type ClientTurnRefusalReasonV1,
   type ClientTurnRefusalV1,
-} from "@frockbot/plugin-shell/run-protocol";
-import { decodeApprovalDecisionCommandV1 } from "@frockbot/plugin-shell/approvals";
+} from "@frockbot/app/shell/run-protocol";
+import { decodeApprovalDecisionCommandV1 } from "@frockbot/app/shell/approvals";
 import {
   APPLETS_UNAVAILABLE_MESSAGE_V1,
   botTurnRefusalCodeV1,
@@ -94,7 +94,7 @@ function hostedIsAdmin(request: Request): boolean {
 
 /**
  * The `<body>` attributes the hosted client's auth projection decodes
- * (`packages/plugin-auth/src/client/browser.ts`, which throws rather than
+ * (`app/auth/client/browser.ts`, which throws rather than
  * mounting when one is missing). Every document that mounts the client - the
  * Worker-rendered one below and the vite development document
  * (`apps/cloudflare/index.html`) - carries all of them, so the list lives in

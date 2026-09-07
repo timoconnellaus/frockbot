@@ -40,7 +40,7 @@ const BOT_WRITER: WorkspaceWriterV1 = {
 };
 const PACKAGE_WRITER: WorkspaceWriterV1 = {
   kind: "first-party",
-  packageId: "@frockbot/plugin-skills",
+  packageId: "@frockbot/app/skills",
 };
 
 const skillsRoot: WorkspaceRootV1 = {
@@ -62,7 +62,7 @@ const userMemoryRoot: WorkspaceRootV1 = { kind: "user-memory", userId: USER };
 const packageRoot: WorkspaceRootV1 = {
   kind: "package-declared",
   userId: USER,
-  packageId: "@frockbot/plugin-notes",
+  packageId: "@frockbot/app/notes",
   rootId: "notes",
 };
 

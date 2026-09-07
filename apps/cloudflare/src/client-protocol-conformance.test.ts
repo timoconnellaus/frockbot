@@ -29,14 +29,14 @@ import {
   decodeClientTurnV1,
   decodeClientTurnRefusalV1,
   decodeRunCursorV1,
-} from "@frockbot/plugin-shell/run-protocol";
-import { CLIENT_VERSION_DEGRADED_MESSAGE_V1 } from "@frockbot/plugin-shell/run-failure-copy";
+} from "@frockbot/app/shell/run-protocol";
+import { CLIENT_VERSION_DEGRADED_MESSAGE_V1 } from "@frockbot/app/shell/run-failure-copy";
 import {
   decodeBotUnreadCommandV1,
   decodeBotUnreadDirectoryViewV1,
   decodeBotNotificationDirectoryViewV1,
   decodeBotUnreadReceiptV1,
-} from "@frockbot/plugin-shell/unread";
+} from "@frockbot/app/shell/unread";
 import {
   decodeDirectoryViewV1,
   decodeBotLifecycleCommandV1,
@@ -44,9 +44,9 @@ import {
   decodeBotLifecycleReceiptV1,
   decodeBotLifecycleDirectoryViewV1,
   decodeCreateBotCommandV1,
-} from "@frockbot/plugin-flock/shared";
+} from "@frockbot/app/flock/shared";
 
-import { decodeClientAuditPageV1 } from "@frockbot/plugin-audit";
+import { decodeClientAuditPageV1 } from "@frockbot/app/audit";
 import { decodeCompositionGenerationListViewV1 } from "@frockbot/core/configuration";
 
 const existing: Record<string, (value: unknown) => unknown> = {

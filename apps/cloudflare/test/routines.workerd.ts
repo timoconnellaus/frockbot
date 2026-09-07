@@ -20,7 +20,7 @@ import {
   routineDeliveryIdV1,
   routineHookDigestV1,
   verifyRoutineHookTokenV1,
-} from "@frockbot/plugin-routines/hook";
+} from "@frockbot/app/routines/hook";
 import { provisionBot } from "./provision-bot.ts";
 
 function bot(userId: string, botId: string) {
