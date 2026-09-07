@@ -146,8 +146,6 @@ import {
   createDurableWorkspaceFilesV1,
   deleteBotWorkspaceRootsV1,
 } from "./workspace.js";
-import { R2PackageCatalog } from "./package-catalog.js";
-import type { BotSkillCatalogReaderV1 } from "@frockbot/plugin-shell/backend-skills";
 import type { ClientWorkspaceFileV1 } from "./contracts.js";
 import {
   DurableWorkspaceGenerations,
@@ -350,7 +348,6 @@ export class BotState extends DurableObject<BotStateEnv> {
   protected readonly backendEnv: BotStateEnv & {
     FROCK_AI?: FrockAiGatewayHostV1;
     WORKSPACE_FILES?: WorkspaceFilesV1;
-    PACKAGE_CATALOG_ENTRIES?: BotSkillCatalogReaderV1;
     MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
     MEMORY_PROJECTS?: MemoryProjectsV1;
     MEMORY_CHUNK_INDEX?: MemoryChunkIndexWriterV1;
@@ -683,14 +680,6 @@ export class BotState extends DurableObject<BotStateEnv> {
       generations: routed,
     });
     if (workspace) this.backendEnv.WORKSPACE_FILES = workspace;
-    // The Catalog reader is identity-independent, but it is bound here beside
-    // the other constructed surfaces so the Shell Package reads one
-    // environment and names no Cloudflare type.
-    if (this.env.PACKAGE_CATALOG && !this.backendEnv.PACKAGE_CATALOG_ENTRIES) {
-      this.backendEnv.PACKAGE_CATALOG_ENTRIES = new R2PackageCatalog(
-        this.env.PACKAGE_CATALOG,
-      );
-    }
     if (sync) {
       this.backendEnv.WORKSPACE_SYNC_FILES = sync;
       this.backendEnv.WORKSPACE_SYNC_EFFECTS = new DurableWorkspaceSyncEffects({

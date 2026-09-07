@@ -50,7 +50,6 @@ import type {
   BotStateBinding,
   BotTurnCommand,
   BotTurnResult,
-  CatalogGatewayStore,
   ConnectionBinding,
   GatewayAuth,
   GatewayDependencies,
@@ -947,7 +946,6 @@ function createTestGateway(
   auth: GatewayAuth = unauthenticatedAuth,
   allowDevelopmentIdentity = true,
   allowedClientOrigins?: string[],
-  catalog?: CatalogGatewayStore,
   signup?: {
     userExists?: (userId: string) => Promise<boolean>;
     policy?: DeploymentPolicyV1;
@@ -1128,7 +1126,6 @@ function createTestGateway(
     ],
     allowDevelopmentIdentity,
     ...(allowedClientOrigins ? { allowedClientOrigins } : {}),
-    ...(catalog ? { catalog } : {}),
   });
   return {
     gateway,
@@ -2161,7 +2158,6 @@ describe("Cloudflare user application gateway", () => {
       auth,
       false,
       undefined,
-      undefined,
       { userExists: () => Promise.resolve(false) },
     );
 
@@ -2188,7 +2184,6 @@ describe("Cloudflare user application gateway", () => {
       undefined,
       auth,
       false,
-      undefined,
       undefined,
       {
         userExists: () => Promise.resolve(false),
@@ -2222,7 +2217,6 @@ describe("Cloudflare user application gateway", () => {
         auth,
         false,
         undefined,
-        undefined,
         {
           userExists: () => {
             existenceChecks += 1;
@@ -2246,7 +2240,6 @@ describe("Cloudflare user application gateway", () => {
       undefined,
       unauthenticatedAuth,
       true,
-      undefined,
       undefined,
       {
         userExists: () => {
@@ -2284,14 +2277,9 @@ describe("Cloudflare user application gateway", () => {
           user: { id: "new-user", email: "new@example.com" },
         }),
     };
-    const { gateway } = createTestGateway(
-      undefined,
-      auth,
-      false,
-      undefined,
-      undefined,
-      { userExists: () => Promise.resolve(false) },
-    );
+    const { gateway } = createTestGateway(undefined, auth, false, undefined, {
+      userExists: () => Promise.resolve(false),
+    });
 
     const response = await gateway(
       new Request("https://frockbot.test/sign-out"),
@@ -2324,7 +2312,6 @@ describe("Bot-state WebSocket gateway", () => {
       false,
       undefined,
       undefined,
-      undefined,
       () => {
         opened = true;
         return Promise.resolve(Response.json({ opened: true }));
@@ -2344,7 +2331,6 @@ describe("Bot-state WebSocket gateway", () => {
       undefined,
       undefined,
       true,
-      undefined,
       undefined,
       undefined,
       (userId, botId) => {
@@ -2375,7 +2361,6 @@ describe("Bot-state WebSocket gateway", () => {
       undefined,
       true,
       [CLIENT_ORIGIN],
-      undefined,
       { adminEmails: "" },
       (userId, botId, _request, forwarded) => {
         context = { userId, botId, ...forwarded };
@@ -2402,7 +2387,6 @@ describe("Bot-state WebSocket gateway", () => {
       true,
       [CLIENT_ORIGIN],
       undefined,
-      undefined,
       () => {
         opened = true;
         return Promise.resolve(Response.json({ opened: true }));
@@ -2428,7 +2412,6 @@ describe("Bot-state WebSocket gateway", () => {
       undefined,
       true,
       origins,
-      undefined,
       undefined,
       (_userId, _botId, request) => {
         opened.push(request.headers.get("origin") ?? "");
@@ -2670,133 +2653,6 @@ describe("Cross-origin access for configured clients", () => {
   });
 });
 
-describe("the remote Package Catalog routes", () => {
-  const indexDocument = JSON.stringify({
-    schemaVersion: 1,
-    generation: "gen-one",
-    entries: [],
-  });
-  const entryDocument = JSON.stringify({
-    schemaVersion: 1,
-    catalogId: "clock",
-  });
-
-  function catalogGateway(overrides: Partial<CatalogGatewayStore> = {}) {
-    const catalog: CatalogGatewayStore = {
-      readIndexDocument: (generation) =>
-        Promise.resolve(
-          generation !== undefined && generation !== "gen-one"
-            ? undefined
-            : {
-                generation: "gen-one",
-                hash: "a".repeat(64),
-                document: indexDocument,
-              },
-        ),
-      readEntryDocument: (catalogId) =>
-        Promise.resolve(
-          catalogId === "clock"
-            ? {
-                generation: "gen-one",
-                hash: "b".repeat(64),
-                document: entryDocument,
-              }
-            : undefined,
-        ),
-      ...overrides,
-    };
-    return createTestGateway(undefined, undefined, true, undefined, catalog);
-  }
-
-  test("serves the index with its content hash as an etag", async () => {
-    const { gateway } = catalogGateway();
-    const response = await gateway(request("/catalog/v1/index", "alice"));
-
-    expect(response.status).toBe(200);
-    expect(await response.text()).toBe(indexDocument);
-    expect(response.headers.get("etag")).toBe(`"${"a".repeat(64)}"`);
-    expect(response.headers.get("x-frockbot-catalog-generation")).toBe(
-      "gen-one",
-    );
-    // The live read follows a pointer that moves, so it revalidates.
-    expect(response.headers.get("cache-control")).toContain("must-revalidate");
-  });
-
-  test("a pinned generation is immutable and cached as such", async () => {
-    const { gateway } = catalogGateway();
-    const response = await gateway(
-      request("/catalog/v1/index?generation=gen-one", "alice"),
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toContain("immutable");
-  });
-
-  test("answers a matching etag with 304 and no body", async () => {
-    const { gateway } = catalogGateway();
-    const response = await gateway(
-      request("/catalog/v1/index", "alice", {
-        headers: { "if-none-match": `"${"a".repeat(64)}"` },
-      }),
-    );
-
-    expect(response.status).toBe(304);
-    expect(await response.text()).toBe("");
-  });
-
-  test("serves one entry and 404s an entry the generation does not carry", async () => {
-    const { gateway } = catalogGateway();
-
-    expect(
-      await (await gateway(request("/catalog/v1/entry/clock", "alice"))).text(),
-    ).toBe(entryDocument);
-    expect(
-      (await gateway(request("/catalog/v1/entry/weather", "alice"))).status,
-    ).toBe(404);
-  });
-
-  test("is authenticated, read-only, and refuses an unknown query", async () => {
-    const { gateway } = catalogGateway();
-
-    expect(
-      (await gateway(new Request("https://frockbot.test/catalog/v1/index")))
-        .status,
-    ).toBe(401);
-    expect(
-      (await gateway(request("/catalog/v1/index", "alice", { method: "POST" })))
-        .status,
-    ).toBe(405);
-    expect(
-      (await gateway(request("/catalog/v1/index?q=1", "alice"))).status,
-    ).toBe(400);
-  });
-
-  test("reports an unconfigured Catalog rather than falling through", async () => {
-    const { gateway } = createTestGateway();
-    const response = await gateway(request("/catalog/v1/index", "alice"));
-
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({
-      error: "Package Catalog is not configured",
-    });
-  });
-
-  test("a generation that fails verification is a broken publish, not a body", async () => {
-    const { gateway } = catalogGateway({
-      readIndexDocument: () =>
-        Promise.reject(
-          new Error("catalog index failed content hash verification"),
-        ),
-    });
-    const response = await gateway(request("/catalog/v1/index", "alice"));
-
-    expect(response.status).toBe(502);
-    expect(await response.json()).toMatchObject({
-      error: "catalog index failed content hash verification",
-    });
-  });
-});
-
 describe("the Workspace seed door", () => {
   const seedRequest = (token: string | undefined, body: unknown) =>
     new Request("https://frockbot.test/api/workspace-seed/alice/bot-1", {
@@ -2830,7 +2686,6 @@ describe("the Workspace seed door", () => {
       undefined,
       undefined,
       true,
-      undefined,
       undefined,
       undefined,
       undefined,

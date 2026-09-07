@@ -50,13 +50,6 @@
       "binding": "MEMORY_FILES",
       "bucket_name": "frockbot-memory-files",
     },
-    // The remote Package Catalog: immutable generations plus one mutable
-    // pointer, published by scripts/publish-catalog.ts and served read-only
-    // through /catalog/v1/*.
-    {
-      "binding": "PACKAGE_CATALOG",
-      "bucket_name": "frockbot-package-catalog",
-    },
   ],
   "d1_databases": [
     {
@@ -177,11 +170,6 @@
           "bucket_name": "frockbot-memory-files-development",
           "remote": true,
         },
-        {
-          "binding": "PACKAGE_CATALOG",
-          "bucket_name": "frockbot-package-catalog-development",
-          "remote": false,
-        },
       ],
       "d1_databases": [
         {
@@ -285,10 +273,6 @@
         {
           "binding": "MEMORY_FILES",
           "bucket_name": "frockbot-memory-files-staging",
-        },
-        {
-          "binding": "PACKAGE_CATALOG",
-          "bucket_name": "frockbot-package-catalog-staging",
         },
       ],
       // The staging deploy replaces `database_id` with the identifier of the
@@ -398,11 +382,6 @@
         {
           "binding": "MEMORY_FILES",
           "bucket_name": "frockbot-memory-files-e2e",
-          "remote": false,
-        },
-        {
-          "binding": "PACKAGE_CATALOG",
-          "bucket_name": "frockbot-package-catalog",
           "remote": false,
         },
       ],

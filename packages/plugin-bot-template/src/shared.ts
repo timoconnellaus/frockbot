@@ -2,7 +2,7 @@
 //
 // "Cross-runtime communication uses narrow, versioned DTOs, and every inbound
 // value is decoded at its seam." The template *document* lives in
-// `@frockbot/template-core` beside `catalog-core`, because it is a product
+// `@frockbot/template-core`, because it is a product
 // artifact several runtimes read without this Package mounted. What lives here
 // is the traffic around it: the commands a User issues, the receipts they get
 // back, and the summary of what an export packed and what it scrubbed.
@@ -24,10 +24,8 @@ export { TemplateDecodeError };
 /** Why something on the Bot did not reach the template. */
 export const TEMPLATE_OMISSION_REASONS_V1 = [
   "managed-skill",
-  "plugin-skill",
   "unattributed-skill",
   "unreadable-skill",
-  "first-party-package",
   "package-values",
   "connection",
   "memory",
@@ -369,7 +367,6 @@ export interface TemplateImportRecordV1 {
   status: TemplateImportStatusV1;
   botName: string;
   packages: {
-    catalogId: string;
     packageId: string;
     displayName: string;
     version: string;
@@ -380,7 +377,6 @@ export interface TemplateImportRecordV1 {
   steps: TemplateImportStepReceiptV1[];
   createdAt: string;
   updatedAt: string;
-  catalogGeneration?: string;
   failure?: string;
 }
 
@@ -509,7 +505,6 @@ export function decodeTemplateImportRecordV1(
         );
       }
       return {
-        catalogId: required(line.catalogId, "catalogId", 64),
         packageId: required(line.packageId, "packageId", 64),
         displayName: required(line.displayName, "displayName", 100),
         version: required(line.version, "version", 100),
@@ -530,15 +525,6 @@ export function decodeTemplateImportRecordV1(
     steps: value.steps.map(decodeTemplateImportStepReceiptV1),
     createdAt: required(value.createdAt, "template import createdAt", 64),
     updatedAt: required(value.updatedAt, "template import updatedAt", 64),
-    ...(value.catalogGeneration === undefined
-      ? {}
-      : {
-          catalogGeneration: required(
-            value.catalogGeneration,
-            "catalogGeneration",
-            64,
-          ),
-        }),
     ...(value.failure === undefined
       ? {}
       : { failure: required(value.failure, "template import failure", 2_000) }),

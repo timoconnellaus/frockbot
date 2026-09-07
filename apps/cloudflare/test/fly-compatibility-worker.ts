@@ -35,11 +35,7 @@ import {
 } from "@frockbot/plugin-memory/agent";
 import { memoryChunkIndexEntriesV1 } from "@frockbot/plugin-memory/chunk-index";
 import { createBotMemoryHost } from "@frockbot/plugin-shell/backend-memory";
-import {
-  createBotPluginSkillsSource,
-  createBotSkillCatalogReader,
-  createBotSkillsReads,
-} from "@frockbot/plugin-shell/backend-skills";
+import { createBotSkillsReads } from "@frockbot/plugin-shell/backend-skills";
 import { loadFullSkillCatalogV1 } from "@frockbot/plugin-skills/catalog";
 import { createBotComputerSyncHost } from "@frockbot/plugin-shell/backend-computer";
 import {
@@ -696,31 +692,7 @@ export class WorkerdBotState extends BotState {
     this.bindSurfaces(identity);
     const reads = createBotSkillsReads(this.backendEnv);
     if (!reads) throw new Error("no Workspace bucket is bound");
-    // SAFETY: the generated stub type for `readConfiguration` is too deep for
-    // the compiler to instantiate here; this names the one field it reads.
-    const configuration = this.env.USER_CONFIGURATIONS.getByName(
-      identity.userId,
-    ) as unknown as {
-      readConfiguration(input: unknown): Promise<{
-        packages: Array<{
-          packageId: string;
-          state: "installed" | "disabled" | "failed";
-          catalogId?: string;
-          catalogGeneration?: string;
-        }>;
-      }>;
-    };
-    const user = await configuration.readConfiguration({
-      schemaVersion: 1,
-      userId: identity.userId,
-    });
-    const pluginSkills = createBotPluginSkillsSource(
-      user.packages,
-      createBotSkillCatalogReader(this.backendEnv),
-    );
-    const catalog = await loadFullSkillCatalogV1(reads, identity, {
-      ...(pluginSkills ? { pluginSkills } : {}),
-    });
+    const catalog = await loadFullSkillCatalogV1(reads, identity);
     const generations = (await this.listCompositionGenerations({
       schemaVersion: 1,
       userId: identity.userId,
@@ -730,14 +702,7 @@ export class WorkerdBotState extends BotState {
     return {
       compositionGenerationId: generations.currentGenerationId,
       skills: catalog.skills.map((skill) => ({
-        ...(skill.ref
-          ? {
-              ref:
-                skill.ref.source === "plugin"
-                  ? `plugin/${skill.ref.packageId}/${skill.ref.slug}`
-                  : `${skill.ref.source}/${skill.ref.slug}`,
-            }
-          : {}),
+        ...(skill.ref ? { ref: `${skill.ref.source}/${skill.ref.slug}` } : {}),
         path: skill.path,
         generationId: skill.generationId,
         // The shared-tier attribution: which Bot or User wrote a Skill this

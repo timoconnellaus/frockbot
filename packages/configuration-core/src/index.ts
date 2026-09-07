@@ -132,27 +132,19 @@ export interface BotNotificationPolicy {
 }
 
 /**
- * Where an installed Package came from. `first-party` is a Package compiled
- * into the running application; `catalog` is one admitted from a pinned remote
- * Catalog generation, whose manifest is data and whose executing code is still
- * a reviewed first-party Package. Absent means `first-party`, so every
- * installation recorded before the Catalog existed keeps its meaning.
+ * Where an installed Package came from. Every Package is compiled into the
+ * running application, so `first-party` is the only answer; absent means the
+ * same thing.
  */
-export type PackageProvenanceV1 = "first-party" | "catalog";
+export type PackageProvenanceV1 = "first-party";
 
 export interface PackageInstallationView {
   packageId: string;
   version: string;
   state: "installed" | "disabled" | "failed";
   failure?: string;
-  /** The Catalog identity this installation was admitted from, if any. */
-  catalogId?: string;
-  /** The immutable Catalog generation `catalogId` was read from. */
-  catalogGeneration?: string;
-  /** Exact non-first-party bundle admitted from the Catalog, when it carries code. */
-  contentHash?: string;
   provenance?: PackageProvenanceV1;
-  /** The setup values the install carried, as GrokBot's `InstallPlugin{values}`. */
+  /** The Package's own setting values, as GrokBot's `InstallPlugin{values}`. */
   values?: Record<string, JsonValue | ModelBindingV1>;
 }
 
@@ -244,15 +236,6 @@ export interface UserSettingsViewV1 {
   platformModel?: ModelBindingV1;
   /** Permanent account choice; the legacy browser projection omits this field. */
   accountModel?: ModelBindingV1;
-  /**
-   * The remote Catalog generation this User is pinned to, and the content hash
-   * of that generation's index. Pinned on the first read that finds a Catalog
-   * and never moved by an install, so a Catalog install is always validated
-   * against an immutable, content-addressed generation. Both are absent for a
-   * User whose deployment has no Catalog, so the decoder must accept absence.
-   */
-  catalogGeneration?: string;
-  catalogIndexHash?: string;
 }
 
 export interface BotSettingsViewV1 {
@@ -319,16 +302,6 @@ export type ConfigurationCommandV1 =
       version: string;
       /** Installs enabled unless the caller explicitly asks otherwise. */
       enabled?: boolean;
-      /**
-       * A Catalog install names the entry and the generation it was read
-       * from. The User Durable Object refuses a generation other than the one
-       * it pinned, so a stale browser cannot install off a moved index. All
-       * three absent is the unchanged compiled-in install path.
-       */
-      catalogId?: string;
-      catalogGeneration?: string;
-      contentHash?: string;
-      values?: Record<string, JsonValue>;
     })
   | (CommandMetaV1 & {
       /** Removes the installation; Connections remain User-owned. */
@@ -1320,32 +1293,8 @@ export function decodeConfigurationCommandV1(
       const command = exactCommand(
         input,
         ["packageId", "version"],
-        ["catalogId", "catalogGeneration", "contentHash", "values", "enabled"],
+        ["enabled"],
       );
-      // A Catalog install is all three of identity, generation and (optional)
-      // values or none of them: half a Catalog install would be an install
-      // against no pinned generation at all.
-      if (
-        (command.catalogId === undefined) !==
-        (command.catalogGeneration === undefined)
-      ) {
-        throw new ConfigurationDecodeError(
-          "a Catalog install requires both catalogId and catalogGeneration",
-        );
-      }
-      if (command.catalogId === undefined && command.values !== undefined) {
-        throw new ConfigurationDecodeError(
-          "install values require a Catalog entry",
-        );
-      }
-      if (
-        command.catalogId === undefined &&
-        command.contentHash !== undefined
-      ) {
-        throw new ConfigurationDecodeError(
-          "install contentHash requires a Catalog entry",
-        );
-      }
       if (
         command.enabled !== undefined &&
         typeof command.enabled !== "boolean"
@@ -1358,26 +1307,6 @@ export function decodeConfigurationCommandV1(
         packageId: identifier(command.packageId, "packageId"),
         version: text(command.version, "version", 100),
         ...(command.enabled === undefined ? {} : { enabled: command.enabled }),
-        ...(command.catalogId === undefined
-          ? {}
-          : {
-              catalogId: identifier(command.catalogId, "catalogId"),
-              catalogGeneration: identifier(
-                command.catalogGeneration,
-                "catalogGeneration",
-              ),
-              ...(command.contentHash === undefined
-                ? {}
-                : {
-                    contentHash: compositionHash(
-                      command.contentHash,
-                      "contentHash",
-                    ),
-                  }),
-            }),
-        ...(command.values === undefined
-          ? {}
-          : { values: installValues(command.values) }),
       };
     }
     case "user/uninstall-package": {
@@ -1634,13 +1563,13 @@ function safeJsonValue(value: unknown, label: string): JsonValue {
   throw new ConfigurationDecodeError(`${label} is not JSON`);
 }
 
-/** Most setup values one Catalog install may carry. */
+/** Most setting values one installation may carry. */
 const MAX_INSTALL_VALUES_V1 = 32;
 const MAX_INSTALL_VALUES_BYTES_V1 = 16_384;
 
 /**
- * The `values` a Catalog install carries. Bounded and JSON-only, because they
- * become durable User state: the User Durable Object stores them on the
+ * The `values` an installation carries. Bounded and JSON-only, because they
+ * are durable User state: the User Durable Object stores them on the
  * installation, and nothing here may become a prototype or a function.
  */
 function installValues(value: unknown): Record<string, JsonValue> {
@@ -1765,14 +1694,7 @@ function packageInstallation(value: unknown): PackageInstallationView {
     value,
     "Package installation",
     ["packageId", "version", "state"],
-    [
-      "failure",
-      "catalogId",
-      "catalogGeneration",
-      "contentHash",
-      "provenance",
-      "values",
-    ],
+    ["failure", "provenance", "values"],
   );
   if (
     installation.state !== "installed" &&
@@ -1783,8 +1705,7 @@ function packageInstallation(value: unknown): PackageInstallationView {
   }
   if (
     installation.provenance !== undefined &&
-    installation.provenance !== "first-party" &&
-    installation.provenance !== "catalog"
+    installation.provenance !== "first-party"
   ) {
     throw new ConfigurationDecodeError(
       "Package installation provenance is invalid",
@@ -1795,22 +1716,6 @@ function packageInstallation(value: unknown): PackageInstallationView {
     version: text(installation.version, "version", 100),
     state: installation.state,
     failure: optionalText(installation.failure, "failure", 2_000),
-    ...(installation.catalogId === undefined
-      ? {}
-      : { catalogId: identifier(installation.catalogId, "catalogId") }),
-    ...(installation.catalogGeneration === undefined
-      ? {}
-      : {
-          catalogGeneration: identifier(
-            installation.catalogGeneration,
-            "catalogGeneration",
-          ),
-        }),
-    ...(installation.contentHash === undefined
-      ? {}
-      : {
-          contentHash: compositionHash(installation.contentHash, "contentHash"),
-        }),
     ...(installation.provenance === undefined
       ? {}
       : { provenance: installation.provenance }),
@@ -2089,10 +1994,7 @@ function migrateCatalogRelativeUserSettingsV1(
       storedDataValueV1(installation, "version") !== platformPackage.version ||
       storedDataValueV1(installation, "state") !== "installed" ||
       storedDataValueV1(installation, "provenance") !== "first-party" ||
-      storedDataValueV1(installation, "failure") !== undefined ||
-      Object.hasOwn(installation, "catalogId") ||
-      Object.hasOwn(installation, "catalogGeneration") ||
-      Object.hasOwn(installation, "contentHash");
+      storedDataValueV1(installation, "failure") !== undefined;
     if (!needsRepair) return [storedInstallation];
     changed = true;
     return [
@@ -2103,7 +2005,7 @@ function migrateCatalogRelativeUserSettingsV1(
           state: "installed",
           provenance: "first-party",
         },
-        ["failure", "catalogId", "catalogGeneration", "contentHash"],
+        ["failure"],
       ),
     ];
   });
@@ -2338,7 +2240,7 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
     input,
     "User settings",
     ["schemaVersion", "revision", "profile", "packages", "connections"],
-    ["platformModel", "accountModel", "catalogGeneration", "catalogIndexHash"],
+    ["platformModel", "accountModel"],
   );
   schemaVersion(value);
   const profile = exactRecord(value.profile, "profile", ["name"], ["email"]);
@@ -2366,22 +2268,6 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
     ...(value.platformModel === undefined
       ? {}
       : { platformModel: decodeModelBindingV1(value.platformModel) }),
-    // The pin is optional — a deployment with no Catalog has none — but never
-    // half present: one field alone is a corrupt pin, not a pin.
-    ...(value.catalogGeneration === undefined &&
-    value.catalogIndexHash === undefined
-      ? {}
-      : {
-          catalogGeneration: identifier(
-            value.catalogGeneration,
-            "catalogGeneration",
-          ),
-          catalogIndexHash: text(
-            value.catalogIndexHash,
-            "catalogIndexHash",
-            64,
-          ),
-        }),
   };
 }
 

@@ -95,51 +95,6 @@ class MemoryStorage implements UserSettingsStorage {
   }
 }
 
-/** One immutable generation holding the entry the template names. */
-const CATALOG_ENTRY = {
-  schemaVersion: 1 as const,
-  catalogId: "example-connector",
-  packageId: "mcp",
-  displayName: "Example",
-  description: "An example connector.",
-  version: "0.0.1",
-  kind: "package" as const,
-  manifestHash: "d".repeat(64),
-  servers: [],
-  setupFields: [],
-  skills: [],
-};
-
-function catalogHost() {
-  return {
-    readCurrentIndex: () =>
-      Promise.resolve({
-        pin: { generation: "gen-7", indexHash: "c".repeat(64) },
-        index: {
-          schemaVersion: 1 as const,
-          generation: "gen-7",
-          entries: [
-            {
-              catalogId: CATALOG_ENTRY.catalogId,
-              packageId: CATALOG_ENTRY.packageId,
-              displayName: CATALOG_ENTRY.displayName,
-              description: CATALOG_ENTRY.description,
-              version: CATALOG_ENTRY.version,
-              manifestHash: CATALOG_ENTRY.manifestHash,
-              kind: CATALOG_ENTRY.kind,
-            },
-          ],
-        },
-      }),
-    readEntry: (generation: string, catalogId: string) =>
-      Promise.resolve(
-        generation === "gen-7" && catalogId === CATALOG_ENTRY.catalogId
-          ? CATALOG_ENTRY
-          : undefined,
-      ),
-  };
-}
-
 const blobs: TemplateBlobStoreV1 = {
   putImmutable: () => Promise.resolve(),
   read: () => Promise.resolve(undefined),
@@ -175,7 +130,6 @@ function template(overrides: Partial<BotTemplateV1> = {}): BotTemplateV1 {
     packages: [
       {
         packageId: "mcp",
-        catalogId: "example-connector",
         version: "0.0.1",
         displayName: "Example",
       },
@@ -216,7 +170,7 @@ function recorder(
       return Promise.resolve({ status: "applied" as const });
     },
     installPackage: (install) => {
-      calls.push(`install:${install.catalogId}`);
+      calls.push(`install:${install.packageId}`);
       installs.push(install as unknown as Record<string, unknown>);
       if (failures["install"]) throw new Error(failures["install"]);
       return Promise.resolve({ status: "applied" });
@@ -251,7 +205,7 @@ function recorder(
 async function harness(
   options: {
     failures?: Record<string, string>;
-    availableCatalogIds?: string[];
+    availablePackageIds?: string[];
     installed?: boolean;
   } = {},
 ) {
@@ -259,9 +213,7 @@ async function harness(
   const settings = createUserSettingsBackendContribution({
     storage,
     availablePackages: [{ packageId: "mcp", version: "0.0.1" }],
-    catalog: catalogHost(),
   });
-  // The first read pins the generation, exactly as production's first read does.
   await settings.readConfiguration({ schemaVersion: 1, userId: USER });
   if (options.installed) {
     await settings.executeConfiguration({
@@ -287,8 +239,9 @@ async function harness(
     blobs,
     importer: recording.writer,
     readPublishedShare: () => Promise.resolve({ hash, document }),
-    readCatalogIds: () =>
-      Promise.resolve(options.availableCatalogIds ?? ["example-connector"]),
+    availablePackages: (options.availablePackageIds ?? ["mcp"]).map(
+      (packageId) => ({ packageId }),
+    ),
     now: () => Date.parse("2026-09-01T00:00:00.000Z"),
   });
   return { contribution, recording, storage, hash };
@@ -349,7 +302,7 @@ describe("applying", () => {
     );
     expect(recording.calls).toEqual([
       `bot/create:${planned.botId}`,
-      "install:example-connector",
+      "install:mcp",
       "skill:reconcile",
       "routine/create:import-1-on-delivery",
       "routine/pause:import-1-on-delivery",
@@ -368,12 +321,12 @@ describe("applying", () => {
 
   it("skips an install the pinned generation does not hold", async () => {
     const { contribution, recording } = await harness({
-      availableCatalogIds: [],
+      availablePackageIds: [],
     });
     const planned = await plan(contribution);
     expect(planned.packages[0]!.status).toBe("missing");
     await apply(contribution);
-    expect(recording.calls).not.toContain("install:example-connector");
+    expect(recording.calls).not.toContain("install:mcp");
   });
 
   it("installs with no setup values, because a template exports none", async () => {
@@ -411,7 +364,7 @@ describe("failure is a visible, repairable record", () => {
       failed.steps.map((step) => [step.key, step.status]),
     );
     expect(steps["bot/create"]).toBe("done");
-    expect(steps["install:example-connector"]).toBe("done");
+    expect(steps["install:mcp"]).toBe("done");
     expect(steps["skill:reconcile"]).toBe("failed");
     // The Routine steps were never reached, so nothing half-fired.
     expect(steps["routine:on-delivery"]).toBe("pending");
@@ -426,7 +379,6 @@ describe("failure is a visible, repairable record", () => {
     const settings = createUserSettingsBackendContribution({
       storage,
       availablePackages: [{ packageId: "mcp", version: "0.0.1" }],
-      catalog: catalogHost(),
     });
     await settings.readConfiguration({ schemaVersion: 1, userId: USER });
     const document = canonicalBotTemplateDocumentV1(template());
@@ -439,7 +391,7 @@ describe("failure is a visible, repairable record", () => {
       blobs,
       importer: recording.writer,
       readPublishedShare: () => Promise.resolve({ hash, document }),
-      readCatalogIds: () => Promise.resolve(["example-connector"]),
+      availablePackages: [{ packageId: "mcp" }],
       now: () => Date.parse("2026-09-01T00:00:00.000Z"),
     });
     await plan(contribution);
@@ -454,7 +406,7 @@ describe("failure is a visible, repairable record", () => {
       recording.calls.filter((call) => call.startsWith("bot/create")),
     ).toHaveLength(1);
     expect(
-      recording.calls.filter((call) => call === "install:example-connector"),
+      recording.calls.filter((call) => call === "install:mcp"),
     ).toHaveLength(1);
   });
 

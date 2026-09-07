@@ -56,7 +56,6 @@ describe("settings client contribution", () => {
       "plugins",
       "models",
       "connections",
-      "package-catalog",
       "user-settings",
     ]) {
       expect(surfaces.has(id)).toBe(true);
@@ -76,7 +75,6 @@ describe("settings client contribution", () => {
       "plugins",
       "models",
       "connections",
-      "package-catalog",
       "user-settings",
     ]) {
       expect(surfaces.has(id)).toBe(false);

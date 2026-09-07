@@ -49,12 +49,10 @@ function template(overrides: Partial<BotTemplateV1> = {}): BotTemplateV1 {
     packages: [
       {
         packageId: "mcp",
-        catalogId: "example-connector",
         version: "0.0.1",
         displayName: "Example",
       },
     ],
-    sourceCatalogGeneration: "gen-1",
     ...overrides,
   };
 }
@@ -171,7 +169,6 @@ describe("canonical bytes and the content hash", () => {
         routines: template().routines,
         skills: template().skills,
         profile: template().profile,
-        sourceCatalogGeneration: template().sourceCatalogGeneration,
         schemaVersion: 1,
       }),
     ) as BotTemplateV1;

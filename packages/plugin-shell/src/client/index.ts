@@ -42,12 +42,6 @@ import type {
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import { resolveEffectiveBotModelV1 } from "@frockbot/configuration-core";
-import {
-  decodeCatalogEntryV1,
-  decodeCatalogIndexV1,
-  type CatalogEntryV1,
-  type CatalogIndexEntryV1,
-} from "@frockbot/catalog-core";
 import type { SkillRefV1 } from "@frockbot/kernel-contracts";
 import { decodeStartConnectionResultV1 } from "@frockbot/connection-core";
 import { decodeClientSkillCatalogV1 } from "../skill-protocol.js";
@@ -1034,11 +1028,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   let restoredWithoutRead: string | undefined;
   let userSettingsGeneration = 0;
   let pluginCatalogGeneration = 0;
-  let packageCatalogGeneration = 0;
-  const settingsLoadErrors = new Map<
-    "bot" | "user" | "catalog" | "package-catalog",
-    string
-  >();
+  const settingsLoadErrors = new Map<"bot" | "user" | "catalog", string>();
   const connectionOperations = readConnectionOperations();
   const stopCommands = new Map<string, string>();
   const authorizationOperations = new Map<
@@ -1319,7 +1309,7 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
   }
 
   function updateSettingsLoadError(
-    source: "bot" | "user" | "catalog" | "package-catalog",
+    source: "bot" | "user" | "catalog",
     message?: string,
   ): void {
     settingsLoadErrors.delete(source);
@@ -1441,7 +1431,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
     },
     messages: [],
     pluginCatalog: [],
-    packageCatalog: [],
     skillCatalog: [],
     approvals: [],
     tasks: [],
@@ -2219,96 +2208,6 @@ export const shellClientPlugin: ClientPlugin = (ctx) => {
           clientFailureDetailV1(error),
         );
       }
-    },
-    /**
-     * The remote Catalog index. Read through the gateway route, never from
-     * object storage, and decoded at the seam like every other inbound value.
-     */
-    async loadPackageCatalog(): Promise<void> {
-      if (!ctx.transport.hostedRequest) {
-        updateSettingsLoadError(
-          "package-catalog",
-          "The Catalog is unavailable",
-        );
-        return;
-      }
-      const generation = ++packageCatalogGeneration;
-      try {
-        const index = decodeCatalogIndexV1(
-          await ctx.transport.hostedRequest("/catalog/v1/index"),
-        );
-        if (generation !== packageCatalogGeneration) return;
-        web.value.packageCatalog = index.entries;
-        web.value.packageCatalogGeneration = index.generation;
-        updateSettingsLoadError("package-catalog");
-      } catch (error) {
-        if (generation !== packageCatalogGeneration) return;
-        // The gateway answers 404 `catalog generation was not found` when the
-        // deployment has published no Catalog at all. That is a state, not a
-        // fault, and the raw server sentence means nothing to a person — so it
-        // is translated here and the surface renders it instead of the
-        // "nothing matched your search" empty state.
-        // The one server sentence worth reading is the one that says there is
-        // nothing to read: everything else becomes the shared failure line,
-        // because a raw fault text means nothing to the person looking at it.
-        const detail = clientFailureDetailV1(error);
-        web.value.packageCatalog = [];
-        web.value.packageCatalogGeneration = undefined;
-        updateSettingsLoadError(
-          "package-catalog",
-          /catalog generation was not found|Package Catalog is not configured/.test(
-            detail,
-          )
-            ? "No plugins are published for this deployment yet."
-            : presentClientFailureV1(error, "load the plugin catalog"),
-        );
-        console.debug("package catalog load failed", detail);
-      }
-    },
-    async loadCatalogEntry(
-      catalogId: string,
-    ): Promise<CatalogEntryV1 | undefined> {
-      if (!ctx.transport.hostedRequest) {
-        throw new Error("The Catalog is unavailable");
-      }
-      // Pinned to the generation the index came from, so an entry never
-      // describes a different generation than the row that opened it.
-      const pinned = web.value.packageCatalogGeneration;
-      return decodeCatalogEntryV1(
-        await ctx.transport.hostedRequest(
-          `/catalog/v1/entry/${encodeURIComponent(catalogId)}${
-            pinned ? `?generation=${encodeURIComponent(pinned)}` : ""
-          }`,
-        ),
-      );
-    },
-    async installCatalogPackage(
-      entry: CatalogIndexEntryV1,
-      values?: Record<string, JsonValue>,
-    ): Promise<void> {
-      const settings = web.value.userSettings;
-      const generation = web.value.packageCatalogGeneration;
-      if (!settings || !ctx.transport.executeConfiguration) {
-        throw new Error("Plugins are unavailable");
-      }
-      if (!generation)
-        throw new Error("The catalog isn't loaded yet. Try again in a moment.");
-      const receipt = await ctx.transport.executeConfiguration({
-        schemaVersion: 1,
-        type: "user/install-package",
-        commandId: crypto.randomUUID(),
-        expectedRevision: settings.revision,
-        packageId: entry.packageId,
-        version: entry.version,
-        catalogId: entry.catalogId,
-        catalogGeneration: generation,
-        // GrokBot's `InstallPlugin{values}`: the entry's `setupFields`, filled
-        // in by the User, recorded on the installation so the install is
-        // reproducible from durable state rather than from a form that is gone.
-        ...(values && Object.keys(values).length > 0 ? { values } : {}),
-      });
-      await web.value.loadPluginCatalog();
-      if (receipt.status === "rejected") throw new Error(receipt.failure);
     },
     async uninstallPackage(packageId: string): Promise<void> {
       const settings = web.value.userSettings;

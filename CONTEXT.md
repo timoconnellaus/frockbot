@@ -102,18 +102,6 @@ _Avoid_: Skill id, skill path, handle
 A User attaching a Skill ref to a message, which expands that Skill's body into the Turn's first step. Distinct from a Bot loading a Skill on its own initiative, and from merely mentioning one.
 _Avoid_: Run a skill, trigger, call
 
-**Catalog**:
-The set of Packages available for installation, whether first-party, User-published, or Bot-authored. Published as immutable, content-addressed generations; a reader pins one generation and installs only from it.
-_Avoid_: Registry, marketplace, store
-
-**Catalog generation**:
-One immutable, content-addressed publication of the Catalog: an index and its entries, named by a mutable pointer. A generation is never edited, only superseded.
-_Avoid_: Version, snapshot, release
-
-**Catalog entry**:
-One installable row in a Catalog generation, identified by an opaque immutable catalogId and naming the Package it installs.
-_Avoid_: Listing, item, plugin record
-
 **Applet**:
 A small real-time application a Bot builds for its User and the User opens beside the conversation: one Package's Instance Contribution, one durable instance of it, its UI, and the tools it exposes to every Bot of that User. Its code is a Package; its state is not.
 _Avoid_: App, gadget, application, widget

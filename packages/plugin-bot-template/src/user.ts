@@ -8,8 +8,8 @@
 // and can never publish it.
 //
 // STATE. The blob is content-addressed and immutable, so it lives in object
-// storage beside the Catalog's generations and is written through the same
-// collision-checking `putImmutable` the Package publisher uses. What cannot
+// storage under `templates/`, written through the same collision-checking
+// `putImmutable` an immutable application artifact uses. What cannot
 // live there is visibility: an immutable object can never be un-published, and
 // a share must be revocable, so the `TemplateShareRecordV1` lives in this
 // object's durable storage (D3). `shareId` carries the owning User's public id
@@ -149,8 +149,6 @@ export interface TemplateImportWriterV1 {
     commandId: string;
     packageId: string;
     version: string;
-    catalogId: string;
-    catalogGeneration: string;
   }): Promise<{ status: string; failure?: string }>;
   /** Written with `writer: { kind: "user" }`: the importing User authored it. */
   writeSkill(input: {
@@ -199,17 +197,14 @@ export interface BotTemplateUserHostV1 {
   readPublishedShare?(
     shareId: string,
   ): Promise<{ hash: string; document: string } | undefined>;
-  /** Every `catalogId` the given generation's index holds. */
-  readCatalogIds?(generation: string): Promise<readonly string[]>;
   /**
-   * The Catalog display name of one entry at an exact generation. Optional: a
-   * deployment with no Catalog exports the `packageId` as the display name
-   * rather than failing, which is the same thing the install surface does.
+   * The Packages this deployment compiles in, with the display name each
+   * manifest declares. Both halves of a template's Package line resolve
+   * against exactly this: whether the Package exists here, and what to call
+   * it. Absent leaves every exported name the bare `packageId` and every
+   * imported line `missing`.
    */
-  readCatalogDisplayName?(
-    generation: string,
-    catalogId: string,
-  ): Promise<string | undefined>;
+  availablePackages?: readonly { packageId: string; displayName?: string }[];
   now?(): number;
   /** 32 hex characters. Overridable so a test can pin a share id. */
   randomSecret?(): string;
@@ -411,26 +406,15 @@ export class BotTemplateUserBackendContribution {
       this.host.bots.readSkills(userId, botId),
       this.host.bots.readRoutines(userId, botId),
     ]);
-    const packages = await Promise.all(
-      user.packages.map(async (installation) => ({
-        packageId: installation.packageId,
-        version: installation.version,
-        state: installation.state,
-        ...(installation.catalogId === undefined
-          ? {}
-          : { catalogId: installation.catalogId }),
-        ...(installation.catalogGeneration === undefined
-          ? {}
-          : { catalogGeneration: installation.catalogGeneration }),
-        ...(installation.provenance === undefined
-          ? {}
-          : { provenance: installation.provenance }),
-        ...(installation.values === undefined
-          ? {}
-          : { values: installation.values }),
-        displayName: await this.displayName(installation),
-      })),
-    );
+    const packages = user.packages.map((installation) => ({
+      packageId: installation.packageId,
+      version: installation.version,
+      state: installation.state,
+      ...(installation.values === undefined
+        ? {}
+        : { values: installation.values }),
+      displayName: this.displayName(installation.packageId),
+    }));
     return buildBotTemplateV1({
       botId,
       profile: {
@@ -450,36 +434,15 @@ export class BotTemplateUserBackendContribution {
         packageId: connection.packageId,
         connectionTypeId: connection.connectionTypeId,
       })),
-      ...(user.catalogGeneration === undefined
-        ? {}
-        : { sourceCatalogGeneration: user.catalogGeneration }),
     });
   }
 
-  private async displayName(installation: {
-    packageId: string;
-    catalogId?: string;
-    catalogGeneration?: string;
-  }): Promise<string> {
-    if (
-      !this.host.readCatalogDisplayName ||
-      !installation.catalogId ||
-      !installation.catalogGeneration
-    ) {
-      return installation.packageId;
-    }
-    try {
-      return (
-        (await this.host.readCatalogDisplayName(
-          installation.catalogGeneration,
-          installation.catalogId,
-        )) ?? installation.packageId
-      );
-    } catch {
-      // A Catalog that cannot be read costs the export a prettier name and
-      // nothing else; it never costs it the entry.
-      return installation.packageId;
-    }
+  private displayName(packageId: string): string {
+    return (
+      this.host.availablePackages?.find(
+        (candidate) => candidate.packageId === packageId,
+      )?.displayName ?? packageId
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -533,7 +496,7 @@ export class BotTemplateUserBackendContribution {
   ): Promise<TemplateImportRecordV1> {
     const existing = await this.readImport(importId);
     // A replanned import is a read: the plan is what the User reviewed, and
-    // re-deriving it under a moved Catalog would change what they confirmed.
+    // re-deriving it later would change what they confirmed.
     if (existing) return existing;
     if (!this.host.readPublishedShare) {
       throw new TemplateDecodeError("this deployment cannot import templates");
@@ -545,11 +508,6 @@ export class BotTemplateUserBackendContribution {
       schemaVersion: 1,
       userId,
     });
-    const generation = user.catalogGeneration;
-    const availableCatalogIds =
-      generation && this.host.readCatalogIds
-        ? await this.host.readCatalogIds(generation)
-        : [];
     const plan = planBotTemplateImportV1({
       importId,
       shareId,
@@ -559,12 +517,10 @@ export class BotTemplateUserBackendContribution {
       installedPackages: user.packages.map((installation) => ({
         packageId: installation.packageId,
         state: installation.state,
-        ...(installation.catalogId === undefined
-          ? {}
-          : { catalogId: installation.catalogId }),
       })),
-      ...(generation === undefined ? {} : { catalogGeneration: generation }),
-      availableCatalogIds,
+      availablePackageIds: (this.host.availablePackages ?? []).map(
+        (candidate) => candidate.packageId,
+      ),
     });
     const now = new Date(this.now()).toISOString();
     const record: TemplateImportRecordV1 = decodeTemplateImportRecordV1({
@@ -589,9 +545,6 @@ export class BotTemplateUserBackendContribution {
       })),
       createdAt: now,
       updatedAt: now,
-      ...(plan.catalogGeneration === undefined
-        ? {}
-        : { catalogGeneration: plan.catalogGeneration }),
     });
     await this.putImport(record, plan);
     return record;
@@ -763,24 +716,21 @@ export class BotTemplateUserBackendContribution {
       }
       case "user/install-package": {
         const entry = plan.packages.find(
-          (candidate) => candidate.catalogId === step.subject,
+          (candidate) => candidate.packageId === step.subject,
         );
         if (!entry || entry.status !== "will-install") return { skipped: true };
-        if (!plan.catalogGeneration) return { skipped: true };
         const receipt = await writer.installPackage({
           userId,
           // Derived, so the Settings Contribution's own receipt makes a replay
           // a read rather than a second install.
-          commandId: `import-install-${plan.importId}-${entry.catalogId}`,
+          commandId: `import-install-${plan.importId}-${entry.packageId}`,
           packageId: entry.packageId,
           version: entry.version,
-          catalogId: entry.catalogId,
-          catalogGeneration: plan.catalogGeneration,
         });
         if (receipt.status === "rejected") {
           throw new Error(receipt.failure ?? "the install was rejected");
         }
-        return { detail: entry.catalogId };
+        return { detail: entry.packageId };
       }
       case "skill/write": {
         const skill = plan.skills.find(

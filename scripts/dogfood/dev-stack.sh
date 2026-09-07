@@ -18,16 +18,12 @@ client_port="${FROCKBOT_DEV_CLIENT_PORT:-5173}"
 worker_url="http://127.0.0.1:${worker_port}"
 client_url="http://127.0.0.1:${client_port}"
 
-# The R2 bucket names bound by the `development` environment in
+# The R2 bucket name bound by the `development` environment in
 # `apps/cloudflare/wrangler.jsonc`. `wrangler r2 object put` addresses a bucket
 # by *name*, not by binding, so a name that drifts from the environment seeds a
-# bucket the Worker never opens: the Catalog was seeded into
-# `frockbot-package-catalog` for months while `development` read
-# `frockbot-package-catalog-development`, which left every fresh User with no
-# `catalog/current` pointer to pin and killed `package_search` on its first
-# call. `scripts/dogfood/dev-stack.test.ts` keeps the two in step.
+# bucket the Worker never opens. `scripts/dogfood/dev-stack.test.ts` keeps the
+# two in step.
 artifact_bucket="frockbot-application-artifacts"
-catalog_bucket="frockbot-package-catalog-development"
 
 state_dir="$repo_root/.dogfood"
 log_dir="${CLAUDE_JOB_DIR:+$CLAUDE_JOB_DIR/tmp}"
@@ -150,13 +146,6 @@ wait_for_client() {
 
 # ------------------------------------------------------------------ seed
 
-seed_object() {
-  key="$1"
-  file="$2"
-  (cd "$cloudflare_root" && bunx wrangler --env development r2 object put \
-    "$key" --file "$file" --content-type application/json --local >/dev/null)
-}
-
 build_and_seed() {
   say "building the client bundle and the foundation artifact"
   (cd "$cloudflare_root" && bun run artifact:build)
@@ -172,26 +161,6 @@ build_and_seed() {
   say "applying the local D1 auth migrations"
   (cd "$cloudflare_root" && bunx wrangler --env development d1 migrations apply \
     frockbot-auth-development --local >/dev/null)
-
-  say "publishing and seeding a Package Catalog generation"
-  source_dir="$state_dir/catalog-source"
-  rm -rf "$source_dir"
-  (cd "$repo_root" && bun scripts/publish-catalog.ts --out "$source_dir")
-  generation="$(bun -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).generation)' "$source_dir/catalog/current")"
-  [ -n "$generation" ] || die "the published Catalog pointer names no generation"
-
-  # The index and the entries first, so the pointer never names a generation
-  # whose documents are not there yet.
-  seed_object "${catalog_bucket}/catalog/${generation}/index.json" \
-    "$source_dir/catalog/${generation}/index.json"
-  for entry in "$source_dir/catalog/${generation}/entry/"*.json; do
-    [ -e "$entry" ] || break
-    seed_object \
-      "${catalog_bucket}/catalog/${generation}/entry/$(basename "$entry")" \
-      "$entry"
-  done
-  seed_object "${catalog_bucket}/catalog/current" \
-    "$source_dir/catalog/current"
 }
 
 # ------------------------------------------------------------------ start

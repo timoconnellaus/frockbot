@@ -29,7 +29,6 @@ interface FlyTestEnv {
   COMPUTER_HOST_SHARDS: string;
   COMPUTER_HOST_TOKEN: string;
   FLY_COMPATIBILITY: DurableObjectNamespace<FlyCompatibilityProbe>;
-  PACKAGE_CATALOG: R2Bucket;
   SPRITES_TOKEN: string;
   ROUTINE_HOOK_SECRET: string;
   MACHINE_TOKEN_SECRET: string;

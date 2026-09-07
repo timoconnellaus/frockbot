@@ -47,7 +47,6 @@ import {
   type SkillCatalogV1,
   type SkillOwnerV1,
 } from "./catalog.js";
-import type { PluginSkillsSourceV1 } from "./plugin-index.js";
 import { writeSkillDocumentV1 } from "./write.js";
 import {
   checkSkillQuotaV1,
@@ -81,12 +80,6 @@ export interface SkillsRuntimeHostV1 {
   files?: WorkspaceFilesV1;
   writer?: SkillWriterIdentityV1;
   quota?: SkillQuotaConfigV1;
-  /**
-   * The index over the User's installed Catalog entries. Absent when the
-   * deployment has no Catalog, and the Turn then carries no plugin-borne
-   * Skills — which is the true answer, not a failure.
-   */
-  pluginSkills?: PluginSkillsSourceV1;
 }
 
 export async function sha256HexV1(text: string): Promise<string> {
@@ -141,21 +134,15 @@ export type SkillInvocationOutcomeV1 =
 export class SkillCatalog {
   #owner: SkillOwnerV1;
   #reads: WorkspaceReadsV1;
-  #pluginSkills: PluginSkillsSourceV1 | undefined;
   #catalog: SkillCatalogV1;
   #turn: number | undefined;
   #invoked: InvokedSkillV1[] = [];
   #invokedTurn: number | undefined;
   #step: { turn: number; step: number } | undefined;
 
-  constructor(
-    owner: SkillOwnerV1,
-    reads: WorkspaceReadsV1,
-    pluginSkills?: PluginSkillsSourceV1,
-  ) {
+  constructor(owner: SkillOwnerV1, reads: WorkspaceReadsV1) {
     this.#owner = owner;
     this.#reads = reads;
-    this.#pluginSkills = pluginSkills;
     this.#catalog = emptySkillCatalogV1(owner);
   }
 
@@ -169,9 +156,7 @@ export class SkillCatalog {
 
   /** Loads the Turn's Skills and records the injection in the session log. */
   async refresh(turn: number, session: Session): Promise<SkillCatalogV1> {
-    this.#catalog = await loadFullSkillCatalogV1(this.#reads, this.#owner, {
-      ...(this.#pluginSkills ? { pluginSkills: this.#pluginSkills } : {}),
-    });
+    this.#catalog = await loadFullSkillCatalogV1(this.#reads, this.#owner);
     this.#turn = turn;
     session.append({
       type: "skill/injected",
@@ -316,21 +301,19 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 /**
  * Where a `skill_write` lands.
  *
- * All four sources are named so a refusal can be specific about *why* two of
- * them are not writable, rather than reading as an unknown-field error. `bot`
+ * All three sources are named so a refusal can be specific about *why* one of
+ * them is not writable, rather than reading as an unknown-field error. `bot`
  * and `user` are the two instruction roots and both are written the same way,
- * with the Bot's own provenance recorded. `managed` and `plugin` are
- * not durable-root files at all — one is bytes of a first-party artifact, the
- * other an index over a pinned Catalog generation — so neither has a write
- * path to route to.
+ * with the Bot's own provenance recorded. `managed` is not a durable-root file
+ * at all — it is bytes of a first-party artifact — so it has no write path to
+ * route to.
  */
-export type SkillWriteScopeV1 = "bot" | "user" | "managed" | "plugin";
+export type SkillWriteScopeV1 = "bot" | "user" | "managed";
 
 const SKILL_WRITE_SCOPES: readonly SkillWriteScopeV1[] = [
   "bot",
   "user",
   "managed",
-  "plugin",
 ];
 
 /** Why a scope is refused, or `undefined` when it is writable. GrokBot's own wording for managed. */
@@ -360,7 +343,6 @@ export function skillWriteTargetV1(
     case "user":
       return { status: "writable", scope };
     case "managed":
-    case "plugin":
       return {
         status: "refused",
         reason: "managed skills are not editable this way",
@@ -652,7 +634,7 @@ export function createSkillsRuntimeFeature(
   host: SkillsRuntimeHostV1,
 ): RuntimeFeatureV1<AgentRuntimeV1> {
   return (runtime) => {
-    const catalog = new SkillCatalog(host.owner, host.reads, host.pluginSkills);
+    const catalog = new SkillCatalog(host.owner, host.reads);
     const disposers: Array<() => void> = [];
     disposers.push(
       runtime.systemPrompt.register({

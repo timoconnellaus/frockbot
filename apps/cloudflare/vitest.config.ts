@@ -48,7 +48,7 @@ export default defineConfig({
           createFrockAiFakeWorker("2026-08-27"),
           createVectorizeFakeWorker("2026-08-27"),
         ],
-        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES", "PACKAGE_CATALOG"],
+        r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES"],
         durableObjects: {
           BOT_ISOLATES: "BotIsolateProbe",
           BOT_STATES: "WorkerdBotState",

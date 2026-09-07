@@ -50,7 +50,7 @@ import type {
  * someone else's Bot to run.
  */
 export interface TemplateSkillCandidateV1 {
-  source: "bot" | "managed" | "plugin";
+  source: "bot" | "managed";
   slug?: string;
   name: string;
   description?: string;
@@ -74,12 +74,9 @@ export interface TemplatePackageCandidateV1 {
   packageId: string;
   version: string;
   state: "installed" | "disabled" | "failed";
-  catalogId?: string;
-  catalogGeneration?: string;
-  provenance?: "first-party" | "catalog";
-  /** Setup values. Present here only so the omission can be counted. */
+  /** Setting values. Present here only so the omission can be counted. */
   values?: Record<string, unknown>;
-  /** The Catalog's own display name, when the pinned generation still has it. */
+  /** The Package manifest's own display name, when the host knows it. */
   displayName?: string;
 }
 
@@ -114,7 +111,6 @@ export interface TemplateSourceV1 {
   routines: readonly TemplateRoutineCandidateV1[];
   packages: readonly TemplatePackageCandidateV1[];
   connections: readonly TemplateConnectionCandidateV1[];
-  sourceCatalogGeneration?: string;
 }
 
 export interface TemplateBuildResultV1 {
@@ -179,10 +175,6 @@ function scrubSkills(
   for (const candidate of source.skills) {
     if (candidate.source === "managed") {
       omissions.add("managed-skill");
-      continue;
-    }
-    if (candidate.source === "plugin") {
-      omissions.add("plugin-skill");
       continue;
     }
     if (
@@ -262,22 +254,11 @@ function scrubPackages(
   for (const candidate of source.packages) {
     if (candidate.values !== undefined) omissions.add("package-values");
     if (candidate.state !== "installed") continue;
-    if (
-      candidate.provenance === "first-party" ||
-      candidate.provenance === undefined ||
-      !candidate.catalogId
-    ) {
-      // Nothing to install: a first-party Package is compiled into whatever
-      // application the importer is running, so a reference would be noise.
-      omissions.add("first-party-package");
-      continue;
-    }
-    if (seen.has(candidate.catalogId)) continue;
+    if (seen.has(candidate.packageId)) continue;
     if (packages.length >= MAX_TEMPLATE_PACKAGES_V1) continue;
-    seen.add(candidate.catalogId);
+    seen.add(candidate.packageId);
     packages.push({
       packageId: candidate.packageId,
-      catalogId: candidate.catalogId,
       version: candidate.version.slice(0, 100),
       displayName: (candidate.displayName || candidate.packageId).slice(0, 100),
     });
@@ -314,9 +295,6 @@ export function buildBotTemplateV1(
     skills,
     routines,
     packages,
-    ...(source.sourceCatalogGeneration
-      ? { sourceCatalogGeneration: source.sourceCatalogGeneration }
-      : {}),
   });
 
   return {
@@ -346,14 +324,11 @@ export function describeTemplateSummaryV1(
     if (omission.reason === "managed-skill") {
       scrubbed.push(`${omission.count} managed Skill(s)`);
     }
-    if (omission.reason === "plugin-skill") {
-      scrubbed.push(`${omission.count} plugin Skill(s)`);
-    }
     if (omission.reason === "unattributed-skill") {
       scrubbed.push(`${omission.count} Skill(s) with no recorded writer`);
     }
     if (omission.reason === "package-values") {
-      scrubbed.push("Package setup values");
+      scrubbed.push("Package setting values");
     }
   }
   return [

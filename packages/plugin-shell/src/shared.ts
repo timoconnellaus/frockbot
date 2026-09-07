@@ -10,10 +10,6 @@ import type {
   UserSettingsViewV1,
 } from "@frockbot/configuration-core";
 import type {
-  CatalogEntryV1,
-  CatalogIndexEntryV1,
-} from "@frockbot/catalog-core";
-import type {
   AppletBuildViewV1,
   AppletSourceViewV1,
   AppletSummaryV1,
@@ -28,8 +24,6 @@ import type { ApprovalCardViewV1 } from "./approvals.js";
 import type { AppletCanvasFailureV1 } from "./client/applet-canvas-failure.js";
 import type { TaskViewV1 } from "@frockbot/plugin-subagents/shared";
 import type { InjectionKey, Ref } from "vue";
-
-export type { CatalogEntryV1, CatalogIndexEntryV1 };
 
 export type WebConnection = "starting" | "ready" | "disconnected" | "error";
 
@@ -309,15 +303,6 @@ export interface FrockBotWebData {
     import("@frockbot/connection-core").ConnectorCatalogEntryV1[]
   >;
   /**
-   * The remote Catalog index, read through `/catalog/v1/index`. Separate from
-   * `pluginCatalog`, which projects the compiled-in application manifest: the
-   * two answer different questions — what this deployment can execute, and what
-   * the Catalog offers to install.
-   */
-  packageCatalog: CatalogIndexEntryV1[];
-  /** The generation `packageCatalog` was read from; every install names it. */
-  packageCatalogGeneration?: string;
-  /**
    * The Bot's invocable Skills, for the composer's `/` and `@` popover. Refs,
    * names and descriptions — never a body.
    */
@@ -408,9 +393,6 @@ export interface FrockBotWebData {
   loadUserSettings(): Promise<void>;
   saveUserProfile(profile: { name: string; email?: string }): Promise<void>;
   loadPluginCatalog(): Promise<void>;
-  loadPackageCatalog(): Promise<void>;
-  /** One entry detail, for the panel a User opens before installing. */
-  loadCatalogEntry(catalogId: string): Promise<CatalogEntryV1 | undefined>;
   /** Refreshes {@link FrockBotWebData.skillCatalog} for the active Bot. */
   loadSkillCatalog(): Promise<void>;
   /** Refreshes {@link FrockBotWebData.approvals} for the active Bot. */
@@ -469,11 +451,6 @@ export interface FrockBotWebData {
   savePackageSettings(
     packageId: string,
     values: Record<string, string | number | boolean>,
-  ): Promise<void>;
-  installCatalogPackage(
-    entry: CatalogIndexEntryV1,
-    /** The entry's `setupFields`, as the User filled them in. */
-    values?: Record<string, JsonValue>,
   ): Promise<void>;
   uninstallPackage(packageId: string): Promise<void>;
   /**

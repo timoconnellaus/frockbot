@@ -36,7 +36,6 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -83,7 +82,6 @@ const adbBinary = resolve(sdk, "platform-tools/adb");
 const emulatorBinary = resolve(sdk, "emulator/emulator");
 
 const artifactBucket = "frockbot-application-artifacts";
-const catalogBucket = "frockbot-package-catalog-development";
 
 mkdirSync(stateDir, { recursive: true });
 mkdirSync(logDir, { recursive: true });
@@ -287,45 +285,6 @@ function buildAndSeed(): void {
     "--persist-to",
     persistDir,
   ]);
-
-  say("publishing and seeding a Package Catalog generation");
-  const catalogSource = resolve(stateDir, "catalog-source");
-  rmSync(catalogSource, { recursive: true, force: true });
-  run(["bun", "scripts/publish-catalog.ts", "--out", catalogSource]);
-  const pointer = resolve(catalogSource, "catalog/current");
-  const generation = JSON.parse(readFileSync(pointer, "utf8")).generation;
-  if (!generation) die("the published Catalog pointer names no generation");
-  const seed = (key: string, file: string) =>
-    wrangler([
-      "--env",
-      "development",
-      "r2",
-      "object",
-      "put",
-      key,
-      "--file",
-      file,
-      "--content-type",
-      "application/json",
-      "--local",
-      "--persist-to",
-      persistDir,
-    ]);
-  const generationDir = resolve(catalogSource, "catalog", generation);
-  seed(
-    `${catalogBucket}/catalog/${generation}/index.json`,
-    resolve(generationDir, "index.json"),
-  );
-  const entries = resolve(generationDir, "entry");
-  if (existsSync(entries)) {
-    for (const entry of readdirSync(entries)) {
-      seed(
-        `${catalogBucket}/catalog/${generation}/entry/${entry}`,
-        resolve(entries, entry),
-      );
-    }
-  }
-  seed(`${catalogBucket}/catalog/current`, pointer);
 }
 
 // ---------------------------------------------------------------- serve

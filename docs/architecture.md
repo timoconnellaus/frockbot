@@ -248,7 +248,7 @@ Plugin UI mounts two ways.
 
 The chat view lives in `packages/plugin-shell/src/client/FrockBotApp.vue` (2108 lines). The transcript is a `v-for` at `:1520`; assistant text renders through `UiMarkdown` at `:1551`. Turn merge logic is `replaceTurnMessages()` (`packages/plugin-shell/src/client/index.ts:3405`). Data arrives over REST, with invalidation over the state channel (`apps/cloudflare/src/client/bot-state-channel.ts:147-170`).
 
-`packages/plugin-settings/src/client/index.ts:23-94` registers six surfaces (`bot-settings`, `plugins`, `models`, `connections`, `package-catalog`, `user-settings`) and three slot fillers; other plugins mount into slots that settings declares.
+`packages/plugin-settings/src/client/index.ts` registers five surfaces (`bot-settings`, `plugins`, `models`, `connections`, `user-settings`) and three slot fillers; other plugins mount into slots that settings declares.
 
 ### Flutter app
 
@@ -275,7 +275,7 @@ Auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over a
 
 WebView is used in one place, `AppletPage` (`lib/extensions/fallback.dart:157-465`), loading the anonymous bootstrap at `ui.bot.frockbot.com/native-fallback` (server side `apps/cloudflare/src/native-fallback.ts:34`). It never receives the native session.
 
-**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, the package catalog, in-app connector authorize and revoke, model configuration, admin, search, flock and avatar editing, routines, Bot templates, registered machines, the Computer overlay, and package iframe entries. Native settings are a generic server-described form renderer rather than plugin surfaces.
+**Capability gap.** Present in web, absent in native: Bot creation, starting a conversation, in-app connector authorize and revoke, model configuration, admin, search, flock and avatar editing, routines, Bot templates, registered machines, the Computer overlay, and package iframe entries. Native settings are a generic server-described form renderer rather than plugin surfaces.
 
 Present in native, absent in web: a durable offline store of directory, transcripts and drafts; inbox as a first-class screen; Bot archive, restore and delete UI with composition-generation and audit detail; deep-link-to-Bot; PKCE system-browser sign-in.
 
@@ -395,7 +395,6 @@ Bindings are declared in `apps/cloudflare/wrangler.jsonc`.
 | `COMPUTER_HOST` (:47)                                                     | Service            | `frockbot-computer-host` (`apps/cloudflare/src/bot-state.ts:465-474`)                                                                                 |
 | `APPLICATION_ARTIFACTS` (:53)                                             | R2                 | Application, Package and Applet artifacts, content-addressed                                                                                          |
 | `MEMORY_FILES` (:57)                                                      | R2                 | Memory and workspace file bodies (`apps/cloudflare/src/workspace.ts:126`, `:157`)                                                                     |
-| `PACKAGE_CATALOG` (:64)                                                   | R2                 | Immutable catalog generations plus a mutable `catalog/current` pointer, served at `/catalog/v1/*`                                                     |
 | `AUTH_DB` (:70)                                                           | D1 `frockbot-auth` | better-auth only                                                                                                                                      |
 | `MEMORY_INDEX` (:78)                                                      | Vectorize          | Memory embeddings; the app Worker uses the binding only for deletion (`bot-state.ts:820-825`)                                                         |
 | `AI` (:83)                                                                | Workers AI         | Frock AI gateway transport and image generation                                                                                                       |
@@ -460,7 +459,7 @@ Triggers: push to `main`, all pull requests, `workflow_dispatch`.
 - `e2e` (:179) — 4-shard matrix, `fail-fast: false`, Chromium install, `bun run test:e2e --shard=N/4`; uploads blob reports, failure diagnostics and wrangler logs.
 - `e2e-gate` (:298) — aggregates the matrix into the ruleset-required check `Browser end-to-end`.
 - `e2e-report` (:326) — merges blob reports into HTML on failure.
-- `deploy-staging` (:367) — push to `main`, `needs: [validate, e2e]`, environment `staging`. Validates required env names, creates missing staging R2 buckets, the Vectorize index and D1, rewrites `wrangler.jsonc` in place to inject the staging `database_id` and replace `foundation-v1` with the artifact sha256, applies D1 migrations, uploads the artifact to R2, publishes the Package Catalog, then `wrangler deploy --env staging --secrets-file`.
+- `deploy-staging` (:367) — push to `main`, `needs: [validate, e2e]`, environment `staging`. Validates required env names, creates missing staging R2 buckets, the Vectorize index and D1, rewrites `wrangler.jsonc` in place to inject the staging `database_id` and replace `foundation-v1` with the artifact sha256, applies D1 migrations, uploads the artifact to R2, then `wrangler deploy --env staging --secrets-file`.
 
 ### `.github/workflows/release.yml`
 
@@ -470,7 +469,7 @@ Trigger: push of a tag matching `v*.*.*`.
 - `publish-npm` (:84) — `build:webui`, rewrites every `packages/*/package.json` to the tag version and sets `private: false`, resolves `workspace:` ranges to literals, requires npm ≥ 11.5.1, then publishes all of `packages/*` concurrently with `npm publish --access public` (`--tag next` for prereleases) through OIDC trusted publishing. `EPUBLISHCONFLICT` is treated as success.
 - `github-release` (:233) — `gh release create --generate-notes --verify-tag`.
 - `deploy-marketing` (:255).
-- `deploy-backend` (:307, environment `production`) — rewrites the production D1 id and artifact hash into `wrangler.jsonc`, applies D1 migrations remotely, uploads the artifact, publishes the Package Catalog, deploys the bundler and then the computer host with its own secrets file, runs `scripts/check-production-secrets.ts check --live` and `write-secrets-file`, then `wrangler deploy --secrets-file`.
+- `deploy-backend` (:307, environment `production`) — rewrites the production D1 id and artifact hash into `wrangler.jsonc`, applies D1 migrations remotely, uploads the artifact, deploys the bundler and then the computer host with its own secrets file, runs `scripts/check-production-secrets.ts check --live` and `write-secrets-file`, then `wrangler deploy --secrets-file`.
 
 ### `.github/workflows/auto-merge.yml`
 

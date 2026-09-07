@@ -11,10 +11,8 @@ interface IntegrationTestEnv {
   DEFAULT_APPLICATION_HASH: string;
   /** The built `dist/artifacts/foundation-v1.mjs`, read by the config. */
   FOUNDATION_ARTIFACT: string;
-  /** The remote Package Catalog bucket the /catalog/v1 routes read. */
   /** The bucket the durable-root Workspace store writes through. */
   MEMORY_FILES: R2Bucket;
-  PACKAGE_CATALOG: R2Bucket;
   TEST_MIGRATIONS: D1Migration[];
   /**
    * The Frock AI fake's RPC entrypoint under a second name. `AI` itself is

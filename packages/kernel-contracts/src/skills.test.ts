@@ -13,31 +13,23 @@ describe("a Skill ref crossing a seam", () => {
       { schemaVersion: 1 as const, source: "bot" as const, slug: "standup" },
       { schemaVersion: 1 as const, source: "user" as const, slug: "standup" },
       { schemaVersion: 1 as const, source: "managed" as const, slug: "teach" },
-      {
-        schemaVersion: 1 as const,
-        source: "plugin" as const,
-        slug: "compose",
-        packageId: "composio",
-      },
     ];
     expect(refs.map(formatSkillRefV1)).toEqual([
       "bot/standup",
       "user/standup",
       "managed/teach",
-      "plugin/composio/compose",
     ]);
     for (const ref of refs) {
       expect(parseSkillRefV1(formatSkillRefV1(ref))).toEqual(ref);
     }
   });
 
-  test("admits every declared source, so K1 and K2 add no wire change", () => {
-    for (const source of ["bot", "user", "managed", "plugin"] as const) {
+  test("admits every declared source", () => {
+    for (const source of ["bot", "user", "managed"] as const) {
       const ref = decodeSkillRefV1({
         schemaVersion: 1,
         source,
         slug: "standup",
-        ...(source === "plugin" ? { packageId: "composio" } : {}),
       });
       expect(ref.source).toBe(source);
     }
@@ -60,7 +52,7 @@ describe("a Skill ref crossing a seam", () => {
     ).toThrow(/unknown fields/u);
   });
 
-  test("refuses a packageId on a source that has no Package", () => {
+  test("refuses a packageId, which no source carries", () => {
     expect(() =>
       decodeSkillRefV1({
         schemaVersion: 1,
@@ -68,13 +60,7 @@ describe("a Skill ref crossing a seam", () => {
         slug: "standup",
         packageId: "composio",
       }),
-    ).toThrow(/only valid on a plugin Skill/u);
-  });
-
-  test("requires a packageId on a plugin Skill", () => {
-    expect(() =>
-      decodeSkillRefV1({ schemaVersion: 1, source: "plugin", slug: "compose" }),
-    ).toThrow(/packageId is invalid/u);
+    ).toThrow(/unknown fields/u);
   });
 
   test("refuses a malformed slug and a wrong schema version", () => {
@@ -87,7 +73,7 @@ describe("a Skill ref crossing a seam", () => {
   });
 
   test("reads no ref out of a string that is not one", () => {
-    for (const value of ["bot", "bot/", "/standup", "plugin/standup", 7]) {
+    for (const value of ["bot", "bot/", "/standup", "bot/a/b", 7]) {
       expect(parseSkillRefV1(value)).toBeUndefined();
     }
   });

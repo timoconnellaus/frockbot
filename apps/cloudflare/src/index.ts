@@ -162,7 +162,6 @@ import {
   rpcString,
 } from "./durable-rpc.js";
 import { createImmutablePlanRequestFactory } from "./immutable-application.js";
-import { R2PackageCatalog } from "./package-catalog.js";
 import { UserConfiguration } from "./user-configuration.js";
 import {
   DEPLOYMENT_POLICY_SINGLETON_NAME,
@@ -213,12 +212,6 @@ interface Env {
   APPLICATION_ARTIFACTS: R2Bucket;
   UI_ARTIFACT_HOSTS?: string;
   MEMORY_FILES: R2Bucket;
-  /**
-   * The remote Package Catalog. Optional so a deployment without one still
-   * boots: `/catalog/v1/*` then reports the Catalog as unconfigured rather
-   * than the Worker failing to construct.
-   */
-  PACKAGE_CATALOG?: R2Bucket;
   MEMORY_INDEX: VectorizeIndex;
   AI: Ai;
   FROCK_AI_GATEWAY_ID?: string;
@@ -2145,9 +2138,6 @@ export default {
           ),
         openBotStateChannel: (userId, botId, request, context) =>
           openOwnedBotStateChannel(env, userId, botId, request, context),
-        ...(env.PACKAGE_CATALOG
-          ? { catalog: new R2PackageCatalog(env.PACKAGE_CATALOG) }
-          : {}),
         backendContributions: [...mountedBackend.contributions],
         debug: debugSurface(env),
         ...(env.WORKSPACE_SEED_TOKEN

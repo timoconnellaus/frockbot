@@ -129,10 +129,6 @@ function openHome(item: PluginCatalogItem): void {
   surfaces.open(target);
 }
 
-function openPackageCatalog(): void {
-  surfaces.open("package-catalog");
-}
-
 /** The read the error banner offers again. */
 async function reload(): Promise<void> {
   await web.value.loadPluginCatalog();
@@ -271,11 +267,6 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
         Turn plugins on and off for your Bots. Set one up where it belongs:
         model providers in Models, accounts in Connectors.
       </p>
-      <div class="plugin-catalog-link">
-        <UiButton type="button" @click="openPackageCatalog">
-          Browse all plugins
-        </UiButton>
-      </div>
     </UiAnchor>
     <div
       class="plugin-grid"
@@ -409,10 +400,6 @@ async function setEnabled(packageId: string, next: boolean): Promise<void> {
   margin: 14px 0 0;
   color: var(--frock-text-muted);
   font-size: var(--frock-text-base);
-}
-
-.plugin-catalog-link {
-  margin-top: 12px;
 }
 
 .plugin-grid {

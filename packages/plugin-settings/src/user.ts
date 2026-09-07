@@ -34,13 +34,6 @@ import {
   type UserConfigurationCommandV1,
   type UserSettingsViewV1,
 } from "@frockbot/configuration-core";
-import {
-  decodeCatalogContentHashV1,
-  decodeCatalogGenerationIdV1,
-  type CatalogEntryV1,
-  type CatalogIndexV1,
-  type CatalogPinV1,
-} from "@frockbot/catalog-core";
 import type { ConnectionCommandV1 } from "@frockbot/connection-core";
 import type {
   PackageSettingDefinition,
@@ -54,13 +47,6 @@ const ACCOUNT_MODEL_CHECKPOINT_KEY =
   "user-account-model:migration-checkpoint:v1";
 const DEFAULT_PACKAGES_BOOTSTRAP_KEY = "user-default-packages-bootstrap:v1";
 const DEFAULT_PACKAGES_BOOTSTRAP_VERSION = 3;
-/**
- * The pinned Catalog generation lives beside the settings view rather than in
- * it, so pinning on a read never bumps the settings revision a client is
- * holding an `expectedRevision` against. It is projected into the view when
- * the view is read.
- */
-const CATALOG_PIN_KEY = "user-catalog-pin";
 const IDENTITY_KEY = "user-id";
 const RECEIPT_PREFIX = "configuration-receipt:";
 
@@ -106,34 +92,6 @@ export interface UserConfigurationReadBootstrap {
 }
 
 /**
- * The remote Package Catalog, as the User Durable Object sees it. A host that
- * omits it keeps the compiled-in behaviour exactly: `availablePackages` is
- * still the only source of installable Packages.
- *
- * Neither method reaches R2 or the network from this Contribution — the
- * adapter that owns the bucket implements them, so this Package names no
- * Cloudflare type and stays testable with a plain object.
- */
-export interface UserPackageCatalogHost {
-  /**
-   * The generation the Catalog currently points at, with the content hash of
-   * its index bytes. `undefined` when the deployment has no Catalog yet, which
-   * leaves the User unpinned rather than failing a read.
-   */
-  readCurrentIndex(): Promise<
-    { pin: CatalogPinV1; index: CatalogIndexV1 } | undefined
-  >;
-  /**
-   * One entry from an exact, immutable generation. `undefined` when that
-   * generation does not contain the entry.
-   */
-  readEntry(
-    generation: string,
-    catalogId: string,
-  ): Promise<CatalogEntryV1 | undefined>;
-}
-
-/**
  * One Package this application can execute, as the User Durable Object needs
  * to see it: its identity, and the settings its manifest declares.
  *
@@ -170,7 +128,6 @@ export interface AvailableUserPackage {
 export interface UserSettingsBackendHost {
   storage: UserSettingsStorage;
   availablePackages: readonly AvailableUserPackage[];
-  catalog?: UserPackageCatalogHost;
 }
 
 function initialState(): UserSettingsViewV1 {
@@ -218,45 +175,11 @@ function requireMatchingConfigurationReceipt(
 }
 
 /**
- * An install may only name the generation this User is pinned to. Refusing
- * anything else is what makes "Composition consumes immutable,
- * content-addressed artifacts" true of an install: a client holding a stale
- * index cannot install an entry that generation never contained.
- */
-function assertPinnedGeneration(
-  commandGeneration: string | undefined,
-  pinnedGeneration: string | undefined,
-): void {
-  if (!pinnedGeneration) {
-    throw new Error("Package Catalog generation is not pinned");
-  }
-  if (commandGeneration !== pinnedGeneration) {
-    throw new Error(
-      `Package Catalog generation "${commandGeneration}" is not the pinned generation "${pinnedGeneration}"`,
-    );
-  }
-}
-
-function withCatalogPin(
-  settings: UserSettingsViewV1,
-  pin: CatalogPinV1 | undefined,
-): UserSettingsViewV1 {
-  return pin
-    ? {
-        ...settings,
-        catalogGeneration: pin.generation,
-        catalogIndexHash: pin.indexHash,
-      }
-    : settings;
-}
-
-/**
  * The setting values one installation carries after a partial update.
  *
- * `values` on the installation row *is* the store: the Catalog install path
- * writes setup values there, and this writes the same field, so a Package has
- * exactly one durable bag of configuration and the projection the client
- * already reads needs no second source.
+ * `values` on the installation row *is* the store, so a Package has exactly
+ * one durable bag of configuration and the projection the client already reads
+ * needs no second source.
  */
 function mergePackageSettingValues(
   current: Record<string, JsonValue | PackageSettingValueV1> | undefined,
@@ -312,14 +235,9 @@ function applyUserCommand(
       const existing = current.packages.find(
         (pkg) => pkg.packageId === command.packageId,
       );
-      // One store, two writers: a Catalog install's setup values and
-      // `user/set-package-settings` write the same bag, and a reinstall — a
-      // version bump, say — carries the configuration forward rather than
-      // silently returning the Package to its defaults.
-      const values = {
-        ...(existing?.values ?? {}),
-        ...structuredClone(command.values ?? {}),
-      };
+      // A reinstall — a version bump, say — carries the configuration
+      // forward rather than silently returning the Package to its defaults.
+      const values = { ...(existing?.values ?? {}) };
       return {
         ...current,
         revision,
@@ -337,18 +255,6 @@ function applyUserCommand(
                   ? "disabled"
                   : "installed",
             failure: existing?.failure,
-            // A Catalog install records where it came from; the compiled-in
-            // path records nothing new, so an old row keeps its exact shape.
-            ...(command.catalogId === undefined
-              ? {}
-              : {
-                  catalogId: command.catalogId,
-                  catalogGeneration: command.catalogGeneration,
-                  ...(command.contentHash === undefined
-                    ? {}
-                    : { contentHash: command.contentHash }),
-                  provenance: "catalog" as const,
-                }),
             ...(Object.keys(values).length === 0 ? {} : { values }),
           },
         ],
@@ -590,8 +496,7 @@ export class UserSettingsBackendContribution {
         defaultPackage.version !== pkg.version ||
         defaultPackage.state !== "disabled" ||
         pkg.state !== "installed" ||
-        pkg.failure !== undefined ||
-        pkg.provenance === "catalog"
+        pkg.failure !== undefined
       ) {
         return pkg;
       }
@@ -612,8 +517,7 @@ export class UserSettingsBackendContribution {
         !defaultPackage ||
         defaultPackage.version !== pkg.version ||
         pkg.state !== "disabled" ||
-        pkg.failure !== undefined ||
-        pkg.provenance === "catalog"
+        pkg.failure !== undefined
       ) {
         return pkg;
       }
@@ -827,16 +731,12 @@ export class UserSettingsBackendContribution {
     const request = decodeUserConfigurationReadRpcV1(input);
     // Settings owns the stored-record migration and platform-row repair. Run
     // it before Package bootstraps so every bootstrap observes the repaired
-    // current Catalog in the same configuration read.
+    // rows in the same configuration read.
     await this.read(request.userId);
     for (const bootstrap of this.readBootstraps.values()) {
       await bootstrap.bootstrap(request.userId);
     }
-    // The first read that finds a Catalog pins its generation, so every later
-    // install is validated against one immutable, content-addressed set of
-    // artifacts rather than whatever the pointer happens to name that second.
-    const pin = await this.pinCatalogGeneration(request.userId);
-    const view = withCatalogPin(await this.read(request.userId), pin);
+    const view = await this.read(request.userId);
     return {
       ...view,
       connections: view.connections.map(
@@ -846,106 +746,6 @@ export class UserSettingsBackendContribution {
             ?.projectConnection?.(connection) ?? connection,
       ),
     };
-  }
-
-  /**
-   * The Catalog generation this User is pinned to, pinning it on first sight.
-   * `undefined` when the deployment has no Catalog, which is not a failure:
-   * compiled-in Packages install through the unchanged path either way.
-   */
-  async pinCatalogGeneration(
-    userId: string,
-  ): Promise<CatalogPinV1 | undefined> {
-    const catalog = this.host.catalog;
-    if (!catalog) return undefined;
-    const stored = await this.readCatalogPin(this.host.storage);
-    if (stored) return stored;
-    const current = await catalog.readCurrentIndex();
-    if (!current) return undefined;
-    return this.host.storage.transaction(async (storage) => {
-      await this.assertIdentity(userId, storage);
-      const existing = await this.readCatalogPin(storage);
-      if (existing) return existing;
-      const pin: CatalogPinV1 = {
-        generation: decodeCatalogGenerationIdV1(current.pin.generation),
-        indexHash: decodeCatalogContentHashV1(current.pin.indexHash),
-      };
-      await storage.put(CATALOG_PIN_KEY, pin);
-      return pin;
-    });
-  }
-
-  private async readCatalogPin(
-    storage: UserSettingsTransaction,
-  ): Promise<CatalogPinV1 | undefined> {
-    const stored = await storage.get<unknown>(CATALOG_PIN_KEY);
-    if (stored === undefined) return undefined;
-    if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
-      throw new Error("Stored Catalog pin is invalid");
-    }
-    const value = stored as Record<string, unknown>;
-    if (
-      Object.keys(value).some(
-        (key) => key !== "generation" && key !== "indexHash",
-      )
-    ) {
-      throw new Error("Stored Catalog pin is invalid");
-    }
-    return {
-      generation: decodeCatalogGenerationIdV1(value.generation),
-      indexHash: decodeCatalogContentHashV1(value.indexHash),
-    };
-  }
-
-  /**
-   * Resolve a Catalog install against the pinned generation, before the
-   * durable transaction opens: reading an entry is object-storage I/O, and a
-   * Durable Object transaction is not the place for it. The pinned generation
-   * is checked again inside the transaction, so a pin that moved between the
-   * two loses the race rather than admitting a stale install.
-   */
-  private async resolveCatalogInstall(command: {
-    packageId: string;
-    version: string;
-    catalogId: string;
-    catalogGeneration: string;
-    contentHash?: string;
-  }): Promise<CatalogEntryV1> {
-    const catalog = this.host.catalog;
-    if (!catalog) {
-      throw new Error("Package Catalog is not available");
-    }
-    const pin = await this.readCatalogPin(this.host.storage);
-    if (!pin) {
-      throw new Error("Package Catalog generation is not pinned");
-    }
-    assertPinnedGeneration(command.catalogGeneration, pin.generation);
-    const entry = await catalog.readEntry(pin.generation, command.catalogId);
-    if (!entry) {
-      throw new Error(
-        `Catalog entry "${command.catalogId}" is not in pinned Catalog generation "${pin.generation}"`,
-      );
-    }
-    if (
-      entry.packageId !== command.packageId ||
-      entry.version !== command.version
-    ) {
-      throw new Error(
-        `Catalog entry "${command.catalogId}" does not offer Package "${command.packageId}" at version "${command.version}"`,
-      );
-    }
-    if (entry.bundle) {
-      if (command.contentHash !== entry.bundle.contentHash) {
-        throw new Error(
-          `Catalog entry "${command.catalogId}" requires bundle hash "${entry.bundle.contentHash}"`,
-        );
-      }
-    } else if (command.contentHash !== undefined) {
-      throw new Error(
-        `Catalog entry "${command.catalogId}" does not carry a Package bundle`,
-      );
-    }
-    return entry;
   }
 
   private chooseModelProvider(
@@ -1062,7 +862,6 @@ export class UserSettingsBackendContribution {
         command,
         storage,
         configurationCommandFingerprintV1(command),
-        undefined,
         home,
       ),
     );
@@ -1073,27 +872,12 @@ export class UserSettingsBackendContribution {
     const { command } = request;
     const commandFingerprint = configurationCommandFingerprintV1(command);
     await this.assertIdentity(request.userId);
-    const catalogInstall =
-      command.type === "user/install-package" &&
-      command.catalogId !== undefined &&
-      command.catalogGeneration !== undefined
-        ? await this.resolveCatalogInstall({
-            packageId: command.packageId,
-            version: command.version,
-            catalogId: command.catalogId,
-            catalogGeneration: command.catalogGeneration,
-            ...(command.contentHash === undefined
-              ? {}
-              : { contentHash: command.contentHash }),
-          })
-        : undefined;
     return this.host.storage.transaction((storage) =>
       this.applyConfigurationCommand(
         request.userId,
         command,
         storage,
         commandFingerprint,
-        catalogInstall,
       ),
     );
   }
@@ -1109,14 +893,6 @@ export class UserSettingsBackendContribution {
     command: UserConfigurationCommandV1,
     storage: UserSettingsTransaction,
   ): Promise<OperationReceiptV1> {
-    if (
-      command.type === "user/install-package" &&
-      command.catalogId !== undefined
-    ) {
-      throw new Error(
-        "Catalog installs must be resolved through executeConfiguration",
-      );
-    }
     return this.applyConfigurationCommand(
       userId,
       command,
@@ -1130,7 +906,6 @@ export class UserSettingsBackendContribution {
     command: UserConfigurationCommandV1,
     storage: UserSettingsTransaction,
     commandFingerprint: string,
-    catalogInstall?: CatalogEntryV1,
     home?: "application" | "models",
   ): Promise<OperationReceiptV1> {
     await this.assertIdentity(userId, storage);
@@ -1143,19 +918,13 @@ export class UserSettingsBackendContribution {
         command.commandId,
       );
     }
-    if (command.type === "user/install-package") {
-      if (catalogInstall) {
-        assertPinnedGeneration(
-          command.catalogGeneration,
-          (await this.readCatalogPin(storage))?.generation,
-        );
-      } else if (
-        !this.availablePackages.has(
-          `${command.packageId}\u0000${command.version}`,
-        )
-      ) {
-        throw new Error("Package is not available in this application");
-      }
+    if (
+      command.type === "user/install-package" &&
+      !this.availablePackages.has(
+        `${command.packageId}\u0000${command.version}`,
+      )
+    ) {
+      throw new Error("Package is not available in this application");
     }
     const current = await this.readSnapshot(storage);
     if (command.type === "user/set-package-enabled" && command.enabled) {
